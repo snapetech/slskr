@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_imports)]
 
+mod batch;
 mod config;
 mod logging;
 mod utils;
