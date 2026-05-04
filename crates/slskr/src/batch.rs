@@ -381,9 +381,14 @@ mod tests {
         ];
         
         let response = format_batch_response(results);
+        // Parse JSON to verify structure
+        let json: Result<serde_json::Value, _> = serde_json::from_str(&response);
+        assert!(json.is_ok());
+        let json = json.unwrap();
+        assert_eq!(json["count"], 2);
+        assert_eq!(json["results"].as_array().unwrap().len(), 2);
         assert!(response.contains("op1"));
         assert!(response.contains("op2"));
-        assert!(response.contains("\"count\": 2"));
     }
 
     #[test]
