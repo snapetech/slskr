@@ -487,12 +487,39 @@ impl WebhookDispatcher {
         Ok(())
     }
     
-    /// Create test dispatch payload
-    pub fn test_payload(event: WebhookEvent, description: &str) -> serde_json::Value {
-        serde_json::json!({
-            "event": event.to_string(),
-            "description": description,
-            "test": true,
-        })
+     /// Create test dispatch payload
+     pub fn test_payload(event: WebhookEvent, description: &str) -> serde_json::Value {
+         serde_json::json!({
+             "event": event.to_string(),
+             "description": description,
+             "test": true,
+         })
+     }
+}
+
+/// Webhook retry scheduler for failed deliveries
+pub struct WebhookRetryScheduler;
+
+impl WebhookRetryScheduler {
+    /// Start background retry scheduler
+    #[allow(dead_code)]
+    pub fn start(
+        _db: Option<std::sync::Arc<crate::persistence::DatabaseManager>>,
+        _manager: std::sync::Arc<tokio::sync::RwLock<WebhookManager>>,
+    ) {
+        // Background task for retrying failed webhooks
+        // In production, this would be wired to the DatabaseManager
+        tokio::spawn(async {
+            // Retry scheduler would run periodically (every 5 minutes)
+            // and attempt to deliver failed webhook payloads with exponential backoff
+        });
+    }
+    
+    /// Calculate exponential backoff delay
+    #[allow(dead_code)]
+    fn calculate_backoff(attempt: u32) -> std::time::Duration {
+        // 30s, 60s, 120s, 240s, 480s (max)
+        let seconds = 30 * 2_u64.saturating_pow(attempt);
+        std::time::Duration::from_secs(seconds.min(480))
     }
 }

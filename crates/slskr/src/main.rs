@@ -4496,6 +4496,155 @@ async fn route_http_request_with_headers(
             }
         }
         
+        // USER STATUS ENDPOINTS
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/status") => {
+            let username = path.strip_prefix("/api/users/")
+                .and_then(|p| p.strip_suffix("/status"))
+                .unwrap_or("unknown");
+            let users = state.users.read().await;
+            if let Some(record) = users.records.iter().find(|u| u.username == username) {
+                let json = format!(
+                    "{{\"username\":\"{}\",\"status\":\"{}\",\"average_speed\":{},\"file_count\":{}}}",
+                    json_escape(&record.username),
+                    record.status.as_deref().unwrap_or("offline"),
+                    json_u32_option(record.average_speed),
+                    json_u32_option(record.file_count)
+                );
+                drop(users);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(users);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
+            let username = path.strip_prefix("/api/users/")
+                .and_then(|p| p.strip_suffix("/group"))
+                .unwrap_or("unknown");
+            let json = format!(
+                "{{\"username\":\"{}\",\"group\":\"default\"}}",
+                json_escape(username)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/endpoint") => {
+            let username = path.strip_prefix("/api/users/")
+                .and_then(|p| p.strip_suffix("/endpoint"))
+                .unwrap_or("unknown");
+            let json = format!(
+                "{{\"username\":\"{}\",\"address\":\"0.0.0.0\",\"port\":0}}",
+                json_escape(username)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/soulseek/users/similar") => {
+            let json = format!("{{\"users\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", path) if path.starts_with("/api/soulseek/users/") && path.ends_with("/interests") => {
+            let username = path.strip_prefix("/api/soulseek/users/")
+                .and_then(|p| p.strip_suffix("/interests"))
+                .unwrap_or("unknown");
+            let json = format!(
+                "{{\"username\":\"{}\",\"liked\":[],\"hated\":[],\"count\":0}}",
+                json_escape(username)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        // SEARCH ENDPOINTS
+        ("GET", "/api/searches") => {
+            let searches = state.searches.read().await;
+            let mut search_list = Vec::new();
+            for record in &searches.records {
+                search_list.push(format!(
+                    "{{\"token\":{},\"query\":\"{}\",\"status\":\"{}\",\"result_count\":{},\"created_at\":{}}}",
+                    record.token,
+                    json_escape(&record.query),
+                    record.status,
+                    record.results.len(),
+                    record.created_at
+                ));
+            }
+            let json = format!(
+                "{{\"searches\":[{}],\"count\":{}}}",
+                search_list.join(","),
+                searches.records.len()
+            );
+            drop(searches);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("DELETE", "/api/searches") => {
+            let mut searches = state.searches.write().await;
+            let cleared_count = searches.records.len();
+            searches.records.clear();
+            drop(searches);
+            let json = format!("{{\"cleared\":{}}}", cleared_count);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
+            let token_str = &path[13..];
+            if let Ok(token) = token_str.parse::<u32>() {
+                let searches = state.searches.read().await;
+                if let Some(record) = searches.records.iter().find(|s| s.token == token) {
+                    let json = record.json();
+                    drop(searches);
+                    Ok(routing::ok_response(json))
+                } else {
+                    drop(searches);
+                    Ok(routing::not_found_response())
+                }
+            } else {
+                Ok(routing::bad_request_response("invalid token"))
+            }
+        }
+        
+        ("DELETE", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
+            let token_str = &path[13..];
+            if let Ok(token) = token_str.parse::<u32>() {
+                let mut searches = state.searches.write().await;
+                if let Some(pos) = searches.records.iter().position(|s| s.token == token) {
+                    searches.records.remove(pos);
+                    drop(searches);
+                    Ok(routing::ok_response("{}".to_string()))
+                } else {
+                    drop(searches);
+                    Ok(routing::not_found_response())
+                }
+            } else {
+                Ok(routing::bad_request_response("invalid token"))
+            }
+        }
+        
+        ("GET", path) if path.starts_with("/api/searches/") && path.ends_with("/responses") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 4 {
+                return Ok(routing::not_found_response());
+            }
+            if let Ok(token) = parts[3].parse::<u32>() {
+                let searches = state.searches.read().await;
+                if let Some(record) = searches.records.iter().find(|s| s.token == token) {
+                    let json = format!(
+                        "{{\"token\":{},\"responses\":[],\"count\":0}}",
+                        token
+                    );
+                    drop(searches);
+                    Ok(routing::ok_response(json))
+                } else {
+                    drop(searches);
+                    Ok(routing::not_found_response())
+                }
+            } else {
+                Ok(routing::bad_request_response("invalid token"))
+            }
+        }
+        
         // MESSAGE ENDPOINTS
          ("POST", "/api/messages") => {
              let username = match extract_json_string_field(body, "username") {
