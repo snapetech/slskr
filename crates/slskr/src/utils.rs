@@ -736,3 +736,63 @@ pub fn generate_request_id() -> String {
     // Combine timestamp nanos with a counter for uniqueness
     format!("req-{:x}", nanos)
 }
+
+/// Standard error codes for API responses
+#[derive(Debug, Clone, Copy)]
+pub enum ErrorCode {
+    // Client errors (4xx)
+    BadRequest = 400,
+    Unauthorized = 401,
+    Forbidden = 403,
+    NotFound = 404,
+    RateLimited = 429,
+    
+    // Server errors (5xx)
+    InternalError = 500,
+    ServiceUnavailable = 503,
+}
+
+impl ErrorCode {
+    pub fn status_text(self) -> &'static str {
+        match self {
+            Self::BadRequest => "400 Bad Request",
+            Self::Unauthorized => "401 Unauthorized",
+            Self::Forbidden => "403 Forbidden",
+            Self::NotFound => "404 Not Found",
+            Self::RateLimited => "429 Too Many Requests",
+            Self::InternalError => "500 Internal Server Error",
+            Self::ServiceUnavailable => "503 Service Unavailable",
+        }
+    }
+    
+    pub fn code_string(self) -> &'static str {
+        match self {
+            Self::BadRequest => "BAD_REQUEST",
+            Self::Unauthorized => "UNAUTHORIZED",
+            Self::Forbidden => "FORBIDDEN",
+            Self::NotFound => "NOT_FOUND",
+            Self::RateLimited => "RATE_LIMITED",
+            Self::InternalError => "INTERNAL_ERROR",
+            Self::ServiceUnavailable => "SERVICE_UNAVAILABLE",
+        }
+    }
+}
+
+/// Format error response with code and message
+pub fn error_response_json(code: ErrorCode, message: &str) -> String {
+    format!(
+        "{{\"error\":\"{}\",\"code\":\"{}\",\"message\":\"{}\"}}",
+        code.code_string(),
+        code.code_string(),
+        json_escape(message)
+    )
+}
+
+/// Escape JSON string values
+pub fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}

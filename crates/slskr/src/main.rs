@@ -9608,6 +9608,9 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     });
     let allowed = state.rate_limiter.check_rate_limit(remote_addr, username.as_deref()).await;
     
+    // Generate request ID for tracking
+    let request_id = generate_request_id();
+    
     // Log request
     let req_log = logging::HttpRequestLog {
         method: method.to_string(),
@@ -9670,6 +9673,9 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     
     // Add CORS headers
     let cors_headers_str = cors_headers(headers.origin, &["*"]);
+    
+    // Add request ID header
+    let request_id_header = format!("X-Request-ID: {}\r\n", request_id);
 
     // Add CSRF cookie for HTML responses (GET /)
     let csrf_cookie = if path == "/" && method == "GET" {
@@ -9683,7 +9689,7 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     };
 
     let response_text = format!(
-        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}{}{}{}{}
+        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}{}{}{}{}{}
 \r\n{}",
         response.status,
         response.content_type,
@@ -9693,6 +9699,7 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
         cache_headers,
         etag,
         cors_headers_str,
+        request_id_header,
         response.body
     );
     
