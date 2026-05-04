@@ -3032,10 +3032,51 @@ async fn route_http_request_with_headers(
                  completed_at: None,
              };
              
-             Ok(routing::created_response(entry.json()))
-        }
-        
-        ("POST", path) if transfer_action_path(route.normalized_path).is_some() => {
+              Ok(routing::created_response(entry.json()))
+         }
+         
+         // GET individual transfer
+         ("GET", path) if (path.starts_with("/api/transfers/") || path.starts_with("/api/v0/transfers/")) 
+             && !path.ends_with("/start") && !path.ends_with("/progress") && !path.ends_with("/complete")
+             && !path.ends_with("/stats") => {
+             let id_str = path.rsplitn(2, '/').next().unwrap_or("");
+             if let Ok(id) = id_str.parse::<u64>() {
+                 let transfers = state.transfers.read().await;
+                 if let Some(entry) = transfers.entries.iter().find(|t| t.id == id) {
+                     let json_response = entry.json();
+                     drop(transfers);
+                     Ok(routing::ok_response(json_response))
+                 } else {
+                     drop(transfers);
+                     Ok(routing::not_found_response())
+                 }
+             } else {
+                 Ok(routing::bad_request_response("invalid transfer id"))
+             }
+         }
+         
+         // DELETE individual transfer (cancel)
+         ("DELETE", path) if (path.starts_with("/api/transfers/") || path.starts_with("/api/v0/transfers/"))
+             && !path.contains('/') => {
+             let id_str = path.rsplitn(2, '/').next().unwrap_or("");
+             if let Ok(id) = id_str.parse::<u64>() {
+                 let mut transfers = state.transfers.write().await;
+                 if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                     entry.status = "cancelled".to_owned();
+                     entry.updated_at = unix_timestamp();
+                     let json_response = entry.json();
+                     drop(transfers);
+                     Ok(routing::ok_response(json_response))
+                 } else {
+                     drop(transfers);
+                     Ok(routing::not_found_response())
+                 }
+             } else {
+                 Ok(routing::bad_request_response("invalid transfer id"))
+             }
+         }
+         
+         ("POST", path) if transfer_action_path(route.normalized_path).is_some() => {
             if let Some((id, action)) = transfer_action_path(route.normalized_path) {
                 let mut transfers = state.transfers.write().await;
                 
@@ -3212,13 +3253,32 @@ async fn route_http_request_with_headers(
                 send_session_command(state, SessionCommand::MessageAcked { id: id as u32 }).await.ok();
                 
                 Ok(routing::ok_response(json_response))
-            } else {
-                drop(messages);
-                Ok(routing::not_found_response())
-            }
-         }
-         
-         ("GET", path) if messages_user_path(route.normalized_path).is_some() => {
+             } else {
+                 drop(messages);
+                 Ok(routing::not_found_response())
+             }
+          }
+          
+          ("PUT", path) if message_ack_path(route.normalized_path).is_some() => {
+             let id = message_ack_path(route.normalized_path).unwrap();
+             let mut messages = state.messages.write().await;
+             
+             if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
+                 record.acknowledged = true;
+                 record.updated_at = unix_timestamp();
+                 let json_response = record.json();
+                 drop(messages);
+                 
+                 send_session_command(state, SessionCommand::MessageAcked { id: id as u32 }).await.ok();
+                 
+                 Ok(routing::ok_response(json_response))
+             } else {
+                 drop(messages);
+                 Ok(routing::not_found_response())
+             }
+          }
+          
+          ("GET", path) if messages_user_path(route.normalized_path).is_some() => {
             let username = messages_user_path(route.normalized_path).unwrap();
             let messages = state.messages.read().await;
             Ok(HttpResponse {
@@ -3823,6 +3883,118 @@ scalar Long
                 body: r#"{"updated":true,"status":"success"}"#.to_owned(),
             })
         }
+        // HEALTH & DIAGNOSTICS ENDPOINTS
+        ("GET", "/api/v0/health/detailed") => {
+            let transfers = state.transfers.read().await;
+            let searches = state.searches.read().await;
+            let messages = state.messages.read().await;
+            let users = state.users.read().await;
+            
+            let diagnostics = serde_json::json!({
+                "status": "operational",
+                "transfers": {
+                    "active": transfers.entries.iter().filter(|t| t.status == "in_progress").count(),
+                    "total": transfers.entries.len(),
+                    "succeeded": transfers.entries.iter().filter(|t| t.status == "succeeded").count(),
+                    "failed": transfers.entries.iter().filter(|t| t.status == "failed").count(),
+                },
+                "searches": {
+                    "total": searches.records.len(),
+                },
+                "messages": {
+                    "total": messages.records.len(),
+                    "unread": messages.records.iter().filter(|m| !m.acknowledged).count(),
+                },
+                "users": {
+                    "total": users.records.len(),
+                },
+            }).to_string();
+            
+            drop(transfers);
+            drop(searches);
+            drop(messages);
+            drop(users);
+            
+            Ok(routing::ok_response(diagnostics))
+        }
+        
+        ("GET", "/api/v0/diagnostics") => {
+            let transfers = state.transfers.read().await;
+            let searches = state.searches.read().await;
+            
+            let diag = serde_json::json!({
+                "timestamp": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                "transfers": {
+                    "queue_size": transfers.entries.len(),
+                    "active_downloads": transfers.entries.iter().filter(|t| t.status == "in_progress" && t.direction == 0).count(),
+                    "active_uploads": transfers.entries.iter().filter(|t| t.status == "in_progress" && t.direction != 0).count(),
+                },
+                "searches": {
+                    "total": searches.records.len(),
+                },
+            }).to_string();
+            
+            drop(transfers);
+            drop(searches);
+            
+            Ok(routing::ok_response(diag))
+        }
+        
+        // DATABASE MAINTENANCE ENDPOINTS
+        ("GET", "/api/v0/database/stats") => {
+            if let Some(ref db) = state.db {
+                match db.get_stats().await {
+                    Ok(stats) => {
+                        let response_body = serde_json::json!({
+                            "searches": stats.search_count,
+                            "transfers": stats.transfer_count,
+                            "messages": stats.message_count,
+                            "users": stats.user_count,
+                            "rooms": stats.room_count,
+                        }).to_string();
+                        Ok(routing::ok_response(response_body))
+                    }
+                    Err(_) => Ok(routing::conflict_response("failed to retrieve database statistics")),
+                }
+            } else {
+                Ok(routing::conflict_response("database not initialized"))
+            }
+        }
+        ("POST", "/api/v0/database/cleanup") => {
+            if let Some(ref db) = state.db {
+                let days: i32 = extract_json_i32_field(body, "days").unwrap_or(30);
+                match db.cleanup_old_records(days).await {
+                    Ok(count) => {
+                        let response_body = serde_json::json!({
+                            "cleaned": count,
+                            "days": days,
+                        }).to_string();
+                        Ok(routing::ok_response(response_body))
+                    }
+                    Err(_) => Ok(routing::conflict_response("failed to cleanup database")),
+                }
+            } else {
+                Ok(routing::conflict_response("database not initialized"))
+            }
+        }
+        ("POST", "/api/v0/database/vacuum") => {
+            if let Some(ref db) = state.db {
+                match db.vacuum().await {
+                    Ok(_) => {
+                        let response_body = serde_json::json!({
+                            "vacuumed": true,
+                        }).to_string();
+                        Ok(routing::ok_response(response_body))
+                    }
+                    Err(_) => Ok(routing::conflict_response("failed to vacuum database")),
+                }
+            } else {
+                Ok(routing::conflict_response("database not initialized"))
+            }
+        }
         // WEBUI PARITY: SignalR hub stub endpoints
         // These return 501 Not Implemented; proper SignalR WebSocket hubs are future work
         ("GET", path) if path.starts_with("/hub/") => {
@@ -3972,6 +4144,14 @@ fn extract_json_bool_field(body: &str, field: &str) -> Option<bool> {
 }
 
 fn extract_json_u64_field(body: &str, field: &str) -> Option<u64> {
+    let key = format!("\"{}\"", field);
+    let after_key = json_field_after_key(body, &key)?;
+    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+    let end = after_colon.find([',', '}']).unwrap_or(after_colon.len());
+    after_colon[..end].trim().parse().ok()
+}
+
+fn extract_json_i32_field(body: &str, field: &str) -> Option<i32> {
     let key = format!("\"{}\"", field);
     let after_key = json_field_after_key(body, &key)?;
     let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
