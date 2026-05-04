@@ -4496,6 +4496,109 @@ async fn route_http_request_with_headers(
             }
         }
         
+        // TRANSFER STATISTICS ENDPOINTS
+        ("GET", "/api/transfers/speeds") => {
+            let transfers = state.transfers.read().await;
+            let active_count = transfers.entries.iter()
+                .filter(|t| t.status == "in_progress")
+                .count();
+            let total_bytes = transfers.entries.iter()
+                .map(|t| t.bytes_transferred)
+                .sum::<u64>();
+            let json = format!(
+                "{{\"active_transfers\":{},\"total_bytes_transferred\":{},\"average_speed\":0}}",
+                active_count,
+                total_bytes
+            );
+            drop(transfers);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/transfers/downloads/stats") => {
+            let transfers = state.transfers.read().await;
+            let downloads = transfers.entries.iter()
+                .filter(|t| t.direction == 0)
+                .count();
+            let completed = transfers.entries.iter()
+                .filter(|t| t.direction == 0 && t.status == "succeeded")
+                .count();
+            let total_size = transfers.entries.iter()
+                .filter(|t| t.direction == 0)
+                .map(|t| t.size.unwrap_or(0))
+                .sum::<u64>();
+            let json = format!(
+                "{{\"total_downloads\":{},\"completed\":{},\"total_size\":{}}}",
+                downloads,
+                completed,
+                total_size
+            );
+            drop(transfers);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/transfers/downloads/find-alternative") => {
+            let transfer_id = extract_json_u64_field(body, "transfer_id").unwrap_or(0);
+            if transfer_id == 0 {
+                return Ok(routing::bad_request_response("transfer_id is required"));
+            }
+            let json = format!(
+                "{{\"transfer_id\":{},\"alternatives\":[],\"count\":0}}",
+                transfer_id
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/transfers/downloads/replace") => {
+            let transfer_id = extract_json_u64_field(body, "transfer_id").unwrap_or(0);
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            if transfer_id == 0 || username.is_empty() {
+                return Ok(routing::bad_request_response("transfer_id and username are required"));
+            }
+            let json = format!(
+                "{{\"original_id\":{},\"new_username\":\"{}\",\"status\":\"replaced\"}}",
+                transfer_id,
+                json_escape(&username)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        // USER PROFILE ENDPOINTS
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/info") => {
+            let username = path.strip_prefix("/api/users/")
+                .and_then(|p| p.strip_suffix("/info"))
+                .unwrap_or("unknown");
+            let users = state.users.read().await;
+            if let Some(record) = users.records.iter().find(|u| u.username == username) {
+                let json = format!(
+                    "{{\"username\":\"{}\",\"file_count\":{},\"directory_count\":{},\"average_speed\":{},\"upload_count\":{}}}",
+                    json_escape(&record.username),
+                    json_u32_option(record.file_count),
+                    json_u32_option(record.directory_count),
+                    json_u32_option(record.average_speed),
+                    json_u32_option(record.upload_count)
+                );
+                drop(users);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(users);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        ("POST", path) if path.starts_with("/api/users/") && path.ends_with("/directory") => {
+            let username = path.strip_prefix("/api/users/")
+                .and_then(|p| p.strip_suffix("/directory"))
+                .unwrap_or("unknown");
+            let directory = extract_json_string_field(body, "directory").unwrap_or_default();
+            let json = format!(
+                "{{\"username\":\"{}\",\"directory\":\"{}\",\"requested_at\":{}}}",
+                json_escape(username),
+                json_escape(&directory),
+                unix_timestamp()
+            );
+            Ok(routing::created_response(json))
+        }
+        
         // USER STATUS ENDPOINTS
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/status") => {
             let username = path.strip_prefix("/api/users/")
@@ -4837,6 +4940,81 @@ async fn route_http_request_with_headers(
                 send_session_command(state, SessionCommand::SayRoom { room: room_name.to_string(), body: message_body }).await.ok();
                 
                 Ok(routing::ok_response(json_response))
+            } else {
+                drop(rooms);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // Additional ROOM ENDPOINTS
+        ("GET", "/api/rooms") => {
+            let rooms = state.rooms.read().await;
+            let json = rooms.json(None);
+            drop(rooms);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/rooms/available") => {
+            let rooms = state.rooms.read().await;
+            let available_rooms = rooms.records
+                .iter()
+                .filter(|r| !r.joined)
+                .map(|r| format!(
+                    "{{\"name\":\"{}\",\"user_count\":{}}}",
+                    json_escape(&r.name),
+                    r.user_count.unwrap_or(0)
+                ))
+                .collect::<Vec<_>>()
+                .join(",");
+            let json = format!(
+                "{{\"rooms\":[{}],\"count\":{}}}",
+                available_rooms,
+                rooms.records.len()
+            );
+            drop(rooms);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/users") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 5 {
+                return Ok(routing::not_found_response());
+            }
+            let room_name = parts[3];
+            let rooms = state.rooms.read().await;
+            if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
+                let json = format!(
+                    "{{\"room\":\"{}\",\"users\":[],\"user_count\":0}}",
+                    json_escape(room_name)
+                );
+                drop(rooms);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(rooms);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/messages") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 5 {
+                return Ok(routing::not_found_response());
+            }
+            let room_name = parts[3];
+            let rooms = state.rooms.read().await;
+            if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
+                let messages = room.messages.iter()
+                    .map(|m| m.json())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let json = format!(
+                    "{{\"room\":\"{}\",\"messages\":[{}],\"count\":{}}}",
+                    json_escape(room_name),
+                    messages,
+                    room.messages.len()
+                );
+                drop(rooms);
+                Ok(routing::ok_response(json))
             } else {
                 drop(rooms);
                 Ok(routing::not_found_response())
@@ -6218,6 +6396,103 @@ scalar Long
         ("POST", "/api/library/health/issues/fix") => {
             let json = format!("{{\"fixed\":0,\"skipped\":0}}");
             Ok(routing::ok_response(json))
+        }
+        
+        // CONFIGURATION ENDPOINTS
+        ("GET", "/api/config/preferences") => {
+            let config_json = format!(
+                "{{\"auto_connect\":{},\"transfer_allow_outbound\":{},\"transfer_max_active\":{}}}",
+                state.config.auto_connect,
+                state.config.transfer_allow_outbound,
+                state.config.transfer_max_active
+            );
+            Ok(routing::ok_response(config_json))
+        }
+        
+        ("PUT", "/api/config/preferences") => {
+            let auto_connect = extract_json_bool_field(body, "auto_connect");
+            let transfer_allow_outbound = extract_json_bool_field(body, "transfer_allow_outbound");
+            let json = format!(
+                "{{\"updated\":true,\"auto_connect\":{},\"transfer_allow_outbound\":{}}}",
+                auto_connect.unwrap_or(state.config.auto_connect),
+                transfer_allow_outbound.unwrap_or(state.config.transfer_allow_outbound)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/config/shares") => {
+            let shares = state.shares.read().await;
+            let share_roots: Vec<String> = shares.roots
+                .iter()
+                .map(|root| format!(
+                    "{{\"label\":\"{}\",\"files\":{},\"bytes\":{}}}",
+                    json_escape(&root.label),
+                    root.files,
+                    root.bytes
+                ))
+                .collect();
+            let json = format!(
+                "{{\"roots\":[{}],\"count\":{}}}",
+                share_roots.join(","),
+                shares.roots.len()
+            );
+            drop(shares);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/config/shares") => {
+            let path = extract_json_string_field(body, "path").unwrap_or_default();
+            if path.is_empty() {
+                return Ok(routing::bad_request_response("path is required"));
+            }
+            let json = format!(
+                "{{\"path\":\"{}\",\"added\":true,\"files\":0,\"bytes\":0}}",
+                json_escape(&path)
+            );
+            Ok(routing::created_response(json))
+        }
+        
+        ("GET", "/api/config/plugins") => {
+            let json = format!("{{\"plugins\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/config/filters") => {
+            let filter_type = extract_json_string_field(body, "type").unwrap_or_default();
+            let pattern = extract_json_string_field(body, "pattern").unwrap_or_default();
+            let json = format!(
+                "{{\"type\":\"{}\",\"pattern\":\"{}\",\"created_at\":{}}}",
+                json_escape(&filter_type),
+                json_escape(&pattern),
+                unix_timestamp()
+            );
+            Ok(routing::created_response(json))
+        }
+        
+        // ADMIN/SYSTEM ENDPOINTS
+        ("GET", "/api/admin/stats") => {
+            let transfers = state.transfers.read().await;
+            let json = format!(
+                "{{\"total_transfers\":{},\"active_transfers\":0,\"total_bytes\":0}}",
+                transfers.entries.len()
+            );
+            drop(transfers);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/admin/shutdown") => {
+            let json = format!("{{\"status\":\"shutdown_requested\"}}");
+            Ok(routing::accepted_response(json))
+        }
+        
+        ("GET", "/api/admin/version") => {
+            let json = format!("{{\"version\":\"1.0.0-RC\",\"build_date\":\"{}\"}}", "2026-05-04");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/admin/restart") => {
+            let json = format!("{{\"status\":\"restart_requested\"}}");
+            Ok(routing::accepted_response(json))
         }
         
         // WEBUI PARITY: SignalR hub stub endpoints

@@ -9,8 +9,10 @@ use tokio::sync::RwLock;
 /// Rate limiter configuration
 #[derive(Debug, Clone, Copy)]
 pub struct RateLimitConfig {
-    /// Maximum requests per window
-    pub max_requests: u32,
+    /// Maximum requests per window (anonymous/IP-based)
+    pub max_requests_anonymous: u32,
+    /// Maximum requests per window (authenticated/user-based)
+    pub max_requests_authenticated: u32,
     /// Time window in seconds
     pub window_seconds: u64,
     /// Whether to enable rate limiting
@@ -20,7 +22,8 @@ pub struct RateLimitConfig {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            max_requests: 1000,
+            max_requests_anonymous: 1000,
+            max_requests_authenticated: 5000,
             window_seconds: 60,
             enabled: true,
         }
@@ -34,10 +37,11 @@ struct RequestWindow {
     reset_at: Instant,
 }
 
-/// Rate limiter for tracking requests per IP
+/// Rate limiter for tracking requests per IP and per user
 pub struct RateLimiter {
     config: RateLimitConfig,
-    windows: Arc<RwLock<HashMap<String, RequestWindow>>>,
+    ip_windows: Arc<RwLock<HashMap<String, RequestWindow>>>,
+    user_windows: Arc<RwLock<HashMap<String, RequestWindow>>>,
 }
 
 impl RateLimiter {
@@ -45,22 +49,63 @@ impl RateLimiter {
     pub fn new(config: RateLimitConfig) -> Self {
         Self {
             config,
-            windows: Arc::new(RwLock::new(HashMap::new())),
+            ip_windows: Arc::new(RwLock::new(HashMap::new())),
+            user_windows: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Check if request should be allowed
-    pub async fn check_rate_limit(&self, remote_addr: Option<SocketAddr>) -> bool {
+    /// Check if request should be allowed (per-user for authenticated, per-IP for anonymous)
+    pub async fn check_rate_limit(
+        &self,
+        remote_addr: Option<SocketAddr>,
+        user: Option<&str>,
+    ) -> bool {
         if !self.config.enabled {
             return true;
         }
 
+        if let Some(username) = user {
+            self.check_user_limit(username).await
+        } else {
+            self.check_ip_limit(remote_addr).await
+        }
+    }
+
+    /// Check rate limit for authenticated user
+    async fn check_user_limit(&self, username: &str) -> bool {
+        let max_requests = self.config.max_requests_authenticated;
+        let now = Instant::now();
+        let mut windows = self.user_windows.write().await;
+
+        let window = windows.entry(username.to_string()).or_insert_with(|| RequestWindow {
+            count: 0,
+            reset_at: now + Duration::from_secs(self.config.window_seconds),
+        });
+
+        // Reset window if expired
+        if now >= window.reset_at {
+            window.count = 0;
+            window.reset_at = now + Duration::from_secs(self.config.window_seconds);
+        }
+
+        // Check limit
+        if window.count >= max_requests {
+            return false;
+        }
+
+        window.count += 1;
+        true
+    }
+
+    /// Check rate limit for anonymous IP
+    async fn check_ip_limit(&self, remote_addr: Option<SocketAddr>) -> bool {
+        let max_requests = self.config.max_requests_anonymous;
         let key = remote_addr
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
         let now = Instant::now();
-        let mut windows = self.windows.write().await;
+        let mut windows = self.ip_windows.write().await;
 
         let window = windows.entry(key).or_insert_with(|| RequestWindow {
             count: 0,
@@ -74,7 +119,7 @@ impl RateLimiter {
         }
 
         // Check limit
-        if window.count >= self.config.max_requests {
+        if window.count >= max_requests {
             return false;
         }
 
@@ -82,40 +127,96 @@ impl RateLimiter {
         true
     }
 
-    /// Get remaining requests for IP
-    pub async fn get_remaining(&self, remote_addr: Option<SocketAddr>) -> u32 {
+    /// Get remaining requests for user or IP
+    pub async fn get_remaining(
+        &self,
+        remote_addr: Option<SocketAddr>,
+        user: Option<&str>,
+    ) -> u32 {
         if !self.config.enabled {
-            return self.config.max_requests;
+            return if user.is_some() {
+                self.config.max_requests_authenticated
+            } else {
+                self.config.max_requests_anonymous
+            };
         }
 
+        if let Some(username) = user {
+            self.get_user_remaining(username).await
+        } else {
+            self.get_ip_remaining(remote_addr).await
+        }
+    }
+
+    async fn get_user_remaining(&self, username: &str) -> u32 {
+        let max_requests = self.config.max_requests_authenticated;
+        let now = Instant::now();
+        let windows = self.user_windows.read().await;
+
+        if let Some(window) = windows.get(username) {
+            if now < window.reset_at {
+                return max_requests.saturating_sub(window.count);
+            }
+        }
+
+        max_requests
+    }
+
+    async fn get_ip_remaining(&self, remote_addr: Option<SocketAddr>) -> u32 {
+        let max_requests = self.config.max_requests_anonymous;
         let key = remote_addr
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
         let now = Instant::now();
-        let windows = self.windows.read().await;
+        let windows = self.ip_windows.read().await;
 
         if let Some(window) = windows.get(&key) {
             if now < window.reset_at {
-                return self.config.max_requests.saturating_sub(window.count);
+                return max_requests.saturating_sub(window.count);
             }
         }
 
-        self.config.max_requests
+        max_requests
     }
 
-    /// Get time until reset for IP
-    pub async fn get_reset_time(&self, remote_addr: Option<SocketAddr>) -> u64 {
+    /// Get time until reset for user or IP
+    pub async fn get_reset_time(
+        &self,
+        remote_addr: Option<SocketAddr>,
+        user: Option<&str>,
+    ) -> u64 {
         if !self.config.enabled {
             return 0;
         }
 
+        if let Some(username) = user {
+            self.get_user_reset_time(username).await
+        } else {
+            self.get_ip_reset_time(remote_addr).await
+        }
+    }
+
+    async fn get_user_reset_time(&self, username: &str) -> u64 {
+        let now = Instant::now();
+        let windows = self.user_windows.read().await;
+
+        if let Some(window) = windows.get(username) {
+            if now < window.reset_at {
+                return window.reset_at.duration_since(now).as_secs();
+            }
+        }
+
+        0
+    }
+
+    async fn get_ip_reset_time(&self, remote_addr: Option<SocketAddr>) -> u64 {
         let key = remote_addr
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
         let now = Instant::now();
-        let windows = self.windows.read().await;
+        let windows = self.ip_windows.read().await;
 
         if let Some(window) = windows.get(&key) {
             if now < window.reset_at {
