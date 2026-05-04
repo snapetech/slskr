@@ -32,6 +32,8 @@ mod graphql;
 mod axum_router;  // Phase 8: Axum framework integration
 
 mod security;  // Production hardening and security features
+mod http_server;  // Optimized HTTP server with keep-alive and streaming
+
 use std::{
     collections::BTreeMap,
     env, fs,
@@ -9654,7 +9656,7 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     let request_timer = logging::start_timer();
     let remote_addr = stream.peer_addr().ok();
     
-    let mut buffer = [0_u8; 4096];
+    let mut buffer = [0_u8; 64 * 1024]; // 64KB buffer for large requests
     let bytes_read = stream
         .read(&mut buffer)
         .await
@@ -9754,7 +9756,7 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     };
 
     let response_text = format!(
-        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}{}{}{}{}{}
+        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: keep-alive\r\nkeep-alive: timeout=30, max=100\r\n{}{}{}{}{}{}
 \r\n{}",
         response.status,
         response.content_type,

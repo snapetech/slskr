@@ -46,6 +46,7 @@ deadpool-postgres = "0.14"
 # Request batching
 tokio-util = "0.7"
 bytes = "1.5"
+http = "1.1"
 
 [lints]
 workspace = true
