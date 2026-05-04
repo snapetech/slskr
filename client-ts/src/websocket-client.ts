@@ -1,0 +1,236 @@
+/**
+ * WebSocket client for real-time event streaming
+ */
+
+import { Event, EventType, WebSocketMessage } from './types';
+
+export type EventListener = (event: Event) => void;
+export type ConnectionListener = (connected: boolean) => void;
+export type ErrorListener = (error: Error) => void;
+
+export class WebSocketClient {
+  private ws: WebSocket | null = null;
+  private url: string;
+  private token: string;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 1000;
+  private pingInterval: number | null = null;
+  private subscribedTopics: Set<string> = new Set();
+
+  private listeners: Map<EventType, Set<EventListener>> = new Map();
+  private connectionListeners: Set<ConnectionListener> = new Set();
+  private errorListeners: Set<ErrorListener> = new Set();
+
+  constructor(baseUrl: string, token: string) {
+    this.url = baseUrl
+      .replace(/^http/, 'ws')
+      .replace(/\/$/, '') + '/api/events/ws';
+    this.token = token;
+  }
+
+  /**
+   * Connect to WebSocket
+   */
+  async connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        this.ws = new WebSocket(this.url);
+
+        this.ws.onopen = () => {
+          this.reconnectAttempts = 0;
+          this.notifyConnectionListeners(true);
+          this.setupPingInterval();
+          resolve();
+        };
+
+        this.ws.onmessage = (event) => {
+          this.handleMessage(event.data);
+        };
+
+        this.ws.onerror = (error) => {
+          this.notifyErrorListeners(new Error('WebSocket error'));
+          reject(new Error('WebSocket connection error'));
+        };
+
+        this.ws.onclose = () => {
+          this.notifyConnectionListeners(false);
+          this.clearPingInterval();
+          this.attemptReconnect();
+        };
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Disconnect from WebSocket
+   */
+  disconnect(): void {
+    this.clearPingInterval();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  /**
+   * Subscribe to event types
+   */
+  subscribe(...topics: EventType[]): void {
+    const newTopics = topics.filter((t) => !this.subscribedTopics.has(t));
+    if (newTopics.length === 0) return;
+
+    newTopics.forEach((t) => this.subscribedTopics.add(t));
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const message: WebSocketMessage = {
+        type: 'subscribe',
+        data: { topics: newTopics },
+      };
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+
+  /**
+   * Unsubscribe from event types
+   */
+  unsubscribe(...topics: EventType[]): void {
+    topics.forEach((t) => this.subscribedTopics.delete(t));
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const message: WebSocketMessage = {
+        type: 'unsubscribe',
+        data: { topics },
+      };
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+
+  /**
+   * Listen to specific event type
+   */
+  on(type: EventType, listener: EventListener): () => void {
+    if (!this.listeners.has(type)) {
+      this.listeners.set(type, new Set());
+    }
+    this.listeners.get(type)!.add(listener);
+
+    // Return unsubscribe function
+    return () => {
+      this.listeners.get(type)?.delete(listener);
+    };
+  }
+
+  /**
+   * Listen to connection state changes
+   */
+  onConnectionChange(listener: ConnectionListener): () => void {
+    this.connectionListeners.add(listener);
+    return () => this.connectionListeners.delete(listener);
+  }
+
+  /**
+   * Listen to errors
+   */
+  onError(listener: ErrorListener): () => void {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
+  }
+
+  /**
+   * Check if connected
+   */
+  isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Get subscribed topics
+   */
+  getSubscribedTopics(): string[] {
+    return Array.from(this.subscribedTopics);
+  }
+
+  /**
+   * Remove all listeners
+   */
+  removeAllListeners(): void {
+    this.listeners.clear();
+    this.connectionListeners.clear();
+    this.errorListeners.clear();
+  }
+
+  // =========================================================================
+  // Private Methods
+  // =========================================================================
+
+  private handleMessage(data: string): void {
+    try {
+      const message = JSON.parse(data) as Event;
+
+      // Emit to listeners
+      if (this.listeners.has(message.type as EventType)) {
+        this.listeners.get(message.type as EventType)?.forEach((listener) => {
+          try {
+            listener(message);
+          } catch (error) {
+            this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+      }
+    } catch (error) {
+      this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private notifyConnectionListeners(connected: boolean): void {
+    this.connectionListeners.forEach((listener) => {
+      try {
+        listener(connected);
+      } catch (error) {
+        this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private notifyErrorListeners(error: Error): void {
+    this.errorListeners.forEach((listener) => {
+      try {
+        listener(error);
+      } catch (e) {
+        console.error('Error in error listener:', e);
+      }
+    });
+  }
+
+  private setupPingInterval(): void {
+    this.pingInterval = window.setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        const message: WebSocketMessage = { type: 'ping' };
+        this.ws.send(JSON.stringify(message));
+      }
+    }, 30000) as any; // 30 seconds
+  }
+
+  private clearPingInterval(): void {
+    if (this.pingInterval !== null) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+  }
+
+  private attemptReconnect(): void {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+
+      setTimeout(() => {
+        this.connect().catch((error) => {
+          this.notifyErrorListeners(error);
+        });
+      }, delay);
+    }
+  }
+}
