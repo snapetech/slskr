@@ -1,0 +1,444 @@
+# soulseekR GraphQL Schema
+# Alternative query interface to REST API with full type safety
+
+schema {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}
+
+type Query {
+  # Health and version
+  health: HealthInfo!
+  version: VersionInfo!
+  
+  # Configuration
+  config: Config!
+  stats: Statistics!
+  capabilities: Capabilities!
+  
+  # Searches
+  searches(limit: Int = 50, offset: Int = 0): SearchConnection!
+  search(id: ID!): Search
+  
+  # Transfers
+  transfers(
+    direction: TransferDirection
+    status: TransferStatus
+    limit: Int = 50
+    offset: Int = 0
+  ): TransferConnection!
+  transfer(id: ID!): Transfer
+  
+  # Messages
+  messages(limit: Int = 50, offset: Int = 0): MessageConnection!
+  message(id: ID!): Message
+  userMessages(username: String!, limit: Int = 50): [Message!]!
+  
+  # Users
+  users(limit: Int = 50, offset: Int = 0): UserConnection!
+  user(username: String!): User
+  
+  # Rooms
+  rooms: [Room!]!
+  room(id: ID!): Room
+  
+  # Shares
+  shares(limit: Int = 50, offset: Int = 0): ShareConnection!
+  
+  # API Keys
+  apiKeys(limit: Int = 50, offset: Int = 0): ApiKeyConnection!
+  apiKey(id: ID!): ApiKey
+}
+
+type Mutation {
+  # Searches
+  createSearch(input: CreateSearchInput!): SearchMutationPayload!
+  cancelSearch(id: ID!): MutationPayload!
+  
+  # Transfers
+  createTransfer(input: CreateTransferInput!): TransferMutationPayload!
+  cancelTransfer(id: ID!): MutationPayload!
+  
+  # Messages
+  sendMessage(input: SendMessageInput!): MessageMutationPayload!
+  acknowledgeMessage(id: ID!): MutationPayload!
+  
+  # Rooms
+  joinRoom(input: JoinRoomInput!): RoomMutationPayload!
+  leaveRoom(id: ID!): MutationPayload!
+  
+  # API Keys
+  createApiKey(input: CreateApiKeyInput!): ApiKeyMutationPayload!
+  revokeApiKey(id: ID!): MutationPayload!
+  
+  # Configuration
+  updateFilters(input: UpdateFiltersInput!): MutationPayload!
+  refreshShares: MutationPayload!
+}
+
+type Subscription {
+  # Real-time events
+  searchUpdated: SearchEvent!
+  transferUpdated: TransferEvent!
+  messageReceived: Message!
+  userStatusChanged: UserStatusEvent!
+}
+
+# ============================================================================
+# Types
+# ============================================================================
+
+type HealthInfo {
+  status: String!
+  uptime: Int!
+  timestamp: Int!
+}
+
+type VersionInfo {
+  version: String!
+  name: String!
+  buildDate: String
+}
+
+type Config {
+  username: String!
+  port: Int!
+  shareDirectory: String
+  maxTransfers: Int!
+  maxSearches: Int!
+}
+
+type Statistics {
+  totalSearches: Int!
+  activeTransfers: Int!
+  totalUsers: Int!
+  totalRooms: Int!
+  uptime: Int!
+}
+
+type Capabilities {
+  endpoints: [String!]!
+  features: [String!]!
+}
+
+# Search Types
+type Search {
+  id: ID!
+  query: String!
+  status: SearchStatus!
+  resultCount: Int!
+  results: [SearchResult!]!
+  createdAt: Int!
+  completedAt: Int
+  room: String
+  target: String
+}
+
+type SearchResult {
+  filename: String!
+  filesize: Int!
+  attributes: [SearchAttribute!]!
+  peer: SearchResultPeer!
+}
+
+type SearchAttribute {
+  key: String!
+  value: String!
+}
+
+type SearchResultPeer {
+  username: String!
+  country: String
+}
+
+type SearchConnection {
+  edges: [SearchEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type SearchEdge {
+  node: Search!
+  cursor: String!
+}
+
+enum SearchStatus {
+  PENDING
+  SEARCHING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+# Transfer Types
+type Transfer {
+  id: ID!
+  direction: TransferDirection!
+  filename: String!
+  peerUsername: String!
+  filesize: Int!
+  progress: Int!
+  status: TransferStatus!
+  startedAt: Int!
+  completedAt: Int
+}
+
+type TransferConnection {
+  edges: [TransferEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type TransferEdge {
+  node: Transfer!
+  cursor: String!
+}
+
+enum TransferDirection {
+  UPLOAD
+  DOWNLOAD
+}
+
+enum TransferStatus {
+  QUEUED
+  STARTING
+  ACTIVE
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+# Message Types
+type Message {
+  id: ID!
+  username: String!
+  content: String!
+  direction: MessageDirection!
+  read: Boolean!
+  createdAt: Int!
+}
+
+type MessageConnection {
+  edges: [MessageEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type MessageEdge {
+  node: Message!
+  cursor: String!
+}
+
+enum MessageDirection {
+  INCOMING
+  OUTGOING
+}
+
+# User Types
+type User {
+  username: String!
+  status: UserStatus!
+  statusMessage: String
+  country: String
+  averageSpeed: Int
+  downloadCount: Int
+  uploadCount: Int
+}
+
+type UserConnection {
+  edges: [UserEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type UserEdge {
+  node: User!
+  cursor: String!
+}
+
+enum UserStatus {
+  OFFLINE
+  AWAY
+  ONLINE
+}
+
+# Room Types
+type Room {
+  id: ID!
+  name: String!
+  userCount: Int!
+  messageCount: Int!
+}
+
+# Share Types
+type Share {
+  id: ID!
+  path: String!
+  fileCount: Int!
+  totalSize: Int!
+  lastUpdated: Int!
+}
+
+type ShareConnection {
+  edges: [ShareEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type ShareEdge {
+  node: Share!
+  cursor: String!
+}
+
+# API Key Types
+type ApiKey {
+  id: ID!
+  key: String
+  scopes: [String!]!
+  createdAt: Int!
+  expiresAt: Int
+  lastUsed: Int
+  active: Boolean!
+}
+
+type ApiKeyConnection {
+  edges: [ApiKeyEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type ApiKeyEdge {
+  node: ApiKey!
+  cursor: String!
+}
+
+# Pagination
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+# Events
+type SearchEvent {
+  search: Search!
+  eventType: SearchEventType!
+  timestamp: Int!
+}
+
+enum SearchEventType {
+  CREATED
+  UPDATED
+  COMPLETED
+  FAILED
+}
+
+type TransferEvent {
+  transfer: Transfer!
+  eventType: TransferEventType!
+  timestamp: Int!
+}
+
+enum TransferEventType {
+  STARTED
+  PROGRESS
+  COMPLETED
+  FAILED
+}
+
+type UserStatusEvent {
+  username: String!
+  status: UserStatus!
+  timestamp: Int!
+}
+
+# ============================================================================
+# Input Types
+# ============================================================================
+
+input CreateSearchInput {
+  query: String!
+  room: String
+  target: String
+}
+
+input CreateTransferInput {
+  direction: TransferDirection!
+  peerUsername: String!
+  filename: String!
+}
+
+input SendMessageInput {
+  recipient: String!
+  content: String!
+}
+
+input JoinRoomInput {
+  name: String!
+}
+
+input CreateApiKeyInput {
+  scopes: [String!]!
+  expiresInDays: Int
+}
+
+input UpdateFiltersInput {
+  enabled: Boolean
+  excludeExtensions: [String!]
+  minFileSize: Int
+  maxFileSize: Int
+}
+
+# ============================================================================
+# Response Types
+# ============================================================================
+
+type MutationPayload {
+  success: Boolean!
+  message: String
+  error: String
+}
+
+type SearchMutationPayload implements MutationPayload {
+  success: Boolean!
+  message: String
+  error: String
+  search: Search
+}
+
+type TransferMutationPayload implements MutationPayload {
+  success: Boolean!
+  message: String
+  error: String
+  transfer: Transfer
+}
+
+type MessageMutationPayload implements MutationPayload {
+  success: Boolean!
+  message: String
+  error: String
+  message: Message
+}
+
+type RoomMutationPayload implements MutationPayload {
+  success: Boolean!
+  message: String
+  error: String
+  room: Room
+}
+
+type ApiKeyMutationPayload implements MutationPayload {
+  success: Boolean!
+  message: String
+  error: String
+  apiKey: ApiKey
+}
+
+interface MutationPayload {
+  success: Boolean!
+  message: String
+  error: String
+}

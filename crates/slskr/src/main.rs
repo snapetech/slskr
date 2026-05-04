@@ -11,6 +11,9 @@ mod utils;
 mod storage;
 mod routing;
 mod websocket;
+mod tracing;
+mod webhooks;
+mod persistence;
 
 use std::{
     collections::BTreeMap,
