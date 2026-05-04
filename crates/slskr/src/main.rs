@@ -2979,6 +2979,324 @@ impl ShareGroupStore {
     }
 }
 
+// User Notes Models
+#[derive(Clone, Debug)]
+struct UserNoteRecord {
+    id: String,
+    username: String,
+    note: String,
+    created_at: u64,
+    updated_at: u64,
+}
+
+impl UserNoteRecord {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"username\":\"{}\",\"note\":\"{}\",\"created_at\":{},\"updated_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.username),
+            json_escape(&self.note),
+            self.created_at,
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct UserNoteStore {
+    records: Vec<UserNoteRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl UserNoteStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn create(&mut self, username: String, note: String) -> UserNoteRecord {
+        let now = unix_timestamp();
+        let id = format!("note-{}", self.next_id);
+        self.next_id += 1;
+        let record = UserNoteRecord {
+            id,
+            username,
+            note,
+            created_at: now,
+            updated_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn get(&self, id: &str) -> Option<UserNoteRecord> {
+        self.records.iter().find(|r| r.id == id).cloned()
+    }
+
+    fn get_by_username(&self, username: &str) -> Option<UserNoteRecord> {
+        self.records.iter().find(|r| r.username == username).cloned()
+    }
+
+    fn update(&mut self, id: &str, note: String) -> Option<UserNoteRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == id)?;
+        record.note = note;
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn delete(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.records.iter().position(|r| r.id == id) {
+            self.records.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn json(&self, _query: Option<&str>) -> String {
+        let records = self
+            .records
+            .iter()
+            .map(UserNoteRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            self.updated_at
+        )
+    }
+}
+
+// Interest Models
+#[derive(Clone, Debug)]
+struct InterestRecord {
+    id: String,
+    name: String,
+    kind: String,
+    created_at: u64,
+}
+
+impl InterestRecord {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"created_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.name),
+            json_escape(&self.kind),
+            self.created_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct InterestStore {
+    liked: Vec<InterestRecord>,
+    hated: Vec<InterestRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl InterestStore {
+    fn new() -> Self {
+        Self {
+            liked: Vec::new(),
+            hated: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn add_liked(&mut self, name: String) -> InterestRecord {
+        let now = unix_timestamp();
+        let id = format!("liked-{}", self.next_id);
+        self.next_id += 1;
+        let record = InterestRecord {
+            id,
+            name,
+            kind: "liked".to_string(),
+            created_at: now,
+        };
+        self.liked.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn add_hated(&mut self, name: String) -> InterestRecord {
+        let now = unix_timestamp();
+        let id = format!("hated-{}", self.next_id);
+        self.next_id += 1;
+        let record = InterestRecord {
+            id,
+            name,
+            kind: "hated".to_string(),
+            created_at: now,
+        };
+        self.hated.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn remove_liked(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.liked.iter().position(|r| r.id == id) {
+            self.liked.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn remove_hated(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.hated.iter().position(|r| r.id == id) {
+            self.hated.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn json_liked(&self) -> String {
+        let records = self
+            .liked
+            .iter()
+            .map(InterestRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"kind\":\"liked\",\"updated_at\":{}}}",
+            records,
+            self.liked.len(),
+            self.updated_at
+        )
+    }
+
+    fn json_hated(&self) -> String {
+        let records = self
+            .hated
+            .iter()
+            .map(InterestRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"kind\":\"hated\",\"updated_at\":{}}}",
+            records,
+            self.hated.len(),
+            self.updated_at
+        )
+    }
+}
+
+// Share Grant Models
+#[derive(Clone, Debug)]
+struct ShareGrantRecord {
+    id: String,
+    collection_id: String,
+    username: String,
+    shared_at: u64,
+    permissions: String,
+}
+
+impl ShareGrantRecord {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"collection_id\":\"{}\",\"username\":\"{}\",\"shared_at\":{},\"permissions\":\"{}\"}}",
+            json_escape(&self.id),
+            json_escape(&self.collection_id),
+            json_escape(&self.username),
+            self.shared_at,
+            json_escape(&self.permissions)
+        )
+    }
+}
+
+#[derive(Debug)]
+struct ShareGrantStore {
+    records: Vec<ShareGrantRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl ShareGrantStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn create(&mut self, collection_id: String, username: String) -> ShareGrantRecord {
+        let now = unix_timestamp();
+        let id = format!("grant-{}", self.next_id);
+        self.next_id += 1;
+        let record = ShareGrantRecord {
+            id,
+            collection_id,
+            username,
+            shared_at: now,
+            permissions: "read".to_string(),
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn get(&self, id: &str) -> Option<ShareGrantRecord> {
+        self.records.iter().find(|r| r.id == id).cloned()
+    }
+
+    fn get_by_collection(&self, collection_id: &str) -> Vec<ShareGrantRecord> {
+        self.records
+            .iter()
+            .filter(|r| r.collection_id == collection_id)
+            .cloned()
+            .collect()
+    }
+
+    fn update(&mut self, id: &str, permissions: String) -> Option<ShareGrantRecord> {
+        let record = self.records.iter_mut().find(|r| r.id == id)?;
+        record.permissions = permissions;
+        self.updated_at = unix_timestamp();
+        Some(record.clone())
+    }
+
+    fn delete(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.records.iter().position(|r| r.id == id) {
+            self.records.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn json(&self) -> String {
+        let records = self
+            .records
+            .iter()
+            .map(ShareGrantRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            self.updated_at
+        )
+    }
+}
+
 #[derive(Debug)]
 struct AppState {
     config: AppConfig,
@@ -2997,6 +3315,9 @@ struct AppState {
     wishlist: RwLock<WishlistStore>,
     contacts: RwLock<ContactStore>,
     sharegroups: RwLock<ShareGroupStore>,
+    user_notes: RwLock<UserNoteStore>,
+    interests: RwLock<InterestStore>,
+    share_grants: RwLock<ShareGrantStore>,
     db: Option<crate::persistence::DatabaseManager>,
     session_commands: mpsc::Sender<SessionCommand>,
 }
@@ -5283,6 +5604,195 @@ scalar Long
             }
         }
         
+        // USER NOTES ENDPOINTS
+        ("GET", "/api/users/notes") => {
+            let notes = state.user_notes.read().await;
+            let json = notes.json(None);
+            drop(notes);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/users/notes") => {
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            let note = extract_json_string_field(body, "note").unwrap_or_default();
+            if username.is_empty() {
+                return Ok(routing::conflict_response("username is required"));
+            }
+            let mut notes = state.user_notes.write().await;
+            let record = notes.create(username, note);
+            let json = record.json();
+            drop(notes);
+            Ok(routing::created_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/users/notes/") && path.len() > 17 => {
+            let id = &path[17..];
+            let notes = state.user_notes.read().await;
+            if let Some(record) = notes.get(id) {
+                let json = record.json();
+                drop(notes);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(notes);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("PUT", path) if path.starts_with("/api/users/notes/") && path.len() > 17 => {
+            let id = &path[17..];
+            let note = extract_json_string_field(body, "note").unwrap_or_default();
+            let mut notes = state.user_notes.write().await;
+            if let Some(record) = notes.update(id, note) {
+                let json = record.json();
+                drop(notes);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(notes);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/users/notes/") && path.len() > 17 => {
+            let id = &path[17..];
+            let mut notes = state.user_notes.write().await;
+            let deleted = notes.delete(id);
+            drop(notes);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // INTERESTS ENDPOINTS (Liked)
+        ("GET", "/api/soulseek/interests") => {
+            let interests = state.interests.read().await;
+            let json = interests.json_liked();
+            drop(interests);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/soulseek/interests") => {
+            let name = extract_json_string_field(body, "name").unwrap_or_default();
+            if name.is_empty() {
+                return Ok(routing::conflict_response("name is required"));
+            }
+            let mut interests = state.interests.write().await;
+            let record = interests.add_liked(name);
+            let json = record.json();
+            drop(interests);
+            Ok(routing::created_response(json))
+        }
+        ("DELETE", path) if path.starts_with("/api/soulseek/interests/") && path.len() > 24 => {
+            let id = &path[24..];
+            let mut interests = state.interests.write().await;
+            let deleted = interests.remove_liked(id);
+            drop(interests);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // INTERESTS ENDPOINTS (Hated)
+        ("GET", "/api/soulseek/hated-interests") => {
+            let interests = state.interests.read().await;
+            let json = interests.json_hated();
+            drop(interests);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/soulseek/hated-interests") => {
+            let name = extract_json_string_field(body, "name").unwrap_or_default();
+            if name.is_empty() {
+                return Ok(routing::conflict_response("name is required"));
+            }
+            let mut interests = state.interests.write().await;
+            let record = interests.add_hated(name);
+            let json = record.json();
+            drop(interests);
+            Ok(routing::created_response(json))
+        }
+        ("DELETE", path) if path.starts_with("/api/soulseek/hated-interests/") && path.len() > 30 => {
+            let id = &path[30..];
+            let mut interests = state.interests.write().await;
+            let deleted = interests.remove_hated(id);
+            drop(interests);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // SHARE GRANTS ENDPOINTS
+        ("GET", "/api/share-grants") => {
+            let grants = state.share_grants.read().await;
+            let json = grants.json();
+            drop(grants);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/share-grants") => {
+            let collection_id = extract_json_string_field(body, "collection_id").unwrap_or_default();
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            if collection_id.is_empty() || username.is_empty() {
+                return Ok(routing::conflict_response("collection_id and username are required"));
+            }
+            let mut grants = state.share_grants.write().await;
+            let record = grants.create(collection_id, username);
+            let json = record.json();
+            drop(grants);
+            Ok(routing::created_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/share-grants/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
+            let id = &path[18..];
+            let grants = state.share_grants.read().await;
+            if let Some(record) = grants.get(id) {
+                let json = record.json();
+                drop(grants);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(grants);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("GET", path) if path.starts_with("/api/share-grants/by-collection/") && path.len() > 32 => {
+            let collection_id = &path[32..];
+            let grants = state.share_grants.read().await;
+            let records = grants.get_by_collection(collection_id);
+            let json = records.iter()
+                .map(|r| r.json())
+                .collect::<Vec<_>>()
+                .join(",");
+            let response = format!(
+                "{{\"entries\":[{}],\"count\":{},\"collection_id\":\"{}\"}}",
+                json,
+                records.len(),
+                json_escape(collection_id)
+            );
+            drop(grants);
+            Ok(routing::ok_response(response))
+        }
+        ("PUT", path) if path.starts_with("/api/share-grants/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
+            let id = &path[18..];
+            let permissions = extract_json_string_field(body, "permissions").unwrap_or_else(|| "read".to_string());
+            let mut grants = state.share_grants.write().await;
+            if let Some(record) = grants.update(id, permissions) {
+                let json = record.json();
+                drop(grants);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(grants);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/share-grants/") && !path.contains("/token") && !path.contains("/backfill") && path.len() > 18 => {
+            let id = &path[18..];
+            let mut grants = state.share_grants.write().await;
+            let deleted = grants.delete(id);
+            drop(grants);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
         // WEBUI PARITY: SignalR hub stub endpoints
         // These return 501 Not Implemented; proper SignalR WebSocket hubs are future work
         ("GET", path) if path.starts_with("/hub/") => {
@@ -5479,6 +5989,9 @@ async fn serve(once: bool) -> Result<(), String> {
           wishlist: RwLock::new(WishlistStore::new()),
           contacts: RwLock::new(ContactStore::new()),
           sharegroups: RwLock::new(ShareGroupStore::new()),
+          user_notes: RwLock::new(UserNoteStore::new()),
+          interests: RwLock::new(InterestStore::new()),
+          share_grants: RwLock::new(ShareGrantStore::new()),
           db,
           config,
           session_commands,
@@ -9180,6 +9693,9 @@ mod tests {
               wishlist: RwLock::new(super::WishlistStore::new()),
               contacts: RwLock::new(super::ContactStore::new()),
               sharegroups: RwLock::new(super::ShareGroupStore::new()),
+              user_notes: RwLock::new(super::UserNoteStore::new()),
+              interests: RwLock::new(super::InterestStore::new()),
+              share_grants: RwLock::new(super::ShareGrantStore::new()),
               db: None,
               config,
               session_commands: sender,
@@ -11704,6 +12220,9 @@ mod tests {
               wishlist: RwLock::new(super::WishlistStore::new()),
               contacts: RwLock::new(super::ContactStore::new()),
               sharegroups: RwLock::new(super::ShareGroupStore::new()),
+              user_notes: RwLock::new(super::UserNoteStore::new()),
+              interests: RwLock::new(super::InterestStore::new()),
+              share_grants: RwLock::new(super::ShareGrantStore::new()),
               db: None,
               config,
               session_commands: sender,
