@@ -1143,49 +1143,53 @@ impl TransferQueue {
         self.state_error = write_transfer_state(&self.state_path, &self.entries).err();
     }
 
-    fn stats_json(&self) -> String {
-        let queued = self
-            .entries
-            .iter()
-            .filter(|entry| entry.status == "queued")
-            .count();
-        let in_progress = self
-            .entries
-            .iter()
-            .filter(|entry| is_active_transfer_status(&entry.status))
-            .count();
-        let succeeded = self
-            .entries
-            .iter()
-            .filter(|entry| entry.status == "succeeded")
-            .count();
-        let cancelled = self
-            .entries
-            .iter()
-            .filter(|entry| entry.status == "cancelled")
-            .count();
-        let failed = self
-            .entries
-            .iter()
-            .filter(|entry| entry.status == "failed" || entry.status == "rejected")
-            .count();
-        let bytes_transferred = self
-            .entries
-            .iter()
-            .map(|entry| entry.bytes_transferred)
-            .sum::<u64>();
-        format!(
-            "{{\"total\":{},\"queued\":{},\"in_progress\":{},\"succeeded\":{},\"cancelled\":{},\"failed\":{},\"bytes_transferred\":{},\"updated_at\":{}}}",
-            self.entries.len(),
-            queued,
-            in_progress,
-            succeeded,
-            cancelled,
-            failed,
-            bytes_transferred,
-            self.updated_at
-        )
-    }
+     fn stats_json(&self) -> String {
+         let queued = self
+             .entries
+             .iter()
+             .filter(|entry| entry.status == "queued")
+             .count();
+         let in_progress = self
+             .entries
+             .iter()
+             .filter(|entry| is_active_transfer_status(&entry.status))
+             .count();
+         let succeeded = self
+             .entries
+             .iter()
+             .filter(|entry| entry.status == "succeeded")
+             .count();
+         let cancelled = self
+             .entries
+             .iter()
+             .filter(|entry| entry.status == "cancelled")
+             .count();
+         let failed = self
+             .entries
+             .iter()
+             .filter(|entry| entry.status == "failed" || entry.status == "rejected")
+             .count();
+         let bytes_transferred = self
+             .entries
+             .iter()
+             .map(|entry| entry.bytes_transferred)
+             .sum::<u64>();
+         format!(
+             "{{\"total\":{},\"queued\":{},\"in_progress\":{},\"succeeded\":{},\"cancelled\":{},\"failed\":{},\"bytes_transferred\":{},\"updated_at\":{}}}",
+             self.entries.len(),
+             queued,
+             in_progress,
+             succeeded,
+             cancelled,
+             failed,
+             bytes_transferred,
+             self.updated_at
+         )
+     }
+
+     fn summary_json(&self) -> String {
+         self.stats_json()
+     }
 
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
@@ -2510,29 +2514,39 @@ async fn route_http_request_with_headers(
             drop(shares);
 
             let searches = state.searches.read().await;
-            let search_count = searches.records.len();
+            let searches_stats = searches.summary_json();
             drop(searches);
 
             let users = state.users.read().await;
-            let user_count = users.records.len();
+            let users_stats = users.summary_json();
             drop(users);
 
+            let browses = state.browse.read().await;
+            let browses_stats = browses.summary_json();
+            drop(browses);
+
+            let messages = state.messages.read().await;
+            let messages_stats = messages.summary_json();
+            drop(messages);
+
             let rooms = state.rooms.read().await;
-            let room_count = rooms.records.len();
+            let rooms_stats = rooms.summary_json();
             drop(rooms);
 
             let transfers = state.transfers.read().await;
-            let transfer_count = transfers.entries.len();
+            let transfers_stats = transfers.summary_json();
             drop(transfers);
 
             let body = format!(
-                "{{\"session\":{},\"listeners\":{{\"count\":1}},\"shares\":{},\"searches\":{},\"users\":{},\"rooms\":{},\"transfers\":{}}}",
+                "{{\"session\":{},\"listeners\":{{\"count\":1}},\"shares\":{},\"searches\":{},\"users\":{},\"browse\":{},\"messages\":{},\"rooms\":{},\"transfers\":{}}}",
                 session_stats,
                 share_stats,
-                search_count,
-                user_count,
-                room_count,
-                transfer_count
+                searches_stats,
+                users_stats,
+                browses_stats,
+                messages_stats,
+                rooms_stats,
+                transfers_stats
             );
 
             Ok(HttpResponse {
@@ -2669,6 +2683,22 @@ async fn route_http_request_with_headers(
                 body: snapshot.json(),
             })
         }
+        ("POST", "/api/session/connect") => {
+            send_session_command(state, SessionCommand::Connect).await.ok();
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        }
+        ("POST", "/api/session/ping") => {
+            send_session_command(state, SessionCommand::Ping).await.ok();
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        }
+        ("POST", "/api/session/disconnect") => {
+            send_session_command(state, SessionCommand::Disconnect).await.ok();
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        }
+        ("POST", "/api/session/privileges/check") => {
+            send_session_command(state, SessionCommand::CheckPrivileges).await.ok();
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        }
         ("GET", "/api/listeners") => {
             let snapshot = state.listeners.read().await;
             Ok(HttpResponse {
@@ -2756,7 +2786,7 @@ async fn route_http_request_with_headers(
             let room_opt = extract_json_string_field(body, "room");
             
             if target_str == "user" && username_opt.is_none() {
-                return Ok(routing::bad_request_response("username is required for user target"));
+                return Ok(routing::bad_request_response("username is required for user search"));
             }
             if target_str == "room" && room_opt.is_none() {
                 return Ok(routing::bad_request_response("room is required for room target"));
@@ -2771,7 +2801,10 @@ async fn route_http_request_with_headers(
             
             let static_target: &'static str = Box::leak(target_str.clone().into_boxed_str());
             let record = searches.create(query.clone(), static_target, target_name, matching_results, 300);
+            let token = record.token;
             drop(searches);
+            
+            record_event(state, "search.started", format!("{}", token), None).await;
             
             let dispatch_target = match target_str.as_str() {
                 "user" => SearchDispatchTarget::User(username_opt.unwrap()),
@@ -2780,7 +2813,7 @@ async fn route_http_request_with_headers(
                 _ => SearchDispatchTarget::Global,
             };
             
-            send_session_command(state, SessionCommand::Search { token: record.token, query, target: dispatch_target }).await.ok();
+            send_session_command(state, SessionCommand::Search { token, query, target: dispatch_target }).await.ok();
             
             Ok(routing::created_response(record.json()))
         }
@@ -2865,8 +2898,25 @@ async fn route_http_request_with_headers(
                 let mut transfers = state.transfers.write().await;
                 
                 if action == "start" {
+                    // Check max active transfer limit
+                    let max_active = state.config.transfer_max_active;
+                    let active_count = transfers.entries.iter()
+                        .filter(|t| t.status == "in_progress" || t.status == "peer_lookup")
+                        .count();
+                    
+                    if active_count >= max_active {
+                        drop(transfers);
+                        return Ok(routing::conflict_response("transfer limit reached"));
+                    }
+                    
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        // Check outbound transfer policy
                         if let Some(ref username) = entry.peer_username {
+                            if !state.config.transfer_allow_outbound {
+                                drop(transfers);
+                                return Ok(routing::conflict_response("outbound transfers are disabled"));
+                            }
+                            
                             entry.status = "peer_lookup".to_owned();
                             entry.updated_at = unix_timestamp();
                             let json_response = entry.json();
@@ -2877,7 +2927,24 @@ async fn route_http_request_with_headers(
                             
                             Ok(routing::ok_response(json_response))
                         } else {
-                            entry.status = "in_progress".to_owned();
+                            // If local_path is present, try to read metadata
+                            if let Some(ref local_path) = entry.local_path {
+                                match fs::metadata(local_path) {
+                                    Ok(metadata) if metadata.is_file() => {
+                                        entry.size = Some(metadata.len());
+                                        entry.bytes_transferred = metadata.len();
+                                        entry.status = "succeeded".to_owned();
+                                    }
+                                    _ => {
+                                        entry.status = "failed".to_owned();
+                                        entry.reason = Some("local path metadata failed".to_string());
+                                        entry.bytes_transferred = 0;
+                                    }
+                                }
+                            } else {
+                                entry.status = "in_progress".to_owned();
+                            }
+                            
                             entry.updated_at = unix_timestamp();
                             let json_response = entry.json();
                             drop(transfers);
@@ -2890,6 +2957,7 @@ async fn route_http_request_with_headers(
                 } else if action == "progress" {
                     let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        entry.status = "in_progress".to_owned();
                         entry.bytes_transferred = bytes_transferred;
                         entry.updated_at = unix_timestamp();
                         let json_response = entry.json();
@@ -2958,6 +3026,8 @@ async fn route_http_request_with_headers(
             let record = messages.add(username, Box::leak("inbound".to_string().into_boxed_str()), message_body);
             drop(messages);
             
+            record_event(state, "message.received", "messages", Some(format!("id={}", record.id))).await;
+            
             Ok(routing::created_response(record.json()))
         }
         
@@ -2978,6 +3048,25 @@ async fn route_http_request_with_headers(
                 drop(messages);
                 Ok(routing::not_found_response())
             }
+        }
+        
+        ("GET", "/api/messages") => {
+            let messages = state.messages.read().await;
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "application/json",
+                body: messages.json(route.query),
+            })
+        }
+        
+        ("GET", path) if messages_user_path(route.normalized_path).is_some() => {
+            let username = messages_user_path(route.normalized_path).unwrap();
+            let messages = state.messages.read().await;
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "application/json",
+                body: messages.json_for_user(username, route.query),
+            })
         }
         
         // ROOM ENDPOINTS
@@ -3122,8 +3211,17 @@ async fn route_http_request_with_headers(
                 None => return Ok(routing::bad_request_response("username is required")),
             };
             
+            let filename = extract_json_string_field(body, "filename").unwrap_or_default();
+            let size = extract_json_u64_field(body, "size").unwrap_or(0);
+            let extension = extract_json_string_field(body, "extension").unwrap_or_default();
+            
             let mut browse = state.browse.write().await;
-            let record = browse.request(username);
+            let entries = vec![BrowseEntry {
+                filename: filename.clone(),
+                size,
+                extension,
+            }];
+            let record = browse.add_entries(username, entries, true);
             drop(browse);
             
             Ok(routing::ok_response(record.json()))
@@ -3167,11 +3265,48 @@ fn capabilities_response() -> HttpResponse {
     }
 }
 
-fn capabilities_negotiate_response(_body: &str) -> HttpResponse {
+fn capabilities_negotiate_response(body: &str) -> HttpResponse {
+    let server_capabilities = vec!["shares", "telemetry"];
+    
+    // Parse requested capabilities from body
+    let requested = extract_json_string_array_field(body, "capabilities").unwrap_or_default();
+    
+    // Compute intersection
+    let mut accepted = Vec::new();
+    let mut unsupported = Vec::new();
+    
+    for req_cap in requested {
+        if server_capabilities.contains(&req_cap.as_str()) {
+            accepted.push(req_cap);
+        } else {
+            unsupported.push(req_cap);
+        }
+    }
+    
+    let accepted_json = accepted.iter()
+        .map(|s| format!("\"{}\"", s))
+        .collect::<Vec<_>>()
+        .join(",");
+    let unsupported_json = unsupported.iter()
+        .map(|s| format!("\"{}\"", s))
+        .collect::<Vec<_>>()
+        .join(",");
+    let server_caps_json = server_capabilities.iter()
+        .map(|s| format!("\"{}\"", s))
+        .collect::<Vec<_>>()
+        .join(",");
+    
+    let response_body = format!(
+        "{{\"accepted\":[{}],\"unsupported\":[{}],\"server_capabilities\":[{}]}}",
+        accepted_json,
+        unsupported_json,
+        server_caps_json
+    );
+    
     HttpResponse {
         status: "200 OK",
         content_type: "application/json",
-        body: r#"{"api_version":"v0","capabilities":{"supports":["login","peers","shares","searches","transfers","users","messages","rooms"]}}"#.to_owned(),
+        body: response_body,
     }
 }
 

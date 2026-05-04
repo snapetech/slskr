@@ -118,3 +118,11 @@ pub fn ok_response(body: String) -> HttpResponse {
         body,
     }
 }
+
+pub fn conflict_response(message: &str) -> HttpResponse {
+    HttpResponse {
+        status: "409 Conflict",
+        content_type: "application/json",
+        body: format!("{{\"error\":\"{}\"}}", crate::config::json_escape(message)),
+    }
+}
