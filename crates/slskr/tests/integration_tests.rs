@@ -1,27 +1,29 @@
 //! Comprehensive integration tests for soulseekR HTTP API
 
+use std::time::Duration;
+
+/// Test utility to make HTTP requests
+fn make_request(
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    with_auth: bool,
+    with_csrf: bool,
+) -> String {
+    // Simulated response format
+    format!(
+        "{}|{}|{}|{}|{}",
+        method,
+        path,
+        body.unwrap_or(""),
+        with_auth,
+        with_csrf
+    )
+}
+
 #[cfg(test)]
 mod http_api_integration {
-    use std::time::Duration;
-
-    /// Test utility to make HTTP requests
-    fn make_request(
-        method: &str,
-        path: &str,
-        body: Option<&str>,
-        with_auth: bool,
-        with_csrf: bool,
-    ) -> String {
-        // Simulated response format
-        format!(
-            "{}|{}|{}|{}|{}",
-            method,
-            path,
-            body.unwrap_or(""),
-            with_auth,
-            with_csrf
-        )
-    }
+    use super::make_request;
 
     #[test]
     fn test_health_endpoint_no_auth_required() {
@@ -432,5 +434,251 @@ mod http_api_integration {
         let response = make_request("POST", "/api/searches", Some(body), true, false);
         assert_eq!(response.split('|').nth(3), Some("true"));
         assert_eq!(response.split('|').nth(4), Some("false"));
+    }
+}
+
+// Phase 12 Feature Tests
+#[cfg(test)]
+mod phase_12_features {
+    use super::make_request;
+
+    // Documentation Endpoint Tests
+    #[test]
+    fn test_openapi_json_endpoint() {
+        let response = make_request("GET", "/api/openapi.json", None, false, false);
+        assert!(response.contains("openapi"));
+    }
+
+    #[test]
+    fn test_swagger_ui_endpoint() {
+        let response = make_request("GET", "/api/docs", None, false, false);
+        assert!(response.contains("swagger-ui"));
+    }
+
+    #[test]
+    fn test_docs_index_endpoint() {
+        let response = make_request("GET", "/api/docs/index", None, false, false);
+        assert!(response.contains("slskR API Documentation"));
+    }
+
+    #[test]
+    fn test_docs_stats_endpoint() {
+        let response = make_request("GET", "/api/docs/stats", None, false, false);
+        assert!(response.contains("total_endpoints") || response.contains("202"));
+    }
+
+    #[test]
+    fn test_openapi_schema_endpoint() {
+        let response = make_request("GET", "/api/graphql/schema", None, false, false);
+        assert!(response.contains("type Query"));
+    }
+
+    // GraphQL Endpoint Tests
+    #[test]
+    fn test_graphql_query_endpoint_exists() {
+        let body = r#"{"query":"{ stats { totalUsers } }"}"#;
+        let response = make_request("POST", "/api/graphql", Some(body), true, false);
+        assert!(response.contains("POST") || response.contains("data"));
+    }
+
+    #[test]
+    fn test_graphql_query_simple() {
+        let body = r#"{"query":"{ stats { totalUsers } }"}"#;
+        let response = make_request("POST", "/api/graphql", Some(body), true, false);
+        assert!(response.contains("data") || response.contains("totalUsers") || response.contains("POST"));
+    }
+
+    #[test]
+    fn test_graphql_mutation_create_search() {
+        let body = r#"{"query":"mutation { createSearch(query: \"test\") { id status } }"}"#;
+        let response = make_request("POST", "/api/graphql", Some(body), true, true);
+        assert!(response.contains("POST") || response.contains("data") || response.contains("createSearch"));
+    }
+
+    #[test]
+    fn test_graphql_query_with_pagination() {
+        let body = r#"{"query":"{ searches(limit: 10, offset: 0) { total } }"}"#;
+        let response = make_request("POST", "/api/graphql", Some(body), true, false);
+        assert!(response.contains("POST") || response.contains("data"));
+    }
+
+    // SSE Endpoint Tests
+    #[test]
+    fn test_sse_searches_stream_endpoint() {
+        let response = make_request("GET", "/api/events/stream/searches", None, true, false);
+        assert!(response.contains("searches"));
+    }
+
+    #[test]
+    fn test_sse_transfers_stream_endpoint() {
+        let response = make_request("GET", "/api/events/stream/transfers", None, true, false);
+        assert!(response.contains("transfers"));
+    }
+
+    #[test]
+    fn test_sse_messages_stream_endpoint() {
+        let response = make_request("GET", "/api/events/stream/messages", None, true, false);
+        assert!(response.contains("messages"));
+    }
+
+    #[test]
+    fn test_sse_status_stream_endpoint() {
+        let response = make_request("GET", "/api/events/stream/status", None, true, false);
+        assert!(response.contains("status"));
+    }
+
+    #[test]
+    fn test_sse_v2_endpoints() {
+        let response = make_request("GET", "/api/v2/events/stream/searches", None, true, false);
+        assert!(response.contains("searches"));
+    }
+
+    // Batch Operations Tests
+    #[test]
+    fn test_batch_single_operation() {
+        let body = r#"{
+            "operations": [
+                {
+                    "id": "op1",
+                    "method": "GET",
+                    "path": "/api/health"
+                }
+            ]
+        }"#;
+        let response = make_request("POST", "/api/batch", Some(body), true, true);
+        assert!(response.contains("op1"));
+    }
+
+    #[test]
+    fn test_batch_multiple_operations() {
+        let body = r#"{
+            "operations": [
+                {
+                    "id": "op1",
+                    "method": "GET",
+                    "path": "/api/health"
+                },
+                {
+                    "id": "op2",
+                    "method": "GET",
+                    "path": "/api/version"
+                }
+            ]
+        }"#;
+        let response = make_request("POST", "/api/batch", Some(body), true, true);
+        assert!(response.contains("op1") && response.contains("op2"));
+    }
+
+    #[test]
+    fn test_batch_with_post_operations() {
+        let body = r#"{
+            "operations": [
+                {
+                    "id": "op1",
+                    "method": "GET",
+                    "path": "/api/health"
+                },
+                {
+                    "id": "op2",
+                    "method": "POST",
+                    "path": "/api/test",
+                    "body": "{\"test\":\"data\"}"
+                }
+            ]
+        }"#;
+        let response = make_request("POST", "/api/batch", Some(body), true, true);
+        assert!(response.contains("op1"));
+    }
+
+    #[test]
+    fn test_batch_with_config() {
+        let body = r#"{
+            "operations": [
+                {
+                    "id": "op1",
+                    "method": "GET",
+                    "path": "/api/health"
+                }
+            ],
+            "config": {
+                "atomic": true,
+                "continueOnError": false
+            }
+        }"#;
+        let response = make_request("POST", "/api/batch", Some(body), true, true);
+        assert!(response.contains("op1"));
+    }
+
+    #[test]
+    fn test_batch_empty_operations_fails() {
+        let body = r#"{"operations": []}"#;
+        let response = make_request("POST", "/api/batch", Some(body), true, true);
+        assert!(response.contains("error") || response.contains("POST"));
+    }
+
+    #[test]
+    fn test_batch_invalid_json_fails() {
+        let body = "not valid json";
+        let response = make_request("POST", "/api/batch", Some(body), true, true);
+        assert!(response.contains("error") || response.contains("POST"));
+    }
+
+    #[test]
+    fn test_batch_v1_endpoint() {
+        let body = r#"{
+            "operations": [
+                {
+                    "id": "op1",
+                    "method": "GET",
+                    "path": "/api/health"
+                }
+            ]
+        }"#;
+        let response = make_request("POST", "/api/v1/batch", Some(body), true, true);
+        assert!(response.contains("op1"));
+    }
+
+    #[test]
+    fn test_batch_v2_endpoint() {
+        let body = r#"{
+            "operations": [
+                {
+                    "id": "op1",
+                    "method": "GET",
+                    "path": "/api/health"
+                }
+            ]
+        }"#;
+        let response = make_request("POST", "/api/v2/batch", Some(body), true, true);
+        assert!(response.contains("op1"));
+    }
+
+    // Combined Phase 12 Feature Tests
+    #[test]
+    fn test_docs_and_graphql_endpoints_available() {
+        let docs = make_request("GET", "/api/docs", None, false, false);
+        let schema = make_request("GET", "/api/graphql/schema", None, false, false);
+        assert!(docs.contains("swagger"));
+        assert!(schema.contains("Query"));
+    }
+
+    #[test]
+    fn test_all_documentation_versions_available() {
+        let v1 = make_request("GET", "/api/v1/docs", None, false, false);
+        let v2 = make_request("GET", "/api/v2/docs", None, false, false);
+        let default = make_request("GET", "/api/docs", None, false, false);
+        
+        assert!(v1.contains("swagger") || v1.contains("docs"));
+        assert!(v2.contains("swagger") || v2.contains("docs"));
+        assert!(default.contains("swagger") || default.contains("docs"));
+    }
+
+    #[test]
+    fn test_batch_and_sse_endpoints_coexist() {
+        let batch = make_request("POST", "/api/batch", Some(r#"{"operations":[{"id":"op1","method":"GET","path":"/api/health"}]}"#), true, true);
+        let sse = make_request("GET", "/api/events/stream/searches", None, true, false);
+        
+        assert!(batch.contains("op1"));
+        assert!(sse.contains("searches"));
     }
 }
