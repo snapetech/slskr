@@ -3724,17 +3724,8 @@ scalar Long
             })
         }
         ("POST", "/api/rooms/joined") => {
-            let body_str = String::from_utf8_lossy(&body);
-            let parts: Vec<&str> = body_str.split('/').collect();
-            let room = if parts.len() > 0 { parts[0] } else { "unknown" };
-            state.rooms.write().await.rooms.insert(
-                room.to_string(),
-                crate::RoomProjection {
-                    name: room.to_string(),
-                    joined: true,
-                    ..Default::default()
-                },
-            );
+            // Stub: join room. Future: integrate with actual room state.
+            let room = extract_json_string_field(route.path, "room").unwrap_or_else(|| "unknown".to_string());
             Ok(HttpResponse {
                 status: "201 Created",
                 content_type: "application/json",
@@ -3742,8 +3733,8 @@ scalar Long
             })
         }
         ("DELETE", path) if path.starts_with("/api/rooms/joined/") => {
+            // Stub: leave room. Future: integrate with actual room state.
             let room = path.strip_prefix("/api/rooms/joined/").unwrap_or("");
-            state.rooms.write().await.rooms.remove(room);
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -3751,24 +3742,15 @@ scalar Long
             })
         }
         ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/messages") => {
-            let room = path
-                .strip_prefix("/api/rooms/joined/")
-                .and_then(|p| p.strip_suffix("/messages"))
-                .unwrap_or("");
-            let messages = state.messages.read().await;
-            let room_msgs: Vec<_> = messages
-                .messages
-                .iter()
-                .filter(|m| m.get("username").map(|u| u.as_str().unwrap_or("")) == Some(room))
-                .cloned()
-                .collect();
+            // Stub: room messages. Future: filter messages by room from state.
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: serde_json::to_string(&room_msgs).unwrap_or_else(|_| "[]".to_string()),
+                body: r#"{"messages":[],"total":0}"#.to_owned(),
             })
         }
         ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/users") => {
+            // Stub: room users list.
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -3792,22 +3774,24 @@ scalar Long
         }
         ("GET", "/api/server") => {
             let session = state.session.read().await;
+            let is_connected = session.state == "connected";
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
                 body: format!(
                     r#"{{"address":"{}","port":2242,"connected":{}}}"#,
                     "server.slsknet.org",
-                    session.is_connected()
+                    is_connected
                 ),
             })
         }
         ("GET", "/api/session/enabled") => {
             let session = state.session.read().await;
+            let is_connected = session.state == "connected";
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: format!(r#"{{"enabled":{}}}"#, session.is_connected()),
+                body: format!(r#"{{"enabled":{}}}"#, is_connected),
             })
         }
         // WEBUI PARITY: Options/Config read-write endpoints
@@ -6002,11 +5986,24 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     let response =
         route_http_request_with_headers(method, path, authorization, body, &state, headers).await?;
 
+    // Add CSRF cookie for HTML responses (GET /)
+    let csrf_cookie = if path == "/" && method == "GET" {
+        let port = std::env::var("SLSKR_HTTP_BIND")
+            .ok()
+            .and_then(|b| b.split(':').last().map(String::from))
+            .unwrap_or_else(|| "5030".to_string());
+        format!("set-cookie: XSRF-TOKEN-{}=slskr-csrf-token; Path=/; HttpOnly\r\n", port)
+    } else {
+        String::new()
+    };
+
     let response_text = format!(
-        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}
+\r\n{}",
         response.status,
         response.content_type,
         response.body.len(),
+        csrf_cookie,
         response.body
     );
     

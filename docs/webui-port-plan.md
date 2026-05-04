@@ -1,6 +1,65 @@
 # slskdN WebUI → slskR Port Plan
 
-Status: design / assessment. No code changes yet.
+Status: **Phase 1 complete** — webui copied, rebranded, stub routes implemented, tooling in place. Dev-mode testing ready.
+
+## Implementation Status
+
+### ✓ Phase 1 completed (this session)
+
+- [x] Copied webui from `../slskdn/src/web/` into `web/`
+- [x] Rebranded slskdN refs → slskR in webui (module names, releases URL, theme names)
+- [x] Added stub route handlers for `/api/rooms/joined/*`, `/api/application`, `/api/server`, `/api/session/enabled`, `/api/options*`
+- [x] Added `/hub/*` stub endpoints (return 501 with note about SignalR not yet implemented)
+- [x] Created `build.rs` to track webui changes and optionally build on `SLSKR_BUILD_WEB` env
+- [x] Added CSRF cookie emission (`XSRF-TOKEN-<port>`) on GET `/` for webui auth
+- [x] Created `scripts/diff-webui-endpoints.sh` to measure endpoint coverage vs. webui needs
+- [x] Snapshotted `docs/webui-endpoints.txt` (291 canonical routes) for ongoing parity checks
+
+### 🔲 Phase 2 (next: dev testing)
+
+- [ ] Test webui dev server against running `slskr serve` (needs npm install + vite dev)
+- [ ] Collect missing endpoint errors from browser network panel
+- [ ] Prioritize implementation by frequency-of-use and feature dependency
+- [ ] Implement core features in dependency order: Wishlist, Collections, Contacts, Share-Grants, Destinations
+
+---
+
+## Quick Start: Testing the Webui Against slskR
+
+### Build slskR and start the daemon
+
+```bash
+cd /path/to/slskR
+cargo run -p slskr -- serve
+# Listens on http://127.0.0.1:5030 by default
+```
+
+### Build the webui and run in dev mode
+
+```bash
+cd /path/to/slskR/web
+npm install
+npm run dev
+# Vite dev server listens on http://localhost:5173
+# Auto-proxies API calls to http://localhost:5030 (see vite.config.js)
+```
+
+### Open browser and check network tab
+
+1. Navigate to `http://localhost:5173`
+2. Open DevTools → Network tab
+3. Interact with the UI
+4. Look for 4xx/5xx responses to identify missing endpoints
+
+### Measure endpoint coverage
+
+```bash
+./scripts/diff-webui-endpoints.sh --verbose
+# Shows which of the 291 canonical webui routes are implemented
+# Outputs coverage percentage and lists of missing endpoints
+```
+
+---
 
 This document assesses the slskdN (C#/.NET) repo at `../slskdn` and its React webui at
 `../slskdn/src/web`, and proposes a concrete plan for porting the webui onto the
