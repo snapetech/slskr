@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 /// Webhook event types
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -160,9 +162,10 @@ pub struct WebhookSignature {
 impl WebhookSignature {
     /// Create signature for payload using secret
     pub fn create(payload: &[u8], secret: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        // Simplified signature: concatenate secret and payload hash
-        let combined = format!("{}{:?}", secret, payload);
-        let signature = format!("{:x}", combined.len()); // Placeholder
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
+        mac.update(payload);
+        let signature = hex::encode(mac.finalize().into_bytes());
 
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -181,8 +184,10 @@ impl WebhookSignature {
         payload: &[u8],
         secret: &str,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let combined = format!("{}{:?}", secret, payload);
-        let expected = format!("{:x}", combined.len());
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
+        mac.update(payload);
+        let expected = hex::encode(mac.finalize().into_bytes());
 
         Ok(constant_time_compare(
             self.signature.as_bytes(),
@@ -219,6 +224,7 @@ impl WebhookSignature {
 }
 
 /// Webhook manager
+#[derive(Debug, Clone)]
 pub struct WebhookManager {
     webhooks: HashMap<String, Webhook>,
 }
@@ -430,29 +436,55 @@ impl WebhookDispatcher {
         for webhook in webhooks {
             // Spawn async task for each webhook delivery (no blocking)
             let webhook_url = webhook.url.clone();
-            let _webhook_secret = webhook.secret.clone();
+            let webhook_secret = webhook.secret.clone();
+            let webhook_timeout = webhook.timeout_seconds;
             let payload_clone = payload_json.clone();
             
             tokio::spawn(async move {
-                Self::send_webhook(&webhook_url, &payload_clone).await
+                let _ = Self::send_webhook(
+                    &webhook_url,
+                    &webhook_secret,
+                    &payload_clone,
+                    webhook_timeout,
+                ).await;
             });
         }
     }
     
-    /// Send webhook to URL
-    async fn send_webhook(url: &str, payload: &str) {
-        // Log webhook attempt
-        // In production, this would be:
-        // let client = reqwest::Client::new();
-        // let sig = WebhookSignature::create(payload.as_bytes(), secret)?;
-        // client.post(url)
-        //     .header("X-Webhook-Signature", sig.as_header())
-        //     .body(payload.to_string())
-        //     .timeout(Duration::from_secs(30))
-        //     .send()
-        //     .await
+    /// Send webhook to URL with HMAC-SHA256 signature
+    pub async fn send_webhook(
+        url: &str,
+        secret: &str,
+        payload: &str,
+        timeout_secs: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let payload_bytes = payload.as_bytes();
         
-        eprintln!("[WEBHOOK] Dispatched to: {} (payload: {} bytes)", url, payload.len());
+        // Create HMAC signature
+        let sig = WebhookSignature::create(payload_bytes, secret)?;
+        
+        // Create HTTP client with timeout
+        let client = reqwest::Client::new();
+        
+        let response = client
+            .post(url)
+            .header("X-Webhook-Signature", sig.as_header())
+            .header("X-Webhook-Event", "webhook")
+            .header("Content-Type", "application/json")
+            .body(payload.to_string())
+            .timeout(std::time::Duration::from_secs(timeout_secs as u64))
+            .send()
+            .await?;
+        
+        // Log successful delivery
+        eprintln!(
+            "[WEBHOOK] Delivered to: {} (status: {}, payload: {} bytes)",
+            url,
+            response.status(),
+            payload.len()
+        );
+        
+        Ok(())
     }
     
     /// Create test dispatch payload

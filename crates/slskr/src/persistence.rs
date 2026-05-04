@@ -70,6 +70,37 @@ pub struct RoomRecord {
     pub last_activity: i64,
 }
 
+/// Webhook configuration record for persistence
+#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WebhookRecord {
+    pub id: String,
+    pub url: String,
+    pub events: String,  // JSON-encoded array of event types
+    pub secret: String,
+    pub active: bool,
+    pub created_at: i64,
+    pub last_triggered: Option<i64>,
+    pub retry_count: i32,
+    pub max_retries: i32,
+    pub timeout_seconds: i32,
+}
+
+/// Webhook delivery log record for persistence
+#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WebhookLogRecord {
+    pub id: String,
+    pub webhook_id: String,
+    pub event: String,
+    pub correlation_id: String,
+    pub status: String,  // success, failed, timeout, etc.
+    pub request_body: String,  // JSON payload sent
+    pub response_status: Option<i32>,
+    pub response_body: Option<String>,
+    pub error_message: Option<String>,
+    pub attempt: i32,
+    pub timestamp: i64,
+}
+
 /// SQLite-backed database manager
 #[derive(Clone)]
 pub struct DatabaseManager {
@@ -195,6 +226,48 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
 
+        // Create webhooks table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                events TEXT NOT NULL,
+                secret TEXT NOT NULL,
+                active INTEGER DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                last_triggered INTEGER,
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 3,
+                timeout_seconds INTEGER DEFAULT 30
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create webhook logs table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS webhook_logs (
+                id TEXT PRIMARY KEY,
+                webhook_id TEXT NOT NULL,
+                event TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                request_body TEXT NOT NULL,
+                response_status INTEGER,
+                response_body TEXT,
+                error_message TEXT,
+                attempt INTEGER DEFAULT 1,
+                timestamp INTEGER NOT NULL,
+                FOREIGN KEY (webhook_id) REFERENCES webhooks(id)
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Create indices for common queries
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_searches_created ON searches(created_at DESC)")
             .execute(&self.pool)
@@ -209,6 +282,18 @@ impl DatabaseManager {
             .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_webhooks_active ON webhooks(active)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook ON webhook_logs(webhook_id)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_webhook_logs_timestamp ON webhook_logs(timestamp DESC)")
             .execute(&self.pool)
             .await?;
 
@@ -561,6 +646,169 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    // ========================================================================
+    // Webhook Operations
+    // ========================================================================
+
+    /// Insert or update webhook record
+    pub async fn insert_webhook(&self, record: &WebhookRecord) -> Result<(), Box<dyn std::error::Error>> {
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO webhooks (id, url, events, secret, active, created_at, last_triggered, retry_count, max_retries, timeout_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#
+        )
+        .bind(&record.id)
+        .bind(&record.url)
+        .bind(&record.events)
+        .bind(&record.secret)
+        .bind(record.active as i32)
+        .bind(record.created_at)
+        .bind(record.last_triggered)
+        .bind(record.retry_count as i32)
+        .bind(record.max_retries as i32)
+        .bind(record.timeout_seconds as i32)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Get webhook record by ID
+    pub async fn get_webhook(&self, id: &str) -> Result<Option<WebhookRecord>, Box<dyn std::error::Error>> {
+        let record = sqlx::query_as::<_, WebhookRecord>(
+            r#"SELECT id, url, events, secret, active, created_at, last_triggered, retry_count, max_retries, timeout_seconds FROM webhooks WHERE id = ?"#
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(record)
+    }
+
+    /// List all webhooks
+    pub async fn list_webhooks(&self) -> Result<Vec<WebhookRecord>, Box<dyn std::error::Error>> {
+        let records = sqlx::query_as::<_, WebhookRecord>(
+            r#"SELECT id, url, events, secret, active, created_at, last_triggered, retry_count, max_retries, timeout_seconds FROM webhooks ORDER BY created_at DESC"#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// List active webhooks
+    pub async fn list_active_webhooks(&self) -> Result<Vec<WebhookRecord>, Box<dyn std::error::Error>> {
+        let records = sqlx::query_as::<_, WebhookRecord>(
+            r#"SELECT id, url, events, secret, active, created_at, last_triggered, retry_count, max_retries, timeout_seconds FROM webhooks WHERE active = 1 ORDER BY created_at DESC"#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// Delete webhook
+    pub async fn delete_webhook(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        sqlx::query("DELETE FROM webhooks WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Update webhook active status
+    pub async fn update_webhook_active(&self, id: &str, active: bool) -> Result<(), Box<dyn std::error::Error>> {
+        sqlx::query("UPDATE webhooks SET active = ? WHERE id = ?")
+            .bind(active as i32)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Insert webhook log record
+    pub async fn insert_webhook_log(&self, record: &WebhookLogRecord) -> Result<(), Box<dyn std::error::Error>> {
+        sqlx::query(
+            r#"
+            INSERT INTO webhook_logs (id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#
+        )
+        .bind(&record.id)
+        .bind(&record.webhook_id)
+        .bind(&record.event)
+        .bind(&record.correlation_id)
+        .bind(&record.status)
+        .bind(&record.request_body)
+        .bind(record.response_status)
+        .bind(&record.response_body)
+        .bind(&record.error_message)
+        .bind(record.attempt as i32)
+        .bind(record.timestamp)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Get webhook logs for a specific webhook
+    pub async fn get_webhook_logs(
+        &self,
+        webhook_id: &str,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<WebhookLogRecord>, Box<dyn std::error::Error>> {
+        let records = sqlx::query_as::<_, WebhookLogRecord>(
+            r#"SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE webhook_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?"#
+        )
+        .bind(webhook_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// Get recent webhook logs by event
+    pub async fn get_logs_by_event(
+        &self,
+        event: &str,
+        limit: i32,
+    ) -> Result<Vec<WebhookLogRecord>, Box<dyn std::error::Error>> {
+        let records = sqlx::query_as::<_, WebhookLogRecord>(
+            r#"SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE event = ? ORDER BY timestamp DESC LIMIT ?"#
+        )
+        .bind(event)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// Get failed webhook logs for retry
+    pub async fn get_failed_webhook_logs(
+        &self,
+        limit: i32,
+    ) -> Result<Vec<WebhookLogRecord>, Box<dyn std::error::Error>> {
+        let records = sqlx::query_as::<_, WebhookLogRecord>(
+            r#"SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE status IN ('failed', 'timeout') AND attempt < (SELECT max_retries FROM webhooks WHERE webhooks.id = webhook_logs.webhook_id) ORDER BY timestamp ASC LIMIT ?"#
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// Delete old webhook logs
+    pub async fn delete_old_webhook_logs(&self, days: i32) -> Result<u32, Box<dyn std::error::Error>> {
+        let cutoff = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_secs() as i64 - (days as i64 * 86400);
+
+        let result = sqlx::query("DELETE FROM webhook_logs WHERE timestamp < ?")
+            .bind(cutoff)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() as u32)
     }
 }
 

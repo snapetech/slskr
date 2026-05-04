@@ -2382,6 +2382,314 @@ impl RoomStore {
     }
 }
 
+// Collection Models
+#[derive(Clone, Debug)]
+struct CollectionItem {
+    id: String,
+    content_id: String,
+    artist: String,
+    title: String,
+    kind: String,
+    added_at: u64,
+}
+
+impl CollectionItem {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"content_id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.content_id),
+            json_escape(&self.artist),
+            json_escape(&self.title),
+            json_escape(&self.kind),
+            self.added_at
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CollectionRecord {
+    id: String,
+    name: String,
+    description: String,
+    items: Vec<CollectionItem>,
+    created_at: u64,
+    updated_at: u64,
+}
+
+impl CollectionRecord {
+    fn json(&self) -> String {
+        let items = self
+            .items
+            .iter()
+            .map(CollectionItem::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"description\":\"{}\",\"items\":[{}],\"item_count\":{},\"created_at\":{},\"updated_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.name),
+            json_escape(&self.description),
+            items,
+            self.items.len(),
+            self.created_at,
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct CollectionStore {
+    records: Vec<CollectionRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl CollectionStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn create(&mut self, name: String, description: String) -> CollectionRecord {
+        let now = unix_timestamp();
+        let id = format!("col-{}", self.next_id);
+        self.next_id += 1;
+        let record = CollectionRecord {
+            id,
+            name,
+            description,
+            items: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn get(&self, id: &str) -> Option<CollectionRecord> {
+        self.records.iter().find(|r| r.id == id).cloned()
+    }
+
+    fn update(&mut self, id: &str, name: String, description: String) -> Option<CollectionRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == id)?;
+        record.name = name;
+        record.description = description;
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn delete(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.records.iter().position(|r| r.id == id) {
+            self.records.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn add_item(&mut self, collection_id: &str, item: CollectionItem) -> Option<CollectionRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == collection_id)?;
+        record.items.push(item);
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn remove_item(&mut self, collection_id: &str, item_id: &str) -> Option<CollectionRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == collection_id)?;
+        if let Some(pos) = record.items.iter().position(|i| i.id == item_id) {
+            record.items.remove(pos);
+            record.updated_at = now;
+            self.updated_at = now;
+            Some(record.clone())
+        } else {
+            None
+        }
+    }
+
+    fn json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .records
+            .iter()
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+            })
+            .collect::<Vec<_>>();
+        let filtered_count = records.len();
+        let records = records
+            .into_iter()
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(CollectionRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            filtered_count,
+            filter.offset,
+            json_usize_option(filter.limit),
+            self.updated_at
+        )
+    }
+}
+
+// Wishlist Models
+#[derive(Clone, Debug)]
+struct WishlistItem {
+    id: String,
+    artist: String,
+    title: String,
+    kind: String,
+    added_at: u64,
+}
+
+impl WishlistItem {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.artist),
+            json_escape(&self.title),
+            json_escape(&self.kind),
+            self.added_at
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct WishlistRecord {
+    id: String,
+    items: Vec<WishlistItem>,
+    created_at: u64,
+    updated_at: u64,
+}
+
+impl WishlistRecord {
+    fn json(&self) -> String {
+        let items = self
+            .items
+            .iter()
+            .map(WishlistItem::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"id\":\"{}\",\"items\":[{}],\"item_count\":{},\"created_at\":{},\"updated_at\":{}}}",
+            json_escape(&self.id),
+            items,
+            self.items.len(),
+            self.created_at,
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct WishlistStore {
+    records: Vec<WishlistRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl WishlistStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn create() -> WishlistRecord {
+        let now = unix_timestamp();
+        WishlistRecord {
+            id: "default".to_string(),
+            items: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn get_or_create(&mut self) -> WishlistRecord {
+        let now = unix_timestamp();
+        if let Some(record) = self.records.iter_mut().find(|r| r.id == "default") {
+            record.clone()
+        } else {
+            let record = WishlistRecord {
+                id: "default".to_string(),
+                items: Vec::new(),
+                created_at: now,
+                updated_at: now,
+            };
+            self.records.push(record.clone());
+            self.updated_at = now;
+            record
+        }
+    }
+
+    fn add_item(&mut self, item: WishlistItem) -> Option<WishlistRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == "default")?;
+        record.items.push(item);
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn remove_item(&mut self, item_id: &str) -> Option<WishlistRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == "default")?;
+        if let Some(pos) = record.items.iter().position(|i| i.id == item_id) {
+            record.items.remove(pos);
+            record.updated_at = now;
+            self.updated_at = now;
+            Some(record.clone())
+        } else {
+            None
+        }
+    }
+
+    fn json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .records
+            .iter()
+            .collect::<Vec<_>>();
+        let filtered_count = records.len();
+        let records = records
+            .into_iter()
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(WishlistRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            filtered_count,
+            filter.offset,
+            json_usize_option(filter.limit),
+            self.updated_at
+        )
+    }
+}
+
 #[derive(Debug)]
 struct AppState {
     config: AppConfig,
@@ -2395,6 +2703,9 @@ struct AppState {
     rooms: RwLock<RoomStore>,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
+    webhooks: RwLock<webhooks::WebhookManager>,
+    collections: RwLock<CollectionStore>,
+    wishlist: RwLock<WishlistStore>,
     db: Option<crate::persistence::DatabaseManager>,
     session_commands: mpsc::Sender<SessionCommand>,
 }
@@ -2677,8 +2988,181 @@ async fn route_http_request_with_headers(
                 content_type: "application/json",
                 body: events.json(route.query),
             })
-        }
-        ("GET", "/api/shares") => {
+         }
+         
+         // WEBHOOK ENDPOINTS
+         ("GET", "/api/webhooks") => {
+             let webhooks = state.webhooks.read().await;
+             let webhook_list: Vec<serde_json::Value> = webhooks.get_all().iter().map(|w| {
+                 serde_json::json!({
+                     "id": w.id,
+                     "url": w.url,
+                     "events": w.events.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+                     "active": w.active,
+                     "created_at": w.created_at,
+                     "last_triggered": w.last_triggered,
+                     "retry_count": w.retry_count,
+                     "max_retries": w.max_retries,
+                     "timeout_seconds": w.timeout_seconds,
+                 })
+             }).collect();
+             drop(webhooks);
+             Ok(HttpResponse {
+                 status: "200 OK",
+                 content_type: "application/json",
+                 body: serde_json::to_string(&serde_json::json!({"webhooks": webhook_list})).unwrap_or_else(|_| "{}".to_string()),
+             })
+         }
+         
+         ("POST", "/api/webhooks") => {
+             let url = match extract_json_string_field(body, "url") {
+                 Some(u) => u,
+                 None => return Ok(routing::bad_request_response("url is required")),
+             };
+             
+             let events_str = extract_json_string_field(body, "events");
+             let events = if let Some(ref e) = events_str {
+                 e.split(',').filter_map(|ev| {
+                     match ev.trim() {
+                         "search.created" => Some(webhooks::WebhookEvent::SearchCreated),
+                         "search.completed" => Some(webhooks::WebhookEvent::SearchCompleted),
+                         "transfer.started" => Some(webhooks::WebhookEvent::TransferStarted),
+                         "transfer.completed" => Some(webhooks::WebhookEvent::TransferCompleted),
+                         "transfer.failed" => Some(webhooks::WebhookEvent::TransferFailed),
+                         "message.received" => Some(webhooks::WebhookEvent::MessageReceived),
+                         "message.sent" => Some(webhooks::WebhookEvent::MessageSent),
+                         "user.connected" => Some(webhooks::WebhookEvent::UserConnected),
+                         "user.disconnected" => Some(webhooks::WebhookEvent::UserDisconnected),
+                         "room.joined" => Some(webhooks::WebhookEvent::RoomJoined),
+                         "room.left" => Some(webhooks::WebhookEvent::RoomLeft),
+                         "apikey.created" => Some(webhooks::WebhookEvent::ApiKeyCreated),
+                         "apikey.revoked" => Some(webhooks::WebhookEvent::ApiKeyRevoked),
+                         "config.changed" => Some(webhooks::WebhookEvent::ConfigChanged),
+                         _ => None,
+                     }
+                 }).collect()
+             } else {
+                 vec![webhooks::WebhookEvent::SearchCreated]
+             };
+             
+             if events.is_empty() {
+                 return Ok(routing::bad_request_response("no valid events specified"));
+             }
+             
+             let secret = extract_json_string_field(body, "secret").unwrap_or_else(|| webhooks::Webhook::generate_secret());
+             let webhook = webhooks::Webhook::new(url, events, secret.clone());
+             let webhook_id = webhook.id.clone();
+             
+             let mut webhooks = state.webhooks.write().await;
+             webhooks.register(webhook);
+             drop(webhooks);
+             
+             let response = serde_json::json!({
+                 "id": webhook_id,
+                 "secret": secret,
+                 "status": "created"
+             });
+             
+             Ok(routing::created_response(serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())))
+         }
+         
+         ("DELETE", path) if path.starts_with("/api/webhooks/") => {
+             let webhook_id = path.rsplitn(2, '/').next().unwrap_or("");
+             let mut webhooks = state.webhooks.write().await;
+             if let Some(_) = webhooks.unregister(webhook_id) {
+                 drop(webhooks);
+                 Ok(routing::ok_response(serde_json::json!({"status": "deleted"}).to_string()))
+             } else {
+                 drop(webhooks);
+                 Ok(routing::not_found_response())
+             }
+         }
+         
+         ("PATCH", path) if path.starts_with("/api/webhooks/") => {
+             let webhook_id = path.rsplitn(2, '/').next().unwrap_or("");
+             let active = extract_json_bool_field(body, "active");
+             
+             let mut webhooks = state.webhooks.write().await;
+             if let Some(webhook) = webhooks.get_mut(webhook_id) {
+                 if let Some(a) = active {
+                     webhook.active = a;
+                 }
+                 let updated = serde_json::json!({
+                     "id": webhook.id,
+                     "active": webhook.active,
+                 });
+                 drop(webhooks);
+                 Ok(routing::ok_response(serde_json::to_string(&updated).unwrap_or_else(|_| "{}".to_string())))
+             } else {
+                 drop(webhooks);
+                 Ok(routing::not_found_response())
+             }
+         }
+         
+         ("POST", path) if path.starts_with("/api/webhooks/") && path.ends_with("/test") => {
+             let webhook_id = path.rsplitn(4, '/').nth(2).unwrap_or("");
+             let webhooks = state.webhooks.read().await;
+             if let Some(webhook) = webhooks.get(webhook_id) {
+                 let payload = webhooks::WebhookDispatcher::test_payload(
+                     webhooks::WebhookEvent::SearchCreated,
+                     "test webhook delivery"
+                 );
+                 let webhook_clone = webhook.clone();
+                 drop(webhooks);
+                 
+                 tokio::spawn(async move {
+                     let _ = webhooks::WebhookDispatcher::send_webhook(
+                         &webhook_clone.url,
+                         &webhook_clone.secret,
+                         &payload.to_string(),
+                         webhook_clone.timeout_seconds,
+                     ).await;
+                 });
+                 
+                 Ok(routing::ok_response(serde_json::json!({"status": "test_sent"}).to_string()))
+             } else {
+                 drop(webhooks);
+                 Ok(routing::not_found_response())
+             }
+         }
+         
+         ("GET", path) if path.starts_with("/api/webhooks/") && path.ends_with("/logs") => {
+             let webhook_id = path.rsplitn(4, '/').nth(2).unwrap_or("");
+             let limit = if let Some(q) = route.query {
+                 query_params(q).iter().find(|(k, _)| k == "limit").and_then(|(_, v)| v.parse::<i32>().ok()).unwrap_or(50)
+             } else {
+                 50
+             };
+             
+             if let Some(db) = &state.db {
+                 match db.get_webhook_logs(webhook_id, limit, 0).await {
+                     Ok(logs) => {
+                         let log_json = logs.iter().map(|l| {
+                             serde_json::json!({
+                                 "id": l.id,
+                                 "event": l.event,
+                                 "correlation_id": l.correlation_id,
+                                 "status": l.status,
+                                 "response_status": l.response_status,
+                                 "error_message": l.error_message,
+                                 "timestamp": l.timestamp,
+                             })
+                         }).collect::<Vec<_>>();
+                         
+                         Ok(HttpResponse {
+                             status: "200 OK",
+                             content_type: "application/json",
+                             body: serde_json::to_string(&serde_json::json!({"logs": log_json})).unwrap_or_else(|_| "{}".to_string()),
+                         })
+                     }
+                     Err(_) => Ok(routing::bad_request_response("database error")),
+                 }
+             } else {
+                 Ok(routing::bad_request_response("database not configured"))
+             }
+         }
+         
+         ("GET", "/api/shares") => {
             let shares = state.shares.read().await;
             Ok(HttpResponse {
                 status: "200 OK",
@@ -2907,13 +3391,14 @@ async fn route_http_request_with_headers(
             let matching_results = search_shares(&shares.entries, &query);
             drop(shares);
             
-            let mut searches = state.searches.write().await;
-            let target_name = if target_str == "user" { username_opt.clone() } else if target_str == "room" { room_opt.clone() } else { None };
-            
-             let static_target: &'static str = Box::leak(target_str.clone().into_boxed_str());
-             let record = searches.create(query.clone(), static_target, target_name, matching_results, 300);
-             let token = record.token;
-             drop(searches);
+             let mut searches = state.searches.write().await;
+             let target_name = if target_str == "user" { username_opt.clone() } else if target_str == "room" { room_opt.clone() } else { None };
+             let result_count = matching_results.len();
+             
+              let static_target: &'static str = Box::leak(target_str.clone().into_boxed_str());
+              let record = searches.create(query.clone(), static_target, target_name.clone(), matching_results, 300);
+              let token = record.token;
+              drop(searches);
              
              // Persist search to database
              let _db_result = persistence::SearchRecord {
@@ -2932,16 +3417,37 @@ async fn route_http_request_with_headers(
              
              record_event(state, "search.started", format!("{}", token), None).await;
              
+             // Dispatch webhook for search.created event
+             let webhook_data = serde_json::json!({
+                 "token": token,
+                 "query": query,
+                 "target": target_str,
+                 "target_name": target_name,
+                 "result_count": result_count,
+             });
+             let correlation_id = format!("search_{}", token);
+             let webhooks = state.webhooks.read().await;
+             let webhooks_clone = webhooks.clone();
+             drop(webhooks);
+             tokio::spawn(async move {
+                 webhooks::WebhookDispatcher::dispatch(
+                     &webhooks_clone,
+                     correlation_id,
+                     webhooks::WebhookEvent::SearchCreated,
+                     webhook_data,
+                 ).await;
+             });
+             
              let dispatch_target = match target_str.as_str() {
                  "user" => SearchDispatchTarget::User(username_opt.unwrap()),
                  "room" => SearchDispatchTarget::Room(room_opt.unwrap()),
                 "wishlist" => SearchDispatchTarget::Wishlist,
                 _ => SearchDispatchTarget::Global,
-            };
-            
-            send_session_command(state, SessionCommand::Search { token, query, target: dispatch_target }).await.ok();
-            
-            Ok(routing::created_response(record.json()))
+             };
+             
+             send_session_command(state, SessionCommand::Search { token, query, target: dispatch_target }).await.ok();
+             
+             Ok(routing::created_response(record.json()))
         }
         
         ("POST", path) if search_token_path(route.normalized_path, "/complete").is_some() => {
@@ -2949,7 +3455,31 @@ async fn route_http_request_with_headers(
             let mut searches = state.searches.write().await;
             if let Some(record) = searches.complete(token) {
                 let body_json = record.json();
+                
+                // Dispatch webhook for search.completed event
+                let result_count = record.results.len();
+                let webhook_data = serde_json::json!({
+                    "token": token,
+                    "query": record.query,
+                    "result_count": result_count,
+                    "target": record.target,
+                });
+                let correlation_id = format!("search_{}", token);
+                
                 drop(searches);
+                
+                let webhooks = state.webhooks.read().await;
+                let webhooks_clone = webhooks.clone();
+                drop(webhooks);
+                tokio::spawn(async move {
+                    webhooks::WebhookDispatcher::dispatch(
+                        &webhooks_clone,
+                        correlation_id,
+                        webhooks::WebhookEvent::SearchCompleted,
+                        webhook_data,
+                    ).await;
+                });
+                
                 Ok(routing::ok_response(body_json))
             } else {
                 drop(searches);
@@ -3150,62 +3680,119 @@ async fn route_http_request_with_headers(
                         drop(transfers);
                         Ok(routing::not_found_response())
                     }
-                } else if action == "complete" {
-                    let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
-                    let status_str = extract_json_string_field(body, "status").unwrap_or_else(|| "succeeded".to_string());
-                    if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
-                        entry.bytes_transferred = bytes_transferred;
-                        entry.status = status_str;
-                        entry.updated_at = unix_timestamp();
-                        let json_response = entry.json();
-                        drop(transfers);
-                        Ok(routing::ok_response(json_response))
-                    } else {
-                        drop(transfers);
-                        Ok(routing::not_found_response())
-                    }
-                } else {
-                    drop(transfers);
-                    Ok(routing::not_found_response())
-                }
+                 } else if action == "complete" {
+                     let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
+                     let status_str = extract_json_string_field(body, "status").unwrap_or_else(|| "succeeded".to_string());
+                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                         entry.bytes_transferred = bytes_transferred;
+                         entry.status = status_str.clone();
+                         entry.updated_at = unix_timestamp();
+                         let json_response = entry.json();
+                         
+                         // Prepare webhook dispatch
+                         let webhook_event = if status_str == "succeeded" {
+                             webhooks::WebhookEvent::TransferCompleted
+                         } else if status_str == "failed" {
+                             webhooks::WebhookEvent::TransferFailed
+                         } else {
+                             webhooks::WebhookEvent::TransferCompleted
+                         };
+                         
+                         let webhook_data = serde_json::json!({
+                             "transfer_id": id,
+                             "filename": entry.filename.clone(),
+                             "peer_username": entry.peer_username.clone().unwrap_or_else(|| "unknown".to_string()),
+                             "direction": if entry.direction == 0 { "download" } else { "upload" },
+                             "size": entry.size.unwrap_or(0),
+                             "bytes_transferred": bytes_transferred,
+                             "status": status_str.clone(),
+                         });
+                         let correlation_id = format!("transfer_{}", id);
+                         
+                         drop(transfers);
+                         
+                         // Dispatch webhook
+                         let webhooks = state.webhooks.read().await;
+                         let webhooks_clone = webhooks.clone();
+                         drop(webhooks);
+                         tokio::spawn(async move {
+                             webhooks::WebhookDispatcher::dispatch(
+                                 &webhooks_clone,
+                                 correlation_id,
+                                 webhook_event,
+                                 webhook_data,
+                             ).await;
+                         });
+                         
+                         Ok(routing::ok_response(json_response))
+                     } else {
+                         drop(transfers);
+                         Ok(routing::not_found_response())
+                     }
+                 } else {
+                     drop(transfers);
+                     Ok(routing::not_found_response())
+                 }
             } else {
                 Ok(routing::not_found_response())
             }
         }
         
         // MESSAGE ENDPOINTS
-        ("POST", "/api/messages") => {
-            let username = match extract_json_string_field(body, "username") {
-                Some(u) => u,
-                None => return Ok(routing::bad_request_response("username is required")),
-            };
-            
-            let message_body = match extract_json_string_field(body, "body") {
-                Some(b) => b,
-                None => return Ok(routing::bad_request_response("body is required")),
-            };
-            
-             let mut messages = state.messages.write().await;
-             let record = messages.add(username.clone(), Box::leak("outbound".to_string().into_boxed_str()), message_body.clone());
-             drop(messages);
-             
-             // Persist message to database
-             let _msg_persist = persistence::MessageRecord {
-                 id: format!("{}", record.id),
-                 username: username.clone(),
-                 direction: "outbound".to_string(),
-                 content: message_body.clone(),
-                 read: false,
-                 created_at: std::time::SystemTime::now()
-                     .duration_since(std::time::UNIX_EPOCH)
-                     .unwrap()
-                     .as_secs() as i64,
+         ("POST", "/api/messages") => {
+             let username = match extract_json_string_field(body, "username") {
+                 Some(u) => u,
+                 None => return Ok(routing::bad_request_response("username is required")),
              };
              
-             send_session_command(state, SessionCommand::MessageUser { username, body: message_body }).await.ok();
+             let message_body = match extract_json_string_field(body, "body") {
+                 Some(b) => b,
+                 None => return Ok(routing::bad_request_response("body is required")),
+             };
              
-             Ok(routing::created_response(record.json()))
-        }
+              let mut messages = state.messages.write().await;
+              let record = messages.add(username.clone(), Box::leak("outbound".to_string().into_boxed_str()), message_body.clone());
+              let message_id = record.id;
+              drop(messages);
+              
+              // Persist message to database
+              let _msg_persist = persistence::MessageRecord {
+                  id: format!("{}", record.id),
+                  username: username.clone(),
+                  direction: "outbound".to_string(),
+                  content: message_body.clone(),
+                  read: false,
+                  created_at: std::time::SystemTime::now()
+                      .duration_since(std::time::UNIX_EPOCH)
+                      .unwrap()
+                      .as_secs() as i64,
+              };
+              
+              // Dispatch webhook for message.sent event
+              let webhook_data = serde_json::json!({
+                  "message_id": message_id,
+                  "username": username.clone(),
+                  "body": message_body.clone(),
+                  "direction": "outbound",
+              });
+              let correlation_id = format!("message_{}", message_id);
+              
+              let webhooks = state.webhooks.read().await;
+              let webhooks_clone = webhooks.clone();
+              drop(webhooks);
+              tokio::spawn(async move {
+                  webhooks::WebhookDispatcher::dispatch(
+                      &webhooks_clone,
+                      correlation_id,
+                      webhooks::WebhookEvent::MessageSent,
+                      webhook_data,
+                  ).await;
+              });
+              
+              send_session_command(state, SessionCommand::MessageUser { username, body: message_body }).await.ok();
+              
+              Ok(routing::created_response(record.json()))
+         }
         
         ("POST", "/api/messages/inbound") => {
             let username = match extract_json_string_field(body, "username") {
@@ -3995,6 +4582,226 @@ scalar Long
                 Ok(routing::conflict_response("database not initialized"))
             }
         }
+        
+        // COLLECTIONS ENDPOINTS
+        ("GET", "/api/collections") => {
+            let collections = state.collections.read().await;
+            let json = collections.json(route.query.as_deref());
+            drop(collections);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/collections") => {
+            let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
+            let description = extract_json_string_field(body, "description").unwrap_or_default();
+            let mut collections = state.collections.write().await;
+            let record = collections.create(name, description);
+            let json = record.json();
+            drop(collections);
+            Ok(routing::created_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/collections/") && !path.ends_with("/items") && path.matches('/').count() == 3 => {
+            let id = path.strip_prefix("/api/collections/").unwrap_or("");
+            if id.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let collections = state.collections.read().await;
+            if let Some(record) = collections.get(id) {
+                let json = record.json();
+                drop(collections);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(collections);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("PUT", path) if path.starts_with("/api/collections/") && !path.contains("/items") && path.matches('/').count() == 3 => {
+            let id = path.strip_prefix("/api/collections/").unwrap_or("");
+            if id.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
+            let description = extract_json_string_field(body, "description").unwrap_or_default();
+            let mut collections = state.collections.write().await;
+            if let Some(record) = collections.update(id, name, description) {
+                let json = record.json();
+                drop(collections);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(collections);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/collections/") && !path.contains("/items") && path.matches('/').count() == 3 => {
+            let id = path.strip_prefix("/api/collections/").unwrap_or("");
+            if id.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let mut collections = state.collections.write().await;
+            let deleted = collections.delete(id);
+            drop(collections);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        ("GET", path) if path.starts_with("/api/collections/") && path.ends_with("/items") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 5 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            if id.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let collections = state.collections.read().await;
+            if let Some(record) = collections.get(id) {
+                let items = record.items.iter()
+                    .map(|item| item.json())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let json = format!(
+                    "{{\"items\":[{}],\"count\":{},\"collection_id\":\"{}\"}}",
+                    items,
+                    record.items.len(),
+                    json_escape(id)
+                );
+                drop(collections);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(collections);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("POST", path) if path.starts_with("/api/collections/") && path.ends_with("/items") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 5 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            if id.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let content_id = extract_json_string_field(body, "content_id").unwrap_or_default();
+            let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+            let title = extract_json_string_field(body, "title").unwrap_or_default();
+            let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
+            
+            let mut collections = state.collections.write().await;
+            let item_id = format!("item-{}", unix_timestamp());
+            let item = CollectionItem {
+                id: item_id,
+                content_id,
+                artist,
+                title,
+                kind,
+                added_at: unix_timestamp(),
+            };
+            if let Some(_record) = collections.add_item(id, item.clone()) {
+                let json = item.json();
+                drop(collections);
+                Ok(routing::created_response(json))
+            } else {
+                drop(collections);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/collections/items/") => {
+            let item_id = path.strip_prefix("/api/collections/items/").unwrap_or("");
+            if item_id.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let mut collections = state.collections.write().await;
+            let mut found = false;
+            for record in &mut collections.records {
+                if let Some(pos) = record.items.iter().position(|i| i.id == item_id) {
+                    record.items.remove(pos);
+                    record.updated_at = unix_timestamp();
+                    found = true;
+                    break;
+                }
+            }
+            drop(collections);
+            if found {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        ("PUT", path) if path.starts_with("/api/collections/items/") => {
+            let item_id = path.strip_prefix("/api/collections/items/").unwrap_or("");
+            if item_id.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let artist = extract_json_string_field(body, "artist");
+            let title = extract_json_string_field(body, "title");
+            
+            let mut collections = state.collections.write().await;
+            let mut found = false;
+            for record in &mut collections.records {
+                if let Some(item) = record.items.iter_mut().find(|i| i.id == item_id) {
+                    if let Some(a) = artist {
+                        item.artist = a;
+                    }
+                    if let Some(t) = title {
+                        item.title = t;
+                    }
+                    record.updated_at = unix_timestamp();
+                    found = true;
+                    break;
+                }
+            }
+            drop(collections);
+            if found {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // WISHLIST ENDPOINTS
+        ("GET", "/api/wishlist") => {
+            let mut wishlist = state.wishlist.write().await;
+            let record = wishlist.get_or_create();
+            let json = record.json();
+            drop(wishlist);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/wishlist") => {
+            let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+            let title = extract_json_string_field(body, "title").unwrap_or_default();
+            let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
+            
+            let mut wishlist = state.wishlist.write().await;
+            let item_id = format!("wish-{}", unix_timestamp());
+            let item = WishlistItem {
+                id: item_id,
+                artist,
+                title,
+                kind,
+                added_at: unix_timestamp(),
+            };
+            if let Some(_record) = wishlist.add_item(item.clone()) {
+                let json = item.json();
+                drop(wishlist);
+                Ok(routing::created_response(json))
+            } else {
+                drop(wishlist);
+                Ok(routing::conflict_response("failed to add wishlist item"))
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/wishlist/") && path.len() > 14 => {
+            let item_id = &path[14..];
+            let mut wishlist = state.wishlist.write().await;
+            if wishlist.remove_item(item_id).is_some() {
+                drop(wishlist);
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                drop(wishlist);
+                Ok(routing::not_found_response())
+            }
+        }
+        
         // WEBUI PARITY: SignalR hub stub endpoints
         // These return 501 Not Implemented; proper SignalR WebSocket hubs are future work
         ("GET", path) if path.starts_with("/hub/") => {
@@ -4175,21 +4982,24 @@ async fn serve(once: bool) -> Result<(), String> {
         .await
         .ok();
     
-    let state = Arc::new(AppState {
-        session: RwLock::new(SessionSnapshot::disconnected(&config)),
-        listeners: RwLock::new(ListenerSnapshot::new(&config)),
-        shares: RwLock::new(share_index),
-        searches: RwLock::new(SearchStore::new()),
-        users: RwLock::new(UserStore::new()),
-        browse: RwLock::new(BrowseStore::new()),
-        messages: RwLock::new(MessageStore::new()),
-        rooms: RwLock::new(RoomStore::new()),
-        transfers: RwLock::new(TransferQueue::new(&config)),
-        events: RwLock::new(EventStore::new(EVENT_HISTORY_LIMIT)),
-        db,
-        config,
-        session_commands,
-    });
+      let state = Arc::new(AppState {
+          session: RwLock::new(SessionSnapshot::disconnected(&config)),
+          listeners: RwLock::new(ListenerSnapshot::new(&config)),
+          shares: RwLock::new(share_index),
+          searches: RwLock::new(SearchStore::new()),
+          users: RwLock::new(UserStore::new()),
+          browse: RwLock::new(BrowseStore::new()),
+          messages: RwLock::new(MessageStore::new()),
+          rooms: RwLock::new(RoomStore::new()),
+          transfers: RwLock::new(TransferQueue::new(&config)),
+          events: RwLock::new(EventStore::new(EVENT_HISTORY_LIMIT)),
+          webhooks: RwLock::new(webhooks::WebhookManager::new()),
+          collections: RwLock::new(CollectionStore::new()),
+          wishlist: RwLock::new(WishlistStore::new()),
+          db,
+          config,
+          session_commands,
+      });
     spawn_session_manager(Arc::clone(&state), session_receiver);
     spawn_configured_listeners(Arc::clone(&state));
 
@@ -7871,21 +8681,24 @@ mod tests {
             super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("test config");
         let share_index = super::build_share_index(&config);
         let (sender, receiver) = mpsc::channel(8);
-        let state = Arc::new(super::AppState {
-            session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
-            listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
-            shares: RwLock::new(share_index),
-            searches: RwLock::new(super::SearchStore::new()),
-            users: RwLock::new(super::UserStore::new()),
-            browse: RwLock::new(super::BrowseStore::new()),
-            messages: RwLock::new(super::MessageStore::new()),
-            rooms: RwLock::new(super::RoomStore::new()),
-            transfers: RwLock::new(super::TransferQueue::new(&config)),
-            events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
-            db: None,
-            config,
-            session_commands: sender,
-        });
+         let state = Arc::new(super::AppState {
+              session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
+              listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
+              shares: RwLock::new(share_index),
+              searches: RwLock::new(super::SearchStore::new()),
+              users: RwLock::new(super::UserStore::new()),
+              browse: RwLock::new(super::BrowseStore::new()),
+              messages: RwLock::new(super::MessageStore::new()),
+              rooms: RwLock::new(super::RoomStore::new()),
+              transfers: RwLock::new(super::TransferQueue::new(&config)),
+              events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
+              webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
+              collections: RwLock::new(super::CollectionStore::new()),
+              wishlist: RwLock::new(super::WishlistStore::new()),
+              db: None,
+              config,
+              session_commands: sender,
+         });
         (state, receiver)
     }
 
@@ -10390,21 +11203,24 @@ mod tests {
         let config =
             super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("auth config");
         let (sender, _receiver) = mpsc::channel(8);
-        let state = super::AppState {
-            session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
-            listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
-            shares: RwLock::new(super::build_share_index(&config)),
-            searches: RwLock::new(super::SearchStore::new()),
-            users: RwLock::new(super::UserStore::new()),
-            browse: RwLock::new(super::BrowseStore::new()),
-            messages: RwLock::new(super::MessageStore::new()),
-            rooms: RwLock::new(super::RoomStore::new()),
-            transfers: RwLock::new(super::TransferQueue::new(&config)),
-            events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
-            db: None,
-            config,
-            session_commands: sender,
-        };
+         let state = super::AppState {
+              session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
+              listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
+              shares: RwLock::new(super::build_share_index(&config)),
+              searches: RwLock::new(super::SearchStore::new()),
+              users: RwLock::new(super::UserStore::new()),
+              browse: RwLock::new(super::BrowseStore::new()),
+              messages: RwLock::new(super::MessageStore::new()),
+              rooms: RwLock::new(super::RoomStore::new()),
+              transfers: RwLock::new(super::TransferQueue::new(&config)),
+              events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
+              webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
+              collections: RwLock::new(super::CollectionStore::new()),
+              wishlist: RwLock::new(super::WishlistStore::new()),
+              db: None,
+              config,
+              session_commands: sender,
+         };
 
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
             .await
