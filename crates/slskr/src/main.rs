@@ -23,9 +23,6 @@ mod versioning;  // Phase 12: API versioning and compatibility
 mod response_cache;  // Phase 12: Response caching with TTL management
 mod observability;  // Phase 12: Advanced monitoring and observability
 mod rate_limiter;  // Phase 12: Advanced rate limiting strategies
-mod sharding;    // 500K req/sec: Database sharding by user_id
-mod grpc_api;    // 500K req/sec: gRPC protocol (70% payload reduction)
-mod cluster;     // 500K req/sec: Multi-instance clustering & load balancing
 mod websocket;
 mod tracing;
 mod webhooks;
@@ -14301,10 +14298,4 @@ mod tests {
     }
 }
 
-// 500K req/sec scaling features already declared at top
-// mod sharding;    // Database sharding by user_id
-// mod grpc_api;    // gRPC protocol (70% payload reduction)
-// mod cluster;     // Multi-instance clustering & load balancing
 
-mod http2_multiplexing;  // HTTP/2 stream multiplexing (100 streams per connection)
-mod request_pipelining;  // Request batching/pipelining for throughput
