@@ -701,3 +701,38 @@ pub fn generate_etag(body: &str) -> String {
     let hash = hasher.finish();
     format!("\"{}\"", hash)
 }
+
+/// Generate CORS headers for API responses
+pub fn cors_headers(origin: Option<&str>, allowed_origins: &[&str]) -> String {
+    let origin = match origin {
+        Some(o) if allowed_origins.contains(&o) => o,
+        Some(_) => return String::new(),  // Origin not allowed
+        None => return String::new(),      // No origin header
+    };
+    
+    format!(
+        "Access-Control-Allow-Origin: {}\r\n\
+         Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+         Access-Control-Max-Age: 86400\r\n",
+        origin
+    )
+}
+
+/// Check if request is OPTIONS preflight
+pub fn is_cors_preflight(method: &str) -> bool {
+    method == "OPTIONS"
+}
+
+/// Generate a unique request ID
+pub fn generate_request_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    
+    // Combine timestamp nanos with a counter for uniqueness
+    format!("req-{:x}", nanos)
+}

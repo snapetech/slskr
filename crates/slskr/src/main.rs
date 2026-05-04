@@ -9617,6 +9617,20 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
         timestamp: logging::format_timestamp(),
     };
     
+    // Handle CORS preflight
+    if is_cors_preflight(method) {
+        let cors_headers_str = cors_headers(headers.origin, &["*"]);
+        let response_text = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 0\r\nconnection: close\r\n{}\r\n",
+            cors_headers_str
+        );
+        stream
+            .write_all(response_text.as_bytes())
+            .await
+            .map_err(|error| format!("write failed: {error}"))?;
+        return Ok(());
+    }
+    
     let response = if !allowed {
         // Rate limited
         routing::HttpResponse {
@@ -9653,6 +9667,9 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     } else {
         String::new()
     };
+    
+    // Add CORS headers
+    let cors_headers_str = cors_headers(headers.origin, &["*"]);
 
     // Add CSRF cookie for HTML responses (GET /)
     let csrf_cookie = if path == "/" && method == "GET" {
@@ -9666,7 +9683,7 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     };
 
     let response_text = format!(
-        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}{}{}{}
+        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}{}{}{}{}
 \r\n{}",
         response.status,
         response.content_type,
@@ -9675,6 +9692,7 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
         ratelimit_headers,
         cache_headers,
         etag,
+        cors_headers_str,
         response.body
     );
     
