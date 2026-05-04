@@ -5,6 +5,7 @@ mod logging;
 mod utils;
 mod storage;
 mod routing;
+mod websocket;
 
 use std::{
     collections::BTreeMap,
