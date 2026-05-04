@@ -10,6 +10,7 @@ mod rate_limit;
 mod utils;
 mod storage;
 mod routing;
+mod validation;  // Phase 11: Request validation and pagination
 mod websocket;
 mod tracing;
 mod webhooks;
@@ -18,6 +19,7 @@ mod api_integration;
 mod graphql;
 mod axum_router;  // Phase 8: Axum framework integration
 
+mod security;  // Production hardening and security features
 use std::{
     collections::BTreeMap,
     env, fs,
