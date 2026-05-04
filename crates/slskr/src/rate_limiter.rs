@@ -213,7 +213,7 @@ impl RateLimiter {
         clients.get(client_id).and_then(|limit| match limit {
             ClientLimit::TokenBucket(bucket) => Some(bucket.tokens as u32),
             ClientLimit::SlidingWindow(window) => {
-                Some(self.config.max_requests - (window.requests.len() as u32))
+                Some(self.config.requests_per_minute - (window.requests.len() as u32))
             }
         })
     }
