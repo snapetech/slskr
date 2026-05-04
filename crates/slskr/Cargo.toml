@@ -17,7 +17,7 @@ slskr-client = { version = "0.0.0", path = "../slskr-client" }
 slskr-cli = { version = "0.0.0", path = "../slskr-cli" }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time", "signal"] }
 toml = "0.8"
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }
+sqlx = { version = "0.7", features = ["sqlite", "postgres", "runtime-tokio-rustls", "chrono", "uuid"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 reqwest = { version = "0.11", features = ["json"] }
@@ -33,6 +33,19 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Phase 9: WebSocket support
 tokio-tungstenite = "0.21"
+# 500K req/sec scaling features
+redis = { version = "0.24", features = ["aio", "tokio-comp", "connection-manager"] }
+moka = { version = "0.12", features = ["future"] }
+dashmap = "5.5"
+# gRPC protocol support
+tonic = "0.11"
+prost = "0.12"
+# Database scaling
+sea-orm = { version = "0.12", features = ["sqlx-postgres", "runtime-tokio-rustls"] }
+deadpool-postgres = "0.14"
+# Request batching
+tokio-util = "0.7"
+bytes = "1.5"
 
 [lints]
 workspace = true
