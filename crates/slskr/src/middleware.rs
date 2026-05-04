@@ -244,10 +244,11 @@ impl MiddlewarePipeline {
         &self,
         stage: MiddlewareStage,
         req: Option<&RequestContext>,
-        res: Option<&mut ResponseContext>,
+        res: &mut Option<ResponseContext>,
     ) -> Result<(), String> {
         for middleware in &self.middlewares {
-            middleware.execute(stage, req, res)?;
+            let res_ref = res.as_mut();
+            middleware.execute(stage, req, res_ref)?;
         }
         Ok(())
     }
