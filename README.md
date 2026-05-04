@@ -6,7 +6,7 @@ Goal: ship one runnable app, `slskr`, with the daemon/API/web UI bundled the way
 
 `slskr` is an independent protocol implementation for the Soulseek network.
 
-Status: **Phases 1-7 initial cuts done; Phase 8 hardening started; 24h soak still pending**. See [PLAN.md](./PLAN.md) for the full roadmap.
+Status: `slskr-protocol` and `slskr-client` are production-quality — real Soulseek wire codecs, full session/peer/transfer runtime, passing test suites. `slskr-cli` probe commands and the Proton NAT-PMP matrix scripts work end-to-end. The `slskr serve` daemon has a hand-rolled HTTP server and handles a defined set of API endpoints (see [docs/app-surface.md](./docs/app-surface.md)), but a large fraction of the endpoint surface returns stub JSON. WebSocket events (`/api/events/ws`) and SignalR hubs for the web UI are not yet implemented. Persistence writes are wired at the call site but gated behind no-op `let _ =` assignments. See [REMEDIATION.md](./REMEDIATION.md) for the honest state and the phased plan to fix it.
 
 Compliance and network-use notes are tracked in [COMPLIANCE.md](./COMPLIANCE.md).
 The app command/API direction is tracked in [docs/app-surface.md](./docs/app-surface.md).
