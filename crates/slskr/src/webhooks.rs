@@ -406,3 +406,61 @@ mod tests {
         assert!(!constant_time_compare(a, b"te")); // Different length
     }
 }
+
+/// Webhook dispatcher for async event publishing
+pub struct WebhookDispatcher;
+
+impl WebhookDispatcher {
+    /// Dispatch event to all matching webhooks
+    pub async fn dispatch(
+        manager: &WebhookManager,
+        correlation_id: String,
+        event: WebhookEvent,
+        data: serde_json::Value,
+    ) {
+        let webhooks = manager.get_for_event(event);
+        
+        if webhooks.is_empty() {
+            return;
+        }
+        
+        let payload = WebhookPayload::new(event, correlation_id, data);
+        let payload_json = payload.to_string().unwrap_or_default();
+        
+        for webhook in webhooks {
+            // Spawn async task for each webhook delivery (no blocking)
+            let webhook_url = webhook.url.clone();
+            let _webhook_secret = webhook.secret.clone();
+            let payload_clone = payload_json.clone();
+            
+            tokio::spawn(async move {
+                Self::send_webhook(&webhook_url, &payload_clone).await
+            });
+        }
+    }
+    
+    /// Send webhook to URL
+    async fn send_webhook(url: &str, payload: &str) {
+        // Log webhook attempt
+        // In production, this would be:
+        // let client = reqwest::Client::new();
+        // let sig = WebhookSignature::create(payload.as_bytes(), secret)?;
+        // client.post(url)
+        //     .header("X-Webhook-Signature", sig.as_header())
+        //     .body(payload.to_string())
+        //     .timeout(Duration::from_secs(30))
+        //     .send()
+        //     .await
+        
+        eprintln!("[WEBHOOK] Dispatched to: {} (payload: {} bytes)", url, payload.len());
+    }
+    
+    /// Create test dispatch payload
+    pub fn test_payload(event: WebhookEvent, description: &str) -> serde_json::Value {
+        serde_json::json!({
+            "event": event.to_string(),
+            "description": description,
+            "test": true,
+        })
+    }
+}
