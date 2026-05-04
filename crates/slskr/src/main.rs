@@ -2547,9 +2547,14 @@ async fn route_http_request_with_headers(
             let session_json = session.summary_json();
             drop(session);
 
+            let shares = state.shares.read().await;
+            let shares_json = shares.summary_json();
+            drop(shares);
+
             let body = format!(
-                "{{\"health\":{{\"connected\":{}}},\"session\":{}}}",
+                "{{\"health\":{{\"connected\":{}}},\"service\":{{\"name\":\"slskr\"}},\"storage\":{{\"share_cache_file\":\"share-index.tsv\",\"transfer_events_file\":\"transfer-events.tsv\"}},\"shares\":{},\"session\":{}}}",
                 is_connected,
+                shares_json,
                 session_json
             );
 
