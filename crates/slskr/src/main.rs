@@ -58,6 +58,8 @@ use config::redact_username;
 const TRANSFER_PROGRESS_CHUNK_BYTES: usize = 64 * 1024;
 const DEFAULT_SEARCH_TTL_SECONDS: u64 = 300;
 const EVENT_HISTORY_LIMIT: usize = 500;
+
+#[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
     "health",
     "version",
@@ -85,6 +87,8 @@ const APP_CAPABILITIES: &[&str] = &[
     "browser-session-auth",
     "csrf-origin-guard",
 ];
+
+#[allow(dead_code)]
 const NETWORK_CAPABILITIES: &[&str] = &[
     "server-session",
     "regular-listener",
@@ -95,11 +99,15 @@ const NETWORK_CAPABILITIES: &[&str] = &[
     "file-transfer",
     "indirect-connect",
 ];
+
+#[allow(dead_code)]
 const STORAGE_CAPABILITIES: &[&str] = &[
     "share-index-tsv",
     "transfer-events-tsv",
     "transfer-state-json",
 ];
+
+#[allow(dead_code)]
 const EXPERIMENTAL_CAPABILITIES: &[&str] = &[
     "direct-peer-browse",
     "direct-and-indirect-file-transfer",
