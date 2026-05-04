@@ -14,6 +14,7 @@ mod websocket;
 mod tracing;
 mod webhooks;
 mod persistence;
+mod api_integration;
 
 use std::{
     collections::BTreeMap,
