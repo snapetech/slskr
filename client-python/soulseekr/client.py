@@ -9,6 +9,8 @@ from urllib.parse import urljoin, urlencode
 import aiohttp
 
 from .exceptions import ApiError, NetworkError, TimeoutError
+from .batch import BatchClient
+from .websocket import WebSocketClient
 
 
 class SoulseekrClient:
@@ -31,6 +33,10 @@ class SoulseekrClient:
         self.retry_delay = retry_delay
         self.debug = debug
         self.session: Optional[aiohttp.ClientSession] = None
+        
+        # Initialize batch and websocket clients
+        self.batch = BatchClient(self)
+        self.ws = None  # WebSocket client created on demand
 
     async def __aenter__(self):
         """Context manager entry"""
@@ -52,6 +58,32 @@ class SoulseekrClient:
         if self.session:
             await self.session.close()
             self.session = None
+        if self.ws:
+            await self.ws.disconnect()
+            self.ws = None
+
+    # =========================================================================
+    # WebSocket Connection
+    # =========================================================================
+
+    async def connect_ws(self) -> WebSocketClient:
+        """Connect to WebSocket for real-time events"""
+        if self.ws is None:
+            self.ws = WebSocketClient(self.base_url, self.token, debug=self.debug)
+        
+        if not self.ws.is_connected():
+            await self.ws.connect()
+        
+        return self.ws
+
+    async def disconnect_ws(self):
+        """Disconnect WebSocket"""
+        if self.ws:
+            await self.ws.disconnect()
+
+    def get_ws(self) -> Optional[WebSocketClient]:
+        """Get WebSocket client (must be connected first)"""
+        return self.ws if self.ws and self.ws.is_connected() else None
 
     # =========================================================================
     # Health & Version

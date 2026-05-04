@@ -155,6 +155,171 @@ func (c *Client) ListMessages(ctx context.Context, limit, offset int) ([]map[str
 	return out, nil
 }
 
+// GetUserMessages gets messages from specific user
+func (c *Client) GetUserMessages(ctx context.Context, username string, limit int) ([]map[string]interface{}, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+
+	result, err := c.getWithParams(ctx, fmt.Sprintf("/api/messages/%s", username), params, true)
+	if err != nil {
+		return nil, err
+	}
+
+	messages, ok := result["messages"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format")
+	}
+
+	var out []map[string]interface{}
+	for _, m := range messages {
+		if msg, ok := m.(map[string]interface{}); ok {
+			out = append(out, msg)
+		}
+	}
+	return out, nil
+}
+
+// SendMessage sends a message to user
+func (c *Client) SendMessage(ctx context.Context, recipient, content string) (map[string]interface{}, error) {
+	body := map[string]interface{}{
+		"recipient": recipient,
+		"content":   content,
+	}
+	return c.post(ctx, "/api/messages", body, true)
+}
+
+// AcknowledgeMessage marks message as acknowledged
+func (c *Client) AcknowledgeMessage(ctx context.Context, messageID string) error {
+	_, err := c.post(ctx, fmt.Sprintf("/api/messages/%s/acknowledge", messageID), nil, true)
+	return err
+}
+
+// ============================================================================
+// Users
+// ============================================================================
+
+// GetUser gets user info
+func (c *Client) GetUser(ctx context.Context, username string) (map[string]interface{}, error) {
+	return c.get(ctx, fmt.Sprintf("/api/users/%s", username), false)
+}
+
+// ListUsers lists users
+func (c *Client) ListUsers(ctx context.Context, limit, offset int) ([]map[string]interface{}, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("offset", fmt.Sprintf("%d", offset))
+
+	result, err := c.getWithParams(ctx, "/api/users", params, true)
+	if err != nil {
+		return nil, err
+	}
+
+	users, ok := result["users"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format")
+	}
+
+	var out []map[string]interface{}
+	for _, u := range users {
+		if m, ok := u.(map[string]interface{}); ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// ============================================================================
+// Rooms
+// ============================================================================
+
+// ListRooms lists chat rooms
+func (c *Client) ListRooms(ctx context.Context) ([]map[string]interface{}, error) {
+	result, err := c.get(ctx, "/api/rooms", true)
+	if err != nil {
+		return nil, err
+	}
+
+	rooms, ok := result["rooms"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format")
+	}
+
+	var out []map[string]interface{}
+	for _, r := range rooms {
+		if m, ok := r.(map[string]interface{}); ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// GetRoom gets room info
+func (c *Client) GetRoom(ctx context.Context, roomID string) (map[string]interface{}, error) {
+	return c.get(ctx, fmt.Sprintf("/api/rooms/%s", roomID), true)
+}
+
+// JoinRoom joins a room
+func (c *Client) JoinRoom(ctx context.Context, roomName string) (map[string]interface{}, error) {
+	body := map[string]interface{}{
+		"name": roomName,
+	}
+	return c.post(ctx, "/api/rooms/join", body, true)
+}
+
+// LeaveRoom leaves a room
+func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
+	_, err := c.post(ctx, fmt.Sprintf("/api/rooms/%s/leave", roomID), nil, true)
+	return err
+}
+
+// ============================================================================
+// Shares
+// ============================================================================
+
+// ListShares lists shared files
+func (c *Client) ListShares(ctx context.Context, limit, offset int) ([]map[string]interface{}, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("offset", fmt.Sprintf("%d", offset))
+
+	result, err := c.getWithParams(ctx, "/api/shares", params, true)
+	if err != nil {
+		return nil, err
+	}
+
+	shares, ok := result["shares"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format")
+	}
+
+	var out []map[string]interface{}
+	for _, s := range shares {
+		if m, ok := s.(map[string]interface{}); ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// RefreshShares refreshes the share list
+func (c *Client) RefreshShares(ctx context.Context) (map[string]interface{}, error) {
+	return c.post(ctx, "/api/shares/refresh", nil, true)
+}
+
+// ============================================================================
+// Filters
+// ============================================================================
+
+// GetFilters gets search filters
+func (c *Client) GetFilters(ctx context.Context) (map[string]interface{}, error) {
+	return c.get(ctx, "/api/filters", true)
+}
+
+// UpdateFilters updates search filters
+func (c *Client) UpdateFilters(ctx context.Context, filters map[string]interface{}) (map[string]interface{}, error) {
+	return c.post(ctx, "/api/filters", filters, true)
+}
+
 // ============================================================================
 // Internal Methods
 // ============================================================================
