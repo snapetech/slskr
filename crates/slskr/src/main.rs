@@ -16,6 +16,7 @@ mod webhooks;
 mod persistence;
 mod api_integration;
 mod graphql;
+mod axum_router;  // Phase 8: Axum framework integration
 
 use std::{
     collections::BTreeMap,
