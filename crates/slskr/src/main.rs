@@ -3261,9 +3261,13 @@ async fn route_http_request_with_headers(
             let username = user_browse_folder_path(route.normalized_path).unwrap();
             let folder = extract_json_string_field(body, "folder").unwrap_or_default();
             
-            send_session_command(state, SessionCommand::BrowseFolder { username: username.to_string(), folder: folder.clone() }).await.ok();
+            let mut browse = state.browse.write().await;
+            let record = browse.request_folder(username.to_string(), folder.clone());
+            drop(browse);
             
-            Ok(routing::accepted_response(format!("{{\"username\":\"{}\",\"folder\":\"{}\",\"status\":\"requested\"}}", json_escape(username), json_escape(&folder))))
+            send_session_command(state, SessionCommand::BrowseFolder { username: username.to_string(), folder }).await.ok();
+            
+            Ok(routing::accepted_response(record.json()))
         }
         
         ("POST", path) if user_browse_fail_path(route.normalized_path).is_some() => {
@@ -3332,7 +3336,10 @@ async fn route_http_request_with_headers(
             if entries.is_empty() {
                 if let Some(filename) = extract_json_string_field(body, "filename") {
                     let size = extract_json_u64_field(body, "size").unwrap_or(0);
-                    let extension = extract_json_string_field(body, "extension").unwrap_or_default();
+                    let extension = extract_json_string_field(body, "extension")
+                        .unwrap_or_else(|| {
+                            filename.split('.').last().unwrap_or("").to_string()
+                        });
                     entries.push(BrowseEntry {
                         filename,
                         size,
@@ -3346,6 +3353,36 @@ async fn route_http_request_with_headers(
             drop(browse);
             
             Ok(routing::ok_response(record.json()))
+        }
+        ("GET", "/api/browse") | ("GET", "/api/v0/browse") => {
+            let browse = state.browse.read().await;
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "application/json",
+                body: browse.json(route.query),
+            })
+        }
+        ("GET", path) if (path.starts_with("/api/users/") || path.starts_with("/api/v0/users/")) && path.ends_with("/browse") => {
+            let username = path.strip_prefix("/api/users/")
+                .or_else(|| path.strip_prefix("/api/v0/users/"))
+                .and_then(|p| p.strip_suffix("/browse"));
+            
+            if let Some(username) = username {
+                let browse = state.browse.read().await;
+                if let Some(record) = browse.get(username) {
+                    drop(browse);
+                    Ok(HttpResponse {
+                        status: "200 OK",
+                        content_type: "application/json",
+                        body: record.json(),
+                    })
+                } else {
+                    drop(browse);
+                    Ok(routing::not_found_response())
+                }
+            } else {
+                Ok(routing::not_found_response())
+            }
         }
         _ => Ok(routing::not_found_response()),
     }
