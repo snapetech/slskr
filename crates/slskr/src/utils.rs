@@ -654,3 +654,50 @@ pub fn unix_timestamp() -> u64 {
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
 }
+
+/// Determine cache control header for response
+pub fn cache_control_header(method: &str, content_type: &str, path: &str) -> Option<String> {
+    // Only cache GET requests
+    if method != "GET" {
+        return None;
+    }
+    
+    // Don't cache HTML (dynamic dashboard)
+    if content_type.contains("text/html") {
+        return Some("Cache-Control: no-cache, must-revalidate\r\n".to_string());
+    }
+    
+    // Cache static endpoints for longer
+    if path == "/api/health" || path == "/api/version" || path == "/api/capabilities" {
+        return Some("Cache-Control: public, max-age=3600\r\n".to_string());  // 1 hour
+    }
+    
+    // Cache config for medium duration
+    if path == "/api/config" {
+        return Some("Cache-Control: private, max-age=300\r\n".to_string());  // 5 minutes
+    }
+    
+    // Cache stats briefly (they change frequently)
+    if path.starts_with("/api/stats") || path.starts_with("/api/metrics") {
+        return Some("Cache-Control: public, max-age=10\r\n".to_string());  // 10 seconds
+    }
+    
+    // Cache shares catalog
+    if path.starts_with("/api/shares") {
+        return Some("Cache-Control: public, max-age=60\r\n".to_string());  // 1 minute
+    }
+    
+    // Default: no caching for dynamic endpoints
+    Some("Cache-Control: no-store\r\n".to_string())
+}
+
+/// Generate ETag for response body
+pub fn generate_etag(body: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    
+    let mut hasher = DefaultHasher::new();
+    body.hash(&mut hasher);
+    let hash = hasher.finish();
+    format!("\"{}\"", hash)
+}
