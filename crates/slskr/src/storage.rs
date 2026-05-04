@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! Storage module: file I/O, caching, and persistence operations.
 
 use std::fs;
@@ -88,7 +90,7 @@ pub struct TransferStateFile {
 
 pub fn append_transfer_event(
     path: &Path,
-    id: u64,
+    _id: u64,
     status: &str,
     bytes_transferred: Option<u64>,
     filename: &str,

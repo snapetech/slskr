@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 mod config;
 mod utils;
 mod storage;
@@ -51,7 +53,6 @@ use crate::config::{
     json_u64_option, json_usize_option, parse_share_entries, AppConfig,
 };
 use crate::utils::*;
-use crate::storage::*;
 
 use config::redact_username;
 
@@ -3133,18 +3134,9 @@ async fn route_http_request_with_headers(
                 drop(messages);
                 Ok(routing::not_found_response())
             }
-        }
-        
-        ("GET", "/api/messages") => {
-            let messages = state.messages.read().await;
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: messages.json(route.query),
-            })
-        }
-        
-        ("GET", path) if messages_user_path(route.normalized_path).is_some() => {
+         }
+         
+         ("GET", path) if messages_user_path(route.normalized_path).is_some() => {
             let username = messages_user_path(route.normalized_path).unwrap();
             let messages = state.messages.read().await;
             Ok(HttpResponse {
