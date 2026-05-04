@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './pages/Dashboard';
@@ -95,6 +95,7 @@ export default function App() {
                 <Route path="/database" element={<Database apiUrl={state.apiUrl} apiKey={state.apiKey} />} />
                 <Route path="/monitoring" element={<Monitoring apiUrl={state.apiUrl} apiKey={state.apiKey} />} />
                 <Route path="/configuration" element={<Configuration apiUrl={state.apiUrl} apiKey={state.apiKey} />} />
+                <Route path="*" element={<Navigate to="/" />} />
               </Routes>
             )}
           </main>
