@@ -1,38 +1,15 @@
-#![allow(dead_code, unused_imports)]
-
-mod api_keys;
 mod batch;
-mod caching;
 mod config;
 mod logging;
-mod metrics;
+mod openapi;
 mod rate_limit;
 mod utils;
 mod storage;
 mod routing;
-mod validation;  // Phase 11: Request validation and pagination
-mod pagination;  // Phase 11: Pagination helpers
-mod compression;  // Phase 11: Response compression
-mod openapi;  // Phase 12: OpenAPI/Swagger documentation
-mod docs;  // Phase 12: API documentation endpoints
-mod sse;  // Phase 12: Server-Sent Events streaming
-mod middleware;  // Phase 12: Advanced middleware system
-mod filters;  // Phase 12: Request/response filtering and transformation
-mod enrichment;  // Phase 12: Response enrichment and metadata injection
-mod versioning;  // Phase 12: API versioning and compatibility
-mod response_cache;  // Phase 12: Response caching with TTL management
-mod observability;  // Phase 12: Advanced monitoring and observability
-mod rate_limiter;  // Phase 12: Advanced rate limiting strategies
-mod websocket;
 mod tracing;
 mod webhooks;
 mod persistence;
-mod api_integration;
-mod graphql;
-mod axum_router;  // Phase 8: Axum framework integration
-
-mod security;  // Production hardening and security features
-mod http_server;  // Optimized HTTP server with keep-alive and streaming
+mod http_server;
 
 use std::{
     collections::BTreeMap,
@@ -40,7 +17,6 @@ use std::{
     net::{SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -79,14 +55,13 @@ use tokio::{
 
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option,
-    json_u64_option, json_usize_option, parse_share_entries, AppConfig,
+    json_u64_option, json_usize_option, AppConfig,
 };
 use crate::utils::*;
 
 use config::redact_username;
 
 const TRANSFER_PROGRESS_CHUNK_BYTES: usize = 64 * 1024;
-const DEFAULT_SEARCH_TTL_SECONDS: u64 = 300;
 const EVENT_HISTORY_LIMIT: usize = 500;
 
 #[allow(dead_code)]
@@ -317,51 +292,6 @@ impl ShareIndexSnapshot {
         )
     }
 
-    fn root_files_json(&self, label: &str, query: Option<&str>) -> Option<String> {
-        let root = self.roots.iter().find(|root| root.label == label)?;
-        let filter = CatalogFilter::from_query(query);
-        let prefix = format!("{label}/").to_ascii_lowercase();
-        let mut entries = self
-            .entries
-            .iter()
-            .filter(|entry| entry.filename.to_ascii_lowercase().starts_with(&prefix))
-            .filter(|entry| filter.matches(entry))
-            .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.filename.cmp(&right.filename));
-        let filtered_count = entries.len();
-        let total_bytes = entries.iter().map(|entry| entry.size).sum::<u64>();
-        let files = entries
-            .into_iter()
-            .skip(filter.offset)
-            .take(filter.limit.unwrap_or(usize::MAX))
-            .map(|entry| {
-                let path = entry
-                    .filename
-                    .split_once('/')
-                    .map_or(entry.filename.as_str(), |(_, path)| path);
-                format!(
-                    "{{\"path\":\"{}\",\"virtual_path\":\"{}\",\"size\":{},\"extension\":\"{}\",\"attribute_count\":{}}}",
-                    json_escape(path),
-                    json_escape(&entry.filename),
-                    entry.size,
-                    json_escape(&entry.extension),
-                    entry.attributes.len()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        Some(format!(
-            "{{\"root\":{},\"files\":[{}],\"count\":{},\"filtered_count\":{},\"total_bytes\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            root.json(),
-            files,
-            root.files,
-            filtered_count,
-            total_bytes,
-            filter.offset,
-            json_usize_option(filter.limit),
-            self.updated_at
-        ))
-    }
 }
 
 #[derive(Debug, Default)]
@@ -569,16 +499,6 @@ impl SearchStore {
         let before = self.records.len();
         self.records.retain(|record| record.status != "expired");
         before - self.records.len()
-    }
-
-    fn add_result(&mut self, token: u32, result: SearchResultEntry) -> Option<SearchRecord> {
-        let record = self
-            .records
-            .iter_mut()
-            .find(|record| record.token == token)?;
-        record.results.push(result);
-        record.updated_at = unix_timestamp();
-        Some(record.clone())
     }
 
     fn add_peer_response(&mut self, response: &FileSearchResponse) -> Option<SearchRecord> {
@@ -850,14 +770,6 @@ impl EventStore {
         )
     }
 
-    fn summary_json(&self) -> String {
-        format!(
-            "{{\"total\":{},\"history_limit\":{},\"next_id\":{}}}",
-            self.records.len(),
-            self.history_limit,
-            self.next_id
-        )
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -950,8 +862,8 @@ impl TransferQueue {
 
     #[cfg(test)]
     fn new_in_memory(history_limit: usize) -> Self {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
         let base = std::env::temp_dir().join(format!(
@@ -1118,10 +1030,6 @@ impl TransferQueue {
         self.persist_state();
         self.updated_at = unix_timestamp();
         Some(entry)
-    }
-
-    fn get(&self, id: u64) -> Option<TransferEntry> {
-        self.entries.iter().find(|entry| entry.id == id).cloned()
     }
 
     fn pending_peer_transfer(&self, username: &str) -> Option<TransferEntry> {
@@ -1448,25 +1356,6 @@ impl ListenerSnapshot {
         )
     }
 
-    fn summary_json(&self) -> String {
-        format!(
-            "{{\"regular_accepts\":{},\"obfuscated_accepts\":{},\"peer_messages\":{},\"obfuscated_peer_messages\":{},\"file_transfers\":{},\"distributed\":{},\"peer_inits\":{},\"pierce_firewalls\":{},\"user_info_requests\":{},\"share_list_requests\":{},\"file_search_requests\":{},\"transfer_rejections\":{},\"errors\":{},\"updated_at\":{}}}",
-            self.regular_accepts,
-            self.obfuscated_accepts,
-            self.peer_messages,
-            self.obfuscated_peer_messages,
-            self.file_transfers,
-            self.distributed,
-            self.peer_inits,
-            self.pierce_firewalls,
-            self.user_info_requests,
-            self.share_list_requests,
-            self.file_search_requests,
-            self.transfer_rejections,
-            self.errors,
-            self.updated_at
-        )
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -2012,23 +1901,6 @@ impl BrowseStore {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct BrowseResponseBody {
-    username: Option<String>,
-    filename: Option<String>,
-    size: Option<u64>,
-    extension: Option<String>,
-    complete: Option<bool>,
-    entries: Option<Vec<BrowseResponseBodyEntry>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BrowseResponseBodyEntry {
-    filename: String,
-    size: u64,
-    extension: Option<String>,
-}
-
 #[derive(Clone, Debug)]
 struct MessageRecord {
     id: u64,
@@ -2521,19 +2393,6 @@ impl CollectionStore {
         Some(record.clone())
     }
 
-    fn remove_item(&mut self, collection_id: &str, item_id: &str) -> Option<CollectionRecord> {
-        let now = unix_timestamp();
-        let record = self.records.iter_mut().find(|r| r.id == collection_id)?;
-        if let Some(pos) = record.items.iter().position(|i| i.id == item_id) {
-            record.items.remove(pos);
-            record.updated_at = now;
-            self.updated_at = now;
-            Some(record.clone())
-        } else {
-            None
-        }
-    }
-
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
@@ -2619,7 +2478,6 @@ impl WishlistRecord {
 #[derive(Debug)]
 struct WishlistStore {
     records: Vec<WishlistRecord>,
-    next_id: u64,
     updated_at: u64,
 }
 
@@ -2627,18 +2485,7 @@ impl WishlistStore {
     fn new() -> Self {
         Self {
             records: Vec::new(),
-            next_id: 1,
             updated_at: unix_timestamp(),
-        }
-    }
-
-    fn create() -> WishlistRecord {
-        let now = unix_timestamp();
-        WishlistRecord {
-            id: "default".to_string(),
-            items: Vec::new(),
-            created_at: now,
-            updated_at: now,
         }
     }
 
@@ -2681,30 +2528,6 @@ impl WishlistStore {
         }
     }
 
-    fn json(&self, query: Option<&str>) -> String {
-        let filter = RecordListFilter::from_query(query);
-        let records = self
-            .records
-            .iter()
-            .collect::<Vec<_>>();
-        let filtered_count = records.len();
-        let records = records
-            .into_iter()
-            .skip(filter.offset)
-            .take(filter.limit.unwrap_or(usize::MAX))
-            .map(WishlistRecord::json)
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            records,
-            self.records.len(),
-            filtered_count,
-            filter.offset,
-            json_usize_option(filter.limit),
-            self.updated_at
-        )
-    }
 }
 
 // Contact Models
@@ -3053,10 +2876,6 @@ impl UserNoteStore {
 
     fn get(&self, id: &str) -> Option<UserNoteRecord> {
         self.records.iter().find(|r| r.id == id).cloned()
-    }
-
-    fn get_by_username(&self, username: &str) -> Option<UserNoteRecord> {
-        self.records.iter().find(|r| r.username == username).cloned()
     }
 
     fn update(&mut self, id: &str, note: String) -> Option<UserNoteRecord> {
@@ -3542,43 +3361,6 @@ enum SearchDispatchTarget {
     Wishlist,
 }
 
-impl SearchDispatchTarget {
-    fn from_body(body: &str) -> Result<Self, String> {
-        match extract_json_string_field(body, "target")
-            .unwrap_or_else(|| "global".to_owned())
-            .as_str()
-        {
-            "global" => Ok(Self::Global),
-            "wishlist" => Ok(Self::Wishlist),
-            "user" => extract_json_string_field(body, "username")
-                .filter(|value| !value.trim().is_empty())
-                .map(Self::User)
-                .ok_or_else(|| "username is required for user search".to_owned()),
-            "room" => extract_json_string_field(body, "room")
-                .filter(|value| !value.trim().is_empty())
-                .map(Self::Room)
-                .ok_or_else(|| "room is required for room search".to_owned()),
-            _ => Err("target must be global, user, room, or wishlist".to_owned()),
-        }
-    }
-
-    const fn label(&self) -> &'static str {
-        match self {
-            Self::Global => "global",
-            Self::User(_) => "user",
-            Self::Room(_) => "room",
-            Self::Wishlist => "wishlist",
-        }
-    }
-
-    fn name(&self) -> Option<&str> {
-        match self {
-            Self::User(username) | Self::Room(username) => Some(username),
-            Self::Global | Self::Wishlist => None,
-        }
-    }
-}
-
 use routing::HttpResponse;
 
 async fn route_http_request_with_headers(
@@ -3602,13 +3384,9 @@ async fn route_http_request_with_headers(
     let route = routing::parse_route(method, path);
     
     // Normalize versioned paths: /api/v1/* -> /api/*, /api/v2/* -> /api/*
-    // Keep track of the API version for v2 features
-    let mut api_version = 1; // Default to v1
     let normalized_path = if let Some(v1_path) = route.normalized_path.strip_prefix("/api/v1/") {
-        api_version = 1;
         format!("/api/{}", v1_path)
     } else if let Some(v2_path) = route.normalized_path.strip_prefix("/api/v2/") {
-        api_version = 2;
         format!("/api/{}", v2_path)
     } else {
         route.normalized_path.to_string()
@@ -3715,7 +3493,7 @@ async fn route_http_request_with_headers(
         // Batch operations endpoint
         ("POST", "/api/batch") | ("POST", "/api/v1/batch") | ("POST", "/api/v2/batch") => {
             match batch::parse_batch_request(body) {
-                Ok((operations, config)) => {
+                Ok((operations, _config)) => {
                     match batch::validate_batch_operations(&operations) {
                         Ok(_) => {
                             // For now, return successful batch response with placeholder results
@@ -4878,28 +4656,6 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         
-        // SEARCH ENDPOINTS
-        ("GET", "/api/searches") => {
-            let searches = state.searches.read().await;
-            let mut search_list = Vec::new();
-            for record in &searches.records {
-                search_list.push(format!(
-                    "{{\"token\":{},\"query\":\"{}\",\"status\":\"{}\",\"result_count\":{},\"created_at\":{}}}",
-                    record.token,
-                    json_escape(&record.query),
-                    record.status,
-                    record.results.len(),
-                    record.created_at
-                ));
-            }
-            let json = format!(
-                "{{\"searches\":[{}],\"count\":{}}}",
-                search_list.join(","),
-                searches.records.len()
-            );
-            drop(searches);
-            Ok(routing::ok_response(json))
-        }
         
         ("DELETE", "/api/searches") => {
             let mut searches = state.searches.write().await;
@@ -4951,7 +4707,7 @@ async fn route_http_request_with_headers(
             }
             if let Ok(token) = parts[3].parse::<u32>() {
                 let searches = state.searches.read().await;
-                if let Some(record) = searches.records.iter().find(|s| s.token == token) {
+                if let Some(_record) = searches.records.iter().find(|s| s.token == token) {
                     let json = format!(
                         "{{\"token\":{},\"responses\":[],\"count\":0}}",
                         token
@@ -5165,14 +4921,6 @@ async fn route_http_request_with_headers(
             }
         }
         
-        // Additional ROOM ENDPOINTS
-        ("GET", "/api/rooms") => {
-            let rooms = state.rooms.read().await;
-            let json = rooms.json(None);
-            drop(rooms);
-            Ok(routing::ok_response(json))
-        }
-        
         ("GET", "/api/rooms/available") => {
             let rooms = state.rooms.read().await;
             let available_rooms = rooms.records
@@ -5201,7 +4949,7 @@ async fn route_http_request_with_headers(
             }
             let room_name = parts[3];
             let rooms = state.rooms.read().await;
-            if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
+            if let Some(_room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let json = format!(
                     "{{\"room\":\"{}\",\"users\":[],\"user_count\":0}}",
                     json_escape(room_name)
@@ -5545,32 +5293,8 @@ async fn route_http_request_with_headers(
                 body: r#"{"cpu_percent":5.2,"memory_mb":128,"uptime_seconds":3600}"#.to_owned(),
             })
         }
-        // GRAPHQL ROUTES
-        ("POST", "/api/graphql") => {
-            let result = graphql::execute_graphql_query(body);
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: result.to_string(),
-            })
-        }
-        ("GET", "/api/graphql/schema") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/graphql",
-                body: graphql::generate_graphql_schema(),
-            })
-        }
         // WEBUI PARITY: Room routes with /joined prefix
         ("GET", "/api/rooms/joined") => {
-            let rooms = state.rooms.read().await;
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: rooms.json(route.query),
-            })
-        }
-        ("GET", "/api/rooms/available") => {
             let rooms = state.rooms.read().await;
             Ok(HttpResponse {
                 status: "200 OK",
@@ -7010,13 +6734,6 @@ async fn route_http_request_with_headers(
              Ok(routing::ok_response(json))
          }
          
-         ("GET", "/api/soulseek/users/similar") => {
-             let json = format!(
-                 "{{\"similar_users\":[],\"count\":0}}"
-             );
-             Ok(routing::ok_response(json))
-         }
-         
          ("GET", path) if path.starts_with("/api/soulseek/users/") && path.contains("/interests") && path.len() > 20 => {
              let username = path.split('/').nth(4).unwrap_or("unknown");
              let json = format!(
@@ -7306,12 +7023,6 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         
-        // CONVERSATION & MESSAGES ENDPOINTS
-        ("GET", "/api/conversations") => {
-            let json = format!("{{\"conversations\":[],\"count\":0}}");
-            Ok(routing::ok_response(json))
-        }
-        
          ("GET", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
              let conversation_id = &path[18..];
              let json = format!(
@@ -7349,29 +7060,6 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         
-        // APPLICATION STATE ENDPOINTS
-        ("GET", "/api/application") => {
-            let json = format!(
-                "{{\"status\":\"running\",\"version\":\"1.0.0-RC\",\"started_at\":{}}}",
-                unix_timestamp()
-            );
-            Ok(routing::ok_response(json))
-        }
-        
-        ("GET", "/api/application/version/latest") => {
-            let json = format!(
-                "{{\"latest\":\"1.0.0\",\"current\":\"1.0.0-RC\",\"update_available\":false}}"
-            );
-            Ok(routing::ok_response(json))
-        }
-        
-        ("GET", "/api/events") => {
-            let events = state.events.read().await;
-            let json = events.json(route.query.as_deref());
-            drop(events);
-            Ok(routing::ok_response(json))
-        }
-        
          ("POST", "/api/relay") => {
              let relay_enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
              let json = format!(
@@ -7402,7 +7090,7 @@ async fn route_http_request_with_headers(
          
          ("POST", "/api/session") => {
              let username = extract_json_string_field(body, "username").unwrap_or_default();
-             let password = extract_json_string_field(body, "password").unwrap_or_default();
+             let _password = extract_json_string_field(body, "password").unwrap_or_default();
              let json = format!(
                  "{{\"username\":\"{}\",\"authenticated\":true,\"session_id\":\"sess-{}\"}}",
                  json_escape(&username),
@@ -7434,25 +7122,6 @@ async fn route_http_request_with_headers(
              let json = format!(
                  "{{\"interest\":\"{}\",\"added\":true}}",
                  json_escape(&interest)
-             );
-             Ok(routing::created_response(json))
-         }
-         
-         ("POST", "/api/soulseek/hated-interests") => {
-             let interest = extract_json_string_field(body, "interest").unwrap_or_default();
-             let json = format!(
-                 "{{\"interest\":\"{}\",\"hated\":true}}",
-                 json_escape(&interest)
-             );
-             Ok(routing::created_response(json))
-         }
-         
-         ("POST", "/api/wishlist") => {
-             let item = extract_json_string_field(body, "item").unwrap_or_default();
-             let json = format!(
-                 "{{\"item\":\"{}\",\"added\":true,\"id\":\"wish-{}\"}}",
-                 json_escape(&item),
-                 unix_timestamp()
              );
              Ok(routing::created_response(json))
          }

@@ -1,10 +1,8 @@
 //! Optimized HTTP server with keep-alive, proper parsing, and streaming responses
 //! Replaces manual HTTP parsing in main.rs
 
-use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpStream;
-use bytes::BytesMut;
 
 use crate::routing::HttpResponse;
 
