@@ -1,0 +1,267 @@
+use std::{
+    net::Ipv4Addr,
+    time::{Duration, Instant},
+};
+
+use slskr_client::{
+    distributed_tree::{BranchInfoReporter, DistributedEvent, DistributedTree, ParentInfo},
+    server::ServerSession,
+    stream::{DistributedConnection, ServerConnection},
+};
+use slskr_protocol::{
+    distributed::{DistributedMessage, DistributedSearch},
+    server::{Direction, PossibleParent, ServerMessage},
+};
+use tokio::io::duplex;
+
+#[test]
+fn choose_parent_ignores_self_and_zero_ports_then_picks_stable_candidate() {
+    let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+    let candidates = vec![
+        possible_parent("local", [10, 0, 0, 1], 2234),
+        possible_parent("zero", [10, 0, 0, 2], 0),
+        possible_parent("zoe", [10, 0, 0, 4], 2234),
+        possible_parent("alice", [10, 0, 0, 3], 2234),
+    ];
+
+    assert_eq!(
+        tree.choose_parent(&candidates),
+        Some(ParentInfo {
+            username: "alice".to_owned(),
+            ip: Ipv4Addr::new(10, 0, 0, 3),
+            port: 2234,
+        })
+    );
+}
+
+#[test]
+fn parent_state_tracks_connect_disconnect_reset_and_server_reports() {
+    let (tree_side, _peer_side) = duplex(512);
+    let mut tree = DistributedTree::new("local");
+
+    assert_eq!(
+        tree.have_no_parent_message(),
+        ServerMessage::HaveNoParent { no_parent: true }
+    );
+    assert_eq!(
+        tree.set_accepting_children(true),
+        ServerMessage::AcceptChildren { accept: true }
+    );
+    assert!(tree.accepting_children());
+
+    tree.connect_parent(
+        parent_info("parent", [10, 0, 0, 2], 2234),
+        DistributedConnection::new(tree_side),
+    );
+
+    assert_eq!(tree.parent().unwrap().username, "parent");
+    assert_eq!(tree.branch_level(), 1);
+    assert_eq!(tree.branch_root(), "parent");
+    assert_eq!(
+        tree.have_no_parent_message(),
+        ServerMessage::HaveNoParent { no_parent: false }
+    );
+    assert_eq!(
+        tree.branch_server_messages(),
+        [
+            ServerMessage::BranchLevel { level: 1 },
+            ServerMessage::BranchRoot {
+                username: "parent".to_owned(),
+            },
+        ]
+    );
+
+    tree.disconnect_parent();
+    assert!(tree.parent().is_none());
+    assert_eq!(tree.branch_level(), 0);
+    assert_eq!(tree.branch_root(), "local");
+
+    let (tree_side, _peer_side) = duplex(512);
+    tree.connect_parent(
+        parent_info("parent", [10, 0, 0, 2], 2234),
+        DistributedConnection::new(tree_side),
+    );
+    tree.reset();
+    assert!(tree.parent().is_none());
+    assert_eq!(tree.children_len(), 0);
+    assert!(!tree.accepting_children());
+}
+
+#[test]
+fn parent_messages_update_branch_state_and_surface_searches() {
+    let mut tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+    let search = distributed_search(7, "remote", 99, "rare");
+
+    assert_eq!(
+        tree.handle_parent_message(DistributedMessage::BranchLevel { level: 3 }),
+        DistributedEvent::BranchChanged
+    );
+    assert_eq!(tree.branch_level(), 4);
+
+    assert_eq!(
+        tree.handle_parent_message(DistributedMessage::BranchRoot {
+            username: "root".to_owned(),
+        }),
+        DistributedEvent::BranchChanged
+    );
+    assert_eq!(tree.branch_root(), "root");
+
+    assert_eq!(
+        tree.handle_parent_message(DistributedMessage::Search(search.clone())),
+        DistributedEvent::Search(search)
+    );
+}
+
+#[test]
+fn child_depth_updates_local_child_depth() {
+    let (child_a, _peer_a) = duplex(512);
+    let (child_b, _peer_b) = duplex(512);
+    let mut tree = DistributedTree::new("local");
+    tree.add_child("alice", DistributedConnection::new(child_a));
+    tree.add_child("bob", DistributedConnection::new(child_b));
+
+    assert_eq!(tree.child_depth(), 1);
+    assert_eq!(
+        tree.handle_child_message("alice", DistributedMessage::ChildDepth { depth: 4 }),
+        DistributedEvent::BranchChanged
+    );
+    assert_eq!(tree.child_info("alice").unwrap().depth, 4);
+    assert_eq!(tree.child_depth(), 5);
+    assert_eq!(
+        tree.handle_child_message("missing", DistributedMessage::ChildDepth { depth: 9 }),
+        DistributedEvent::Ignored
+    );
+}
+
+#[tokio::test]
+async fn branch_info_is_sent_to_parent_as_distributed_messages() {
+    let (tree_side, parent_side) = duplex(1024);
+    let (child_side, _child_peer) = duplex(512);
+    let mut tree = DistributedTree::new("local");
+    let mut parent = DistributedConnection::new(parent_side);
+
+    tree.connect_parent(
+        parent_info("parent", [10, 0, 0, 2], 2234),
+        DistributedConnection::new(tree_side),
+    );
+    tree.add_child("child", DistributedConnection::new(child_side));
+    tree.handle_child_message("child", DistributedMessage::ChildDepth { depth: 2 });
+
+    assert!(tree.send_branch_info_to_parent().await.unwrap());
+    assert_eq!(
+        parent.receive().await.unwrap(),
+        DistributedMessage::BranchLevel { level: 1 }
+    );
+    assert_eq!(
+        parent.receive().await.unwrap(),
+        DistributedMessage::BranchRoot {
+            username: "parent".to_owned(),
+        }
+    );
+    assert_eq!(
+        parent.receive().await.unwrap(),
+        DistributedMessage::ChildDepth { depth: 3 }
+    );
+}
+
+#[tokio::test]
+async fn distributed_searches_forward_to_children_except_source() {
+    let (tree_a, peer_a) = duplex(1024);
+    let (tree_b, peer_b) = duplex(1024);
+    let mut tree = DistributedTree::new("local");
+    let mut peer_a = DistributedConnection::new(peer_a);
+    let mut peer_b = DistributedConnection::new(peer_b);
+    let search = distributed_search(5, "origin", 44, "album");
+
+    tree.add_child("alice", DistributedConnection::new(tree_a));
+    tree.add_child("bob", DistributedConnection::new(tree_b));
+
+    assert_eq!(
+        tree.forward_search_to_children(&search, Some("alice"))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        peer_b.receive().await.unwrap(),
+        DistributedMessage::Search(search)
+    );
+
+    let timed_out = tokio::time::timeout(Duration::from_millis(25), peer_a.receive()).await;
+    assert!(timed_out.is_err());
+}
+
+#[tokio::test]
+async fn branch_info_reporter_schedules_server_updates() {
+    let now = Instant::now();
+    let mut reporter = BranchInfoReporter::new(Duration::from_secs(5), now);
+    let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+    let (client, server) = duplex(1024);
+    let mut session = ServerSession::new(ServerConnection::new(client));
+    let mut server = ServerConnection::new(server);
+
+    assert!(reporter
+        .due_messages(now + Duration::from_secs(4), &tree)
+        .is_none());
+
+    let messages = reporter
+        .due_messages(now + Duration::from_secs(5), &tree)
+        .unwrap();
+    assert_eq!(
+        messages,
+        [
+            ServerMessage::BranchLevel { level: 0 },
+            ServerMessage::BranchRoot {
+                username: "local".to_owned(),
+            },
+        ]
+    );
+
+    tree.send_branch_info_to_server(&mut session).await.unwrap();
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::BranchLevel { level: 0 }
+    );
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::BranchRoot {
+            username: "local".to_owned(),
+        }
+    );
+}
+
+fn possible_parent(username: &str, ip: [u8; 4], port: u32) -> PossibleParent {
+    PossibleParent {
+        username: username.to_owned(),
+        ip: Ipv4Addr::from(ip),
+        port,
+    }
+}
+
+fn parent_info(username: &str, ip: [u8; 4], port: u32) -> ParentInfo {
+    ParentInfo {
+        username: username.to_owned(),
+        ip: Ipv4Addr::from(ip),
+        port,
+    }
+}
+
+fn distributed_search(
+    identifier: u32,
+    username: &str,
+    token: u32,
+    query: &str,
+) -> DistributedSearch {
+    DistributedSearch {
+        identifier,
+        username: username.to_owned(),
+        token,
+        query: query.to_owned(),
+    }
+}

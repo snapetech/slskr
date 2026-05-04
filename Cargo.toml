@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/slskr",
+    "crates/slskr-client",
+    "crates/slskr-cli",
+    "crates/slskr-protocol",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "AGPL-3.0-only"
+homepage = "https://github.com/snapetech/soulseekR"
+repository = "https://github.com/snapetech/soulseekR"
+rust-version = "1.76"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

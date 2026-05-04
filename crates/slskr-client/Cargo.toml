@@ -1,0 +1,23 @@
+[package]
+name = "slskr-client"
+version = "0.0.0"
+description = "Async Rust client orchestration for the Soulseek peer-to-peer protocol"
+keywords = ["slsk", "soulseek", "client", "p2p", "rust"]
+categories = ["network-programming", "asynchronous"]
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flate2 = "1"
+md5 = "0.7"
+rand = "0.8"
+slskr-protocol = { version = "0.0.0", path = "../slskr-protocol" }
+thiserror = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tracing = "0.1"
+
+[lints]
+workspace = true

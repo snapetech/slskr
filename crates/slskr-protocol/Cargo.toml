@@ -1,0 +1,21 @@
+[package]
+name = "slskr-protocol"
+version = "0.0.0"
+description = "Pure Rust codecs for the Soulseek peer-to-peer protocol"
+keywords = ["slsk", "soulseek", "protocol", "codec", "rust"]
+categories = ["encoding", "network-programming"]
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+encoding_rs = "0.8"
+thiserror = "1"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

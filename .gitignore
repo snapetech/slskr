@@ -5,3 +5,4 @@ Cargo.lock.bak
 *.swp
 .idea/
 .vscode/
+.secrets/

@@ -1,0 +1,47 @@
+# Example slskr app config. Environment variables override these values.
+
+[app]
+http_bind = "127.0.0.1:5030"
+state_dir = "/var/lib/slskr"
+auto_connect = false
+reconnect = true
+reconnect_seconds = 30
+ping_seconds = 300
+
+[network]
+server_address = "server.slsknet.org:2242"
+listen_port = 2234
+# Prefer a secret manager or environment variables for real credentials.
+# username = "user"
+# password = "pass"
+
+[listeners]
+regular_bind = "0.0.0.0:2234"
+advertised_port = 2234
+# obfuscated_bind = "0.0.0.0:2235"
+# obfuscated_advertised_port = 2235
+
+[profile]
+user_info_description = "slskr daemon"
+
+[timeouts]
+peer_response_seconds = 5
+
+[shares]
+dirs = ["/srv/slskr/shares/music"]
+follow_symlinks = false
+include_hidden = false
+scan_max_files = 50000
+# fixture = "Virtual/Example.flac=12345"
+
+[transfers]
+history_limit = 500
+max_active = 3
+allow_inbound = true
+allow_outbound = true
+
+[auth]
+# Loopback-only binds default to no API auth unless api_token is configured.
+# Non-loopback binds require an API token unless auth is explicitly disabled.
+disabled = false
+api_token = "replace-with-a-random-token"
