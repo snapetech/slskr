@@ -2499,22 +2499,122 @@ async fn route_http_request_with_headers(
         }),
         ("GET", "/api/stats") => {
             let session = state.session.read().await;
-            let stats = session.summary_json();
+            let session_stats = session.summary_json();
             drop(session);
+
+            let _listeners = state.listeners.read().await;
+            drop(_listeners);
+
+            let shares = state.shares.read().await;
+            let share_stats = shares.summary_json();
+            drop(shares);
+
+            let searches = state.searches.read().await;
+            let search_count = searches.records.len();
+            drop(searches);
+
+            let users = state.users.read().await;
+            let user_count = users.records.len();
+            drop(users);
+
+            let rooms = state.rooms.read().await;
+            let room_count = rooms.records.len();
+            drop(rooms);
+
+            let transfers = state.transfers.read().await;
+            let transfer_count = transfers.entries.len();
+            drop(transfers);
+
+            let body = format!(
+                "{{\"session\":{},\"listeners\":{{\"count\":1}},\"shares\":{},\"searches\":{},\"users\":{},\"rooms\":{},\"transfers\":{}}}",
+                session_stats,
+                share_stats,
+                search_count,
+                user_count,
+                room_count,
+                transfer_count
+            );
+
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: format!("{{\"session\":{}}}", stats),
+                body,
             })
         }
         ("GET", "/api/telemetry") => {
             let session = state.session.read().await;
             let is_connected = session.state == "connected";
+            let session_json = session.summary_json();
             drop(session);
+
+            let body = format!(
+                "{{\"health\":{{\"connected\":{}}},\"session\":{}}}",
+                is_connected,
+                session_json
+            );
+
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: format!("{{\"connected\":{}}}", is_connected),
+                body,
+            })
+        }
+        ("GET", "/api/metrics") => {
+            let session = state.session.read().await;
+            let _listeners = state.listeners.read().await;
+            let shares = state.shares.read().await;
+            let searches = state.searches.read().await;
+            let users = state.users.read().await;
+            let browse = state.browse.read().await;
+            let messages = state.messages.read().await;
+            let rooms = state.rooms.read().await;
+            let transfers = state.transfers.read().await;
+
+            let share_bytes: u64 = shares.entries.iter().map(|e| e.size).sum();
+
+            let metrics = format!(
+                "# HELP slskr_session_connected Session connection status\n\
+                 # TYPE slskr_session_connected gauge\n\
+                 slskr_session_connected {}\n\
+                 # HELP slskr_shares_files Number of shared files\n\
+                 # TYPE slskr_shares_files gauge\n\
+                 slskr_shares_files {}\n\
+                 # HELP slskr_shares_bytes Total bytes shared\n\
+                 # TYPE slskr_shares_bytes gauge\n\
+                 slskr_shares_bytes {}\n\
+                 # HELP slskr_searches_active Active search count\n\
+                 # TYPE slskr_searches_active gauge\n\
+                 slskr_searches_active {}\n\
+                 # HELP slskr_users_watched Watched user count\n\
+                 # TYPE slskr_users_watched gauge\n\
+                 slskr_users_watched {}\n\
+                 # HELP slskr_browse_cache Browse cache size\n\
+                 # TYPE slskr_browse_cache gauge\n\
+                 slskr_browse_cache {}\n\
+                 # HELP slskr_messages_total Message count\n\
+                 # TYPE slskr_messages_total counter\n\
+                 slskr_messages_total {}\n\
+                 # HELP slskr_rooms_joined Joined room count\n\
+                 # TYPE slskr_rooms_joined gauge\n\
+                 slskr_rooms_joined {}\n\
+                 # HELP slskr_transfers Transfer count\n\
+                 # TYPE slskr_transfers gauge\n\
+                 slskr_transfers{{state=\"total\"}} {}\n",
+                if session.state == "connected" { 1 } else { 0 },
+                shares.entries.len(),
+                share_bytes,
+                searches.records.len(),
+                users.records.len(),
+                browse.records.len(),
+                messages.records.len(),
+                rooms.records.len(),
+                transfers.entries.len()
+            );
+
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "text/plain; version=0.0.4; charset=utf-8",
+                body: metrics,
             })
         }
         ("GET", "/api/events") => {
@@ -2675,7 +2775,7 @@ fn capabilities_response() -> HttpResponse {
     HttpResponse {
         status: "200 OK",
         content_type: "application/json",
-        body: r#"{"client_version":"0.1","supports":["login","peers","shares","searches","transfers","users","messages","rooms"]}"#.to_owned(),
+        body: r#"{"api_version":"v0","client_version":"0.1","supports":["login","peers","shares","searches","transfers","users","messages","rooms"]}"#.to_owned(),
     }
 }
 
@@ -2683,7 +2783,7 @@ fn capabilities_negotiate_response(_body: &str) -> HttpResponse {
     HttpResponse {
         status: "200 OK",
         content_type: "application/json",
-        body: r#"{"capabilities":{"supports":["login","peers","shares","searches","transfers","users","messages","rooms"]}}"#.to_owned(),
+        body: r#"{"api_version":"v0","capabilities":{"supports":["login","peers","shares","searches","transfers","users","messages","rooms"]}}"#.to_owned(),
     }
 }
 
