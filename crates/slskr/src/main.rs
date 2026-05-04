@@ -2482,11 +2482,11 @@ async fn route_http_request_with_headers(
 ) -> Result<HttpResponse, String> {
     let route = routing::parse_route(method, path);
 
-    if let Err(_) = routing::check_route_auth(&state.config, method, route.normalized_path, authorization, &headers) {
-        return Ok(if authorization.is_none() {
-            routing::unauthorized_response()
+    if let Err(err) = routing::check_route_auth(&state.config, method, route.normalized_path, authorization, &headers) {
+        return Ok(if err == "forbidden" {
+            routing::forbidden_response("cross-site mutating request rejected")
         } else {
-            routing::forbidden_response("unauthorized")
+            routing::unauthorized_response()
         });
     }
 
@@ -2658,6 +2658,83 @@ async fn route_http_request_with_headers(
                 status: "200 OK",
                 content_type: "application/json",
                 body: shares.catalog_json(route.query),
+            })
+        }
+        ("GET", path) if path.starts_with("/api/files/") || path.starts_with("/api/v0/files/") => {
+            let folder = path.strip_prefix("/api/v0/files/")
+                .or_else(|| path.strip_prefix("/api/files/"))
+                .unwrap_or("");
+            
+            if folder.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            
+            // Parse extension filter from query
+            let mut extension_filter: Option<String> = None;
+            for (name, value) in query_params(route.query.unwrap_or_default()) {
+                if name == "extension" {
+                    extension_filter = Some(value);
+                }
+            }
+            
+            let filter = RecordListFilter::from_query(route.query);
+            let shares = state.shares.read().await;
+            
+            // Find the root
+            let root = shares.roots.iter()
+                .find(|r| r.label == folder);
+            
+            if root.is_none() {
+                drop(shares);
+                return Ok(routing::not_found_response());
+            }
+            
+            let root = root.unwrap();
+            
+            // Filter entries by folder prefix and extension
+            let mut entries: Vec<_> = shares.entries.iter()
+                .filter(|e| e.filename.starts_with(&format!("{}/", folder)))
+                .filter(|e| {
+                    extension_filter.as_deref()
+                        .map_or(true, |ext| e.extension == ext)
+                })
+                .collect();
+            
+            let filtered_count = entries.len();
+            
+            // Apply pagination
+            entries = entries.into_iter()
+                .skip(filter.offset)
+                .take(filter.limit.unwrap_or(usize::MAX))
+                .collect();
+            
+            let entries_json = entries.iter()
+                .map(|entry| {
+                    let path = entry.filename.strip_prefix(&format!("{}/", folder)).unwrap_or("");
+                    format!(
+                        "{{\"path\":\"{}\",\"virtual_path\":\"{}\",\"size\":{}}}",
+                        json_escape(path),
+                        json_escape(&entry.filename),
+                        entry.size
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            
+            let response_body = format!(
+                "{{\"label\":\"{}\",\"entries\":[{}],\"filtered_count\":{},\"offset\":{},\"limit\":{}}}",
+                json_escape(&root.label),
+                entries_json,
+                filtered_count,
+                filter.offset,
+                json_usize_option(filter.limit)
+            );
+            
+            drop(shares);
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "application/json",
+                body: response_body,
             })
         }
         ("POST", "/api/shares/rescan") => {
@@ -3211,17 +3288,61 @@ async fn route_http_request_with_headers(
                 None => return Ok(routing::bad_request_response("username is required")),
             };
             
-            let filename = extract_json_string_field(body, "filename").unwrap_or_default();
-            let size = extract_json_u64_field(body, "size").unwrap_or(0);
-            let extension = extract_json_string_field(body, "extension").unwrap_or_default();
+            let complete = extract_json_bool_field(body, "complete").unwrap_or(true);
+            
+            // Parse entries array - find the array in the JSON and manually parse objects
+            let mut entries = Vec::new();
+            if let Some(entries_start) = body.find("\"entries\":[") {
+                let after_bracket = entries_start + 11; // len("\"entries\":[")
+                if let Some(array_end) = body[after_bracket..].find(']') {
+                    let array_content = &body[after_bracket..after_bracket + array_end];
+                    
+                    // Split by }, but be careful with nested structures
+                    let mut current_obj_start = 0;
+                    let mut brace_depth = 0;
+                    for (i, ch) in array_content.chars().enumerate() {
+                        if ch == '{' {
+                            if brace_depth == 0 {
+                                current_obj_start = i;
+                            }
+                            brace_depth += 1;
+                        } else if ch == '}' {
+                            brace_depth -= 1;
+                            if brace_depth == 0 {
+                                let obj_str = &array_content[current_obj_start..=i];
+                                if let Some(filename) = extract_json_string_field(obj_str, "filename") {
+                                    let size = extract_json_u64_field(obj_str, "size").unwrap_or(0);
+                                    let extension = extract_json_string_field(obj_str, "extension")
+                                        .unwrap_or_else(|| {
+                                            filename.split('.').last().unwrap_or("").to_string()
+                                        });
+                                    entries.push(BrowseEntry {
+                                        filename,
+                                        size,
+                                        extension,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Fallback for single entry format (backward compatibility)
+            if entries.is_empty() {
+                if let Some(filename) = extract_json_string_field(body, "filename") {
+                    let size = extract_json_u64_field(body, "size").unwrap_or(0);
+                    let extension = extract_json_string_field(body, "extension").unwrap_or_default();
+                    entries.push(BrowseEntry {
+                        filename,
+                        size,
+                        extension,
+                    });
+                }
+            }
             
             let mut browse = state.browse.write().await;
-            let entries = vec![BrowseEntry {
-                filename: filename.clone(),
-                size,
-                extension,
-            }];
-            let record = browse.add_entries(username, entries, true);
+            let record = browse.add_entries(username, entries, complete);
             drop(browse);
             
             Ok(routing::ok_response(record.json()))
@@ -3261,7 +3382,7 @@ fn capabilities_response() -> HttpResponse {
     HttpResponse {
         status: "200 OK",
         content_type: "application/json",
-        body: r#"{"api_version":"v0","client_version":"0.1","supports":["login","peers","shares","searches","transfers","users","messages","rooms"]}"#.to_owned(),
+        body: r#"{"api_version":"v0","client_version":"0.1","supports":["login","peers","shares","searches","transfers","users","messages","rooms","room-list-sync","browser-session-auth"]}"#.to_owned(),
     }
 }
 
