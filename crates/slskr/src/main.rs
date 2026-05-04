@@ -6024,6 +6024,14 @@ scalar Long
             }
         }
         
+        // ADDITIONAL MISSING CONTACTS ENDPOINT (Phase 5)
+        ("GET", "/api/contacts/nearby") => {
+            let json = format!(
+                "{{\"nearby_contacts\":[],\"count\":0,\"status\":\"no_contacts_nearby\"}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
         // SHAREGROUPS ENDPOINTS
         ("GET", "/api/sharegroups") => {
             let sharegroups = state.sharegroups.read().await;
@@ -6822,12 +6830,84 @@ scalar Long
             Ok(routing::ok_response(json))
         }
         
-        ("GET", "/api/transfers/downloads/user-stats") => {
-            let json = format!("{{\"users\":[],\"count\":0}}");
-            Ok(routing::ok_response(json))
-        }
-        
-        // BANS & BLOCKING ENDPOINTS
+         ("GET", "/api/transfers/downloads/user-stats") => {
+             let json = format!("{{\"users\":[],\"count\":0}}");
+             Ok(routing::ok_response(json))
+         }
+         
+         // ADDITIONAL MISSING GET ENDPOINTS (Phase 5)
+         ("GET", "/api/source-providers") => {
+             let json = format!(
+                 "{{\"providers\":[],\"count\":0}}"
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", "/api/songid/runs") => {
+             let json = format!(
+                 "{{\"runs\":[],\"count\":0}}"
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", path) if path.starts_with("/api/songid/runs/") && path.len() > 17 && !path.contains("/forensic-matrix") => {
+             let run_id = &path[17..];
+             let json = format!(
+                 "{{\"id\":\"{}\",\"results\":[],\"count\":0}}",
+                 json_escape(run_id)
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", path) if path.starts_with("/api/songid/runs/") && path.contains("/forensic-matrix") => {
+             let run_id = path.split('/').nth(4).unwrap_or("unknown");
+             let json = format!(
+                 "{{\"run_id\":\"{}\",\"matrix\":[],\"count\":0}}",
+                 json_escape(run_id)
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", "/api/soulseek/users/similar") => {
+             let json = format!(
+                 "{{\"similar_users\":[],\"count\":0}}"
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", path) if path.starts_with("/api/soulseek/users/") && path.contains("/interests") && path.len() > 20 => {
+             let username = path.split('/').nth(4).unwrap_or("unknown");
+             let json = format!(
+                 "{{\"username\":\"{}\",\"interests\":[],\"count\":0}}",
+                 json_escape(username)
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", "/api/swarm/analytics/recommendations") => {
+             let json = format!(
+                 "{{\"recommendations\":[],\"count\":0}}"
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", "/api/telemetry/metrics") => {
+             let json = format!(
+                 "{{\"metrics\":{},\"timestamp\":{},\"version\":\"1.0.0\"}}",
+                 "{}",
+                 unix_timestamp()
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         ("GET", "/api/telemetry/metrics/kpi") => {
+             let json = format!(
+                 "{{\"kpis\":[],\"count\":0}}"
+             );
+             Ok(routing::ok_response(json))
+         }
+         
+         // BANS & BLOCKING ENDPOINTS
         ("POST", path) if path.contains("/bans/username") => {
             let username = extract_json_string_field(body, "username").unwrap_or_default();
             let json = format!(
@@ -6969,6 +7049,65 @@ scalar Long
             let json = format!(
                 "{{\"channel\":\"{}\",\"deleted\":true,\"status\":\"success\"}}",
                 json_escape(channel)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        // ADDITIONAL MISSING INTEGRATION & PLATFORM ENDPOINTS (Phase 5)
+        ("GET", "/api/integrations/spotify/status") => {
+            let json = format!(
+                "{{\"connected\":false,\"status\":\"disconnected\",\"user\":null}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/integrations/lidarr/status") => {
+            let json = format!(
+                "{{\"connected\":false,\"status\":\"disconnected\",\"url\":null}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/integrations/lidarr/wanted/missing") => {
+            let json = format!(
+                "{{\"missing_albums\":[],\"count\":0}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/musicbrainz/albums/completion") => {
+            let json = format!(
+                "{{\"completion_status\":[],\"average_completion\":0.0}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", path) if path.starts_with("/api/musicbrainz/artist/") && path.contains("/discography-coverage") => {
+            let artist = path.split('/').nth(4).unwrap_or("unknown");
+            let json = format!(
+                "{{\"artist\":\"{}\",\"coverage\":0.0,\"releases\":0}}",
+                json_escape(artist)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/musicbrainz/release-radar/notifications") => {
+            let json = format!(
+                "{{\"notifications\":[],\"count\":0}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/musicbrainz/release-radar/subscriptions") => {
+            let json = format!(
+                "{{\"subscriptions\":[],\"count\":0}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/listening-party") => {
+            let json = format!(
+                "{{\"active_parties\":[],\"count\":0}}"
             );
             Ok(routing::ok_response(json))
         }
