@@ -1961,6 +1961,7 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "chrono",
+ "flate2",
  "hex",
  "hmac",
  "reqwest",
