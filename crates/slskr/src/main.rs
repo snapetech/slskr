@@ -2745,6 +2745,389 @@ async fn route_http_request_with_headers(
                 body: transfers.stats_json(),
             })
         }
+        ("POST", "/api/searches") => {
+            let query = match extract_json_string_field(body, "query") {
+                Some(q) => q,
+                None => return Ok(routing::bad_request_response("query is required")),
+            };
+            
+            let target_str = extract_json_string_field(body, "target").unwrap_or_else(|| "global".to_string());
+            let username_opt = extract_json_string_field(body, "username");
+            let room_opt = extract_json_string_field(body, "room");
+            
+            if target_str == "user" && username_opt.is_none() {
+                return Ok(routing::bad_request_response("username is required for user target"));
+            }
+            if target_str == "room" && room_opt.is_none() {
+                return Ok(routing::bad_request_response("room is required for room target"));
+            }
+            
+            let shares = state.shares.read().await;
+            let matching_results = search_shares(&shares.entries, &query);
+            drop(shares);
+            
+            let mut searches = state.searches.write().await;
+            let target_name = if target_str == "user" { username_opt.clone() } else if target_str == "room" { room_opt.clone() } else { None };
+            
+            let static_target: &'static str = Box::leak(target_str.clone().into_boxed_str());
+            let record = searches.create(query.clone(), static_target, target_name, matching_results, 300);
+            drop(searches);
+            
+            let dispatch_target = match target_str.as_str() {
+                "user" => SearchDispatchTarget::User(username_opt.unwrap()),
+                "room" => SearchDispatchTarget::Room(room_opt.unwrap()),
+                "wishlist" => SearchDispatchTarget::Wishlist,
+                _ => SearchDispatchTarget::Global,
+            };
+            
+            send_session_command(state, SessionCommand::Search { token: record.token, query, target: dispatch_target }).await.ok();
+            
+            Ok(routing::created_response(record.json()))
+        }
+        
+        ("POST", path) if search_token_path(route.normalized_path, "/complete").is_some() => {
+            let token = search_token_path(route.normalized_path, "/complete").unwrap();
+            let mut searches = state.searches.write().await;
+            if let Some(record) = searches.complete(token) {
+                let body_json = record.json();
+                drop(searches);
+                Ok(routing::ok_response(body_json))
+            } else {
+                drop(searches);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        ("POST", "/api/searches/prune") => {
+            let mut searches = state.searches.write().await;
+            let pruned = searches.prune_expired();
+            let remaining = searches.records.len();
+            drop(searches);
+            Ok(routing::ok_response(format!("{{\"pruned\":{},\"remaining\":{}}}", pruned, remaining)))
+        }
+        
+        ("POST", "/api/search-responses") => {
+            let token = match extract_json_u64_field(body, "token") {
+                Some(t) => t as u32,
+                None => return Ok(routing::bad_request_response("token is required")),
+            };
+            
+            let peer_username = extract_json_string_field(body, "peer_username");
+            let filename = extract_json_string_field(body, "filename");
+            let size = extract_json_u64_field(body, "size");
+            let slot_free = extract_json_bool_field(body, "slot_free");
+            let average_speed = extract_json_u32_field(body, "average_speed");
+            let queue_length = extract_json_u32_field(body, "queue_length");
+            
+            let mut searches = state.searches.write().await;
+            if let Some(record) = searches.records.iter_mut().find(|r| r.token == token) {
+                let entry = SearchResultEntry {
+                    peer_username: peer_username.clone(),
+                    filename: filename.clone().unwrap_or_default(),
+                    size: size.unwrap_or(0),
+                    slot_free,
+                    average_speed,
+                    queue_length,
+                    extension: filename.as_ref().and_then(|f| f.split('.').last().map(|s| s.to_string())).unwrap_or_default(),
+                };
+                record.results.push(entry);
+                record.updated_at = unix_timestamp();
+                let response_json = record.json();
+                drop(searches);
+                Ok(routing::ok_response(response_json))
+            } else {
+                drop(searches);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // TRANSFER ENDPOINTS
+        ("POST", "/api/transfers") => {
+            let filename = match extract_json_string_field(body, "filename") {
+                Some(f) => f,
+                None => return Ok(routing::bad_request_response("filename is required")),
+            };
+            
+            let direction = extract_json_u32_field(body, "direction").unwrap_or(0);
+            let peer_username = extract_json_string_field(body, "peer_username");
+            let local_path = extract_json_string_field(body, "local_path");
+            let size = extract_json_u64_field(body, "size");
+            
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(direction, peer_username, filename, local_path, size);
+            drop(transfers);
+            
+            Ok(routing::created_response(entry.json()))
+        }
+        
+        ("POST", path) if transfer_action_path(route.normalized_path).is_some() => {
+            if let Some((id, action)) = transfer_action_path(route.normalized_path) {
+                let mut transfers = state.transfers.write().await;
+                
+                if action == "start" {
+                    if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        if let Some(ref username) = entry.peer_username {
+                            entry.status = "peer_lookup".to_owned();
+                            entry.updated_at = unix_timestamp();
+                            let json_response = entry.json();
+                            let username_clone = username.clone();
+                            drop(transfers);
+                            
+                            send_session_command(state, SessionCommand::TransferPeer { id, username: username_clone }).await.ok();
+                            
+                            Ok(routing::ok_response(json_response))
+                        } else {
+                            entry.status = "in_progress".to_owned();
+                            entry.updated_at = unix_timestamp();
+                            let json_response = entry.json();
+                            drop(transfers);
+                            Ok(routing::ok_response(json_response))
+                        }
+                    } else {
+                        drop(transfers);
+                        Ok(routing::not_found_response())
+                    }
+                } else if action == "progress" {
+                    let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
+                    if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        entry.bytes_transferred = bytes_transferred;
+                        entry.updated_at = unix_timestamp();
+                        let json_response = entry.json();
+                        drop(transfers);
+                        Ok(routing::ok_response(json_response))
+                    } else {
+                        drop(transfers);
+                        Ok(routing::not_found_response())
+                    }
+                } else if action == "complete" {
+                    let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
+                    let status_str = extract_json_string_field(body, "status").unwrap_or_else(|| "succeeded".to_string());
+                    if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        entry.bytes_transferred = bytes_transferred;
+                        entry.status = status_str;
+                        entry.updated_at = unix_timestamp();
+                        let json_response = entry.json();
+                        drop(transfers);
+                        Ok(routing::ok_response(json_response))
+                    } else {
+                        drop(transfers);
+                        Ok(routing::not_found_response())
+                    }
+                } else {
+                    drop(transfers);
+                    Ok(routing::not_found_response())
+                }
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // MESSAGE ENDPOINTS
+        ("POST", "/api/messages") => {
+            let username = match extract_json_string_field(body, "username") {
+                Some(u) => u,
+                None => return Ok(routing::bad_request_response("username is required")),
+            };
+            
+            let message_body = match extract_json_string_field(body, "body") {
+                Some(b) => b,
+                None => return Ok(routing::bad_request_response("body is required")),
+            };
+            
+            let mut messages = state.messages.write().await;
+            let record = messages.add(username.clone(), Box::leak("outbound".to_string().into_boxed_str()), message_body.clone());
+            drop(messages);
+            
+            send_session_command(state, SessionCommand::MessageUser { username, body: message_body }).await.ok();
+            
+            Ok(routing::created_response(record.json()))
+        }
+        
+        ("POST", "/api/messages/inbound") => {
+            let username = match extract_json_string_field(body, "username") {
+                Some(u) => u,
+                None => return Ok(routing::bad_request_response("username is required")),
+            };
+            
+            let message_body = match extract_json_string_field(body, "body") {
+                Some(b) => b,
+                None => return Ok(routing::bad_request_response("body is required")),
+            };
+            
+            let mut messages = state.messages.write().await;
+            let record = messages.add(username, Box::leak("inbound".to_string().into_boxed_str()), message_body);
+            drop(messages);
+            
+            Ok(routing::created_response(record.json()))
+        }
+        
+        ("POST", path) if message_ack_path(route.normalized_path).is_some() => {
+            let id = message_ack_path(route.normalized_path).unwrap();
+            let mut messages = state.messages.write().await;
+            
+            if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
+                record.acknowledged = true;
+                record.updated_at = unix_timestamp();
+                let json_response = record.json();
+                drop(messages);
+                
+                send_session_command(state, SessionCommand::MessageAcked { id: id as u32 }).await.ok();
+                
+                Ok(routing::ok_response(json_response))
+            } else {
+                drop(messages);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // ROOM ENDPOINTS
+        ("POST", "/api/rooms/refresh") => {
+            send_session_command(state, SessionCommand::RefreshRooms).await.ok();
+            Ok(routing::accepted_response("{}".to_string()))
+        }
+        
+        ("POST", path) if room_join_path(route.normalized_path).is_some() => {
+            let room_name = room_join_path(route.normalized_path).unwrap();
+            let mut rooms = state.rooms.write().await;
+            let record = rooms.join(room_name.to_string());
+            drop(rooms);
+            
+            send_session_command(state, SessionCommand::JoinRoom(room_name.to_string())).await.ok();
+            
+            Ok(routing::created_response(record.json()))
+        }
+        
+        ("DELETE", path) if room_join_path(route.normalized_path).is_some() => {
+            let room_name = room_join_path(route.normalized_path).unwrap();
+            let mut rooms = state.rooms.write().await;
+            
+            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
+                record.joined = false;
+                record.updated_at = unix_timestamp();
+                let json_response = record.json();
+                drop(rooms);
+                
+                send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
+                
+                Ok(routing::ok_response(json_response))
+            } else {
+                drop(rooms);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        ("POST", path) if room_messages_path(route.normalized_path).is_some() => {
+            let room_name = room_messages_path(route.normalized_path).unwrap();
+            let username = extract_json_string_field(body, "username").unwrap_or_else(|| "unknown".to_string());
+            let message_body = extract_json_string_field(body, "body").unwrap_or_default();
+            
+            let mut rooms = state.rooms.write().await;
+            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
+                record.messages.push(RoomMessageRecord {
+                    username: username.clone(),
+                    body: message_body.clone(),
+                    created_at: unix_timestamp(),
+                });
+                record.updated_at = unix_timestamp();
+                let json_response = record.json();
+                drop(rooms);
+                
+                send_session_command(state, SessionCommand::SayRoom { room: room_name.to_string(), body: message_body }).await.ok();
+                
+                Ok(routing::ok_response(json_response))
+            } else {
+                drop(rooms);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // USER ENDPOINTS
+        ("POST", "/api/users/watch") => {
+            let username = match extract_json_string_field(body, "username") {
+                Some(u) => u,
+                None => return Ok(routing::bad_request_response("username is required")),
+            };
+            
+            let mut users = state.users.write().await;
+            let record = users.watch(username.clone());
+            drop(users);
+            
+            send_session_command(state, SessionCommand::WatchUser(username)).await.ok();
+            
+            Ok(routing::created_response(record.json()))
+        }
+        
+        ("DELETE", path) if user_watch_path(route.normalized_path).is_some() => {
+            let username = user_watch_path(route.normalized_path).unwrap();
+            let mut users = state.users.write().await;
+            
+            if let Some(record) = users.unwatch(username) {
+                drop(users);
+                
+                send_session_command(state, SessionCommand::UnwatchUser(username.to_string())).await.ok();
+                
+                Ok(routing::ok_response(record.json()))
+            } else {
+                drop(users);
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        ("POST", path) if user_stats_request_path(route.normalized_path).is_some() => {
+            let username = user_stats_request_path(route.normalized_path).unwrap();
+            send_session_command(state, SessionCommand::RequestUserStats(username.to_string())).await.ok();
+            Ok(routing::accepted_response(format!("{{\"username\":\"{}\"}}", json_escape(username))))
+        }
+        
+        ("POST", path) if user_browse_request_path(route.normalized_path).is_some() => {
+            let username = user_browse_request_path(route.normalized_path).unwrap();
+            
+            let mut browse = state.browse.write().await;
+            let record = browse.request(username.to_string());
+            drop(browse);
+            
+            send_session_command(state, SessionCommand::BrowseUser(username.to_string())).await.ok();
+            
+            Ok(routing::accepted_response(record.json()))
+        }
+        
+        ("POST", path) if user_browse_folder_path(route.normalized_path).is_some() => {
+            let username = user_browse_folder_path(route.normalized_path).unwrap();
+            let folder = extract_json_string_field(body, "folder").unwrap_or_default();
+            
+            send_session_command(state, SessionCommand::BrowseFolder { username: username.to_string(), folder: folder.clone() }).await.ok();
+            
+            Ok(routing::accepted_response(format!("{{\"username\":\"{}\",\"folder\":\"{}\",\"status\":\"requested\"}}", json_escape(username), json_escape(&folder))))
+        }
+        
+        ("POST", path) if user_browse_fail_path(route.normalized_path).is_some() => {
+            let username = user_browse_fail_path(route.normalized_path).unwrap();
+            let reason = extract_json_string_field(body, "reason").unwrap_or_default();
+            
+            let mut browse = state.browse.write().await;
+            if let Some(r) = browse.records.iter_mut().find(|b| b.username == username) {
+                r.status = Box::leak("failed".to_string().into_boxed_str());
+                r.reason = if reason.is_empty() { None } else { Some(reason.clone()) };
+                r.updated_at = unix_timestamp();
+            }
+            drop(browse);
+            
+            Ok(routing::ok_response(format!("{{\"username\":\"{}\",\"status\":\"failed\",\"reason\":\"{}\"}}", json_escape(username), json_escape(&reason))))
+        }
+        
+        // BROWSE-RESPONSE ENDPOINT
+        ("POST", "/api/browse-responses") => {
+            let username = match extract_json_string_field(body, "username") {
+                Some(u) => u,
+                None => return Ok(routing::bad_request_response("username is required")),
+            };
+            
+            let mut browse = state.browse.write().await;
+            let record = browse.request(username);
+            drop(browse);
+            
+            Ok(routing::ok_response(record.json()))
+        }
         _ => Ok(routing::not_found_response()),
     }
 }
@@ -2830,6 +3213,14 @@ fn extract_json_bool_field(body: &str, field: &str) -> Option<bool> {
         "false" => Some(false),
         _ => None,
     }
+}
+
+fn extract_json_u64_field(body: &str, field: &str) -> Option<u64> {
+    let key = format!("\"{}\"", field);
+    let after_key = json_field_after_key(body, &key)?;
+    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+    let end = after_colon.find([',', '}']).unwrap_or(after_colon.len());
+    after_colon[..end].trim().parse().ok()
 }
 
 async fn serve(once: bool) -> Result<(), String> {
