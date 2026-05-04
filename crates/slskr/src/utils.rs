@@ -784,7 +784,7 @@ pub fn error_response_json(code: ErrorCode, message: &str) -> String {
         "{{\"error\":\"{}\",\"code\":\"{}\",\"message\":\"{}\"}}",
         code.code_string(),
         code.code_string(),
-        json_escape(message)
+        crate::config::json_escape(message)
     )
 }
 
