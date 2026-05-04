@@ -1,60 +1,11 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: soulseekr
-
----
-
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: soulseekr-config
-  namespace: soulseekr
-data:
-  config.toml: |
-    [server]
-    host = "0.0.0.0"
-    port = 8080
-    
-    [logging]
-    level = "info"
-    
-    [cache]
-    enabled = true
-    ttl_seconds = 300
-    
-    [rate_limit]
-    enabled = true
-    requests_per_second = 1000
-    
-    [database]
-    path = "/data/soulseekr.db"
-
----
-
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: soulseekr-data-pvc
-  namespace: soulseekr
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-  storageClassName: fast-ssd
-
----
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: soulseekr-api
+  name: slskr-api
   namespace: soulseekr
   labels:
-    app: soulseekr
-    component: api
+    app: slskr-api
+    version: "1.0"
 spec:
   replicas: 3
   strategy:
@@ -64,29 +15,26 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: soulseekr
-      component: api
+      app: slskr-api
   template:
     metadata:
       labels:
-        app: soulseekr
-        component: api
+        app: slskr-api
+        version: "1.0"
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
-        prometheus.io/path: "/metrics"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/api/metrics"
     spec:
-      serviceAccountName: soulseekr
+      serviceAccountName: slskr
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
-      
       containers:
-      - name: soulseekr
-        image: soulseekr:latest
-        imagePullPolicy: IfNotPresent
-        
+      - name: slskr-api
+        image: slskr:latest
+        imagePullPolicy: Always
         ports:
         - name: http
           containerPort: 8080
@@ -94,237 +42,139 @@ spec:
         - name: metrics
           containerPort: 9090
           protocol: TCP
-        
+        envFrom:
+        - configMapRef:
+            name: slskr-config
         env:
-        - name: RUST_LOG
-          value: "info"
-        - name: DATABASE_URL
-          value: "sqlite:///data/soulseekr.db"
-        
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         resources:
           requests:
-            cpu: 500m
-            memory: 512Mi
+            cpu: 250m
+            memory: 256Mi
           limits:
-            cpu: 2000m
-            memory: 2Gi
-        
+            cpu: 1000m
+            memory: 512Mi
         livenessProbe:
           httpGet:
             path: /api/health
             port: http
-          initialDelaySeconds: 30
+          initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
-        
         readinessProbe:
           httpGet:
             path: /api/health
             port: http
-          initialDelaySeconds: 10
+          initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 2
-        
-        startupProbe:
-          httpGet:
-            path: /api/health
-            port: http
-          initialDelaySeconds: 0
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 30
-        
         volumeMounts:
         - name: data
           mountPath: /data
-        - name: config
-          mountPath: /etc/soulseekr
-          readOnly: true
-        
+        - name: cache
+          mountPath: /tmp
         securityContext:
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
+          readOnlyRootFilesystem: false
           capabilities:
             drop:
             - ALL
-      
+      - name: dashboard
+        image: node:20-alpine
+        ports:
+        - name: dashboard
+          containerPort: 3000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: slskr-dashboard-config
+        workingDir: /app
+        command: ["npm"]
+        args: ["run", "preview"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: dashboard
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        volumeMounts:
+        - name: dashboard
+          mountPath: /app
       volumes:
       - name: data
-        persistentVolumeClaim:
-          claimName: soulseekr-data-pvc
-      - name: config
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      - name: dashboard
         configMap:
-          name: soulseekr-config
-
+          name: slskr-dashboard-assets
 ---
-
-apiVersion: v1
-kind: Service
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: soulseekr-api
+  name: slskr-dashboard-standalone
   namespace: soulseekr
   labels:
-    app: soulseekr
-    component: api
+    app: slskr-dashboard
+    version: "1.0"
 spec:
-  type: ClusterIP
-  ports:
-  - name: http
-    port: 8080
-    targetPort: http
-    protocol: TCP
-  - name: metrics
-    port: 9090
-    targetPort: metrics
-    protocol: TCP
-  selector:
-    app: soulseekr
-    component: api
-
----
-
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: soulseekr-api-hpa
-  namespace: soulseekr
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: soulseekr-api
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      policies:
-      - type: Percent
-        value: 50
-        periodSeconds: 15
-    scaleUp:
-      stabilizationWindowSeconds: 0
-      policies:
-      - type: Percent
-        value: 100
-        periodSeconds: 30
-      - type: Pods
-        value: 2
-        periodSeconds: 30
-      selectPolicy: Max
-
----
-
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: soulseekr-api-pdb
-  namespace: soulseekr
-spec:
-  minAvailable: 2
+  replicas: 2
   selector:
     matchLabels:
-      app: soulseekr
-      component: api
-
----
-
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: soulseekr
-  namespace: soulseekr
-
----
-
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: soulseekr
-rules:
-- apiGroups: [""]
-  resources: ["pods", "services"]
-  verbs: ["get", "list", "watch"]
-
----
-
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: soulseekr
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: soulseekr
-subjects:
-- kind: ServiceAccount
-  name: soulseekr
-  namespace: soulseekr
-
----
-
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: soulseekr-metrics
-  namespace: soulseekr
-spec:
-  selector:
-    matchLabels:
-      app: soulseekr
-      component: api
-  endpoints:
-  - port: metrics
-    interval: 30s
-    path: /metrics
-
----
-
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: soulseekr-network-policy
-  namespace: soulseekr
-spec:
-  podSelector:
-    matchLabels:
-      app: soulseekr
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 8080
-  egress:
-  - to:
-    - namespaceSelector: {}
-    ports:
-    - protocol: TCP
-      port: 53
-    - protocol: UDP
-      port: 53
-  - to:
-    - podSelector: {}
-    ports:
-    - protocol: TCP
-      port: 5432
+      app: slskr-dashboard
+  template:
+    metadata:
+      labels:
+        app: slskr-dashboard
+        version: "1.0"
+    spec:
+      containers:
+      - name: dashboard
+        image: nginx:alpine
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: dashboard-dist
+          mountPath: /usr/share/nginx/html
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      volumes:
+      - name: dashboard-dist
+        configMap:
+          name: slskr-dashboard-assets
+      - name: nginx-config
+        configMap:
+          name: slskr-nginx-config

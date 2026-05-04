@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slskr-config
+  namespace: soulseekr
+data:
+  SLSKR_LOG_LEVEL: "info"
+  SLSKR_API_PORT: "8080"
+  SLSKR_METRICS_PORT: "9090"
+  SLSKR_SESSION_MAX_IDLE: "300"
+  SLSKR_TRANSFER_MAX_ACTIVE: "8"
+  SLSKR_SEARCH_RESULT_LIMIT: "100"
+  SLSKR_DATABASE_PATH: "/data/slskr.db"
+  SLSKR_WEBHOOK_TIMEOUT: "30"
+  SLSKR_WEBHOOK_MAX_RETRIES: "3"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slskr-dashboard-config
+  namespace: soulseekr
+data:
+  API_URL: "http://localhost:8080"
+  POLL_INTERVAL: "5000"

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: soulseekr
+  labels:
+    app.kubernetes.io/name: soulseekr
+    app.kubernetes.io/version: "1.0"
+    monitoring: enabled

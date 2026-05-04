@@ -1,0 +1,71 @@
+prometheus:
+  prometheusSpec:
+    retention: 30d
+    
+    # Service Monitor selectors
+    serviceMonitorSelector:
+      matchLabels:
+        prometheus: "true"
+    serviceMonitorNamespaceSelector:
+      matchNames:
+      - soulseekr
+      - monitoring
+    
+    # Pod Monitor selectors
+    podMonitorSelector:
+      matchLabels:
+        prometheus: "true"
+    podMonitorNamespaceSelector:
+      matchNames:
+      - soulseekr
+      - monitoring
+    
+    # Storage
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+    
+    # Resource limits
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 4Gi
+    
+    # External labels
+    externalLabels:
+      cluster: production
+      environment: prod
+    
+    # Scrape config
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          resources:
+            requests:
+              storage: 10Gi
+
+grafana:
+  enabled: true
+  adminPassword: changeme
+  persistence:
+    enabled: true
+    size: 10Gi
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

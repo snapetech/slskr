@@ -1,0 +1,21 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: slskr-api-pdb
+  namespace: soulseekr
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: slskr-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: slskr-dashboard-pdb
+  namespace: soulseekr
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: slskr-dashboard
