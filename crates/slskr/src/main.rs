@@ -11,6 +11,7 @@ mod utils;
 mod storage;
 mod routing;
 mod validation;  // Phase 11: Request validation and pagination
+mod pagination;  // Phase 11: Pagination helpers
 mod websocket;
 mod tracing;
 mod webhooks;
