@@ -14305,3 +14305,6 @@ mod tests {
 // mod sharding;    // Database sharding by user_id
 // mod grpc_api;    // gRPC protocol (70% payload reduction)
 // mod cluster;     // Multi-instance clustering & load balancing
+
+mod http2_multiplexing;  // HTTP/2 stream multiplexing (100 streams per connection)
+mod request_pipelining;  // Request batching/pipelining for throughput
