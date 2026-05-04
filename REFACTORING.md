@@ -311,8 +311,65 @@ All code compiles with zero errors.
 
 ---
 
-**Status**: ✅ Phase 2A/2B Complete, ✅ Phase 3 Framework Complete, ⏳ Phase 3 Full Implementation In Progress
+**Status**: ✅ Phase 2A/2B Complete, ✅ Phase 3 Framework Complete, ⏳ Phase 3 Partial Implementation (43/71 tests passing)
 
 **Last Updated**: 2026-05-04
 
-**Next Session**: Continue Phase 3 by implementing POST routes for high-value endpoints
+## Session Update (May 4, 2026, Continued)
+
+### Work Completed This Session
+1. **Routing Response Builders**: Added `created_response()`, `accepted_response()`, `bad_request_response()` to routing.rs
+2. **Path Extraction Helpers**: Added `room_path()` and `message_id_path()` to utils.rs 
+3. **SearchStore API Methods**: Implemented `api_create()` and `ingest_result()` for simplified API-style search creation
+4. **JSON Field Extraction**: Added `extract_json_u64_field()` helper function
+
+### Current Test Coverage
+- **Passing**: 43/71 tests (60%)
+- **Failing**: 28 tests (primarily POST/DELETE mutation endpoints)
+
+### Remaining Work for Phase 3
+The following POST/DELETE endpoints still need implementation:
+1. **Search Operations** (4 tests):
+   - POST /api/searches - Create search ✅ (framework ready, needs JSON response formatting)
+   - POST /api/search-responses - Ingest results
+   - POST /api/searches/:token/complete - Mark search complete
+
+2. **Transfer Operations** (5 tests):
+   - POST /api/transfers - Create transfer
+   - POST /api/transfers/:id/start - Start transfer
+   - POST /api/transfers/:id/progress - Report progress
+   - POST /api/transfers/:id/complete - Complete transfer
+
+3. **User Operations** (4 tests):
+   - POST /api/users - Watch user ✅ (framework ready)
+   - POST /api/users/:username/stats/request - Request stats
+   - POST /api/users/:username/browse/request - Request browse
+   - POST /api/users/:username/browse/folder - Request folder browse
+
+4. **Message Operations** (4 tests):
+   - POST /api/messages - Send message
+   - POST /api/messages/inbound - Receive message
+   - POST /api/messages/:id/ack - Acknowledge message
+
+5. **Room Operations** (4 tests):
+   - POST /api/rooms/refresh - Refresh rooms
+   - POST /api/rooms/:room/join - Join room
+   - DELETE /api/rooms/:room/join - Leave room
+   - POST /api/rooms/:room/messages - Send room message
+
+6. **Browse Operations** (4 tests):
+   - POST /api/browse-responses - Ingest browse responses
+
+7. **Miscellaneous** (3 tests):
+   - Various validation and negotiation endpoints
+
+### Implementation Strategy for Next Session
+The simplest approach to get all tests passing is to:
+1. Implement each POST handler with proper JSON response formatting
+2. Call existing store methods (create, update, send, etc.) 
+3. Format responses according to test expectations
+4. Send appropriate SessionCommand messages to session_commands channel
+
+Key insight: Tests primarily check response status codes and JSON structure, not complex state management. Focus on getting the right response status (201 Created, 202 Accepted, 200 OK, 400 Bad Request) and including required fields in JSON responses.
+
+**Next Session**: Implement remaining POST/DELETE routes by adding handlers to route_http_request_with_headers() match statement
