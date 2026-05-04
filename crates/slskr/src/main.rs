@@ -2690,6 +2690,295 @@ impl WishlistStore {
     }
 }
 
+// Contact Models
+#[derive(Clone, Debug)]
+struct ContactRecord {
+    id: String,
+    username: String,
+    online: bool,
+    status: String,
+    free_upload_slots: Option<u32>,
+    queue_length: Option<u32>,
+    created_at: u64,
+    updated_at: u64,
+}
+
+impl ContactRecord {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"username\":\"{}\",\"online\":{},\"status\":\"{}\",\"free_upload_slots\":{},\"queue_length\":{},\"created_at\":{},\"updated_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.username),
+            self.online,
+            json_escape(&self.status),
+            json_u32_option(self.free_upload_slots),
+            json_u32_option(self.queue_length),
+            self.created_at,
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct ContactStore {
+    records: Vec<ContactRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl ContactStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn create(&mut self, username: String) -> ContactRecord {
+        let now = unix_timestamp();
+        let id = format!("contact-{}", self.next_id);
+        self.next_id += 1;
+        let record = ContactRecord {
+            id,
+            username,
+            online: false,
+            status: "offline".to_string(),
+            free_upload_slots: None,
+            queue_length: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn get(&self, id: &str) -> Option<ContactRecord> {
+        self.records.iter().find(|r| r.id == id).cloned()
+    }
+
+    fn update(&mut self, id: &str, username: Option<String>, online: Option<bool>) -> Option<ContactRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == id)?;
+        if let Some(u) = username {
+            record.username = u;
+        }
+        if let Some(o) = online {
+            record.online = o;
+            record.status = if o { "online".to_string() } else { "offline".to_string() };
+        }
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn delete(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.records.iter().position(|r| r.id == id) {
+            self.records.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .records
+            .iter()
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.username.to_ascii_lowercase().contains(q))
+            })
+            .collect::<Vec<_>>();
+        let filtered_count = records.len();
+        let records = records
+            .into_iter()
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(ContactRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            filtered_count,
+            filter.offset,
+            json_usize_option(filter.limit),
+            self.updated_at
+        )
+    }
+}
+
+// ShareGroup Models
+#[derive(Clone, Debug)]
+struct ShareGroupMember {
+    username: String,
+    added_at: u64,
+}
+
+impl ShareGroupMember {
+    fn json(&self) -> String {
+        format!(
+            "{{\"username\":\"{}\",\"added_at\":{}}}",
+            json_escape(&self.username),
+            self.added_at
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ShareGroupRecord {
+    id: String,
+    name: String,
+    description: String,
+    members: Vec<ShareGroupMember>,
+    created_at: u64,
+    updated_at: u64,
+}
+
+impl ShareGroupRecord {
+    fn json(&self) -> String {
+        let members = self
+            .members
+            .iter()
+            .map(ShareGroupMember::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"description\":\"{}\",\"members\":[{}],\"member_count\":{},\"created_at\":{},\"updated_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.name),
+            json_escape(&self.description),
+            members,
+            self.members.len(),
+            self.created_at,
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct ShareGroupStore {
+    records: Vec<ShareGroupRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl ShareGroupStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn create(&mut self, name: String, description: String) -> ShareGroupRecord {
+        let now = unix_timestamp();
+        let id = format!("sg-{}", self.next_id);
+        self.next_id += 1;
+        let record = ShareGroupRecord {
+            id,
+            name,
+            description,
+            members: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn get(&self, id: &str) -> Option<ShareGroupRecord> {
+        self.records.iter().find(|r| r.id == id).cloned()
+    }
+
+    fn update(&mut self, id: &str, name: String, description: String) -> Option<ShareGroupRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == id)?;
+        record.name = name;
+        record.description = description;
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn delete(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.records.iter().position(|r| r.id == id) {
+            self.records.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn add_member(&mut self, group_id: &str, username: String) -> Option<ShareGroupRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == group_id)?;
+        if !record.members.iter().any(|m| m.username == username) {
+            record.members.push(ShareGroupMember {
+                username,
+                added_at: now,
+            });
+            record.updated_at = now;
+            self.updated_at = now;
+        }
+        Some(record.clone())
+    }
+
+    fn remove_member(&mut self, group_id: &str, username: &str) -> Option<ShareGroupRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == group_id)?;
+        if let Some(pos) = record.members.iter().position(|m| m.username == username) {
+            record.members.remove(pos);
+            record.updated_at = now;
+            self.updated_at = now;
+            Some(record.clone())
+        } else {
+            None
+        }
+    }
+
+    fn json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .records
+            .iter()
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+            })
+            .collect::<Vec<_>>();
+        let filtered_count = records.len();
+        let records = records
+            .into_iter()
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(ShareGroupRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            filtered_count,
+            filter.offset,
+            json_usize_option(filter.limit),
+            self.updated_at
+        )
+    }
+}
+
 #[derive(Debug)]
 struct AppState {
     config: AppConfig,
@@ -2706,6 +2995,8 @@ struct AppState {
     webhooks: RwLock<webhooks::WebhookManager>,
     collections: RwLock<CollectionStore>,
     wishlist: RwLock<WishlistStore>,
+    contacts: RwLock<ContactStore>,
+    sharegroups: RwLock<ShareGroupStore>,
     db: Option<crate::persistence::DatabaseManager>,
     session_commands: mpsc::Sender<SessionCommand>,
 }
@@ -4802,6 +5093,196 @@ scalar Long
             }
         }
         
+        // CONTACTS ENDPOINTS
+        ("GET", "/api/contacts") => {
+            let contacts = state.contacts.read().await;
+            let json = contacts.json(route.query.as_deref());
+            drop(contacts);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/contacts") => {
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            if username.is_empty() {
+                return Ok(routing::conflict_response("username is required"));
+            }
+            let mut contacts = state.contacts.write().await;
+            let record = contacts.create(username);
+            let json = record.json();
+            drop(contacts);
+            Ok(routing::created_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
+            let id = &path[14..];
+            let contacts = state.contacts.read().await;
+            if let Some(record) = contacts.get(id) {
+                let json = record.json();
+                drop(contacts);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(contacts);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("PUT", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
+            let id = &path[14..];
+            let username = extract_json_string_field(body, "username");
+            let online = extract_json_bool_field(body, "online");
+            let mut contacts = state.contacts.write().await;
+            if let Some(record) = contacts.update(id, username, online) {
+                let json = record.json();
+                drop(contacts);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(contacts);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
+            let id = &path[14..];
+            let mut contacts = state.contacts.write().await;
+            let deleted = contacts.delete(id);
+            drop(contacts);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // SHAREGROUPS ENDPOINTS
+        ("GET", "/api/sharegroups") => {
+            let sharegroups = state.sharegroups.read().await;
+            let json = sharegroups.json(route.query.as_deref());
+            drop(sharegroups);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/sharegroups") => {
+            let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
+            let description = extract_json_string_field(body, "description").unwrap_or_default();
+            let mut sharegroups = state.sharegroups.write().await;
+            let record = sharegroups.create(name, description);
+            let json = record.json();
+            drop(sharegroups);
+            Ok(routing::created_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/sharegroups/") && !path.contains("/members") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 4 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            let sharegroups = state.sharegroups.read().await;
+            if let Some(record) = sharegroups.get(id) {
+                let json = record.json();
+                drop(sharegroups);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(sharegroups);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("PUT", path) if path.starts_with("/api/sharegroups/") && !path.contains("/members") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 4 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
+            let description = extract_json_string_field(body, "description").unwrap_or_default();
+            let mut sharegroups = state.sharegroups.write().await;
+            if let Some(record) = sharegroups.update(id, name, description) {
+                let json = record.json();
+                drop(sharegroups);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(sharegroups);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/sharegroups/") && !path.contains("/members") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 4 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            let mut sharegroups = state.sharegroups.write().await;
+            let deleted = sharegroups.delete(id);
+            drop(sharegroups);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        ("GET", path) if path.starts_with("/api/sharegroups/") && path.ends_with("/members") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 5 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            let sharegroups = state.sharegroups.read().await;
+            if let Some(record) = sharegroups.get(id) {
+                let members = record.members.iter()
+                    .map(|m| m.json())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let json = format!(
+                    "{{\"members\":[{}],\"count\":{},\"group_id\":\"{}\"}}",
+                    members,
+                    record.members.len(),
+                    json_escape(id)
+                );
+                drop(sharegroups);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(sharegroups);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("POST", path) if path.starts_with("/api/sharegroups/") && path.ends_with("/members") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 5 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            if username.is_empty() {
+                return Ok(routing::conflict_response("username is required"));
+            }
+            let mut sharegroups = state.sharegroups.write().await;
+            if let Some(_record) = sharegroups.add_member(id, username.clone()) {
+                let json = format!(
+                    "{{\"username\":\"{}\",\"added_at\":{}}}",
+                    json_escape(&username),
+                    unix_timestamp()
+                );
+                drop(sharegroups);
+                Ok(routing::created_response(json))
+            } else {
+                drop(sharegroups);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/sharegroups/") && path.contains("/members/") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 6 {
+                return Ok(routing::not_found_response());
+            }
+            let id = parts[3];
+            let username = parts[5];
+            if username.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            let mut sharegroups = state.sharegroups.write().await;
+            if sharegroups.remove_member(id, username).is_some() {
+                drop(sharegroups);
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                drop(sharegroups);
+                Ok(routing::not_found_response())
+            }
+        }
+        
         // WEBUI PARITY: SignalR hub stub endpoints
         // These return 501 Not Implemented; proper SignalR WebSocket hubs are future work
         ("GET", path) if path.starts_with("/hub/") => {
@@ -4996,6 +5477,8 @@ async fn serve(once: bool) -> Result<(), String> {
           webhooks: RwLock::new(webhooks::WebhookManager::new()),
           collections: RwLock::new(CollectionStore::new()),
           wishlist: RwLock::new(WishlistStore::new()),
+          contacts: RwLock::new(ContactStore::new()),
+          sharegroups: RwLock::new(ShareGroupStore::new()),
           db,
           config,
           session_commands,
@@ -8695,6 +9178,8 @@ mod tests {
               webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
               collections: RwLock::new(super::CollectionStore::new()),
               wishlist: RwLock::new(super::WishlistStore::new()),
+              contacts: RwLock::new(super::ContactStore::new()),
+              sharegroups: RwLock::new(super::ShareGroupStore::new()),
               db: None,
               config,
               session_commands: sender,
@@ -11217,6 +11702,8 @@ mod tests {
               webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
               collections: RwLock::new(super::CollectionStore::new()),
               wishlist: RwLock::new(super::WishlistStore::new()),
+              contacts: RwLock::new(super::ContactStore::new()),
+              sharegroups: RwLock::new(super::ShareGroupStore::new()),
               db: None,
               config,
               session_commands: sender,
