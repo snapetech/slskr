@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 use std::fmt;
-use uuid::Uuid;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 thread_local! {
     static CORRELATION_ID: RefCell<Option<String>> = RefCell::new(None);
@@ -16,10 +16,13 @@ thread_local! {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CorrelationId(String);
 
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
 impl CorrelationId {
     /// Generate a new correlation ID
     pub fn new() -> Self {
-        CorrelationId(format!("corr-{}", Uuid::new_v4()))
+        let num = COUNTER.fetch_add(1, Ordering::Relaxed);
+        CorrelationId(format!("corr-{}", num))
     }
 
     /// Create from existing string
