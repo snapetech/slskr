@@ -3466,6 +3466,7 @@ struct AppState {
     destinations: RwLock<DestinationStore>,
     db: Option<crate::persistence::DatabaseManager>,
     session_commands: mpsc::Sender<SessionCommand>,
+    rate_limiter: rate_limit::RateLimiter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6495,6 +6496,148 @@ scalar Long
             Ok(routing::accepted_response(json))
         }
         
+        // RECOMMENDATIONS & ANALYTICS ENDPOINTS
+        ("GET", "/api/soulseek/recommendations") => {
+            let json = format!("{{\"recommendations\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/soulseek/recommendations/global") => {
+            let json = format!("{{\"global_recommendations\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/soulseek/items/:id/recommendations") => {
+            let json = format!("{{\"item_id\":\":id\",\"recommendations\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/soulseek/items/:id/similar-users") => {
+            let json = format!("{{\"item_id\":\":id\",\"similar_users\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/transfers/downloads/accelerated") => {
+            let json = format!("{{\"accelerated\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/transfers/downloads/stuck") => {
+            let json = format!("{{\"stuck\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/transfers/downloads/user-stats") => {
+            let json = format!("{{\"users\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        // BANS & BLOCKING ENDPOINTS
+        ("POST", path) if path.contains("/bans/username") => {
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            let json = format!(
+                "{{\"banned\":\"{}\",\"status\":\"success\",\"created_at\":{}}}",
+                json_escape(&username),
+                unix_timestamp()
+            );
+            Ok(routing::created_response(json))
+        }
+        
+        ("DELETE", path) if path.contains("/bans/username/") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            let username = parts.last().unwrap_or(&"unknown");
+            let json = format!(
+                "{{\"unbanned\":\"{}\",\"status\":\"success\"}}",
+                json_escape(username)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", path) if path.contains("/bans/ip") => {
+            let ip = extract_json_string_field(body, "ip").unwrap_or_default();
+            let json = format!(
+                "{{\"banned_ip\":\"{}\",\"status\":\"success\"}}",
+                json_escape(&ip)
+            );
+            Ok(routing::created_response(json))
+        }
+        
+        ("DELETE", path) if path.contains("/bans/ip/") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            let ip = parts.last().unwrap_or(&"0.0.0.0");
+            let json = format!(
+                "{{\"unbanned_ip\":\"{}\",\"status\":\"success\"}}",
+                json_escape(ip)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        // CONVERSATION & MESSAGES ENDPOINTS
+        ("GET", "/api/conversations") => {
+            let json = format!("{{\"conversations\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
+            let conversation_id = &path[18..];
+            let json = format!(
+                "{{\"id\":\"{}\",\"messages\":[],\"count\":0}}",
+                json_escape(conversation_id)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/nowplaying") => {
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+            let title = extract_json_string_field(body, "title").unwrap_or_default();
+            let json = format!(
+                "{{\"username\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"updated_at\":{}}}",
+                json_escape(&username),
+                json_escape(&artist),
+                json_escape(&title),
+                unix_timestamp()
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/nowplaying") => {
+            let json = format!("{{\"now_playing\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        // APPLICATION STATE ENDPOINTS
+        ("GET", "/api/application") => {
+            let json = format!(
+                "{{\"status\":\"running\",\"version\":\"1.0.0-RC\",\"started_at\":{}}}",
+                unix_timestamp()
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/application/version/latest") => {
+            let json = format!(
+                "{{\"latest\":\"1.0.0\",\"current\":\"1.0.0-RC\",\"update_available\":false}}"
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        ("GET", "/api/events") => {
+            let events = state.events.read().await;
+            let json = events.json(route.query.as_deref());
+            drop(events);
+            Ok(routing::ok_response(json))
+        }
+        
+        ("POST", "/api/relay") => {
+            let relay_enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
+            let json = format!(
+                "{{\"relay_enabled\":{},\"status\":\"configured\"}}",
+                relay_enabled
+            );
+            Ok(routing::ok_response(json))
+        }
+        
         // WEBUI PARITY: SignalR hub stub endpoints
         // These return 501 Not Implemented; proper SignalR WebSocket hubs are future work
         ("GET", path) if path.starts_with("/hub/") => {
@@ -6675,6 +6818,13 @@ async fn serve(once: bool) -> Result<(), String> {
         .await
         .ok();
     
+      let rate_limiter = rate_limit::RateLimiter::new(rate_limit::RateLimitConfig {
+          max_requests_anonymous: 1000,
+          max_requests_authenticated: 5000,
+          window_seconds: 60,
+          enabled: true,
+      });
+
       let state = Arc::new(AppState {
           session: RwLock::new(SessionSnapshot::disconnected(&config)),
           listeners: RwLock::new(ListenerSnapshot::new(&config)),
@@ -6699,6 +6849,7 @@ async fn serve(once: bool) -> Result<(), String> {
           db,
           config,
           session_commands,
+          rate_limiter,
       });
     spawn_session_manager(Arc::clone(&state), session_receiver);
     spawn_configured_listeners(Arc::clone(&state));
@@ -10381,6 +10532,13 @@ mod tests {
             super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("test config");
         let share_index = super::build_share_index(&config);
         let (sender, receiver) = mpsc::channel(8);
+         let rate_limiter = super::rate_limit::RateLimiter::new(super::rate_limit::RateLimitConfig {
+              max_requests_anonymous: 1000,
+              max_requests_authenticated: 5000,
+              window_seconds: 60,
+              enabled: true,
+         });
+
          let state = Arc::new(super::AppState {
               session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
               listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
@@ -10405,6 +10563,7 @@ mod tests {
               db: None,
               config,
               session_commands: sender,
+              rate_limiter,
          });
         (state, receiver)
     }
@@ -12910,6 +13069,13 @@ mod tests {
         let config =
             super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("auth config");
         let (sender, _receiver) = mpsc::channel(8);
+         let rate_limiter = super::rate_limit::RateLimiter::new(super::rate_limit::RateLimitConfig {
+              max_requests_anonymous: 1000,
+              max_requests_authenticated: 5000,
+              window_seconds: 60,
+              enabled: true,
+         });
+
          let state = super::AppState {
               session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
               listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
@@ -12934,6 +13100,7 @@ mod tests {
               db: None,
               config,
               session_commands: sender,
+              rate_limiter,
          };
 
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)

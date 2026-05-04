@@ -38,6 +38,7 @@ struct RequestWindow {
 }
 
 /// Rate limiter for tracking requests per IP and per user
+#[derive(Debug)]
 pub struct RateLimiter {
     config: RateLimitConfig,
     ip_windows: Arc<RwLock<HashMap<String, RequestWindow>>>,
@@ -229,43 +230,60 @@ impl RateLimiter {
 
     /// Clear all rate limit windows
     pub async fn reset(&self) {
-        let mut windows = self.windows.write().await;
-        windows.clear();
+        let mut ip_windows = self.ip_windows.write().await;
+        ip_windows.clear();
+        let mut user_windows = self.user_windows.write().await;
+        user_windows.clear();
     }
 
     /// Get statistics
     pub async fn stats(&self) -> RateLimitStats {
-        let windows = self.windows.read().await;
+        let ip_windows = self.ip_windows.read().await;
+        let user_windows = self.user_windows.read().await;
 
-        let total_entries = windows.len();
-        let total_requests: u32 = windows.iter().map(|(_, w)| w.count).sum();
-        let max_requests_seen = windows.iter().map(|(_, w)| w.count).max().unwrap_or(0);
+        let ip_entries = ip_windows.len();
+        let ip_requests: u32 = ip_windows.iter().map(|(_, w)| w.count).sum();
+        let ip_max = ip_windows.iter().map(|(_, w)| w.count).max().unwrap_or(0);
+
+        let user_entries = user_windows.len();
+        let user_requests: u32 = user_windows.iter().map(|(_, w)| w.count).sum();
+        let user_max = user_windows.iter().map(|(_, w)| w.count).max().unwrap_or(0);
 
         RateLimitStats {
-            total_entries,
-            total_requests,
-            max_requests_seen,
+            ip_entries,
+            ip_requests,
+            ip_max_requests_seen: ip_max,
+            user_entries,
+            user_requests,
+            user_max_requests_seen: user_max,
             window_size_seconds: self.config.window_seconds,
-            max_requests: self.config.max_requests,
+            max_requests_anonymous: self.config.max_requests_anonymous,
+            max_requests_authenticated: self.config.max_requests_authenticated,
         }
     }
 
     /// Cleanup expired windows
     pub async fn cleanup(&self) {
         let now = Instant::now();
-        let mut windows = self.windows.write().await;
-        windows.retain(|_, window| now < window.reset_at);
+        let mut ip_windows = self.ip_windows.write().await;
+        ip_windows.retain(|_, window| now < window.reset_at);
+        let mut user_windows = self.user_windows.write().await;
+        user_windows.retain(|_, window| now < window.reset_at);
     }
 }
 
 /// Rate limit statistics
 #[derive(Debug, Clone)]
 pub struct RateLimitStats {
-    pub total_entries: usize,
-    pub total_requests: u32,
-    pub max_requests_seen: u32,
+    pub ip_entries: usize,
+    pub ip_requests: u32,
+    pub ip_max_requests_seen: u32,
+    pub user_entries: usize,
+    pub user_requests: u32,
+    pub user_max_requests_seen: u32,
     pub window_size_seconds: u64,
-    pub max_requests: u32,
+    pub max_requests_anonymous: u32,
+    pub max_requests_authenticated: u32,
 }
 
 /// Rate limit response headers
@@ -317,63 +335,117 @@ mod tests {
         let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
 
         for _ in 0..2000 {
-            assert!(limiter.check_rate_limit(addr).await);
+            assert!(limiter.check_rate_limit(addr, None).await);
         }
     }
 
     #[tokio::test]
-    async fn test_rate_limit_enforcement() {
+    async fn test_rate_limit_enforcement_ip() {
         let config = RateLimitConfig {
-            max_requests: 5,
+            max_requests_anonymous: 5,
             window_seconds: 60,
             enabled: true,
+            ..Default::default()
         };
         let limiter = RateLimiter::new(config);
 
         let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
 
         for i in 0..5 {
-            assert!(limiter.check_rate_limit(addr).await, "Request {} should pass", i + 1);
+            assert!(limiter.check_rate_limit(addr, None).await, "Request {} should pass", i + 1);
         }
 
-        assert!(!limiter.check_rate_limit(addr).await, "6th request should fail");
+        assert!(!limiter.check_rate_limit(addr, None).await, "6th request should fail");
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_enforcement_user() {
+        let config = RateLimitConfig {
+            max_requests_authenticated: 5,
+            window_seconds: 60,
+            enabled: true,
+            ..Default::default()
+        };
+        let limiter = RateLimiter::new(config);
+
+        for i in 0..5 {
+            assert!(limiter.check_rate_limit(None, Some("testuser")).await, "Request {} should pass", i + 1);
+        }
+
+        assert!(!limiter.check_rate_limit(None, Some("testuser")).await, "6th request should fail");
     }
 
     #[tokio::test]
     async fn test_rate_limit_different_ips() {
         let config = RateLimitConfig {
-            max_requests: 2,
+            max_requests_anonymous: 2,
             window_seconds: 60,
             enabled: true,
+            ..Default::default()
         };
         let limiter = RateLimiter::new(config);
 
         let addr1 = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
         let addr2 = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8080));
 
-        assert!(limiter.check_rate_limit(addr1).await);
-        assert!(limiter.check_rate_limit(addr2).await);
-        assert!(limiter.check_rate_limit(addr1).await);
-        assert!(limiter.check_rate_limit(addr2).await);
+        assert!(limiter.check_rate_limit(addr1, None).await);
+        assert!(limiter.check_rate_limit(addr2, None).await);
+        assert!(limiter.check_rate_limit(addr1, None).await);
+        assert!(limiter.check_rate_limit(addr2, None).await);
 
-        assert!(!limiter.check_rate_limit(addr1).await);
-        assert!(!limiter.check_rate_limit(addr2).await);
+        assert!(!limiter.check_rate_limit(addr1, None).await);
+        assert!(!limiter.check_rate_limit(addr2, None).await);
     }
 
     #[tokio::test]
-    async fn test_rate_limit_remaining() {
+    async fn test_rate_limit_different_users() {
         let config = RateLimitConfig {
-            max_requests: 10,
+            max_requests_authenticated: 2,
             window_seconds: 60,
             enabled: true,
+            ..Default::default()
+        };
+        let limiter = RateLimiter::new(config);
+
+        assert!(limiter.check_rate_limit(None, Some("user1")).await);
+        assert!(limiter.check_rate_limit(None, Some("user2")).await);
+        assert!(limiter.check_rate_limit(None, Some("user1")).await);
+        assert!(limiter.check_rate_limit(None, Some("user2")).await);
+
+        assert!(!limiter.check_rate_limit(None, Some("user1")).await);
+        assert!(!limiter.check_rate_limit(None, Some("user2")).await);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_remaining_ip() {
+        let config = RateLimitConfig {
+            max_requests_anonymous: 10,
+            window_seconds: 60,
+            enabled: true,
+            ..Default::default()
         };
         let limiter = RateLimiter::new(config);
 
         let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
 
-        assert_eq!(limiter.get_remaining(addr).await, 10);
-        limiter.check_rate_limit(addr).await;
-        assert_eq!(limiter.get_remaining(addr).await, 9);
+        assert_eq!(limiter.get_remaining(addr, None).await, 10);
+        limiter.check_rate_limit(addr, None).await;
+        assert_eq!(limiter.get_remaining(addr, None).await, 9);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_remaining_user() {
+        let config = RateLimitConfig {
+            max_requests_authenticated: 10,
+            window_seconds: 60,
+            enabled: true,
+            ..Default::default()
+        };
+        let limiter = RateLimiter::new(config);
+
+        assert_eq!(limiter.get_remaining(None, Some("testuser")).await, 10);
+        limiter.check_rate_limit(None, Some("testuser")).await;
+        assert_eq!(limiter.get_remaining(None, Some("testuser")).await, 9);
     }
 
     #[tokio::test]
@@ -389,7 +461,8 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_stats() {
         let config = RateLimitConfig {
-            max_requests: 10,
+            max_requests_anonymous: 10,
+            max_requests_authenticated: 10,
             window_seconds: 60,
             enabled: true,
         };
@@ -398,12 +471,19 @@ mod tests {
         let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
 
         for _ in 0..5 {
-            limiter.check_rate_limit(addr).await;
+            limiter.check_rate_limit(addr, None).await;
+        }
+
+        for _ in 0..3 {
+            limiter.check_rate_limit(None, Some("user1")).await;
         }
 
         let stats = limiter.stats().await;
-        assert_eq!(stats.total_entries, 1);
-        assert_eq!(stats.total_requests, 5);
-        assert_eq!(stats.max_requests_seen, 5);
+        assert_eq!(stats.ip_entries, 1);
+        assert_eq!(stats.ip_requests, 5);
+        assert_eq!(stats.ip_max_requests_seen, 5);
+        assert_eq!(stats.user_entries, 1);
+        assert_eq!(stats.user_requests, 3);
+        assert_eq!(stats.user_max_requests_seen, 3);
     }
 }
