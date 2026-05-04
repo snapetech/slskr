@@ -20,6 +20,9 @@ mod middleware;  // Phase 12: Advanced middleware system
 mod filters;  // Phase 12: Request/response filtering and transformation
 mod enrichment;  // Phase 12: Response enrichment and metadata injection
 mod versioning;  // Phase 12: API versioning and compatibility
+mod response_cache;  // Phase 12: Response caching with TTL management
+mod observability;  // Phase 12: Advanced monitoring and observability
+mod rate_limiter;  // Phase 12: Advanced rate limiting strategies
 mod sharding;    // 500K req/sec: Database sharding by user_id
 mod grpc_api;    // 500K req/sec: gRPC protocol (70% payload reduction)
 mod cluster;     // 500K req/sec: Multi-instance clustering & load balancing
