@@ -16,6 +16,8 @@ mod compression;  // Phase 11: Response compression
 mod openapi;  // Phase 12: OpenAPI/Swagger documentation
 mod docs;  // Phase 12: API documentation endpoints
 mod sse;  // Phase 12: Server-Sent Events streaming
+mod middleware;  // Phase 12: Advanced middleware system
+mod filters;  // Phase 12: Request/response filtering and transformation
 mod websocket;
 mod tracing;
 mod webhooks;
