@@ -1,0 +1,90 @@
+.pods-workspace {
+  display: flex;
+  height: 100vh;
+}
+
+.pods-sidebar {
+  border-radius: 0 !important;
+  margin: 0 !important;
+  min-width: 280px;
+  overflow-y: auto;
+  width: 280px;
+}
+
+.pods-sidebar-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.pod-discovery-results {
+  margin-top: 10px !important;
+  padding: 10px !important;
+}
+
+.pod-detail {
+  border-radius: 0 !important;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  margin: 0 !important;
+}
+
+.pod-detail-header {
+  margin-bottom: 20px;
+}
+
+.pod-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.pod-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pod-channel-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pod-channel-chat.ui.segment {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  min-height: 500px;
+}
+
+.pod-channel-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.pod-channel-heading .ui.header {
+  margin-bottom: 2px;
+}
+
+.pod-channel-subtitle {
+  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+}
+
+.pod-message-history {
+  flex: 1;
+  max-height: 560px;
+  min-height: 360px;
+  overflow-y: auto;
+}
+
+.pod-message-composer {
+  flex: 0 0 auto;
+}

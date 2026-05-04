@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_cache_entry_expiration() {
-        let mut entry = CacheEntry::new("data".to_string(), Duration::from_millis(1));
+        let entry = CacheEntry::new("data".to_string(), Duration::from_millis(1));
         std::thread::sleep(Duration::from_millis(2));
         assert!(entry.is_expired());
     }

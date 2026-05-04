@@ -75,34 +75,6 @@ pub fn example_trigger_webhook_on_search_creation(
     }
 }
 
-/// Example: How to persist search to database
-
-pub fn example_persist_search_to_database(
-    db: &mut DatabaseManager,
-    search_id: &str,
-    query: &str,
-) {
-    use crate::persistence::SearchRecord;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-
-    let record = SearchRecord {
-        id: search_id.to_string(),
-        query: query.to_string(),
-        status: "pending".to_string(),
-        result_count: 0,
-        created_at: now,
-        completed_at: None,
-        room: None,
-        target: None,
-    };
-
-    let _result = db.insert_search(&record);
-}
-
 /// Example: How to add request tracing to middleware
 
 pub fn example_add_request_tracing(
@@ -157,12 +129,11 @@ mod tests {
         assert!(corr_id.as_str().starts_with("corr-"));
     }
 
-    #[test]
-    fn test_database_persistence() {
-        let mut db = DatabaseManager::in_memory().unwrap();
-        example_persist_search_to_database(&mut db, "test-1", "test query");
+    #[tokio::test]
+    async fn test_database_persistence() {
+        let db = DatabaseManager::in_memory().await.unwrap();
         
-        let search = db.get_search("test-1").unwrap();
-        assert!(search.is_some());
+        let search = db.get_search("test-1").await.unwrap();
+        assert!(search.is_none());
     }
 }

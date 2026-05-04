@@ -1,0 +1,215 @@
+:root {
+  --slskd-chat-color: #0e6eb8;
+  --slskd-self-message-background-color: rgba(0, 0, 0, 0.03);
+  --slskd-chat-message-background: rgba(255, 255, 255, 0.9);
+  --slskd-chat-input-background: rgba(255, 255, 255, 0.96);
+}
+
+:root.dark {
+  --slskd-chat-color: var(--slskdn-accent-primary-hover, #eadfff);
+  --slskd-self-message-background-color: var(--slskdn-accent-primary-muted, rgba(199, 167, 255, 0.22));
+  --slskd-chat-message-background:
+    radial-gradient(circle at 12% 0%, rgba(199, 167, 255, 0.13), transparent 30%),
+    #09080f;
+  --slskd-chat-input-background:
+    linear-gradient(180deg, rgba(96, 199, 217, 0.11), rgba(96, 199, 217, 0.03)),
+    #10141a;
+}
+
+.chat {
+  display: flex;
+  margin-top: 1rem;
+  height: calc(100vh - 255px);
+}
+
+.chat > .segments {
+  width: 100%;
+  box-shadow: unset !important;
+}
+
+:root.dark .chat > .segments {
+  box-shadow: var(--slskdn-surface-shadow, 0 18px 46px rgba(0, 0, 0, 0.34)) !important;
+}
+
+:root.dark .chat-active-card.ui.card {
+  background: #141118 !important;
+  border-color: var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+:root.dark .chat-active-card.ui.card > .content > .header,
+:root.dark .chat-active-card .user-card-username,
+:root.dark .chat-message-name .user-card-username {
+  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+}
+
+.chats {
+  padding-left: 15px;
+  padding-right: 15px;
+  max-width: 1200px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  margin-bottom: 16px;
+}
+
+.chat-segment {
+  margin-top: 15px !important;
+  height: 78px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-segment-icon {
+  padding-top: 10px;
+  padding-right: .5em;
+}
+
+.chat-input {
+  width: 100%;
+}
+
+.chat-recovery-rail {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px !important;
+  margin-top: -6px !important;
+  padding: 8px !important;
+}
+
+.chat-recovery-rail .button {
+  margin: 0 !important;
+}
+
+.chat-tabs {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.conversation-menu {
+  overflow-x: auto;
+  box-shadow: unset !important;
+  height: 47px;
+  width: 100%;
+  margin-top: unset !important;
+}
+
+:root.dark .conversation-menu.ui.menu {
+  background: var(--slskd-color-inset, #08070d) !important;
+  border-color: var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
+}
+
+:root.dark .chats .ui.secondary.inverted.menu {
+  background: #09080f !important;
+  border: 1px solid var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24));
+  border-radius: 7px;
+  box-shadow: var(--slskdn-surface-shadow-soft, 0 8px 24px rgba(0, 0, 0, 0.28));
+  margin-bottom: 12px;
+  padding: 6px;
+}
+
+:root.dark .chats .ui.secondary.inverted.menu .item {
+  border-radius: 5px;
+  color: var(--slskd-color-subtle, #c8bad8) !important;
+}
+
+:root.dark .chats .ui.secondary.inverted.menu .active.item {
+  background: var(--slskdn-accent-primary-muted, rgba(199, 167, 255, 0.22)) !important;
+  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+}
+
+.conversation-menu > .menu-item {
+  font-size: 14pt;
+}
+
+.conversation-menu > .menu-active {
+  font-weight: bold !important;
+}
+
+.conversation-menu > .menu > .add-button {
+  margin: 0px;
+  border-top-left-radius: 0%;
+  border-bottom-left-radius: 0%;
+  border-radius: 0%;
+} 
+
+.chat-history {
+  padding: .5em .5em 0 .5em !important;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-snap-type: y proximity;
+  display: grid;
+  height: calc(100vh - 292px);
+}
+
+:root.dark .chat-history.ui.segment {
+  background: var(--slskd-chat-message-background) !important;
+  border-color: rgba(199, 167, 255, 0.24) !important;
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+.chat-history > .list {
+  align-self: end;
+  margin-bottom: .5em !important;
+}
+
+.chat-active-card {
+  width: 100% !important;
+}
+
+.chat-message-name {
+  font-weight: bold;
+  color: var(--slskd-chat-color);
+}
+
+.chat-message-time {
+  float:right;
+  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+  font-size: smaller;
+  font-variant: small-caps;
+  font-style: italic;
+  opacity: .9;
+}
+
+.chat-message-self {
+  color: var(--slskd-chat-color);
+  background-color: var(--slskd-self-message-background-color);
+  border-left: 3px solid var(--slskdn-accent-primary, #c7a7ff);
+  padding-left: 0.45rem;
+}
+
+.chat-input {
+  padding: 0px 0px 0px 1em !important;
+}
+
+.chat-input.ui.segment {
+  background: var(--slskd-chat-input-background) !important;
+}
+
+:root.dark .chat-input.ui.segment {
+  border-color: rgba(96, 199, 217, 0.28) !important;
+}
+
+:root.dark .chat-input .ui.input > input,
+:root.dark .chat-history .ui.list .content {
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+.chat-message-button {
+  background-color: transparent !important;
+}
+
+#chat-history-scroll-anchor {
+  scroll-snap-align: start
+}
+
+/* semantic-ui-react colors the border of inputs
+   when a right aligned action is used, even when 
+   transparent is specified, and it uses !important.
+   this had to be added to an id to override the class
+   declaration. */
+#chat-message-input {
+    border-right-color: transparent !important;
+}

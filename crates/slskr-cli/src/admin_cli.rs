@@ -1,4 +1,4 @@
-/// Administrative CLI tool for soulseekR
+/// Administrative CLI tool for slskR
 ///
 /// Provides command-line management of the HTTP API server,
 /// including key management, configuration, monitoring, and maintenance.

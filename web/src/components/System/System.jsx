@@ -1,0 +1,390 @@
+import './System.css';
+import AdminPolicies from './AdminPolicies';
+import { Switch } from '../Shared';
+import AutomationCenter from './AutomationCenter';
+import Bridge from './Bridge';
+import Data from './Data';
+import Events from './Events';
+import ExperienceSettings from './ExperienceSettings';
+import Files from './Files';
+import Info from './Info';
+import Integrations from './Integrations';
+import Jobs from './Jobs';
+import LibraryHealth from './LibraryHealth';
+import Logs from './Logs';
+import MediaCore from './MediaCore';
+import Mesh from './Mesh';
+import Metrics from './Metrics';
+import Network from './Network';
+import Options from './Options';
+import QuarantineJury from './QuarantineJury';
+import Security from './Security';
+import Shares from './Shares';
+import SourceProviders from './SourceProviders';
+import SwarmAnalytics from './SwarmAnalytics';
+import React from 'react';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Icon, Menu, Segment, Tab } from 'semantic-ui-react';
+
+const System = ({ options = {}, state = {}, theme }) => {
+  const navigate = useNavigate();
+  const { tab } = useParams();
+
+  const panes = [
+    {
+      menuItem: (
+        <Menu.Item key="info">
+          <Switch
+            pending={
+              ((state?.pendingRestart ?? false) ||
+                (state?.pendingReconnect ?? false)) && (
+                <Icon
+                  color="yellow"
+                  name="exclamation circle"
+                />
+              )
+            }
+          >
+            <Icon name="info circle" />
+          </Switch>
+          Info
+        </Menu.Item>
+      ),
+      render: () => (
+        <Tab.Pane>
+          <Info
+            options={options}
+            state={state}
+            theme={theme}
+          />
+        </Tab.Pane>
+      ),
+      route: 'info',
+    },
+    {
+      menuItem: (
+        <Menu.Item key="network">
+          <Icon
+            color="blue"
+            name="sitemap"
+          />
+          Network
+        </Menu.Item>
+      ),
+      render: () => (
+        <Tab.Pane>
+          <Network theme={theme} />
+        </Tab.Pane>
+      ),
+      route: 'network',
+    },
+    {
+      menuItem: {
+        content: 'Mesh',
+        icon: 'share alternate',
+        key: 'mesh',
+      },
+      render: () => (
+        <Tab.Pane>
+          <Mesh />
+        </Tab.Pane>
+      ),
+      route: 'mesh',
+    },
+    {
+      menuItem: {
+        content: 'Bridge',
+        icon: 'exchange',
+        key: 'bridge',
+      },
+      render: () => (
+        <Tab.Pane>
+          <Bridge />
+        </Tab.Pane>
+      ),
+      route: 'bridge',
+    },
+    {
+      menuItem: {
+        content: 'MediaCore',
+        icon: 'music',
+        key: 'mediacore',
+      },
+      render: () => (
+        <Tab.Pane>
+          <MediaCore />
+        </Tab.Pane>
+      ),
+      route: 'mediacore',
+    },
+    {
+      menuItem: {
+        content: 'Security',
+        icon: 'shield alternate',
+        key: 'security',
+      },
+      render: () => (
+        <Tab.Pane>
+          <Security />
+        </Tab.Pane>
+      ),
+      route: 'security',
+    },
+    {
+      menuItem: {
+        content: 'Policies',
+        icon: 'sliders horizontal',
+        key: 'policies',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <AdminPolicies options={options} />
+        </Tab.Pane>
+      ),
+      route: 'policies',
+    },
+    {
+      menuItem: {
+        content: 'Experience',
+        icon: 'compass',
+        key: 'experience',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <ExperienceSettings />
+        </Tab.Pane>
+      ),
+      route: 'experience',
+    },
+    {
+      menuItem: {
+        content: 'Integrations',
+        icon: 'plug',
+        key: 'integrations',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Integrations
+            options={options}
+            state={state}
+          />
+        </Tab.Pane>
+      ),
+      route: 'integrations',
+    },
+    {
+      menuItem: {
+        content: 'Options',
+        icon: 'options',
+        key: 'options',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Options
+            options={options}
+            theme={theme}
+          />
+        </Tab.Pane>
+      ),
+      route: 'options',
+    },
+    {
+      menuItem: (
+        <Menu.Item key="shares">
+          <Switch
+            scanPending={
+              (state?.shares?.scanPending ?? false) && (
+                <Icon
+                  color="yellow"
+                  name="exclamation circle"
+                />
+              )
+            }
+          >
+            <Icon name="share external" />
+          </Switch>
+          Shares
+        </Menu.Item>
+      ),
+      render: () => (
+        <Tab.Pane>
+          <Shares
+            state={state.shares}
+            theme={theme}
+          />
+        </Tab.Pane>
+      ),
+      route: 'shares',
+    },
+    {
+      menuItem: {
+        content: 'Jobs',
+        icon: 'tasks',
+        key: 'jobs',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Jobs />
+        </Tab.Pane>
+      ),
+      route: 'jobs',
+    },
+    {
+      menuItem: {
+        content: 'Automations',
+        icon: 'magic',
+        key: 'automations',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <AutomationCenter />
+        </Tab.Pane>
+      ),
+      route: 'automations',
+    },
+    {
+      menuItem: {
+        content: 'Source Providers',
+        icon: 'random',
+        key: 'source-providers',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <SourceProviders />
+        </Tab.Pane>
+      ),
+      route: 'source-providers',
+    },
+    {
+      menuItem: {
+        content: 'Swarm Analytics',
+        icon: 'chart line',
+        key: 'swarm-analytics',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <SwarmAnalytics />
+        </Tab.Pane>
+      ),
+      route: 'swarm-analytics',
+    },
+    {
+      menuItem: {
+        content: 'Library Health',
+        icon: 'heartbeat',
+        key: 'library-health',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <LibraryHealth />
+        </Tab.Pane>
+      ),
+      route: 'library-health',
+    },
+    {
+      menuItem: {
+        content: 'Quarantine Jury',
+        icon: 'shield',
+        key: 'quarantine-jury',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <QuarantineJury />
+        </Tab.Pane>
+      ),
+      route: 'quarantine-jury',
+    },
+    {
+      menuItem: {
+        content: 'Files',
+        icon: 'folder open',
+        key: 'files',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Files
+            options={options}
+            theme={theme}
+          />
+        </Tab.Pane>
+      ),
+      route: 'files',
+    },
+    {
+      menuItem: {
+        content: 'Data',
+        icon: 'database',
+        key: 'data',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Data theme={theme} />
+        </Tab.Pane>
+      ),
+      route: 'data',
+    },
+    {
+      menuItem: {
+        content: 'Events',
+        icon: 'calendar check',
+        key: 'events',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Events />
+        </Tab.Pane>
+      ),
+      route: 'events',
+    },
+    {
+      menuItem: {
+        content: 'Logs',
+        icon: 'file outline',
+        key: 'logs',
+      },
+      render: () => (
+        <Tab.Pane>
+          <Logs />
+        </Tab.Pane>
+      ),
+      route: 'logs',
+    },
+    {
+      menuItem: {
+        content: 'Metrics',
+        icon: 'chart bar',
+        key: 'metrics',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Metrics />
+        </Tab.Pane>
+      ),
+      route: 'metrics',
+    },
+  ];
+
+  const activeIndex = panes.findIndex((pane) => pane.route === tab);
+
+  const onTabChange = (_event, { activeIndex: newActiveIndex }) => {
+    navigate(`/system/${panes[newActiveIndex].route}`);
+  };
+
+  if (tab === undefined) {
+    return <Navigate replace to={`/system/${panes[0].route}`} />;
+  }
+
+  return (
+    <div className="system">
+      <Segment raised>
+        <Tab
+          activeIndex={activeIndex > -1 ? activeIndex : 0}
+          onTabChange={onTabChange}
+          panes={panes}
+        />
+      </Segment>
+    </div>
+  );
+};
+
+export default System;

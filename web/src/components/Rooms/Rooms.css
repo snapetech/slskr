@@ -1,0 +1,284 @@
+.popup-menu {
+  overflow-y: auto;
+  position: fixed;
+  z-index: 1000;
+}
+
+.rooms {
+  --slskd-room-accent-color: #0e6eb8;
+  --slskd-room-note-background: rgba(0, 0, 0, 0.04);
+  --slskd-room-message-background: rgba(255, 255, 255, 0.9);
+  --slskd-room-users-background: rgba(255, 255, 255, 0.94);
+  --slskd-room-input-background: rgba(255, 255, 255, 0.96);
+  padding-left: 15px;
+  padding-right: 15px;
+  max-width: 1200px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  margin-bottom: 16px;
+}
+
+:root.dark .rooms {
+  --slskd-room-accent-color: var(--slskdn-accent-primary-hover, #eadfff);
+  --slskd-room-note-background: var(--slskdn-accent-primary-muted, rgba(199, 167, 255, 0.22));
+  --slskd-room-message-background:
+    radial-gradient(circle at 10% 0%, rgba(199, 167, 255, 0.13), transparent 32%),
+    #09080f;
+  --slskd-room-users-background:
+    linear-gradient(180deg, rgba(240, 196, 126, 0.09), transparent 36%),
+    #18131f;
+  --slskd-room-input-background:
+    linear-gradient(180deg, rgba(96, 199, 217, 0.11), rgba(96, 199, 217, 0.03)),
+    #10141a;
+}
+
+.rooms-segment {
+  margin-top: 15px !important;
+  height: 78px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rooms-segment-icon {
+  padding-top: 10px;
+  padding-right: .5em;
+}
+
+.rooms-input {
+  width: 100%;
+}
+
+.room-recovery-rail {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px !important;
+  margin-top: -6px !important;
+  padding: 8px !important;
+}
+
+.room-recovery-rail .button {
+  margin: 0 !important;
+}
+
+.room-tabs {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+:root.dark .rooms .ui.secondary.inverted.menu {
+  background: #09080f !important;
+  border: 1px solid var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24));
+  border-radius: 7px;
+  box-shadow: var(--slskdn-surface-shadow-soft, 0 8px 24px rgba(0, 0, 0, 0.28));
+  margin-bottom: 12px;
+  padding: 6px;
+}
+
+:root.dark .rooms .ui.secondary.inverted.menu .item {
+  border-radius: 5px;
+  color: var(--slskd-color-subtle, #c8bad8) !important;
+}
+
+:root.dark .rooms .ui.secondary.inverted.menu .active.item {
+  background: var(--slskdn-accent-primary-muted, rgba(199, 167, 255, 0.22)) !important;
+  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+}
+
+.room-menu {
+  overflow-x: auto;
+  box-shadow: unset !important;
+  height: 47px;
+  width: 100%;
+  margin-top: unset !important;
+}
+
+.room-menu > .menu-item {
+  font-size: 14pt;
+}
+
+.room-menu > .menu-active {
+  font-weight: bold !important;
+}
+
+.room-menu > .menu > .add-button {
+  margin: 0px;
+  border-top-left-radius: 0%;
+  border-bottom-left-radius: 0%;
+  border-radius: 0%;
+}
+
+.join-room-modal > .content > .table > thead > tr > th > .icon {
+  float: right !important;
+}
+
+@media only screen and (max-width: 767px) {
+  .room-users {
+    display: none;
+  }
+}
+
+.room {
+  display: flex;
+  margin-top: 1rem;
+  height: calc(100vh - 255px);
+}
+
+.room-active-card {
+  width: 100% !important;
+}
+
+:root.dark .room-active-card.ui.card {
+  background: #141118 !important;
+  border-color: var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
+  box-shadow: var(--slskdn-surface-shadow, 0 18px 46px rgba(0, 0, 0, 0.34)) !important;
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+:root.dark .room-active-card.ui.card > .content > .header {
+  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+}
+
+.room-active-card > .content > .room > .segments {
+  box-shadow: unset !important;
+  margin-bottom: 0px;
+  border-top-right-radius: unset !important;
+  border-bottom-right-radius: unset !important;
+  width: 100% !important;
+}
+
+.room-history {
+  padding: .5em .5em 0 .5em !important;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-snap-type: y proximity;
+  display: grid;
+  height: calc(100vh - 292px);
+}
+
+:root.dark .room-history.ui.segment {
+  background: var(--slskd-room-message-background) !important;
+  border-color: rgba(199, 167, 255, 0.24) !important;
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+.room-history > .list {
+  align-self: end;
+  margin-bottom: .5em !important;
+}
+
+.room-users {
+  margin-top: 0px !important;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-snap-type: y proximity;
+  overflow-x: hidden;
+  min-width: 250px;
+  max-width: 250px;
+  box-shadow: unset !important;
+  border-left: unset !important;
+  border-bottom-left-radius: unset !important;
+  border-top-left-radius: unset !important;
+  padding: 7px !important;
+}
+
+:root.dark .room-users.ui.segment {
+  background: var(--slskd-room-users-background) !important;
+  border-color: rgba(240, 196, 126, 0.28) !important;
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+:root.dark .room-input.ui.segment {
+  background: var(--slskd-room-input-background) !important;
+  border-color: rgba(96, 199, 217, 0.28) !important;
+}
+
+:root.dark .room-input .ui.input > input {
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+:root.dark .room-users-header {
+  color: var(--slskdn-accent-warm, #f0c47e);
+  font-weight: 700;
+}
+
+:root.dark .room-users .ui.list .item,
+:root.dark .room-users .ui.list .item .header,
+:root.dark .room-users .ui.list .item .description,
+:root.dark .room-history .ui.list .item,
+:root.dark .room-history .ui.list .content {
+  color: var(--slskd-color, #f4eefc) !important;
+}
+
+:root.dark .room-users .user-card-username,
+:root.dark .room-message-name .user-card-username {
+  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+}
+
+.room-message-name {
+  font-weight: bold;
+  color: var(--slskd-room-accent-color);
+}
+
+.room-message-time {
+  float:right;
+  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+  font-size: smaller;
+  font-variant: small-caps;
+  font-style: italic;
+  opacity: .9;
+}
+
+.room-message-self, .room-user-self {
+  color: var(--slskd-room-accent-color);
+}
+
+.room-message-self {
+  background: var(--slskd-room-note-background);
+  border-left: 3px solid var(--slskdn-accent-primary, #c7a7ff);
+  padding-left: 0.45rem;
+}
+
+.room-input {
+  padding: 0px 0px 0px 1em !important;
+}
+
+.room-input.ui.segment {
+  background: var(--slskd-room-input-background) !important;
+}
+
+.room-message-button {
+  background-color: transparent !important;
+}
+
+#room-history-scroll-anchor {
+  scroll-snap-align: start
+}
+
+/* semantic-ui-react colors the border of inputs
+   when a right aligned action is used, even when 
+   transparent is specified, and it uses !important.
+   this had to be added to an id to override the class
+   declaration. */
+#room-message-input {
+    border-right-color: transparent !important;
+}
+
+.unknown-user-flag {
+  opacity: .1 !important;
+}
+
+.room-create-note {
+  background: var(--slskd-room-note-background);
+  border: 1px solid var(--slskd-tertiary-border-color, rgba(34, 36, 38, 0.15));
+  border-radius: 4px;
+  color: var(--slskd-color, rgba(0, 0, 0, 0.87));
+  padding: 12px;
+}
+
+.room-create-type-description {
+  color: var(--slskd-color-subtle, #666);
+  font-size: 12px;
+}

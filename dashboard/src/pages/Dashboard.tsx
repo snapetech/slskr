@@ -1,63 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Activity, Users, Database, Zap } from 'lucide-react';
-
-interface DashboardProps {
-  apiUrl: string;
-  apiKey: string | null;
-}
+import { useApi } from '../context/ApiContext';
+import { useFetch } from '../hooks/useFetch';
 
 interface ServerStats {
-  total_searches: number;
-  active_transfers: number;
-  total_users: number;
-  total_rooms: number;
-  uptime: number;
+  total_searches?: number;
+  active_transfers?: number;
+  total_users?: number;
+  total_rooms?: number;
+  uptime?: number;
 }
 
 interface HealthStatus {
   status: string;
-  timestamp: number;
+  timestamp?: number;
 }
 
-export default function Dashboard({ apiUrl, apiKey }: DashboardProps) {
-  const [stats, setStats] = useState<ServerStats | null>(null);
-  const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export default function Dashboard() {
+  const { apiUrl, apiKey } = useApi();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  // Create headers with auth if available
+  const headers = useMemo<HeadersInit>(() => {
+    const h: HeadersInit = {};
+    if (apiKey) {
+      h['Authorization'] = `Bearer ${apiKey}`;
+    }
+    return h;
+  }, [apiKey]);
 
-        // Fetch health
-        const healthRes = await fetch(`${apiUrl}/api/health`);
-        if (!healthRes.ok) throw new Error('Failed to fetch health');
-        const healthData = await healthRes.json();
-        setHealth(healthData);
+  // Fetch stats with auto-refresh every 5s
+  const { 
+    data: stats, 
+    loading, 
+    error: statsError 
+  } = useFetch<ServerStats>(
+    `${apiUrl}/api/stats`,
+    { headers, interval: 5000 }
+  );
 
-        // Fetch stats (requires auth if set)
-        const headers: HeadersInit = {};
-        if (apiKey) {
-          headers['Authorization'] = `Bearer ${apiKey}`;
-        }
-
-        const statsRes = await fetch(`${apiUrl}/api/stats`, { headers });
-        if (!statsRes.ok) throw new Error('Failed to fetch stats');
-        const statsData = await statsRes.json();
-        setStats(statsData);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-    const interval = setInterval(fetchData, 5000); // Refresh every 5s
-    return () => clearInterval(interval);
-  }, [apiUrl, apiKey]);
+  const formatUptime = (seconds?: number): string => {
+    if (!seconds) return 'N/A';
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    return `${days}d ${hours}h ${mins}m`;
+  };
 
   if (loading && !stats) {
     return (
@@ -67,20 +54,13 @@ export default function Dashboard({ apiUrl, apiKey }: DashboardProps) {
     );
   }
 
-  if (error) {
+  if (statsError) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800">Error: {error}</p>
+        <p className="text-red-800">Error: {statsError.message}</p>
       </div>
     );
   }
-
-  const formatUptime = (seconds: number) => {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    return `${days}d ${hours}h ${mins}m`;
-  };
 
   return (
     <div className="space-y-6">
@@ -92,15 +72,14 @@ export default function Dashboard({ apiUrl, apiKey }: DashboardProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-blue-50 rounded-lg p-4">
             <p className="text-sm text-blue-600 font-medium">Status</p>
-            <p className="text-2xl font-bold text-blue-900 mt-2">{health?.status || 'Unknown'}</p>
-            <p className="text-xs text-blue-600 mt-2">
-              {new Date(health?.timestamp ? health.timestamp * 1000 : 0).toLocaleString()}
+            <p className="text-2xl font-bold text-blue-900 mt-2">
+              {stats ? 'Healthy' : 'Unknown'}
             </p>
           </div>
           <div className="bg-green-50 rounded-lg p-4">
             <p className="text-sm text-green-600 font-medium">Uptime</p>
             <p className="text-2xl font-bold text-green-900 mt-2">
-              {stats ? formatUptime(stats.uptime) : 'N/A'}
+              {formatUptime(stats?.uptime)}
             </p>
           </div>
         </div>
@@ -132,17 +111,6 @@ export default function Dashboard({ apiUrl, apiKey }: DashboardProps) {
           value={stats?.total_rooms || 0}
           color="orange"
         />
-      </div>
-
-      {/* Quick Actions */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <QuickActionButton label="Refresh Stats" onClick={() => window.location.reload()} />
-          <QuickActionButton label="View Logs" onClick={() => {}} disabled />
-          <QuickActionButton label="Backup DB" onClick={() => {}} disabled />
-          <QuickActionButton label="Health Check" onClick={() => {}} />
-        </div>
       </div>
 
       {/* Auto-refresh indicator */}

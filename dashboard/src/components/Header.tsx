@@ -1,36 +1,36 @@
-import React, { useState } from 'react';
-import { Server, Settings, LogOut } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { Server, Settings } from 'lucide-react';
+import { useApi } from '../context/ApiContext';
 
-interface HeaderProps {
-  isConnected: boolean;
-  apiUrl: string;
-  onApiUrlChange: (url: string) => void;
-  onApiKeyChange: (key: string) => void;
-}
-
-export default function Header({
-  isConnected,
-  apiUrl,
-  onApiUrlChange,
-  onApiKeyChange,
-}: HeaderProps) {
+export default function Header() {
+  const { apiUrl, apiKey, isConnected, setApiUrl, setApiKey } = useApi();
   const [showSettings, setShowSettings] = useState(false);
   const [tempUrl, setTempUrl] = useState(apiUrl);
   const [tempKey, setTempKey] = useState('');
 
-  const handleSave = () => {
-    if (tempUrl) onApiUrlChange(tempUrl);
-    if (tempKey) onApiKeyChange(tempKey);
+  const handleSave = useCallback(() => {
+    if (tempUrl) {
+      setApiUrl(tempUrl);
+    }
+    if (tempKey) {
+      setApiKey(tempKey);
+    }
     setShowSettings(false);
     setTempKey('');
-  };
+  }, [tempUrl, tempKey, setApiUrl, setApiKey]);
+
+  const handleCancel = useCallback(() => {
+    setShowSettings(false);
+    setTempUrl(apiUrl);
+    setTempKey('');
+  }, [apiUrl]);
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
       <div className="flex justify-between items-center px-8 py-4">
         <div className="flex items-center gap-3">
           <Server className="w-6 h-6 text-blue-600" />
-          <h1 className="text-xl font-semibold text-gray-900">soulseekR Admin</h1>
+          <h1 className="text-xl font-semibold text-gray-900">slskR Admin</h1>
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
             isConnected
               ? 'bg-green-100 text-green-800'
@@ -43,6 +43,7 @@ export default function Header({
         <button
           onClick={() => setShowSettings(!showSettings)}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          aria-label="Toggle settings"
         >
           <Settings className="w-5 h-5 text-gray-600" />
         </button>
@@ -83,7 +84,7 @@ export default function Header({
                 Save
               </button>
               <button
-                onClick={() => setShowSettings(false)}
+                onClick={handleCancel}
                 className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
               >
                 Cancel

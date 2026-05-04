@@ -1,0 +1,981 @@
+import * as slskrAPI from '../../../lib/slskr';
+import {
+  buildNetworkHealthScore,
+  formatNetworkHealthReport,
+} from '../../../lib/networkHealthScore';
+import { getLocalStorageItem, setLocalStorageItem } from '../../../lib/storage';
+import { LoaderSegment, ShrinkableButton } from '../../Shared';
+import React, { useCallback, useEffect, useState } from 'react';
+import { toast } from 'react-toastify';
+import {
+  Button,
+  Card,
+  Divider,
+  Grid,
+  Header,
+  Icon,
+  Label,
+  List,
+  Message,
+  Popup,
+  Progress,
+  Segment,
+  Statistic,
+  Table,
+} from 'semantic-ui-react';
+
+const DHT_EXPOSURE_CONSENT_KEY = 'slskdn:ui:dht-public-exposure:consent-v1';
+
+const formatBytes = (bytes) => {
+  if (bytes === 0 || bytes === undefined || bytes === null) return '0 B';
+  const k = 1_024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.floor(Math.log(bytes) / Math.log(k));
+  return (
+    Number.parseFloat((bytes / k ** index).toFixed(1)) + ' ' + sizes[index]
+  );
+};
+
+const formatNumber = (value) => {
+  if (value === undefined || value === null) return '0';
+  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M';
+  if (value >= 1_000) return (value / 1_000).toFixed(1) + 'K';
+  return value.toString();
+};
+
+const formatTimeAgo = (dateString) => {
+  if (!dateString) return 'never';
+  const date = new Date(dateString);
+  const now = new Date();
+  const seconds = Math.floor((now - date) / 1_000);
+
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)}h ago`;
+  return `${Math.floor(seconds / 86_400)}d ago`;
+};
+
+const StatCard = ({ color, icon, inverted = false, label, subLabel, value }) => (
+  <Card raised={inverted}>
+    <Card.Content>
+      <Card.Header style={inverted ? { color: 'rgba(255, 255, 255, 0.92)' } : undefined}>
+        <Icon
+          color={color}
+          name={icon}
+        />{' '}
+        {value}
+      </Card.Header>
+      <Card.Meta style={inverted ? { color: 'rgba(255, 255, 255, 0.7)' } : undefined}>
+        {label}
+      </Card.Meta>
+      {subLabel && (
+        <Card.Description
+          style={inverted ? { color: 'rgba(255, 255, 255, 0.82)' } : undefined}
+        >
+          {subLabel}
+        </Card.Description>
+      )}
+    </Card.Content>
+  </Card>
+);
+
+// eslint-disable-next-line complexity
+const Network = ({ theme }) => {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({});
+  const [meshPeers, setMeshPeers] = useState([]);
+  const [discoveredPeers, setDiscoveredPeers] = useState([]);
+  const [syncing, setSyncing] = useState({});
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillProgress, setBackfillProgress] = useState(null);
+  const [dhtExposureAcknowledged, setDhtExposureAcknowledged] = useState(() => {
+    return getLocalStorageItem(DHT_EXPOSURE_CONSENT_KEY) === 'acknowledged';
+  });
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [statsData, peersData, discoveredData] = await Promise.all([
+        slskrAPI.getSlskdnStats().catch(() => ({})),
+        slskrAPI.getMeshPeers().catch(() => []),
+        slskrAPI.getDiscoveredPeers().catch(() => []),
+      ]);
+
+      setStats(statsData || {});
+      setMeshPeers(Array.isArray(peersData) ? peersData : []);
+      setDiscoveredPeers(Array.isArray(discoveredData) ? discoveredData : []);
+    } catch (error) {
+      console.error('Failed to fetch network stats:', error);
+      // Don't show toast on every poll failure
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const dismissDhtExposureConsent = () => {
+    setLocalStorageItem(DHT_EXPOSURE_CONSENT_KEY, 'acknowledged');
+    setDhtExposureAcknowledged(true);
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 5_000); // Refresh every 5 seconds
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  const handleSync = async (username) => {
+    setSyncing((previous) => ({ ...previous, [username]: true }));
+    try {
+      await slskrAPI.triggerMeshSync(username);
+      toast.success(`Sync initiated with ${username}`);
+    } catch {
+      toast.error(`Failed to sync with ${username}`);
+    } finally {
+      setSyncing((previous) => ({ ...previous, [username]: false }));
+    }
+  };
+
+  const handleBackfillFromHistory = async (reset = false) => {
+    setBackfilling(true);
+    try {
+      const result = await slskrAPI.backfillFromSearchHistory({
+        batchSize: 50,
+        reset,
+      });
+
+      if (result.error) {
+        toast.error(`Backfill failed: ${result.error}`);
+        setBackfillProgress(null);
+      } else {
+        setBackfillProgress(result);
+
+        if (result.complete) {
+          toast.success(result.message || 'Backfill complete!');
+        } else {
+          toast.info(
+            result.message || 'Batch processed - click again to continue',
+          );
+        }
+
+        fetchData(); // Refresh stats
+      }
+    } catch {
+      toast.error('Failed to trigger backfill from search history');
+      setBackfillProgress(null);
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
+  const { backfill, capabilities, hashDb, mesh, swarmJobs } = stats;
+  const obfuscation = capabilities?.obfuscation;
+  const darkTheme = theme === 'dark';
+  const dhtIsLanOnly = stats?.dht?.isLanOnly ?? stats?.dht?.lanOnly ?? false;
+  const dhtIsRunning = stats?.dht?.isDhtRunning ?? false;
+  const dhtNodeCount = stats?.dht?.dhtNodeCount ?? 0;
+  const dhtDiscoveredPeerCount =
+    stats?.dht?.discoveredPeerCount ?? stats?.dht?.totalPeersDiscovered ?? 0;
+  const dhtActiveMeshCount = stats?.dht?.activeMeshConnections ?? 0;
+  const observedMeshPeerCount = Math.max(
+    meshPeers.length,
+    mesh?.connectedPeerCount ?? 0,
+    dhtActiveMeshCount,
+  );
+  const observedDiscoveredPeerCount = Math.max(
+    discoveredPeers.length,
+    dhtDiscoveredPeerCount,
+  );
+  const shouldExplainLanOnlyDht =
+    dhtIsLanOnly &&
+    dhtIsRunning &&
+    dhtNodeCount === 0 &&
+    observedMeshPeerCount === 0 &&
+    observedDiscoveredPeerCount === 0;
+  const shouldWarnAboutConnectivity =
+    !shouldExplainLanOnlyDht &&
+    dhtIsRunning &&
+    dhtNodeCount === 0 &&
+    observedMeshPeerCount === 0 &&
+    observedDiscoveredPeerCount === 0;
+  const shouldShowDhtExposureNotice =
+    (stats?.dht?.isEnabled ?? false) &&
+    !dhtIsLanOnly &&
+    dhtIsRunning &&
+    !dhtExposureAcknowledged;
+  const networkHealth = buildNetworkHealthScore({
+    discoveredPeers,
+    meshPeers,
+    stats,
+  });
+
+  const copyNetworkHealthReport = async () => {
+    const report = formatNetworkHealthReport(networkHealth);
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(report);
+        toast.success('Network health report copied');
+      } catch {
+        toast.error('Unable to copy network health report');
+      }
+      return;
+    }
+
+    toast.info('Clipboard unavailable; select the report text manually');
+  };
+
+  if (loading) {
+    return <LoaderSegment />;
+  }
+
+  return (
+    <div className="network-dashboard">
+      {shouldExplainLanOnlyDht && (
+        <Message
+          className="network-diagnostic-message"
+          info
+        >
+          <Message.Header>LAN-only DHT is isolated</Message.Header>
+          <p>
+            DHT rendezvous is running with <code>dhtRendezvous.lanOnly: true</code>,
+            so slskdN intentionally skips the public BitTorrent DHT bootstrap
+            routers. Seeing <code>0</code> DHT nodes and <code>0</code> discovered
+            peers can be expected in this privacy mode even when the overlay and
+            DHT ports are open.
+          </p>
+          <p>
+            To discover public slskdN peers through DHT rendezvous, set
+            <code> dhtRendezvous.lanOnly: false</code> and restart. Keep LAN-only
+            enabled if you want discovery limited to local or already-known
+            private peers.
+          </p>
+        </Message>
+      )}
+      {shouldWarnAboutConnectivity && (
+        <Message
+          className="network-diagnostic-message"
+          warning
+        >
+          <Message.Header>Connectivity diagnostics</Message.Header>
+          <p>
+            slskdN is not seeing reachable peers yet. If you can log into the
+            Soulseek server but uploads, downloads, and peer counts stay at
+            zero, verify that your configured Soulseek listen port is reachable
+            from other peers. The default is <code>50300/tcp</code>.
+          </p>
+          <p>
+            Check local firewall rules, router/NAT forwarding, container port
+            publishing, and any reverse-proxy setup that might expose the Web UI
+            but not the Soulseek listen port.
+          </p>
+        </Message>
+      )}
+      {shouldShowDhtExposureNotice && (
+        <Message
+          className="network-diagnostic-message"
+          info
+          onDismiss={dismissDhtExposureConsent}
+        >
+          <Message.Header>Public DHT exposure notice</Message.Header>
+          <p>
+            DHT rendezvous is enabled and this node can publish its public
+            endpoint into the public BitTorrent DHT. This is expected when public
+            rendezvous is enabled; this notice is only here so operators are aware
+            that other slskdN peers can discover the node for mesh sync.
+          </p>
+          <p>
+            If you want to keep mesh discovery confined to trusted local peers,
+            set <code>dht.lan_only=true</code> in configuration before long-term
+            operation.
+          </p>
+        </Message>
+      )}
+
+      {/* Header Stats */}
+      <Card.Group
+        itemsPerRow={4}
+        stackable
+      >
+        <StatCard
+          color="blue"
+          icon="sitemap"
+          inverted={darkTheme}
+          label="Mesh Peers"
+          subLabel="slskdN clients connected"
+          value={mesh?.connectedPeerCount ?? meshPeers.length ?? 0}
+        />
+        <StatCard
+          color="green"
+          icon="database"
+          inverted={darkTheme}
+          label="Hash Entries"
+          subLabel={
+            hashDb?.dbSizeBytes
+              ? `${formatBytes(hashDb.dbSizeBytes)} on disk`
+              : 'Local database'
+          }
+          value={formatNumber(hashDb?.totalEntries ?? 0)}
+        />
+        <StatCard
+          color="purple"
+          icon="sync"
+          inverted={darkTheme}
+          label="Sequence ID"
+          subLabel="Mesh sync position"
+          value={hashDb?.currentSeqId ?? mesh?.localSeqId ?? 0}
+        />
+        <StatCard
+          color="orange"
+          icon="bolt"
+          inverted={darkTheme}
+          label="Active Swarms"
+          subLabel="Multi-source downloads"
+          value={swarmJobs?.length ?? 0}
+        />
+      </Card.Group>
+
+      <Divider />
+
+      <Segment className="network-health-panel">
+        <div className="network-health-head">
+          <Header as="h4">
+            <Icon name="heartbeat" />
+            <Header.Content>
+              Network Health
+              <Header.Subheader>
+                Local readiness score from already-loaded mesh, DHT, HashDb, and security counters
+              </Header.Subheader>
+            </Header.Content>
+          </Header>
+          <Popup
+            content="Copy a local network-health report for diagnostics. This does not query peers or change network state."
+            position="top center"
+            trigger={
+              <Button
+                aria-label="Copy network health report"
+                onClick={copyNetworkHealthReport}
+                size="small"
+              >
+                <Icon name="copy" />
+                Copy Report
+              </Button>
+            }
+          />
+        </div>
+        <div className="network-health-score-row">
+          <Progress
+            color={
+              networkHealth.score >= 85
+                ? 'green'
+                : networkHealth.score >= 65
+                  ? 'yellow'
+                  : 'red'
+            }
+            percent={networkHealth.score}
+            progress
+          >
+            {networkHealth.label}
+          </Progress>
+          <Label color="blue">
+            Mesh
+            <Label.Detail>{networkHealth.inputs.meshCount}</Label.Detail>
+          </Label>
+          <Label color="teal">
+            Discovered
+            <Label.Detail>{networkHealth.inputs.discoveredCount}</Label.Detail>
+          </Label>
+          <Label color="purple">
+            DHT
+            <Label.Detail>{networkHealth.inputs.dhtNodes}</Label.Detail>
+          </Label>
+          <Label color="orange">
+            Security
+            <Label.Detail>{networkHealth.inputs.securityWarningCount}</Label.Detail>
+          </Label>
+        </div>
+        {networkHealth.findings.length > 0 ? (
+          <List
+            divided
+            relaxed
+          >
+            {networkHealth.findings.map((finding) => (
+              <List.Item key={`${finding.area}-${finding.summary}`}>
+                <List.Icon
+                  color={
+                    finding.severity === 'fail'
+                      ? 'red'
+                      : finding.severity === 'warn'
+                        ? 'yellow'
+                        : 'blue'
+                  }
+                  name={
+                    finding.severity === 'fail'
+                      ? 'warning sign'
+                      : finding.severity === 'warn'
+                        ? 'exclamation triangle'
+                        : 'info circle'
+                  }
+                  verticalAlign="middle"
+                />
+                <List.Content>
+                  <List.Header>
+                    {finding.area}: {finding.summary}
+                  </List.Header>
+                  <List.Description>{finding.action}</List.Description>
+                </List.Content>
+              </List.Item>
+            ))}
+          </List>
+        ) : (
+          <Message
+            className="network-diagnostic-message"
+            positive
+          >
+            <Message.Header>No local network-health findings</Message.Header>
+            <p>
+              Mesh, DHT, HashDb, and security counters look healthy from the
+              already-loaded dashboard data.
+            </p>
+          </Message>
+        )}
+      </Segment>
+
+      {/* Our Capabilities */}
+      <Segment>
+        <Header as="h4">
+          <Icon name="id card" />
+          <Header.Content>
+            Our Capabilities
+            <Header.Subheader>
+              What we advertise to other slskdN peers
+            </Header.Subheader>
+          </Header.Content>
+        </Header>
+
+        <Label.Group>
+          <Label color="blue">
+            <Icon name="code branch" />
+            {capabilities?.version ?? 'slskdN'}
+          </Label>
+          {capabilities?.features?.map((feature) => (
+            <Label
+              color="teal"
+              key={feature}
+            >
+              <Icon name="check" />
+              {feature}
+            </Label>
+          )) ?? (
+            <>
+              <Label color="teal">
+                <Icon name="check" />
+                multi_source
+              </Label>
+              <Label color="teal">
+                <Icon name="check" />
+                hash_db
+              </Label>
+              <Label color="teal">
+                <Icon name="check" />
+                mesh_sync
+              </Label>
+            </>
+          )}
+        </Label.Group>
+        {obfuscation && (
+          <Message
+            info={!obfuscation.enabled}
+            warning={obfuscation.enabled && !obfuscation.runtimeSupported}
+            positive={obfuscation.enabled && obfuscation.runtimeSupported}
+          >
+            <Message.Header>Soulseek Type-1 Obfuscation</Message.Header>
+            <p>{obfuscation.summary}</p>
+            <Label.Group>
+              <Label color={obfuscation.enabled ? 'teal' : 'grey'}>
+                {obfuscation.enabled ? 'enabled' : 'disabled'}
+              </Label>
+              <Label color="blue">mode: {obfuscation.mode}</Label>
+              <Label color="blue">type: {obfuscation.type}</Label>
+              <Label color="blue">
+                obfuscated port: {obfuscation.effectiveListenPort ?? 'unset'}
+              </Label>
+              <Label color={obfuscation.advertiseRegularPort ? 'green' : 'grey'}>
+                regular fallback:{' '}
+                {obfuscation.advertiseRegularPort ? 'advertised' : 'off'}
+              </Label>
+              <Label color={obfuscation.runtimeSupported ? 'green' : 'orange'}>
+                runtime: {obfuscation.runtimeState}
+              </Label>
+            </Label.Group>
+          </Message>
+        )}
+      </Segment>
+
+      <Grid
+        columns={2}
+        stackable
+      >
+        {/* Mesh Peers */}
+        <Grid.Column>
+          <Segment>
+            <Header as="h4">
+              <Icon name="sitemap" />
+              <Header.Content>
+                Mesh Peers
+                <Header.Subheader>
+                  Connected slskdN clients for hash sync
+                </Header.Subheader>
+              </Header.Content>
+            </Header>
+
+            {meshPeers.length === 0 ? (
+              <Segment
+                basic
+                placeholder
+                textAlign="center"
+              >
+                <Header icon>
+                  <Icon name="users" />
+                  No mesh peers connected
+                </Header>
+                <p>Other slskdN clients will appear here when discovered</p>
+              </Segment>
+            ) : (
+              <Table
+                basic="very"
+                compact
+              >
+                <Table.Header>
+                  <Table.Row>
+                    <Table.HeaderCell>Peer</Table.HeaderCell>
+                    <Table.HeaderCell>Seq ID</Table.HeaderCell>
+                    <Table.HeaderCell>Last Sync</Table.HeaderCell>
+                    <Table.HeaderCell>Actions</Table.HeaderCell>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {meshPeers.map((peer) => (
+                    <Table.Row key={peer.username}>
+                      <Table.Cell>
+                        <Icon
+                          color="green"
+                          name="circle"
+                          size="tiny"
+                        />{' '}
+                        {peer.username}
+                      </Table.Cell>
+                      <Table.Cell>{peer.lastSeqId ?? '-'}</Table.Cell>
+                      <Table.Cell>{formatTimeAgo(peer.lastSyncAt)}</Table.Cell>
+                      <Table.Cell>
+                        <ShrinkableButton
+                          compact
+                          disabled={syncing[peer.username]}
+                          icon="sync"
+                          loading={syncing[peer.username]}
+                          mediaQuery="(max-width: 500px)"
+                          onClick={() => handleSync(peer.username)}
+                          primary
+                          size="mini"
+                        >
+                          Sync
+                        </ShrinkableButton>
+                      </Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            )}
+          </Segment>
+        </Grid.Column>
+
+        {/* Discovered Peers */}
+        <Grid.Column>
+          <Segment>
+            <Header as="h4">
+              <Icon name="search" />
+              <Header.Content>
+                Discovered slskdN Peers
+                <Header.Subheader>
+                  Peers with slskdN capabilities detected
+                </Header.Subheader>
+              </Header.Content>
+            </Header>
+
+            {discoveredPeers.length === 0 ? (
+              <Segment
+                basic
+                placeholder
+                textAlign="center"
+              >
+                <Header icon>
+                  <Icon name="radar" />
+                  No slskdN peers discovered yet
+                </Header>
+                <p>Peers are discovered through searches and downloads</p>
+              </Segment>
+            ) : (
+              <List
+                divided
+                relaxed
+              >
+                {discoveredPeers.slice(0, 10).map((peer) => (
+                  <List.Item key={peer.username}>
+                    <List.Icon
+                      color="blue"
+                      name="user"
+                      verticalAlign="middle"
+                    />
+                    <List.Content>
+                      <List.Header>{peer.username}</List.Header>
+                      <List.Description>
+                        {peer.version ?? 'slskdN'} • Last seen:{' '}
+                        {formatTimeAgo(peer.lastSeenAt)}
+                      </List.Description>
+                    </List.Content>
+                  </List.Item>
+                ))}
+                {discoveredPeers.length > 10 && (
+                  <List.Item>
+                    <List.Content>
+                      <em>...and {discoveredPeers.length - 10} more</em>
+                    </List.Content>
+                  </List.Item>
+                )}
+              </List>
+            )}
+          </Segment>
+        </Grid.Column>
+      </Grid>
+
+      <Divider />
+
+      {/* Mesh Sync Security */}
+      <Segment>
+        <Header as="h4">
+          <Icon name="shield alternate" />
+          <Header.Content>
+            Mesh Sync Security
+            <Header.Subheader>
+              Counters for signatures, reputation, rate limits, and quarantine
+            </Header.Subheader>
+          </Header.Content>
+        </Header>
+        {mesh?.warnings?.length > 0 && (
+          <Message
+            attached="top"
+            negative
+            size="small"
+          >
+            <Message.Header>
+              <Icon name="exclamation triangle" />
+              Security threshold alerts
+            </Message.Header>
+            <List
+              bulleted
+              size="small"
+            >
+              {mesh.warnings.map((w, index) => (
+                <List.Item key={index}>{w}</List.Item>
+              ))}
+            </List>
+          </Message>
+        )}
+        <Statistic.Group
+          inverted={darkTheme}
+          size="small"
+          widths={7}
+        >
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(mesh?.signatureVerificationFailures ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Sig. failures</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(mesh?.reputationBasedRejections ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Rep. rejections</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(mesh?.rateLimitViolations ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Rate limits</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(mesh?.quarantinedPeers ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Quarantined</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(mesh?.quarantineEvents ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Quarantine events</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(mesh?.rejectedMessages ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Rejected msgs</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(mesh?.skippedEntries ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Skipped entries</Statistic.Label>
+          </Statistic>
+        </Statistic.Group>
+      </Segment>
+
+      <Divider />
+
+      {/* Hash Database Details */}
+      <Segment>
+        <Header as="h4">
+          <Icon name="database" />
+          <Header.Content>
+            Hash Database
+            <Header.Subheader>
+              Content-addressed FLAC fingerprints
+            </Header.Subheader>
+          </Header.Content>
+          <span style={{ float: 'right', marginTop: '-0.5em' }}>
+            {backfillProgress && !backfillProgress.complete && (
+              <Label
+                size="tiny"
+                style={{ marginRight: '0.5em' }}
+              >
+                {backfillProgress.remainingSearches} searches left
+              </Label>
+            )}
+            <Popup
+              content={
+                backfillProgress && !backfillProgress.complete
+                  ? `Continue processing search history. ${backfillProgress.remainingSearches} of ${backfillProgress.totalSearches} searches remaining.`
+                  : 'Scan your search history to discover FLAC files from past searches. This populates the inventory with files that can be probed for content hashes, enabling multi-source downloads for those files. Processes in batches - click multiple times for large histories.'
+              }
+              position="top right"
+              trigger={
+                <ShrinkableButton
+                  compact
+                  disabled={backfilling}
+                  icon={
+                    backfillProgress && !backfillProgress.complete
+                      ? 'play'
+                      : 'history'
+                  }
+                  loading={backfilling}
+                  mediaQuery="(max-width: 500px)"
+                  onClick={() => handleBackfillFromHistory(false)}
+                  primary
+                  size="mini"
+                >
+                  {backfillProgress && !backfillProgress.complete
+                    ? 'Continue'
+                    : 'Backfill from History'}
+                </ShrinkableButton>
+              }
+            />
+            {backfillProgress && (
+              <Popup
+                content="Reset progress and start backfill from the beginning"
+                position="top right"
+                trigger={
+                  <ShrinkableButton
+                    compact
+                    disabled={backfilling}
+                    icon="redo"
+                    mediaQuery="(max-width: 500px)"
+                    onClick={() => handleBackfillFromHistory(true)}
+                    size="mini"
+                    style={{ marginLeft: '0.3em' }}
+                  >
+                    Reset
+                  </ShrinkableButton>
+                }
+              />
+            )}
+          </span>
+        </Header>
+
+        <Statistic.Group
+          inverted={darkTheme}
+          size="tiny"
+          widths={4}
+        >
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(hashDb?.totalEntries ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Total Entries</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatNumber(hashDb?.uniqueFiles ?? hashDb?.totalEntries ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Unique Files</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>
+              {formatBytes(hashDb?.dbSizeBytes ?? 0)}
+            </Statistic.Value>
+            <Statistic.Label>Database Size</Statistic.Label>
+          </Statistic>
+          <Statistic>
+            <Statistic.Value>{hashDb?.currentSeqId ?? 0}</Statistic.Value>
+            <Statistic.Label>Sequence ID</Statistic.Label>
+          </Statistic>
+        </Statistic.Group>
+
+        {hashDb?.coveragePercent !== undefined && (
+          <>
+            <Divider hidden />
+            <Progress
+              color="green"
+              percent={hashDb.coveragePercent}
+              progress
+              size="small"
+            >
+              Coverage of shared FLACs
+            </Progress>
+          </>
+        )}
+      </Segment>
+
+      {/* Backfill Scheduler */}
+      <Segment>
+        <Header as="h4">
+          <Icon name="clock" />
+          <Header.Content>
+            Backfill Scheduler
+            <Header.Subheader>
+              Conservative discovery of hashes from non-slskdN peers
+            </Header.Subheader>
+          </Header.Content>
+        </Header>
+
+        <Grid
+          columns={4}
+          stackable
+        >
+          <Grid.Column>
+            <Statistic
+              inverted={darkTheme}
+              size="mini"
+            >
+              <Statistic.Value>
+                <Icon
+                  color={backfill?.isActive ? 'green' : 'grey'}
+                  name="circle"
+                />{' '}
+                {backfill?.isActive ? 'Active' : 'Idle'}
+              </Statistic.Value>
+              <Statistic.Label>Status</Statistic.Label>
+            </Statistic>
+          </Grid.Column>
+          <Grid.Column>
+            <Statistic
+              inverted={darkTheme}
+              size="mini"
+            >
+              <Statistic.Value>{backfill?.pendingCount ?? 0}</Statistic.Value>
+              <Statistic.Label>Pending Files</Statistic.Label>
+            </Statistic>
+          </Grid.Column>
+          <Grid.Column>
+            <Statistic
+              inverted={darkTheme}
+              size="mini"
+            >
+              <Statistic.Value>{backfill?.completedToday ?? 0}</Statistic.Value>
+              <Statistic.Label>Completed Today</Statistic.Label>
+            </Statistic>
+          </Grid.Column>
+          <Grid.Column>
+            <Statistic
+              inverted={darkTheme}
+              size="mini"
+            >
+              <Statistic.Value>
+                {backfill?.discoveryRate ?? 0}/hr
+              </Statistic.Value>
+              <Statistic.Label>Discovery Rate</Statistic.Label>
+            </Statistic>
+          </Grid.Column>
+        </Grid>
+      </Segment>
+
+      {/* Active Swarm Downloads */}
+      {swarmJobs && swarmJobs.length > 0 && (
+        <Segment>
+          <Header as="h4">
+            <Icon name="bolt" />
+            <Header.Content>
+              Active Swarm Downloads
+              <Header.Subheader>
+                Multi-source downloads in progress
+              </Header.Subheader>
+            </Header.Content>
+          </Header>
+
+          {swarmJobs.map((job) => (
+            <Card
+              fluid
+              key={job.jobId}
+            >
+              <Card.Content>
+                <Card.Header>
+                  <Icon
+                    color="yellow"
+                    name="bolt"
+                  />
+                  {job.filename?.split('/').pop() ?? 'Unknown file'}
+                </Card.Header>
+                <Card.Meta>
+                  {job.activeSources ?? 0} sources •{' '}
+                  {formatBytes(job.downloadedBytes ?? 0)} /{' '}
+                  {formatBytes(job.totalBytes ?? 0)}
+                </Card.Meta>
+                <Progress
+                  active
+                  color="blue"
+                  percent={job.progressPercent ?? 0}
+                  progress
+                  size="small"
+                />
+                {job.workers && job.workers.length > 0 && (
+                  <List
+                    horizontal
+                    size="small"
+                  >
+                    {job.workers.slice(0, 5).map((worker) => (
+                      <List.Item key={worker.username}>
+                        <Label size="tiny">
+                          <Icon name="user" />
+                          {worker.username}
+                          <Label.Detail>
+                            {formatBytes(worker.speedBps ?? 0)}/s
+                          </Label.Detail>
+                        </Label>
+                      </List.Item>
+                    ))}
+                    {job.workers.length > 5 && (
+                      <List.Item>
+                        <Label size="tiny">
+                          +{job.workers.length - 5} more
+                        </Label>
+                      </List.Item>
+                    )}
+                  </List>
+                )}
+              </Card.Content>
+            </Card>
+          ))}
+        </Segment>
+      )}
+    </div>
+  );
+};
+
+export default Network;

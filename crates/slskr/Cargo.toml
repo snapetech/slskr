@@ -17,6 +17,9 @@ slskr-client = { version = "0.0.0", path = "../slskr-client" }
 slskr-cli = { version = "0.0.0", path = "../slskr-cli" }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 toml = "0.8"
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [lints]
 workspace = true
