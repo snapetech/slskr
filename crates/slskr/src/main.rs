@@ -9628,6 +9628,32 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
         route_http_request_with_headers(method, path, authorization, body, &state, headers).await?
     };
 
+    // Get rate limit info for headers
+    let remaining = state.rate_limiter.get_remaining(remote_addr, username.as_deref()).await;
+    let reset_secs = state.rate_limiter.get_reset_time(remote_addr, username.as_deref()).await;
+    let max_requests = if username.is_some() {
+        state.config.api_rate_limit_authenticated
+    } else {
+        state.config.api_rate_limit_anonymous
+    };
+    
+    // Build rate limit headers
+    let ratelimit_headers = format!(
+        "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n",
+        max_requests, remaining, reset_secs
+    );
+
+    // Add cache control headers
+    let cache_headers = cache_control_header(method, response.content_type, normalized_path)
+        .unwrap_or_else(String::new);
+    
+    // Generate ETag
+    let etag = if method == "GET" && response.content_type.contains("json") {
+        format!("ETag: {}\r\n", generate_etag(&response.body))
+    } else {
+        String::new()
+    };
+
     // Add CSRF cookie for HTML responses (GET /)
     let csrf_cookie = if path == "/" && method == "GET" {
         let port = std::env::var("SLSKR_HTTP_BIND")
@@ -9640,12 +9666,15 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     };
 
     let response_text = format!(
-        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}
+        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n{}{}{}{}
 \r\n{}",
         response.status,
         response.content_type,
         response.body.len(),
         csrf_cookie,
+        ratelimit_headers,
+        cache_headers,
+        etag,
         response.body
     );
     
