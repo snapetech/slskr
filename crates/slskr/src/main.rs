@@ -3297,6 +3297,150 @@ impl ShareGrantStore {
     }
 }
 
+// Library Item Models
+#[derive(Clone, Debug)]
+struct LibraryItemRecord {
+    id: String,
+    artist: String,
+    title: String,
+    kind: String,
+    created_at: u64,
+}
+
+impl LibraryItemRecord {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"created_at\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.artist),
+            json_escape(&self.title),
+            json_escape(&self.kind),
+            self.created_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct LibraryStore {
+    records: Vec<LibraryItemRecord>,
+    next_id: u64,
+    updated_at: u64,
+}
+
+impl LibraryStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn create(&mut self, artist: String, title: String, kind: String) -> LibraryItemRecord {
+        let now = unix_timestamp();
+        let id = format!("lib-{}", self.next_id);
+        self.next_id += 1;
+        let record = LibraryItemRecord {
+            id,
+            artist,
+            title,
+            kind,
+            created_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn get(&self, id: &str) -> Option<LibraryItemRecord> {
+        self.records.iter().find(|r| r.id == id).cloned()
+    }
+
+    fn delete(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.records.iter().position(|r| r.id == id) {
+            self.records.remove(pos);
+            self.updated_at = unix_timestamp();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn json(&self) -> String {
+        let records = self
+            .records
+            .iter()
+            .map(LibraryItemRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"items\":[{}],\"count\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            self.updated_at
+        )
+    }
+}
+
+// Destination Models
+#[derive(Clone, Debug)]
+struct DestinationRecord {
+    id: String,
+    name: String,
+    path: String,
+    is_default: bool,
+}
+
+impl DestinationRecord {
+    fn json(&self) -> String {
+        format!(
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"path\":\"{}\",\"is_default\":{}}}",
+            json_escape(&self.id),
+            json_escape(&self.name),
+            json_escape(&self.path),
+            self.is_default
+        )
+    }
+}
+
+#[derive(Debug)]
+struct DestinationStore {
+    records: Vec<DestinationRecord>,
+}
+
+impl DestinationStore {
+    fn new() -> Self {
+        Self {
+            records: vec![
+                DestinationRecord {
+                    id: "default".to_string(),
+                    name: "Default".to_string(),
+                    path: "/home/user/Downloads".to_string(),
+                    is_default: true,
+                }
+            ],
+        }
+    }
+
+    fn list(&self) -> String {
+        let records = self
+            .records
+            .iter()
+            .map(DestinationRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"destinations\":[{}],\"count\":{}}}",
+            records,
+            self.records.len()
+        )
+    }
+
+    fn default(&self) -> String {
+        self.records[0].json()
+    }
+}
+
 #[derive(Debug)]
 struct AppState {
     config: AppConfig,
@@ -3318,6 +3462,8 @@ struct AppState {
     user_notes: RwLock<UserNoteStore>,
     interests: RwLock<InterestStore>,
     share_grants: RwLock<ShareGrantStore>,
+    library: RwLock<LibraryStore>,
+    destinations: RwLock<DestinationStore>,
     db: Option<crate::persistence::DatabaseManager>,
     session_commands: mpsc::Sender<SessionCommand>,
 }
@@ -4724,9 +4870,28 @@ async fn route_http_request_with_headers(
             } else {
                 Ok(routing::not_found_response())
             }
-        }
-        // WEBHOOK MANAGEMENT ROUTES
-        ("POST", "/api/admin/webhooks") => {
+         }
+         
+         // GET browse requests list
+         ("GET", "/api/browse/requests") => {
+             let browse = state.browse.read().await;
+             let requests = browse.records.iter().map(|r| {
+                 serde_json::json!({
+                     "username": r.username,
+                     "status": r.status,
+                     "requested_at": r.requested_at,
+                     "updated_at": r.updated_at,
+                 })
+             }).collect::<Vec<_>>();
+             drop(browse);
+             Ok(HttpResponse {
+                 status: "200 OK",
+                 content_type: "application/json",
+                 body: serde_json::to_string(&serde_json::json!({"requests": requests, "count": requests.len()})).unwrap_or_else(|_| "{}".to_string()),
+             })
+         }
+         // WEBHOOK MANAGEMENT ROUTES
+         ("POST", "/api/admin/webhooks") => {
             let payload = webhooks::WebhookPayload::new(
                 webhooks::WebhookEvent::ApiKeyCreated,
                 "hook-create".to_string(),
@@ -5008,6 +5173,18 @@ scalar Long
                 body: r#"{"messages":[],"total":0}"#.to_owned(),
             })
         }
+        // GET room detail by name
+        ("GET", path) if path.starts_with("/api/rooms/") && !path.ends_with("/messages") && !path.ends_with("/users") && path.matches('/').count() == 3 => {
+            let room_name = path.rsplitn(2, '/').next().unwrap_or("");
+            let rooms = state.rooms.read().await;
+            if let Some(record) = rooms.records.iter().find(|r| r.name == room_name) {
+                Ok(routing::ok_response(record.json()))
+            } else {
+                drop(rooms);
+                Ok(routing::not_found_response())
+            }
+        }
+        
         ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/users") => {
             // Stub: room users list.
             Ok(HttpResponse {
@@ -5793,6 +5970,107 @@ scalar Long
             }
         }
         
+        // LIBRARY ITEMS ENDPOINTS
+        ("GET", "/api/library/items") => {
+            let library = state.library.read().await;
+            let json = library.json();
+            drop(library);
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/library/items") => {
+            let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+            let title = extract_json_string_field(body, "title").unwrap_or_default();
+            let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
+            let mut library = state.library.write().await;
+            let record = library.create(artist, title, kind);
+            let json = record.json();
+            drop(library);
+            Ok(routing::created_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/library/items/") && path.len() > 19 => {
+            let id = &path[19..];
+            let library = state.library.read().await;
+            if let Some(record) = library.get(id) {
+                let json = record.json();
+                drop(library);
+                Ok(routing::ok_response(json))
+            } else {
+                drop(library);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/library/items/") && path.len() > 19 => {
+            let id = &path[19..];
+            let mut library = state.library.write().await;
+            let deleted = library.delete(id);
+            drop(library);
+            if deleted {
+                Ok(routing::ok_response("{}".to_string()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+        
+        // DESTINATIONS ENDPOINTS
+        ("GET", "/api/destinations") => {
+            let destinations = state.destinations.read().await;
+            let json = destinations.list();
+            drop(destinations);
+            Ok(routing::ok_response(json))
+        }
+        ("GET", "/api/destinations/default") => {
+            let destinations = state.destinations.read().await;
+            let json = destinations.default();
+            drop(destinations);
+            Ok(routing::ok_response(json))
+        }
+        
+        // BROWSE ENDPOINTS (stub)
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
+            let json = format!(
+                "{{\"username\":\"{}\",\"items\":[],\"count\":0}}",
+                path.split('/').nth(3).unwrap_or("unknown")
+            );
+            Ok(routing::ok_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse/status") => {
+            let json = format!(
+                "{{\"username\":\"{}\",\"status\":\"idle\",\"browsing\":false}}",
+                path.split('/').nth(3).unwrap_or("unknown")
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        // CONVERSATIONS ENDPOINT (stub)
+        ("GET", "/api/conversations") => {
+            let json = format!("{{\"conversations\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
+        // JOBS ENDPOINT (stub)
+        ("GET", path) if path.starts_with("/api/jobs/") && path.len() > 10 => {
+            let job_id = &path[10..];
+            let json = format!(
+                "{{\"id\":\"{}\",\"status\":\"pending\",\"progress\":0}}",
+                json_escape(job_id)
+            );
+            Ok(routing::ok_response(json))
+        }
+        
+        // LIBRARY HEALTH ENDPOINTS (stubs)
+        ("GET", "/api/library/health/issues") => {
+            let json = format!("{{\"issues\":[],\"count\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        ("POST", "/api/library/health/scans") => {
+            let json = format!("{{\"scan_id\":\"scan-{}\",\"status\":\"started\"}}",unix_timestamp());
+            Ok(routing::created_response(json))
+        }
+        ("POST", "/api/library/health/issues/fix") => {
+            let json = format!("{{\"fixed\":0,\"skipped\":0}}");
+            Ok(routing::ok_response(json))
+        }
+        
         // WEBUI PARITY: SignalR hub stub endpoints
         // These return 501 Not Implemented; proper SignalR WebSocket hubs are future work
         ("GET", path) if path.starts_with("/hub/") => {
@@ -5992,6 +6270,8 @@ async fn serve(once: bool) -> Result<(), String> {
           user_notes: RwLock::new(UserNoteStore::new()),
           interests: RwLock::new(InterestStore::new()),
           share_grants: RwLock::new(ShareGrantStore::new()),
+          library: RwLock::new(LibraryStore::new()),
+          destinations: RwLock::new(DestinationStore::new()),
           db,
           config,
           session_commands,
@@ -9696,6 +9976,8 @@ mod tests {
               user_notes: RwLock::new(super::UserNoteStore::new()),
               interests: RwLock::new(super::InterestStore::new()),
               share_grants: RwLock::new(super::ShareGrantStore::new()),
+              library: RwLock::new(super::LibraryStore::new()),
+              destinations: RwLock::new(super::DestinationStore::new()),
               db: None,
               config,
               session_commands: sender,
@@ -12223,6 +12505,8 @@ mod tests {
               user_notes: RwLock::new(super::UserNoteStore::new()),
               interests: RwLock::new(super::InterestStore::new()),
               share_grants: RwLock::new(super::ShareGrantStore::new()),
+              library: RwLock::new(super::LibraryStore::new()),
+              destinations: RwLock::new(super::DestinationStore::new()),
               db: None,
               config,
               session_commands: sender,
