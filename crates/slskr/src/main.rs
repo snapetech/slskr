@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_imports)]
 
+mod api_keys;
 mod batch;
 mod caching;
 mod config;
