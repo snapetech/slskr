@@ -4,6 +4,7 @@ mod batch;
 mod caching;
 mod config;
 mod logging;
+mod rate_limit;
 mod utils;
 mod storage;
 mod routing;
