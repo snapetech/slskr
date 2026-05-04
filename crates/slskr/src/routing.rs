@@ -86,3 +86,35 @@ pub fn not_found_response() -> HttpResponse {
         body: "{\"error\":\"not found\"}".to_owned(),
     }
 }
+
+pub fn bad_request_response(message: &str) -> HttpResponse {
+    HttpResponse {
+        status: "400 Bad Request",
+        content_type: "application/json",
+        body: format!("{{\"error\":\"{}\"}}", crate::config::json_escape(message)),
+    }
+}
+
+pub fn created_response(body: String) -> HttpResponse {
+    HttpResponse {
+        status: "201 Created",
+        content_type: "application/json",
+        body,
+    }
+}
+
+pub fn accepted_response(body: String) -> HttpResponse {
+    HttpResponse {
+        status: "202 Accepted",
+        content_type: "application/json",
+        body,
+    }
+}
+
+pub fn ok_response(body: String) -> HttpResponse {
+    HttpResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        body,
+    }
+}

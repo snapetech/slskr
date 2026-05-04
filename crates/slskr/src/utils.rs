@@ -334,6 +334,24 @@ pub fn room_messages_path(path: &str) -> Option<&str> {
         .filter(|room| !room.is_empty() && !room.contains('/'))
 }
 
+pub fn room_path(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/rooms/")
+        .or_else(|| path.strip_prefix("/api/v0/rooms/"))?
+        .split('/').next()
+        .filter(|room| !room.is_empty())
+}
+
+pub fn message_id_path(path: &str) -> Option<u64> {
+    let rest = path
+        .strip_prefix("/api/messages/")
+        .or_else(|| path.strip_prefix("/api/v0/messages/"))?;
+    let id = rest.split('/').next()?;
+    if id.is_empty() || id.contains('/') {
+        return None;
+    }
+    id.parse().ok()
+}
+
 // ============================================================================
 // JSON Parsing
 // ============================================================================
