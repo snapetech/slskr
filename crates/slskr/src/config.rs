@@ -33,6 +33,8 @@ pub struct AppConfig {
     pub transfer_allow_outbound: bool,
     pub auth_required: bool,
     pub api_token: Option<String>,
+    pub api_rate_limit_anonymous: u32,
+    pub api_rate_limit_authenticated: u32,
 }
 
 impl AppConfig {
@@ -186,6 +188,8 @@ impl AppConfig {
             transfer_allow_outbound,
             auth_required,
             api_token,
+            api_rate_limit_anonymous: 1000,
+            api_rate_limit_authenticated: 5000,
         })
     }
 
