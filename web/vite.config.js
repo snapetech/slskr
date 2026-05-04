@@ -64,11 +64,11 @@ export default defineConfig({
     port: 3001,
     proxy: {
       '/api': {
-        target: 'http://localhost:5099',
+        target: 'http://localhost:5030',
         changeOrigin: true,
       },
       '/hub': {
-        target: 'http://localhost:5099',
+        target: 'http://localhost:5030',
         ws: true,
         changeOrigin: true,
       },
