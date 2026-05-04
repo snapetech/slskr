@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod config;
+mod logging;
 mod utils;
 mod storage;
 mod routing;
@@ -5489,6 +5490,9 @@ async fn record_event(
 }
 
 async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> Result<(), String> {
+    let request_timer = logging::start_timer();
+    let remote_addr = stream.peer_addr().ok();
+    
     let mut buffer = [0_u8; 4096];
     let bytes_read = stream
         .read(&mut buffer)
@@ -5497,21 +5501,48 @@ async fn handle_http_connection(mut stream: TcpStream, state: Arc<AppState>) -> 
     let request = std::str::from_utf8(&buffer[..bytes_read])
         .map_err(|error| format!("request was not UTF-8: {error}"))?;
     let (method, path) = parse_route(request);
+    let (normalized_path, query) = split_request_target(path);
     let authorization = authorization_header(request);
     let headers = RequestSecurityHeaders::from_request(request);
     let body = request_body(request);
+    
+    // Log request
+    let req_log = logging::HttpRequestLog {
+        method: method.to_string(),
+        path: normalized_path.to_string(),
+        query: query.map(|q| q.to_string()),
+        remote_addr: remote_addr.map(|addr| addr.to_string()),
+        timestamp: logging::format_timestamp(),
+    };
+    
     let response =
         route_http_request_with_headers(method, path, authorization, body, &state, headers).await?;
 
-    let response = format!(
+    let response_text = format!(
         "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
         response.status,
         response.content_type,
         response.body.len(),
         response.body
     );
+    
+    // Log response
+    let resp_log = logging::HttpResponseLog {
+        status_code: logging::status_code_from_string(response.status),
+        content_length: response.body.len(),
+        duration_ms: logging::elapsed_ms(request_timer),
+        error: None,
+    };
+    
+    let trans_log = logging::HttpTransactionLog {
+        request: req_log,
+        response: resp_log,
+    };
+    let log_config = logging::LogConfig::from_env();
+    logging::log_transaction(&log_config, &trans_log);
+    
     stream
-        .write_all(response.as_bytes())
+        .write_all(response_text.as_bytes())
         .await
         .map_err(|error| format!("write failed: {error}"))?;
     Ok(())
