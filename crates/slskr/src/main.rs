@@ -416,6 +416,7 @@ impl SearchResultEntry {
 
 #[derive(Clone, Debug)]
 struct SearchRecord {
+    id: String,
     token: u32,
     query: String,
     target: &'static str,
@@ -437,7 +438,7 @@ impl SearchRecord {
             .join(",");
         format!(
             "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"responseCount\":{},\"results\":[{}],\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
-            self.token,
+            json_escape(&self.id),
             self.token,
             json_escape(&self.query),
             json_escape(&self.query),
@@ -501,6 +502,7 @@ impl SearchRecord {
             _ => None,
         };
         Some(Self {
+            id: record.id.clone(),
             token,
             query: record.query.clone(),
             target,
@@ -548,6 +550,7 @@ impl SearchStore {
 
     fn create(
         &mut self,
+        id: Option<String>,
         query: String,
         target: &'static str,
         target_name: Option<String>,
@@ -555,8 +558,12 @@ impl SearchStore {
         ttl_seconds: u64,
     ) -> SearchRecord {
         let now = unix_timestamp();
+        let token = self.next_token;
         let record = SearchRecord {
-            token: self.next_token,
+            id: id
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| token.to_string()),
+            token,
             query,
             target,
             target_name,
@@ -572,6 +579,26 @@ impl SearchStore {
         self.next_token = self.next_token.wrapping_add(1).max(1);
         self.records.push(record.clone());
         record
+    }
+
+    fn get_by_identifier(&self, id: &str) -> Option<SearchRecord> {
+        self.records
+            .iter()
+            .find(|record| record.id == id || record.token.to_string() == id)
+            .cloned()
+    }
+
+    fn remove_by_identifier(&mut self, id: &str) -> bool {
+        if let Some(pos) = self
+            .records
+            .iter()
+            .position(|record| record.id == id || record.token.to_string() == id)
+        {
+            self.records.remove(pos);
+            true
+        } else {
+            false
+        }
     }
 
     fn complete(&mut self, token: u32) -> Option<SearchRecord> {
@@ -4845,6 +4872,7 @@ async fn route_http_request_with_headers(
             };
 
             let target_str = extract_json_string_field(body, "target").unwrap_or_else(|| "global".to_string());
+            let external_id = extract_json_string_field(body, "id");
             let username_opt = extract_json_string_field(body, "username");
             let room_opt = extract_json_string_field(body, "room");
 
@@ -4867,7 +4895,7 @@ async fn route_http_request_with_headers(
              let result_count = matching_results.len();
 
               let target = search_target_static(&target_str);
-              let record = searches.create(query.clone(), target, target_name.clone(), matching_results, 300);
+              let record = searches.create(external_id, query.clone(), target, target_name.clone(), matching_results, 300);
               let token = record.token;
               drop(searches);
 
@@ -5092,7 +5120,9 @@ async fn route_http_request_with_headers(
              let response = transfers
                  .slskd_transfer_json(0, username, id)
                  .map(routing::ok_response)
-                 .unwrap_or_else(|| routing::ok_response(slskd_empty_transfer_json(0, username, id)));
+                 .unwrap_or_else(|| {
+                     routing::ok_response(slskd_empty_transfer_json(0, username, id))
+                 });
              drop(transfers);
              Ok(response)
          }
@@ -5105,7 +5135,9 @@ async fn route_http_request_with_headers(
              let response = transfers
                  .slskd_transfer_json(1, username, id)
                  .map(routing::ok_response)
-                 .unwrap_or_else(|| routing::ok_response(slskd_empty_transfer_json(1, username, id)));
+                 .unwrap_or_else(|| {
+                     routing::ok_response(slskd_empty_transfer_json(1, username, id))
+                 });
              drop(transfers);
              Ok(response)
          }
@@ -5134,6 +5166,23 @@ async fn route_http_request_with_headers(
              }
              drop(transfers);
              Ok(routing::ok_response("true".to_owned()))
+         }
+
+         ("DELETE", "/api/transfers/downloads/all/completed")
+         | ("DELETE", "/api/transfers/uploads/all/completed") => {
+             let direction = if normalized_path.contains("/downloads/") { 0 } else { 1 };
+             let mut transfers = state.transfers.write().await;
+             let before = transfers.entries.len();
+             transfers.entries.retain(|entry| {
+                 entry.direction != direction
+                     || !matches!(
+                         entry.status.as_str(),
+                         "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+                     )
+             });
+             let removed = before.saturating_sub(transfers.entries.len());
+             drop(transfers);
+             Ok(routing::ok_response((removed > 0).to_string()))
          }
 
          ("DELETE", path) if slskd_transfer_file_path(path, "downloads").is_some() => {
@@ -5513,57 +5562,50 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/searches/") && path.ends_with("/responses") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 4 {
+            let Some(id) = path
+                .strip_prefix("/api/searches/")
+                .and_then(|value| value.strip_suffix("/responses"))
+                .filter(|value| !value.is_empty() && !value.contains('/'))
+            else {
                 return Ok(routing::not_found_response());
-            }
-            if let Ok(token) = parts[3].parse::<u32>() {
-                let searches = state.searches.read().await;
-                if let Some(record) = searches.records.iter().find(|s| s.token == token) {
-                    let json = record.slskd_responses_json();
-                    drop(searches);
-                    Ok(routing::ok_response(json))
-                } else {
-                    drop(searches);
-                    Ok(routing::not_found_response())
-                }
+            };
+            let searches = state.searches.read().await;
+            if let Some(record) = searches.get_by_identifier(id) {
+                let json = record.slskd_responses_json();
+                drop(searches);
+                Ok(routing::ok_response(json))
             } else {
-                Ok(routing::bad_request_response("invalid token"))
+                drop(searches);
+                Ok(routing::not_found_response())
             }
         }
 
-        ("GET", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
-            let token_str = &path[13..];
-            if let Ok(token) = token_str.parse::<u32>() {
-                let searches = state.searches.read().await;
-                if let Some(record) = searches.records.iter().find(|s| s.token == token) {
-                    let json = record.json();
-                    drop(searches);
-                    Ok(routing::ok_response(json))
-                } else {
-                    drop(searches);
-                    Ok(routing::not_found_response())
-                }
+        ("GET", path) if path.starts_with("/api/searches/") && path.len() > "/api/searches/".len() => {
+            let id = path.trim_start_matches("/api/searches/");
+            let searches = state.searches.read().await;
+            if let Some(record) = searches.get_by_identifier(id) {
+                let json = record.json();
+                drop(searches);
+                Ok(routing::ok_response(json))
             } else {
-                Ok(routing::bad_request_response("invalid token"))
+                drop(searches);
+                Ok(routing::not_found_response())
             }
         }
 
-        ("DELETE", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
-            let token_str = &path[13..];
-            if let Ok(token) = token_str.parse::<u32>() {
-                let mut searches = state.searches.write().await;
-                if let Some(pos) = searches.records.iter().position(|s| s.token == token) {
-                    searches.records.remove(pos);
-                    drop(searches);
-                    Ok(routing::ok_response("{}".to_string()))
-                } else {
-                    drop(searches);
-                    Ok(routing::not_found_response())
-                }
-            } else {
-                Ok(routing::bad_request_response("invalid token"))
-            }
+        ("DELETE", path)
+            if (path.starts_with("/api/searches/")
+                || route.normalized_path.starts_with("/api/v0/searches/"))
+                && path.len() > "/api/searches/".len() =>
+        {
+            let token_str = path
+                .strip_prefix("/api/searches/")
+                .or_else(|| route.normalized_path.strip_prefix("/api/v0/searches/"))
+                .unwrap_or_default();
+            let mut searches = state.searches.write().await;
+            searches.remove_by_identifier(token_str);
+            drop(searches);
+            Ok(routing::ok_response("{}".to_string()))
         }
 
         // MESSAGE ENDPOINTS
@@ -7970,11 +8012,11 @@ async fn route_http_request_with_headers(
         }
 
         ("DELETE", path) if path.starts_with("/api/files/") && path.contains("/directories/") => {
-            Ok(routing::bad_request_response("file directory deletion is disabled"))
+            Ok(routing::ok_response("false".to_owned()))
         }
 
         ("DELETE", path) if path.starts_with("/api/files/") && path.contains("/files/") => {
-            Ok(routing::bad_request_response("file deletion is disabled"))
+            Ok(routing::ok_response("false".to_owned()))
         }
 
         ("DELETE", "/api/integrations/spotify") => {
@@ -13821,6 +13863,41 @@ mod tests {
         assert_eq!(responses_json[0]["username"], "peer1");
         assert_eq!(responses_json[0]["files"][0]["filename"], "Remote/Song.mp3");
 
+        let uuid_search_id = "11111111-1111-1111-1111-111111111111";
+        let uuid_search = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            &format!(r#"{{"id":"{uuid_search_id}","searchText":"UUID Song"}}"#),
+            &state,
+        )
+        .await
+        .expect("uuid search route");
+        assert_eq!(uuid_search.status, "201 Created");
+        let uuid_search_json =
+            serde_json::from_str::<serde_json::Value>(&uuid_search.body).unwrap();
+        assert_eq!(uuid_search_json["id"], uuid_search_id);
+        let _ = receiver.try_recv();
+
+        for (method, path) in [
+            ("GET", format!("/api/v0/searches/{uuid_search_id}")),
+            (
+                "GET",
+                format!("/api/v0/searches/{uuid_search_id}?includeResponses=true"),
+            ),
+            (
+                "GET",
+                format!("/api/v0/searches/{uuid_search_id}/responses"),
+            ),
+            ("PUT", format!("/api/v0/searches/{uuid_search_id}")),
+            ("DELETE", format!("/api/v0/searches/{uuid_search_id}")),
+        ] {
+            let response = super::route_http_request(method, &path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+        }
+
         let enqueue = super::route_http_request(
             "POST",
             "/api/v0/transfers/downloads/peer1",
@@ -13971,6 +14048,7 @@ mod tests {
             ("PUT", "/api/conversations/peer1", ""),
             ("DELETE", "/api/conversations/peer1", ""),
             ("GET", "/api/users/peer1/endpoint", ""),
+            ("GET", "/api/users/peer1/browse", ""),
             ("GET", "/api/users/peer1/browse/status", ""),
             ("POST", "/api/users/peer1/directory", r#"{"directory":""}"#),
             ("GET", "/api/users/peer1/info", ""),
@@ -14054,6 +14132,54 @@ mod tests {
                 !versioned_response.status.starts_with('5'),
                 "{method} {versioned}: {}",
                 versioned_response.status
+            );
+            while receiver.try_recv().is_ok() {}
+        }
+
+        let query_contract_routes = [
+            ("GET", "/api/application/version/latest?forceCheck=true", ""),
+            ("GET", "/api/searches?includeResponses=true", ""),
+            ("DELETE", "/api/transfers/downloads/peer1/1?remove=true", ""),
+            ("GET", "/api/transfers/downloads/?includeRemoved=true", ""),
+            ("GET", "/api/transfers/uploads/?includeRemoved=true", ""),
+            (
+                "GET",
+                "/api/conversations?includeInactive=true&unAcknowledgedOnly=false",
+                "",
+            ),
+            ("GET", "/api/conversations/peer1?includeMessages=false", ""),
+            (
+                "GET",
+                "/api/conversations/peer1/messages?unAcknowledgedOnly=true",
+                "",
+            ),
+            ("GET", "/api/files/downloads/directories?recursive=true", ""),
+            (
+                "GET",
+                "/api/files/incomplete/directories?recursive=true",
+                "",
+            ),
+            ("GET", "/api/events?limit=10", ""),
+            (
+                "GET",
+                "/api/telemetry/reports/transfers/summary?startDate=2026-01-01&endDate=2026-01-02",
+                "",
+            ),
+        ];
+
+        for (method, path, body) in query_contract_routes {
+            let response = tokio::time::timeout(
+                Duration::from_secs(1),
+                super::route_http_request(method, path, None, body, &state),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
+            .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            assert!(
+                !response.status.starts_with('5'),
+                "{method} {path}: {}",
+                response.status
             );
             while receiver.try_recv().is_ok() {}
         }
@@ -14538,7 +14664,7 @@ mod tests {
     #[test]
     fn search_store_merges_peer_search_responses() {
         let mut store = super::SearchStore::new();
-        let record = store.create("remote".to_owned(), "global", None, Vec::new(), 300);
+        let record = store.create(None, "remote".to_owned(), "global", None, Vec::new(), 300);
         let response = FileSearchResponse {
             username: "peer1".to_owned(),
             token: record.token,

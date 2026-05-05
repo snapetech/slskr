@@ -38,6 +38,24 @@ pub struct RuntimeProbe {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RouteAction {
+    pub body: ActionBody,
+    pub label: &'static str,
+    pub method: &'static str,
+    pub path: &'static str,
+    pub surface: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionBody {
+    None,
+    BrowseDirectory,
+    ConversationMessage,
+    JsonString,
+    SearchText,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RoutePage {
     pub description: &'static str,
     pub path: &'static str,
@@ -487,6 +505,74 @@ pub const fn runtime_probes() -> &'static [RuntimeProbe] {
     ]
 }
 
+pub const fn route_actions() -> &'static [RouteAction] {
+    &[
+        RouteAction {
+            body: ActionBody::SearchText,
+            label: "Start Search",
+            method: "POST",
+            path: "/searches",
+            surface: "search",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Cancel Search",
+            method: "DELETE",
+            path: "/searches/:id",
+            surface: "search",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Clear Completed Downloads",
+            method: "DELETE",
+            path: "/transfers/downloads/all/completed",
+            surface: "transfers",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Clear Completed Uploads",
+            method: "DELETE",
+            path: "/transfers/uploads/all/completed",
+            surface: "transfers",
+        },
+        RouteAction {
+            body: ActionBody::JsonString,
+            label: "Join Room",
+            method: "POST",
+            path: "/rooms/joined",
+            surface: "rooms",
+        },
+        RouteAction {
+            body: ActionBody::ConversationMessage,
+            label: "Send Message",
+            method: "POST",
+            path: "/conversations/:username",
+            surface: "messages",
+        },
+        RouteAction {
+            body: ActionBody::BrowseDirectory,
+            label: "Request Directory",
+            method: "POST",
+            path: "/users/:username/directory",
+            surface: "browse",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Connect",
+            method: "PUT",
+            path: "/server",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Disconnect",
+            method: "DELETE",
+            path: "/server",
+            surface: "system",
+        },
+    ]
+}
+
 pub const fn route_pages() -> &'static [RoutePage] {
     &[
         RoutePage {
@@ -633,11 +719,12 @@ pub fn endpoint_url(endpoint: &str) -> String {
 
 pub fn compatibility_report() -> String {
     format!(
-        "{} UI routes, {} route pages, {} nav items, {} API contracts, {} runtime probes",
+        "{} UI routes, {} route pages, {} nav items, {} API contracts, {} route actions, {} runtime probes",
         ui_routes().len(),
         route_pages().len(),
         nav_items().len(),
         api_endpoints().len(),
+        route_actions().len(),
         runtime_probes().len()
     )
 }
@@ -651,6 +738,22 @@ fn escape_html(value: &str) -> String {
             '>' => escaped.push_str("&gt;"),
             '"' => escaped.push_str("&quot;"),
             '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn escape_json_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len() + 2);
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => escaped.push(' '),
             _ => escaped.push(ch),
         }
     }
@@ -747,6 +850,14 @@ pub fn route_endpoints(surface: &str) -> Vec<ApiEndpoint> {
         .collect()
 }
 
+pub fn surface_actions(surface: &str) -> Vec<RouteAction> {
+    route_actions()
+        .iter()
+        .copied()
+        .filter(|action| action.surface == surface)
+        .collect()
+}
+
 fn route_param_value(path: &str, fallback: &str) -> String {
     let value = path
         .trim_matches('/')
@@ -769,6 +880,72 @@ pub fn concrete_endpoint_path(route_path: &str, endpoint: ApiEndpoint) -> String
     endpoint_url(endpoint.path)
         .replace(":id", &search_id)
         .replace(":username", "peer1")
+}
+
+pub fn concrete_action_path(route_path: &str, action: RouteAction) -> String {
+    let search_id = route_param_value(route_path, "1");
+    endpoint_url(action.path)
+        .replace(":id", &search_id)
+        .replace(":username", "peer1")
+}
+
+pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
+    let value = value.trim();
+    match body {
+        ActionBody::None => None,
+        ActionBody::BrowseDirectory => Some(format!(
+            r#"{{"directory":"{}"}}"#,
+            escape_json_string(value)
+        )),
+        ActionBody::ConversationMessage | ActionBody::JsonString => {
+            Some(format!(r#""{}""#, escape_json_string(value)))
+        }
+        ActionBody::SearchText => Some(format!(
+            r#"{{"searchText":"{}"}}"#,
+            escape_json_string(value)
+        )),
+    }
+}
+
+pub fn action_input_html(action: RouteAction) -> String {
+    match action.body {
+        ActionBody::None => String::new(),
+        ActionBody::BrowseDirectory => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="BrowseDirectory" value="" placeholder="Directory">"#.to_string()
+        }
+        ActionBody::ConversationMessage => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="ConversationMessage" value="hello" placeholder="Message">"#.to_string()
+        }
+        ActionBody::JsonString => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="JsonString" value="contract-room" placeholder="Name">"#.to_string()
+        }
+        ActionBody::SearchText => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="SearchText" value="public domain jazz" placeholder="Search text">"#.to_string()
+        }
+    }
+}
+
+pub fn route_actions_html(path: &str) -> String {
+    let Some(page) = route_page(path) else {
+        return String::new();
+    };
+    surface_actions(page.surface)
+        .iter()
+        .enumerate()
+        .map(|(index, action)| {
+            let url = concrete_action_path(path, *action);
+            let input = action_input_html(*action);
+            format!(
+                r#"<li><div><strong>{method}</strong><code>{path}</code></div>{input}<button type="button" class="slskr-action-button" data-slskr-action-index="{index}" data-slskr-action-method="{method}" data-slskr-action-path="{path}" data-slskr-action-body="{body:?}">{label}</button></li>"#,
+                method = escape_html(action.method),
+                path = escape_html(&url),
+                input = input,
+                label = escape_html(action.label),
+                body = action.body,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 pub fn route_probe_pending_html(path: &str) -> String {
@@ -819,13 +996,14 @@ pub fn route_page_html(path: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-actions"><h3>Actions</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
         description = escape_html(page.description),
         routes = route_inventory,
         endpoints = endpoints,
+        actions = route_actions_html(path),
         route_data = route_probe_pending_html(path),
     )
 }
@@ -980,6 +1158,7 @@ fn render_current_route(
     if let Some(view) = document.get_element_by_id("slskr-route-view") {
         view.set_inner_html(&route_page_html(&path));
     }
+    mount_route_actions(window, document)?;
     for item in nav_items() {
         let selector = format!(r#".slskr-nav-item[href="{}"]"#, item.href);
         let Some(element) = document.query_selector(&selector)? else {
@@ -997,6 +1176,89 @@ fn render_current_route(
         let _ = refresh_route_data(&window_for_data).await;
     });
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_route_actions(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let buttons = document.query_selector_all(".slskr-action-button")?;
+    for index in 0..buttons.length() {
+        let Some(node) = buttons.item(index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let method = button
+            .get_attribute("data-slskr-action-method")
+            .unwrap_or_else(|| "GET".to_string());
+        let path = button
+            .get_attribute("data-slskr-action-path")
+            .unwrap_or_default();
+        let body_kind = button
+            .get_attribute("data-slskr-action-body")
+            .unwrap_or_else(|| "None".to_string());
+        let input_selector = format!(
+            "#slskr-route-actions li:nth-child({}) .slskr-action-input",
+            index + 1
+        );
+        let window = window.clone();
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |_event: web_sys::MouseEvent| {
+                let value = document
+                    .query_selector(&input_selector)
+                    .ok()
+                    .flatten()
+                    .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    .map(|input| input.value())
+                    .unwrap_or_default();
+                let body = action_body_from_value(action_body_from_name(&body_kind), &value);
+                let window = window.clone();
+                let document = document.clone();
+                let method = method.clone();
+                let path = path.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let result =
+                        fetch_text_with_method(&window, &path, &method, body.as_deref()).await;
+                    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+                        match result {
+                            Ok(response) => status.set_inner_html(&format!(
+                                "<strong>{}</strong> {}",
+                                escape_html(&method),
+                                escape_html(&compact_preview(&response))
+                            )),
+                            Err(error) => {
+                                let message = error
+                                    .as_string()
+                                    .unwrap_or_else(|| "request failed".to_string());
+                                status.set_inner_html(&format!(
+                                    "<strong>{}</strong> {}",
+                                    escape_html(&method),
+                                    escape_html(&message)
+                                ));
+                            }
+                        }
+                    }
+                    let _ = refresh_route_data(&window).await;
+                });
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn action_body_from_name(name: &str) -> ActionBody {
+    match name {
+        "BrowseDirectory" => ActionBody::BrowseDirectory,
+        "ConversationMessage" => ActionBody::ConversationMessage,
+        "JsonString" => ActionBody::JsonString,
+        "SearchText" => ActionBody::SearchText,
+        _ => ActionBody::None,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1075,11 +1337,37 @@ async fn fetch_text(window: &web_sys::Window, url: &str) -> Result<String, JsVal
     Ok(text.as_string().unwrap_or_default())
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn fetch_text_with_method(
+    window: &web_sys::Window,
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+) -> Result<String, JsValue> {
+    let init = web_sys::RequestInit::new();
+    init.set_method(method);
+    if let Some(body) = body {
+        let headers = web_sys::Headers::new()?;
+        headers.set("Content-Type", "application/json")?;
+        init.set_headers(&headers);
+        init.set_body(&JsValue::from_str(body));
+    }
+    let response_value =
+        wasm_bindgen_futures::JsFuture::from(window.fetch_with_str_and_init(url, &init)).await?;
+    let response: web_sys::Response = response_value.dyn_into()?;
+    if !response.ok() {
+        return Err(JsValue::from_str(&format!("HTTP {}", response.status())));
+    }
+    let text = wasm_bindgen_futures::JsFuture::from(response.text()?).await?;
+    Ok(text.as_string().unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const REACT_APP: &str = include_str!("../../../web/src/components/App.jsx");
+    const STATIC_INDEX: &str = include_str!("../static/index.html");
 
     #[test]
     fn api_endpoints_are_versioned() {
@@ -1099,6 +1387,14 @@ mod tests {
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
         assert!(html.contains("slskr-route-view"));
+    }
+
+    #[test]
+    fn static_index_supports_direct_nested_route_loads() {
+        assert!(STATIC_INDEX.contains("href=\"/styles.css\""));
+        assert!(STATIC_INDEX.contains("import init from '/slskr_web.js'"));
+        assert!(!STATIC_INDEX.contains("href=\"./styles.css\""));
+        assert!(!STATIC_INDEX.contains("from './slskr_web.js'"));
     }
 
     #[test]
@@ -1164,6 +1460,8 @@ mod tests {
         assert!(html.contains("data-route=\"/downloads\""));
         assert!(html.contains("slskr-route-data"));
         assert!(html.contains("Live Route Data"));
+        assert!(html.contains("slskr-route-actions"));
+        assert!(html.contains("Clear Completed Downloads"));
     }
 
     #[test]
@@ -1184,6 +1482,59 @@ mod tests {
         let pending = route_probe_pending_html("/messages");
         assert!(pending.contains("/api/v0/conversations"));
         assert!(pending.contains("/api/v0/conversations/peer1"));
+    }
+
+    #[test]
+    fn rust_actions_render_core_mutations() {
+        let html = route_page_html("/searches/42");
+        assert!(html.contains("Start Search"));
+        assert!(html.contains("Cancel Search"));
+        assert!(html.contains("/api/v0/searches/42"));
+        assert!(html.contains("data-slskr-action-body=\"SearchText\""));
+
+        let system = route_page_html("/system/network");
+        assert!(system.contains("Connect"));
+        assert!(system.contains("Disconnect"));
+        assert!(system.contains("/api/v0/server"));
+    }
+
+    #[test]
+    fn rust_action_bodies_are_json_safe() {
+        assert_eq!(
+            action_body_from_value(ActionBody::SearchText, "a \"b\"").unwrap(),
+            r#"{"searchText":"a \"b\""}"#
+        );
+        assert_eq!(
+            action_body_from_value(ActionBody::BrowseDirectory, "Music\\Jazz\nLive").unwrap(),
+            r#"{"directory":"Music\\Jazz\nLive"}"#
+        );
+        assert_eq!(
+            action_body_from_value(ActionBody::JsonString, "room\t<script>").unwrap(),
+            "\"room\\t<script>\""
+        );
+        assert!(action_body_from_value(ActionBody::None, "ignored").is_none());
+    }
+
+    #[test]
+    fn rust_action_paths_reject_untrusted_route_params() {
+        let endpoint = RouteAction {
+            body: ActionBody::None,
+            label: "Cancel Search",
+            method: "DELETE",
+            path: "/searches/:id",
+            surface: "search",
+        };
+        assert_eq!(
+            concrete_action_path("/searches/42", endpoint),
+            "/api/v0/searches/42"
+        );
+        assert_eq!(
+            concrete_action_path("/searches/<script>", endpoint),
+            "/api/v0/searches/1"
+        );
+        let html = route_actions_html("/searches/<script>");
+        assert!(html.contains("/api/v0/searches/1"));
+        assert!(!html.contains("<script>"));
     }
 
     #[test]
@@ -1278,6 +1629,24 @@ mod tests {
                 surfaces.contains(&expected),
                 "missing API surface {expected}"
             );
+        }
+    }
+
+    #[test]
+    fn route_actions_cover_core_old_ui_surfaces() {
+        let surfaces = route_actions()
+            .iter()
+            .map(|action| action.surface)
+            .collect::<Vec<_>>();
+        for expected in [
+            "search",
+            "transfers",
+            "rooms",
+            "messages",
+            "browse",
+            "system",
+        ] {
+            assert!(surfaces.contains(&expected), "missing action {expected}");
         }
     }
 }

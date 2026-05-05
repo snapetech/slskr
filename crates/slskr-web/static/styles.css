@@ -223,6 +223,73 @@ body {
   padding-top: 16px;
 }
 
+.slskr-route-actions {
+  border-top: 1px solid #263130;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.slskr-route-actions h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-route-actions ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-route-actions li {
+  align-items: center;
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr minmax(160px, 240px) auto;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.slskr-route-actions li div {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr;
+}
+
+.slskr-action-input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.slskr-action-button {
+  background: #ffd166;
+  border: 1px solid #ffd166;
+  color: #17120d;
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.slskr-action-button:hover {
+  background: #f4efe7;
+  border-color: #f4efe7;
+}
+
+#slskr-action-status {
+  color: #c6d0ca;
+  margin: 10px 0 0;
+}
+
 .slskr-route-live h3 {
   color: #f4efe7;
   font-size: 14px;
@@ -273,6 +340,7 @@ body {
 }
 
 @media (max-width: 760px) {
+  .slskr-route-actions li,
   .slskr-runtime li,
   .slskr-route-live li {
     align-items: start;
