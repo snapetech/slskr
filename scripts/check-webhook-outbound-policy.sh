@@ -19,7 +19,7 @@ if ! rg -n 'validate_webhook_url_for_registration\(&url\)' crates/slskr/src/main
   status=1
 fi
 
-for token in 'is_private' 'is_loopback' 'is_link_local' 'localhost' '169.254.169.254'; do
+for token in 'is_private' 'is_loopback' 'is_link_local' 'is_multicast' '2001:db8' 'SLSKR_WEBHOOK_ALLOW_CIDRS' 'SLSKR_WEBHOOK_DENY_CIDRS' 'localhost' '169.254.169.254'; do
   if ! rg -n "$token" crates/slskr/src/webhooks.rs >/dev/null; then
     printf 'webhook outbound policy check failed: expected webhook URL policy/test token missing: %s\n' "$token" >&2
     status=1

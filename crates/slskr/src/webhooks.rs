@@ -8,6 +8,7 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
@@ -18,6 +19,8 @@ const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
 const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
 pub const MAX_WEBHOOKS: usize = 64;
 pub const MIN_WEBHOOK_SECRET_BYTES: usize = 32;
+const WEBHOOK_ALLOW_CIDRS_ENV: &str = "SLSKR_WEBHOOK_ALLOW_CIDRS";
+const WEBHOOK_DENY_CIDRS_ENV: &str = "SLSKR_WEBHOOK_DENY_CIDRS";
 
 /// Webhook event types
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -487,6 +490,90 @@ fn validate_and_resolve_webhook_url(
 }
 
 fn is_blocked_webhook_ip(ip: IpAddr) -> bool {
+    WebhookOutboundPolicy::from_env()
+        .map(|policy| policy.blocks(ip))
+        .unwrap_or(true)
+}
+
+#[derive(Clone, Debug, Default)]
+struct WebhookOutboundPolicy {
+    allow_cidrs: Vec<IpCidr>,
+    deny_cidrs: Vec<IpCidr>,
+}
+
+impl WebhookOutboundPolicy {
+    fn from_env() -> Result<Self, String> {
+        Ok(Self {
+            allow_cidrs: parse_cidr_env(WEBHOOK_ALLOW_CIDRS_ENV)?,
+            deny_cidrs: parse_cidr_env(WEBHOOK_DENY_CIDRS_ENV)?,
+        })
+    }
+
+    fn blocks(&self, ip: IpAddr) -> bool {
+        if self.deny_cidrs.iter().any(|cidr| cidr.contains(ip)) {
+            return true;
+        }
+        default_blocks_webhook_ip(ip) && !self.allow_cidrs.iter().any(|cidr| cidr.contains(ip))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IpCidr {
+    network: IpAddr,
+    prefix: u8,
+}
+
+impl IpCidr {
+    fn parse(value: &str) -> Result<Self, String> {
+        let (addr, prefix) = value
+            .split_once('/')
+            .ok_or_else(|| format!("CIDR {value:?} must include a prefix length"))?;
+        let network = addr
+            .parse::<IpAddr>()
+            .map_err(|error| format!("CIDR {value:?} has invalid address: {error}"))?;
+        let prefix = prefix
+            .parse::<u8>()
+            .map_err(|error| format!("CIDR {value:?} has invalid prefix: {error}"))?;
+        let max_prefix = match network {
+            IpAddr::V4(_) => 32,
+            IpAddr::V6(_) => 128,
+        };
+        if prefix > max_prefix {
+            return Err(format!("CIDR {value:?} prefix exceeds {max_prefix}"));
+        }
+        Ok(Self { network, prefix })
+    }
+
+    fn contains(&self, ip: IpAddr) -> bool {
+        match (self.network, ip) {
+            (IpAddr::V4(network), IpAddr::V4(ip)) => {
+                let network = u32::from(network);
+                let ip = u32::from(ip);
+                self.prefix == 0 || network >> (32 - self.prefix) == ip >> (32 - self.prefix)
+            }
+            (IpAddr::V6(network), IpAddr::V6(ip)) => {
+                let network = u128::from_be_bytes(network.octets());
+                let ip = u128::from_be_bytes(ip.octets());
+                self.prefix == 0 || network >> (128 - self.prefix) == ip >> (128 - self.prefix)
+            }
+            _ => false,
+        }
+    }
+}
+
+fn parse_cidr_env(name: &str) -> Result<Vec<IpCidr>, String> {
+    let Ok(value) = env::var(name) else {
+        return Ok(Vec::new());
+    };
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(IpCidr::parse)
+        .collect()
+}
+
+fn default_blocks_webhook_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
             ip.is_private()
@@ -507,6 +594,8 @@ fn is_blocked_webhook_ip(ip: IpAddr) -> bool {
             }
             ip.is_loopback()
                 || ip.is_unspecified()
+                || ip.is_multicast()
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
                 || (segments[0] & 0xfe00) == 0xfc00
                 || (segments[0] & 0xffc0) == 0xfe80
         }
@@ -687,6 +776,37 @@ mod tests {
         assert!(is_blocked_webhook_ip(
             "2001:0000:4136:e378::1".parse().unwrap()
         ));
+        assert!(is_blocked_webhook_ip("2001:db8::1".parse().unwrap()));
+        assert!(is_blocked_webhook_ip("ff02::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_webhook_outbound_policy_covers_operator_cidrs() {
+        let policy = WebhookOutboundPolicy {
+            allow_cidrs: vec![IpCidr::parse("10.42.0.0/16").unwrap()],
+            deny_cidrs: vec![IpCidr::parse("93.184.216.0/24").unwrap()],
+        };
+
+        assert!(!policy.blocks("10.42.1.5".parse().unwrap()));
+        assert!(policy.blocks("10.43.1.5".parse().unwrap()));
+        assert!(policy.blocks("93.184.216.34".parse().unwrap()));
+        assert!(!policy.blocks("93.184.217.34".parse().unwrap()));
+        assert!(policy.blocks("2001:db8::42".parse().unwrap()));
+        assert!(policy.blocks("ff02::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_webhook_cidr_parser_matches_ipv4_and_ipv6_prefixes() {
+        let v4 = IpCidr::parse("198.51.100.0/24").unwrap();
+        assert!(v4.contains("198.51.100.23".parse().unwrap()));
+        assert!(!v4.contains("198.51.101.23".parse().unwrap()));
+
+        let v6 = IpCidr::parse("2001:db8:abcd::/48").unwrap();
+        assert!(v6.contains("2001:db8:abcd::1".parse().unwrap()));
+        assert!(!v6.contains("2001:db8:abce::1".parse().unwrap()));
+
+        assert!(IpCidr::parse("10.0.0.0/33").is_err());
+        assert!(IpCidr::parse("2001:db8::/129").is_err());
     }
 
     #[test]

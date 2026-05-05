@@ -8,7 +8,12 @@ Webhook endpoints are protected API routes. Requests must use the same bearer or
 
 If the creation response is lost, delete and recreate the webhook with a new generated secret or provide a new explicit `secret` field at creation time.
 
-Webhook deliveries sign the JSON payload with `X-Webhook-Signature` using HMAC-SHA256. Delivery validation rejects localhost, private, loopback, link-local, and otherwise blocked webhook targets at registration where possible and again at delivery after DNS resolution.
+Webhook deliveries sign the JSON payload with `X-Webhook-Signature` using HMAC-SHA256. Delivery validation rejects localhost, private, loopback, link-local, documentation, multicast, and otherwise blocked webhook targets at registration where possible and again at delivery after DNS resolution.
+
+Operators can extend the outbound policy with comma-separated CIDRs:
+
+- `SLSKR_WEBHOOK_DENY_CIDRS` blocks additional destination ranges.
+- `SLSKR_WEBHOOK_ALLOW_CIDRS` permits explicit exceptions to the built-in special-use blocks, such as an internal webhook receiver. Deny CIDRs still win over allow CIDRs.
 
 ## Create
 
