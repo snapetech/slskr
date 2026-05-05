@@ -13,6 +13,13 @@ This runs public-posture checks, shell syntax checks, Rust formatting, clippy,
 workspace tests, RustSec audit when `cargo-audit` is installed, workspace
 packaging, web tests, web build verification, and subpath smoke checks.
 
+The live slskd automation-client compatibility smoke is opt-in because it starts
+a local daemon and may install the Python `slskd-api` package:
+
+```sh
+SLSKR_RUN_SLSKD_API_COMPAT_SMOKE=1 scripts/run-release-gate.sh
+```
+
 ## Local Archive
 
 Build the host archive:

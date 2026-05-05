@@ -8,6 +8,7 @@ Official client libraries for the slskr HTTP API, providing language-specific im
 - **Python**: Async/await support with aiohttp, batch operations, WebSocket events
 - **Go**: Concurrent operations, type-safe interfaces, batch builder pattern
 - **Rust**: Native integration with HTTP API (embedded)
+- **slskd automation clients**: Compatibility routes for existing `slskd_api` Python automations
 
 ## Python Client
 
@@ -201,6 +202,39 @@ SlskrClient(
 - `connect_ws()` → WebSocketClient
 - `disconnect_ws()` → None
 - `close()` → None
+
+## slskd Automation Compatibility
+
+Existing automations that use the Python `slskd_api` package can point at
+`slskr` with the daemon base URL and API token. The compatibility surface covers
+the slskd-style application, session, server, search, transfer, room,
+conversation, user, share, file, relay, options, event, log, and telemetry
+calls exercised by the local smoke suite.
+
+```python
+from slskd_api import SlskdClient
+
+client = SlskdClient(
+    host="http://127.0.0.1:5030",
+    api_key="your-api-token",
+)
+
+print(client.application.state())
+print(client.searches.get_all())
+```
+
+Run the local compatibility smoke against a temporary authenticated daemon:
+
+```bash
+scripts/run-slskd-api-compat-smoke.sh
+```
+
+Useful overrides:
+
+- `SLSKD_API_VERSION`: Python `slskd-api` package version, default `0.2.4`.
+- `SLSKD_API_PYTHONPATH`: preinstalled package directory to reuse instead of installing.
+- `SLSKR_SLSKD_API_SMOKE_PORT`: fixed local daemon port.
+- `SLSKR_SLSKD_API_SMOKE_DIR`: fixed temporary state/log directory.
 
 ## Go Client
 

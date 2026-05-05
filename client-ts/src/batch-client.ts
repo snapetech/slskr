@@ -5,6 +5,10 @@
 import { BatchOperation, BatchRequest, BatchResponse, BatchResult } from './types';
 import { SlskrClient } from './client';
 
+type BatchCapableClient = {
+  postAuth<T>(path: string, body: unknown): Promise<T>;
+};
+
 export class BatchClient {
   constructor(private client: SlskrClient) {}
 
@@ -30,7 +34,7 @@ export class BatchClient {
     const request: BatchRequest = { operations };
     
     // Use internal client method to make the request
-    return (this.client as any).postAuth<BatchResponse>('/api/batch', request);
+    return (this.client as unknown as BatchCapableClient).postAuth<BatchResponse>('/api/batch', request);
   }
 
   /**
@@ -151,7 +155,7 @@ export class BatchBuilder {
     }
 
     const request: BatchRequest = { operations: this.operations };
-    return (this.client as any).postAuth<BatchResponse>('/api/batch', request);
+    return (this.client as unknown as BatchCapableClient).postAuth<BatchResponse>('/api/batch', request);
   }
 
   /**

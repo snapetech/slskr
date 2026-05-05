@@ -33,8 +33,8 @@ spec:
         fsGroup: 1000
       containers:
       - name: slskr-api
-        image: slskr:latest
-        imagePullPolicy: Always
+        image: ghcr.io/slskr/slskr:REPLACE_WITH_RELEASE_TAG
+        imagePullPolicy: IfNotPresent
         ports:
         - name: http
           containerPort: 8080
@@ -45,6 +45,8 @@ spec:
         envFrom:
         - configMapRef:
             name: slskr-config
+        - secretRef:
+            name: slskr-secrets
         env:
         - name: POD_NAME
           valueFrom:
@@ -84,47 +86,15 @@ spec:
           mountPath: /tmp
         securityContext:
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
             - ALL
-      - name: dashboard
-        image: node:20-alpine
-        ports:
-        - name: dashboard
-          containerPort: 3000
-          protocol: TCP
-        envFrom:
-        - configMapRef:
-            name: slskr-dashboard-config
-        workingDir: /app
-        command: ["npm"]
-        args: ["run", "preview"]
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
-        livenessProbe:
-          httpGet:
-            path: /
-            port: dashboard
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          failureThreshold: 3
-        volumeMounts:
-        - name: dashboard
-          mountPath: /app
       volumes:
       - name: data
         emptyDir: {}
       - name: cache
         emptyDir: {}
-      - name: dashboard
-        configMap:
-          name: slskr-dashboard-assets
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -145,9 +115,14 @@ spec:
         app: slskr-dashboard
         version: "1.0"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
       containers:
       - name: dashboard
-        image: nginx:alpine
+        image: ghcr.io/slskr/slskr-dashboard:REPLACE_WITH_RELEASE_TAG
+        imagePullPolicy: IfNotPresent
         ports:
         - name: http
           containerPort: 80
@@ -166,15 +141,22 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
         volumeMounts:
-        - name: dashboard-dist
-          mountPath: /usr/share/nginx/html
-        - name: nginx-config
-          mountPath: /etc/nginx/nginx.conf
-          subPath: nginx.conf
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: nginx-run
+          mountPath: /var/run
+        - name: nginx-tmp
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
       volumes:
-      - name: dashboard-dist
-        configMap:
-          name: slskr-dashboard-assets
-      - name: nginx-config
-        configMap:
-          name: slskr-nginx-config
+      - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-run
+        emptyDir: {}
+      - name: nginx-tmp
+        emptyDir: {}

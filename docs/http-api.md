@@ -211,7 +211,7 @@ Check user privileges in session.
 
 #### `GET /api/searches`
 
-List recent searches.
+List recent searches as a slskd-compatible top-level array. This is the route used by slskd automation clients.
 
 **Query Parameters:**
 - `limit` (optional): Max results (default: 50)
@@ -220,16 +220,39 @@ List recent searches.
 
 **Response:**
 ```json
+[
+  {
+    "id": "search-123",
+    "token": 1,
+    "query": "song title",
+    "searchText": "song title",
+    "status": "active",
+    "state": "InProgress",
+    "isComplete": false,
+    "fileCount": 42,
+    "lockedFileCount": 0,
+    "responseCount": 3,
+    "responses": [],
+    "result_count": 42,
+    "startedAt": "1777973673",
+    "endedAt": null
+  }
+]
+```
+
+#### `GET /api/searches/records`
+
+List recent searches with the slskr metadata envelope used by the dashboard.
+
+**Response:**
+```json
 {
-  "searches": [
-    {
-      "id": "search-123",
-      "query": "song title",
-      "status": "active",
-      "results_count": 42,
-      "started_at": "2025-05-04T11:50:00Z"
-    }
-  ]
+  "entries": [],
+  "count": 0,
+  "filtered_count": 0,
+  "offset": 0,
+  "limit": 50,
+  "next_token": 1
 }
 ```
 
@@ -518,27 +541,38 @@ Mark browse request as acknowledged.
 
 #### `GET /api/events`
 
-Get historical events.
+Get historical events as a slskd-compatible top-level array.
 
 **Query Parameters:**
-- `type` (optional): Event type filter
+- `kind` (optional): Event kind filter
 - `limit` (optional): Max events (default: 50)
 - `offset` (optional): Pagination offset
 
 **Response:**
 ```json
+[
+  {
+    "id": 1,
+    "type": "search.started",
+    "kind": "search.started",
+    "resource": "1",
+    "createdAt": 1777973673
+  }
+]
+```
+
+#### `GET /api/events/records`
+
+Get historical events with the slskr metadata envelope used by the dashboard.
+
+**Response:**
+```json
 {
-  "events": [
-    {
-      "id": "event-1",
-      "type": "search.started",
-      "data": {
-        "search_id": "search-123",
-        "query": "song"
-      },
-      "timestamp": "2025-05-04T11:50:00Z"
-    }
-  ]
+  "entries": [],
+  "count": 0,
+  "filtered_count": 0,
+  "offset": 0,
+  "limit": 500
 }
 ```
 

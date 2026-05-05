@@ -5,7 +5,8 @@ metadata:
   namespace: slskr
 data:
   SLSKR_LOG_LEVEL: "info"
-  SLSKR_API_PORT: "8080"
+  SLSKR_HTTP_BIND: "0.0.0.0:8080"
+  SLSKR_AUTH_DISABLED: "false"
   SLSKR_METRICS_PORT: "9090"
   SLSKR_SESSION_MAX_IDLE: "300"
   SLSKR_TRANSFER_MAX_ACTIVE: "8"
@@ -20,5 +21,5 @@ metadata:
   name: slskr-dashboard-config
   namespace: slskr
 data:
-  API_URL: "http://localhost:8080"
+  API_URL: "https://slskr.example.com"
   POLL_INTERVAL: "5000"

@@ -323,7 +323,54 @@ body {
 .slskr-page-data {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: 1fr;
+}
+
+.slskr-workspace-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.slskr-workspace-tab {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-workspace-tab.is-active {
+  background: #ffd166;
+  border-color: #ffd166;
+  color: #17120d;
+}
+
+.slskr-workspace-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.85fr);
+}
+
+.slskr-workspace-primary,
+.slskr-workspace-secondary {
+  display: grid;
+  gap: 10px;
+}
+
+.slskr-workspace-grid.mode-primary,
+.slskr-workspace-grid.mode-secondary {
+  grid-template-columns: 1fr;
+}
+
+.slskr-workspace-grid.mode-primary .slskr-workspace-secondary,
+.slskr-workspace-grid.mode-secondary .slskr-workspace-primary {
+  display: none;
 }
 
 .slskr-data-card {
@@ -331,7 +378,7 @@ body {
   border: 1px solid #34403f;
   display: grid;
   gap: 10px;
-  min-height: 158px;
+  min-height: 146px;
   padding: 12px;
 }
 
@@ -734,6 +781,7 @@ body {
 @media (max-width: 760px) {
   .slskr-appbar,
   .slskr-functional-layout,
+  .slskr-workspace-grid,
   .slskr-player {
     grid-template-columns: 1fr;
   }

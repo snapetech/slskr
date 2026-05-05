@@ -4,8 +4,6 @@
 
 import {
   ClientConfig,
-  RequestConfig,
-  ApiResponse,
   HealthStatus,
   VersionInfo,
   Capabilities,
@@ -27,7 +25,7 @@ import {
   PaginationParams,
   CacheStats,
 } from './types';
-import { ApiError, NetworkError, TimeoutError, ValidationError } from './errors';
+import { ApiError, NetworkError, TimeoutError } from './errors';
 
 export class SlskrClient {
   private baseUrl: string;
@@ -307,7 +305,10 @@ export class SlskrClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = await response.json().catch(() => ({})) as {
+          error?: string;
+          details?: string;
+        };
         throw new ApiError(
           response.status,
           errorData.error || `HTTP ${response.status}`,

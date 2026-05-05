@@ -36,7 +36,11 @@ if [[ "$source_username" == "$target_username" || "$source_username" == "$probe_
   exit 2
 fi
 
-api_token="${SLSKR_LIVE_SMOKE_API_TOKEN:-live-smoke-token}"
+api_token="${SLSKR_LIVE_SMOKE_API_TOKEN:-}"
+if [[ -z "$api_token" ]]; then
+  echo "missing SLSKR_LIVE_SMOKE_API_TOKEN" >&2
+  exit 2
+fi
 soak_seconds="${SLSKR_LIVE_HTTP_SOAK_SECONDS:-60}"
 timeout_seconds="${SLSKR_LIVE_HTTP_TIMEOUT_SECONDS:-180}"
 work_dir="${SLSKR_LIVE_HTTP_WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-live-http-transfer.XXXXXX")}"

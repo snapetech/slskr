@@ -48,7 +48,7 @@ export class WebSocketClient {
           this.handleMessage(event.data);
         };
 
-        this.ws.onerror = (error) => {
+        this.ws.onerror = () => {
           this.notifyErrorListeners(new Error('WebSocket error'));
           reject(new Error('WebSocket connection error'));
         };
@@ -206,12 +206,12 @@ export class WebSocketClient {
   }
 
   private setupPingInterval(): void {
-    this.pingInterval = window.setInterval(() => {
+    this.pingInterval = globalThis.setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         const message: WebSocketMessage = { type: 'ping' };
         this.ws.send(JSON.stringify(message));
       }
-    }, 30000) as any; // 30 seconds
+    }, 30000) as unknown as number; // 30 seconds
   }
 
   private clearPingInterval(): void {

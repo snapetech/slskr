@@ -3,6 +3,7 @@
 // </copyright>
 
 import * as session from './session';
+import api from './api';
 import { setToken } from './token';
 
 vi.mock('./api', async () => {
@@ -40,5 +41,29 @@ describe('session', () => {
     expect(session.authHeaders({ csrf: true })).toEqual({
       'X-CSRF-TOKEN': 'csrf-token',
     });
+  });
+
+  it('verifies a user supplied token without accepting a token echo from the API', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        name: 'slskr',
+        token: 'server-token-must-not-be-used',
+        tokenConfigured: true,
+      },
+    });
+
+    await expect(
+      session.login({ username: 'user', password: 'user-token', rememberMe: false }),
+    ).resolves.toBe('user-token');
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/session',
+      { username: 'user' },
+      { headers: { Authorization: 'Bearer user-token' } },
+    );
+    expect(sessionStorage.getItem('slskr-token')).toBe('user-token');
+    expect(sessionStorage.getItem('slskr-token')).not.toBe(
+      'server-token-must-not-be-used',
+    );
   });
 });
