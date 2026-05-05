@@ -665,27 +665,13 @@ pub fn cache_control_header(method: &str, content_type: &str, path: &str) -> Opt
         return Some("Cache-Control: no-cache, must-revalidate\r\n".to_string());
     }
 
-    // Cache static endpoints for longer
+    // Only cache endpoints that are intentionally public without auth.
     if path == "/api/health" || path == "/api/version" || path == "/api/capabilities" {
         return Some("Cache-Control: public, max-age=3600\r\n".to_string()); // 1 hour
     }
 
-    // Cache config for medium duration
-    if path == "/api/config" {
-        return Some("Cache-Control: private, max-age=300\r\n".to_string()); // 5 minutes
-    }
-
-    // Cache stats briefly (they change frequently)
-    if path.starts_with("/api/stats") || path.starts_with("/api/metrics") {
-        return Some("Cache-Control: public, max-age=10\r\n".to_string()); // 10 seconds
-    }
-
-    // Cache shares catalog
-    if path.starts_with("/api/shares") {
-        return Some("Cache-Control: public, max-age=60\r\n".to_string()); // 1 minute
-    }
-
-    // Default: no caching for dynamic endpoints
+    // Protected API responses can include local state, share metadata, transfer
+    // status, messages, telemetry, and sanitized-but-sensitive config.
     Some("Cache-Control: no-store\r\n".to_string())
 }
 

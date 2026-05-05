@@ -14948,6 +14948,22 @@ mod tests {
         assert!(headers.contains("Access-Control-Allow-Origin: https://example.test"));
     }
 
+    #[test]
+    fn protected_api_cache_control_is_no_store() {
+        assert_eq!(
+            super::cache_control_header("GET", "application/json", "/api/shares/catalog"),
+            Some("Cache-Control: no-store\r\n".to_string())
+        );
+        assert_eq!(
+            super::cache_control_header("GET", "application/json", "/api/metrics"),
+            Some("Cache-Control: no-store\r\n".to_string())
+        );
+        assert_eq!(
+            super::cache_control_header("GET", "application/json", "/api/capabilities"),
+            Some("Cache-Control: public, max-age=3600\r\n".to_string())
+        );
+    }
+
     #[tokio::test]
     async fn patch_options_reports_non_persisted_runtime_update() {
         let (state, _receiver) = test_state();
