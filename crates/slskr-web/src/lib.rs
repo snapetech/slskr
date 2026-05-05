@@ -2465,6 +2465,7 @@ pub fn route_workspace_pending_html(path: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     match page.surface {
+        "search" => format!("{pending}{}", search_planner_panel_html()),
         "integrations" => format!("{pending}{}", automation_center_panel_html()),
         "system" => format!(
             "{pending}{}{}",
@@ -2615,17 +2616,25 @@ fn automation_center_panel_html() -> String {
     )
 }
 
+fn search_planner_panel_html() -> String {
+    r#"<article class="slskr-data-card slskr-local-panel" data-slskr-search-planner><header><div><h3>Search Planner</h3><code>browser local</code></div><span id="slskr-search-planner-summary">Ranking, duplicate folding, and action previews</span></header><form class="slskr-local-form"><fieldset><legend>Ranking</legend><label><span>Search Text</span><input type="text" data-slskr-search-setting="query" value="public domain theme"></label><label><span>Acquisition Profile</span><input type="text" data-slskr-search-setting="profile" value="lossless-exact"></label><label class="slskr-local-check"><input type="checkbox" data-slskr-search-setting="foldDuplicates" checked>Fold duplicate responses</label></fieldset></form><div class="slskr-local-actions"><button type="button" data-slskr-search-action="plan">Build Preview</button><button type="button" data-slskr-search-action="reset">Reset</button></div><pre id="slskr-search-planner-report"></pre><p id="slskr-search-planner-status" aria-live="polite"></p></article>"#.to_string()
+}
+
 fn search_workspace_html(responses: &[EndpointBody]) -> String {
     workspace_layout_html(
         &["Searches", "Responses", "Interests"],
         selected_cards_html(responses, &["/searches", "/searches/:id/responses"]),
-        selected_cards_html(
-            responses,
-            &[
-                "/searches/records",
-                "/soulseek/interests",
-                "/soulseek/hated-interests",
-            ],
+        format!(
+            "{}{}",
+            selected_cards_html(
+                responses,
+                &[
+                    "/searches/records",
+                    "/soulseek/interests",
+                    "/soulseek/hated-interests",
+                ],
+            ),
+            search_planner_panel_html()
         ),
     )
 }
@@ -3407,6 +3416,34 @@ pub struct SimilarQueueCandidate {
     pub score: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SearchCandidateRank {
+    pub reasons: Vec<String>,
+    pub score: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SearchDuplicateGroup {
+    pub candidate_count: usize,
+    pub folded_count: usize,
+    pub key: String,
+    pub providers: Vec<String>,
+    pub usernames: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SearchActionPreview {
+    pub candidate_score: Option<u32>,
+    pub file_count: usize,
+    pub filenames: Vec<String>,
+    pub locked_count: usize,
+    pub provider_labels: Vec<String>,
+    pub route: String,
+    pub total_size_bytes: u64,
+    pub username: String,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExperiencePreference {
     pub default_value: &'static str,
@@ -3804,6 +3841,687 @@ pub fn automation_history_report(state: &serde_json::Map<String, serde_json::Val
         lines.push(format!("  File impact: {}", recipe.file_impact));
     }
     lines.join("\n")
+}
+
+fn file_extension(filename: &str) -> String {
+    filename
+        .rsplit(['/', '\\'])
+        .next()
+        .and_then(|name| name.rsplit_once('.').map(|(_, extension)| extension))
+        .unwrap_or_default()
+        .to_lowercase()
+}
+
+fn search_response_files(response: &serde_json::Value) -> Vec<serde_json::Value> {
+    ["files", "lockedFiles", "locked_files"]
+        .iter()
+        .flat_map(|key| {
+            response
+                .get(*key)
+                .and_then(|value| value.as_array())
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+fn search_file_name(file: &serde_json::Value) -> String {
+    json_track_field(file, &["filename", "fileName", "path"])
+}
+
+fn search_file_size(file: &serde_json::Value) -> u64 {
+    file.get("size")
+        .or_else(|| file.get("bytes"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or_default()
+}
+
+fn search_file_number(file: &serde_json::Value, keys: &[&str]) -> u64 {
+    keys.iter()
+        .find_map(|key| file.get(*key).and_then(|value| value.as_u64()))
+        .unwrap_or_default()
+}
+
+fn search_tokens(value: &str) -> Vec<String> {
+    unique_nonempty(
+        value
+            .to_lowercase()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || character == ' ' {
+                    character
+                } else {
+                    ' '
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .filter(|token| token.len() > 2)
+            .map(ToOwned::to_owned)
+            .collect(),
+    )
+}
+
+fn is_lossless_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "aif" | "aiff" | "alac" | "ape" | "flac" | "wav" | "wv"
+    )
+}
+
+fn is_lossy_extension(extension: &str) -> bool {
+    matches!(extension, "aac" | "m4a" | "mp3" | "ogg" | "opus" | "wma")
+}
+
+fn is_artwork_extension(extension: &str) -> bool {
+    matches!(extension, "gif" | "jpeg" | "jpg" | "png" | "webp")
+}
+
+fn clamp_i64(value: i64, min: i64, max: i64) -> i64 {
+    value.max(min).min(max)
+}
+
+fn push_unique_reason(reasons: &mut Vec<String>, reason: impl Into<String>) {
+    let reason = reason.into();
+    if !reason.is_empty() && !reasons.iter().any(|item| item == &reason) {
+        reasons.push(reason);
+    }
+}
+
+pub fn rank_search_candidate(
+    response: &serde_json::Value,
+    search_text: &str,
+    acquisition_profile: &str,
+    download_stats: Option<&serde_json::Value>,
+    community_quality_summary: Option<&serde_json::Value>,
+    preferred_conditions: Option<&serde_json::Value>,
+) -> SearchCandidateRank {
+    let files = search_response_files(response);
+    let mut reasons = Vec::new();
+    let mut score: i64 = 0;
+
+    let tokens = search_tokens(search_text);
+    if !tokens.is_empty() && !files.is_empty() {
+        let best = files
+            .iter()
+            .map(|file| {
+                let filename = search_file_name(file).to_lowercase();
+                let matched = tokens
+                    .iter()
+                    .filter(|token| filename.contains(token.as_str()))
+                    .count();
+                matched as f64 / tokens.len() as f64
+            })
+            .fold(0.0_f64, f64::max);
+        score += (best * 18.0).round() as i64;
+        if best >= 0.8 {
+            push_unique_reason(&mut reasons, "strong filename match");
+        } else if best >= 0.45 {
+            push_unique_reason(&mut reasons, "partial filename match");
+        } else {
+            push_unique_reason(&mut reasons, "weak filename match");
+        }
+    }
+
+    let media_files = files
+        .iter()
+        .filter(|file| !is_artwork_extension(&file_extension(&search_file_name(file))))
+        .collect::<Vec<_>>();
+    if media_files.is_empty() {
+        push_unique_reason(&mut reasons, "no media files visible");
+    } else {
+        let lossless_count = media_files
+            .iter()
+            .filter(|file| {
+                is_lossless_extension(&file_extension(&search_file_name(file)))
+                    || (file.get("bitDepth").is_some() && file.get("sampleRate").is_some())
+            })
+            .count();
+        let high_bitrate_lossy_count = media_files
+            .iter()
+            .filter(|file| {
+                is_lossy_extension(&file_extension(&search_file_name(file)))
+                    && search_file_number(file, &["bitRate", "bitrate"]) >= 256
+            })
+            .count();
+        let lossless_ratio = lossless_count as f64 / media_files.len() as f64;
+        let high_bitrate_ratio = high_bitrate_lossy_count as f64 / media_files.len() as f64;
+        match acquisition_profile {
+            "fast-good-enough" => {
+                score += (lossless_ratio * 12.0 + high_bitrate_ratio * 16.0).round() as i64;
+                if lossless_count > 0 {
+                    push_unique_reason(&mut reasons, "lossless fast-good-enough candidate");
+                } else if high_bitrate_lossy_count > 0 {
+                    push_unique_reason(&mut reasons, "high bitrate fast-good-enough candidate");
+                } else {
+                    push_unique_reason(&mut reasons, "limited fast-good-enough quality evidence");
+                }
+            }
+            "album-complete" => {
+                score += (lossless_ratio * 14.0).round() as i64
+                    + clamp_i64(media_files.len() as i64, 0, 18);
+                push_unique_reason(
+                    &mut reasons,
+                    if media_files.len() >= 8 {
+                        "broad folder candidate"
+                    } else {
+                        "small folder candidate"
+                    },
+                );
+            }
+            _ => {
+                score += (lossless_ratio * 28.0 + high_bitrate_ratio * 6.0).round() as i64;
+                if lossless_ratio >= 0.8 {
+                    push_unique_reason(&mut reasons, "mostly lossless files");
+                } else if lossless_ratio > 0.0 {
+                    push_unique_reason(&mut reasons, "mixed lossless files");
+                } else {
+                    push_unique_reason(&mut reasons, "no lossless signal");
+                }
+            }
+        }
+    }
+
+    let audio_files = files
+        .iter()
+        .filter(|file| {
+            let extension = file_extension(&search_file_name(file));
+            is_lossless_extension(&extension) || is_lossy_extension(&extension)
+        })
+        .collect::<Vec<_>>();
+    if !audio_files.is_empty() {
+        let plausible = audio_files
+            .iter()
+            .filter(|file| {
+                let size = search_file_size(file);
+                let length = search_file_number(file, &["length", "duration"]);
+                let extension = file_extension(&search_file_name(file));
+                if is_lossless_extension(&extension) {
+                    (8_000_000..=250_000_000).contains(&size)
+                } else if length > 0 {
+                    size >= (length * 8).min(2_000_000) && size <= 80_000_000
+                } else {
+                    (1_000_000..=80_000_000).contains(&size)
+                }
+            })
+            .count();
+        let ratio = plausible as f64 / audio_files.len() as f64;
+        score += (ratio * 9.0).round() as i64;
+        push_unique_reason(
+            &mut reasons,
+            if ratio >= 0.8 {
+                "plausible file sizes"
+            } else {
+                "mixed file size evidence"
+            },
+        );
+    }
+
+    if response
+        .get("hasFreeUploadSlot")
+        .or_else(|| response.get("has_free_upload_slot"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        score += 12;
+        push_unique_reason(&mut reasons, "free upload slot");
+    } else {
+        push_unique_reason(&mut reasons, "queued upload");
+    }
+    let queue_length = response
+        .get("queueLength")
+        .or_else(|| response.get("queue_length"))
+        .and_then(|value| value.as_i64())
+        .unwrap_or_default();
+    score += clamp_i64(10 - queue_length * 2, 0, 10);
+    if queue_length <= 1 {
+        push_unique_reason(&mut reasons, "short queue");
+    } else if queue_length >= 5 {
+        push_unique_reason(&mut reasons, "long queue");
+    }
+    let upload_speed = response
+        .get("uploadSpeed")
+        .or_else(|| response.get("upload_speed"))
+        .and_then(|value| value.as_i64())
+        .unwrap_or_default();
+    score += clamp_i64(
+        ((upload_speed as f64 / 5_242_880.0) * 10.0).round() as i64,
+        0,
+        10,
+    );
+    if upload_speed >= 2_097_152 {
+        push_unique_reason(&mut reasons, "fast peer");
+    }
+
+    if let Some(stats) = download_stats {
+        let successes = stats
+            .get("successfulDownloads")
+            .and_then(|value| value.as_i64())
+            .unwrap_or_default();
+        let failures = stats
+            .get("failedDownloads")
+            .and_then(|value| value.as_i64())
+            .unwrap_or_default();
+        let history_points = clamp_i64(successes * 2 - failures * 3, -9, 10);
+        score += history_points;
+        if history_points >= 5 {
+            push_unique_reason(&mut reasons, "trusted download history");
+        } else if history_points < 0 {
+            push_unique_reason(&mut reasons, "poor download history");
+        } else {
+            push_unique_reason(&mut reasons, "limited download history");
+        }
+    }
+
+    if response
+        .get("sourceProviders")
+        .and_then(|value| value.as_array())
+        .is_some_and(|providers| providers.iter().any(|value| value == "local"))
+    {
+        score += 8;
+        push_unique_reason(&mut reasons, "local source available");
+    } else if response
+        .get("sourceProviders")
+        .and_then(|value| value.as_array())
+        .is_some_and(|providers| {
+            providers
+                .iter()
+                .any(|value| value == "mesh" || value == "pod")
+        })
+    {
+        score += 5;
+        push_unique_reason(&mut reasons, "mesh source available");
+    }
+
+    if let Some(summary) = community_quality_summary {
+        let quality_score = summary
+            .get("score")
+            .and_then(|value| value.as_i64())
+            .unwrap_or_default();
+        let override_mode = summary
+            .get("override")
+            .and_then(|value| value.get("mode"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        match override_mode {
+            "ignore" => push_unique_reason(&mut reasons, "local quality signals ignored"),
+            "trust" => {
+                score += 8;
+                push_unique_reason(&mut reasons, "local trust override");
+            }
+            "caution" => {
+                score -= 6;
+                push_unique_reason(&mut reasons, "local caution override");
+            }
+            _ if quality_score >= 8 => {
+                score += quality_score.min(10);
+                push_unique_reason(&mut reasons, "positive local quality signals");
+            }
+            _ if quality_score <= -6 => {
+                score += quality_score.max(-15);
+                push_unique_reason(&mut reasons, "local caution signals");
+            }
+            _ if quality_score != 0 => {
+                score += quality_score;
+                push_unique_reason(&mut reasons, "mixed local quality signals");
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(preferred) = preferred_conditions {
+        if preferred
+            .get("preferLossless")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+            && !files.is_empty()
+        {
+            let lossless = files
+                .iter()
+                .filter(|file| is_lossless_extension(&file_extension(&search_file_name(file))))
+                .count();
+            if lossless > 0 {
+                score += ((lossless as f64 / files.len() as f64) * 12.0)
+                    .round()
+                    .min(12.0) as i64;
+                push_unique_reason(&mut reasons, "preferred lossless match");
+            } else {
+                score -= 6;
+                push_unique_reason(&mut reasons, "missing preferred lossless files");
+            }
+        }
+        if let Some(extensions) = preferred
+            .get("preferExtensions")
+            .and_then(|value| value.as_array())
+        {
+            if !extensions.is_empty() && !files.is_empty() {
+                let matching = files
+                    .iter()
+                    .filter(|file| {
+                        let extension = file_extension(&search_file_name(file));
+                        extensions
+                            .iter()
+                            .any(|value| value.as_str() == Some(extension.as_str()))
+                    })
+                    .count();
+                if matching > 0 {
+                    score += ((matching as f64 / files.len() as f64) * 10.0)
+                        .round()
+                        .min(10.0) as i64;
+                    push_unique_reason(&mut reasons, "preferred extension match");
+                } else {
+                    score -= 4;
+                    push_unique_reason(&mut reasons, "missing preferred extension");
+                }
+            }
+        }
+        let min_bitrate = preferred
+            .get("preferMinBitRate")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default();
+        if min_bitrate > 0 && !files.is_empty() {
+            let matching = files
+                .iter()
+                .filter(|file| search_file_number(file, &["bitRate", "bitrate"]) >= min_bitrate)
+                .count();
+            if matching > 0 {
+                score += ((matching as f64 / files.len() as f64) * 8.0)
+                    .round()
+                    .min(8.0) as i64;
+                push_unique_reason(&mut reasons, "preferred bitrate match");
+            } else {
+                score -= 3;
+                push_unique_reason(&mut reasons, "below preferred bitrate");
+            }
+        }
+    }
+
+    reasons.truncate(9);
+    SearchCandidateRank {
+        reasons,
+        score: clamp_i64(score, 0, 100) as u32,
+    }
+}
+
+fn search_provider_labels(response: &serde_json::Value) -> Vec<String> {
+    let mut providers = response
+        .get("sourceProviders")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(json_scalar_preview)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if let Some(primary) = response
+        .get("primarySource")
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+    {
+        providers.push(primary);
+    }
+    if providers.is_empty() {
+        providers.push("soulseek".to_string());
+    }
+    providers.sort();
+    providers.dedup();
+    providers
+}
+
+fn search_response_signature(response: &serde_json::Value) -> String {
+    let mut media = search_response_files(response)
+        .iter()
+        .filter_map(|file| {
+            let filename = search_file_name(file);
+            let extension = file_extension(&filename);
+            if !(is_lossless_extension(&extension) || is_lossy_extension(&extension)) {
+                return None;
+            }
+            let basename = filename
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(filename.as_str())
+                .to_lowercase();
+            Some((basename, search_file_size(file)))
+        })
+        .collect::<Vec<_>>();
+    if media.is_empty() {
+        return String::new();
+    }
+    media.sort_by(|left, right| left.0.cmp(&right.0));
+    let total_size = media.iter().map(|(_, size)| *size).sum::<u64>();
+    let mut parts = vec![
+        media.len().to_string(),
+        ((total_size as f64 / 1_000_000.0).round() as u64).to_string(),
+    ];
+    parts.extend(
+        media
+            .iter()
+            .take(20)
+            .map(|(name, size)| format!("{name}:{}", (size + 5_000) / 10_000)),
+    );
+    parts.join("|")
+}
+
+pub fn deduplicate_search_response_groups(
+    responses: &[serde_json::Value],
+    enabled: bool,
+) -> (usize, Vec<SearchDuplicateGroup>) {
+    if !enabled || responses.is_empty() {
+        return (0, Vec::new());
+    }
+    let mut groups = std::collections::BTreeMap::<String, Vec<&serde_json::Value>>::new();
+    for response in responses {
+        let key = search_response_signature(response);
+        if !key.is_empty() {
+            groups.entry(key).or_default().push(response);
+        }
+    }
+    let mut folded = 0;
+    let duplicate_groups = groups
+        .into_iter()
+        .filter_map(|(key, group)| {
+            if group.len() <= 1 {
+                return None;
+            }
+            folded += group.len() - 1;
+            let providers = unique_nonempty_case_insensitive(
+                group
+                    .iter()
+                    .flat_map(|response| search_provider_labels(response))
+                    .collect(),
+            );
+            let mut usernames = unique_nonempty_case_insensitive(
+                group
+                    .iter()
+                    .map(|response| json_track_field(response, &["username"]))
+                    .collect(),
+            );
+            usernames.sort();
+            Some(SearchDuplicateGroup {
+                candidate_count: group.len(),
+                folded_count: group.len() - 1,
+                key,
+                providers,
+                usernames,
+            })
+        })
+        .collect::<Vec<_>>();
+    (folded, duplicate_groups)
+}
+
+pub fn build_search_action_preview(
+    response: &serde_json::Value,
+    files: &[serde_json::Value],
+    candidate_rank: Option<&SearchCandidateRank>,
+    community_quality_summary: Option<&serde_json::Value>,
+    route: &str,
+) -> SearchActionPreview {
+    let locked_count = files
+        .iter()
+        .filter(|file| {
+            file.get("locked")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+        })
+        .count();
+    let mut warnings = Vec::new();
+    if locked_count > 0 {
+        push_unique_reason(
+            &mut warnings,
+            format!(
+                "{locked_count} selected file{} may be locked",
+                if locked_count == 1 { "" } else { "s" }
+            ),
+        );
+    }
+    if !response
+        .get("hasFreeUploadSlot")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        push_unique_reason(&mut warnings, "No free upload slot is currently advertised");
+    }
+    let queue_length = response
+        .get("queueLength")
+        .and_then(|value| value.as_u64())
+        .unwrap_or_default();
+    if queue_length >= 5 {
+        push_unique_reason(&mut warnings, format!("Queue depth is {queue_length}"));
+    }
+    if community_quality_summary
+        .and_then(|summary| summary.get("score"))
+        .and_then(|value| value.as_i64())
+        .unwrap_or_default()
+        <= -6
+    {
+        push_unique_reason(&mut warnings, "Local caution signals exist for this peer");
+    }
+    if let Some(note) = community_quality_summary
+        .and_then(|summary| summary.get("override"))
+        .and_then(|value| value.get("note"))
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+    {
+        push_unique_reason(&mut warnings, format!("Local quality note: {note}"));
+    }
+    if community_quality_summary
+        .and_then(|summary| summary.get("override"))
+        .and_then(|value| value.get("mode"))
+        .and_then(|value| value.as_str())
+        == Some("ignore")
+    {
+        push_unique_reason(
+            &mut warnings,
+            "Local quality signals are ignored by reviewer override",
+        );
+    }
+    if let Some(rank) = candidate_rank {
+        if rank.score > 0 && rank.score < 45 {
+            push_unique_reason(
+                &mut warnings,
+                format!("Candidate score is {}/100", rank.score),
+            );
+        }
+    }
+    SearchActionPreview {
+        candidate_score: candidate_rank.map(|rank| rank.score),
+        file_count: files.len(),
+        filenames: files.iter().map(search_file_name).collect(),
+        locked_count,
+        provider_labels: search_provider_labels(response),
+        route: route.to_string(),
+        total_size_bytes: files.iter().map(search_file_size).sum(),
+        username: json_track_field(response, &["username"]),
+        warnings,
+    }
+}
+
+pub fn format_search_action_preview(preview: &SearchActionPreview) -> String {
+    let mut lines = vec![
+        format!("Action: {}", preview.route),
+        format!(
+            "Source: {}",
+            if preview.username.is_empty() {
+                "unknown"
+            } else {
+                &preview.username
+            }
+        ),
+        format!("Providers: {}", preview.provider_labels.join(", ")),
+        format!("Files: {}", preview.file_count),
+        format!("Total bytes: {}", preview.total_size_bytes),
+    ];
+    if let Some(score) = preview.candidate_score {
+        lines.push(format!("Candidate score: {score}/100"));
+    }
+    if !preview.warnings.is_empty() {
+        lines.push("Warnings:".to_string());
+        lines.extend(
+            preview
+                .warnings
+                .iter()
+                .map(|warning| format!("- {warning}")),
+        );
+    }
+    lines.push("Selected files:".to_string());
+    lines.extend(
+        preview
+            .filenames
+            .iter()
+            .map(|filename| format!("- {filename}")),
+    );
+    lines.join("\n")
+}
+
+pub fn search_planner_report(
+    search_text: &str,
+    acquisition_profile: &str,
+    fold_duplicates: bool,
+) -> String {
+    let response = serde_json::json!({
+        "files": [
+            {
+                "bitDepth": 16,
+                "filename": "Archive Artist/Open Sessions/01 Public Domain Theme.flac",
+                "sampleRate": 44100,
+                "size": 24000000
+            }
+        ],
+        "hasFreeUploadSlot": true,
+        "queueLength": 0,
+        "sourceProviders": ["soulseek"],
+        "uploadSpeed": 4000000,
+        "username": "archive-peer"
+    });
+    let rank = rank_search_candidate(
+        &response,
+        search_text,
+        acquisition_profile,
+        Some(&serde_json::json!({"successfulDownloads": 2, "failedDownloads": 0})),
+        None,
+        Some(&serde_json::json!({"preferLossless": acquisition_profile == "lossless-exact"})),
+    );
+    let preview = build_search_action_preview(
+        &response,
+        &search_response_files(&response),
+        Some(&rank),
+        None,
+        "download",
+    );
+    let (folded, _) = deduplicate_search_response_groups(&[response], fold_duplicates);
+    format!(
+        "Search planner\nQuery: {}\nProfile: {}\nDuplicate folding: {}\nFolded duplicates: {}\nScore: {}/100\nReasons: {}\n\n{}",
+        search_text,
+        acquisition_profile,
+        fold_duplicates,
+        folded,
+        rank.score,
+        rank.reasons.join(", "),
+        format_search_action_preview(&preview)
+    )
 }
 
 fn json_track_field(track: &serde_json::Value, keys: &[&str]) -> String {
@@ -4964,6 +5682,131 @@ fn mount_browser_local_panels(
         }
     }
 
+    if document
+        .query_selector("[data-slskr-search-planner]")?
+        .is_some()
+    {
+        let render_search_plan =
+            |document: &web_sys::Document, window: &web_sys::Window, message: &str| {
+                let query = document
+                    .query_selector(r#"[data-slskr-search-setting="query"]"#)
+                    .ok()
+                    .flatten()
+                    .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    .map(|input| input.value())
+                    .unwrap_or_else(|| "public domain theme".to_string());
+                let profile = document
+                    .query_selector(r#"[data-slskr-search-setting="profile"]"#)
+                    .ok()
+                    .flatten()
+                    .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    .map(|input| input.value())
+                    .unwrap_or_else(|| "lossless-exact".to_string());
+                let fold = document
+                    .query_selector(r#"[data-slskr-search-setting="foldDuplicates"]"#)
+                    .ok()
+                    .flatten()
+                    .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    .map(|input| input.checked())
+                    .unwrap_or(true);
+                if let Some(output) = document.get_element_by_id("slskr-search-planner-report") {
+                    output.set_text_content(Some(&search_planner_report(&query, &profile, fold)));
+                }
+                if let Some(status) = document.get_element_by_id("slskr-search-planner-status") {
+                    status.set_text_content(Some(message));
+                }
+                let mut stored = serde_json::Map::new();
+                stored.insert("query".to_string(), serde_json::Value::String(query));
+                stored.insert("profile".to_string(), serde_json::Value::String(profile));
+                stored.insert("foldDuplicates".to_string(), serde_json::Value::Bool(fold));
+                write_storage_json_object(window, "slskr.search.planner", &stored);
+            };
+
+        render_search_plan(document, window, "Search planner ready.");
+        let buttons = document.query_selector_all("[data-slskr-search-action]")?;
+        for index in 0..buttons.length() {
+            let Some(node) = buttons.item(index) else {
+                continue;
+            };
+            let button: web_sys::Element = node.dyn_into()?;
+            let action = button
+                .get_attribute("data-slskr-search-action")
+                .unwrap_or_default();
+            let window = window.clone();
+            let document = document.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    if action == "reset" {
+                        if let Ok(Some(input)) =
+                            document.query_selector(r#"[data-slskr-search-setting="query"]"#)
+                        {
+                            if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+                                input.set_value("public domain theme");
+                            }
+                        }
+                        if let Ok(Some(input)) =
+                            document.query_selector(r#"[data-slskr-search-setting="profile"]"#)
+                        {
+                            if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+                                input.set_value("lossless-exact");
+                            }
+                        }
+                        if let Ok(Some(input)) = document
+                            .query_selector(r#"[data-slskr-search-setting="foldDuplicates"]"#)
+                        {
+                            if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+                                input.set_checked(true);
+                            }
+                        }
+                        remove_storage_item(&window, "slskr.search.planner");
+                    }
+                    let query = document
+                        .query_selector(r#"[data-slskr-search-setting="query"]"#)
+                        .ok()
+                        .flatten()
+                        .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                        .map(|input| input.value())
+                        .unwrap_or_default();
+                    let profile = document
+                        .query_selector(r#"[data-slskr-search-setting="profile"]"#)
+                        .ok()
+                        .flatten()
+                        .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                        .map(|input| input.value())
+                        .unwrap_or_else(|| "lossless-exact".to_string());
+                    let fold = document
+                        .query_selector(r#"[data-slskr-search-setting="foldDuplicates"]"#)
+                        .ok()
+                        .flatten()
+                        .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                        .map(|input| input.checked())
+                        .unwrap_or(true);
+                    if let Some(output) = document.get_element_by_id("slskr-search-planner-report")
+                    {
+                        output
+                            .set_text_content(Some(&search_planner_report(&query, &profile, fold)));
+                    }
+                    if let Some(status) = document.get_element_by_id("slskr-search-planner-status")
+                    {
+                        status.set_text_content(Some(if action == "reset" {
+                            "Search planner reset."
+                        } else {
+                            "Search action preview prepared."
+                        }));
+                    }
+                    let mut stored = serde_json::Map::new();
+                    stored.insert("query".to_string(), serde_json::Value::String(query));
+                    stored.insert("profile".to_string(), serde_json::Value::String(profile));
+                    stored.insert("foldDuplicates".to_string(), serde_json::Value::Bool(fold));
+                    write_storage_json_object(&window, "slskr.search.planner", &stored);
+                },
+            ));
+            button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+    }
+
     Ok(())
 }
 
@@ -5404,6 +6247,8 @@ mod tests {
         assert!(html.contains("data-slskr-player-rating=\"5\""));
         assert!(html.contains("slskr-player-rating-status"));
         assert!(html.contains("slskr-player-radio"));
+        assert!(html.contains("Search Planner"));
+        assert!(html.contains("data-slskr-search-planner"));
         assert!(html.contains("slskr-player-now"));
         assert!(html.contains("slskr-player-transfers"));
         assert!(html.contains("/api/v0/searches"));
@@ -5624,6 +6469,135 @@ mod tests {
         assert!(history.contains("Wishlist Retry"));
         assert!(
             automation_center_panel_html().contains("data-slskr-recipe=\"library-health-scan\"")
+        );
+    }
+
+    #[test]
+    fn rust_search_planner_matches_react_search_helpers() {
+        let strong = serde_json::json!({
+            "files": [{
+                "bitDepth": 16,
+                "filename": "Boards of Canada/Music Has The Right/01 Wildlife Analysis.flac",
+                "sampleRate": 44100,
+                "size": 24000000
+            }],
+            "hasFreeUploadSlot": true,
+            "queueLength": 0,
+            "uploadSpeed": 4000000,
+            "username": "good-peer"
+        });
+        let rank = rank_search_candidate(
+            &strong,
+            "boards canada wildlife analysis",
+            "lossless-exact",
+            Some(&serde_json::json!({"successfulDownloads": 4, "failedDownloads": 0})),
+            None,
+            None,
+        );
+        assert!(rank.score >= 80);
+        assert!(rank.reasons.contains(&"strong filename match".to_string()));
+        assert!(rank.reasons.contains(&"mostly lossless files".to_string()));
+        assert!(rank.reasons.contains(&"free upload slot".to_string()));
+
+        let weak = serde_json::json!({
+            "files": [{"bitRate": 128, "filename": "misc/upload/track.mp3", "size": 2000000}],
+            "hasFreeUploadSlot": false,
+            "queueLength": 8,
+            "uploadSpeed": 64000,
+            "username": "rough-peer"
+        });
+        let weak_rank = rank_search_candidate(
+            &weak,
+            "boards canada wildlife analysis",
+            "lossless-exact",
+            Some(&serde_json::json!({"successfulDownloads": 0, "failedDownloads": 4})),
+            None,
+            None,
+        );
+        assert!(weak_rank.score < 35);
+        assert!(weak_rank.reasons.contains(&"long queue".to_string()));
+        assert!(weak_rank
+            .reasons
+            .contains(&"poor download history".to_string()));
+
+        let fast = serde_json::json!({
+            "files": [{"bitRate": 320, "filename": "Stereolab/Peng!/Super Falling Star.mp3", "size": 8000000}],
+            "hasFreeUploadSlot": true,
+            "queueLength": 1,
+            "uploadSpeed": 1000000
+        });
+        let fast_rank = rank_search_candidate(
+            &fast,
+            "stereolab super falling star",
+            "fast-good-enough",
+            None,
+            None,
+            None,
+        );
+        assert!(fast_rank.score >= 60);
+        assert!(fast_rank
+            .reasons
+            .contains(&"high bitrate fast-good-enough candidate".to_string()));
+
+        let responses = vec![
+            serde_json::json!({
+                "files": [{"filename": "Artist/Album/01 Track.flac", "size": 24000000}],
+                "primarySource": "mesh",
+                "sourceProviders": ["mesh"],
+                "username": "best-peer"
+            }),
+            serde_json::json!({
+                "files": [{"filename": "Different Root/01 Track.flac", "size": 24000000}],
+                "primarySource": "soulseek",
+                "sourceProviders": ["soulseek"],
+                "username": "backup-peer"
+            }),
+            serde_json::json!({
+                "files": [{"filename": "Artist/Album/02 Other.flac", "size": 22000000}],
+                "username": "other-peer"
+            }),
+        ];
+        let (folded, groups) = deduplicate_search_response_groups(&responses, true);
+        assert_eq!(folded, 1);
+        assert_eq!(groups[0].candidate_count, 2);
+        assert_eq!(groups[0].folded_count, 1);
+        assert_eq!(
+            groups[0].usernames,
+            vec!["backup-peer".to_string(), "best-peer".to_string()]
+        );
+
+        let preview = build_search_action_preview(
+            &serde_json::json!({
+                "hasFreeUploadSlot": false,
+                "queueLength": 7,
+                "sourceProviders": ["pod", "scene"],
+                "username": "peer"
+            }),
+            &[
+                serde_json::json!({"filename": "Artist/Album/01 Track.flac", "size": 20}),
+                serde_json::json!({"filename": "Artist/Album/02 Track.flac", "locked": true, "size": 30}),
+            ],
+            Some(&SearchCandidateRank {
+                reasons: Vec::new(),
+                score: 38,
+            }),
+            Some(&serde_json::json!({
+                "override": {"mode": "ignore", "note": "Known private peer."},
+                "score": -6
+            })),
+            "download",
+        );
+        assert_eq!(preview.file_count, 2);
+        assert_eq!(preview.locked_count, 1);
+        assert!(preview
+            .warnings
+            .contains(&"No free upload slot is currently advertised".to_string()));
+        let text = format_search_action_preview(&preview);
+        assert!(text.contains("Action: download"));
+        assert!(text.contains("Candidate score: 38/100"));
+        assert!(
+            search_planner_report("public domain theme", "lossless-exact", true)
+                .contains("Search planner")
         );
     }
 
