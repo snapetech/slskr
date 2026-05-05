@@ -2204,6 +2204,129 @@ fn json_object_fields(value: &serde_json::Value) -> Vec<(&str, String)> {
         .unwrap_or_default()
 }
 
+fn json_table_columns(items: &[serde_json::Value]) -> Vec<String> {
+    let preferred = [
+        "name",
+        "username",
+        "query",
+        "title",
+        "filename",
+        "path",
+        "status",
+        "state",
+        "kind",
+        "size",
+        "bytes",
+        "createdAt",
+        "updatedAt",
+        "id",
+    ];
+    let mut columns = Vec::new();
+    for key in preferred {
+        if items.iter().any(|item| item.get(key).is_some()) {
+            columns.push(key.to_string());
+        }
+    }
+    for item in items.iter().take(10) {
+        let Some(object) = item.as_object() else {
+            continue;
+        };
+        for (key, value) in object {
+            if columns.iter().any(|column| column == key)
+                || matches!(
+                    value,
+                    serde_json::Value::Array(_) | serde_json::Value::Object(_)
+                )
+            {
+                continue;
+            }
+            columns.push(key.clone());
+            if columns.len() >= 6 {
+                return columns;
+            }
+        }
+    }
+    if columns.is_empty() {
+        columns.push("value".to_string());
+    }
+    columns.truncate(6);
+    columns
+}
+
+fn json_cell_value(item: &serde_json::Value, column: &str) -> String {
+    if column == "value" {
+        return compact_preview(&item.to_string());
+    }
+    item.get(column)
+        .map(json_scalar_preview)
+        .unwrap_or_default()
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn data_card_table_html(items: &[serde_json::Value]) -> String {
+    let columns = json_table_columns(items);
+    let header = columns
+        .iter()
+        .map(|column| format!(r#"<th>{}</th>"#, escape_html(column)))
+        .collect::<Vec<_>>()
+        .join("");
+    let rows = items
+        .iter()
+        .take(50)
+        .map(|item| {
+            let search_text = compact_preview(&item.to_string()).to_lowercase();
+            let cells = columns
+                .iter()
+                .map(|column| {
+                    format!(
+                        r#"<td>{}</td>"#,
+                        escape_html(&json_cell_value(item, column))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            format!(
+                r#"<tr data-slskr-row-text="{search}">{cells}</tr>"#,
+                search = escape_html(&search_text),
+                cells = cells,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<div class="slskr-table-wrap"><table class="slskr-data-table"><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table></div>"#,
+        header = header,
+        rows = rows,
+    )
+}
+
+fn data_card_csv_html(items: &[serde_json::Value]) -> String {
+    let columns = json_table_columns(items);
+    let mut lines = vec![columns
+        .iter()
+        .map(|column| csv_escape(column))
+        .collect::<Vec<_>>()
+        .join(",")];
+    lines.extend(items.iter().take(50).map(|item| {
+        columns
+            .iter()
+            .map(|column| csv_escape(&json_cell_value(item, column)))
+            .collect::<Vec<_>>()
+            .join(",")
+    }));
+    format!(
+        r#"<details class="slskr-card-csv"><summary>CSV</summary><pre>{}</pre></details>"#,
+        escape_html(&lines.join("\n"))
+    )
+}
+
 fn data_card_pending_html(endpoint: ApiEndpoint) -> String {
     format!(
         r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>{method} {path}</code></header><div class="slskr-empty-state">Loading</div></article>"#,
@@ -2228,14 +2351,16 @@ fn data_card_result_html(response: &EndpointBody) -> String {
     if let Some(items) = json_display_array(&value) {
         if items.is_empty() {
             return format!(
-                r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>GET {url}</code></header><div class="slskr-empty-state">No records</div></article>"#,
+                r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>0 records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><div class="slskr-empty-state">No records</div>{table}{csv}</article>"#,
                 title = escape_html(&title),
                 url = escape_html(&url),
+                table = data_card_table_html(items),
+                csv = data_card_csv_html(items),
             );
         }
         let rows = items
             .iter()
-            .take(8)
+            .take(50)
             .map(|item| {
                 let label = item
                     .get("name")
@@ -2254,8 +2379,12 @@ fn data_card_result_html(response: &EndpointBody) -> String {
                     .or_else(|| item.get("path"))
                     .map(json_scalar_preview)
                     .unwrap_or_else(|| format!("{} fields", json_object_fields(item).len()));
+                let search_text =
+                    format!("{label} {detail} {}", compact_preview(&item.to_string()))
+                        .to_lowercase();
                 format!(
-                    r#"<li><strong>{label}</strong><span>{detail}</span></li>"#,
+                    r#"<li data-slskr-row-text="{search}"><strong>{label}</strong><span>{detail}</span></li>"#,
+                    search = escape_html(&search_text),
                     label = escape_html(&label),
                     detail = escape_html(&detail),
                 )
@@ -2263,10 +2392,13 @@ fn data_card_result_html(response: &EndpointBody) -> String {
             .collect::<Vec<_>>()
             .join("");
         return format!(
-            r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>GET {url}</code></header><ul class="slskr-record-list">{rows}</ul></article>"#,
+            r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>{count} records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><ul class="slskr-record-list">{rows}</ul>{table}{csv}</article>"#,
             title = escape_html(&title),
             url = escape_html(&url),
+            count = items.len(),
             rows = rows,
+            table = data_card_table_html(items),
+            csv = data_card_csv_html(items),
         );
     }
 
@@ -2691,6 +2823,7 @@ fn render_current_route(
     mount_route_actions(window, document)?;
     mount_toolbar_actions(window, document)?;
     mount_workspace_tabs(document)?;
+    mount_data_cards(document)?;
     for item in nav_items() {
         let selector = format!(r#".slskr-nav-item[href="{}"]"#, item.href);
         let Some(element) = document.query_selector(&selector)? else {
@@ -2707,6 +2840,97 @@ fn render_current_route(
     wasm_bindgen_futures::spawn_local(async move {
         let _ = refresh_route_data(&window_for_data).await;
     });
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_data_cards(document: &web_sys::Document) -> Result<(), JsValue> {
+    let cards = document.query_selector_all("[data-slskr-data-card]")?;
+    for card_index in 0..cards.length() {
+        let Some(node) = cards.item(card_index) else {
+            continue;
+        };
+        let card: web_sys::Element = node.dyn_into()?;
+
+        if let Some(filter) = card.query_selector(".slskr-card-filter")? {
+            let input: web_sys::HtmlInputElement = filter.dyn_into()?;
+            let card_for_filter = card.clone();
+            let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(
+                move |event: web_sys::Event| {
+                    let term = event
+                        .current_target()
+                        .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+                        .map(|input| input.value().to_lowercase())
+                        .unwrap_or_default();
+                    let Ok(rows) = card_for_filter.query_selector_all("[data-slskr-row-text]")
+                    else {
+                        return;
+                    };
+                    for row_index in 0..rows.length() {
+                        let Some(row) = rows.item(row_index) else {
+                            continue;
+                        };
+                        let Ok(row) = row.dyn_into::<web_sys::Element>() else {
+                            continue;
+                        };
+                        let matches = term.is_empty()
+                            || row
+                                .get_attribute("data-slskr-row-text")
+                                .is_some_and(|value| value.contains(&term));
+                        if matches {
+                            let _ = row.remove_attribute("hidden");
+                        } else {
+                            let _ = row.set_attribute("hidden", "");
+                        }
+                    }
+                },
+            ));
+            input.add_event_listener_with_callback("input", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+
+        let view_buttons = card.query_selector_all("[data-slskr-card-view]")?;
+        for button_index in 0..view_buttons.length() {
+            let Some(node) = view_buttons.item(button_index) else {
+                continue;
+            };
+            let button: web_sys::Element = node.dyn_into()?;
+            let card_for_view = card.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    let Some(target) = event
+                        .current_target()
+                        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                    else {
+                        return;
+                    };
+                    let view = target
+                        .get_attribute("data-slskr-card-view")
+                        .unwrap_or_else(|| "list".to_string());
+                    let _ = card_for_view.set_attribute("data-slskr-view", &view);
+                    if let Ok(buttons) = card_for_view.query_selector_all("[data-slskr-card-view]")
+                    {
+                        for index in 0..buttons.length() {
+                            let Some(node) = buttons.item(index) else {
+                                continue;
+                            };
+                            let Ok(button) = node.dyn_into::<web_sys::Element>() else {
+                                continue;
+                            };
+                            let active = button
+                                .get_attribute("data-slskr-card-view")
+                                .is_some_and(|button_view| button_view == view);
+                            let class = if active { "is-active" } else { "" };
+                            let _ = button.set_attribute("class", class);
+                        }
+                    }
+                },
+            ));
+            button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+    }
     Ok(())
 }
 
@@ -2988,6 +3212,7 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         if let Some(page_data) = page_data.as_ref() {
             page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
             mount_workspace_tabs(&document)?;
+            mount_data_cards(&document)?;
         }
     }
 
@@ -3135,6 +3360,27 @@ mod tests {
         assert!(html.contains("slskr-page-data"));
         assert!(html.contains("Route diagnostics"));
         assert!(html.contains("Clear Completed Downloads"));
+    }
+
+    #[test]
+    fn array_data_cards_render_filterable_table_and_csv_views() {
+        let response = EndpointBody {
+            endpoint: ApiEndpoint {
+                method: "GET",
+                path: "/searches",
+                surface: "search",
+            },
+            body: r#"[{"id":1,"query":"public domain jazz","status":"Completed","username":"peer1"},{"id":2,"query":"archive live set","status":"Running","username":"peer2"}]"#.to_string(),
+        };
+        let html = data_card_result_html(&response);
+        assert!(html.contains("data-slskr-data-card"));
+        assert!(html.contains("data-slskr-view=\"list\""));
+        assert!(html.contains("slskr-card-filter"));
+        assert!(html.contains("data-slskr-card-view=\"table\""));
+        assert!(html.contains("slskr-data-table"));
+        assert!(html.contains("2 records"));
+        assert!(html.contains("public domain jazz"));
+        assert!(html.contains("CSV"));
     }
 
     #[test]
