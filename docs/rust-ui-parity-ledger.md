@@ -33,6 +33,9 @@ Completed across the main Rust routes:
   now resolve to route actions or explicit local workspace acknowledgements
 - destructive native actions now use an in-app confirmation dialog so cancel,
   delete, deny, restart, shutdown, and vacuum flows stay inside the Rust shell
+- native live-response parsing now handles dotted and indexed payload paths,
+  array counts, string numeric/bool values, nested browse entries, and richer
+  transfer progress details
 
 ## Route Gaps
 

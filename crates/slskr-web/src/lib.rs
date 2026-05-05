@@ -2857,25 +2857,28 @@ fn endpoint_array(responses: Option<&[EndpointBody]>, endpoint: &str) -> Vec<ser
         .unwrap_or_default()
 }
 
+fn value_at_path<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for part in key.split('.') {
+        if let Ok(index) = part.parse::<usize>() {
+            current = current.as_array()?.get(index)?;
+        } else {
+            current = current.get(part)?;
+        }
+    }
+    Some(current)
+}
+
 fn value_text(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
     for key in keys {
-        let mut current = value;
-        let mut found = true;
-        for part in key.split('.') {
-            if let Some(next) = current.get(part) {
-                current = next;
-            } else {
-                found = false;
-                break;
-            }
-        }
-        if !found {
+        let Some(current) = value_at_path(value, key) else {
             continue;
-        }
+        };
         match current {
             serde_json::Value::String(text) if !text.is_empty() => return Some(text.clone()),
             serde_json::Value::Bool(value) => return Some(value.to_string()),
             serde_json::Value::Number(value) => return Some(value.to_string()),
+            serde_json::Value::Array(items) => return Some(items.len().to_string()),
             _ => {}
         }
     }
@@ -2884,21 +2887,14 @@ fn value_text(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
 
 fn value_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
     for key in keys {
-        let mut current = value;
-        let mut found = true;
-        for part in key.split('.') {
-            if let Some(next) = current.get(part) {
-                current = next;
-            } else {
-                found = false;
-                break;
-            }
-        }
-        if !found {
+        let Some(current) = value_at_path(value, key) else {
             continue;
-        }
+        };
         if let Some(number) = current.as_f64() {
             return Some(number);
+        }
+        if let Some(text) = current.as_str().and_then(|text| text.parse::<f64>().ok()) {
+            return Some(text);
         }
     }
     None
@@ -2906,21 +2902,18 @@ fn value_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
 
 fn value_bool(value: &serde_json::Value, keys: &[&str]) -> Option<bool> {
     for key in keys {
-        let mut current = value;
-        let mut found = true;
-        for part in key.split('.') {
-            if let Some(next) = current.get(part) {
-                current = next;
-            } else {
-                found = false;
-                break;
-            }
-        }
-        if !found {
+        let Some(current) = value_at_path(value, key) else {
             continue;
-        }
+        };
         if let Some(value) = current.as_bool() {
             return Some(value);
+        }
+        if let Some(text) = current.as_str() {
+            match text.to_ascii_lowercase().as_str() {
+                "true" | "yes" | "online" | "enabled" => return Some(true),
+                "false" | "no" | "offline" | "disabled" => return Some(false),
+                _ => {}
+            }
         }
     }
     None
@@ -2928,11 +2921,55 @@ fn value_bool(value: &serde_json::Value, keys: &[&str]) -> Option<bool> {
 
 fn nested_items(value: &serde_json::Value, keys: &[&str]) -> Vec<serde_json::Value> {
     for key in keys {
-        if let Some(items) = value.get(*key).and_then(|entry| entry.as_array()) {
+        if let Some(items) = value_at_path(value, key).and_then(|entry| entry.as_array()) {
             return items.clone();
         }
     }
     Vec::new()
+}
+
+fn value_count(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let Some(current) = value_at_path(value, key) else {
+            continue;
+        };
+        match current {
+            serde_json::Value::Array(items) => return Some(items.len().to_string()),
+            serde_json::Value::Number(number) => return Some(number.to_string()),
+            serde_json::Value::String(text) if !text.is_empty() => return Some(text.clone()),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn value_text_with_parent(
+    value: &serde_json::Value,
+    parent: Option<&serde_json::Value>,
+    keys: &[&str],
+) -> Option<String> {
+    value_text(value, keys).or_else(|| parent.and_then(|parent| value_text(parent, keys)))
+}
+
+fn value_number_with_parent(
+    value: &serde_json::Value,
+    parent: Option<&serde_json::Value>,
+    keys: &[&str],
+) -> Option<f64> {
+    value_number(value, keys).or_else(|| parent.and_then(|parent| value_number(parent, keys)))
+}
+
+fn format_speed(value: &serde_json::Value, parent: Option<&serde_json::Value>) -> String {
+    if let Some(speed) = value_text_with_parent(value, parent, &["speed", "averageSpeed"]) {
+        return speed;
+    }
+    value_number_with_parent(
+        value,
+        parent,
+        &["bytesPerSecond", "transferSpeed", "speedBytesPerSecond"],
+    )
+    .map(|bytes| format!("{bytes:.0} B/s"))
+    .unwrap_or_else(|| "0 B/s".to_string())
 }
 
 fn first_nested_text(
@@ -2945,20 +2982,39 @@ fn first_nested_text(
         .and_then(|item| value_text(item, field_keys))
 }
 
-fn format_transfer_progress(value: &serde_json::Value) -> String {
-    let state = value_text(value, &["state", "status"]).unwrap_or_else(|| "pending".to_string());
-    let progress = value_number(value, &["percentComplete", "percentage", "progress"])
-        .map(|value| {
-            if value <= 1.0 {
-                format!("{:.0}%", value * 100.0)
-            } else {
-                format!("{value:.0}%")
-            }
-        })
-        .unwrap_or_else(|| "0%".to_string());
-    let speed = value_text(value, &["speed", "bytesPerSecond", "averageSpeed"])
-        .unwrap_or_else(|| "0 B/s".to_string());
-    format!("{state} / {progress} / {speed}")
+fn format_transfer_progress(
+    value: &serde_json::Value,
+    parent: Option<&serde_json::Value>,
+) -> String {
+    let state = value_text_with_parent(value, parent, &["state", "status"])
+        .unwrap_or_else(|| "pending".to_string());
+    let progress = value_number_with_parent(
+        value,
+        parent,
+        &[
+            "percentComplete",
+            "percentage",
+            "progress",
+            "progressPercent",
+        ],
+    )
+    .map(|value| {
+        if value <= 1.0 {
+            format!("{:.0}%", value * 100.0)
+        } else {
+            format!("{value:.0}%")
+        }
+    })
+    .unwrap_or_else(|| "0%".to_string());
+    let speed = format_speed(value, parent);
+    let eta = value_text_with_parent(
+        value,
+        parent,
+        &["eta", "remaining", "remainingTime", "timeRemaining"],
+    )
+    .map(|value| format!(" / ETA {value}"))
+    .unwrap_or_default();
+    format!("{state} / {progress} / {speed}{eta}")
 }
 
 fn route_dynamic_rows(
@@ -3054,13 +3110,25 @@ fn route_dynamic_rows(
                 .flat_map(|item| {
                     let username = value_text(item, &["username", "user", "peer"])
                         .unwrap_or_else(|| "unknown peer".to_string());
-                    let files = nested_items(item, &["files", "directories"]);
+                    let files = nested_items(
+                        item,
+                        &[
+                            "files",
+                            "directories",
+                            "items",
+                            "transfer.files",
+                            "transfer.directories",
+                        ],
+                    );
                     if files.is_empty() {
                         vec![(
-                            value_text(item, &["filename", "path", "name"])
-                                .unwrap_or_else(|| "Transfer".to_string()),
+                            value_text(
+                                item,
+                                &["filename", "path", "name", "remotePath", "localPath"],
+                            )
+                            .unwrap_or_else(|| "Transfer".to_string()),
                             username,
-                            format_transfer_progress(item),
+                            format_transfer_progress(item, None),
                             if kind == RouteKind::Downloads {
                                 "Cancel"
                             } else {
@@ -3073,10 +3141,14 @@ fn route_dynamic_rows(
                             .iter()
                             .map(|file| {
                                 (
-                                    value_text(file, &["filename", "path", "name"])
-                                        .unwrap_or_else(|| "Transfer".to_string()),
-                                    username.clone(),
-                                    format_transfer_progress(file),
+                                    value_text(
+                                        file,
+                                        &["filename", "path", "name", "remotePath", "localPath"],
+                                    )
+                                    .unwrap_or_else(|| "Transfer".to_string()),
+                                    value_text(file, &["username", "user", "peer"])
+                                        .unwrap_or_else(|| username.clone()),
+                                    format_transfer_progress(file, Some(item)),
                                     if kind == RouteKind::Downloads {
                                         "Cancel"
                                     } else {
@@ -3119,8 +3191,14 @@ fn route_dynamic_rows(
                     value_text(item, &["username", "name"]).unwrap_or_else(|| "peer".to_string());
                 let status =
                     value_text(item, &["status", "state"]).unwrap_or_else(|| "unknown".to_string());
-                let stats = value_text(item, &["sharedFileCount", "files", "uploadSpeed"])
-                    .unwrap_or_else(|| "stats pending".to_string());
+                let file_count = value_count(item, &["sharedFileCount", "files", "stats.files"])
+                    .unwrap_or_else(|| "files pending".to_string());
+                let speed = value_text(item, &["uploadSpeed", "stats.uploadSpeed", "speed"])
+                    .unwrap_or_else(|| "speed pending".to_string());
+                let privileges =
+                    value_text(item, &["privileges", "privileged", "stats.privileges"])
+                        .unwrap_or_else(|| "standard".to_string());
+                let stats = format!("{file_count} files / {speed} / {privileges}");
                 (username, status, stats, "Browse".to_string())
             })
             .collect::<Vec<_>>(),
@@ -3135,10 +3213,15 @@ fn route_dynamic_rows(
                 let verified = value_bool(item, &["verified"])
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "pending".to_string());
+                let group =
+                    value_text(item, &["group", "groupName", "tags.0"]).unwrap_or_else(|| {
+                        value_text(item, &["status", "state"])
+                            .unwrap_or_else(|| "ungrouped".to_string())
+                    });
                 (
                     name,
                     peer,
-                    format!("verified={verified}"),
+                    format!("{group} / verified={verified}"),
                     "Message".to_string(),
                 )
             })
@@ -3164,7 +3247,7 @@ fn route_dynamic_rows(
                     .unwrap_or_else(|| "Collection".to_string());
                 let kind =
                     value_text(item, &["type", "kind"]).unwrap_or_else(|| "Playlist".to_string());
-                let count = value_text(item, &["itemCount", "itemsCount", "items"])
+                let count = value_count(item, &["itemCount", "itemsCount", "items", "files"])
                     .unwrap_or_else(|| "0".to_string());
                 (title, kind, format!("{count} items"), "Open".to_string())
             })
@@ -3175,7 +3258,7 @@ fn route_dynamic_rows(
             .map(|item| {
                 let name = value_text(item, &["name", "title"])
                     .unwrap_or_else(|| "Share group".to_string());
-                let members = value_text(item, &["memberCount", "members"])
+                let members = value_count(item, &["memberCount", "members", "grants", "users"])
                     .unwrap_or_else(|| "0".to_string());
                 let created = value_text(item, &["createdAt", "created"])
                     .unwrap_or_else(|| "created pending".to_string());
@@ -3193,10 +3276,23 @@ fn route_dynamic_rows(
             .map(|item| {
                 let title = value_text(item, &["collection.title", "title", "name"])
                     .unwrap_or_else(|| "Shared collection".to_string());
-                let owner = value_text(item, &["owner", "sharedBy", "username"])
-                    .unwrap_or_else(|| "unknown owner".to_string());
-                let permissions = value_text(item, &["permissions", "access", "grant.permissions"])
-                    .unwrap_or_else(|| "read".to_string());
+                let owner = value_text(
+                    item,
+                    &[
+                        "owner.username",
+                        "owner",
+                        "sharedBy.username",
+                        "sharedBy",
+                        "grant.owner",
+                        "username",
+                    ],
+                )
+                .unwrap_or_else(|| "unknown owner".to_string());
+                let permissions = value_text(
+                    item,
+                    &["permissions", "access", "grant.permissions", "grant.access"],
+                )
+                .unwrap_or_else(|| "read".to_string());
                 (title, owner, permissions, "Open".to_string())
             })
             .collect::<Vec<_>>(),
@@ -3204,18 +3300,37 @@ fn route_dynamic_rows(
             let root = json_endpoint_value(responses, "/users/:username/browse");
             let mut rows = root.as_ref().map(value_array).unwrap_or_default();
             if let Some(value) = root.as_ref() {
-                rows.extend(nested_items(value, &["directories"]));
-                rows.extend(nested_items(value, &["files"]));
+                rows.extend(nested_items(value, &["directories", "root.directories"]));
+                for directory in nested_items(value, &["directories", "root.directories"]) {
+                    rows.extend(nested_items(&directory, &["files", "children", "items"]));
+                }
+                rows.extend(nested_items(
+                    value,
+                    &["files", "root.files", "children", "items"],
+                ));
             }
             rows.iter()
                 .take(50)
                 .map(|item| {
-                    let name = value_text(item, &["name", "filename", "path", "directory"])
-                        .unwrap_or_else(|| "Browse entry".to_string());
-                    let kind =
-                        value_text(item, &["type", "kind"]).unwrap_or_else(|| "file".to_string());
-                    let size =
-                        value_text(item, &["size", "bytes"]).unwrap_or_else(|| "0".to_string());
+                    let name = value_text(
+                        item,
+                        &[
+                            "name",
+                            "filename",
+                            "path",
+                            "directory",
+                            "folder",
+                            "remotePath",
+                        ],
+                    )
+                    .unwrap_or_else(|| "Browse entry".to_string());
+                    let kind = if value_bool(item, &["isDirectory", "directory"]).unwrap_or(false) {
+                        "folder".to_string()
+                    } else {
+                        value_text(item, &["type", "kind"]).unwrap_or_else(|| "file".to_string())
+                    };
+                    let size = value_text(item, &["size", "bytes", "fileSize"])
+                        .unwrap_or_else(|| "0".to_string());
                     (name, kind, size, "Download".to_string())
                 })
                 .collect::<Vec<_>>()
@@ -3227,9 +3342,20 @@ fn route_dynamic_rows(
                     "Connection".to_string(),
                     value_text(&server, &["state", "status"])
                         .unwrap_or_else(|| "pending".to_string()),
-                    value_text(&server, &["username", "server"])
+                    value_text(&server, &["username", "server", "session.username"])
                         .unwrap_or_else(|| "session".to_string()),
                     "Connect".to_string(),
+                ));
+            }
+            if let Some(shares) = json_endpoint_value(responses, "/shares") {
+                rows.push((
+                    "Shares".to_string(),
+                    value_text(&shares, &["status", "state", "scanStatus"])
+                        .unwrap_or_else(|| "ready".to_string()),
+                    value_count(&shares, &["roots", "directories", "shares", "count"])
+                        .map(|count| format!("{count} roots"))
+                        .unwrap_or_else(|| "roots pending".to_string()),
+                    "Rescan".to_string(),
                 ));
             }
             if let Some(database) = json_endpoint_value(responses, "/database/stats") {
@@ -3237,8 +3363,19 @@ fn route_dynamic_rows(
                     "Database".to_string(),
                     value_text(&database, &["status", "state"])
                         .unwrap_or_else(|| "ready".to_string()),
-                    value_text(&database, &["size", "path"]).unwrap_or_else(|| "stats".to_string()),
+                    value_text(&database, &["size", "path", "databaseSize"])
+                        .unwrap_or_else(|| "stats".to_string()),
                     "Vacuum".to_string(),
+                ));
+            }
+            if let Some(logs) = json_endpoint_value(responses, "/logs") {
+                rows.push((
+                    "Events".to_string(),
+                    value_text(&logs, &["level", "status"]).unwrap_or_else(|| "live".to_string()),
+                    value_count(&logs, &["events", "entries", "items"])
+                        .map(|count| format!("{count} entries"))
+                        .unwrap_or_else(|| "stream pending".to_string()),
+                    "Filter".to_string(),
                 ));
             }
             rows
@@ -11200,6 +11337,89 @@ mod tests {
         );
         assert!(rooms.contains("Joined"));
         assert!(rooms.contains(">1<"));
+    }
+
+    #[test]
+    fn native_workspaces_parse_nested_live_domain_payloads() {
+        let downloads = route_workspace_result_html(
+            "/downloads",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/transfers/downloads",
+                    surface: "transfers",
+                },
+                body: r#"[{"username":"parent-peer","state":"InProgress","bytesPerSecond":2048,"eta":"00:42","files":[{"filename":"Album/Track.flac","progress":0.625}]}]"#
+                    .to_string(),
+            }],
+        );
+        assert!(downloads.contains("Album/Track.flac"));
+        assert!(downloads.contains("parent-peer"));
+        assert!(downloads.contains("InProgress / 62% / 2048 B/s / ETA 00:42"));
+
+        let browse = route_workspace_result_html(
+            "/browse",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/users/:username/browse",
+                    surface: "browse",
+                },
+                body: r#"{"directories":[{"name":"Music","isDirectory":true,"files":[{"filename":"Music/live.mp3","size":321}]}],"root":{"files":[{"name":"root.flac","fileSize":654}]}}"#
+                    .to_string(),
+            }],
+        );
+        assert!(browse.contains("Music"));
+        assert!(browse.contains("folder"));
+        assert!(browse.contains("Music/live.mp3"));
+        assert!(browse.contains("root.flac"));
+
+        let collections = route_workspace_result_html(
+            "/collections",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/collections",
+                    surface: "collections",
+                },
+                body:
+                    r#"[{"title":"Road Trips","kind":"playlist","items":[{"id":"1"},{"id":"2"}]}]"#
+                        .to_string(),
+            }],
+        );
+        assert!(collections.contains("Road Trips"));
+        assert!(collections.contains("2 items"));
+
+        let sharegroups = route_workspace_result_html(
+            "/sharegroups",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/sharegroups",
+                    surface: "collections",
+                },
+                body: r#"[{"name":"Trusted","members":[{"username":"peer1"},{"username":"peer2"}],"createdAt":"today"}]"#
+                    .to_string(),
+            }],
+        );
+        assert!(sharegroups.contains("Trusted"));
+        assert!(sharegroups.contains("2 members"));
+
+        let shared = route_workspace_result_html(
+            "/shared",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/shared",
+                    surface: "collections",
+                },
+                body: r#"[{"collection":{"title":"Inbox"},"owner":{"username":"sender"},"grant":{"permissions":"read/write"}}]"#
+                    .to_string(),
+            }],
+        );
+        assert!(shared.contains("Inbox"));
+        assert!(shared.contains("sender"));
+        assert!(shared.contains("read/write"));
     }
 
     #[test]
