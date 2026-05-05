@@ -57,6 +57,7 @@ while IFS=' ' read -r method path; do
        grep -q "starts_with.*\"$path\"" "$MAIN_RS" || \
        grep -q "ends_with.*\"$path\"" "$MAIN_RS" || \
        grep -q "path == \"$path\"" "$MAIN_RS" || \
+       { [[ -n "$api_dynamic_prefix" ]] && grep -q "path_segment_after(path, \"$api_dynamic_prefix" "$MAIN_RS"; } || \
        { [[ -n "$api_dynamic_prefix" ]] && grep -q "starts_with.*\"$api_dynamic_prefix" "$MAIN_RS"; } || \
        { [[ -n "$dynamic_prefix" ]] && grep -q "starts_with.*\"$dynamic_prefix" "$MAIN_RS"; }; then
         ((++IMPLEMENTED))

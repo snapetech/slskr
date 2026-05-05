@@ -48,7 +48,6 @@ GET /contacts
 GET /contacts/nearby
 GET /contacts/:var
 GET /conversations/:var
-GET /conversations:var
 GET /destinations
 GET /destinations/default
 GET /events
