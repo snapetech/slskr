@@ -68,6 +68,9 @@ Completed across the main Rust routes:
 - Selected rows now also carry route-specific field summaries for every
   workflow route. The inspector and preview cards expose human labels like peer,
   queue, progress, permissions, owner, path, and next action after selection.
+- Selected rows now carry route-specific context action menus. The inspector
+  swaps its generic buttons for the selected row's Search, transfer, message,
+  user, browse, collection, share, and system actions.
 
 ## Route Gaps
 

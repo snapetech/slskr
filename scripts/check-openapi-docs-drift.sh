@@ -18,7 +18,15 @@ python3 - <<'PY'
 import json
 from pathlib import Path
 
-with Path("docs/openapi.json").open(encoding="utf-8") as handle:
+docs_spec_path = Path("docs/openapi.json")
+crate_spec_path = Path("crates/slskr/src/openapi.json")
+
+if docs_spec_path.read_bytes() != crate_spec_path.read_bytes():
+    raise SystemExit(
+        "docs/openapi.json and crates/slskr/src/openapi.json must stay identical"
+    )
+
+with docs_spec_path.open(encoding="utf-8") as handle:
     spec = json.load(handle)
 
 if spec.get("openapi") != "3.0.0":
@@ -27,7 +35,7 @@ if not isinstance(spec.get("paths"), dict) or not spec["paths"]:
     raise SystemExit("docs/openapi.json must contain a non-empty paths object")
 PY
 
-for expected in 'generate_openapi_json' 'CHECKED_IN_OPENAPI_JSON' 'include_str!("../../../docs/openapi.json")' 'test_runtime_openapi_matches_checked_in_spec' 'slskd-compatible array'; do
+for expected in 'generate_openapi_json' 'CHECKED_IN_OPENAPI_JSON' 'include_str!("openapi.json")' 'test_runtime_openapi_matches_checked_in_spec' 'slskd-compatible array'; do
   if ! rg -n -F "$expected" crates/slskr/src/openapi.rs >/dev/null; then
     printf 'openapi/docs drift check failed: expected OpenAPI regression token missing: %s\n' "$expected" >&2
     status=1

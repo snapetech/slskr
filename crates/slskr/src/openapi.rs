@@ -5,7 +5,7 @@
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-const CHECKED_IN_OPENAPI_JSON: &str = include_str!("../../../docs/openapi.json");
+const CHECKED_IN_OPENAPI_JSON: &str = include_str!("openapi.json");
 
 /// OpenAPI spec generator
 pub struct OpenApiSpec {
@@ -541,8 +541,7 @@ mod tests {
 
     #[test]
     fn test_checked_in_openapi_documents_slskd_compatible_arrays() {
-        let spec: Value =
-            serde_json::from_str(include_str!("../../../docs/openapi.json")).expect("openapi json");
+        let spec: Value = serde_json::from_str(CHECKED_IN_OPENAPI_JSON).expect("openapi json");
         assert_eq!(
             spec["paths"]["/api/searches"]["get"]["responses"]["200"]["content"]
                 ["application/json"]["schema"]["type"],
