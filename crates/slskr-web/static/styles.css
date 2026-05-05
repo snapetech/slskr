@@ -192,6 +192,55 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.slskr-route-summary {
+  border-bottom: 1px solid #263130;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+}
+
+.slskr-route-summary h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-route-summary ul {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-route-summary li {
+  background: #111516;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 4px;
+  min-height: 74px;
+  padding: 12px;
+}
+
+.slskr-route-summary strong {
+  color: #cdbfab;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.slskr-route-summary span {
+  color: #f4efe7;
+  font-size: 22px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.slskr-route-summary small {
+  color: #9ba8a1;
+  font-size: 12px;
+}
+
 .slskr-route-columns h3 {
   color: #f4efe7;
   font-size: 14px;

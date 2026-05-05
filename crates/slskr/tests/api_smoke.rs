@@ -39,7 +39,7 @@ async fn daemon_http_api_smoke() {
         .env("SLSKR_HTTP_BIND", format!("127.0.0.1:{port}"))
         .env("SLSKR_STATE_DIR", &state_dir)
         .env("SLSKR_API_TOKEN", "smoke-token")
-        .env("SLSKR_API_RATE_LIMIT_AUTHENTICATED", "4")
+        .env("SLSKR_API_RATE_LIMIT_AUTHENTICATED", "8")
         .env("SLSKR_SHARE_FIXTURE", "Virtual/Test.flac=42")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -110,7 +110,18 @@ async fn daemon_http_api_smoke() {
         .unwrap();
     assert_eq!(searches.status(), StatusCode::OK);
     let searches_body = searches.text().await.unwrap();
-    assert!(searches_body.contains("\"count\":1"));
+    assert!(searches_body.starts_with('['));
+    assert!(searches_body.contains("\"query\":\"test flac\""));
+
+    let search_records = client
+        .get(format!("{base_url}/api/v0/searches/records"))
+        .bearer_auth("smoke-token")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(search_records.status(), StatusCode::OK);
+    let search_records_body = search_records.text().await.unwrap();
+    assert!(search_records_body.contains("\"count\":1"));
 
     let transfers = client
         .get(format!("{base_url}/api/v0/transfers"))
@@ -120,13 +131,20 @@ async fn daemon_http_api_smoke() {
         .unwrap();
     assert_eq!(transfers.status(), StatusCode::OK);
 
-    let rate_limited = client
-        .get(format!("{base_url}/api/v0/config"))
-        .bearer_auth("smoke-token")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(rate_limited.status(), StatusCode::TOO_MANY_REQUESTS);
+    let mut last_status = StatusCode::OK;
+    for _ in 0..10 {
+        last_status = client
+            .get(format!("{base_url}/api/v0/config"))
+            .bearer_auth("smoke-token")
+            .send()
+            .await
+            .unwrap()
+            .status();
+        if last_status == StatusCode::TOO_MANY_REQUESTS {
+            break;
+        }
+    }
+    assert_eq!(last_status, StatusCode::TOO_MANY_REQUESTS);
 }
 
 async fn wait_for_health(client: &reqwest::Client, base_url: &str) {

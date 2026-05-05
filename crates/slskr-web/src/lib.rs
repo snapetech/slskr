@@ -67,6 +67,12 @@ pub struct RoutePage {
     pub title: &'static str,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EndpointBody {
+    pub endpoint: ApiEndpoint,
+    pub body: String,
+}
+
 pub const fn api_base_path() -> &'static str {
     "/api/v0"
 }
@@ -368,6 +374,11 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         ApiEndpoint {
             method: "GET",
             path: "/searches",
+            surface: "search",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/searches/records",
             surface: "search",
         },
         ApiEndpoint {
@@ -1037,6 +1048,259 @@ pub fn route_actions_html(path: &str) -> String {
         .join("")
 }
 
+fn stat_card_html(label: &str, value: &str, detail: &str) -> String {
+    format!(
+        r#"<li><strong>{label}</strong><span>{value}</span><small>{detail}</small></li>"#,
+        label = escape_html(label),
+        value = escape_html(value),
+        detail = escape_html(detail),
+    )
+}
+
+fn json_array_len(body: &str) -> Option<usize> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.as_array().map(Vec::len))
+}
+
+fn json_entries_len(body: &str) -> Option<usize> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("entries").cloned())
+        .and_then(|value| value.as_array().map(Vec::len))
+}
+
+fn json_field_string(body: &str, field: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get(field).cloned())
+        .and_then(|value| match value {
+            serde_json::Value::String(text) => Some(text),
+            serde_json::Value::Bool(value) => Some(value.to_string()),
+            serde_json::Value::Number(value) => Some(value.to_string()),
+            _ => None,
+        })
+}
+
+fn endpoint_body<'a>(responses: &'a [EndpointBody], path: &str) -> Option<&'a str> {
+    responses
+        .iter()
+        .find(|response| response.endpoint.path == path)
+        .map(|response| response.body.as_str())
+}
+
+pub fn route_summary_pending_html(path: &str) -> String {
+    let Some(page) = route_page(path) else {
+        return String::new();
+    };
+    match page.surface {
+        "search" => [
+            stat_card_html("Searches", "pending", "active records"),
+            stat_card_html("Responses", "pending", "selected search"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("search").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        "transfers" => [
+            stat_card_html("Downloads", "pending", "peer groups"),
+            stat_card_html("Uploads", "pending", "peer groups"),
+            stat_card_html("Speeds", "pending", "transfer rates"),
+        ]
+        .join(""),
+        "rooms" => [
+            stat_card_html("Available", "pending", "rooms"),
+            stat_card_html("Joined", "pending", "rooms"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("rooms").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        "messages" => [
+            stat_card_html("Conversations", "pending", "threads"),
+            stat_card_html("Selected", "pending", "peer1"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("messages").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        "browse" => [
+            stat_card_html("Peer", "peer1", "browse target"),
+            stat_card_html("Folders", "pending", "cached entries"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("browse").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        "system" => [
+            stat_card_html("Metrics", "pending", "runtime"),
+            stat_card_html("Options", "pending", "configuration"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("system").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        _ => [
+            stat_card_html("Surface", page.surface, "route group"),
+            stat_card_html(
+                "Endpoints",
+                &route_endpoints(page.surface).len().to_string(),
+                "tracked",
+            ),
+            stat_card_html(
+                "Actions",
+                &surface_actions(page.surface).len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+    }
+}
+
+pub fn route_summary_result_html(path: &str, responses: &[EndpointBody]) -> String {
+    let Some(page) = route_page(path) else {
+        return String::new();
+    };
+    match page.surface {
+        "search" => {
+            let searches = endpoint_body(responses, "/searches")
+                .and_then(json_array_len)
+                .or_else(|| {
+                    endpoint_body(responses, "/searches/records").and_then(json_entries_len)
+                })
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            let responses_count = endpoint_body(responses, "/searches/:id/responses")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            [
+                stat_card_html("Searches", &searches, "active records"),
+                stat_card_html("Responses", &responses_count, "selected search"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("search").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
+        "transfers" => {
+            let downloads = endpoint_body(responses, "/transfers/downloads")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            let uploads = endpoint_body(responses, "/transfers/uploads")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            let speeds = endpoint_body(responses, "/transfers/speeds")
+                .map(compact_preview)
+                .unwrap_or_else(|| "{}".to_string());
+            [
+                stat_card_html("Downloads", &downloads, "peer groups"),
+                stat_card_html("Uploads", &uploads, "peer groups"),
+                stat_card_html("Speeds", &speeds, "transfer rates"),
+            ]
+            .join("")
+        }
+        "rooms" => {
+            let available = endpoint_body(responses, "/rooms/available")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            let joined = endpoint_body(responses, "/rooms/joined")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            [
+                stat_card_html("Available", &available, "rooms"),
+                stat_card_html("Joined", &joined, "rooms"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("rooms").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
+        "messages" => {
+            let conversations = endpoint_body(responses, "/conversations")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            let selected = endpoint_body(responses, "/conversations/:username")
+                .and_then(|body| {
+                    json_field_string(body, "username")
+                        .or_else(|| json_field_string(body, "message_count"))
+                        .or_else(|| json_field_string(body, "messages"))
+                })
+                .unwrap_or_else(|| "peer1".to_string());
+            [
+                stat_card_html("Conversations", &conversations, "threads"),
+                stat_card_html("Selected", &selected, "peer1"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("messages").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
+        "browse" => {
+            let folders = endpoint_body(responses, "/users/:username/browse")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            [
+                stat_card_html("Peer", "peer1", "browse target"),
+                stat_card_html("Folders", &folders, "cached entries"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("browse").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
+        "system" => {
+            let metrics = endpoint_body(responses, "/telemetry/metrics")
+                .map(|body| {
+                    if body.contains("slskr_") {
+                        "scrapable".to_string()
+                    } else {
+                        compact_preview(body)
+                    }
+                })
+                .unwrap_or_else(|| "offline".to_string());
+            let options = endpoint_body(responses, "/options")
+                .and_then(|body| json_field_string(body, "config_file"))
+                .unwrap_or_else(|| "runtime".to_string());
+            [
+                stat_card_html("Metrics", &metrics, "runtime"),
+                stat_card_html("Options", &options, "configuration"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("system").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
+        _ => route_summary_pending_html(path),
+    }
+}
+
 pub fn route_probe_pending_html(path: &str) -> String {
     let Some(page) = route_page(path) else {
         return String::new();
@@ -1085,11 +1349,12 @@ pub fn route_page_html(path: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-actions"><h3>Actions</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-actions"><h3>Actions</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
         description = escape_html(page.description),
+        summary = route_summary_pending_html(path),
         routes = route_inventory,
         endpoints = endpoints,
         actions = route_actions_html(path),
@@ -1392,19 +1657,27 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
     let Some(status) = document.get_element_by_id("slskr-route-data") else {
         return Ok(());
     };
+    let summary = document.get_element_by_id("slskr-route-summary");
     let path = window.location().pathname()?;
     let Some(page) = route_page(&path) else {
         return Ok(());
     };
 
     let mut rendered = String::new();
+    let mut responses = Vec::new();
     for endpoint in route_endpoints(page.surface)
         .into_iter()
         .filter(|endpoint| endpoint.method == "GET")
     {
         let url = concrete_endpoint_path(&path, endpoint);
         let row = match fetch_text(window, &url).await {
-            Ok(body) => runtime_probe_result_html(&[(endpoint.method, &url, Ok(body.as_str()))]),
+            Ok(body) => {
+                responses.push(EndpointBody {
+                    endpoint,
+                    body: body.clone(),
+                });
+                runtime_probe_result_html(&[(endpoint.method, &url, Ok(body.as_str()))])
+            }
             Err(error) => {
                 let message = error
                     .as_string()
@@ -1414,6 +1687,9 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         };
         rendered.push_str(&row);
         status.set_inner_html(&rendered);
+        if let Some(summary) = summary.as_ref() {
+            summary.set_inner_html(&route_summary_result_html(&path, &responses));
+        }
     }
 
     Ok(())
@@ -1554,6 +1830,8 @@ mod tests {
         assert!(html.contains("slskr-route-data"));
         assert!(html.contains("Live Route Data"));
         assert!(html.contains("slskr-route-actions"));
+        assert!(html.contains("slskr-route-summary"));
+        assert!(html.contains("Summary"));
         assert!(html.contains("Clear Completed Downloads"));
     }
 
@@ -1659,6 +1937,90 @@ mod tests {
         );
         let html = route_actions_html("/searches/<script>");
         assert!(html.contains("/api/v0/searches/1"));
+        assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn rust_route_summaries_parse_live_response_shapes() {
+        let search = route_summary_result_html(
+            "/searches/42",
+            &[
+                EndpointBody {
+                    endpoint: ApiEndpoint {
+                        method: "GET",
+                        path: "/searches/records",
+                        surface: "search",
+                    },
+                    body: r#"{"entries":[{"id":"1"},{"id":"2"}]}"#.to_string(),
+                },
+                EndpointBody {
+                    endpoint: ApiEndpoint {
+                        method: "GET",
+                        path: "/searches/:id/responses",
+                        surface: "search",
+                    },
+                    body: r#"[{"username":"peer1"}]"#.to_string(),
+                },
+            ],
+        );
+        assert!(search.contains(">2<"));
+        assert!(search.contains(">1<"));
+        assert!(search.contains("active records"));
+
+        let transfers = route_summary_result_html(
+            "/downloads",
+            &[
+                EndpointBody {
+                    endpoint: ApiEndpoint {
+                        method: "GET",
+                        path: "/transfers/downloads",
+                        surface: "transfers",
+                    },
+                    body: r#"[{"username":"peer1"}]"#.to_string(),
+                },
+                EndpointBody {
+                    endpoint: ApiEndpoint {
+                        method: "GET",
+                        path: "/transfers/uploads",
+                        surface: "transfers",
+                    },
+                    body: "[]".to_string(),
+                },
+            ],
+        );
+        assert!(transfers.contains("Downloads"));
+        assert!(transfers.contains(">1<"));
+        assert!(transfers.contains("Uploads"));
+
+        let rooms = route_summary_result_html(
+            "/rooms",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/rooms/joined",
+                    surface: "rooms",
+                },
+                body: r#"["contract-room"]"#.to_string(),
+            }],
+        );
+        assert!(rooms.contains("Joined"));
+        assert!(rooms.contains(">1<"));
+    }
+
+    #[test]
+    fn rust_route_summaries_escape_live_response_values() {
+        let html = route_summary_result_html(
+            "/messages",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/conversations/:username",
+                    surface: "messages",
+                },
+                body: r#"{"username":"<script>"}"#.to_string(),
+            }],
+        );
+        assert!(html.contains("&lt;script&gt;"));
         assert!(!html.contains("<script>"));
     }
 

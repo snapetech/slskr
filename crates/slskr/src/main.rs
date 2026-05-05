@@ -656,31 +656,7 @@ impl SearchStore {
 
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
-        let records = self
-            .records
-            .iter()
-            .filter(|record| {
-                filter
-                    .status
-                    .as_deref()
-                    .map_or(true, |status| record.status == status)
-            })
-            .filter(|record| {
-                filter
-                    .target
-                    .as_deref()
-                    .map_or(true, |target| record.target == target)
-            })
-            .filter(|record| {
-                filter.q.as_deref().map_or(true, |q| {
-                    record.query.to_ascii_lowercase().contains(q)
-                        || record
-                            .target_name
-                            .as_deref()
-                            .is_some_and(|target| target.to_ascii_lowercase().contains(q))
-                })
-            })
-            .collect::<Vec<_>>();
+        let records = self.filtered_records(&filter);
         let filtered_count = records.len();
         let expired = self
             .records
@@ -704,6 +680,46 @@ impl SearchStore {
             json_usize_option(filter.limit),
             self.next_token
         )
+    }
+
+    fn slskd_list_json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .filtered_records(&filter)
+            .into_iter()
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(SearchRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{}]", records)
+    }
+
+    fn filtered_records<'a>(&'a self, filter: &RecordListFilter) -> Vec<&'a SearchRecord> {
+        self.records
+            .iter()
+            .filter(|record| {
+                filter
+                    .status
+                    .as_deref()
+                    .map_or(true, |status| record.status == status)
+            })
+            .filter(|record| {
+                filter
+                    .target
+                    .as_deref()
+                    .map_or(true, |target| record.target == target)
+            })
+            .filter(|record| {
+                filter.q.as_deref().map_or(true, |q| {
+                    record.query.to_ascii_lowercase().contains(q)
+                        || record
+                            .target_name
+                            .as_deref()
+                            .is_some_and(|target| target.to_ascii_lowercase().contains(q))
+                })
+            })
+            .collect::<Vec<_>>()
     }
 
     fn summary_json(&self) -> String {
@@ -4801,10 +4817,21 @@ async fn route_http_request_with_headers(
                 body: users.json(),
             })
         }
-        ("GET", "/api/searches") => {
+        ("GET", "/api/searches/records") => {
             let mut searches = state.searches.write().await;
             searches.expire_due();
             let body = searches.json(route.query);
+            drop(searches);
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "application/json",
+                body,
+            })
+        }
+        ("GET", "/api/searches") => {
+            let mut searches = state.searches.write().await;
+            searches.expire_due();
+            let body = searches.slskd_list_json(route.query);
             drop(searches);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -12148,7 +12175,7 @@ pub fn index_html() -> String {
         status: field("search-filter-status"),
         limit: 6
       });
-      const data = await fetchJson(`/api/v0/searches?${query}`);
+      const data = await fetchJson(`/api/v0/searches/records?${query}`);
       document.getElementById("search-table").innerHTML = table(data.entries || [], [
         { label: "Query", value: (row) => row.query },
         { label: "Target", value: (row) => row.target_name ? `${row.target}:${row.target_name}` : row.target },
@@ -13385,7 +13412,8 @@ mod tests {
             ("/api/v0/rooms", "\"count\":0"),
             ("/api/v0/shares", "\"files\":1"),
             ("/api/v0/shares/catalog", "\"total_bytes\":42"),
-            ("/api/v0/searches", "\"count\":0"),
+            ("/api/v0/searches", "[]"),
+            ("/api/v0/searches/records", "\"count\":0"),
             ("/api/v0/transfers", "\"count\":0"),
             ("/api/v0/transfers/stats", "\"total\":0"),
         ];
@@ -14406,7 +14434,7 @@ mod tests {
             }
         );
 
-        let listed = super::route_http_request("GET", "/api/v0/searches", None, "", &state)
+        let listed = super::route_http_request("GET", "/api/v0/searches/records", None, "", &state)
             .await
             .expect("list searches");
         assert_eq!(listed.status, "200 OK");
@@ -14460,10 +14488,15 @@ mod tests {
             rehydrated,
             Some(db),
         );
-        let listed =
-            super::route_http_request("GET", "/api/v0/searches", None, "", &restarted_state)
-                .await
-                .expect("list rehydrated searches");
+        let listed = super::route_http_request(
+            "GET",
+            "/api/v0/searches/records",
+            None,
+            "",
+            &restarted_state,
+        )
+        .await
+        .expect("list rehydrated searches");
         assert_eq!(listed.status, "200 OK");
         assert!(listed.body.contains("\"count\":1"));
         assert!(listed.body.contains("\"query\":\"persist me\""));
@@ -14499,7 +14532,7 @@ mod tests {
 
         let filtered = super::route_http_request(
             "GET",
-            "/api/v0/searches?status=active&target=wishlist&limit=1",
+            "/api/v0/searches/records?status=active&target=wishlist&limit=1",
             None,
             "",
             &state,
@@ -14542,7 +14575,7 @@ mod tests {
             record.expires_at = 0;
         }
 
-        let listed = super::route_http_request("GET", "/api/v0/searches", None, "", &state)
+        let listed = super::route_http_request("GET", "/api/v0/searches/records", None, "", &state)
             .await
             .expect("list searches");
         assert_eq!(listed.status, "200 OK");
