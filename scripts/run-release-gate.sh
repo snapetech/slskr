@@ -18,8 +18,26 @@ run_step() {
   "$@"
 }
 
+run_optional_step() {
+  local tool="$1"
+  local label="$2"
+  shift 2
+  if command -v "$tool" >/dev/null 2>&1; then
+    run_step "$label" "$@"
+  else
+    printf '\n==> %s\n' "$label"
+    printf '%s is not installed; skipping optional local check.\n' "$tool"
+  fi
+}
+
 run_step "Public posture check" scripts/check-public-posture.sh
 run_step "Shell syntax check" bash -n scripts/*.sh
+run_optional_step shellcheck "Shell lint" shellcheck \
+  -e SC1090,SC2016,SC2030,SC2031,SC2034,SC2206 \
+  scripts/*.sh
+run_optional_step actionlint "GitHub workflow lint" actionlint
+run_optional_step semgrep "Semgrep security scan" semgrep scan --config auto --error
+run_optional_step trivy "Trivy filesystem scan" trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed .
 run_step "Rust formatting" cargo fmt --all --check
 run_step "Rust clippy" cargo clippy --workspace --all-targets -- -D warnings
 run_step "Rust wasm web check" cargo check -p slskr-web --target wasm32-unknown-unknown

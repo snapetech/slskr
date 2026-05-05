@@ -52,6 +52,12 @@ jobs:
             web/package-lock.json
             dashboard/package-lock.json
             client-ts/package-lock.json
+      - name: Install workflow and shell linters
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run release gate

@@ -54,7 +54,7 @@ pick_port() {
   local port
   while true; do
     port="$(pick_free_port)"
-    if [[ ! " ${picked_ports[*]} " =~ " ${port} " ]]; then
+    if [[ " ${picked_ports[*]} " != *" ${port} "* ]]; then
       picked_ports+=("$port")
       printf '%s\n' "$port"
       return 0

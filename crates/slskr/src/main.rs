@@ -4547,6 +4547,7 @@ async fn route_http_request_with_headers(
              let response = serde_json::json!({
                  "id": webhook_id,
                  "secret": secret,
+                 "secretReturnedOnce": true,
                  "status": "created"
              });
 
@@ -4729,14 +4730,32 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/files/downloads/directories")
         | ("GET", "/api/files/incomplete/directories") => {
-            Ok(routing::ok_response(slskd_empty_directory_json("").to_string()))
+            let root = if normalized_path.starts_with("/api/files/downloads/") {
+                file_storage_root(&state.config.state_dir, "downloads")
+            } else {
+                file_storage_root(&state.config.state_dir, "incomplete")
+            };
+            let recursive = query_bool(route.query, "recursive").unwrap_or(false);
+            match slskd_storage_directory_json(&root, None, recursive) {
+                Ok(json) => Ok(routing::ok_response(json)),
+                Err(error) => Ok(routing::bad_request_response(&error)),
+            }
         }
         ("GET", path)
             if (path.starts_with("/api/files/downloads/directories/")
                 || path.starts_with("/api/files/incomplete/directories/")) =>
         {
-            let name = path.rsplit('/').next().unwrap_or("");
-            Ok(routing::ok_response(slskd_empty_directory_json(name).to_string()))
+            let root = if path.starts_with("/api/files/downloads/") {
+                file_storage_root(&state.config.state_dir, "downloads")
+            } else {
+                file_storage_root(&state.config.state_dir, "incomplete")
+            };
+            let recursive = query_bool(route.query, "recursive").unwrap_or(false);
+            let encoded_name = path.rsplit('/').next().unwrap_or("");
+            match slskd_storage_directory_json(&root, Some(encoded_name), recursive) {
+                Ok(json) => Ok(routing::ok_response(json)),
+                Err(error) => Ok(routing::bad_request_response(&error)),
+            }
         }
         ("DELETE", path)
             if path.starts_with("/api/files/downloads/directories/")
@@ -6197,6 +6216,7 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(serde_json::json!({
                 "id": webhook_id,
                 "secret": secret,
+                "secretReturnedOnce": true,
                 "status": "created"
             }).to_string()))
         }
@@ -9428,6 +9448,156 @@ fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
         "files": [],
         "directories": [],
     })
+}
+
+const SLSKD_STORAGE_LIST_MAX_ENTRIES: usize = 16_384;
+
+fn query_bool(query: Option<&str>, key: &str) -> Option<bool> {
+    query_params(query.unwrap_or_default())
+        .into_iter()
+        .find_map(|(name, value)| (name == key).then(|| parse_bool_value(&value))?)
+}
+
+fn slskd_storage_file_json(path: &Path, root: &Path) -> serde_json::Value {
+    let relative = path
+        .strip_prefix(root)
+        .ok()
+        .and_then(|path| path.to_str())
+        .unwrap_or_default()
+        .replace('\\', "/");
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    let length = path.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    serde_json::json!({
+        "name": name,
+        "fullName": relative,
+        "length": length,
+        "attributes": "",
+        "createdAt": "",
+        "modifiedAt": "",
+    })
+}
+
+fn slskd_storage_directory_value(
+    root: &Path,
+    directory: &Path,
+    recursive: bool,
+    remaining_entries: &mut usize,
+) -> Result<serde_json::Value, String> {
+    let relative = directory
+        .strip_prefix(root)
+        .ok()
+        .and_then(|path| path.to_str())
+        .unwrap_or_default()
+        .replace('\\', "/");
+    let name = directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    if !directory.exists() {
+        let display_name = if relative.is_empty() { name } else { relative };
+        return Ok(slskd_empty_directory_json(&display_name));
+    }
+    let metadata = directory
+        .symlink_metadata()
+        .map_err(|error| format!("directory metadata failed: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("storage path must not be a symlink".to_owned());
+    }
+    if !metadata.is_dir() {
+        return Err("storage path is not a directory".to_owned());
+    }
+
+    let mut files = Vec::new();
+    let mut directories = Vec::new();
+    for entry in
+        fs::read_dir(directory).map_err(|error| format!("directory read failed: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("directory entry read failed: {error}"))?;
+        let path = entry.path();
+        let metadata = entry
+            .path()
+            .symlink_metadata()
+            .map_err(|error| format!("directory entry metadata failed: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if *remaining_entries == 0 {
+            return Err("storage directory listing is too large".to_owned());
+        }
+        *remaining_entries -= 1;
+        if metadata.is_file() {
+            files.push(slskd_storage_file_json(&path, root));
+        } else if metadata.is_dir() {
+            if recursive {
+                directories.push(slskd_storage_directory_value(
+                    root,
+                    &path,
+                    true,
+                    remaining_entries,
+                )?);
+            } else {
+                let child_relative = path
+                    .strip_prefix(root)
+                    .ok()
+                    .and_then(|path| path.to_str())
+                    .unwrap_or_default()
+                    .replace('\\', "/");
+                directories.push(slskd_empty_directory_json(&child_relative));
+            }
+        }
+    }
+    files.sort_by(|left, right| left["fullName"].as_str().cmp(&right["fullName"].as_str()));
+    directories.sort_by(|left, right| left["fullName"].as_str().cmp(&right["fullName"].as_str()));
+    Ok(serde_json::json!({
+        "name": name,
+        "fullName": relative,
+        "attributes": "",
+        "createdAt": "",
+        "modifiedAt": "",
+        "files": files,
+        "directories": directories,
+    }))
+}
+
+fn slskd_storage_directory_json(
+    root: &Path,
+    encoded_name: Option<&str>,
+    recursive: bool,
+) -> Result<String, String> {
+    fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
+    let path = if let Some(encoded_name) = encoded_name {
+        let decoded = decode_slskd_base64_path_segment(encoded_name)?;
+        scoped_relative_storage_path(root, &decoded)?
+    } else {
+        root.to_path_buf()
+    };
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("storage root canonicalize failed: {error}"))?;
+    let canonical_parent = if path == root {
+        canonical_root.clone()
+    } else if path.exists() {
+        path.parent()
+            .unwrap_or(root)
+            .canonicalize()
+            .map_err(|error| format!("storage parent canonicalize failed: {error}"))?
+    } else {
+        path.parent()
+            .unwrap_or(root)
+            .canonicalize()
+            .map_err(|error| format!("storage parent canonicalize failed: {error}"))?
+    };
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err("path escapes the storage root".to_owned());
+    }
+    let mut remaining_entries = SLSKD_STORAGE_LIST_MAX_ENTRIES;
+    slskd_storage_directory_value(root, &path, recursive, &mut remaining_entries)
+        .map(|value| value.to_string())
 }
 
 fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue) -> String {
@@ -14599,6 +14769,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slskd_file_directory_routes_list_storage_roots() {
+        let (state, _receiver) = test_state();
+        let album = state
+            .config
+            .state_dir
+            .join("downloads")
+            .join("Artist")
+            .join("Album");
+        std::fs::create_dir_all(&album).unwrap();
+        std::fs::write(album.join("Track.flac"), b"track").unwrap();
+
+        let root = super::route_http_request(
+            "GET",
+            "/api/v0/files/downloads/directories?recursive=true",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list downloads root");
+        let root_json = serde_json::from_str::<serde_json::Value>(&root.body).unwrap();
+        assert_eq!(root_json["fullName"], "");
+        assert_eq!(root_json["directories"][0]["fullName"], "Artist");
+        assert_eq!(
+            root_json["directories"][0]["directories"][0]["fullName"],
+            "Artist/Album"
+        );
+        assert_eq!(
+            root_json["directories"][0]["directories"][0]["files"][0]["fullName"],
+            "Artist/Album/Track.flac"
+        );
+
+        let album_dir = super::route_http_request(
+            "GET",
+            "/api/v0/files/downloads/directories/QXJ0aXN0L0FsYnVt",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list album dir");
+        let album_json = serde_json::from_str::<serde_json::Value>(&album_dir.body).unwrap();
+        assert_eq!(album_json["fullName"], "Artist/Album");
+        assert_eq!(album_json["files"][0]["name"], "Track.flac");
+        assert_eq!(album_json["files"][0]["length"], 5);
+    }
+
+    #[test]
+    fn slskd_storage_directory_listing_is_bounded() {
+        let (state, _receiver) = test_state();
+        let dir = state.config.state_dir.join("bounded-listing");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("one.txt"), b"1").unwrap();
+        std::fs::write(dir.join("two.txt"), b"2").unwrap();
+
+        let mut remaining_entries = 1;
+        let error = super::slskd_storage_directory_value(&dir, &dir, false, &mut remaining_entries)
+            .expect_err("bounded listing should reject extra entries");
+        assert_eq!(error, "storage directory listing is too large");
+    }
+
+    #[tokio::test]
     async fn stats_api_aggregates_projection_counts() {
         let (state, mut receiver) = test_state();
 
@@ -15731,7 +15963,21 @@ mod tests {
                 .await
                 .expect("create webhook");
             assert_eq!(created.status, "201 Created");
+            if index == 0 {
+                let created_json =
+                    serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+                assert_eq!(created_json["secretReturnedOnce"], true);
+                assert!(created_json["secret"]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty()));
+            }
         }
+
+        let listed = super::route_http_request("GET", "/api/webhooks", None, "", &state)
+            .await
+            .expect("list webhooks");
+        assert_eq!(listed.status, "200 OK");
+        assert!(!listed.body.contains("\"secret\""));
 
         let capped = super::route_http_request(
             "POST",
