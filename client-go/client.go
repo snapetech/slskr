@@ -121,15 +121,6 @@ func (c *Client) ListTransfers(ctx context.Context, direction, status string, li
 	return out, nil
 }
 
-// SendMessage sends a message
-func (c *Client) SendMessage(ctx context.Context, recipient, content string) (map[string]interface{}, error) {
-	body := map[string]interface{}{
-		"recipient": recipient,
-		"content":   content,
-	}
-	return c.post(ctx, "/api/messages", body, true)
-}
-
 // ListMessages lists messages
 func (c *Client) ListMessages(ctx context.Context, limit, offset int) ([]map[string]interface{}, error) {
 	params := url.Values{}

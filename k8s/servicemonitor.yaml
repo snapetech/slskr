@@ -11,11 +11,14 @@ spec:
     matchLabels:
       app: slskr-api
   endpoints:
-  - port: metrics
+  - port: http
     path: /api/metrics
     interval: 30s
     scrapeTimeout: 10s
     scheme: http
+    bearerTokenSecret:
+      name: slskr-secrets
+      key: SLSKR_API_TOKEN
     relabelings:
     - sourceLabels: [__meta_kubernetes_pod_name]
       targetLabel: pod

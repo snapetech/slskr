@@ -1,14 +1,25 @@
 # GitHub Linguist classification.
 #
-# slskr is a Rust application with bundled web/client surfaces. Keep those
-# surfaces in the repository, but do not let them dominate the repository
-# language index.
-/web/** linguist-vendored
-/dashboard/** linguist-vendored
-/client-ts/** linguist-vendored
+# Count the maintained web/client source so GitHub language stats reflect the
+# real Rust-to-web migration. Exclude only generated dependency/build artifacts.
+/web/src/** linguist-vendored=false
+/web/public/** linguist-vendored=false
+/dashboard/src/** linguist-vendored=false
+/client-ts/src/** linguist-vendored=false
 
 /dashboard/dist/** linguist-generated
 /web/build/** linguist-generated
+/web/coverage/** linguist-generated
+/dashboard/coverage/** linguist-generated
+/client-ts/dist/** linguist-generated
+
+/web/package-lock.json linguist-generated
+/dashboard/package-lock.json linguist-generated
+/client-ts/package-lock.json linguist-generated
+
+/web/node_modules/** linguist-vendored
+/dashboard/node_modules/** linguist-vendored
+/client-ts/node_modules/** linguist-vendored
 
 /docs/** linguist-documentation
 /archive/** linguist-documentation

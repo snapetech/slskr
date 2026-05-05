@@ -56,7 +56,7 @@ Do not add wildcard `Access-Control-Allow-Origin: *` for authenticated browser d
 
 ## Kubernetes
 
-Use the maintained manifests under `k8s/`. They run the API as one stateful replica by default, mount `/data` from the `slskr-data` PVC, and expose metrics at `/api/metrics`.
+Use the maintained manifests under `k8s/`. They run the API as one stateful replica by default, mount `/data` from the `slskr-data` PVC, and expose metrics at `/api/metrics` on the authenticated HTTP port.
 
 Before applying, create real secrets from placeholders in `k8s/secrets.example.yaml`:
 
@@ -77,4 +77,4 @@ kubectl -n slskr rollout status deployment/slskr-api
 
 ## Metrics
 
-Prometheus-compatible metrics are served at both `/api/metrics` and `/api/v0/metrics`. Kubernetes annotations and the ServiceMonitor use `/api/metrics`.
+Prometheus-compatible metrics are served at both `/api/metrics` and `/api/v0/metrics`. These routes are protected when API auth is enabled. The Kubernetes ServiceMonitor uses `/api/metrics` on the `http` service port and reads `SLSKR_API_TOKEN` from `slskr-secrets` as a bearer token.
