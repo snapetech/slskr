@@ -51,7 +51,11 @@ pub enum ActionBody {
     None,
     BrowseDirectory,
     ConversationMessage,
+    DownloadFiles,
+    EnabledFalse,
+    EnabledTrue,
     JsonString,
+    RoomMessage,
     SearchText,
 }
 
@@ -516,10 +520,31 @@ pub const fn route_actions() -> &'static [RouteAction] {
         },
         RouteAction {
             body: ActionBody::None,
-            label: "Cancel Search",
+            label: "Stop Search",
+            method: "PUT",
+            path: "/searches/:id",
+            surface: "search",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Remove Search",
             method: "DELETE",
             path: "/searches/:id",
             surface: "search",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Clear Searches",
+            method: "DELETE",
+            path: "/searches",
+            surface: "search",
+        },
+        RouteAction {
+            body: ActionBody::DownloadFiles,
+            label: "Queue Download",
+            method: "POST",
+            path: "/transfers/downloads/:username",
+            surface: "transfers",
         },
         RouteAction {
             body: ActionBody::None,
@@ -536,6 +561,20 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "transfers",
         },
         RouteAction {
+            body: ActionBody::EnabledTrue,
+            label: "Enable Accelerated Downloads",
+            method: "PUT",
+            path: "/transfers/downloads/accelerated",
+            surface: "transfers",
+        },
+        RouteAction {
+            body: ActionBody::EnabledFalse,
+            label: "Disable Accelerated Downloads",
+            method: "PUT",
+            path: "/transfers/downloads/accelerated",
+            surface: "transfers",
+        },
+        RouteAction {
             body: ActionBody::JsonString,
             label: "Join Room",
             method: "POST",
@@ -543,9 +582,37 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "rooms",
         },
         RouteAction {
+            body: ActionBody::RoomMessage,
+            label: "Send Room Message",
+            method: "POST",
+            path: "/rooms/joined/:roomName/messages",
+            surface: "rooms",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Leave Room",
+            method: "DELETE",
+            path: "/rooms/joined/:roomName",
+            surface: "rooms",
+        },
+        RouteAction {
             body: ActionBody::ConversationMessage,
             label: "Send Message",
             method: "POST",
+            path: "/conversations/:username",
+            surface: "messages",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Acknowledge Conversation",
+            method: "PUT",
+            path: "/conversations/:username",
+            surface: "messages",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Delete Conversation",
+            method: "DELETE",
             path: "/conversations/:username",
             surface: "messages",
         },
@@ -568,6 +635,13 @@ pub const fn route_actions() -> &'static [RouteAction] {
             label: "Disconnect",
             method: "DELETE",
             path: "/server",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Rescan Shares",
+            method: "POST",
+            path: "/shares/rescan",
             surface: "system",
         },
     ]
@@ -887,6 +961,7 @@ pub fn concrete_action_path(route_path: &str, action: RouteAction) -> String {
     endpoint_url(action.path)
         .replace(":id", &search_id)
         .replace(":username", "peer1")
+        .replace(":roomName", "contract-room")
 }
 
 pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
@@ -897,9 +972,16 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             r#"{{"directory":"{}"}}"#,
             escape_json_string(value)
         )),
+        ActionBody::DownloadFiles => Some(format!(
+            r#"[{{"filename":"{}","size":99}}]"#,
+            escape_json_string(value)
+        )),
+        ActionBody::EnabledFalse => Some(r#"{"enabled":false}"#.to_string()),
+        ActionBody::EnabledTrue => Some(r#"{"enabled":true}"#.to_string()),
         ActionBody::ConversationMessage | ActionBody::JsonString => {
             Some(format!(r#""{}""#, escape_json_string(value)))
         }
+        ActionBody::RoomMessage => Some(format!(r#""{}""#, escape_json_string(value))),
         ActionBody::SearchText => Some(format!(
             r#"{{"searchText":"{}"}}"#,
             escape_json_string(value)
@@ -916,8 +998,15 @@ pub fn action_input_html(action: RouteAction) -> String {
         ActionBody::ConversationMessage => {
             r#"<input class="slskr-action-input" data-slskr-action-input="ConversationMessage" value="hello" placeholder="Message">"#.to_string()
         }
+        ActionBody::DownloadFiles => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="DownloadFiles" value="Remote/Song.mp3" placeholder="Filename">"#.to_string()
+        }
+        ActionBody::EnabledFalse | ActionBody::EnabledTrue => String::new(),
         ActionBody::JsonString => {
             r#"<input class="slskr-action-input" data-slskr-action-input="JsonString" value="contract-room" placeholder="Name">"#.to_string()
+        }
+        ActionBody::RoomMessage => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="RoomMessage" value="hello room" placeholder="Message">"#.to_string()
         }
         ActionBody::SearchText => {
             r#"<input class="slskr-action-input" data-slskr-action-input="SearchText" value="public domain jazz" placeholder="Search text">"#.to_string()
@@ -1255,7 +1344,11 @@ fn action_body_from_name(name: &str) -> ActionBody {
     match name {
         "BrowseDirectory" => ActionBody::BrowseDirectory,
         "ConversationMessage" => ActionBody::ConversationMessage,
+        "DownloadFiles" => ActionBody::DownloadFiles,
+        "EnabledFalse" => ActionBody::EnabledFalse,
+        "EnabledTrue" => ActionBody::EnabledTrue,
         "JsonString" => ActionBody::JsonString,
+        "RoomMessage" => ActionBody::RoomMessage,
         "SearchText" => ActionBody::SearchText,
         _ => ActionBody::None,
     }
@@ -1488,13 +1581,33 @@ mod tests {
     fn rust_actions_render_core_mutations() {
         let html = route_page_html("/searches/42");
         assert!(html.contains("Start Search"));
-        assert!(html.contains("Cancel Search"));
+        assert!(html.contains("Stop Search"));
+        assert!(html.contains("Remove Search"));
+        assert!(html.contains("Clear Searches"));
         assert!(html.contains("/api/v0/searches/42"));
         assert!(html.contains("data-slskr-action-body=\"SearchText\""));
+
+        let transfers = route_page_html("/downloads");
+        assert!(transfers.contains("Queue Download"));
+        assert!(transfers.contains("Enable Accelerated Downloads"));
+        assert!(transfers.contains("Disable Accelerated Downloads"));
+        assert!(transfers.contains("/api/v0/transfers/downloads/peer1"));
+
+        let rooms = route_page_html("/rooms");
+        assert!(rooms.contains("Join Room"));
+        assert!(rooms.contains("Send Room Message"));
+        assert!(rooms.contains("Leave Room"));
+        assert!(rooms.contains("/api/v0/rooms/joined/contract-room/messages"));
+
+        let messages = route_page_html("/messages");
+        assert!(messages.contains("Send Message"));
+        assert!(messages.contains("Acknowledge Conversation"));
+        assert!(messages.contains("Delete Conversation"));
 
         let system = route_page_html("/system/network");
         assert!(system.contains("Connect"));
         assert!(system.contains("Disconnect"));
+        assert!(system.contains("Rescan Shares"));
         assert!(system.contains("/api/v0/server"));
     }
 
@@ -1511,6 +1624,18 @@ mod tests {
         assert_eq!(
             action_body_from_value(ActionBody::JsonString, "room\t<script>").unwrap(),
             "\"room\\t<script>\""
+        );
+        assert_eq!(
+            action_body_from_value(ActionBody::DownloadFiles, "Remote/Track.flac").unwrap(),
+            r#"[{"filename":"Remote/Track.flac","size":99}]"#
+        );
+        assert_eq!(
+            action_body_from_value(ActionBody::EnabledTrue, "ignored").unwrap(),
+            r#"{"enabled":true}"#
+        );
+        assert_eq!(
+            action_body_from_value(ActionBody::EnabledFalse, "ignored").unwrap(),
+            r#"{"enabled":false}"#
         );
         assert!(action_body_from_value(ActionBody::None, "ignored").is_none());
     }
@@ -1634,7 +1759,8 @@ mod tests {
 
     #[test]
     fn route_actions_cover_core_old_ui_surfaces() {
-        let surfaces = route_actions()
+        let actions = route_actions();
+        let surfaces = actions
             .iter()
             .map(|action| action.surface)
             .collect::<Vec<_>>();
@@ -1647,6 +1773,31 @@ mod tests {
             "system",
         ] {
             assert!(surfaces.contains(&expected), "missing action {expected}");
+        }
+        for expected in [
+            ("POST", "/searches"),
+            ("PUT", "/searches/:id"),
+            ("DELETE", "/searches/:id"),
+            ("DELETE", "/searches"),
+            ("POST", "/transfers/downloads/:username"),
+            ("PUT", "/transfers/downloads/accelerated"),
+            ("POST", "/rooms/joined"),
+            ("POST", "/rooms/joined/:roomName/messages"),
+            ("DELETE", "/rooms/joined/:roomName"),
+            ("POST", "/conversations/:username"),
+            ("PUT", "/conversations/:username"),
+            ("DELETE", "/conversations/:username"),
+            ("POST", "/users/:username/directory"),
+            ("POST", "/shares/rescan"),
+        ] {
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| action.method == expected.0 && action.path == expected.1),
+                "missing action {} {}",
+                expected.0,
+                expected.1
+            );
         }
     }
 }

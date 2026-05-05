@@ -5096,8 +5096,9 @@ async fn route_http_request_with_headers(
              let Some(username) = slskd_transfer_user_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
+             let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
-             let body = transfers.slskd_transfers_json(0, Some(username));
+             let body = transfers.slskd_transfers_json(0, Some(&username));
              drop(transfers);
              Ok(routing::ok_response(body))
          }
@@ -5106,8 +5107,9 @@ async fn route_http_request_with_headers(
              let Some(username) = slskd_transfer_user_path(path, "uploads") else {
                  return Ok(routing::not_found_response());
              };
+             let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
-             let body = transfers.slskd_transfers_json(1, Some(username));
+             let body = transfers.slskd_transfers_json(1, Some(&username));
              drop(transfers);
              Ok(routing::ok_response(body))
          }
@@ -5116,12 +5118,13 @@ async fn route_http_request_with_headers(
              let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
+             let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
              let response = transfers
-                 .slskd_transfer_json(0, username, id)
+                 .slskd_transfer_json(0, &username, id)
                  .map(routing::ok_response)
                  .unwrap_or_else(|| {
-                     routing::ok_response(slskd_empty_transfer_json(0, username, id))
+                     routing::ok_response(slskd_empty_transfer_json(0, &username, id))
                  });
              drop(transfers);
              Ok(response)
@@ -5131,12 +5134,13 @@ async fn route_http_request_with_headers(
              let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
                  return Ok(routing::not_found_response());
              };
+             let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
              let response = transfers
-                 .slskd_transfer_json(1, username, id)
+                 .slskd_transfer_json(1, &username, id)
                  .map(routing::ok_response)
                  .unwrap_or_else(|| {
-                     routing::ok_response(slskd_empty_transfer_json(1, username, id))
+                     routing::ok_response(slskd_empty_transfer_json(1, &username, id))
                  });
              drop(transfers);
              Ok(response)
@@ -5150,6 +5154,7 @@ async fn route_http_request_with_headers(
              let Some(username) = slskd_transfer_user_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
+             let username = decoded_path_segment(username);
              let files = slskd_files_from_body(body);
              let mut transfers = state.transfers.write().await;
              for file in files {
@@ -5162,7 +5167,7 @@ async fn route_http_request_with_headers(
                      continue;
                  }
                  let size = file.get("size").and_then(serde_json::Value::as_u64);
-                 transfers.create(0, Some(username.to_owned()), filename, None, size);
+                 transfers.create(0, Some(username.clone()), filename, None, size);
              }
              drop(transfers);
              Ok(routing::ok_response("true".to_owned()))
@@ -5189,9 +5194,10 @@ async fn route_http_request_with_headers(
              let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
+             let username = decoded_path_segment(username);
              let mut transfers = state.transfers.write().await;
              let matches_transfer = transfers.entries.iter().any(|entry| {
-                 entry.id == id && entry.direction == 0 && entry.peer_username.as_deref() == Some(username)
+                 entry.id == id && entry.direction == 0 && entry.peer_username.as_deref() == Some(username.as_str())
              });
              let updated = matches_transfer
                  .then(|| transfers.update_status(id, "cancelled", None, None))
@@ -5208,9 +5214,10 @@ async fn route_http_request_with_headers(
              let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
                  return Ok(routing::not_found_response());
              };
+             let username = decoded_path_segment(username);
              let mut transfers = state.transfers.write().await;
              let matches_transfer = transfers.entries.iter().any(|entry| {
-                 entry.id == id && entry.direction == 1 && entry.peer_username.as_deref() == Some(username)
+                 entry.id == id && entry.direction == 1 && entry.peer_username.as_deref() == Some(username.as_str())
              });
              let updated = matches_transfer
                  .then(|| transfers.update_status(id, "cancelled", None, None))
@@ -7116,7 +7123,7 @@ async fn route_http_request_with_headers(
 
         // BROWSE ENDPOINTS
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
-            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
             let browse = state.browse.read().await;
             let entries = browse
                 .records
@@ -7129,7 +7136,7 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(body))
         }
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse/status") => {
-            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
             let browse = state.browse.read().await;
             let size = browse
                 .records
@@ -7147,7 +7154,7 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("POST", path) if path.starts_with("/api/users/") && path.ends_with("/directory") => {
-            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
             let directory = extract_json_string_field(body, "directory")
                 .or_else(|| json_body_string(body))
                 .unwrap_or_default();
@@ -7170,10 +7177,10 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/profile/") && path.len() > 12 => {
-            let username = &path[12..];
+            let username = decoded_path_segment(&path[12..]);
             let json = format!(
                 "{{\"username\":\"{}\",\"description\":\"\",\"picture\":\"\",\"user_type\":\"normal\"}}",
-                json_escape(username)
+                json_escape(&username)
             );
             Ok(routing::ok_response(json))
         }
@@ -7187,16 +7194,16 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
-            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
             let json = format!(
                 "{{\"username\":\"{}\",\"group\":\"normal_users\",\"group_id\":1}}",
-                username
+                json_escape(&username)
             );
             Ok(routing::ok_response(json))
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.contains("/info") => {
-            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
             let users = state.users.read().await;
             let body = users
                 .records
@@ -7204,7 +7211,7 @@ async fn route_http_request_with_headers(
                 .find(|record| record.username == username)
                 .map(|record| record.slskd_info_json().to_string())
                 .unwrap_or_else(|| UserRecord {
-                    username: username.to_owned(),
+                    username: username.clone(),
                     watched: false,
                     status: None,
                     average_speed: None,
@@ -7218,7 +7225,7 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/status") => {
-            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
             let users = state.users.read().await;
             let body = users
                 .records
@@ -7226,7 +7233,7 @@ async fn route_http_request_with_headers(
                 .find(|record| record.username == username)
                 .map(|record| record.slskd_status_json().to_string())
                 .unwrap_or_else(|| UserRecord {
-                    username: username.to_owned(),
+                    username: username.clone(),
                     watched: false,
                     status: Some("Unknown".to_owned()),
                     average_speed: None,
@@ -7250,13 +7257,14 @@ async fn route_http_request_with_headers(
             let Some(username) = conversation_messages_path(path) else {
                 return Ok(routing::not_found_response());
             };
+            let username = decoded_path_segment(username);
             let unacknowledged_only = query_params(route.query.unwrap_or_default())
                 .into_iter()
                 .find(|(key, _)| key == "unAcknowledgedOnly")
                 .and_then(|(_, value)| parse_bool_value(&value))
                 .unwrap_or(false);
             let messages = state.messages.read().await;
-            let body = messages.slskd_messages_json(username, unacknowledged_only);
+            let body = messages.slskd_messages_json(&username, unacknowledged_only);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -7264,13 +7272,14 @@ async fn route_http_request_with_headers(
             let Some(username) = path_segment_after(path, "/api/conversations/") else {
                 return Ok(routing::not_found_response());
             };
+            let username = decoded_path_segment(username);
             let include_messages = query_params(route.query.unwrap_or_default())
                 .into_iter()
                 .find(|(key, _)| key == "includeMessages")
                 .and_then(|(_, value)| parse_bool_value(&value))
                 .unwrap_or(true);
             let messages = state.messages.read().await;
-            let body = messages.slskd_conversation_json(username, include_messages);
+            let body = messages.slskd_conversation_json(&username, include_messages);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -7278,15 +7287,16 @@ async fn route_http_request_with_headers(
             let Some(username) = path_segment_after(path, "/api/conversations/") else {
                 return Ok(routing::not_found_response());
             };
+            let username = decoded_path_segment(username);
             let message_body = json_body_string(body)
                 .or_else(|| extract_json_string_field(body, "message"))
                 .or_else(|| extract_json_string_field(body, "body"))
                 .unwrap_or_default();
             let mut messages = state.messages.write().await;
-            let record = messages.add(username.to_owned(), "outbound", message_body.clone());
+            let record = messages.add(username.clone(), "outbound", message_body.clone());
             drop(messages);
             send_session_command(state, SessionCommand::MessageUser {
-                username: username.to_owned(),
+                username,
                 body: message_body,
             }).await.ok();
             Ok(routing::ok_response((record.id > 0).to_string()))
@@ -7493,6 +7503,7 @@ async fn route_http_request_with_headers(
             let Some((username, id)) = conversation_message_path(path) else {
                 return Ok(routing::not_found_response());
             };
+            let username = decoded_path_segment(username);
             let mut messages = state.messages.write().await;
             let updated = messages
                 .records
@@ -7511,8 +7522,9 @@ async fn route_http_request_with_headers(
             let Some(username) = path_segment_after(path, "/api/conversations/") else {
                 return Ok(routing::not_found_response());
             };
+            let username = decoded_path_segment(username);
             let mut messages = state.messages.write().await;
-            messages.ack_all_for_user(username);
+            messages.ack_all_for_user(&username);
             drop(messages);
             Ok(routing::ok_response("true".to_owned()))
         }
@@ -8888,6 +8900,10 @@ fn json_body_string(body: &str) -> Option<String> {
 fn path_segment_after<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
     path.strip_prefix(prefix)
         .filter(|segment| !segment.is_empty() && !segment.contains('/'))
+}
+
+fn decoded_path_segment(segment: &str) -> String {
+    percent_decode(segment)
 }
 
 fn conversation_message_path(path: &str) -> Option<(&str, u64)> {
