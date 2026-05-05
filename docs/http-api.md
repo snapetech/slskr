@@ -706,6 +706,16 @@ Monitor these key metrics:
 - New fields in responses are backwards compatible
 - Deprecated fields will remain but may be marked as such
 - Major breaking changes will include API version bump
+- Preserved slskd compatibility mutation routes can return successful
+  acknowledgements without persisting runtime config. `/api/options`,
+  `/api/options/yaml`, and `/api/options/yaml/validate` advertise this with
+  `runtimeMutationEnabled: false`, `persisted: false`, and compatibility
+  metadata.
+- Compatibility shells that are not active in this runtime keep their endpoint
+  paths and stable response shapes, but may return empty arrays or
+  `compatibility_acknowledgement` objects. This applies to logs, bridge config
+  acknowledgements, bans, share-grant token/backfill helpers, and MusicBrainz
+  release-radar subscription helpers.
 
 ## Testing
 

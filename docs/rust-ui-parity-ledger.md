@@ -23,6 +23,9 @@ Completed across the main Rust routes:
 - native subpanels expose route-specific controls, fields, and status facts for
   deep workflows such as browse tabs, messaging rooms, share grants, and system
   operations
+- primary native workspaces now show richer route structures for messaging,
+  browse breadcrumbs/tree, collection item picking, share grants, and shared
+  access manifests
 
 ## Route Gaps
 

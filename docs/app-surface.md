@@ -49,6 +49,13 @@ The current app surface preserves the following compatibility concepts:
 
 This is a behavioral compatibility commitment rather than a source-code lineage statement. slskr should interoperate with existing deployment and client habits, but implementation details remain Rust-native and separately maintained.
 
+Compatibility acknowledgements are explicit where a preserved route is not a
+durable slskr feature. Options/config mutation aliases validate request shape
+and report `runtimeMutationEnabled: false` / `persisted: false`; logs, bridge
+config updates, bans, share-grant token/backfill helpers, and MusicBrainz
+release-radar subscription helpers keep stable response shapes while advertising
+empty shells or `compatibility_acknowledgement` status.
+
 ## Initial HTTP Surface
 
 The first app shell exposes:

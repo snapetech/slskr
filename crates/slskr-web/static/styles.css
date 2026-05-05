@@ -1367,6 +1367,102 @@ body {
   font-size: 12px;
 }
 
+.slskr-native-badge {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #8dd7c8;
+  display: inline-flex;
+  font-size: 11px;
+  padding: 3px 6px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.slskr-native-breadcrumb,
+.slskr-native-mini-list,
+.slskr-native-permission-grid,
+.slskr-native-thread-grid,
+.slskr-native-tree {
+  display: grid;
+  gap: 8px;
+}
+
+.slskr-native-breadcrumb {
+  align-items: center;
+  background: #081011;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  display: flex;
+  flex-wrap: wrap;
+  padding: 8px;
+}
+
+.slskr-native-breadcrumb span {
+  color: #8dd7c8;
+  font-size: 12px;
+}
+
+.slskr-native-list-stack,
+.slskr-native-sidebar {
+  display: grid;
+  gap: 12px;
+}
+
+.slskr-native-mini-list span,
+.slskr-native-permission-grid span,
+.slskr-native-tree button,
+.slskr-native-thread-grid article {
+  background: #101819;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  padding: 8px;
+}
+
+.slskr-native-permission-grid {
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+}
+
+.slskr-native-split-detail {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.42fr);
+}
+
+.slskr-native-split-detail aside {
+  background: #0f1112;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.slskr-native-split-detail h4,
+.slskr-native-list-stack h4 {
+  color: #f4efe7;
+  font-size: 13px;
+  margin: 0;
+}
+
+.slskr-native-split-detail p {
+  color: #c6d0ca;
+  font-size: 12px;
+  margin: 0;
+}
+
+.slskr-native-thread-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.slskr-native-thread-grid article {
+  display: grid;
+  gap: 7px;
+}
+
+.slskr-native-tree button {
+  cursor: pointer;
+  text-align: left;
+}
+
 .slskr-native-empty {
   background: #0f1112;
   border: 1px dashed #34403f;
@@ -1971,6 +2067,7 @@ body {
   .slskr-workspace-grid,
   .slskr-workflow-grid,
   .slskr-native-grid,
+  .slskr-native-split-detail,
   .slskr-native-graph,
   .slskr-player {
     grid-template-columns: 1fr;

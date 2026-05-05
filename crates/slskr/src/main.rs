@@ -8649,7 +8649,7 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/musicbrainz/release-radar/subscriptions") => {
-             Ok(routing::created_response("{\"subscriptions\":[],\"created\":false}".to_owned()))
+             Ok(routing::created_response("{\"subscriptions\":[],\"created\":false,\"persisted\":false,\"status\":\"compatibility_acknowledgement\"}".to_owned()))
          }
 
          ("POST", "/api/musicbrainz/targets") => {
@@ -8688,7 +8688,7 @@ async fn route_http_request_with_headers(
          ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/backfill") => {
              let grant_id = path.split('/').nth(3).unwrap_or("unknown");
              Ok(routing::accepted_response(format!(
-                 "{{\"grant_id\":\"{}\",\"backfilled\":0}}",
+                 "{{\"grant_id\":\"{}\",\"backfilled\":0,\"persisted\":false,\"status\":\"compatibility_acknowledgement\"}}",
                  json_escape(grant_id)
              )))
          }
@@ -8696,7 +8696,7 @@ async fn route_http_request_with_headers(
          ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/token") => {
              let grant_id = path.split('/').nth(3).unwrap_or("unknown");
              Ok(routing::created_response(format!(
-                 "{{\"grant_id\":\"{}\",\"token\":null,\"created\":false}}",
+                 "{{\"grant_id\":\"{}\",\"token\":null,\"created\":false,\"persisted\":false,\"status\":\"compatibility_acknowledgement\"}}",
                  json_escape(grant_id)
              )))
          }
@@ -8959,6 +8959,17 @@ fn slskd_options_json(config: &AppConfig) -> String {
         "persisted": true,
         "readOnly": true,
         "runtimeMutationEnabled": false,
+        "compatibility": {
+            "surface": "slskd-options",
+            "configFormat": "toml",
+            "mutationPersistence": "non-persisted compatibility acknowledgement",
+            "readOnly": true,
+        },
+        "nonPersistentMutationRoutes": [
+            "/api/options",
+            "/api/options/yaml",
+            "/api/options/yaml/validate"
+        ],
     })
     .to_string()
 }
@@ -9002,6 +9013,8 @@ fn slskd_options_config_upload_response(body: &str) -> Result<String, String> {
         "restart_required": false,
         "runtimeMutationEnabled": false,
         "bytes": text.len(),
+        "status": "compatibility_acknowledgement",
+        "message": "config upload is validated but not persisted by this runtime",
     })
     .to_string())
 }
@@ -9029,6 +9042,11 @@ fn slskd_options_mutation_response(body: &str) -> Result<String, String> {
         "runtimeMutationEnabled": false,
         "acceptedKeys": accepted_keys,
         "note": "runtime option mutation is not enabled",
+        "message": "non-persisted compatibility acknowledgement",
+        "compatibility": {
+            "surface": "slskd-options",
+            "mutationPersistence": "none",
+        },
     })
     .to_string())
 }
@@ -18778,6 +18796,14 @@ mod tests {
         let options_json = serde_json::from_str::<serde_json::Value>(&options.body).unwrap();
         assert_eq!(options_json["version"], super::APP_VERSION);
         assert_eq!(options_json["runtimeMutationEnabled"], false);
+        assert_eq!(
+            options_json["compatibility"]["mutationPersistence"],
+            "non-persisted compatibility acknowledgement"
+        );
+        assert_eq!(
+            options_json["nonPersistentMutationRoutes"][0],
+            "/api/options"
+        );
         assert!(options_json["options"]["api_token_configured"].is_boolean());
         assert!(options_json["options"].get("api_token").is_none());
 
@@ -18794,6 +18820,9 @@ mod tests {
         assert_eq!(response.status, "200 OK");
         assert!(response.body.contains("\"persisted\":false"));
         assert!(response.body.contains("\"acceptedKeys\""));
+        assert!(response
+            .body
+            .contains("non-persisted compatibility acknowledgement"));
 
         let invalid = super::route_http_request("PATCH", "/api/options", None, "[]", &state)
             .await
@@ -18822,6 +18851,7 @@ mod tests {
                 .expect("options upload");
         assert_eq!(uploaded.status, "200 OK");
         assert!(uploaded.body.contains("\"persisted\":false"));
+        assert!(uploaded.body.contains("not persisted by this runtime"));
 
         let invalid_upload =
             super::route_http_request("PUT", "/api/options/yaml", None, "{}", &state)
@@ -18834,6 +18864,94 @@ mod tests {
                 .await
                 .expect("invalid options validate");
         assert_eq!(invalid_validate.status, "400 Bad Request");
+    }
+
+    #[tokio::test]
+    async fn compatibility_noop_routes_advertise_supported_shape() {
+        let (state, _receiver) = test_state();
+
+        let logs = super::route_http_request("GET", "/api/logs", None, "", &state)
+            .await
+            .expect("logs");
+        assert_eq!(logs.status, "200 OK");
+        assert_eq!(logs.body, "[]");
+
+        let bridge =
+            super::route_http_request("PUT", "/api/bridge/admin/config", None, "{}", &state)
+                .await
+                .expect("bridge config");
+        assert_eq!(bridge.status, "200 OK");
+        let bridge_json = serde_json::from_str::<serde_json::Value>(&bridge.body).unwrap();
+        assert_eq!(bridge_json["persisted"], false);
+        assert_eq!(bridge_json["restart_required"], true);
+
+        let username_ban = super::route_http_request(
+            "POST",
+            "/api/bans/username",
+            None,
+            r#"{"username":"peer1"}"#,
+            &state,
+        )
+        .await
+        .expect("username ban");
+        let username_ban_json =
+            serde_json::from_str::<serde_json::Value>(&username_ban.body).unwrap();
+        assert_eq!(username_ban_json["banned"], true);
+        assert_eq!(username_ban_json["persisted"], false);
+
+        let share_token = super::route_http_request(
+            "POST",
+            "/api/share-grants/grant-1/token",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("share grant token");
+        let share_token_json =
+            serde_json::from_str::<serde_json::Value>(&share_token.body).unwrap();
+        assert_eq!(share_token_json["token"], serde_json::Value::Null);
+        assert_eq!(share_token_json["created"], false);
+        assert_eq!(share_token_json["persisted"], false);
+        assert_eq!(share_token_json["status"], "compatibility_acknowledgement");
+
+        let subscriptions = super::route_http_request(
+            "GET",
+            "/api/musicbrainz/release-radar/subscriptions",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("subscriptions");
+        let subscriptions_json =
+            serde_json::from_str::<serde_json::Value>(&subscriptions.body).unwrap();
+        assert_eq!(
+            subscriptions_json["subscriptions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(subscriptions_json["count"], 0);
+
+        let created_subscription = super::route_http_request(
+            "POST",
+            "/api/musicbrainz/release-radar/subscriptions",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("subscription create");
+        let created_subscription_json =
+            serde_json::from_str::<serde_json::Value>(&created_subscription.body).unwrap();
+        assert_eq!(created_subscription_json["created"], false);
+        assert_eq!(created_subscription_json["persisted"], false);
+        assert_eq!(
+            created_subscription_json["status"],
+            "compatibility_acknowledgement"
+        );
     }
 
     #[test]
