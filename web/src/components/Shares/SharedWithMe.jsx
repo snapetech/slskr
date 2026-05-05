@@ -3,6 +3,7 @@ import * as identityAPI from '../../lib/identity';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
 import React, { Component } from 'react';
+import { safeOpenBlank } from '../../lib/safeOpen';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -143,7 +144,7 @@ export default class SharedWithMe extends Component {
     const url = token
       ? `/api/v0/streams/${contentId}?token=${encodeURIComponent(token)}`
       : `/api/v0/streams/${contentId}`;
-    window.open(url, '_blank');
+    safeOpenBlank(url);
   };
 
   handleBackfill = async () => {
@@ -365,7 +366,7 @@ export default class SharedWithMe extends Component {
                                     )
                                       ? item.streamUrl
                                       : `${window.location.origin}${item.streamUrl}`;
-                                    window.open(url, '_blank');
+                                    safeOpenBlank(url);
                                   }}
                                   primary
                                   size="small"

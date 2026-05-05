@@ -1,6 +1,7 @@
 import { getVersion, restart, shutdown } from '../../../lib/application';
 import DiagnosticBundleModal from './DiagnosticBundleModal';
 import SetupHealthCheckModal from './SetupHealthCheckModal';
+import { safeOpenBlank } from '../../../lib/safeOpen';
 import {
   CodeEditor,
   LoaderSegment,
@@ -43,9 +44,8 @@ const Info = ({ options, state, theme }) => {
             icon="star"
             mediaQuery="(max-width: 686px)"
             onClick={() =>
-              window.open(
+              safeOpenBlank(
                 `http://www.slsknet.org/qtlogin.php?username=${state?.user?.username}`,
-                '_blank',
               )
             }
           >

@@ -1,5 +1,6 @@
 import * as discoveryGraph from '../../lib/discoveryGraph';
 import api from '../../lib/api';
+import { safeOpenBlank } from '../../lib/safeOpen';
 import * as searches from '../../lib/searches';
 import * as transfers from '../../lib/transfers';
 import {
@@ -548,8 +549,7 @@ class Response extends Component {
                       );
 
                       if (result.data?.stream_url) {
-                        // Open stream URL in new tab or redirect
-                        window.open(result.data.stream_url, '_blank');
+                        safeOpenBlank(result.data.stream_url);
                       }
                     } catch (error) {
                       toast.error(

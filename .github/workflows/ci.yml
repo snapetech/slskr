@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  ACTIONLINT_VERSION: v1.7.7
+
 on:
   pull_request:
   push:
@@ -28,7 +31,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
