@@ -99,6 +99,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Audit tooling availability | Local audit attempts showed optional cargo subcommands were absent and dependency inventory was not gate-provisioned. | Fixed by adding `scripts/check-audit-tooling.sh` with reproducible `cargo metadata --format-version 1 --no-deps` and `cargo tree -d` checks plus audit-tool registry coverage. |
 | Low | Transfer event growth | Transfer event history appended indefinitely and was recreated only when absent. | Fixed by rotating oversized `transfer-events.tsv` files at a 16 MiB byte cap, recreating the header, preserving the prior file as `.old`, and adding regression/gate coverage. |
 | Low | Docs drift | General docs still contained stale `http_api_*` config names, mutable `slskr:latest` image guidance, and obsolete WebSocket unsupported text. | Fixed by updating the docs and adding `scripts/check-docs-freshness.sh` to block those stale patterns and wildcard CORS examples from returning. |
+| Medium | Council loop | The audit council could run broad scans but still promote only one small confirmed batch, leaving remaining candidate classes invisible and unclassified. | Fixed by adding `docs/dev/council-scan-inventory.md`, `scripts/run-council-scan.sh`, and `scripts/check-council-loop.sh`; BUG-031 now requires the remaining candidate classes and active section to stay visible. |
+| Medium | Python SDK mutable batch inputs | Batch operation and response constructors kept caller-owned mutable dict/list objects by reference. | Fixed by deep-copying batch request bodies, returning fresh serialized bodies, copying response lists, and adding mutation-isolation tests. |
 
 ## Open Burn-Down
 
@@ -129,6 +131,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `scripts/check-audit-tooling.sh`
 - `scripts/check-transfer-event-growth.sh`
 - `scripts/check-docs-freshness.sh`
+- `scripts/run-council-scan.sh`
+- `scripts/check-council-loop.sh`
 - `cargo outdated --workspace` was attempted but blocked because `cargo-outdated` is not installed in this environment.
 - `cargo +stable udeps --workspace --all-targets` was attempted but blocked because `cargo-udeps` is not installed in this environment.
 - `npm --prefix web outdated --json`

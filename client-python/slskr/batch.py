@@ -2,6 +2,7 @@
 Batch operations client
 """
 
+from copy import deepcopy
 from typing import List, Dict, Any
 
 
@@ -12,13 +13,13 @@ class BatchOperation:
         self.id = op_id
         self.method = method
         self.path = path
-        self.body = body
+        self.body = deepcopy(body) if body is not None else None
 
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
         op = {"id": self.id, "method": self.method, "path": self.path}
         if self.body:
-            op["body"] = self.body
+            op["body"] = deepcopy(self.body)
         return op
 
 
@@ -28,7 +29,7 @@ class BatchResult:
     def __init__(self, op_id: str, status: int, body: Any):
         self.id = op_id
         self.status = status
-        self.body = body
+        self.body = deepcopy(body)
 
     def is_success(self) -> bool:
         """Check if operation succeeded"""
@@ -43,7 +44,7 @@ class BatchResponse:
     """Batch operation response"""
 
     def __init__(self, results: List[BatchResult], total_time_ms: int):
-        self.results = results
+        self.results = list(results)
         self.total_time_ms = total_time_ms
 
     def all_successful(self) -> bool:

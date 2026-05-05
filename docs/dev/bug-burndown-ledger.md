@@ -21,6 +21,7 @@ Reviewer roles are read-only. Reviewers may add evidence, challenge confidence, 
 
 | Status | Meaning |
 | --- | --- |
+| New | Candidate is plausible but not yet accepted as a real bug. |
 | Accepted | Council agrees the finding is real and remediation is required. |
 | In Progress | An owner is actively implementing the remediation. |
 | Fixed | Code/docs have changed and the regression requirement is satisfied locally. |
@@ -65,6 +66,8 @@ Allowed domains are `Backend/API`, `Rust Web UI`, `React Web UI`, `Client SDKs`,
 | BUG-028 | Release/Ops | Deprecated npm transitives | Low | Medium | npm install warns on deprecated packages including old core-js and Babel proposal packages. | Security and maintenance drift persists in frontend dependency graph. | Release/Ops + Frontend/API Handling | Dependency owner upgrades or documented exceptions with advisory checks. | Accepted |
 | BUG-029 | Release/Ops | Dependency modernization | Low | Medium | npm outdated shows major-version drift across web/dashboard/client-ts. | Future security fixes may become harder to apply. | Release/Ops + Frontend/API Handling | Planned compatibility upgrade track with UI/client regressions. | Accepted |
 | BUG-030 | Docs/Config | Stale docs | Low | High | Stale `http_api_*` config names, `slskr:latest` image guidance, and obsolete WebSocket unsupported text were removed from general docs, and `scripts/check-docs-freshness.sh` prevents those patterns and wildcard CORS examples from returning. | Operators are less likely to copy obsolete config, mutable image tags, or outdated event-stream guidance. | Docs/Config | Grep-based docs freshness check plus doc updates or archiving. | Verified |
+| BUG-031 | Tests/Tooling | Council scan loop | Medium | High | The council process could run broad scans but still promote only a small clean batch, leaving whole candidate classes unclassified. `docs/dev/council-scan-inventory.md` now tracks remaining classes, status meanings, and the active section; `scripts/run-council-scan.sh` regenerates candidate counts; `scripts/check-council-loop.sh` keeps the inventory and BUG-031 verified in the remediation baseline. | Future council cycles have a visible remaining-candidate queue instead of silently stopping after one or two fixes. | Tests/Tooling + Adversarial Reviewer | Scanner, inventory, and baseline gate require whole candidate classes to remain visible until classified. | Verified |
+| BUG-032 | Client SDKs | Mutable batch inputs | Medium | High | Python SDK batch operation and response constructors accepted caller-owned dict/list objects by reference, so external mutation after construction could alter serialized batch requests or response helper results. Constructors now defensively copy mutable inputs and serialization returns a fresh copy. | Batch requests and helper responses are stable after construction and cannot be changed by caller-side mutations. | Client SDKs | Constructor mutable-input tests plus Python SDK quality gate. | Verified |
 
 ## Council Gate Mapping
 
@@ -90,6 +93,8 @@ Allowed domains are `Backend/API`, `Rust Web UI`, `React Web UI`, `Client SDKs`,
 | `scripts/check-dev-tooling.sh` | Fail fast when required local release tools are absent and summarize optional live/security tools. |
 | `scripts/check-openapi-docs-drift.sh` | Validate checked-in OpenAPI JSON and keep OpenAPI/compatibility documentation gaps registered. |
 | `scripts/check-docs-freshness.sh` | Block stale config/image/WebSocket/CORS guidance from returning to general docs. |
+| `scripts/run-council-scan.sh` | Regenerate broad candidate counts for the council inventory. |
+| `scripts/check-council-loop.sh` | Keep the council scan inventory, status model, and remaining candidate classes visible in the baseline. |
 | `scripts/check-shell-script-hygiene.sh` | Run shell syntax checks and flag common script footguns. |
 | `scripts/check-kubernetes-public-posture.sh` | Enforce single-replica, PVC-backed, authenticated-metrics, restricted Kubernetes defaults. |
 | `scripts/check-compatibility-noop-documentation.sh` | Keep preserved compatibility acknowledgements documented and tracked until route docs/tests fully cover them. |

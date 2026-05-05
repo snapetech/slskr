@@ -25,6 +25,22 @@ def test_batch_builder_serializes_and_limits_operations():
     assert builder.size() == 2
 
 
+def test_batch_objects_copy_mutable_inputs():
+    body = {"query": "ambient", "filters": ["lossless"]}
+    operation = BatchOperation("op", "POST", "/api/searches", body)
+    body["filters"].append("mutated")
+
+    serialized = operation.to_dict()
+    serialized["body"]["filters"].append("serialized")
+
+    assert operation.to_dict()["body"] == {"query": "ambient", "filters": ["lossless"]}
+
+    results = [BatchResult("ok", 200, {"items": ["one"]})]
+    response = BatchResponse(results, 5)
+    results.append(BatchResult("late", 200, {}))
+    assert [result.id for result in response.results] == ["ok"]
+
+
 def test_batch_response_helpers_classify_results():
     response = BatchResponse(
         [

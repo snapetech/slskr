@@ -4811,6 +4811,20 @@ fn native_selection_preview_html(title: &str, detail: &str, meta: &str, action: 
     )
 }
 
+fn native_browse_workspace_html(route_table: &str) -> String {
+    let preview = native_selection_preview_html(
+        "No files selected",
+        "Select browsed files to preview batch download impact.",
+        "Waiting",
+        "Download Selected",
+    );
+    format!(
+        r#"<div class="slskr-native-grid browse-native" data-slskr-browse-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Browse</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Open a New Browse Tab</button></div><div class="slskr-native-browse-tabs" role="tablist" aria-label="Browse sessions"><button type="button" aria-selected="true" data-slskr-browse-session="peer1:/Music/Open Sessions">peer1 /Music</button><button type="button" data-slskr-browse-session="peer2:/Incoming">peer2 /Incoming</button><button type="button">New Tab</button></div><div class="slskr-native-tree" data-slskr-browse-tree><strong>Directory Tree</strong><button type="button" data-slskr-browse-folder="/" aria-expanded="true">/</button><button type="button" data-slskr-browse-folder="/Music" aria-expanded="true">/Music</button><button type="button" data-slskr-browse-folder="/Music/Open Sessions" aria-current="true">/Music/Open Sessions</button><button type="button" data-slskr-browse-folder="/Incoming">/Incoming</button></div><div class="slskr-native-mini-list"><span>Cached browse result</span><span>Folder expansion state</span><span>Peer browse history</span></div></aside><section class="slskr-native-main"><h3>Files</h3><div class="slskr-native-breadcrumb" data-slskr-browse-breadcrumb><button type="button">peer1</button><span>/</span><button type="button">Music</button><span>/</span><button type="button">Open Sessions</button></div><div class="slskr-native-command-row"><input aria-label="Folder" placeholder="/" value="/Music/Open Sessions"><input aria-label="File filter" placeholder="Filter files"><button type="button">Refresh Folder</button><button type="button">Download Selected</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Download Preview</h4><p>Selected files, destination, peer, queue impact, and duplicate warnings.</p>{preview}<div class="slskr-native-mini-list" data-slskr-browse-download-manifest><span>Queue as batch</span><span>Preserve folders</span><span>Duplicate warning review</span><span>Destination: downloads/peer1/Music</span><span>Estimated queue impact: 2 files</span></div><div class="slskr-native-table-wrap"><table class="slskr-native-table"><thead><tr><th>Selected file</th><th>Peer</th><th>Action body</th></tr></thead><tbody><tr><td>/Music/Open Sessions/Theme.flac</td><td>peer1</td><td>download batch item</td></tr><tr><td>/Music/Open Sessions/Notes.txt</td><td>peer1</td><td>preserve folder</td></tr></tbody></table></div></aside></div></section></div>"#,
+        route_table = route_table,
+        preview = preview,
+    )
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
@@ -4995,16 +5009,7 @@ fn route_native_workspace_html(
                 "Open",
             ),
         ),
-        RouteKind::Browse => format!(
-            r#"<div class="slskr-native-grid browse-native"><aside class="slskr-native-side slskr-native-sidebar"><h3>Browse</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Open a New Browse Tab</button></div><button type="button">New Tab</button><div class="slskr-native-tree"><strong>Directory Tree</strong><button type="button">/Music</button><button type="button">/Music/Open Sessions</button><button type="button">/Incoming</button></div></aside><section class="slskr-native-main"><h3>Files</h3><div class="slskr-native-breadcrumb"><span>peer1</span><span>/</span><span>Music</span><span>Open Sessions</span></div><div class="slskr-native-command-row"><input aria-label="Folder" placeholder="/"><button type="button">Download Selected</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Download Preview</h4><p>Selected files, destination, peer, queue impact, and duplicate warnings.</p>{preview}<div class="slskr-native-mini-list"><span>Queue as batch</span><span>Preserve folders</span><span>Duplicate warning review</span></div></aside></div></section></div>"#,
-            route_table = route_table,
-            preview = native_selection_preview_html(
-                "No files selected",
-                "Select browsed files to preview batch download impact.",
-                "Waiting",
-                "Download Selected",
-            ),
-        ),
+        RouteKind::Browse => native_browse_workspace_html(&route_table),
         RouteKind::System => format!(
             r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-operator-bands"><span>Connection</span><span>Shares</span><span>Database</span><span>Events</span><span>Preferences</span><span>Automation</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3>{preview}<button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
             route_table = route_table,
@@ -11511,6 +11516,13 @@ mod tests {
             "Breadcrumb",
             "Multi-select",
             "Download Selected",
+            "data-slskr-browse-workspace",
+            "data-slskr-browse-session",
+            "data-slskr-browse-folder",
+            "data-slskr-browse-download-manifest",
+            "File filter",
+            "Refresh Folder",
+            "Estimated queue impact",
         ] {
             assert!(
                 browse.contains(value),

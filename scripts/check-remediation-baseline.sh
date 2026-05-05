@@ -24,6 +24,7 @@ GATES=(
   scripts/check-dev-tooling.sh
   scripts/check-openapi-docs-drift.sh
   scripts/check-docs-freshness.sh
+  scripts/check-council-loop.sh
   scripts/check-shell-script-hygiene.sh
   scripts/check-kubernetes-public-posture.sh
   scripts/check-compatibility-noop-documentation.sh

@@ -1,6 +1,6 @@
 # Rust UI Parity Ledger
 
-This ledger tracks the Rust/WASM UI against the current slskdN React UI. It is
+This ledger tracks the Rust/WASM UI against the current React UI. It is
 intended to stay blunt: a route is not complete until the Rust page has the same
 primary workflow, state handling, and route-specific actions as the React page.
 
@@ -43,6 +43,9 @@ Completed across the main Rust routes:
   Mesh, Bridge, MediaCore, Security, Experience, Integrations, Options, Shares,
   Jobs, Automations, Providers, Analytics, Library Health, Quarantine, Files,
   Data, Events, Logs, and Metrics instead of generic placeholder facts
+- Browse now exposes tabbed peer sessions, cached folder state, breadcrumb
+  controls, file filtering, refresh-folder controls, and a selected-file
+  download manifest so the page behaves closer to the expected session browser
 
 ## Route Gaps
 
