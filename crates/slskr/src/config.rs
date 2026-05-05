@@ -39,6 +39,7 @@ pub struct AppConfig {
     pub transfer_allow_outbound: bool,
     pub auth_required: bool,
     pub api_token: Option<String>,
+    pub api_cookie_auth_enabled: bool,
     pub api_rate_limit_anonymous: u32,
     pub api_rate_limit_authenticated: u32,
     pub persistence_enabled: bool,
@@ -178,6 +179,11 @@ impl AppConfig {
                     .to_owned(),
             );
         }
+        let api_cookie_auth_enabled = env_bool_layer(
+            env,
+            "SLSKR_API_COOKIE_AUTH_ENABLED",
+            file_config.auth.cookie_auth_enabled.unwrap_or(false),
+        )?;
         let api_rate_limit_anonymous = env_parse_layer(
             env,
             "SLSKR_API_RATE_LIMIT_ANONYMOUS",
@@ -223,6 +229,7 @@ impl AppConfig {
             transfer_allow_outbound,
             auth_required,
             api_token,
+            api_cookie_auth_enabled,
             api_rate_limit_anonymous,
             api_rate_limit_authenticated,
             persistence_enabled,
@@ -239,7 +246,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -272,6 +279,7 @@ impl AppConfig {
             self.transfer_allow_outbound,
             self.auth_required,
             self.api_token.is_some(),
+            self.api_cookie_auth_enabled,
             self.persistence_enabled,
             self.integrations.sanitized_json()
         )
@@ -623,6 +631,7 @@ pub struct TransferFileConfig {
 pub struct AuthFileConfig {
     disabled: Option<bool>,
     api_token: Option<String>,
+    cookie_auth_enabled: Option<bool>,
     rate_limit_anonymous: Option<u32>,
     rate_limit_authenticated: Option<u32>,
 }

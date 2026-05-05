@@ -86,7 +86,8 @@ pub fn csrf_origin_allowed(
         return true;
     }
     let Some(source) = headers.origin.as_deref().or(headers.referer.as_deref()) else {
-        return cookie_session_token(headers.cookie.as_deref()).is_none();
+        return !config.api_cookie_auth_enabled
+            || cookie_session_token(headers.cookie.as_deref()).is_none();
     };
     let Some(source_host) = origin_host(source) else {
         return false;
@@ -163,8 +164,9 @@ pub fn is_authorized(
         })
         .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes()));
     bearer_authorized
-        || cookie_session_token(cookie)
-            .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes()))
+        || (config.api_cookie_auth_enabled
+            && cookie_session_token(cookie)
+                .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes())))
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {

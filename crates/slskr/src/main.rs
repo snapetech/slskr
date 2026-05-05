@@ -21,6 +21,10 @@ use std::{
     sync::Arc,
 };
 
+use base64::{
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+    Engine,
+};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use slskr_client::{
@@ -4740,7 +4744,23 @@ async fn route_http_request_with_headers(
                 || path.starts_with("/api/files/incomplete/directories/")
                 || path.starts_with("/api/files/incomplete/files/") =>
         {
-            Ok(routing::ok_response("false".to_owned()))
+            let Some(encoded_name) = path.rsplit('/').next().filter(|value| !value.is_empty()) else {
+                return Ok(routing::bad_request_response("path is required"));
+            };
+            let root = if path.starts_with("/api/files/downloads/") {
+                file_storage_root(&state.config.state_dir, "downloads")
+            } else {
+                file_storage_root(&state.config.state_dir, "incomplete")
+            };
+            let delete_result = if path.contains("/directories/") {
+                delete_scoped_file_storage_path(&root, encoded_name, true)
+            } else {
+                delete_scoped_file_storage_path(&root, encoded_name, false)
+            };
+            match delete_result {
+                Ok(deleted) => Ok(routing::ok_response(deleted.to_string())),
+                Err(error) => Ok(routing::bad_request_response(&error)),
+            }
         }
         ("GET", path) if path.starts_with("/api/files/") || path.starts_with("/api/v0/files/") => {
             let folder = path.strip_prefix("/api/v0/files/")
@@ -10467,6 +10487,86 @@ fn download_root(state_dir: &Path) -> PathBuf {
     state_dir.join("downloads")
 }
 
+fn file_storage_root(state_dir: &Path, kind: &str) -> PathBuf {
+    state_dir.join(kind)
+}
+
+fn decode_slskd_base64_path_segment(encoded: &str) -> Result<String, String> {
+    let encoded = percent_decode(encoded);
+    let encoded = encoded.trim();
+    let bytes = STANDARD
+        .decode(encoded.as_bytes())
+        .or_else(|_| STANDARD_NO_PAD.decode(encoded.as_bytes()))
+        .map_err(|_| "path segment must be base64 encoded".to_owned())?;
+    String::from_utf8(bytes).map_err(|_| "path segment must decode to UTF-8".to_owned())
+}
+
+fn scoped_relative_storage_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let mut path = root.to_path_buf();
+    let mut appended = false;
+    for component in Path::new(relative).components() {
+        match component {
+            Component::Normal(part) => {
+                path.push(part);
+                appended = true;
+            }
+            Component::CurDir => {}
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
+                return Err("path must be relative and stay within the storage root".to_owned());
+            }
+        }
+    }
+    if !appended {
+        return Err("path is empty".to_owned());
+    }
+    if !path.starts_with(root) {
+        return Err("path escapes the storage root".to_owned());
+    }
+    Ok(path)
+}
+
+fn delete_scoped_file_storage_path(
+    root: &Path,
+    encoded_name: &str,
+    directory: bool,
+) -> Result<bool, String> {
+    let decoded = decode_slskd_base64_path_segment(encoded_name)?;
+    let path = scoped_relative_storage_path(root, &decoded)?;
+    if !path.exists() {
+        return Ok(false);
+    }
+    fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("storage root canonicalize failed: {error}"))?;
+    let canonical_parent = path
+        .parent()
+        .unwrap_or(root)
+        .canonicalize()
+        .map_err(|error| format!("storage parent canonicalize failed: {error}"))?;
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err("path escapes the storage root".to_owned());
+    }
+    let metadata = path
+        .symlink_metadata()
+        .map_err(|error| format!("storage path metadata failed: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("storage path must not be a symlink".to_owned());
+    }
+    if directory {
+        if !metadata.is_dir() {
+            return Ok(false);
+        }
+        fs::remove_dir_all(&path).map_err(|error| format!("directory delete failed: {error}"))?;
+    } else {
+        if !metadata.is_file() {
+            return Ok(false);
+        }
+        fs::remove_file(&path).map_err(|error| format!("file delete failed: {error}"))?;
+    }
+    Ok(true)
+}
+
 fn safe_download_path(state_dir: &Path, filename: &str) -> Result<PathBuf, String> {
     let root = download_root(state_dir);
     let mut path = root.clone();
@@ -13893,6 +13993,7 @@ mod tests {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
+    use base64::Engine;
     use slskr_client::protocol::peer::{FileEntry, FileSearchResponse};
     use tokio::sync::{mpsc, RwLock};
 
@@ -14012,7 +14113,7 @@ mod tests {
             rooms: RwLock::new(super::RoomStore::new()),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
-            event_tx,
+            event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
@@ -14025,7 +14126,7 @@ mod tests {
             destinations: RwLock::new(super::DestinationStore::new()),
             db,
             config,
-            session_commands: sender,
+            session_commands: sender.clone(),
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
         });
@@ -14434,6 +14535,67 @@ mod tests {
             .await
             .expect("missing files response");
         assert_eq!(missing.status, "404 Not Found");
+    }
+
+    #[tokio::test]
+    async fn slskd_file_delete_routes_are_scoped_to_storage_roots() {
+        let (state, _receiver) = test_state();
+        let download_file = state
+            .config
+            .state_dir
+            .join("downloads")
+            .join("Remote")
+            .join("Song.mp3");
+        std::fs::create_dir_all(download_file.parent().unwrap()).unwrap();
+        std::fs::write(&download_file, b"song").unwrap();
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            "/api/v0/files/downloads/files/UmVtb3RlL1NvbmcubXAz",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete downloaded file");
+        assert_eq!(deleted.status, "200 OK");
+        assert_eq!(deleted.body, "true");
+        assert!(!download_file.exists());
+
+        let missing = super::route_http_request(
+            "DELETE",
+            "/api/v0/files/downloads/files/UmVtb3RlL1NvbmcubXAz",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete missing downloaded file");
+        assert_eq!(missing.status, "200 OK");
+        assert_eq!(missing.body, "false");
+
+        let traversal = super::route_http_request(
+            "DELETE",
+            "/api/v0/files/downloads/files/Li4vc2VjcmV0",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete traversal path");
+        assert_eq!(traversal.status, "400 Bad Request");
+
+        let newline_encoded_missing = super::route_http_request(
+            "DELETE",
+            "/api/v0/files/downloads/directories/Wm05dg==%0A",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete slskd encoded directory");
+        assert_eq!(newline_encoded_missing.status, "200 OK");
+        assert_eq!(newline_encoded_missing.body, "false");
     }
 
     #[tokio::test]
@@ -17682,6 +17844,7 @@ mod tests {
                 [auth]
                 disabled = false
                 api_token = "test-token"
+                cookie_auth_enabled = true
 
                 [integrations.external_visualizer]
                 command = "projectm"
@@ -17719,6 +17882,7 @@ mod tests {
         assert!(!config.transfer_allow_outbound);
         assert!(config.auth_required);
         assert_eq!(config.api_token.as_deref(), Some("test-token"));
+        assert!(config.api_cookie_auth_enabled);
         assert_eq!(
             config.integrations.external_visualizer.command.as_deref(),
             Some("projectm")
@@ -17731,6 +17895,7 @@ mod tests {
         assert!(sanitized.contains("\"transfer_allow_inbound\":false"));
         assert!(sanitized.contains("\"transfer_allow_outbound\":false"));
         assert!(sanitized.contains("\"api_token_configured\":true"));
+        assert!(sanitized.contains("\"api_cookie_auth_enabled\":true"));
         assert!(sanitized.contains("\"launch_enabled\":true"));
         assert!(sanitized.contains("a***e"));
         assert!(!sanitized.contains("secret-password"));
@@ -17760,6 +17925,36 @@ mod tests {
         assert!(config
             .sanitized_json()
             .contains("\"peer_host_override\":\"127.0.0.1\""));
+    }
+
+    #[test]
+    fn scoped_file_storage_delete_rejects_traversal_and_deletes_only_under_root() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-file-delete-test-{}-{unique}",
+            std::process::id()
+        ));
+        let nested = root.join("artist");
+        std::fs::create_dir_all(&nested).expect("create nested dir");
+        let file = nested.join("track.flac");
+        std::fs::write(&file, b"fixture").expect("write file");
+
+        let encoded_file = super::STANDARD.encode("artist/track.flac");
+        assert_eq!(
+            super::delete_scoped_file_storage_path(&root, &encoded_file, false),
+            Ok(true)
+        );
+        assert!(!file.exists());
+
+        let traversal = super::STANDARD.encode("../outside.flac");
+        let error = super::delete_scoped_file_storage_path(&root, &traversal, false)
+            .expect_err("traversal must fail");
+        assert!(error.contains("relative"));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -17793,7 +17988,7 @@ mod tests {
             rooms: RwLock::new(super::RoomStore::new()),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
-            event_tx,
+            event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
@@ -17806,7 +18001,7 @@ mod tests {
             destinations: RwLock::new(super::DestinationStore::new()),
             db: None,
             config,
-            session_commands: sender,
+            session_commands: sender.clone(),
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
         };
@@ -17882,12 +18077,72 @@ mod tests {
         .unwrap();
         assert_eq!(same_origin.status, "202 Accepted");
 
-        let cookie_allowed = super::route_http_request_with_headers(
+        let cookie_rejected_by_default = super::route_http_request_with_headers(
             "GET",
             "/api/v0/config",
             None,
             "",
             &state,
+            super::RequestSecurityHeaders {
+                host: Some("127.0.0.1:5030".to_string()),
+                origin: None,
+                referer: None,
+                cookie: Some("other=value; slskr.session=route-token".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(cookie_rejected_by_default.status, "401 Unauthorized");
+
+        let cookie_enabled_env = MapEnv::default()
+            .with(
+                "SLSKR_STATE_DIR",
+                &std::env::temp_dir().display().to_string(),
+            )
+            .with("SLSKR_API_TOKEN", "route-token")
+            .with("SLSKR_API_COOKIE_AUTH_ENABLED", "true");
+        let cookie_enabled_config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &cookie_enabled_env)
+                .expect("cookie auth config");
+        let cookie_enabled_state = super::AppState {
+            session: RwLock::new(super::SessionSnapshot::disconnected(&cookie_enabled_config)),
+            listeners: RwLock::new(super::ListenerSnapshot::new(&cookie_enabled_config)),
+            shares: RwLock::new(super::build_share_index(&cookie_enabled_config)),
+            searches: RwLock::new(super::SearchStore::new()),
+            users: RwLock::new(super::UserStore::new()),
+            browse: RwLock::new(super::BrowseStore::new()),
+            messages: RwLock::new(super::MessageStore::new()),
+            rooms: RwLock::new(super::RoomStore::new()),
+            transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
+            events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
+            event_tx: event_tx.clone(),
+            webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
+            collections: RwLock::new(super::CollectionStore::new()),
+            wishlist: RwLock::new(super::WishlistStore::new()),
+            contacts: RwLock::new(super::ContactStore::new()),
+            sharegroups: RwLock::new(super::ShareGroupStore::new()),
+            user_notes: RwLock::new(super::UserNoteStore::new()),
+            interests: RwLock::new(super::InterestStore::new()),
+            share_grants: RwLock::new(super::ShareGrantStore::new()),
+            library: RwLock::new(super::LibraryStore::new()),
+            destinations: RwLock::new(super::DestinationStore::new()),
+            db: None,
+            config: cookie_enabled_config,
+            session_commands: sender.clone(),
+            rate_limiter: super::rate_limit::RateLimiter::new(super::rate_limit::RateLimitConfig {
+                max_requests_anonymous: 1000,
+                max_requests_authenticated: 5000,
+                window_seconds: 60,
+                enabled: true,
+            }),
+            oauth_states: RwLock::new(super::OAuthStateStore::default()),
+        };
+        let cookie_allowed = super::route_http_request_with_headers(
+            "GET",
+            "/api/v0/config",
+            None,
+            "",
+            &cookie_enabled_state,
             super::RequestSecurityHeaders {
                 host: Some("127.0.0.1:5030".to_string()),
                 origin: None,
