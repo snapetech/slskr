@@ -12510,12 +12510,14 @@ mod tests {
                     path: "/transfers/downloads",
                     surface: "transfers",
                 },
-                body: r#"[{"username":"peer2","filename":"Remote/Song.mp3","state":"Queued","progress":0.5}]"#.to_string(),
+                body: r#"[{"id":77,"username":"peer2","filename":"Remote/Song.mp3","state":"Queued","progress":0.5}]"#.to_string(),
             }],
         );
         assert!(downloads.contains(r#"data-slskr-native-filename="Remote/Song.mp3""#));
         assert!(downloads.contains(r#"data-slskr-native-peer="peer2""#));
-        assert!(downloads.contains(r#"data-slskr-native-transfer-state="Queued / 50% / 0 B/s""#));
+        assert!(downloads
+            .contains(r#"data-slskr-native-transfer-state="Queued / 50% / 0 B/s / id=77""#));
+        assert!(downloads.contains(r#"data-slskr-native-transfer-id="77""#));
 
         let contacts = route_workspace_result_html(
             "/contacts",
@@ -12539,6 +12541,20 @@ mod tests {
             1,
             "only the filter input should use data-slskr-native-filter"
         );
+
+        let live_wishlist = route_workspace_result_html(
+            "/wishlist",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/wishlist",
+                    surface: "wishlist",
+                },
+                body: r#"[{"id":"wish-7","searchText":"rare live set","filter":"flac","enabled":true}]"#
+                    .to_string(),
+            }],
+        );
+        assert!(live_wishlist.contains(r#"data-slskr-native-wishlist-id="wish-7""#));
 
         let sharing = route_page_html("/sharegroups");
         assert!(sharing.contains("data-slskr-native-share-group"));
@@ -12574,6 +12590,38 @@ mod tests {
         assert_eq!(
             concrete_action_path("/searches", endpoint),
             "/api/v0/searches/1"
+        );
+        let transfer = RouteAction {
+            body: ActionBody::None,
+            label: "Cancel Download",
+            method: "DELETE",
+            path: "/transfers/downloads/:username/:id",
+            surface: "transfers",
+        };
+        assert_eq!(
+            concrete_action_path_with_target_and_id(
+                "/downloads",
+                transfer,
+                Some("peer2"),
+                Some("77")
+            ),
+            "/api/v0/transfers/downloads/peer2/77"
+        );
+        let wishlist = RouteAction {
+            body: ActionBody::None,
+            label: "Run Wishlist Search",
+            method: "POST",
+            path: "/wishlist/:id/search",
+            surface: "wishlist",
+        };
+        assert_eq!(
+            concrete_action_path_with_target_and_id(
+                "/wishlist",
+                wishlist,
+                Some("ignored-peer"),
+                Some("wish-7")
+            ),
+            "/api/v0/wishlist/wish-7/search"
         );
         let html = route_actions_html("/searches/<script>");
         assert!(html.contains("/api/v0/searches/1"));
