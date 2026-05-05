@@ -5,6 +5,8 @@
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+const CHECKED_IN_OPENAPI_JSON: &str = include_str!("../../../docs/openapi.json");
+
 /// OpenAPI spec generator
 pub struct OpenApiSpec {
     version: String,
@@ -429,8 +431,7 @@ impl OpenApiSpec {
 
 /// Generate OpenAPI spec as JSON
 pub fn generate_openapi_json() -> String {
-    let spec = OpenApiSpec::new("slskr API", "1.0.1");
-    serde_json::to_string_pretty(&spec.generate()).unwrap_or_else(|_| "{}".to_string())
+    CHECKED_IN_OPENAPI_JSON.to_owned()
 }
 
 /// Generate Swagger UI HTML
@@ -490,8 +491,16 @@ mod tests {
     fn test_openapi_json_generation() {
         let json = generate_openapi_json();
         assert!(json.contains("openapi"));
-        assert!(json.contains("slskr API"));
+        assert!(json.contains("slskr HTTP API"));
         assert!(json.contains("AGPL-3.0-only"));
+    }
+
+    #[test]
+    fn test_runtime_openapi_matches_checked_in_spec() {
+        let runtime: Value = serde_json::from_str(&generate_openapi_json()).expect("runtime spec");
+        let checked_in: Value =
+            serde_json::from_str(CHECKED_IN_OPENAPI_JSON).expect("checked-in spec");
+        assert_eq!(runtime, checked_in);
     }
 
     #[test]

@@ -114,7 +114,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
-| Medium | OpenAPI drift | API parity work changes response shapes faster than `docs/openapi.json` and docs can track. | Add generated OpenAPI/doc drift checks to CI and fail when checked-in docs differ. |
+| Medium | OpenAPI drift | Runtime `/api/openapi.json` and checked-in `docs/openapi.json` could drift because they were generated through separate paths. | Fixed by serving the checked-in OpenAPI spec at runtime, adding an equality regression test, and strengthening the OpenAPI drift gate. |
 | Medium | Compatibility smoke | slskd API compatibility smoke is opt-in because it needs external Python package install and live-style behavior (`scripts/run-release-gate.sh:55`). | Keep opt-in locally, but run it in scheduled CI with explicit secrets or hermetic fixtures. |
 | Medium | Rust dependency hygiene | `cargo tree -d -p slskr` shows transitive duplicate `getrandom`, `hashbrown`, `thiserror`, and `thiserror-impl` roots in the release graph. | Fixed by documenting the current duplicate-root set and adding a remediation gate that fails when new duplicate roots enter the release binary graph without review. |
 | Medium | GitHub Actions supply chain | CI/release workflows use mutable action tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `softprops/action-gh-release@v2` (`.github/workflows/release.yml:44`, `.github/workflows/release.yml:175`). | Pin third-party and first-party actions to reviewed commit SHAs, automate update PRs, and document the trust policy. |
