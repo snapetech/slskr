@@ -60,7 +60,28 @@ for artifact in "${artifacts[@]}"; do
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   case "$artifact" in
-    *.tar.gz) tar -C "$tmp" -xzf "$artifact" ;;
+    *.tar.gz) python - "$artifact" "$tmp" <<'PY'
+import pathlib
+import sys
+import tarfile
+
+destination = pathlib.Path(sys.argv[2]).resolve()
+
+with tarfile.open(sys.argv[1], "r:gz") as tf:
+    for member in tf.getmembers():
+        member_path = pathlib.PurePosixPath(member.name)
+        if member_path.is_absolute() or ".." in member_path.parts:
+            raise SystemExit(f"unsafe tar entry path: {member.name}")
+        if member.issym() or member.islnk():
+            raise SystemExit(f"tar links are not allowed: {member.name}")
+        if not (member.isfile() or member.isdir()):
+            raise SystemExit(f"tar special files are not allowed: {member.name}")
+        target = (destination / pathlib.Path(*member_path.parts)).resolve()
+        if target != destination and destination not in target.parents:
+            raise SystemExit(f"tar entry escapes destination: {member.name}")
+    tf.extractall(destination)
+PY
+      ;;
     *.zip) python - "$artifact" "$tmp" <<'PY'
 import pathlib
 import sys

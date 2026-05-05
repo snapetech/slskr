@@ -13,12 +13,3 @@ data:
   SLSKR_DATABASE_PATH: "/data/slskr.db"
   SLSKR_WEBHOOK_TIMEOUT: "30"
   SLSKR_WEBHOOK_MAX_RETRIES: "3"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: slskr-dashboard-config
-  namespace: slskr
-data:
-  API_URL: "https://slskr.example.com"
-  POLL_INTERVAL: "5000"

@@ -22,11 +22,15 @@ spec:
         app: slskr-api
         version: "1.0"
     spec:
+      automountServiceAccountToken: false
       serviceAccountName: slskr
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: slskr-api
         image: ghcr.io/slskr/slskr:REPLACE_WITH_RELEASE_TAG
@@ -80,6 +84,8 @@ spec:
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
           capabilities:
             drop:
             - ALL
@@ -88,69 +94,4 @@ spec:
         persistentVolumeClaim:
           claimName: slskr-data
       - name: cache
-        emptyDir: {}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: slskr-dashboard-standalone
-  namespace: slskr
-  labels:
-    app: slskr-dashboard
-    version: "1.0"
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: slskr-dashboard
-  template:
-    metadata:
-      labels:
-        app: slskr-dashboard
-        version: "1.0"
-    spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 101
-        fsGroup: 101
-      containers:
-      - name: dashboard
-        image: ghcr.io/slskr/slskr-dashboard:REPLACE_WITH_RELEASE_TAG
-        imagePullPolicy: IfNotPresent
-        ports:
-        - name: http
-          containerPort: 80
-          protocol: TCP
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 128Mi
-        livenessProbe:
-          httpGet:
-            path: /
-            port: http
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        volumeMounts:
-        - name: nginx-cache
-          mountPath: /var/cache/nginx
-        - name: nginx-run
-          mountPath: /var/run
-        - name: nginx-tmp
-          mountPath: /tmp
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-            - ALL
-      volumes:
-      - name: nginx-cache
-        emptyDir: {}
-      - name: nginx-run
-        emptyDir: {}
-      - name: nginx-tmp
         emptyDir: {}

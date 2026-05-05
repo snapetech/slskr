@@ -40,23 +40,3 @@ spec:
         value: 2
         periodSeconds: 15
       selectPolicy: Max
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: slskr-dashboard-hpa
-  namespace: slskr
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: slskr-dashboard-standalone
-  minReplicas: 2
-  maxReplicas: 5
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 80

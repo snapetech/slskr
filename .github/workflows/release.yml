@@ -23,9 +23,12 @@ jobs:
     steps:
       - id: version
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            version="${{ inputs.version }}"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="$INPUT_VERSION"
             if [[ -z "$version" || "$version" == "manual" ]]; then
               version="manual-${GITHUB_SHA::12}"
             fi

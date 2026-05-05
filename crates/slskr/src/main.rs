@@ -59,6 +59,7 @@ use tokio::{
 };
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
@@ -3870,6 +3871,7 @@ struct AppState {
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
     webhooks: RwLock<webhooks::WebhookManager>,
+    webhook_deliveries: Arc<Semaphore>,
     collections: RwLock<CollectionStore>,
     wishlist: RwLock<WishlistStore>,
     contacts: RwLock<ContactStore>,
@@ -4620,8 +4622,16 @@ async fn route_http_request_with_headers(
                  );
                  let webhook_clone = webhook.clone();
                  drop(webhooks);
+                 let Ok(delivery_permit) = Arc::clone(&state.webhook_deliveries).try_acquire_owned() else {
+                     return Ok(HttpResponse {
+                         status: "429 Too Many Requests",
+                         content_type: "application/json",
+                         body: "{\"error\":\"too many webhook deliveries in progress\"}".to_owned(),
+                     });
+                 };
 
                  tokio::spawn(async move {
+                     let _delivery_permit = delivery_permit;
                      let _ = webhooks::WebhookDispatcher::send_webhook(
                          &webhook_clone.url,
                          &webhook_clone.secret,
@@ -10125,6 +10135,7 @@ async fn serve(once: bool) -> Result<(), String> {
         events: RwLock::new(EventStore::new(EVENT_HISTORY_LIMIT)),
         event_tx,
         webhooks: RwLock::new(webhooks::WebhookManager::new()),
+        webhook_deliveries: Arc::new(Semaphore::new(MAX_WEBHOOK_DELIVERY_TASKS)),
         collections: RwLock::new(CollectionStore::new()),
         wishlist: RwLock::new(WishlistStore::new()),
         contacts: RwLock::new(ContactStore::new()),
@@ -14452,6 +14463,7 @@ mod tests {
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
+            webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -16290,6 +16302,41 @@ mod tests {
         .expect("capped webhook");
         assert_eq!(capped.status, "400 Bad Request");
         assert_eq!(capped.body, "{\"error\":\"webhook limit reached\"}");
+    }
+
+    #[tokio::test]
+    async fn webhook_test_send_rejects_when_delivery_pool_is_full() {
+        let (state, _receiver) = test_state();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/webhooks",
+            None,
+            r#"{"url":"https://example.test/hook","events":"search.created"}"#,
+            &state,
+        )
+        .await
+        .expect("create webhook");
+        assert_eq!(created.status, "201 Created");
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let webhook_id = created_json["id"].as_str().unwrap();
+        let _all_delivery_permits = Arc::clone(&state.webhook_deliveries)
+            .acquire_many_owned(super::MAX_WEBHOOK_DELIVERY_TASKS as u32)
+            .await
+            .expect("acquire webhook delivery permits");
+
+        let response = super::route_http_request(
+            "POST",
+            &format!("/api/webhooks/{webhook_id}/test"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("test webhook");
+
+        assert_eq!(response.status, "429 Too Many Requests");
+        assert!(response.body.contains("webhook deliveries"));
     }
 
     #[tokio::test]
@@ -18587,6 +18634,7 @@ mod tests {
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
+            webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -18714,6 +18762,7 @@ mod tests {
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
+            webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),

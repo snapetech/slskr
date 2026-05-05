@@ -30,6 +30,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: slskr-dashboard
+            name: slskr-api
             port:
-              number: 80
+              number: 8080
