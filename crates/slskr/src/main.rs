@@ -4530,7 +4530,15 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("no valid events specified"));
              }
 
-             let secret = extract_json_string_field(body, "secret").unwrap_or_else(webhooks::Webhook::generate_secret);
+             let secret = match extract_json_string_field(body, "secret") {
+                 Some(secret) => {
+                     if let Err(error) = webhooks::validate_webhook_secret(&secret) {
+                         return Ok(routing::bad_request_response(error));
+                     }
+                     secret
+                 }
+                 None => webhooks::Webhook::generate_secret(),
+             };
              let webhook = webhooks::Webhook::new(url, events, secret.clone());
 
              let mut webhooks = state.webhooks.write().await;
@@ -6198,7 +6206,15 @@ async fn route_http_request_with_headers(
             if let Err(error) = webhooks::validate_webhook_url_for_registration(&url) {
                 return Ok(routing::bad_request_response(&error.to_string()));
             }
-            let secret = extract_json_string_field(body, "secret").unwrap_or_else(webhooks::Webhook::generate_secret);
+            let secret = match extract_json_string_field(body, "secret") {
+                Some(secret) => {
+                    if let Err(error) = webhooks::validate_webhook_secret(&secret) {
+                        return Ok(routing::bad_request_response(error));
+                    }
+                    secret
+                }
+                None => webhooks::Webhook::generate_secret(),
+            };
             let webhook = webhooks::Webhook::new(
                 url,
                 vec![webhooks::WebhookEvent::SearchCreated],
@@ -13964,7 +13980,7 @@ fn write_share_cache(path: &Path, entries: &[FileEntry]) -> Result<(), String> {
         body.push_str(&escape_cache_field(&entry.filename));
         body.push('\n');
     }
-    fs::write(path, body).map_err(|error| format!("share cache write failed: {error}"))
+    write_file_atomic(path, body).map_err(|error| format!("share cache write failed: {error}"))
 }
 
 fn transfer_events_path(state_dir: &Path) -> PathBuf {
@@ -13976,7 +13992,7 @@ fn transfer_state_path(state_dir: &Path) -> PathBuf {
 }
 
 fn write_transfer_events_header(path: &Path) -> Result<(), String> {
-    fs::write(
+    write_file_atomic(
         path,
         "slskr-transfer-events-v2\nid\tdirection\ttoken\tsize\tbytes_transferred\tstatus\treason\tfilename\n",
     )
@@ -14033,7 +14049,32 @@ fn write_transfer_state(path: &Path, entries: &[TransferEntry]) -> Result<(), St
     };
     let body = serde_json::to_string_pretty(&state)
         .map_err(|error| format!("transfer state encode failed: {error}"))?;
-    fs::write(path, body).map_err(|error| format!("transfer state write failed: {error}"))
+    write_file_atomic(path, body).map_err(|error| format!("transfer state write failed: {error}"))
+}
+
+fn write_file_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("slskr-state");
+    let temp_path = parent.join(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        unix_timestamp()
+    ));
+
+    {
+        let mut file = fs::File::create(&temp_path)?;
+        file.write_all(contents.as_ref())?;
+        file.sync_all()?;
+    }
+
+    fs::rename(&temp_path, path).inspect_err(|_| {
+        let _ = fs::remove_file(&temp_path);
+    })
 }
 
 fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), String> {
@@ -16182,6 +16223,30 @@ mod tests {
         .expect("invalid webhook");
         assert_eq!(invalid.status, "400 Bad Request");
         assert_eq!(invalid.body, "{\"error\":\"invalid webhook event\"}");
+
+        let weak_secret = super::route_http_request(
+            "POST",
+            "/api/webhooks",
+            None,
+            r#"{"url":"https://example.test/hook","events":"search.created","secret":"short"}"#,
+            &state,
+        )
+        .await
+        .expect("weak webhook secret");
+        assert_eq!(weak_secret.status, "400 Bad Request");
+        assert!(weak_secret.body.contains("webhook secret"));
+
+        let weak_admin_secret = super::route_http_request(
+            "POST",
+            "/api/admin/webhooks",
+            None,
+            r#"{"url":"https://example.test/admin-hook","secret":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+            &state,
+        )
+        .await
+        .expect("weak admin webhook secret");
+        assert_eq!(weak_admin_secret.status, "400 Bad Request");
+        assert!(weak_admin_secret.body.contains("webhook secret"));
 
         for index in 0..super::webhooks::MAX_WEBHOOKS {
             let body = format!(

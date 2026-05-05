@@ -60,6 +60,29 @@ describe('service worker caching', () => {
     expect(context.self.skipWaiting).toHaveBeenCalled();
   });
 
+  it('deletes only slskr-owned caches during activation', async () => {
+    const { context, listeners } = loadServiceWorker();
+    context.caches.keys.mockResolvedValue([
+      'slskr-shell-v1',
+      'slskr-shell-v2',
+      'third-party-cache',
+    ]);
+    let pending;
+
+    listeners.get('activate')({
+      waitUntil: (promise) => {
+        pending = promise;
+      },
+    });
+
+    await pending;
+
+    expect(context.caches.delete).toHaveBeenCalledWith('slskr-shell-v1');
+    expect(context.caches.delete).toHaveBeenCalledWith('slskr-shell-v2');
+    expect(context.caches.delete).not.toHaveBeenCalledWith('third-party-cache');
+    expect(context.self.clients.claim).toHaveBeenCalled();
+  });
+
   it('uses network-first fetches for navigation requests', async () => {
     const { context, listeners } = loadServiceWorker();
     const request = {

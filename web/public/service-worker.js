@@ -11,7 +11,11 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.map((key) => caches.delete(key))),
+      Promise.all(
+        keys
+          .filter((key) => key.startsWith('slskr-'))
+          .map((key) => caches.delete(key)),
+      ),
     ),
   );
   self.clients.claim();

@@ -61,7 +61,10 @@ export const check = async () => {
 
 export const authHeaders = ({ csrf = false } = {}) => {
   const token = getToken();
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const headers =
+    token && token !== tokenPassthroughValue
+      ? { Authorization: `Bearer ${token}` }
+      : {};
   const csrfToken = csrf ? getCsrfTokenFromCookieString() : null;
   if (csrfToken) {
     headers['X-CSRF-TOKEN'] = csrfToken;

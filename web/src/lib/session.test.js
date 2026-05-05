@@ -36,6 +36,13 @@ describe('session', () => {
     });
   });
 
+  it('omits Authorization when token passthrough is enabled', () => {
+    session.enablePassthrough();
+
+    expect(session.authHeaders()).toEqual({});
+    expect(session.isLoggedIn()).toBe(false);
+  });
+
   it('ignores legacy tokens left in persistent browser storage', () => {
     localStorage.setItem('slskr-token', 'persistent-token');
 

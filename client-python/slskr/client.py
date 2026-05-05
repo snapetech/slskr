@@ -5,7 +5,7 @@ Main HTTP API client for slskr
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlencode
+from urllib.parse import quote, urlencode
 import aiohttp
 
 from .exceptions import ApiError, NetworkError, TimeoutError
@@ -133,7 +133,10 @@ class SlskrClient:
 
     async def get_search_details(self, search_id: str, limit: int = 50) -> Dict:
         """Get search details and results"""
-        return await self._get(f"/api/searches/{search_id}", params={"limit": limit})
+        return await self._get(
+            f"/api/searches/{self._path_segment(search_id)}",
+            params={"limit": limit},
+        )
 
     # =========================================================================
     # Messages
@@ -146,7 +149,10 @@ class SlskrClient:
 
     async def get_user_messages(self, username: str, limit: int = 50) -> List[Dict]:
         """Get messages from user"""
-        result = await self._get(f"/api/messages/{username}", params={"limit": limit})
+        result = await self._get(
+            f"/api/messages/{self._path_segment(username)}",
+            params={"limit": limit},
+        )
         return result.get("messages", [])
 
     async def send_message(self, recipient: str, content: str) -> Dict:
@@ -156,7 +162,10 @@ class SlskrClient:
 
     async def acknowledge_message(self, message_id: str) -> None:
         """Mark message as acknowledged"""
-        await self._put(f"/api/messages/{message_id}/acknowledge", {})
+        await self._put(
+            f"/api/messages/{self._path_segment(message_id)}/acknowledge",
+            {},
+        )
 
     # =========================================================================
     # Transfers
@@ -192,11 +201,11 @@ class SlskrClient:
 
     async def get_transfer(self, transfer_id: str) -> Dict:
         """Get transfer details"""
-        return await self._get(f"/api/transfers/{transfer_id}")
+        return await self._get(f"/api/transfers/{self._path_segment(transfer_id)}")
 
     async def cancel_transfer(self, transfer_id: str) -> None:
         """Cancel transfer"""
-        await self._delete(f"/api/transfers/{transfer_id}")
+        await self._delete(f"/api/transfers/{self._path_segment(transfer_id)}")
 
     # =========================================================================
     # HTTP Methods
@@ -253,7 +262,7 @@ class SlskrClient:
         """Make HTTP request"""
         await self._ensure_session()
 
-        url = urljoin(self.base_url, path)
+        url = self._build_url(path)
         if params:
             url += "?" + urlencode(params)
 
@@ -309,3 +318,9 @@ class SlskrClient:
                 )
 
             raise NetworkError(f"Failed to {method} {url}", cause=e)
+
+    def _path_segment(self, value: str) -> str:
+        return quote(str(value), safe="")
+
+    def _build_url(self, path: str) -> str:
+        return self.base_url + (path if path.startswith("/") else f"/{path}")

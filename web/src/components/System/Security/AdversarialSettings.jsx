@@ -177,10 +177,15 @@ const AdversarialSettings = () => {
     setSettings((previous) => {
       const newSettings = { ...previous };
       const keys = path.split('.');
+
+      if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return newSettings;
+
       let current = newSettings;
 
       for (let index = 0; index < keys.length - 1; index++) {
-        if (!current[keys[index]]) current[keys[index]] = {};
+        if (!Object.hasOwn(current, keys[index]) || typeof current[keys[index]] !== 'object') {
+          current[keys[index]] = {};
+        }
         current = current[keys[index]];
       }
 
@@ -198,10 +203,15 @@ const AdversarialSettings = () => {
     setSettings((previous) => {
       const newSettings = { ...previous };
       const keys = path.split('.');
+
+      if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return newSettings;
+
       let current = newSettings;
 
       for (let index_ = 0; index_ < keys.length - 1; index_++) {
-        if (!current[keys[index_]]) current[keys[index_]] = {};
+        if (!Object.hasOwn(current, keys[index_]) || typeof current[keys[index_]] !== 'object') {
+          current[keys[index_]] = {};
+        }
         current = current[keys[index_]];
       }
 

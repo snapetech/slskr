@@ -44,12 +44,16 @@ fn main() {
             }
             Ok(out) => {
                 eprintln!(
-                    "Webui build failed:\n{}",
-                    String::from_utf8_lossy(&out.stderr)
+                    "Webui build failed with status {}.\nstdout:\n{}\nstderr:\n{}",
+                    out.status,
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr),
                 );
+                std::process::exit(1);
             }
             Err(e) => {
                 eprintln!("Failed to run npm build: {}", e);
+                std::process::exit(1);
             }
         }
     }

@@ -111,15 +111,15 @@ export class SlskrClient {
   }
 
   async pingSession(id: string): Promise<{ status: string; latency_ms: number }> {
-    return this.postAuth(`/api/sessions/${id}/ping`, {});
+    return this.postAuth(`/api/sessions/${this.pathSegment(id)}/ping`, {});
   }
 
   async disconnectSession(id: string): Promise<void> {
-    await this.deleteAuth(`/api/sessions/${id}`);
+    await this.deleteAuth(`/api/sessions/${this.pathSegment(id)}`);
   }
 
   async getSessionPrivileges(id: string): Promise<SessionPrivileges> {
-    return this.getAuth<SessionPrivileges>(`/api/sessions/${id}/privileges`);
+    return this.getAuth<SessionPrivileges>(`/api/sessions/${this.pathSegment(id)}/privileges`);
   }
 
   // =========================================================================
@@ -136,7 +136,7 @@ export class SlskrClient {
   }
 
   async getSearchDetails(id: string, params?: PaginationParams): Promise<SearchDetails> {
-    return this.getAuth<SearchDetails>(`/api/searches/${id}`, params);
+    return this.getAuth<SearchDetails>(`/api/searches/${this.pathSegment(id)}`, params);
   }
 
   // =========================================================================
@@ -150,7 +150,7 @@ export class SlskrClient {
 
   async getUserMessages(username: string, params?: PaginationParams): Promise<Message[]> {
     const response = await this.getAuth<{ messages: Message[] }>(
-      `/api/messages/${username}`,
+      `/api/messages/${this.pathSegment(username)}`,
       params
     );
     return response.messages || [];
@@ -161,7 +161,7 @@ export class SlskrClient {
   }
 
   async acknowledgeMessage(id: string): Promise<void> {
-    await this.putAuth(`/api/messages/${id}/acknowledge`, {});
+    await this.putAuth(`/api/messages/${this.pathSegment(id)}/acknowledge`, {});
   }
 
   // =========================================================================
@@ -181,11 +181,11 @@ export class SlskrClient {
   }
 
   async getTransfer(id: string): Promise<Transfer> {
-    return this.getAuth<Transfer>(`/api/transfers/${id}`);
+    return this.getAuth<Transfer>(`/api/transfers/${this.pathSegment(id)}`);
   }
 
   async cancelTransfer(id: string): Promise<void> {
-    await this.deleteAuth(`/api/transfers/${id}`);
+    await this.deleteAuth(`/api/transfers/${this.pathSegment(id)}`);
   }
 
   // =========================================================================
@@ -198,15 +198,15 @@ export class SlskrClient {
   }
 
   async getRoom(name: string): Promise<Room> {
-    return this.getAuth<Room>(`/api/rooms/${name}`);
+    return this.getAuth<Room>(`/api/rooms/${this.pathSegment(name)}`);
   }
 
   async joinRoom(name: string): Promise<Room> {
-    return this.postAuth<Room>(`/api/rooms/${name}`, {});
+    return this.postAuth<Room>(`/api/rooms/${this.pathSegment(name)}`, {});
   }
 
   async leaveRoom(name: string): Promise<void> {
-    await this.deleteAuth(`/api/rooms/${name}`);
+    await this.deleteAuth(`/api/rooms/${this.pathSegment(name)}`);
   }
 
   // =========================================================================
@@ -214,11 +214,11 @@ export class SlskrClient {
   // =========================================================================
 
   async browseUser(username: string, params?: { folder?: string } & PaginationParams): Promise<BrowseResult> {
-    return this.getAuth<BrowseResult>(`/api/browse/${username}`, params);
+    return this.getAuth<BrowseResult>(`/api/browse/${this.pathSegment(username)}`, params);
   }
 
   async requestBrowse(username: string, folder?: string): Promise<BrowseRequest> {
-    return this.postAuth<BrowseRequest>(`/api/browse/${username}`, { folder });
+    return this.postAuth<BrowseRequest>(`/api/browse/${this.pathSegment(username)}`, { folder });
   }
 
   async getBrowseRequests(params?: { status?: string } & PaginationParams): Promise<BrowseRequest[]> {
@@ -231,7 +231,7 @@ export class SlskrClient {
     action: 'accept' | 'reject',
     folder?: string
   ): Promise<BrowseResult> {
-    return this.postAuth<BrowseResult>(`/api/browse/requests/${id}`, { action, folder });
+    return this.postAuth<BrowseResult>(`/api/browse/requests/${this.pathSegment(id)}`, { action, folder });
   }
 
   // =========================================================================
@@ -381,6 +381,10 @@ export class SlskrClient {
     }
 
     return url;
+  }
+
+  private pathSegment(value: string): string {
+    return encodeURIComponent(value);
   }
 }
 

@@ -11,6 +11,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const maxWebSocketMessageBytes = 64 * 1024
+
 // WebSocketClient represents a WebSocket connection to the API
 type WebSocketClient struct {
 	url              string
@@ -60,6 +62,7 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	conn.SetReadLimit(maxWebSocketMessageBytes)
 
 	w.mu.Lock()
 	w.conn = conn

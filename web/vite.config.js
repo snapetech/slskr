@@ -5,6 +5,20 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const nodeModulesPath = path.resolve(__dirname, 'node_modules');
+
+const resolveNodeModuleLessImport = (filename) => {
+  const requested = filename.slice(1);
+  if (path.isAbsolute(requested)) {
+    throw new Error(`absolute Less alias imports are not allowed: ${filename}`);
+  }
+  const resolved = path.resolve(nodeModulesPath, requested);
+  const relative = path.relative(nodeModulesPath, resolved);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Less alias import escapes node_modules: ${filename}`);
+  }
+  return resolved;
+};
 
 // Custom Less plugin to handle semantic-ui-less webpack-style aliases.
 // @semantic-ui-react/craco-less previously provided these via webpack Less loader.
@@ -28,7 +42,7 @@ class SemanticUILessFileManager {
           return Promise.resolve({ filename: themeConfigPath, contents });
         }
         if (filename.startsWith('~')) {
-          const resolved = path.resolve(__dirname, 'node_modules', filename.slice(1));
+          const resolved = resolveNodeModuleLessImport(filename);
           const contents = fs.readFileSync(resolved, 'utf-8');
           return Promise.resolve({ filename: resolved, contents });
         }
@@ -54,7 +68,7 @@ export default defineConfig({
         math: 'always',
         relativeUrls: true,
         javascriptEnabled: true,
-        paths: [path.resolve(__dirname, 'node_modules')],
+        paths: [nodeModulesPath],
         plugins: [new SemanticUILessFileManager()],
       },
     },

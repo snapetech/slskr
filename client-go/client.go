@@ -9,8 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"time"
 )
+
+var sensitiveErrorFieldPattern = regexp.MustCompile(`(?i)("?(api[-_]?key|authorization|credential|pass(word)?|secret|session|token)"?\s*[:=]\s*)("[^"]*"|[^,\s}\]]+)`)
 
 // Client is the main HTTP client for slskr API
 type Client struct {
@@ -151,7 +155,7 @@ func (c *Client) GetUserMessages(ctx context.Context, username string, limit int
 	params := url.Values{}
 	params.Set("limit", fmt.Sprintf("%d", limit))
 
-	result, err := c.getWithParams(ctx, fmt.Sprintf("/api/messages/%s", username), params, true)
+	result, err := c.getWithParams(ctx, fmt.Sprintf("/api/messages/%s", pathSegment(username)), params, true)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +185,7 @@ func (c *Client) SendMessage(ctx context.Context, recipient, content string) (ma
 
 // AcknowledgeMessage marks message as acknowledged
 func (c *Client) AcknowledgeMessage(ctx context.Context, messageID string) error {
-	_, err := c.post(ctx, fmt.Sprintf("/api/messages/%s/acknowledge", messageID), nil, true)
+	_, err := c.post(ctx, fmt.Sprintf("/api/messages/%s/acknowledge", pathSegment(messageID)), nil, true)
 	return err
 }
 
@@ -191,7 +195,7 @@ func (c *Client) AcknowledgeMessage(ctx context.Context, messageID string) error
 
 // GetUser gets user info
 func (c *Client) GetUser(ctx context.Context, username string) (map[string]interface{}, error) {
-	return c.get(ctx, fmt.Sprintf("/api/users/%s", username), false)
+	return c.get(ctx, fmt.Sprintf("/api/users/%s", pathSegment(username)), false)
 }
 
 // ListUsers lists users
@@ -246,7 +250,7 @@ func (c *Client) ListRooms(ctx context.Context) ([]map[string]interface{}, error
 
 // GetRoom gets room info
 func (c *Client) GetRoom(ctx context.Context, roomID string) (map[string]interface{}, error) {
-	return c.get(ctx, fmt.Sprintf("/api/rooms/%s", roomID), true)
+	return c.get(ctx, fmt.Sprintf("/api/rooms/%s", pathSegment(roomID)), true)
 }
 
 // JoinRoom joins a room
@@ -259,7 +263,7 @@ func (c *Client) JoinRoom(ctx context.Context, roomName string) (map[string]inte
 
 // LeaveRoom leaves a room
 func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
-	_, err := c.post(ctx, fmt.Sprintf("/api/rooms/%s/leave", roomID), nil, true)
+	_, err := c.post(ctx, fmt.Sprintf("/api/rooms/%s/leave", pathSegment(roomID)), nil, true)
 	return err
 }
 
@@ -363,7 +367,7 @@ func (c *Client) do(req *http.Request, auth bool) (map[string]interface{}, error
 
 	if resp.StatusCode >= 400 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, redactErrorBody(bodyBytes))
 	}
 
 	var result map[string]interface{}
@@ -372,4 +376,50 @@ func (c *Client) do(req *http.Request, auth bool) (map[string]interface{}, error
 	}
 
 	return result, nil
+}
+
+func pathSegment(value string) string {
+	return url.PathEscape(value)
+}
+
+func redactErrorBody(body []byte) string {
+	var decoded interface{}
+	if err := json.Unmarshal(body, &decoded); err == nil {
+		redactJSONValue(decoded)
+		redacted, err := json.Marshal(decoded)
+		if err == nil {
+			return string(redacted)
+		}
+	}
+
+	return sensitiveErrorFieldPattern.ReplaceAllString(string(body), `${1}[REDACTED]`)
+}
+
+func redactJSONValue(value interface{}) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		for key, nested := range typed {
+			if isSensitiveField(key) {
+				typed[key] = "[REDACTED]"
+			} else {
+				redactJSONValue(nested)
+			}
+		}
+	case []interface{}:
+		for _, nested := range typed {
+			redactJSONValue(nested)
+		}
+	}
+}
+
+func isSensitiveField(field string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(field, "_", "-"))
+	return strings.Contains(normalized, "token") ||
+		strings.Contains(normalized, "secret") ||
+		strings.Contains(normalized, "password") ||
+		strings.Contains(normalized, "pass") ||
+		strings.Contains(normalized, "api-key") ||
+		strings.Contains(normalized, "authorization") ||
+		strings.Contains(normalized, "credential") ||
+		strings.Contains(normalized, "session")
 }

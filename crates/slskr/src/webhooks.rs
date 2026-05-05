@@ -7,7 +7,7 @@ use rand::{rngs::OsRng, RngCore};
 /// with cryptographic signing for security and verification.
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
 const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
 pub const MAX_WEBHOOKS: usize = 64;
+pub const MIN_WEBHOOK_SECRET_BYTES: usize = 32;
 
 /// Webhook event types
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -111,6 +112,23 @@ impl Webhook {
     pub fn can_retry(&self) -> bool {
         self.retry_count < self.max_retries
     }
+}
+
+pub fn validate_webhook_secret(secret: &str) -> Result<(), &'static str> {
+    if secret.len() < MIN_WEBHOOK_SECRET_BYTES {
+        return Err("webhook secret must be at least 32 bytes");
+    }
+    if secret
+        .bytes()
+        .any(|byte| matches!(byte, 0x00..=0x1f | 0x7f))
+    {
+        return Err("webhook secret must not contain control characters");
+    }
+    let unique = secret.chars().collect::<HashSet<_>>().len();
+    if unique < 8 {
+        return Err("webhook secret has too little character variety");
+    }
+    Ok(())
 }
 
 /// Webhook payload
@@ -548,6 +566,7 @@ mod tests {
     #[test]
     fn test_webhook_creation() {
         let secret = Webhook::generate_secret();
+        validate_webhook_secret(&secret).expect("generated secret is strong enough");
         let webhook = Webhook::new(
             "http://example.com/hook".to_string(),
             vec![WebhookEvent::SearchCreated, WebhookEvent::TransferStarted],
@@ -558,6 +577,14 @@ mod tests {
         assert_eq!(webhook.url, "http://example.com/hook");
         assert!(webhook.active);
         assert_eq!(webhook.max_retries, 3);
+    }
+
+    #[test]
+    fn test_webhook_secret_validation() {
+        assert!(validate_webhook_secret("short").is_err());
+        assert!(validate_webhook_secret("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_err());
+        assert!(validate_webhook_secret("abcdefghij0123456789ABCDEFGHIJ!!").is_ok());
+        assert!(validate_webhook_secret("abcdefghij0123456789\nABCDEFGHIJ!!").is_err());
     }
 
     #[test]

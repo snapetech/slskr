@@ -15,6 +15,7 @@ class WebSocketClient:
         self.url = base_url.replace("http", "ws").rstrip("/") + "/api/events/ws"
         self.token = token
         self.debug = debug
+        self.session: Optional[aiohttp.ClientSession] = None
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self.subscribed_topics: Set[str] = set()
 
@@ -31,8 +32,9 @@ class WebSocketClient:
         """Connect to WebSocket"""
         try:
             headers = {"Authorization": f"Bearer {self.token}"}
+            self.session = aiohttp.ClientSession()
 
-            self.ws = await aiohttp.ClientSession().ws_connect(
+            self.ws = await self.session.ws_connect(
                 self.url,
                 headers=headers,
                 autoclose=False,
@@ -45,6 +47,9 @@ class WebSocketClient:
             asyncio.create_task(self._handle_messages())
 
         except Exception as e:
+            if self.session:
+                await self.session.close()
+                self.session = None
             self._notify_error_listeners(e)
             raise
 
@@ -53,7 +58,10 @@ class WebSocketClient:
         if self.ws:
             await self.ws.close()
             self.ws = None
-            self._notify_connection_listeners(False)
+        if self.session:
+            await self.session.close()
+            self.session = None
+        self._notify_connection_listeners(False)
 
     async def _handle_messages(self):
         """Handle incoming messages"""
