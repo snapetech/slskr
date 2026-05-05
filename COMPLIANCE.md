@@ -55,6 +55,10 @@ This is an engineering compliance checklist, not legal advice.
 - Do not run high-rate searches, crawls, scraping, or unattended network load tests against the public network.
 - Honor server-provided excluded search phrases for outgoing results.
 - Do not bundle, print, log, or commit Soulseek credentials.
+- Use `scripts/check-release-package.sh` as the Rust packaging release gate.
+  The app crate depends on unpublished internal workspace crates, so
+  `cargo package -p slskr` is intentionally not a valid standalone package
+  check.
 
 ## Current Status
 

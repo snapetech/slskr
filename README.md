@@ -52,6 +52,10 @@ cargo test --workspace
 ```
 
 ```bash
+scripts/check-release-package.sh
+```
+
+```bash
 SLSKR_A_USERNAME=<user-a> \
 SLSKR_A_PASSWORD=<pass-a> \
 SLSKR_B_USERNAME=<user-b> \

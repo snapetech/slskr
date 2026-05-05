@@ -451,7 +451,7 @@ CREATE INDEX idx_events_created ON events(created_at DESC);
 
 ## Conclusion
 
-The slskr codebase currently implements **file-based persistence only for share index and transfer snapshots**. All other data is purely in-memory and lost on restart. 
+The slskr codebase currently implements **file-based persistence only for share index and transfer snapshots**. All other data is purely in-memory and lost on restart.
 
 To achieve production-quality persistence:
 1. Add SQLite dependency (`sqlx`)

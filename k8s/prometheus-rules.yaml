@@ -44,8 +44,8 @@ spec:
     # Alert: High memory usage
     - alert: SlskrHighMemoryUsage
       expr: |
-        container_memory_usage_bytes{namespace="slskr", pod=~"slskr-.*"} 
-        / 
+        container_memory_usage_bytes{namespace="slskr", pod=~"slskr-.*"}
+        /
         container_spec_memory_limit_bytes{namespace="slskr", pod=~"slskr-.*"} > 0.9
       for: 5m
       annotations:
@@ -121,8 +121,8 @@ spec:
 
     - record: slskr:webhook_success_rate
       expr: |
-        rate(webhook_deliveries_total{status="success"}[5m]) 
-        / 
+        rate(webhook_deliveries_total{status="success"}[5m])
+        /
         rate(webhook_deliveries_total[5m])
 
     - record: slskr:active_sessions
