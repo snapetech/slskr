@@ -50,13 +50,17 @@ pub struct RouteAction {
 pub enum ActionBody {
     None,
     BrowseDirectory,
+    CollectionItem,
     ConversationMessage,
     DownloadFiles,
     EnabledFalse,
     EnabledTrue,
+    FeedPreview,
     JsonString,
+    NameDescription,
     RoomMessage,
     SearchText,
+    Username,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -407,6 +411,11 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
             surface: "wishlist",
         },
         ApiEndpoint {
+            method: "POST",
+            path: "/wishlist/:id/search",
+            surface: "wishlist",
+        },
+        ApiEndpoint {
             method: "GET",
             path: "/transfers/downloads",
             surface: "transfers",
@@ -468,7 +477,37 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         },
         ApiEndpoint {
             method: "GET",
+            path: "/users",
+            surface: "identity",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/users/:username/info",
+            surface: "identity",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/users/:username/status",
+            surface: "identity",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/users/:username/endpoint",
+            surface: "identity",
+        },
+        ApiEndpoint {
+            method: "GET",
             path: "/contacts",
+            surface: "identity",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/contacts/nearby",
+            surface: "identity",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/users/notes",
             surface: "identity",
         },
         ApiEndpoint {
@@ -477,7 +516,17 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
             surface: "collections",
         },
         ApiEndpoint {
+            method: "POST",
+            path: "/collections",
+            surface: "collections",
+        },
+        ApiEndpoint {
             method: "GET",
+            path: "/sharegroups",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "POST",
             path: "/sharegroups",
             surface: "collections",
         },
@@ -488,12 +537,97 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         },
         ApiEndpoint {
             method: "GET",
+            path: "/shares/catalog",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/items",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/items/browser",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/source-providers",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/source-feed-imports/preview",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/discovery-graph",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/songid/runs",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/songid/runs",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/solid/status",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/pods",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/bridge/status",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/jobs",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/jobs/discography",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/mesh/stats",
+            surface: "integrations",
+        },
+        ApiEndpoint {
+            method: "GET",
             path: "/telemetry/metrics",
             surface: "system",
         },
         ApiEndpoint {
             method: "GET",
             path: "/options",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/events",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/logs",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/shares",
             surface: "system",
         },
     ]
@@ -549,6 +683,20 @@ pub const fn route_actions() -> &'static [RouteAction] {
             method: "DELETE",
             path: "/searches",
             surface: "search",
+        },
+        RouteAction {
+            body: ActionBody::SearchText,
+            label: "Add Wishlist Item",
+            method: "POST",
+            path: "/wishlist",
+            surface: "wishlist",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Run Wishlist Search",
+            method: "POST",
+            path: "/wishlist/wish-demo/search",
+            surface: "wishlist",
         },
         RouteAction {
             body: ActionBody::DownloadFiles,
@@ -633,6 +781,76 @@ pub const fn route_actions() -> &'static [RouteAction] {
             method: "POST",
             path: "/users/:username/directory",
             surface: "browse",
+        },
+        RouteAction {
+            body: ActionBody::Username,
+            label: "Add Contact",
+            method: "POST",
+            path: "/contacts",
+            surface: "identity",
+        },
+        RouteAction {
+            body: ActionBody::Username,
+            label: "Watch User",
+            method: "POST",
+            path: "/users/watch",
+            surface: "identity",
+        },
+        RouteAction {
+            body: ActionBody::Username,
+            label: "Add User Note",
+            method: "POST",
+            path: "/users/notes",
+            surface: "identity",
+        },
+        RouteAction {
+            body: ActionBody::NameDescription,
+            label: "Create Collection",
+            method: "POST",
+            path: "/collections",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::NameDescription,
+            label: "Create Share Group",
+            method: "POST",
+            path: "/sharegroups",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::CollectionItem,
+            label: "Add Library Item",
+            method: "POST",
+            path: "/library/items",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::FeedPreview,
+            label: "Preview Playlist",
+            method: "POST",
+            path: "/source-feed-imports/preview",
+            surface: "integrations",
+        },
+        RouteAction {
+            body: ActionBody::SearchText,
+            label: "Build Discovery Graph",
+            method: "POST",
+            path: "/discovery-graph",
+            surface: "integrations",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Create SongID Run",
+            method: "POST",
+            path: "/songid/runs",
+            surface: "integrations",
+        },
+        RouteAction {
+            body: ActionBody::SearchText,
+            label: "Queue Discography Job",
+            method: "POST",
+            path: "/jobs/discography",
+            surface: "integrations",
         },
         RouteAction {
             body: ActionBody::None,
@@ -983,18 +1201,34 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             r#"{{"directory":"{}"}}"#,
             escape_json_string(value)
         )),
+        ActionBody::CollectionItem => Some(format!(
+            r#"{{"content_id":"rust-web-demo","artist":"Public Domain","title":"{}","kind":"Audio"}}"#,
+            escape_json_string(value)
+        )),
         ActionBody::DownloadFiles => Some(format!(
             r#"[{{"filename":"{}","size":99}}]"#,
             escape_json_string(value)
         )),
         ActionBody::EnabledFalse => Some(r#"{"enabled":false}"#.to_string()),
         ActionBody::EnabledTrue => Some(r#"{"enabled":true}"#.to_string()),
+        ActionBody::FeedPreview => Some(format!(
+            r#"{{"sourceText":"{}","sourceKind":"auto","limit":25,"includeAlbum":true,"fetchProviderUrls":false}}"#,
+            escape_json_string(value)
+        )),
         ActionBody::ConversationMessage | ActionBody::JsonString => {
             Some(format!(r#""{}""#, escape_json_string(value)))
         }
+        ActionBody::NameDescription => Some(format!(
+            r#"{{"name":"{}","description":"Created from the Rust web UI"}}"#,
+            escape_json_string(value)
+        )),
         ActionBody::RoomMessage => Some(format!(r#""{}""#, escape_json_string(value))),
         ActionBody::SearchText => Some(format!(
             r#"{{"searchText":"{}"}}"#,
+            escape_json_string(value)
+        )),
+        ActionBody::Username => Some(format!(
+            r#"{{"username":"{}","note":"Created from the Rust web UI"}}"#,
             escape_json_string(value)
         )),
     }
@@ -1009,18 +1243,30 @@ pub fn action_input_html(action: RouteAction) -> String {
         ActionBody::ConversationMessage => {
             r#"<input class="slskr-action-input" data-slskr-action-input="ConversationMessage" value="hello" placeholder="Message">"#.to_string()
         }
+        ActionBody::CollectionItem => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="CollectionItem" value="Demo Track" placeholder="Title">"#.to_string()
+        }
         ActionBody::DownloadFiles => {
             r#"<input class="slskr-action-input" data-slskr-action-input="DownloadFiles" value="Remote/Song.mp3" placeholder="Filename">"#.to_string()
         }
         ActionBody::EnabledFalse | ActionBody::EnabledTrue => String::new(),
+        ActionBody::FeedPreview => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="FeedPreview" value="Public Domain Jazz - Demo Track" placeholder="Playlist text">"#.to_string()
+        }
         ActionBody::JsonString => {
             r#"<input class="slskr-action-input" data-slskr-action-input="JsonString" value="contract-room" placeholder="Name">"#.to_string()
+        }
+        ActionBody::NameDescription => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="NameDescription" value="Rust Web Demo" placeholder="Name">"#.to_string()
         }
         ActionBody::RoomMessage => {
             r#"<input class="slskr-action-input" data-slskr-action-input="RoomMessage" value="hello room" placeholder="Message">"#.to_string()
         }
         ActionBody::SearchText => {
             r#"<input class="slskr-action-input" data-slskr-action-input="SearchText" value="public domain jazz" placeholder="Search text">"#.to_string()
+        }
+        ActionBody::Username => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="peer1" placeholder="Username">"#.to_string()
         }
     }
 }
@@ -1089,6 +1335,42 @@ fn endpoint_body<'a>(responses: &'a [EndpointBody], path: &str) -> Option<&'a st
         .map(|response| response.body.as_str())
 }
 
+pub fn surface_names() -> Vec<&'static str> {
+    let mut names = route_pages()
+        .iter()
+        .map(|page| page.surface)
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+pub fn surface_route_count(surface: &str) -> usize {
+    route_pages()
+        .iter()
+        .filter(|page| page.surface == surface)
+        .count()
+}
+
+pub fn surface_matrix_html() -> String {
+    surface_names()
+        .iter()
+        .map(|surface| {
+            stat_card_html(
+                surface,
+                &format!(
+                    "{} routes / {} APIs / {} actions",
+                    surface_route_count(surface),
+                    route_endpoints(surface).len(),
+                    surface_actions(surface).len()
+                ),
+                "bulk Rust coverage",
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 pub fn route_summary_pending_html(path: &str) -> String {
     let Some(page) = route_page(path) else {
         return String::new();
@@ -1146,6 +1428,46 @@ pub fn route_summary_pending_html(path: &str) -> String {
             stat_card_html(
                 "Actions",
                 &surface_actions("system").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        "wishlist" => [
+            stat_card_html("Wishlist", "pending", "wanted items"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("wishlist").len().to_string(),
+                "Rust owned",
+            ),
+            stat_card_html("Coverage", "bulk", "route group"),
+        ]
+        .join(""),
+        "identity" => [
+            stat_card_html("Users", "pending", "watched peers"),
+            stat_card_html("Contacts", "pending", "relationships"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("identity").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        "collections" => [
+            stat_card_html("Collections", "pending", "records"),
+            stat_card_html("Share Groups", "pending", "groups"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("collections").len().to_string(),
+                "Rust owned",
+            ),
+        ]
+        .join(""),
+        "integrations" => [
+            stat_card_html("Providers", "pending", "sources"),
+            stat_card_html("Jobs", "pending", "automation"),
+            stat_card_html(
+                "Actions",
+                &surface_actions("integrations").len().to_string(),
                 "Rust owned",
             ),
         ]
@@ -1273,6 +1595,86 @@ pub fn route_summary_result_html(path: &str, responses: &[EndpointBody]) -> Stri
             ]
             .join("")
         }
+        "wishlist" => {
+            let wishlist = endpoint_body(responses, "/wishlist")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            [
+                stat_card_html("Wishlist", &wishlist, "wanted items"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("wishlist").len().to_string(),
+                    "Rust owned",
+                ),
+                stat_card_html("Coverage", "bulk", "route group"),
+            ]
+            .join("")
+        }
+        "identity" => {
+            let users = endpoint_body(responses, "/users")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            let contacts = endpoint_body(responses, "/contacts")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            [
+                stat_card_html("Users", &users, "watched peers"),
+                stat_card_html("Contacts", &contacts, "relationships"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("identity").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
+        "collections" => {
+            let collections = endpoint_body(responses, "/collections")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            let sharegroups = endpoint_body(responses, "/sharegroups")
+                .and_then(json_array_len)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            [
+                stat_card_html("Collections", &collections, "records"),
+                stat_card_html("Share Groups", &sharegroups, "groups"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("collections").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
+        "integrations" => {
+            let providers = endpoint_body(responses, "/source-providers")
+                .and_then(|body| json_field_string(body, "count"))
+                .unwrap_or_else(|| "0".to_string());
+            let jobs = endpoint_body(responses, "/jobs")
+                .and_then(json_array_len)
+                .or_else(|| {
+                    endpoint_body(responses, "/songid/runs")
+                        .and_then(|body| json_field_string(body, "count"))
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            [
+                stat_card_html("Providers", &providers, "sources"),
+                stat_card_html("Jobs", &jobs, "automation"),
+                stat_card_html(
+                    "Actions",
+                    &surface_actions("integrations").len().to_string(),
+                    "Rust owned",
+                ),
+            ]
+            .join("")
+        }
         "system" => {
             let metrics = endpoint_body(responses, "/telemetry/metrics")
                 .map(|body| {
@@ -1349,12 +1751,13 @@ pub fn route_page_html(path: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-actions"><h3>Actions</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-surface-matrix"><h3>Bulk Surface Coverage</h3><ul>{surface_matrix}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-actions"><h3>Actions</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
         description = escape_html(page.description),
         summary = route_summary_pending_html(path),
+        surface_matrix = surface_matrix_html(),
         routes = route_inventory,
         endpoints = endpoints,
         actions = route_actions_html(path),
@@ -1416,9 +1819,10 @@ pub fn shell_html() -> String {
         .join("");
 
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-hero"><p class="slskr-kicker">Rust web migration target</p><h1>slskr</h1><p>Native Rust/WASM app shell for porting the existing browser UI one route at a time.</p><code>{report}</code></header><section id="slskr-route-view">{route_page}</section><section class="slskr-contract slskr-runtime"><h2>Runtime Status</h2><ul id="slskr-runtime-status">{runtime}</ul></section><div class="slskr-grid">{sections}</div><section class="slskr-contract"><h2>Route Parity</h2><ul>{routes}</ul></section><section class="slskr-contract"><h2>API Contracts</h2><ul>{endpoints}</ul></section></main></div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-hero"><p class="slskr-kicker">Rust web migration target</p><h1>slskr</h1><p>Native Rust/WASM app shell for porting the existing browser UI in bulk.</p><code>{report}</code></header><section id="slskr-route-view">{route_page}</section><section class="slskr-contract slskr-runtime"><h2>Runtime Status</h2><ul id="slskr-runtime-status">{runtime}</ul></section><section class="slskr-contract slskr-surface-matrix"><h2>Bulk Surface Coverage</h2><ul>{surface_matrix}</ul></section><div class="slskr-grid">{sections}</div><section class="slskr-contract"><h2>Route Parity</h2><ul>{routes}</ul></section><section class="slskr-contract"><h2>API Contracts</h2><ul>{endpoints}</ul></section></main></div>"#,
         route_page = route_page_html("/searches"),
         runtime = runtime_probe_pending_html(),
+        surface_matrix = surface_matrix_html(),
         report = compatibility_report()
     )
 }
@@ -1608,13 +2012,17 @@ fn mount_route_actions(
 fn action_body_from_name(name: &str) -> ActionBody {
     match name {
         "BrowseDirectory" => ActionBody::BrowseDirectory,
+        "CollectionItem" => ActionBody::CollectionItem,
         "ConversationMessage" => ActionBody::ConversationMessage,
         "DownloadFiles" => ActionBody::DownloadFiles,
         "EnabledFalse" => ActionBody::EnabledFalse,
         "EnabledTrue" => ActionBody::EnabledTrue,
+        "FeedPreview" => ActionBody::FeedPreview,
         "JsonString" => ActionBody::JsonString,
+        "NameDescription" => ActionBody::NameDescription,
         "RoomMessage" => ActionBody::RoomMessage,
         "SearchText" => ActionBody::SearchText,
+        "Username" => ActionBody::Username,
         _ => ActionBody::None,
     }
 }
@@ -1832,6 +2240,7 @@ mod tests {
         assert!(html.contains("slskr-route-actions"));
         assert!(html.contains("slskr-route-summary"));
         assert!(html.contains("Summary"));
+        assert!(html.contains("Bulk Surface Coverage"));
         assert!(html.contains("Clear Completed Downloads"));
     }
 
@@ -1887,6 +2296,25 @@ mod tests {
         assert!(system.contains("Disconnect"));
         assert!(system.contains("Rescan Shares"));
         assert!(system.contains("/api/v0/server"));
+
+        let wishlist = route_page_html("/wishlist");
+        assert!(wishlist.contains("Add Wishlist Item"));
+        assert!(wishlist.contains("Run Wishlist Search"));
+
+        let contacts = route_page_html("/contacts");
+        assert!(contacts.contains("Add Contact"));
+        assert!(contacts.contains("Watch User"));
+        assert!(contacts.contains("Add User Note"));
+
+        let collections = route_page_html("/collections");
+        assert!(collections.contains("Create Collection"));
+        assert!(collections.contains("Create Share Group"));
+        assert!(collections.contains("Add Library Item"));
+
+        let integrations = route_page_html("/playlist-intake");
+        assert!(integrations.contains("Preview Playlist"));
+        assert!(integrations.contains("Build Discovery Graph"));
+        assert!(integrations.contains("Create SongID Run"));
     }
 
     #[test]
@@ -1914,6 +2342,15 @@ mod tests {
         assert_eq!(
             action_body_from_value(ActionBody::EnabledFalse, "ignored").unwrap(),
             r#"{"enabled":false}"#
+        );
+        assert_eq!(
+            action_body_from_value(ActionBody::Username, "peer1").unwrap(),
+            r#"{"username":"peer1","note":"Created from the Rust web UI"}"#
+        );
+        assert!(
+            action_body_from_value(ActionBody::FeedPreview, "artist - song")
+                .unwrap()
+                .contains("\"sourceText\":\"artist - song\"")
         );
         assert!(action_body_from_value(ActionBody::None, "ignored").is_none());
     }
@@ -2025,6 +2462,34 @@ mod tests {
     }
 
     #[test]
+    fn bulk_surface_matrix_covers_every_route_group() {
+        let matrix = surface_matrix_html();
+        for surface in [
+            "browse",
+            "collections",
+            "identity",
+            "integrations",
+            "messages",
+            "rooms",
+            "search",
+            "system",
+            "transfers",
+            "wishlist",
+        ] {
+            assert!(matrix.contains(surface), "missing surface {surface}");
+            assert!(surface_route_count(surface) > 0, "no routes for {surface}");
+            assert!(
+                !route_endpoints(surface).is_empty(),
+                "no endpoints for {surface}"
+            );
+        }
+        assert!(surface_actions("collections").len() >= 3);
+        assert!(surface_actions("integrations").len() >= 4);
+        assert!(surface_actions("identity").len() >= 3);
+        assert!(surface_actions("wishlist").len() >= 2);
+    }
+
+    #[test]
     fn rust_route_inventory_matches_current_react_route_surface() {
         let route_paths = ui_routes()
             .iter()
@@ -2039,6 +2504,8 @@ mod tests {
             "/browse",
             "/users",
             "/contacts",
+            "/solid",
+            "/collections",
             "/sharegroups",
             "/shared",
             "/chat",
@@ -2110,6 +2577,7 @@ mod tests {
             "browse",
             "identity",
             "collections",
+            "integrations",
             "system",
         ] {
             assert!(
@@ -2132,6 +2600,10 @@ mod tests {
             "rooms",
             "messages",
             "browse",
+            "wishlist",
+            "identity",
+            "collections",
+            "integrations",
             "system",
         ] {
             assert!(surfaces.contains(&expected), "missing action {expected}");
@@ -2150,6 +2622,18 @@ mod tests {
             ("PUT", "/conversations/:username"),
             ("DELETE", "/conversations/:username"),
             ("POST", "/users/:username/directory"),
+            ("POST", "/wishlist"),
+            ("POST", "/wishlist/wish-demo/search"),
+            ("POST", "/contacts"),
+            ("POST", "/users/watch"),
+            ("POST", "/users/notes"),
+            ("POST", "/collections"),
+            ("POST", "/sharegroups"),
+            ("POST", "/library/items"),
+            ("POST", "/source-feed-imports/preview"),
+            ("POST", "/discovery-graph"),
+            ("POST", "/songid/runs"),
+            ("POST", "/jobs/discography"),
             ("POST", "/shares/rescan"),
         ] {
             assert!(

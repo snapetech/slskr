@@ -134,6 +134,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | `slskr -> slskr` obfuscated peer-message response | Passed with compatibility fallback | 2026-05-04 focused VPN run: type-1 obfuscated init and obfuscated request succeeded; `slskr` returned the peer message as a plain frame, and `slskr` completed via plain-response fallback |
 | `slskr` live login after repeated daemon retries | Mitigated by VPN account pool | Fresh p5-p8 accounts avoid the prior host-egress reset path for focused daemon/probe runs; raw public-host reruns may still reset under heavy retry |
 | `slskr` unit tests | Passed | `/home/keith/Documents/code/slskr`: 3863/3863 passed |
+| `slskr` live `slskd_api` automation client smoke | Passed | 2026-05-05 local daemon run with Python `slskd_api` 0.2.4: 31 client calls passed across application, session, server, search, transfer, room, conversation, share, options, events, logs, and telemetry APIs |
 | vendored `slskNet.Runtime` library build | Passed | `/home/keith/Documents/code/slskr`: `dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj`, 0 warnings/errors |
 | vendored `slskNet.Runtime` unit behavior | Passed | `/home/keith/Documents/code/slskr`: 2303/2303 passed |
 | standalone `dotnet reference suite` unit behavior | Passed | `/home/keith/Documents/code/dotnet reference suite`: 2246/2246 passed |

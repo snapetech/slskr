@@ -192,20 +192,23 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
-.slskr-route-summary {
+.slskr-route-summary,
+.slskr-surface-matrix {
   border-bottom: 1px solid #263130;
   margin-bottom: 16px;
   padding-bottom: 16px;
 }
 
-.slskr-route-summary h3 {
+.slskr-route-summary h3,
+.slskr-surface-matrix h3 {
   color: #f4efe7;
   font-size: 14px;
   margin: 0 0 10px;
   text-transform: uppercase;
 }
 
-.slskr-route-summary ul {
+.slskr-route-summary ul,
+.slskr-surface-matrix ul {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -214,7 +217,8 @@ body {
   padding: 0;
 }
 
-.slskr-route-summary li {
+.slskr-route-summary li,
+.slskr-surface-matrix li {
   background: #111516;
   border: 1px solid #34403f;
   display: grid;
@@ -223,22 +227,31 @@ body {
   padding: 12px;
 }
 
-.slskr-route-summary strong {
+.slskr-route-summary strong,
+.slskr-surface-matrix strong {
   color: #cdbfab;
   font-size: 11px;
   text-transform: uppercase;
 }
 
-.slskr-route-summary span {
+.slskr-route-summary span,
+.slskr-surface-matrix span {
   color: #f4efe7;
   font-size: 22px;
   font-weight: 700;
   overflow-wrap: anywhere;
 }
 
-.slskr-route-summary small {
+.slskr-route-summary small,
+.slskr-surface-matrix small {
   color: #9ba8a1;
   font-size: 12px;
+}
+
+.slskr-contract.slskr-surface-matrix {
+  border-color: #34403f;
+  margin-top: 18px;
+  padding: 18px;
 }
 
 .slskr-route-columns h3 {

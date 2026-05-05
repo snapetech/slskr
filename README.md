@@ -207,15 +207,15 @@ Core endpoint groups:
 - Health/version/config: `/api/health`, `/api/v0/health`, `/api/version`, `/api/v0/version`, `/api/v0/config`.
 - Capabilities: `/api/v0/capabilities`, `/api/v0/capabilities/negotiate`.
 - Stats/metrics/telemetry: `/api/v0/stats`, `/api/v0/metrics`, `/api/v0/telemetry`.
-- Events: `/api/v0/events`, `/api/events/ws`.
+- Events: `/api/v0/events`, `/api/v0/events/records`, `/api/events/ws`.
 - Shares and catalog: `/api/v0/shares`, `/api/v0/shares/catalog`, `/api/v0/files/:root`, `/api/v0/shares/rescan`.
-- Search: `/api/v0/searches`, `/api/v0/searches/:token`, `/api/v0/searches/:token/complete`, `/api/v0/searches/prune`, `/api/v0/search-responses`.
+- Search: `/api/v0/searches`, `/api/v0/searches/records`, `/api/v0/searches/:token`, `/api/v0/searches/:token/complete`, `/api/v0/searches/prune`, `/api/v0/search-responses`.
 - Users and browse: `/api/v0/users`, `/api/v0/users/watch`, `/api/v0/users/:username/browse`, `/api/v0/users/:username/browse/request`, `/api/v0/browse-responses`.
 - Messages: `/api/v0/messages`, `/api/v0/messages/:username`, `/api/v0/messages/:id/ack`.
 - Rooms: `/api/v0/rooms`, `/api/v0/rooms/refresh`, `/api/v0/rooms/:room/join`, `/api/v0/rooms/:room/messages`.
 - Session/listeners: `/api/v0/session`, `/api/v0/session/connect`, `/api/v0/session/disconnect`, `/api/v0/session/ping`, `/api/v0/listeners`.
 - Transfers: `/api/v0/transfers`, `/api/v0/transfers/stats`, `/api/v0/transfers/downloads`, `/api/v0/transfers/uploads`, `/api/v0/transfers/:id/start`, `/api/v0/transfers/:id/progress`, `/api/v0/transfers/:id/complete`, `/api/v0/transfers/:id/cancel`, `/api/v0/transfers/:id/fail`.
-- Automation compatibility: `/api/v0/application`, `/api/v0/application/version/latest`, `/api/v0/server`, `/api/v0/session/enabled`, `searchText` search bodies, grouped transfer download/upload views, and search response arrays.
+- Automation compatibility: `/api/v0/application`, `/api/v0/application/version/latest`, `/api/v0/server`, `/api/v0/session/enabled`, `searchText` search bodies, slskd-style top-level search/event arrays, grouped transfer download/upload views, JSON-string YAML options, and search response arrays.
 
 Example search request:
 

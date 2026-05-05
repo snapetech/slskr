@@ -77,12 +77,15 @@ The first app shell exposes:
 - `GET /api/v0/server`: automation-compatible server connection state.
 - `POST /api/v0/server` and `DELETE /api/v0/server`: aliases for session connect/disconnect.
 - `GET /api/v0/session/enabled`: reports whether HTTP auth is enabled.
-- `GET /api/v0/searches`: list search records. Supports `q`, `status`, `target`, `limit`, and `offset` query parameters. When persistence is enabled, startup hydrates this projection from SQLite search rows.
+- `GET /api/v0/searches`: list search records as a slskd-compatible top-level array for automation clients. Supports `q`, `status`, `target`, `limit`, and `offset` query parameters. When persistence is enabled, startup hydrates this projection from SQLite search rows.
+- `GET /api/v0/searches/records`: list search records with the slskr metadata envelope (`entries`, counts, pagination, and next token) for the dashboard and richer native callers.
 - `POST /api/v0/searches`: create a search record from JSON body `{"query":"..."}` or automation-compatible `{"searchText":"..."}`, match against the current local share snapshot, optionally persist it to SQLite, and enqueue the public-network search command when connected. Optional `target` values are `global`, `user`, `room`, or `wishlist`; user searches require `username`, room searches require `room`, and `ttl_seconds` controls the active search expiration window.
 - `GET /api/v0/searches/:token`: read one search record
 - `POST /api/v0/searches/:token/complete`: mark one search record completed
 - `POST /api/v0/searches/prune`: expire due active searches and remove expired records
 - `POST /api/v0/search-responses`: merge one flattened result into a search record from JSON body with `token`, `filename`, `size`, and optional `peer_username`, `extension`, `slot_free`, `average_speed`, and `queue_length`
+- `GET /api/v0/events`: list events as a slskd-compatible top-level array.
+- `GET /api/v0/events/records`: list events with the slskr metadata envelope for dashboard filtering and pagination.
 - `GET /api/v0/users`: list watched/user projection records
 - `POST /api/v0/users/watch`: watch a username from JSON body `{"username":"..."}` and enqueue the server watch command when connected
 - `DELETE /api/v0/users/:username/watch`: mark a user unwatched and enqueue the server unwatch command when connected

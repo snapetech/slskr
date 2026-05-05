@@ -4383,7 +4383,7 @@ async fn route_http_request_with_headers(
                 body: metrics,
             })
         }
-        ("GET", "/api/events") => {
+        ("GET", "/api/events/records") => {
             let events = state.events.read().await;
             Ok(HttpResponse {
                 status: "200 OK",
@@ -4391,7 +4391,7 @@ async fn route_http_request_with_headers(
                 body: events.json(route.query),
             })
         }
-        ("GET", "/api/events/slskd") => {
+        ("GET", "/api/events") | ("GET", "/api/events/slskd") => {
             let events = state.events.read().await;
             Ok(HttpResponse {
                 status: "200 OK",
@@ -6347,8 +6347,8 @@ async fn route_http_request_with_headers(
         ("GET", "/api/options/yaml") => {
             Ok(HttpResponse {
                 status: "200 OK",
-                content_type: "text/yaml",
-                body: "# Configuration YAML\napp: {}\n".to_string(),
+                content_type: "application/json",
+                body: format!("\"{}\"", json_escape("# Configuration YAML\napp: {}\n")),
             })
         }
         ("GET", "/api/options/debug") => {
@@ -6359,10 +6359,7 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", "/api/options/yaml/location") => {
-            let json = format!(
-                "{{\"location\":\"{}\",\"readable\":true,\"writable\":true}}",
-                "/etc/slskr/config.yaml"
-            );
+            let json = format!("\"{}\"", json_escape("/etc/slskr/config.yaml"));
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/autoreplace") => {
@@ -6493,6 +6490,9 @@ async fn route_http_request_with_headers(
             let json = collections.json_array(route.query);
             drop(collections);
             Ok(routing::ok_response(json))
+        }
+        ("GET", "/api/shared") => {
+            Ok(routing::ok_response("[]".to_string()))
         }
         ("POST", "/api/collections") => {
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
@@ -13404,7 +13404,8 @@ mod tests {
             ("/api/v0/config", "\"credentials_configured\":true"),
             ("/api/v0/stats", "\"session\":"),
             ("/api/v0/telemetry", "\"health\":"),
-            ("/api/v0/events", "\"entries\":"),
+            ("/api/v0/events", "[]"),
+            ("/api/v0/events/records", "\"entries\":"),
             ("/api/v0/session", "\"state\":\"disconnected\""),
             ("/api/v0/session/enabled", "false"),
             ("/api/v0/listeners", "\"regular_accepts\":0"),
@@ -14614,7 +14615,7 @@ mod tests {
         .await
         .unwrap();
 
-        let events = super::route_http_request("GET", "/api/v0/events", None, "", &state)
+        let events = super::route_http_request("GET", "/api/v0/events/records", None, "", &state)
             .await
             .expect("events response");
         assert_eq!(events.status, "200 OK");
@@ -14624,7 +14625,7 @@ mod tests {
 
         let filtered = super::route_http_request(
             "GET",
-            "/api/v0/events?kind=search.started",
+            "/api/v0/events/records?kind=search.started",
             None,
             "",
             &state,
