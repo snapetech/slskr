@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-In this session, we transformed the slskR Soulseek protocol implementation from a feature-complete but incomplete API into a production-ready system by:
+In this session, we transformed the slskr Soulseek protocol implementation from a feature-complete but incomplete API into a production-ready system by:
 
 1. **Implementing Durable Storage** - Full SQLite persistence layer
 2. **Expanding API Endpoints** - Added 15+ critical missing endpoints

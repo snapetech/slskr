@@ -1,8 +1,8 @@
 /**
- * soulseekR HTTP API Client
- * Official TypeScript/JavaScript client library for soulseekR
+ * slskr HTTP API Client
+ * TypeScript/JavaScript client library for slskr
  *
- * @module @soulseekr/api-client
+ * @module @slskr/api-client
  * @version 1.0.0
  */
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-slskR implements per-user and per-IP rate limiting to protect the API from abuse and ensure fair resource allocation across clients.
+slskr implements per-user and per-IP rate limiting to protect the API from abuse and ensure fair resource allocation across clients.
 
 ## Configuration
 

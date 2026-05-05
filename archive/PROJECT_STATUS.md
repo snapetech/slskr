@@ -1,8 +1,8 @@
-# slskR Project Status - Comprehensive Overview
+# slskr Project Status - Comprehensive Overview
 
 ## Executive Summary
 
-slskR is a production-ready Soulseek network client and server implementation written in Rust with a comprehensive HTTP REST API. The project has evolved through 10 phases of development, implementing 202+ HTTP endpoints with full webhook support, advanced authentication, rate limiting, API versioning, caching, CORS, and enterprise-grade infrastructure.
+slskr is a production-ready Soulseek network client and server implementation written in Rust with a comprehensive HTTP REST API. The project has evolved through 10 phases of development, implementing 202+ HTTP endpoints with full webhook support, advanced authentication, rate limiting, API versioning, caching, CORS, and enterprise-grade infrastructure.
 
 **Current Status:** ✅ **PRODUCTION READY**
 - **Test Coverage:** 154/154 unit tests passing (100%)
@@ -392,7 +392,7 @@ cargo build --release
 ### Build from Source
 ```bash
 git clone <repo>
-cd slskR
+cd slskr
 cargo build --release
 ```
 

@@ -1,12 +1,12 @@
-# React Mistakes Fixed & Directory Renamed to slskR
+# React Mistakes Fixed & Directory Renamed to slskr
 
 ## Summary of Changes
 
-### 1. Directory Rename: soulseekR → slskR
+### 1. Directory Rename: slskr → slskr
 **Status**: ✅ COMPLETE
-**Location**: /home/keith/Documents/code/slskR/
+**Location**: /home/keith/Documents/code/slskr/
 
-All references to "soulseekR" have been updated to "slskR" in:
+All references to "slskr" have been updated to "slskr" in:
 - Cargo.toml (workspace homepage & repository)
 - dashboard/package.json (name & description)
 - dashboard/src/components/Sidebar.tsx (dashboard title)
@@ -193,7 +193,7 @@ dashboard/src/
 ├── components/
 │   ├── ErrorBoundary.tsx            (✅ NEW - Error handling)
 │   ├── Header.tsx                    (Fixed: uses context)
-│   └── Sidebar.tsx                   (Fixed: renamed soulseekR)
+│   └── Sidebar.tsx                   (Fixed: renamed slskr)
 ├── context/
 │   └── ApiContext.tsx                (✅ NEW - Context provider)
 ├── hooks/
@@ -236,12 +236,12 @@ dashboard/src/
 
 ### 6. Naming Changes
 
-All "soulseekR" references renamed to "slskR":
+All "slskr" references renamed to "slskr":
 
-- ✅ Directory: /home/keith/Documents/code/**slskR**
-- ✅ Cargo.toml: github.com/snapetech/slskR
+- ✅ Directory: /home/keith/Documents/code/**slskr**
+- ✅ Cargo.toml: github.com/snapetech/slskr
 - ✅ dashboard/package.json: "slskr-admin-dashboard"
-- ✅ Sidebar title: "slskR Admin"
+- ✅ Sidebar title: "slskr Admin"
 - ✅ All documentation files
 - ✅ CLI tool references
 - ✅ Code comments
@@ -250,7 +250,7 @@ All "soulseekR" references renamed to "slskR":
 
 ```bash
 # Build dashboard
-cd /home/keith/Documents/code/slskR/dashboard
+cd /home/keith/Documents/code/slskr/dashboard
 npm install  # Already done
 npm run build  # Already done
 
@@ -277,11 +277,11 @@ kubectl apply -k k8s/
 1. `src/App.tsx` - Refactored with context & providers
 2. `src/components/Header.tsx` - Uses context, useCallback
 3. `src/pages/Dashboard.tsx` - Uses useFetch hook
-4. `src/components/Sidebar.tsx` - Renamed to slskR
+4. `src/components/Sidebar.tsx` - Renamed to slskr
 5. `dashboard/package.json` - Updated name/description
 
 ### Configuration Updates (1)
-1. `Cargo.toml` - Updated URLs to slskR
+1. `Cargo.toml` - Updated URLs to slskr
 
 ## Testing Checklist
 
@@ -303,6 +303,6 @@ kubectl apply -k k8s/
 ✅ **Memory Safety**: No leaks or dangling refs
 ✅ **Type Safety**: Full TypeScript coverage
 ✅ **Maintainability**: Clean architecture
-✅ **Naming**: Consistent slskR branding
+✅ **Naming**: Consistent slskr branding
 
 Ready for deployment! 🚀

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Basic usage example for soulseekR Python client
+Basic usage example for slskr Python client
 """
 
 import asyncio
-from soulseekr import SoulseekrClient
+from slskr import SlskrClient
 
 
 async def main():
     """Basic client usage example"""
     
     # Initialize client
-    client = SoulseekrClient(
+    client = SlskrClient(
         base_url="http://localhost:8080",
         token="your-api-key-here",
         debug=True  # Enable debug logging

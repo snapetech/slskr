@@ -1,10 +1,10 @@
 # Webhook API Documentation
 
-slskR now supports webhooks for receiving notifications about important events in real-time. This document describes how to use the webhook API.
+slskr now supports webhooks for receiving notifications about important events in real-time. This document describes how to use the webhook API.
 
 ## Overview
 
-Webhooks allow you to register HTTP endpoints that will be notified when specific events occur in slskR. Each webhook:
+Webhooks allow you to register HTTP endpoints that will be notified when specific events occur in slskr. Each webhook:
 - Has a unique ID for identification
 - Targets a specific URL (your server endpoint)
 - Subscribes to one or more event types

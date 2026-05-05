@@ -1,7 +1,7 @@
 {
-  "name": "@soulseekr/api-client",
+  "name": "@slskr/api-client",
   "version": "1.0.0",
-  "description": "Official TypeScript/JavaScript client library for soulseekR HTTP API",
+  "description": "TypeScript/JavaScript client library for the slskr HTTP API",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -19,8 +19,8 @@
     "api",
     "typescript"
   ],
-  "author": "soulseekR",
-  "license": "MIT",
+  "author": "slskr contributors",
+  "license": "AGPL-3.0-only",
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",

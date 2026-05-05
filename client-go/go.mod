@@ -1,4 +1,4 @@
-module github.com/soulseekr/client-go
+module github.com/snapetech/slskr/client-go
 
 go 1.19
 

@@ -183,7 +183,7 @@ describe('App', () => {
     });
   });
 
-  it('keeps the browser tab title focused on slskR branding', async () => {
+  it('keeps the browser tab title focused on slskr branding', async () => {
     render(
       <MemoryRouter>
         <App />
@@ -194,7 +194,7 @@ describe('App', () => {
       expect(screen.getByText('Searches')).toBeInTheDocument();
     });
 
-    expect(document.title).toBe('slskR');
+    expect(document.title).toBe('slskr');
   });
 
   it('shows chat activity in the header when conversations have unread messages', async () => {
@@ -278,10 +278,10 @@ describe('App', () => {
     expect(
       await screen.findByTestId('vpn-port-change-notice'),
     ).toBeInTheDocument();
-    expect(screen.getByText('slskR ingress ports were reduced.')).toBeInTheDocument();
+    expect(screen.getByText('slskr ingress ports were reduced.')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Older builds needed five public forwards. Current builds need two: Soulseek peer/file transfers and the slskR mesh/DHT/QUIC overlay.',
+        'Older builds needed five public forwards. Current builds need two: Soulseek peer/file transfers and the slskr mesh/DHT/QUIC overlay.',
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByText('Soulseek peer/file transfers')).toHaveLength(2);
@@ -289,8 +289,8 @@ describe('App', () => {
     expect(screen.getByText('Need now')).toBeInTheDocument();
     expect(screen.getAllByText('TCP 50300')).toHaveLength(2);
     expect(screen.getAllByText('TCP/UDP 50305')).toHaveLength(2);
-    expect(screen.getByText('slskR mesh overlay and DHT rendezvous')).toBeInTheDocument();
-    expect(screen.getByText('slskR mesh, DHT rendezvous, and QUIC overlay')).toBeInTheDocument();
+    expect(screen.getByText('slskr mesh overlay and DHT rendezvous')).toBeInTheDocument();
+    expect(screen.getByText('slskr mesh, DHT rendezvous, and QUIC overlay')).toBeInTheDocument();
     expect(screen.getByText('legacy mesh UDP overlay')).toBeInTheDocument();
     expect(screen.getByText('UDP 50400')).toBeInTheDocument();
     expect(screen.queryByText('TCP 50301')).not.toBeInTheDocument();
@@ -364,7 +364,7 @@ describe('App', () => {
       await screen.findByTestId('vpn-port-change-notice'),
     ).toBeInTheDocument();
     expect(screen.getByText('TCP 61000')).toBeInTheDocument();
-    expect(screen.getByText('slskR mesh overlay')).toBeInTheDocument();
+    expect(screen.getByText('slskr mesh overlay')).toBeInTheDocument();
     expect(screen.getByText('TCP 62000')).toBeInTheDocument();
     expect(screen.getByText('DHT rendezvous')).toBeInTheDocument();
     expect(screen.getByText('UDP 62010')).toBeInTheDocument();

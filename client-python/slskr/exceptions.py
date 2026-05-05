@@ -1,5 +1,5 @@
 """
-Exception classes for soulseekR API client
+Exception classes for slskr API client
 """
 
 

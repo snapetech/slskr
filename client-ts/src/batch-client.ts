@@ -3,10 +3,10 @@
  */
 
 import { BatchOperation, BatchRequest, BatchResponse, BatchResult } from './types';
-import { SoulseekrClient } from './client';
+import { SlskrClient } from './client';
 
 export class BatchClient {
-  constructor(private client: SoulseekrClient) {}
+  constructor(private client: SlskrClient) {}
 
   /**
    * Create a new batch builder
@@ -59,7 +59,7 @@ export class BatchBuilder {
   private operations: BatchOperation[] = [];
   private idCounter = 0;
 
-  constructor(private client: SoulseekrClient) {}
+  constructor(private client: SlskrClient) {}
 
   /**
    * Add GET operation

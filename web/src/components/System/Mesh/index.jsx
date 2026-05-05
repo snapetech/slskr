@@ -79,7 +79,7 @@ const Mesh = () => {
       await soulseekDiscovery.addMeshRendezvousInterest();
       setRendezvousMessage({
         positive: true,
-        text: 'Published the slskR mesh rendezvous interest on this Soulseek account.',
+        text: 'Published the slskr mesh rendezvous interest on this Soulseek account.',
       });
     } catch (error_) {
       setRendezvousMessage({
@@ -101,7 +101,7 @@ const Mesh = () => {
       await soulseekDiscovery.removeMeshRendezvousInterest();
       setRendezvousMessage({
         positive: true,
-        text: 'Removed the slskR mesh rendezvous interest from this Soulseek account.',
+        text: 'Removed the slskr mesh rendezvous interest from this Soulseek account.',
       });
     } catch (error_) {
       setRendezvousMessage({
@@ -428,8 +428,8 @@ const Mesh = () => {
                 </Message.Header>
                 <p>
                   This feature uses the native Soulseek interest graph to find
-                  other slskR mesh-capable accounts. Publishing the interest
-                  tag makes this account visibly identifiable as a slskR mesh
+                  other slskr mesh-capable accounts. Publishing the interest
+                  tag makes this account visibly identifiable as a slskr mesh
                   participant.
                 </p>
                 <p>

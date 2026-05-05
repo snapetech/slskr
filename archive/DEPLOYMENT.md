@@ -1,6 +1,6 @@
 # SoulseekR Kubernetes Deployment Guide
 
-This guide provides complete instructions for deploying the production-ready soulseekR ecosystem to Kubernetes.
+This guide provides complete instructions for deploying the production-ready slskr ecosystem to Kubernetes.
 
 ## Prerequisites
 
@@ -62,21 +62,21 @@ kubectl apply -k k8s/
 
 ```bash
 # Check deployment status
-kubectl get deployment -n soulseekr
-kubectl get pods -n soulseekr
+kubectl get deployment -n slskr
+kubectl get pods -n slskr
 
 # Check service endpoints
-kubectl get svc -n soulseekr
+kubectl get svc -n slskr
 
 # View logs
-kubectl logs -n soulseekr -l app=slskr-api -f
+kubectl logs -n slskr -l app=slskr-api -f
 
 # Access API health check
-kubectl port-forward -n soulseekr svc/slskr-api 8080:8080
+kubectl port-forward -n slskr svc/slskr-api 8080:8080
 curl http://localhost:8080/api/health
 
 # Access dashboard
-kubectl port-forward -n soulseekr svc/slskr-dashboard 3000:80
+kubectl port-forward -n slskr svc/slskr-dashboard 3000:80
 # Open http://localhost:3000 in browser
 ```
 
@@ -152,7 +152,7 @@ The deployment includes ServiceMonitor for automatic Prometheus scraping:
 
 ```bash
 # Verify ServiceMonitor is created
-kubectl get servicemonitor -n soulseekr
+kubectl get servicemonitor -n slskr
 
 # Check metrics scrape configuration
 kubectl logs -n prometheus prometheus-0 | grep slskr
@@ -173,9 +173,9 @@ All metrics are available at `/api/metrics`:
 
 Import included Grafana dashboards:
 
-1. Dashboard ID: soulseekr-api-overview
-2. Dashboard ID: soulseekr-transfers
-3. Dashboard ID: soulseekr-webhooks
+1. Dashboard ID: slskr-api-overview
+2. Dashboard ID: slskr-transfers
+3. Dashboard ID: slskr-webhooks
 
 ## Scaling
 
@@ -183,10 +183,10 @@ Import included Grafana dashboards:
 
 ```bash
 # Scale API to 5 replicas
-kubectl scale deployment slskr-api -n soulseekr --replicas=5
+kubectl scale deployment slskr-api -n slskr --replicas=5
 
 # Scale dashboard to 3 replicas
-kubectl scale deployment slskr-dashboard-standalone -n soulseekr --replicas=3
+kubectl scale deployment slskr-dashboard-standalone -n slskr --replicas=3
 ```
 
 ### Auto Scaling
@@ -195,11 +195,11 @@ The HPA (HorizontalPodAutoscaler) automatically scales based on metrics:
 
 ```bash
 # View HPA status
-kubectl get hpa -n soulseekr
-kubectl describe hpa slskr-api-hpa -n soulseekr
+kubectl get hpa -n slskr
+kubectl describe hpa slskr-api-hpa -n slskr
 
 # View scaling events
-kubectl get events -n soulseekr --sort-by='.lastTimestamp'
+kubectl get events -n slskr --sort-by='.lastTimestamp'
 ```
 
 ## High Availability
@@ -217,12 +217,12 @@ For multi-region deployments:
 
 ```bash
 # Backup persistent data
-kubectl exec -n soulseekr -it $(kubectl get pod -n soulseekr -l app=slskr-api -o name | head -1) -- \
+kubectl exec -n slskr -it $(kubectl get pod -n slskr -l app=slskr-api -o name | head -1) -- \
   cp /data/slskr.db /tmp/backup.db
-kubectl cp soulseekr/$(pod-name):/tmp/backup.db ./backup.db
+kubectl cp slskr/$(pod-name):/tmp/backup.db ./backup.db
 
 # Restore from backup
-kubectl cp ./backup.db soulseekr/$(pod-name):/data/slskr.db
+kubectl cp ./backup.db slskr/$(pod-name):/data/slskr.db
 ```
 
 ## Security
@@ -238,7 +238,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: slskr-ingress-only
-  namespace: soulseekr
+  namespace: slskr
 spec:
   podSelector:
     matchLabels:
@@ -274,31 +274,31 @@ The deployment enforces:
 
 ```bash
 # Check pod status
-kubectl describe pod -n soulseekr <pod-name>
+kubectl describe pod -n slskr <pod-name>
 
 # Check container logs
-kubectl logs -n soulseekr <pod-name> <container-name>
+kubectl logs -n slskr <pod-name> <container-name>
 
 # Check events
-kubectl get events -n soulseekr
+kubectl get events -n slskr
 ```
 
 ### High memory usage
 
 ```bash
 # Check memory consumption
-kubectl top pod -n soulseekr
+kubectl top pod -n slskr
 
 # Adjust memory limits in deployment.yaml
 # Restart pods to apply changes
-kubectl rollout restart deployment/slskr-api -n soulseekr
+kubectl rollout restart deployment/slskr-api -n slskr
 ```
 
 ### Webhook delivery failures
 
 ```bash
 # Check webhook logs
-kubectl logs -n soulseekr -l app=slskr-api -c slskr-api | grep webhook
+kubectl logs -n slskr -l app=slskr-api -c slskr-api | grep webhook
 
 # Verify webhook configuration
 curl http://localhost:8080/api/admin/webhooks
@@ -312,23 +312,23 @@ curl http://localhost:8080/api/admin/webhooks
 # Update image
 kubectl set image deployment/slskr-api \
   slskr-api=your-registry/slskr:v1.1 \
-  -n soulseekr
+  -n slskr
 
 # Monitor rollout
-kubectl rollout status deployment/slskr-api -n soulseekr
+kubectl rollout status deployment/slskr-api -n slskr
 
 # Check rollout history
-kubectl rollout history deployment/slskr-api -n soulseekr
+kubectl rollout history deployment/slskr-api -n slskr
 ```
 
 ### Rollback
 
 ```bash
 # Rollback to previous version
-kubectl rollout undo deployment/slskr-api -n soulseekr
+kubectl rollout undo deployment/slskr-api -n slskr
 
 # Rollback to specific revision
-kubectl rollout undo deployment/slskr-api --to-revision=2 -n soulseekr
+kubectl rollout undo deployment/slskr-api --to-revision=2 -n slskr
 ```
 
 ## Production Checklist
@@ -349,8 +349,8 @@ kubectl rollout undo deployment/slskr-api --to-revision=2 -n soulseekr
 ## Support
 
 For issues or questions:
-- Check logs: `kubectl logs -n soulseekr <pod>`
-- Check events: `kubectl get events -n soulseekr`
+- Check logs: `kubectl logs -n slskr <pod>`
+- Check events: `kubectl get events -n slskr`
 - Review API health: `curl http://localhost:8080/api/health`
 - Check Prometheus metrics: `http://prometheus:9090`
 - Check Grafana dashboards: `http://grafana:3000`

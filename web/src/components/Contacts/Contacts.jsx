@@ -527,7 +527,7 @@ class AddFriendForm extends Component {
         )?.rawValue;
 
         if (!inviteLink) {
-          throw new Error('No slskR invite QR code was found in that image.');
+          throw new Error('No slskr invite QR code was found in that image.');
         }
 
         this.setState({ inviteLink, scanError: null });

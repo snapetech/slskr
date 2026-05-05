@@ -1,5 +1,5 @@
-// <copyright file="realmSubjectIndexes.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="realmSubjectIndexes.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import api from './api';
@@ -34,7 +34,7 @@ export const formatRealmSubjectIndexConflictReport = ({
 } = {}) => {
   const conflicts = report.conflicts || report.Conflicts || [];
   const lines = [
-    'slskR realm subject-index conflict review',
+    'slskr realm subject-index conflict review',
     `Realm: ${report.realmId || report.RealmId || '-'}`,
     `Indexes: ${report.indexCount ?? report.IndexCount ?? 0}`,
     `Entries: ${report.entryCount ?? report.EntryCount ?? 0}`,

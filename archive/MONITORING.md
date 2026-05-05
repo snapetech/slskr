@@ -1,10 +1,10 @@
 # SoulseekR Monitoring and Observability Guide
 
-Complete guide for monitoring the soulseekR API with Prometheus, Grafana, and Alertmanager.
+Complete guide for monitoring the slskr API with Prometheus, Grafana, and Alertmanager.
 
 ## Overview
 
-The soulseekR deployment includes comprehensive monitoring:
+The slskr deployment includes comprehensive monitoring:
 
 - **Prometheus**: Metrics collection and storage (30-day retention)
 - **Grafana**: Dashboards for visualization
@@ -34,7 +34,7 @@ helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 kubectl get pods -n monitoring
 
 # Check ServiceMonitor discovery
-kubectl get servicemonitor -n soulseekr
+kubectl get servicemonitor -n slskr
 
 # Verify metrics scraping
 kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus -f
@@ -367,9 +367,9 @@ Recording rules (pre-computed queries) improve dashboard performance:
 
 ```promql
 # Available as instant queries without computation
-soulseekr:http_request_duration:p95
-soulseekr:http_requests:rate1m
-soulseekr:webhook_success_rate
+slskr:http_request_duration:p95
+slskr:http_requests:rate1m
+slskr:webhook_success_rate
 ```
 
 ## Troubleshooting
@@ -378,13 +378,13 @@ soulseekr:webhook_success_rate
 
 ```bash
 # Check if ServiceMonitor exists
-kubectl get servicemonitor -n soulseekr
+kubectl get servicemonitor -n slskr
 
 # Check if endpoints match
-kubectl get endpoints -n soulseekr slskr-api
+kubectl get endpoints -n slskr slskr-api
 
 # Verify pod labels match selector
-kubectl get pods -n soulseekr -o yaml | grep -A 10 labels
+kubectl get pods -n slskr -o yaml | grep -A 10 labels
 ```
 
 ### High memory usage in Prometheus

@@ -25,7 +25,7 @@ export default function Sidebar() {
   return (
     <div className="w-64 bg-gray-900 text-white shadow-lg">
       <div className="p-6">
-         <h1 className="text-2xl font-bold">slskR</h1>
+         <h1 className="text-2xl font-bold">slskr</h1>
          <p className="text-gray-400 text-sm">Admin Dashboard</p>
        </div>
 

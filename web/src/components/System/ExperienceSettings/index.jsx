@@ -93,7 +93,7 @@ const readStoredPreferences = () => {
 
 const buildReport = (form) =>
   [
-    'slskR experience preferences',
+    'slskr experience preferences',
     `Search: ranking=${form.searchRankingProfile}, condition=${form.searchPreferredCondition}, duplicate_folding=${form.searchDuplicateFolding}, previews=${form.searchActionPreviewDensity}`,
     `Discovery: provider=${form.discoveryProviderFilter || 'all'}, approval=${form.discoveryApprovalFilter}, confidence>=${form.discoveryConfidenceFloor}, stale_days=${form.discoveryStaleDays}, explanations=${form.discoveryExplanationDetail}`,
     `Player: queue_auto_fill=${form.playerQueueAutoFill}, radio_seed=${form.playerRadioSeedMode}, ratings=${form.playerShowRatings}, history=${form.playerCaptureHistory}, scrobble=${form.playerScrobbleMode}, visualizer=${form.playerDefaultVisualizer}, shortcuts=${form.playerKeyboardShortcuts}`,
@@ -358,7 +358,7 @@ const ExperienceSettings = () => {
           }
         />
         <Popup
-          content="Reset these browser-local preference choices to the slskR defaults."
+          content="Reset these browser-local preference choices to the slskr defaults."
           trigger={
             <Button
               icon

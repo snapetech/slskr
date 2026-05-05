@@ -608,7 +608,7 @@ describe('native MilkDrop WebGL renderer skeleton', () => {
       expect.anything(),
       null,
     );
-    expect(renderer.name).toBe('slskR MilkDrop WebGL');
+    expect(renderer.name).toBe('slskr MilkDrop WebGL');
   });
 
   it('throws when WebGL2 is unavailable', () => {

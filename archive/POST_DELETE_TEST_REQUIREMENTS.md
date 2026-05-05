@@ -1,7 +1,7 @@
 # POST/DELETE Endpoint Test Requirements - Comprehensive List
 
 ## SUMMARY
-Found 22 POST/DELETE test endpoints that require implementation. These endpoints are tested in `/home/keith/Documents/code/soulseekR/crates/slskr/src/main.rs` and currently NOT routed in the main routing match statement (lines 2489-2750).
+Found 22 POST/DELETE test endpoints that require implementation. These endpoints are tested in `/home/keith/Documents/code/slskr/crates/slskr/src/main.rs` and currently NOT routed in the main routing match statement (lines 2489-2750).
 
 ---
 

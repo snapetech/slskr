@@ -1,4 +1,4 @@
-# soulseekR GraphQL Schema
+# slskr GraphQL Schema
 # Alternative query interface to REST API with full type safety
 
 schema {

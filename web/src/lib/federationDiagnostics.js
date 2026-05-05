@@ -1,5 +1,5 @@
-// <copyright file="federationDiagnostics.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="federationDiagnostics.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import api from './api';

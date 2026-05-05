@@ -210,7 +210,7 @@ curl -i http://localhost:5030/api/health
 
 ## Conclusion
 
-Phase 10 established enterprise-grade HTTP infrastructure for slskR:
+Phase 10 established enterprise-grade HTTP infrastructure for slskr:
 - **Performance** via intelligent caching
 - **Reliability** via rate limiting
 - **Interoperability** via CORS

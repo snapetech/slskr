@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The soulseekR project has been successfully evolved into a complete, production-ready HTTP API ecosystem with full integration of all advanced features. The system is now ready for enterprise deployment.
+The slskr project has been successfully evolved into a complete, production-ready HTTP API ecosystem with full integration of all advanced features. The system is now ready for enterprise deployment.
 
 ### Delivery Status: ✅ COMPLETE
 
@@ -346,8 +346,8 @@ cd dashboard && npm run build && cd ..
 kubectl apply -k k8s/
 
 # 4. Verify
-kubectl get pods -n soulseekr
-kubectl logs -n soulseekr -l app=slskr-api -f
+kubectl get pods -n slskr
+kubectl logs -n slskr -l app=slskr-api -f
 ```
 
 ### Production Checklist
@@ -533,13 +533,13 @@ curl http://localhost:8080/api/version
 ### Logs
 ```bash
 # Real-time logs
-kubectl logs -n soulseekr -l app=slskr-api -f
+kubectl logs -n slskr -l app=slskr-api -f
 
 # Previous pod logs
-kubectl logs -n soulseekr -l app=slskr-api --previous
+kubectl logs -n slskr -l app=slskr-api --previous
 
 # Specific container
-kubectl logs -n soulseekr pod-name -c slskr-api
+kubectl logs -n slskr pod-name -c slskr-api
 ```
 
 ### Common Issues
@@ -551,7 +551,7 @@ kubectl logs -n soulseekr pod-name -c slskr-api
 
 ## Conclusion
 
-The soulseekR HTTP API ecosystem is now production-ready with:
+The slskr HTTP API ecosystem is now production-ready with:
 
 ✅ **Complete Feature Set**: All 8 advanced features fully integrated
 ✅ **Enterprise Quality**: 100% test pass rate, zero warnings

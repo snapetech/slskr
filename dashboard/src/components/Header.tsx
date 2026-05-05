@@ -30,7 +30,7 @@ export default function Header() {
       <div className="flex justify-between items-center px-8 py-4">
         <div className="flex items-center gap-3">
           <Server className="w-6 h-6 text-blue-600" />
-          <h1 className="text-xl font-semibold text-gray-900">slskR Admin</h1>
+          <h1 className="text-xl font-semibold text-gray-900">slskr Admin</h1>
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
             isConnected
               ? 'bg-green-100 text-green-800'

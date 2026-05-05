@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: slskr-config
-  namespace: soulseekr
+  namespace: slskr
 data:
   SLSKR_LOG_LEVEL: "info"
   SLSKR_API_PORT: "8080"
@@ -18,7 +18,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: slskr-dashboard-config
-  namespace: soulseekr
+  namespace: slskr
 data:
   API_URL: "http://localhost:8080"
   POLL_INTERVAL: "5000"

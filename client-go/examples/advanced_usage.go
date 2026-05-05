@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/soulseekr"
+	"github.com/snapetech/slskr/client-go"
 )
 
-func searchWithContext(ctx context.Context, client *soulseekr.Client, query string) (map[string]interface{}, error) {
+func searchWithContext(ctx context.Context, client *slskr.Client, query string) (map[string]interface{}, error) {
 	// Create a timeout context if not already set
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -21,7 +21,7 @@ func searchWithContext(ctx context.Context, client *soulseekr.Client, query stri
 	return client.CreateSearch(ctx, query)
 }
 
-func concurrentSearches(ctx context.Context, client *soulseekr.Client, queries []string) {
+func concurrentSearches(ctx context.Context, client *slskr.Client, queries []string) {
 	var wg sync.WaitGroup
 	results := make(chan map[string]interface{}, len(queries))
 
@@ -51,7 +51,7 @@ func concurrentSearches(ctx context.Context, client *soulseekr.Client, queries [
 	fmt.Printf("Completed %d/%d searches\n", count, len(queries))
 }
 
-func listAllResults(ctx context.Context, client *soulseekr.Client, searchID string) {
+func listAllResults(ctx context.Context, client *slskr.Client, searchID string) {
 	limit := 50
 	offset := 0
 	total := 0
@@ -80,7 +80,7 @@ func listAllResults(ctx context.Context, client *soulseekr.Client, searchID stri
 	fmt.Printf("Total results: %d\n", total)
 }
 
-func batchOperationsExample(ctx context.Context, client *soulseekr.Client) {
+func batchOperationsExample(ctx context.Context, client *slskr.Client) {
 	batch := client.NewBatchBuilder()
 
 	// Add various operations
@@ -109,7 +109,7 @@ func batchOperationsExample(ctx context.Context, client *soulseekr.Client) {
 	fmt.Printf("Failed: %d\n", len(response.GetFailed()))
 }
 
-func errorHandlingExample(ctx context.Context, client *soulseekr.Client) {
+func errorHandlingExample(ctx context.Context, client *slskr.Client) {
 	fmt.Println("\n=== Error Handling Example ===")
 
 	// Try invalid endpoint in batch
@@ -133,7 +133,7 @@ func errorHandlingExample(ctx context.Context, client *soulseekr.Client) {
 }
 
 func main() {
-	client := soulseekr.NewClient("http://localhost:8080", "your-api-key-here")
+	client := slskr.NewClient("http://localhost:8080", "your-api-key-here")
 	client.HTTPClient.Timeout = 30 * time.Second
 
 	ctx := context.Background()

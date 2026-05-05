@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Batch operations example for soulseekR Python client
+Batch operations example for slskr Python client
 """
 
 import asyncio
-from soulseekr import SoulseekrClient
+from slskr import SlskrClient
 
 
 async def main():
     """Batch operations example"""
     
-    client = SoulseekrClient(
+    client = SlskrClient(
         base_url="http://localhost:8080",
         token="your-api-key-here",
         debug=True

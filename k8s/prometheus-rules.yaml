@@ -1,15 +1,15 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: soulseekr-alerts
-  namespace: soulseekr
+  name: slskr-alerts
+  namespace: slskr
 spec:
   groups:
-  - name: soulseekr.rules
+  - name: slskr.rules
     interval: 30s
     rules:
     # Alert: High API latency
-    - alert: SoulseekrHighAPILatency
+    - alert: SlskrHighAPILatency
       expr: |
         histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="slskr-api"}[5m])) > 1
       for: 5m
@@ -20,7 +20,7 @@ spec:
         severity: warning
 
     # Alert: High error rate
-    - alert: SoulseekrHighErrorRate
+    - alert: SlskrHighErrorRate
       expr: |
         rate(http_requests_total{job="slskr-api", status=~"5.."}[5m]) > 0.05
       for: 5m
@@ -31,9 +31,9 @@ spec:
         severity: critical
 
     # Alert: Pod restart loop
-    - alert: SoulseekrPodRestartLoop
+    - alert: SlskrPodRestartLoop
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="soulseekr"}[15m]) > 0.1
+        rate(kube_pod_container_status_restarts_total{namespace="slskr"}[15m]) > 0.1
       for: 5m
       annotations:
         summary: "Pod restart loop detected"
@@ -42,11 +42,11 @@ spec:
         severity: critical
 
     # Alert: High memory usage
-    - alert: SoulseekrHighMemoryUsage
+    - alert: SlskrHighMemoryUsage
       expr: |
-        container_memory_usage_bytes{namespace="soulseekr", pod=~"slskr-.*"} 
+        container_memory_usage_bytes{namespace="slskr", pod=~"slskr-.*"} 
         / 
-        container_spec_memory_limit_bytes{namespace="soulseekr", pod=~"slskr-.*"} > 0.9
+        container_spec_memory_limit_bytes{namespace="slskr", pod=~"slskr-.*"} > 0.9
       for: 5m
       annotations:
         summary: "High memory usage detected"
@@ -55,7 +55,7 @@ spec:
         severity: warning
 
     # Alert: Webhook delivery failure
-    - alert: SoulseekrWebhookDeliveryFailure
+    - alert: SlskrWebhookDeliveryFailure
       expr: |
         rate(webhook_delivery_failures_total{job="slskr-api"}[5m]) > 0.1
       for: 10m
@@ -66,7 +66,7 @@ spec:
         severity: warning
 
     # Alert: Database connection pool exhausted
-    - alert: SoulseekrDBConnectionPoolExhausted
+    - alert: SlskrDBConnectionPoolExhausted
       expr: |
         db_connection_pool_used{job="slskr-api"} / db_connection_pool_max{job="slskr-api"} > 0.9
       for: 5m
@@ -77,7 +77,7 @@ spec:
         severity: warning
 
     # Alert: Search queue too large
-    - alert: SoulseekrSearchQueueSize
+    - alert: SlskrSearchQueueSize
       expr: |
         search_queue_size{job="slskr-api"} > 1000
       for: 5m
@@ -88,7 +88,7 @@ spec:
         severity: warning
 
     # Alert: Active transfers limit reached
-    - alert: SoulseekrTransfersAtLimit
+    - alert: SlskrTransfersAtLimit
       expr: |
         active_transfers{job="slskr-api"} >= max_concurrent_transfers{job="slskr-api"}
       for: 5m
@@ -99,40 +99,40 @@ spec:
         severity: info
 
     # Recording rules for dashboards
-    - record: soulseekr:http_request_duration:p50
+    - record: slskr:http_request_duration:p50
       expr: |
         histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job="slskr-api"}[5m]))
 
-    - record: soulseekr:http_request_duration:p95
+    - record: slskr:http_request_duration:p95
       expr: |
         histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="slskr-api"}[5m]))
 
-    - record: soulseekr:http_request_duration:p99
+    - record: slskr:http_request_duration:p99
       expr: |
         histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="slskr-api"}[5m]))
 
-    - record: soulseekr:http_requests:rate1m
+    - record: slskr:http_requests:rate1m
       expr: |
         rate(http_requests_total{job="slskr-api"}[1m])
 
-    - record: soulseekr:http_errors:rate5m
+    - record: slskr:http_errors:rate5m
       expr: |
         rate(http_requests_total{job="slskr-api", status=~"5.."}[5m])
 
-    - record: soulseekr:webhook_success_rate
+    - record: slskr:webhook_success_rate
       expr: |
         rate(webhook_deliveries_total{status="success"}[5m]) 
         / 
         rate(webhook_deliveries_total[5m])
 
-    - record: soulseekr:active_sessions
+    - record: slskr:active_sessions
       expr: |
         sum(increase(user_sessions_total[1m])) - sum(increase(user_sessions_ended_total[1m]))
 
-    - record: soulseekr:transfers:pending
+    - record: slskr:transfers:pending
       expr: |
         count(transfer_status{status="pending"})
 
-    - record: soulseekr:transfers:in_progress
+    - record: slskr:transfers:in_progress
       expr: |
         count(transfer_status{status="in_progress"})

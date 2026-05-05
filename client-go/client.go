@@ -1,5 +1,5 @@
-// Package soulseekr provides an HTTP client for the soulseekR API
-package soulseekr
+// Package slskr provides an HTTP client for the slskr API
+package slskr
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Client is the main HTTP client for soulseekR API
+// Client is the main HTTP client for slskr API
 type Client struct {
 	BaseURL    string
 	Token      string
@@ -20,7 +20,7 @@ type Client struct {
 	Timeout    time.Duration
 }
 
-// NewClient creates a new soulseekR client
+// NewClient creates a new slskr client
 func NewClient(baseURL, token string) *Client {
 	return &Client{
 		BaseURL: baseURL,

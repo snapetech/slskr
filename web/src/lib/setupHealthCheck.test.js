@@ -80,7 +80,7 @@ describe('setupHealthCheck', () => {
     });
     const report = formatSetupHealthReport(summary);
 
-    expect(report).toContain('slskR setup health check');
+    expect(report).toContain('slskr setup health check');
     expect(report).toContain('Score:');
     expect(report).toContain('Next steps:');
     expect(report).toContain('[FAIL] Network / Soulseek session: Not connected');

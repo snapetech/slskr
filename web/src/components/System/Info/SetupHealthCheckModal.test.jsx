@@ -96,7 +96,7 @@ describe('SetupHealthCheckModal', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskR setup health check'),
+        expect.stringContaining('slskr setup health check'),
       );
     });
   });

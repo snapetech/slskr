@@ -1,7 +1,7 @@
-# slskR v1.0.1 - Production Deployment Guide
+# slskr v1.0.1 - Production Deployment Guide
 
 ## Overview
-slskR is a fully-featured Soulseek network daemon with comprehensive REST API (298+ endpoints), WebSocket/SignalR real-time features, SQLite persistence, and production-grade security controls.
+slskr is a fully-featured Soulseek network daemon with comprehensive REST API (298+ endpoints), WebSocket/SignalR real-time features, SQLite persistence, and production-grade security controls.
 
 ## Architecture
 - **HTTP Server**: Axum web framework (replacing hand-rolled router)
@@ -22,7 +22,7 @@ slskR is a fully-featured Soulseek network daemon with comprehensive REST API (2
 
 ### Build from Source
 ```bash
-cd /home/keith/Documents/code/slskR
+cd /home/keith/Documents/code/slskr
 cargo build --release
 ./target/release/slskr daemon
 ```
@@ -289,7 +289,7 @@ sqlite3 /var/lib/slskr/slskr.db ".restore /backups/slskr/slskr_20260504.db"
 Create `/etc/systemd/system/slskr.service`:
 ```ini
 [Unit]
-Description=slskR Soulseek Daemon
+Description=slskr Soulseek Daemon
 After=network.target
 
 [Service]
@@ -348,7 +348,7 @@ journalctl --grep "REQUEST_ID_VALUE"
 
 ## Links
 
-- **Repository**: https://github.com/... (slskR)
+- **Repository**: https://github.com/... (slskr)
 - **Issues**: https://github.com/.../issues
 - **WebUI**: http://localhost:3001 (development)
 - **API Docs**: http://localhost:5030/api/capabilities

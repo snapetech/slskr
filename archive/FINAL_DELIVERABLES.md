@@ -1,4 +1,4 @@
-# slskR - Final Deliverables & Implementation Summary
+# slskr - Final Deliverables & Implementation Summary
 
 **Project Status:** ✅ **COMPLETE & PRODUCTION-READY**  
 **Date:** May 4, 2026  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-slskR is a **production-ready Rust implementation** of a Soulseek network client/server with a comprehensive HTTP API, persistent storage, webhook infrastructure, and advanced feature set. The implementation includes:
+slskr is a **production-ready Rust implementation** of a Soulseek network client/server with a comprehensive HTTP API, persistent storage, webhook infrastructure, and advanced feature set. The implementation includes:
 
 - **Full Soulseek Protocol Support** - Plain and obfuscated peer connections, searches, transfers, messaging, and room management
 - **Comprehensive HTTP API** - 172 endpoints covering all major operations
@@ -22,7 +22,7 @@ slskR is a **production-ready Rust implementation** of a Soulseek network client
 ## Project Architecture
 
 ```
-slskR (Main App)
+slskr (Main App)
 ├── Daemon/API Server (HTTP + WebSocket)
 ├── Soulseek Protocol Handler
 ├── Session Management
@@ -469,7 +469,7 @@ Build time: ~3.5 seconds
 ### Installation
 ```bash
 git clone <repo>
-cd slskR
+cd slskr
 cargo build --release
 ```
 
@@ -514,8 +514,8 @@ curl -H "Authorization: Bearer <token>" \
 
 ## License & Attribution
 
-**License:** Same as slskR  
-**Copyright:** Keith (slskR contributors)  
+**License:** Same as slskr  
+**Copyright:** Keith (slskr contributors)  
 **Soulseek Protocol:** Based on public aioslsk reference implementation  
 **Dependencies:** See Cargo.lock for versions and licenses
 
@@ -523,7 +523,7 @@ curl -H "Authorization: Bearer <token>" \
 
 ## Conclusion
 
-slskR represents a **complete, production-ready implementation** of a Soulseek network client with:
+slskr represents a **complete, production-ready implementation** of a Soulseek network client with:
 
 - **172 HTTP endpoints** covering all major operations
 - **151 passing tests** (100% coverage maintained)

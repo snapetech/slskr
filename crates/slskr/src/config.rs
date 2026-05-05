@@ -1,4 +1,9 @@
-use std::{env, fs, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    env, fs,
+    net::{Ipv4Addr, SocketAddr},
+    path::PathBuf,
+    time::Duration,
+};
 
 use serde::Deserialize;
 use slskr_client::{
@@ -24,6 +29,7 @@ pub struct AppConfig {
     pub advertised_port: u32,
     pub obfuscated_listener_bind: Option<String>,
     pub obfuscated_advertised_port: Option<u32>,
+    pub peer_host_override: Option<Ipv4Addr>,
     pub user_info_description: String,
     pub peer_response_timeout: Duration,
     pub share_settings: ShareSettings,
@@ -115,6 +121,14 @@ impl AppConfig {
             "SLSKR_OBFUSCATED_ADVERTISED_PORT",
             file_config.listeners.obfuscated_advertised_port,
         )?;
+        let peer_host_override = env
+            .var("SLSKR_PEER_HOST_OVERRIDE")
+            .map(|value| {
+                value
+                    .parse::<Ipv4Addr>()
+                    .map_err(|error| format!("invalid SLSKR_PEER_HOST_OVERRIDE: {error}"))
+            })
+            .transpose()?;
         let user_info_description = env
             .var("SLSKR_USER_INFO_DESCRIPTION")
             .or(file_config.profile.user_info_description)
@@ -199,6 +213,7 @@ impl AppConfig {
             advertised_port,
             obfuscated_listener_bind,
             obfuscated_advertised_port,
+            peer_host_override,
             user_info_description,
             peer_response_timeout,
             share_settings,
@@ -224,7 +239,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -239,6 +254,7 @@ impl AppConfig {
             json_option(self.listener_bind.as_deref()),
             json_option(self.obfuscated_listener_bind.as_deref()),
             json_u32_option(self.obfuscated_advertised_port),
+            json_option(self.peer_host_override.map(|ip| ip.to_string()).as_deref()),
             json_option(self.username.as_deref().map(redact_username).as_deref()),
             self.username.is_some() && self.password.is_some(),
             self.auto_connect,

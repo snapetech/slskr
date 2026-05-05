@@ -1,5 +1,5 @@
-// <copyright file="index.test.jsx" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="index.test.jsx" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import * as slskrAPI from '../../../lib/slskr';
@@ -81,7 +81,7 @@ describe('Network', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskR network health report'),
+        expect.stringContaining('slskr network health report'),
       );
     });
   });

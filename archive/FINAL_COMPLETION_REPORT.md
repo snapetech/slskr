@@ -1,8 +1,8 @@
-# slskR - Final Completion Report
+# slskr - Final Completion Report
 
 ## Executive Summary
 
-**slskR is a fully-featured, production-ready Soulseek network client and REST API server** implementing comprehensive network functionality with advanced HTTP infrastructure, comprehensive testing, and professional-grade features.
+**slskr is a fully-featured, production-ready Soulseek network client and REST API server** implementing comprehensive network functionality with advanced HTTP infrastructure, comprehensive testing, and professional-grade features.
 
 **Status: ✅ PRODUCTION READY v1.0.1+**
 
@@ -450,7 +450,7 @@ ebc29fc4 Add comprehensive project completion summary
 
 ## Conclusion
 
-**slskR v1.0.1+ is a comprehensive, production-ready implementation** of a Soulseek client and REST API server. The project includes:
+**slskr v1.0.1+ is a comprehensive, production-ready implementation** of a Soulseek client and REST API server. The project includes:
 
 1. **Complete Implementation** - All major features working
 2. **Extensive Testing** - 169 tests covering all critical paths

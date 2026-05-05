@@ -449,7 +449,7 @@
 
 ## 🏁 Conclusion
 
-**slskR v1.0.1 is a complete, production-ready WebUI API implementation with:**
+**slskr v1.0.1 is a complete, production-ready WebUI API implementation with:**
 
 ✅ 298+/291 endpoints (102% specification coverage)  
 ✅ SQLite database persistence with ACID guarantees  

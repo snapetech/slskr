@@ -18,7 +18,8 @@ impl OpenApiSpec {
         Self {
             title: title.to_string(),
             version: version.to_string(),
-            description: "slskR - Soulseek Network Client and REST API Server".to_string(),
+            description: "slskr - independent Soulseek network client and REST API server"
+                .to_string(),
         }
     }
 
@@ -31,11 +32,12 @@ impl OpenApiSpec {
                 "version": self.version,
                 "description": self.description,
                 "contact": {
-                    "name": "slskR Team",
-                    "url": "https://github.com/slskr"
+                    "name": "slskr contributors",
+                    "url": "https://github.com/snapetech/slskr"
                 },
                 "license": {
-                    "name": "MIT"
+                    "name": "AGPL-3.0-only",
+                    "url": "https://www.gnu.org/licenses/agpl-3.0.html"
                 }
             },
             "servers": [
@@ -310,7 +312,7 @@ impl OpenApiSpec {
 
 /// Generate OpenAPI spec as JSON
 pub fn generate_openapi_json() -> String {
-    let spec = OpenApiSpec::new("slskR API", "1.0.1");
+    let spec = OpenApiSpec::new("slskr API", "1.0.1");
     serde_json::to_string_pretty(&spec.generate()).unwrap_or_else(|_| "{}".to_string())
 }
 
@@ -320,7 +322,7 @@ pub fn swagger_ui_html(spec_url: &str) -> String {
         r#"<!DOCTYPE html>
 <html>
 <head>
-    <title>slskR API Documentation</title>
+    <title>slskr API Documentation</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui.css">
@@ -357,6 +359,7 @@ mod tests {
         assert_eq!(generated["openapi"], "3.0.0");
         assert_eq!(generated["info"]["title"], "Test API");
         assert_eq!(generated["info"]["version"], "1.0.0");
+        assert_eq!(generated["info"]["license"]["name"], "AGPL-3.0-only");
     }
 
     #[test]
@@ -370,6 +373,7 @@ mod tests {
     fn test_openapi_json_generation() {
         let json = generate_openapi_json();
         assert!(json.contains("openapi"));
-        assert!(json.contains("slskR API"));
+        assert!(json.contains("slskr API"));
+        assert!(json.contains("AGPL-3.0-only"));
     }
 }

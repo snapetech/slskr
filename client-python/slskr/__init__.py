@@ -1,10 +1,10 @@
 """
-soulseekR HTTP API Python Client
+slskr HTTP API Python Client
 
-Official Python client library for the soulseekR HTTP API.
+Python client library for the slskr HTTP API.
 """
 
-from .client import SoulseekrClient
+from .client import SlskrClient
 from .exceptions import (
     ApiError,
     NetworkError,
@@ -16,7 +16,7 @@ from .websocket import WebSocketClient
 
 __version__ = "1.0.0"
 __all__ = [
-    "SoulseekrClient",
+    "SlskrClient",
     "BatchClient",
     "BatchBuilder",
     "WebSocketClient",

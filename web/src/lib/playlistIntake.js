@@ -1,5 +1,5 @@
-// <copyright file="playlistIntake.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="playlistIntake.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
@@ -742,11 +742,11 @@ export const formatPlaylistTagOrganizationReport = (
   plan = playlist.organizationPlan,
 ) => {
   if (!plan) {
-    return `slskR tag and organization dry run\nPlaylist: ${playlist.name}\nNo dry-run plan has been prepared.`;
+    return `slskr tag and organization dry run\nPlaylist: ${playlist.name}\nNo dry-run plan has been prepared.`;
   }
 
   const lines = [
-    'slskR tag and organization dry run',
+    'slskr tag and organization dry run',
     `Playlist: ${playlist.name}`,
     `Generated: ${plan.generatedAt}`,
     `Album title: ${plan.options.albumTitle}`,

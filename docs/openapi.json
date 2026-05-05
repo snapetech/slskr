@@ -1,15 +1,16 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "soulseekR HTTP API",
-    "description": "Official HTTP API for soulseekR Soulseek client",
+    "title": "slskr HTTP API",
+    "description": "HTTP API for the slskr Soulseek client",
     "version": "1.0.0",
     "contact": {
-      "name": "soulseekR",
-      "url": "https://github.com/soulseekr/soulseekr"
+      "name": "slskr",
+      "url": "https://github.com/snapetech/slskr"
     },
     "license": {
-      "name": "MIT"
+      "name": "AGPL-3.0-only",
+      "url": "https://www.gnu.org/licenses/agpl-3.0.html"
     }
   },
   "servers": [

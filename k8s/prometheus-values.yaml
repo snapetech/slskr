@@ -8,7 +8,7 @@ prometheus:
         prometheus: "true"
     serviceMonitorNamespaceSelector:
       matchNames:
-      - soulseekr
+      - slskr
       - monitoring
     
     # Pod Monitor selectors
@@ -17,7 +17,7 @@ prometheus:
         prometheus: "true"
     podMonitorNamespaceSelector:
       matchNames:
-      - soulseekr
+      - slskr
       - monitoring
     
     # Storage

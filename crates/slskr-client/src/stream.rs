@@ -31,6 +31,10 @@ impl ServerConnection<TcpStream> {
         let stream = TcpStream::connect(address).await?;
         Ok(Self::new(stream))
     }
+
+    pub async fn readable(&self) -> Result<(), ClientError> {
+        Ok(self.stream.readable().await?)
+    }
 }
 
 impl<S> ServerConnection<S> {

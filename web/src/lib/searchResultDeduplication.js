@@ -1,5 +1,5 @@
-// <copyright file="searchResultDeduplication.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="searchResultDeduplication.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 const mediaExtensions = new Set([

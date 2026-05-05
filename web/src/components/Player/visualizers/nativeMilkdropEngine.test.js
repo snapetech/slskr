@@ -97,7 +97,7 @@ describe('createNativeMilkdropEngine', () => {
     engine.render();
     engine.resize(320, 180);
 
-    expect(engine.name).toBe('slskR MilkDrop WebGL2');
+    expect(engine.name).toBe('slskr MilkDrop WebGL2');
     expect(audioNode.connect).toHaveBeenCalledWith(analyser);
     expect(renderer.render).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -136,7 +136,7 @@ describe('createNativeMilkdropEngine', () => {
 
     engine.render();
 
-    expect(engine.name).toBe('slskR MilkDrop WebGL2 fallback');
+    expect(engine.name).toBe('slskr MilkDrop WebGL2 fallback');
     expect(createMilkdropRenderer).toHaveBeenCalled();
     expect(renderer.render).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -205,7 +205,7 @@ describe('createNativeMilkdropEngine', () => {
     const nextName = engine.nextPreset();
     engine.dispose();
 
-    expect(nextName).toBe('slskR native waveform smoke');
+    expect(nextName).toBe('slskr native waveform smoke');
     expect(renderer.dispose).toHaveBeenCalled();
     expect(audioNode.disconnect).toHaveBeenCalledWith(analyser);
   });
@@ -522,7 +522,7 @@ describe('createNativeMilkdropEngine', () => {
     audioContext.currentTime = 4.9;
     expect(engine.render()).toBeNull();
     audioContext.currentTime = 5.1;
-    expect(engine.render()).toEqual({ presetName: 'slskR native waveform smoke' });
+    expect(engine.render()).toEqual({ presetName: 'slskr native waveform smoke' });
   });
 
   it('advances presets automatically after repeated detected beats', async () => {
@@ -569,7 +569,7 @@ describe('createNativeMilkdropEngine', () => {
     audioContext.currentTime = 0.9;
     expect(engine.render()).toBeNull();
     audioContext.currentTime = 1.8;
-    expect(engine.render()).toEqual({ presetName: 'slskR native waveform smoke' });
+    expect(engine.render()).toEqual({ presetName: 'slskr native waveform smoke' });
   });
 
   it('inspects imported preset compatibility without replacing the renderer', async () => {

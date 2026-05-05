@@ -412,7 +412,7 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('player-open-integrations'));
 
     expect(
-      await screen.findByText('Ready to launch on the slskR host.'),
+      await screen.findByText('Ready to launch on the slskr host.'),
     ).toBeInTheDocument();
     expect(screen.getByText('/opt/MilkDrop3/MilkDrop 3.exe')).toBeInTheDocument();
 
@@ -518,23 +518,23 @@ describe('PlayerBar', () => {
 
     expect(await screen.findByText('Smart Radio Seed')).toBeInTheDocument();
     expect(screen.getByTestId('player-radio-seed')).toHaveTextContent(
-      'slskR - Local stream',
+      'slskr - Local stream',
     );
     expect(screen.getByText('Similar track seed')).toBeInTheDocument();
-    expect(screen.getByText('slskR Local stream')).toBeInTheDocument();
+    expect(screen.getByText('slskr Local stream')).toBeInTheDocument();
     expect(screen.getByText('Album neighborhood')).toBeInTheDocument();
-    expect(screen.getByText('slskR Fixture Album')).toBeInTheDocument();
+    expect(screen.getByText('slskr Fixture Album')).toBeInTheDocument();
     expect(screen.getByText('Artist and genre seed')).toBeInTheDocument();
-    expect(screen.getByText('slskR Fixture Genre')).toBeInTheDocument();
+    expect(screen.getByText('slskr Fixture Genre')).toBeInTheDocument();
     expect(searches.createBatch).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('player-radio-start-searches'));
     await waitFor(() => {
       expect(searches.createBatch).toHaveBeenCalledWith({
         queries: [
-          'slskR Local stream',
-          'slskR Fixture Album',
-          'slskR Fixture Genre',
+          'slskr Local stream',
+          'slskr Fixture Album',
+          'slskr Fixture Genre',
         ],
       });
     });
@@ -546,7 +546,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({
           autoDownload: false,
           enabled: true,
-          searchText: 'slskR Local stream',
+          searchText: 'slskr Local stream',
         }),
       );
     });
@@ -587,7 +587,7 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('player-search-similar-candidates'));
     await waitFor(() => {
       expect(searches.createBatch).toHaveBeenCalledWith({
-        queries: ['slskR Second stream', 'slskR Local stream'],
+        queries: ['slskr Second stream', 'slskr Local stream'],
       });
     });
     expect(screen.getByText('Started 3 similar-track searches.')).toBeInTheDocument();
@@ -598,7 +598,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({
           autoDownload: false,
           enabled: true,
-          searchText: 'slskR Second stream',
+          searchText: 'slskr Second stream',
         }),
       );
     });
@@ -640,7 +640,7 @@ describe('PlayerBar', () => {
     expect(screen.getByText('Top Artists')).toBeInTheDocument();
     expect(screen.getByText('Top Genres')).toBeInTheDocument();
     expect(screen.getByText('Recommendation Seeds')).toBeInTheDocument();
-    expect(screen.getAllByText('slskR').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('slskr').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Fixture Genre').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Local stream').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('player-stats-search-seed-Fixture Genre')).toBeInTheDocument();

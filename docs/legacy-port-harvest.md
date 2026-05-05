@@ -17,7 +17,7 @@ Do not preserve its dirty worktree, git history, or source files.
 
 ## Near-Term Backfill
 
-These are the pieces worth bringing into this repo first, reimplemented against the existing `slskr-client` runtime.
+These are the pieces worth bringing into this repo first, implemented against the existing `slskr-client` runtime.
 
 1. Durable configuration
    - YAML/TOML config file plus env overrides.

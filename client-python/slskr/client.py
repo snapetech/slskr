@@ -1,5 +1,5 @@
 """
-Main HTTP API client for soulseekR
+Main HTTP API client for slskr
 """
 
 import asyncio
@@ -13,8 +13,8 @@ from .batch import BatchClient
 from .websocket import WebSocketClient
 
 
-class SoulseekrClient:
-    """Main HTTP client for soulseekR API"""
+class SlskrClient:
+    """Main HTTP client for slskr API"""
 
     def __init__(
         self,
@@ -272,7 +272,7 @@ class SoulseekrClient:
                 timeout=timeout,
             ) as response:
                 if self.debug:
-                    print(f"[soulseekr] {method} {url} {response.status}")
+                    print(f"[slskr] {method} {url} {response.status}")
 
                 if response.status >= 400:
                     error_data = {}

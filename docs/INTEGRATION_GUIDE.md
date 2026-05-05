@@ -1,6 +1,6 @@
 # Integration Guide - Wiring All Components
 
-This guide shows how to integrate all the completed components into the running soulseekR system.
+This guide shows how to integrate all the completed components into the running slskr system.
 
 ## 1. Admin Dashboard Integration
 
@@ -70,7 +70,7 @@ if let Ok(search) = create_search() {
 use crate::persistence::{DatabaseManager, SearchRecord};
 
 // Initialize on startup
-let db = DatabaseManager::new("data/soulseekr.db")?;
+let db = DatabaseManager::new("data/slskr.db")?;
 
 // Store search results
 let search_record = SearchRecord {
@@ -166,26 +166,26 @@ async fn handle_graphql(req: String) -> Result<String> {
 
 ```bash
 # API Key Management
-soulseekr-admin api-key create --scopes read write --expires-days 90
-soulseekr-admin api-key list
-soulseekr-admin api-key revoke <id>
+slskr-admin api-key create --scopes read write --expires-days 90
+slskr-admin api-key list
+slskr-admin api-key revoke <id>
 
 # Server Management
-soulseekr-admin server health
-soulseekr-admin server stats
-soulseekr-admin server restart
+slskr-admin server health
+slskr-admin server stats
+slskr-admin server restart
 
 # Webhook Management
-soulseekr-admin webhook create http://example.com/hook --events search.created
-soulseekr-admin webhook test <id>
+slskr-admin webhook create http://example.com/hook --events search.created
+slskr-admin webhook test <id>
 
 # Database
-soulseekr-admin database stats
-soulseekr-admin database cleanup --days 30
+slskr-admin database stats
+slskr-admin database cleanup --days 30
 
 # Configuration
-soulseekr-admin config get
-soulseekr-admin config set key value
+slskr-admin config get
+slskr-admin config set key value
 ```
 
 ### CLI Client Code
@@ -219,14 +219,14 @@ cargo run --release
 cd dashboard && npm run dev  # http://localhost:5173
 
 # Terminal 3: CLI Tool
-soulseekr-admin --api-url http://localhost:8080 server health
+slskr-admin --api-url http://localhost:8080 server health
 ```
 
 ### Production
 
 ```bash
 # Build Docker image
-docker build -t soulseekr:latest .
+docker build -t slskr:latest .
 
 # Run with Kubernetes
 kubectl apply -f k8s/deployment.yaml
@@ -283,7 +283,7 @@ Check logs for correlation IDs:
 ### Database Statistics
 
 ```bash
-soulseekr-admin database stats
+slskr-admin database stats
 ```
 
 ### Webhook Logs

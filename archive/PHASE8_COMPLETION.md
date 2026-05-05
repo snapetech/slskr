@@ -4,7 +4,7 @@
 
 **Status:** ✅ COMPLETE
 
-Phase 8 successfully hardened the slskR Soulseek protocol implementation by adding comprehensive webhook infrastructure for event-driven notifications. The implementation includes:
+Phase 8 successfully hardened the slskr Soulseek protocol implementation by adding comprehensive webhook infrastructure for event-driven notifications. The implementation includes:
 
 - **Full HTTP Webhook Delivery** with HMAC-SHA256 cryptographic signing
 - **SQLite Persistence** for webhook configurations and delivery logs
@@ -330,7 +330,7 @@ Message: Phase 8: Complete webhook infrastructure - HTTP delivery, persistence, 
 
 ## Conclusion
 
-Phase 8 successfully implements production-ready webhook infrastructure for slskR. The implementation is:
+Phase 8 successfully implements production-ready webhook infrastructure for slskr. The implementation is:
 
 - **Complete:** Full persistence, HTTP delivery, and API
 - **Secure:** HMAC-SHA256 signing with constant-time comparison

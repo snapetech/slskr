@@ -1,8 +1,8 @@
-# soulseekR HTTP API Reference
+# slskr HTTP API Reference
 
 ## Overview
 
-The soulseekR HTTP API provides programmatic access to Soulseek client functionality. All endpoints are available at `/api/v0/*` or `/api/*` paths and require Bearer token authentication for security-sensitive operations.
+The slskr HTTP API provides programmatic access to Soulseek client functionality. All endpoints are available at `/api/v0/*` or `/api/*` paths and require Bearer token authentication for security-sensitive operations.
 
 ## Authentication
 
@@ -58,13 +58,13 @@ Server health check endpoint. Returns `200 OK` if server is running.
 
 #### `GET /api/version`
 
-Get soulseekR version and build information.
+Get slskr version and build information.
 
 **Response:**
 ```json
 {
   "version": "0.0.0",
-  "client_name": "soulseekR",
+  "client_name": "slskr",
   "major_version": 0,
   "minor_version": 0
 }
@@ -611,7 +611,7 @@ WebSocket connections are not currently supported. Use polling with `/api/events
 
 ### Installation
 
-1. Build soulseekR with HTTP API support:
+1. Build slskr with HTTP API support:
    ```bash
    cargo build --release
    ```

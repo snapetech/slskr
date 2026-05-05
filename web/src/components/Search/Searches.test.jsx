@@ -1,5 +1,5 @@
-// <copyright file="Searches.test.jsx" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="Searches.test.jsx" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import Searches from './Searches';

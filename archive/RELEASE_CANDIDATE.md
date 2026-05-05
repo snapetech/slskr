@@ -1,4 +1,4 @@
-# slskR - Release Candidate v1.0.0
+# slskr - Release Candidate v1.0.0
 
 **Status:** ✅ **PRODUCTION-READY**  
 **Build Date:** May 4, 2026  
@@ -417,7 +417,7 @@ Disk (database):    10MB+ (varies)
 ### Installation
 ```bash
 git clone <repo>
-cd slskR
+cd slskr
 cargo build --release
 ```
 

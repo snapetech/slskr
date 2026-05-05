@@ -1,4 +1,4 @@
-/// Administrative CLI tool for slskR
+/// Administrative CLI tool for slskr
 ///
 /// Provides command-line management of the HTTP API server,
 /// including key management, configuration, monitoring, and maintenance.
@@ -9,8 +9,8 @@ use serde_json::json;
 use std::error::Error;
 
 #[derive(Parser)]
-#[command(name = "soulseekr-admin")]
-#[command(about = "soulseekR Administrative CLI Tool")]
+#[command(name = "slskr-admin")]
+#[command(about = "slskr Administrative CLI Tool")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

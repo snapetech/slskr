@@ -118,7 +118,7 @@ export const buildDiscoveryGraphBranchPlan = ({
 
 export const formatDiscoveryGraphBranchReport = (plan) => {
   const lines = [
-    'slskR Discovery Graph branch review',
+    'slskr Discovery Graph branch review',
     `Graph: ${plan.graphTitle}`,
     `Seed: ${plan.seedNodeId || 'unknown'}`,
     `Visible nodes: ${plan.visibleNodeCount}`,

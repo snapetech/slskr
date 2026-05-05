@@ -1,10 +1,10 @@
-# soulseekR HTTP API - Complete Implementation Summary
+# slskr HTTP API - Complete Implementation Summary
 
 **Project Status: PRODUCTION READY ✅**
 
 ## Executive Summary
 
-soulseekR now features a **complete, production-ready HTTP API** with:
+slskr now features a **complete, production-ready HTTP API** with:
 
 - ✅ **71 core endpoint tests** (100% pass rate)
 - ✅ **310 total tests** including integration tests
@@ -397,7 +397,7 @@ curl -H "Authorization: Bearer your-token" \
 
 ## Conclusion
 
-The soulseekR HTTP API is now **feature-complete and production-ready** with:
+The slskr HTTP API is now **feature-complete and production-ready** with:
 
 - ✅ Comprehensive endpoint coverage (50+ endpoints)
 - ✅ Advanced features (logging, caching, batch, WebSocket)

@@ -1,4 +1,4 @@
-/// Performance benchmarking suite for soulseekR HTTP API
+/// Performance benchmarking suite for slskr HTTP API
 ///
 /// Measures throughput, latency, and resource usage across
 /// various API operations and load scenarios.

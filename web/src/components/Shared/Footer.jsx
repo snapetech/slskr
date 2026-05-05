@@ -9,7 +9,7 @@ import { urlBase } from '../../config';
 import React, { Component } from 'react';
 import { Icon } from 'semantic-ui-react';
 
-const GITHUB_BASE = 'https://github.com/snapetech/slskR';
+const GITHUB_BASE = 'https://github.com/snapetech/slskr';
 
 const formatSpeed = (bytesPerSec) => {
   if (!bytesPerSec || bytesPerSec === 0) return { unit: 'B', value: '0' };
@@ -201,7 +201,7 @@ class Footer extends Component {
         : 'NAT: Login to see stats';
     const networkTooltip = isLoggedIn
       ? `DHT peers: ${displayedDhtPeers}; DHT nodes: ${dhtNodes}; mesh peers: ${meshPeers}; hashes: ${hashCount}; seq: ${seqId}`
-      : 'Login to see slskR network stats';
+      : 'Login to see slskr network stats';
 
     return (
       <footer
@@ -216,7 +216,7 @@ class Footer extends Component {
                 href={GITHUB_BASE}
                 rel="noopener noreferrer"
                 target="_blank"
-                title="Open slskR on GitHub"
+                title="Open slskr on GitHub"
               >
                 <img
                   alt=""
@@ -243,9 +243,9 @@ class Footer extends Component {
                   href={GITHUB_BASE}
                   rel="noopener noreferrer"
                   target="_blank"
-                  title="slskR project"
+                  title="slskr project"
                 >
-                  slskR
+                  slskr
                 </a>
               </span>
               <a

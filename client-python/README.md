@@ -1,6 +1,8 @@
-# soulseekR Python API Client
+# slskr Python API Client
 
-Official Python async client library for the soulseekR HTTP API.
+Python async client library for the slskr HTTP API. This package is part of
+the independent `slskr` project and is not affiliated with or endorsed by
+Soulseek or its operators.
 
 ## Features
 
@@ -15,17 +17,17 @@ Official Python async client library for the soulseekR HTTP API.
 ## Installation
 
 ```bash
-pip install soulseekr-api-client
+pip install slskr-api-client
 ```
 
 ## Quick Start
 
 ```python
 import asyncio
-from soulseekr import SoulseekrClient
+from slskr import SlskrClient
 
 async def main():
-    async with SoulseekrClient(
+    async with SlskrClient(
         base_url="http://localhost:8080",
         token="your-bearer-token"
     ) as client:
@@ -49,7 +51,7 @@ asyncio.run(main())
 ### Batch Operations
 
 ```python
-from soulseekr import BatchClient
+from slskr import BatchClient
 
 async def batch_example(client):
     batch = BatchClient(client)
@@ -68,7 +70,7 @@ async def batch_example(client):
 ### WebSocket Events
 
 ```python
-from soulseekr import WebSocketClient
+from slskr import WebSocketClient
 
 async def websocket_example():
     ws = WebSocketClient(
@@ -98,10 +100,10 @@ async def websocket_example():
 ### Error Handling
 
 ```python
-from soulseekr import SoulseekrClient, ApiError, TimeoutError
+from slskr import SlskrClient, ApiError, TimeoutError
 
 async def error_handling():
-    async with SoulseekrClient(...) as client:
+    async with SlskrClient(...) as client:
         try:
             await client.get_transfer("invalid-id")
         except ApiError as e:
@@ -119,7 +121,7 @@ async def error_handling():
 
 ## API Reference
 
-### SoulseekrClient
+### SlskrClient
 
 Main HTTP client for REST API operations.
 
@@ -179,7 +181,7 @@ async def on_complete(event):
 ## Configuration
 
 ```python
-client = SoulseekrClient(
+client = SlskrClient(
     base_url="http://localhost:8080",
     token="your-token",
     timeout=30,  # Request timeout in seconds
@@ -195,4 +197,4 @@ Contributions welcome! Please see CONTRIBUTING.md
 
 ## License
 
-MIT - See LICENSE for details
+AGPL-3.0-only. See the repository LICENSE and NOTICE files for details.

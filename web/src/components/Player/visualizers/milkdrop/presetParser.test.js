@@ -9,7 +9,7 @@ import {
 const classicPreset = `
 // comments are ignored
 [preset00]
-name=slskR smoke preset
+name=slskr smoke preset
 fRating=4.0
 fGammaAdj=1.35
 zoom=1.01
@@ -50,7 +50,7 @@ describe('parseMilkdropPreset', () => {
     const snapshot = normalizeMilkdropPresetForSnapshot(parsed.primary);
 
     expect(parsed.format).toBe('milk');
-    expect(snapshot.title).toBe('slskR smoke preset');
+    expect(snapshot.title).toBe('slskr smoke preset');
     expect(snapshot.baseValues).toEqual({
       fgammaadj: 1.35,
       frating: 4,

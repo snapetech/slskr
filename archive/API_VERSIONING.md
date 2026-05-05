@@ -2,7 +2,7 @@
 
 ## Overview
 
-slskR implements semantic versioning for the HTTP API to support evolution while maintaining backward compatibility. Three API versions are supported:
+slskr implements semantic versioning for the HTTP API to support evolution while maintaining backward compatibility. Three API versions are supported:
 
 - **v0 (Legacy):** `/api/*` - Original endpoints (kept for compatibility)
 - **v1 (Current):** `/api/v1/*` - Current stable API

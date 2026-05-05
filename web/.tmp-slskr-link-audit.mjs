@@ -66,12 +66,14 @@ for (const route of seedRoutes) {
   for (const link of links) routes.add(link.path);
 
   const buttons = await page.getByRole('button').evaluateAll(buttons => buttons.map((button, index) => ({
+    disabled: button.disabled || button.getAttribute('aria-disabled') === 'true' || button.classList.contains('disabled'),
     index,
     text: button.innerText || button.getAttribute('aria-label') || button.getAttribute('title') || '',
   })));
   const clicked = [];
   for (const button of buttons) {
     const label = button.text.trim();
+    if (button.disabled) continue;
     if (!safeButton.test(label) || unsafeButton.test(label)) continue;
     const before = events.length;
     await page.getByRole('button').nth(button.index).click({ timeout: 2000 }).catch(error => {

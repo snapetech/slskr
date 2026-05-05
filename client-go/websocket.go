@@ -1,4 +1,4 @@
-package soulseekr
+package slskr
 
 import (
 	"context"

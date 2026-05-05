@@ -50,7 +50,7 @@ describe('ExperienceSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy Report' }));
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('slskR experience preferences'),
+      expect.stringContaining('slskr experience preferences'),
     );
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining('Messages:'),

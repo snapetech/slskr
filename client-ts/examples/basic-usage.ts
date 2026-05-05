@@ -1,8 +1,8 @@
 /**
- * Basic usage example for soulseekR API client
+ * Basic usage example for slskr API client
  */
 
-import SoulseekrClient from '../src/client';
+import SlskrClient from '../src/client';
 import { BatchClient } from '../src/batch-client';
 import { WebSocketClient } from '../src/websocket-client';
 
@@ -12,7 +12,7 @@ import { WebSocketClient } from '../src/websocket-client';
 
 async function basicRestExample() {
   // Create client
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'your-bearer-token',
     timeout: 30000,
@@ -74,7 +74,7 @@ async function basicRestExample() {
 // ============================================================================
 
 async function batchOperationsExample() {
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'your-bearer-token',
   });
@@ -110,7 +110,7 @@ async function batchOperationsExample() {
 // ============================================================================
 
 async function bulkMessageExample() {
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'your-bearer-token',
   });
@@ -186,7 +186,7 @@ async function websocketExample() {
 // ============================================================================
 
 async function paginationExample() {
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'your-bearer-token',
   });
@@ -217,7 +217,7 @@ async function paginationExample() {
 // ============================================================================
 
 async function errorHandlingExample() {
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'your-bearer-token',
   });

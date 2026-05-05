@@ -183,7 +183,7 @@ describe('playlistIntake', () => {
     expect(seed.networkImpact).toMatch(/no provider fetch/i);
   });
 
-  it('builds bulk Discovery Inbox seeds and slskR playlist previews without mutations', () => {
+  it('builds bulk Discovery Inbox seeds and slskr playlist previews without mutations', () => {
     const playlist = {
       id: 'playlist-2',
       name: 'Review set',
@@ -431,7 +431,7 @@ describe('playlistIntake', () => {
 
     const report = formatPlaylistTagOrganizationReport(playlist);
 
-    expect(report).toContain('slskR tag and organization dry run');
+    expect(report).toContain('slskr tag and organization dry run');
     expect(report).toContain('Playlist: Snapshot queue');
     expect(report).toContain('Proposed: Stereolab | French Disko | Snapshot Album | 01');
     expect(report).toContain('No tag write');

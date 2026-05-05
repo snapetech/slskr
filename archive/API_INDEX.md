@@ -1,12 +1,12 @@
-# soulseekR HTTP API - Complete Index
+# slskr HTTP API - Complete Index
 
-Welcome to the soulseekR HTTP API documentation! This index provides quick links to all resources.
+Welcome to the slskr HTTP API documentation! This index provides quick links to all resources.
 
 ## 📖 Documentation
 
 ### Getting Started
 - **[Quick Start Guide](docs/http-api-deployment.md#quick-start)** - Get up and running in 5 minutes
-- **[Installation](docs/install.md)** - Build and install soulseekR
+- **[Installation](docs/install.md)** - Build and install slskr
 - **[Configuration](docs/http-api-deployment.md#configuration-reference)** - Configure the API
 
 ### API Reference
@@ -71,14 +71,14 @@ Languages: Python, Node.js, Bash, HTML/JavaScript
 
 - **Installation:**
   ```bash
-  npm install @soulseekr/api-client
+  npm install @slskr/api-client
   ```
 
 - **Quick Start:**
   ```typescript
-  import SoulseekrClient from '@soulseekr/api-client';
+  import SlskrClient from '@slskr/api-client';
 
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'your-bearer-token'
   });

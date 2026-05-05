@@ -1,5 +1,5 @@
-// <copyright file="registerServiceWorker.test.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="registerServiceWorker.test.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 const loadModule = async (urlBase) => {

@@ -82,7 +82,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
             textAlign="center"
           >
             <img
-              alt="slskR"
+              alt="slskr"
               src={`${urlBase}/slskr-logo.png`}
               style={{
                 display: 'inline-block',

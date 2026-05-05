@@ -1,8 +1,8 @@
-# soulseekR HTTP API Performance Analysis
+# slskr HTTP API Performance Analysis
 
 ## Overview
 
-This document analyzes the performance characteristics of the soulseekR HTTP API implementation and provides optimization recommendations.
+This document analyzes the performance characteristics of the slskr HTTP API implementation and provides optimization recommendations.
 
 ## Metrics
 
@@ -280,7 +280,7 @@ wrk -t4 -c100 -d30s \
 
 ## Conclusion
 
-The soulseekR HTTP API is well-optimized for typical use cases:
+The slskr HTTP API is well-optimized for typical use cases:
 
 - ✅ Zero compiler warnings
 - ✅ 100% test pass rate

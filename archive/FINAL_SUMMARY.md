@@ -1,4 +1,4 @@
-# soulseekR - Final Project Summary
+# slskr - Final Project Summary
 
 ## Project Status: ✅ **COMPLETE - ENTERPRISE READY**
 
@@ -12,7 +12,7 @@
 
 ## Executive Summary
 
-soulseekR is a production-grade, enterprise-ready HTTP API and ecosystem for the Soulseek P2P network. The project includes a comprehensive REST API with 71 endpoints, multiple client libraries across 3 languages, advanced features like batch operations and WebSocket support, and now includes 8 major enhancements for production deployment and management.
+slskr is a production-grade, enterprise-ready HTTP API and ecosystem for the Soulseek P2P network. The project includes a comprehensive REST API with 71 endpoints, multiple client libraries across 3 languages, advanced features like batch operations and WebSocket support, and now includes 8 major enhancements for production deployment and management.
 
 ### Key Achievements
 
@@ -375,7 +375,7 @@ Guides:
 ## File Structure
 
 ```
-soulseekR/
+slskr/
 ├── crates/
 │   ├── slskr/                      # Main API server
 │   │   ├── src/
@@ -462,15 +462,15 @@ cargo test
 ### 2. Run Docker Container
 
 ```bash
-docker build -t soulseekr:latest .
-docker run -p 8080:8080 soulseekr:latest
+docker build -t slskr:latest .
+docker run -p 8080:8080 slskr:latest
 ```
 
 ### 3. Deploy to Kubernetes
 
 ```bash
 kubectl apply -f k8s/deployment.yaml
-kubectl port-forward service/soulseekr-api 8080:8080 -n soulseekr
+kubectl port-forward service/slskr-api 8080:8080 -n slskr
 ```
 
 ### 4. Access Admin Dashboard
@@ -485,29 +485,29 @@ npm run dev
 ### 5. Use CLI Management Tool
 
 ```bash
-soulseekr-admin --api-url http://localhost:8080 health
-soulseekr-admin api-key list
-soulseekr-admin server stats
+slskr-admin --api-url http://localhost:8080 health
+slskr-admin api-key list
+slskr-admin server stats
 ```
 
 ### 6. Connect with Client Library
 
 **Python:**
 ```python
-from soulseekr import SoulseekrClient
-client = SoulseekrClient("http://localhost:8080", "api-key")
+from slskr import SlskrClient
+client = SlskrClient("http://localhost:8080", "api-key")
 ```
 
 **Go:**
 ```go
-import "github.com/your-org/soulseekr"
-client := soulseekr.NewClient("http://localhost:8080", "api-key")
+import "github.com/snapetech/slskr/client-go"
+client := slskr.NewClient("http://localhost:8080", "api-key")
 ```
 
 **TypeScript:**
 ```typescript
-import { SoulseekrClient } from 'soulseekr-api';
-const client = new SoulseekrClient({ baseURL: 'http://localhost:8080' });
+import { SlskrClient } from 'slskr-api';
+const client = new SlskrClient({ baseURL: 'http://localhost:8080' });
 ```
 
 ---
@@ -575,7 +575,7 @@ const client = new SoulseekrClient({ baseURL: 'http://localhost:8080' });
 
 ## Conclusion
 
-soulseekR is now a **complete, enterprise-ready solution** for HTTP API access to the Soulseek network. With 16,000+ lines of production code, 205 passing tests, comprehensive documentation, and advanced features for deployment and management, the project is ready for immediate production use.
+slskr is now a **complete, enterprise-ready solution** for HTTP API access to the Soulseek network. With 16,000+ lines of production code, 205 passing tests, comprehensive documentation, and advanced features for deployment and management, the project is ready for immediate production use.
 
 ### Summary Statistics
 
@@ -597,7 +597,7 @@ soulseekR is now a **complete, enterprise-ready solution** for HTTP API access t
 
 **Version**: 1.0.0  
 **Release Date**: May 4, 2026  
-**License**: Same as soulseekR  
+**License**: Same as slskr  
 **Support**: GitHub Issues & Documentation  
 
 🚀 **Ready for production deployment**

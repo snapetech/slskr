@@ -68,7 +68,7 @@ describe('Footer', () => {
     localStorage.clear();
   });
 
-  it('renders slskR network stats in the footer', async () => {
+  it('renders slskr network stats in the footer', async () => {
     render(<Footer />);
 
     await waitFor(() => {

@@ -1,6 +1,6 @@
-# soulseekR API Examples
+# slskr API Examples
 
-This directory contains example applications demonstrating how to use the soulseekR HTTP API.
+This directory contains example applications demonstrating how to use the slskr HTTP API.
 
 ## Examples
 
@@ -102,9 +102,9 @@ Send messages to multiple users:
 
 **Node.js Example:**
 ```javascript
-const SoulseekrClient = require('@soulseekr/api-client');
+const SlskrClient = require('@slskr/api-client');
 
-const client = new SoulseekrClient({
+const client = new SlskrClient({
   baseUrl: 'http://localhost:8080',
   token: 'your-token'
 });
@@ -180,18 +180,18 @@ Web dashboard showing:
 <!DOCTYPE html>
 <html>
 <head>
-  <title>soulseekR Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/@soulseekr/api-client"></script>
+  <title>slskr Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@slskr/api-client"></script>
 </head>
 <body>
-  <h1>soulseekR Dashboard</h1>
+  <h1>slskr Dashboard</h1>
   
   <div id="stats"></div>
   <div id="transfers"></div>
   <div id="searches"></div>
 
   <script>
-    const client = new SoulseekrClient({
+    const client = new SlskrClient({
       baseUrl: 'http://localhost:8080',
       token: 'your-token'
     });
@@ -226,10 +226,10 @@ Benchmark API performance:
 
 **Node.js Benchmark:**
 ```javascript
-const { default: SoulseekrClient, BatchClient } = require('@soulseekr/api-client');
+const { default: SlskrClient, BatchClient } = require('@slskr/api-client');
 
 async function benchmark() {
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'token'
   });
@@ -266,14 +266,14 @@ Comprehensive error handling examples:
 **Example:**
 ```typescript
 import {
-  SoulseekrClient,
+  SlskrClient,
   ApiError,
   NetworkError,
   TimeoutError
-} from '@soulseekr/api-client';
+} from '@slskr/api-client';
 
 async function robustOperation() {
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'token',
     retries: 3,
@@ -311,7 +311,7 @@ async function robustOperation() {
 - Node.js 14+ (for TypeScript examples)
 - Python 3.7+ (for Python examples)
 - curl (for Bash examples)
-- soulseekR server running on http://localhost:8080
+- slskr server running on http://localhost:8080
 
 ### Setup
 
@@ -349,8 +349,8 @@ node examples/message_broadcaster.js
 ```yaml
 version: '3'
 services:
-  soulseekr:
-    image: soulseekr:latest
+  slskr:
+    image: slskr:latest
     ports:
       - "8080:8080"
     environment:
@@ -360,13 +360,13 @@ services:
   example-app:
     image: node:18
     depends_on:
-      - soulseekr
+      - slskr
     volumes:
       - ./examples:/app
     working_dir: /app
     command: npm start
     environment:
-      - SOULSEEK_API_URL=http://soulseekr:8080
+      - SOULSEEK_API_URL=http://slskr:8080
       - SOULSEEK_TOKEN=secret-token
 ```
 
@@ -378,7 +378,7 @@ kind: ConfigMap
 metadata:
   name: example-app-config
 data:
-  SOULSEEK_API_URL: "http://soulseekr:8080"
+  SOULSEEK_API_URL: "http://slskr:8080"
   SOULSEEK_TOKEN: "secret-token"
 
 ---

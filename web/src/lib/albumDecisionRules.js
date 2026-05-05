@@ -1,5 +1,5 @@
-// <copyright file="albumDecisionRules.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="albumDecisionRules.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';

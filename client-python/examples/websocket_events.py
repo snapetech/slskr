@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-WebSocket real-time events example for soulseekR Python client
+WebSocket real-time events example for slskr Python client
 """
 
 import asyncio
-from soulseekr import SoulseekrClient
+from slskr import SlskrClient
 
 
 async def handle_message(event):
@@ -38,7 +38,7 @@ async def handle_error(error):
 async def main():
     """WebSocket real-time events example"""
     
-    client = SoulseekrClient(
+    client = SlskrClient(
         base_url="http://localhost:8080",
         token="your-api-key-here",
         debug=True

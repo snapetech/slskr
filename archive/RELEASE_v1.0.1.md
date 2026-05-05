@@ -1,4 +1,4 @@
-# slskR v1.0.1 - Release Notes
+# slskr v1.0.1 - Release Notes
 
 **Release Date**: May 4, 2026  
 **Status**: Production Ready  

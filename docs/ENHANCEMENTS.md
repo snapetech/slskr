@@ -1,6 +1,6 @@
-# soulseekR Advanced Enhancements
+# slskr Advanced Enhancements
 
-This document describes the 8 major enhancements implemented to complete the soulseekR ecosystem.
+This document describes the 8 major enhancements implemented to complete the slskr ecosystem.
 
 ## 1. Request Tracing & Correlation IDs ✅
 
@@ -208,7 +208,7 @@ CREATE TABLE messages (
 ```rust
 use persistence::DatabaseManager;
 
-let db = DatabaseManager::new("data/soulseekr.db")?;
+let db = DatabaseManager::new("data/slskr.db")?;
 
 // Insert search
 db.insert_search(&SearchRecord {
@@ -396,64 +396,64 @@ LoadTestProfile::stress()  // 2000 clients, 300 seconds
 
 ### Overview
 
-Comprehensive command-line tool for administrative operations on the soulseekR API server.
+Comprehensive command-line tool for administrative operations on the slskr API server.
 
 ### Commands
 
 #### API Key Management
 
 ```bash
-soulseekr-admin api-key create --scopes "read" "write" --expires-days 90
-soulseekr-admin api-key list --limit 50
-soulseekr-admin api-key get <id>
-soulseekr-admin api-key revoke <id>
-soulseekr-admin api-key rotate <id>
+slskr-admin api-key create --scopes "read" "write" --expires-days 90
+slskr-admin api-key list --limit 50
+slskr-admin api-key get <id>
+slskr-admin api-key revoke <id>
+slskr-admin api-key rotate <id>
 ```
 
 #### Server Management
 
 ```bash
-soulseekr-admin server health
-soulseekr-admin server version
-soulseekr-admin server stats
-soulseekr-admin server config
-soulseekr-admin server restart
-soulseekr-admin server shutdown
+slskr-admin server health
+slskr-admin server version
+slskr-admin server stats
+slskr-admin server config
+slskr-admin server restart
+slskr-admin server shutdown
 ```
 
 #### Webhook Management
 
 ```bash
-soulseekr-admin webhook create http://example.com/hook --events search.created transfer.started
-soulseekr-admin webhook list
-soulseekr-admin webhook get <id>
-soulseekr-admin webhook delete <id>
-soulseekr-admin webhook test <id>
+slskr-admin webhook create http://example.com/hook --events search.created transfer.started
+slskr-admin webhook list
+slskr-admin webhook get <id>
+slskr-admin webhook delete <id>
+slskr-admin webhook test <id>
 ```
 
 #### Database Operations
 
 ```bash
-soulseekr-admin database stats
-soulseekr-admin database cleanup --days 30
-soulseekr-admin database vacuum
-soulseekr-admin database export --format json
+slskr-admin database stats
+slskr-admin database cleanup --days 30
+slskr-admin database vacuum
+slskr-admin database export --format json
 ```
 
 #### Health Monitoring
 
 ```bash
-soulseekr-admin health check
-soulseekr-admin health monitor --interval-seconds 5
+slskr-admin health check
+slskr-admin health monitor --interval-seconds 5
 ```
 
 #### Configuration
 
 ```bash
-soulseekr-admin config get
-soulseekr-admin config set max_transfers 100
-soulseekr-admin config validate
-soulseekr-admin config export config.json
+slskr-admin config get
+slskr-admin config set max_transfers 100
+slskr-admin config validate
+slskr-admin config export config.json
 ```
 
 ### Global Options
@@ -480,12 +480,12 @@ soulseekr-admin config export config.json
 
 ### Overview
 
-Production-ready Kubernetes manifests for deploying soulseekR with scalability and resilience.
+Production-ready Kubernetes manifests for deploying slskr with scalability and resilience.
 
 ### Components
 
 #### Namespace
-- Isolated environment for soulseekR resources
+- Isolated environment for slskr resources
 
 #### ConfigMap
 - Server configuration
@@ -542,19 +542,19 @@ Production-ready Kubernetes manifests for deploying soulseekR with scalability a
 kubectl apply -f k8s/deployment.yaml
 
 # Check deployment status
-kubectl get deployment -n soulseekr
+kubectl get deployment -n slskr
 
 # Check pods
-kubectl get pods -n soulseekr
+kubectl get pods -n slskr
 
 # View logs
-kubectl logs -n soulseekr deployment/soulseekr-api
+kubectl logs -n slskr deployment/slskr-api
 
 # Scale manually
-kubectl scale deployment soulseekr-api --replicas=5 -n soulseekr
+kubectl scale deployment slskr-api --replicas=5 -n slskr
 
 # Describe HPA
-kubectl describe hpa soulseekr-api-hpa -n soulseekr
+kubectl describe hpa slskr-api-hpa -n slskr
 ```
 
 ### Production Considerations
@@ -574,7 +574,7 @@ kubectl describe hpa soulseekr-api-hpa -n soulseekr
 
 ### Overview
 
-React-based web interface for managing soulseekR with real-time monitoring and operations.
+React-based web interface for managing slskr with real-time monitoring and operations.
 
 ### Technology Stack
 

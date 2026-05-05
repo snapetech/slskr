@@ -1,4 +1,4 @@
-# soulseekR HTTP API - EXTENDED SESSION SUMMARY
+# slskr HTTP API - EXTENDED SESSION SUMMARY
 
 **Status:** COMPLETE - FEATURE-RICH PRODUCTION SYSTEM ✅
 
@@ -6,7 +6,7 @@
 
 ## Session Overview
 
-This extended session represents a comprehensive enhancement of the soulseekR HTTP API from a solid foundation (71 core tests) to a fully-featured, production-grade ecosystem with **multiple official client libraries, complete tooling, and enterprise-ready features**.
+This extended session represents a comprehensive enhancement of the slskr HTTP API from a solid foundation (71 core tests) to a fully-featured, production-grade ecosystem with **multiple official client libraries, complete tooling, and enterprise-ready features**.
 
 ### Timeline
 - **Starting Point:** 71 core HTTP API tests (100% pass rate)
@@ -248,9 +248,9 @@ f162231 - Add official TypeScript/JavaScript API client library
 
 ### TypeScript/JavaScript
 ```typescript
-import SoulseekrClient from '@soulseekr/api-client';
+import SlskrClient from '@slskr/api-client';
 
-const client = new SoulseekrClient({
+const client = new SlskrClient({
   baseUrl: 'http://localhost:8080',
   token: 'your-token'
 });
@@ -261,10 +261,10 @@ const stats = await client.getStats();
 ### Python
 ```python
 import asyncio
-from soulseekr import SoulseekrClient
+from slskr import SlskrClient
 
 async def main():
-    async with SoulseekrClient(...) as client:
+    async with SlskrClient(...) as client:
         stats = await client.get_stats()
         
 asyncio.run(main())
@@ -272,7 +272,7 @@ asyncio.run(main())
 
 ### Go
 ```go
-client := soulseekr.NewClient("http://localhost:8080", "token")
+client := slskr.NewClient("http://localhost:8080", "token")
 stats, err := client.GetStats(ctx)
 ```
 
@@ -333,7 +333,7 @@ These are **not required for production** but provide additional value:
 
 ## Conclusion
 
-The soulseekR HTTP API is now **enterprise-ready** with:
+The slskr HTTP API is now **enterprise-ready** with:
 
 ### Core System
 - ✅ **50+ REST endpoints** with 100% test coverage

@@ -7,19 +7,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/soulseekr"
+	"github.com/snapetech/slskr/client-go"
 )
 
 // SearchCoordinator coordinates multiple search operations
 type SearchCoordinator struct {
-	client      *soulseekr.Client
+	client      *slskr.Client
 	searches    map[string]string // searchID -> query
 	resultsCnt  map[string]int
 	mu          sync.RWMutex
 }
 
 // NewSearchCoordinator creates a new search coordinator
-func NewSearchCoordinator(client *soulseekr.Client) *SearchCoordinator {
+func NewSearchCoordinator(client *slskr.Client) *SearchCoordinator {
 	return &SearchCoordinator{
 		client:     client,
 		searches:   make(map[string]string),
@@ -103,14 +103,14 @@ func (sc *SearchCoordinator) MonitorSearches(ctx context.Context, searchIDs []st
 
 // MessageHandler handles message operations
 type MessageHandler struct {
-	client         *soulseekr.Client
+	client         *slskr.Client
 	messagesSent   int
 	messagesRecv   int
 	mu             sync.Mutex
 }
 
 // NewMessageHandler creates a new message handler
-func NewMessageHandler(client *soulseekr.Client) *MessageHandler {
+func NewMessageHandler(client *slskr.Client) *MessageHandler {
 	return &MessageHandler{
 		client: client,
 	}
@@ -173,7 +173,7 @@ func (mh *MessageHandler) SendBulkMessages(ctx context.Context, messages []map[s
 }
 
 // batchAnalytics gathers analytics using batch operations
-func batchAnalytics(ctx context.Context, client *soulseekr.Client) map[string]interface{} {
+func batchAnalytics(ctx context.Context, client *slskr.Client) map[string]interface{} {
 	fmt.Println("\n=== Batch Analytics ===")
 
 	batch := client.NewBatchBuilder()
@@ -205,7 +205,7 @@ func batchAnalytics(ctx context.Context, client *soulseekr.Client) map[string]in
 }
 
 // transferOperations handles transfer operations
-func transferOperations(ctx context.Context, client *soulseekr.Client) int {
+func transferOperations(ctx context.Context, client *slskr.Client) int {
 	fmt.Println("\n=== Transfer Operations ===")
 
 	transfers, err := client.ListTransfers(ctx, "download", "active", 10, 0)
@@ -233,7 +233,7 @@ func transferOperations(ctx context.Context, client *soulseekr.Client) int {
 }
 
 // roomOperations handles room operations
-func roomOperations(ctx context.Context, client *soulseekr.Client) int {
+func roomOperations(ctx context.Context, client *slskr.Client) int {
 	fmt.Println("\n=== Room Operations ===")
 
 	rooms, err := client.ListRooms(ctx)
@@ -259,7 +259,7 @@ func roomOperations(ctx context.Context, client *soulseekr.Client) int {
 }
 
 // shareOperations handles share operations
-func shareOperations(ctx context.Context, client *soulseekr.Client) int {
+func shareOperations(ctx context.Context, client *slskr.Client) int {
 	fmt.Println("\n=== Share Operations ===")
 
 	shares, err := client.ListShares(ctx, 10, 0)
@@ -274,7 +274,7 @@ func shareOperations(ctx context.Context, client *soulseekr.Client) int {
 }
 
 // websocketMonitoring monitors events via WebSocket
-func websocketMonitoring(ctx context.Context, client *soulseekr.Client, duration time.Duration) {
+func websocketMonitoring(ctx context.Context, client *slskr.Client, duration time.Duration) {
 	fmt.Printf("\n=== WebSocket Monitoring for %v ===\n", duration)
 
 	ws := client.NewWebSocketClient(true)
@@ -292,12 +292,12 @@ func websocketMonitoring(ctx context.Context, client *soulseekr.Client, duration
 }
 
 func main() {
-	client := soulseekr.NewClient("http://localhost:8080", "your-api-key-here")
+	client := slskr.NewClient("http://localhost:8080", "your-api-key-here")
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	fmt.Println("=== soulseekR Integration Example ===")
+	fmt.Println("=== slskr Integration Example ===")
 
 	// 1. Server verification
 	fmt.Println("\n=== Server Verification ===")

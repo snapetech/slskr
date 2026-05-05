@@ -180,7 +180,7 @@ export const buildWishlistRequestReviewPacket = ({
 
 export const formatWishlistRequestReviewPacket = (packet) => {
   const lines = [
-    'slskR Wishlist request review',
+    'slskr Wishlist request review',
     `Generated: ${packet.generatedAt}`,
     `Requests: ${packet.summary.total}`,
     `Enabled: ${packet.summary.enabled}`,

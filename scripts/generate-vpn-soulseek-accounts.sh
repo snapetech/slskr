@@ -76,10 +76,12 @@ for label in "${labels[@]}"; do
   stderr_file="$(mktemp)"
 
   set +e
-  timeout "${SLSKR_ACCOUNT_GENERATOR_TIMEOUT_SECONDS:-90}" \
-    "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" \
-    env SLSK_USERNAME="$username" SLSK_PASSWORD="$password" SLSK_SERVER="$server_address" \
-    cargo run -q -p slskr -- login smoke >"$stdout_file" 2>"$stderr_file"
+  SLSK_USERNAME="$username" \
+  SLSK_PASSWORD="$password" \
+  SLSK_SERVER="$server_address" \
+    timeout "${SLSKR_ACCOUNT_GENERATOR_TIMEOUT_SECONDS:-90}" \
+      "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" \
+      cargo run -q -p slskr -- login smoke >"$stdout_file" 2>"$stderr_file"
   status=$?
   set -e
 

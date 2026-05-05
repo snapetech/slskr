@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Integration example for soulseekR - demonstrates coordinated client operations
+Integration example for slskr - demonstrates coordinated client operations
 Shows batch operations, WebSocket events, error handling, and data aggregation
 """
 
 import asyncio
 import time
-from soulseekr import SoulseekrClient, ApiError
+from slskr import SlskrClient, ApiError
 
 
 class SearchCoordinator:
@@ -192,7 +192,7 @@ async def main():
     """Main integration example"""
     
     # Initialize client
-    client = SoulseekrClient(
+    client = SlskrClient(
         base_url="http://localhost:8080",
         token="your-api-key-here",
         debug=True

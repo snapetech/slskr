@@ -39,7 +39,7 @@ done
 
 slskr_repo="${SLSKR_SLSKR_REPO:-$code_root/slskr}"
 slskr_repo="${SLSKR_SLSKR_REPO:-$code_root/slskr}"
-soulseek_net_repo="${SLSKR_SOULSEEK_NET_REPO:-$code_root/Soulseek.NET}"
+dotnet_reference_repo="${SLSKR_DOTNET_REFERENCE_REPO:-$code_root/dotnet reference suite}"
 runtime_repo="${SLSKR_RUNTIME_REPO:-$code_root/slskNet.Runtime}"
 run_daemons="${SLSKR_RUN_ADJACENT_DAEMONS:-1}"
 skip_adjacent_tests="${SLSKR_SKIP_ADJACENT_TESTS:-0}"
@@ -147,7 +147,7 @@ run_probe() {
   stderr_file="$(mktemp)"
   local actor_user_var="SLSKR_TEST_${actor_index}_USERNAME"
   local actor_pass_var="SLSKR_TEST_${actor_index}_PASSWORD"
-  local command=(env CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}" SLSK_USERNAME="${!actor_user_var}" SLSK_PASSWORD="${!actor_pass_var}" SLSK_SERVER="${daemon_slsk_address}:${daemon_slsk_port}" SLSK_PEER_USERNAME="$peer_user" "$@")
+  local command=(env CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}" "$@")
   if [[ "$probe_vpn_enabled" == "1" ]]; then
     local label host_ip ns_ip subnet namespace config
     mapfile -t probe_args < <(probe_netns_args "$scope")
@@ -161,7 +161,11 @@ run_probe() {
     command=(env SLSKR_NETNS_HOST_IP="$host_ip" SLSKR_NETNS_IP="$ns_ip" SLSKR_NETNS_SUBNET="$subnet" SLSKR_NETNS_EXTRA_ROUTES="$extra_routes" "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "${command[@]}")
   fi
   set +e
-  "${command[@]}" >"$stdout_file" 2>"$stderr_file"
+  SLSK_USERNAME="${!actor_user_var}" \
+  SLSK_PASSWORD="${!actor_pass_var}" \
+  SLSK_SERVER="${daemon_slsk_address}:${daemon_slsk_port}" \
+  SLSK_PEER_USERNAME="$peer_user" \
+    "${command[@]}" >"$stdout_file" 2>"$stderr_file"
   status=$?
   set -e
   if [[ $status -eq 0 ]]; then
@@ -221,7 +225,7 @@ run_account_command_optional() {
   stderr_file="$(mktemp)"
   local actor_user_var="SLSKR_TEST_${actor_index}_USERNAME"
   local actor_pass_var="SLSKR_TEST_${actor_index}_PASSWORD"
-  local command=(env CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}" SLSK_USERNAME="${!actor_user_var}" SLSK_PASSWORD="${!actor_pass_var}" SLSK_SERVER="${daemon_slsk_address}:${daemon_slsk_port}" "$@")
+  local command=(env CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}" "$@")
   if [[ "$probe_vpn_enabled" == "1" ]]; then
     local label host_ip ns_ip subnet namespace extra_routes config
     mapfile -t probe_args < <(probe_netns_args "$scope")
@@ -235,7 +239,10 @@ run_account_command_optional() {
     command=(env SLSKR_NETNS_HOST_IP="$host_ip" SLSKR_NETNS_IP="$ns_ip" SLSKR_NETNS_SUBNET="$subnet" SLSKR_NETNS_EXTRA_ROUTES="$extra_routes" "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "${command[@]}")
   fi
   set +e
-  "${command[@]}" >"$stdout_file" 2>"$stderr_file"
+  SLSK_USERNAME="${!actor_user_var}" \
+  SLSK_PASSWORD="${!actor_pass_var}" \
+  SLSK_SERVER="${daemon_slsk_address}:${daemon_slsk_port}" \
+    "${command[@]}" >"$stdout_file" 2>"$stderr_file"
   status=$?
   set -e
   detail="$( { cat "$stdout_file"; tail -n 20 "$stderr_file"; } | sanitize_detail )"
@@ -356,29 +363,47 @@ soulseek:
   listen_ip_address: 0.0.0.0
   listen_port: $listen_port
 CFG
-  local daemon_env=(env \
-    ASPNETCORE_URLS="http://0.0.0.0:$http_port" \
-    SLSKR_APP_DIR="$app_dir" \
-    SLSKR_CONFIG="$config_file" \
-    SLSKR_HTTP_PORT="$http_port" \
-    SLSKR_NO_HTTPS=true \
-    SLSKR_SLSK_USERNAME="${!user_var}" \
-    SLSKR_SLSK_PASSWORD="${!pass_var}" \
-    SLSK_ADDRESS="$daemon_slsk_address" \
-    SLSK_PORT="$daemon_slsk_port" \
-    SLSKR_SLSK_ADDRESS="$daemon_slsk_address" \
-    SLSKR_SLSK_PORT="$daemon_slsk_port" \
-    SLSKR_SLSK_LISTEN_IP_ADDRESS=0.0.0.0 \
-    SLSKR_SLSK_LISTEN_PORT="$listen_port" \
-    "$dotnet_path" run --project src/slskr/slskr.csproj --no-launch-profile)
   if [[ "$daemon_vpn_enabled" == "1" ]]; then
     local config namespace extra_routes
     config="$(resolve_proton_config "$vpn_label")" || return 1
     namespace="$(printf 'd-%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-' | cut -c1-10)"
     extra_routes="${SLSKR_SLSKR_PROBE_NETNS_SUBNET:-10.242.0.0/24} ${SLSKR_SLSKR_PROBE_NETNS_SUBNET:-10.243.0.0/24}"
-    (cd "$repo" && env SLSKR_NETNS_HOST_IP="$host_ip" SLSKR_NETNS_IP="$ns_ip" SLSKR_NETNS_SUBNET="$subnet" SLSKR_NETNS_EXTRA_ROUTES="$extra_routes" "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "${daemon_env[@]}") >"$output_dir/$name.stdout.log" 2>"$output_dir/$name.stderr.log" &
+    (
+      cd "$repo"
+      export ASPNETCORE_URLS="http://0.0.0.0:$http_port"
+      export SLSKR_APP_DIR="$app_dir"
+      export SLSKR_CONFIG="$config_file"
+      export SLSKR_HTTP_PORT="$http_port"
+      export SLSKR_NO_HTTPS=true
+      export SLSKR_SLSK_USERNAME="${!user_var}"
+      export SLSKR_SLSK_PASSWORD="${!pass_var}"
+      export SLSK_ADDRESS="$daemon_slsk_address"
+      export SLSK_PORT="$daemon_slsk_port"
+      export SLSKR_SLSK_ADDRESS="$daemon_slsk_address"
+      export SLSKR_SLSK_PORT="$daemon_slsk_port"
+      export SLSKR_SLSK_LISTEN_IP_ADDRESS=0.0.0.0
+      export SLSKR_SLSK_LISTEN_PORT="$listen_port"
+      env SLSKR_NETNS_HOST_IP="$host_ip" SLSKR_NETNS_IP="$ns_ip" SLSKR_NETNS_SUBNET="$subnet" SLSKR_NETNS_EXTRA_ROUTES="$extra_routes" \
+        "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "$dotnet_path" run --project src/slskr/slskr.csproj --no-launch-profile
+    ) >"$output_dir/$name.stdout.log" 2>"$output_dir/$name.stderr.log" &
   else
-    (cd "$repo" && "${daemon_env[@]}") >"$output_dir/$name.stdout.log" 2>"$output_dir/$name.stderr.log" &
+    (
+      cd "$repo"
+      export ASPNETCORE_URLS="http://0.0.0.0:$http_port"
+      export SLSKR_APP_DIR="$app_dir"
+      export SLSKR_CONFIG="$config_file"
+      export SLSKR_HTTP_PORT="$http_port"
+      export SLSKR_NO_HTTPS=true
+      export SLSKR_SLSK_USERNAME="${!user_var}"
+      export SLSKR_SLSK_PASSWORD="${!pass_var}"
+      export SLSK_ADDRESS="$daemon_slsk_address"
+      export SLSK_PORT="$daemon_slsk_port"
+      export SLSKR_SLSK_ADDRESS="$daemon_slsk_address"
+      export SLSKR_SLSK_PORT="$daemon_slsk_port"
+      export SLSKR_SLSK_LISTEN_IP_ADDRESS=0.0.0.0
+      export SLSKR_SLSK_LISTEN_PORT="$listen_port"
+      exec "$dotnet_path" run --project src/slskr/slskr.csproj --no-launch-profile
+    ) >"$output_dir/$name.stdout.log" 2>"$output_dir/$name.stderr.log" &
   fi
   echo $!
 }
@@ -392,7 +417,7 @@ wait_for_peer() {
     local stdout_file stderr_file status detail
     stdout_file="$(mktemp)"
     stderr_file="$(mktemp)"
-    local command=(env SLSK_USERNAME="${!actor_user_var}" SLSK_PASSWORD="${!actor_pass_var}" SLSK_SERVER="${daemon_slsk_address}:${daemon_slsk_port}" SLSK_PEER_USERNAME="$peer_user" cargo run -q -p slskr -- probe peer-address)
+    local command=(cargo run -q -p slskr -- probe peer-address)
     if [[ "$probe_vpn_enabled" == "1" ]]; then
       local label host_ip ns_ip subnet namespace config
       mapfile -t probe_args < <(probe_netns_args "$scope")
@@ -406,7 +431,11 @@ wait_for_peer() {
       command=(env SLSKR_NETNS_HOST_IP="$host_ip" SLSKR_NETNS_IP="$ns_ip" SLSKR_NETNS_SUBNET="$subnet" SLSKR_NETNS_EXTRA_ROUTES="$extra_routes" "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "${command[@]}")
     fi
     set +e
-    "${command[@]}" >"$stdout_file" 2>"$stderr_file"
+    SLSK_USERNAME="${!actor_user_var}" \
+    SLSK_PASSWORD="${!actor_pass_var}" \
+    SLSK_SERVER="${daemon_slsk_address}:${daemon_slsk_port}" \
+    SLSK_PEER_USERNAME="$peer_user" \
+      "${command[@]}" >"$stdout_file" 2>"$stderr_file"
     status=$?
     set -e
     detail="$( { cat "$stdout_file"; grep -E '^(error:|thread |panicked|failed|rejected)' "$stderr_file" || true; } | sanitize_detail )"
@@ -499,10 +528,10 @@ if [[ "$skip_adjacent_tests" != "1" ]]; then
     record slskr checkout missing "not found at $slskr_repo"
   fi
 
-  if [[ -d "$soulseek_net_repo" ]]; then
-    run_logged Soulseek.NET unit-tests "$soulseek_net_repo" dotnet test tests/Soulseek.Tests.Unit/Soulseek.Tests.Unit.csproj
+  if [[ -d "$dotnet_reference_repo" ]]; then
+    run_logged dotnet reference suite unit-tests "$dotnet_reference_repo" dotnet test tests/Soulseek.Tests.Unit/Soulseek.Tests.Unit.csproj
   else
-    record Soulseek.NET checkout missing "not found at $soulseek_net_repo"
+    record dotnet reference suite checkout missing "not found at $dotnet_reference_repo"
   fi
 
   if [[ -d "$runtime_repo" ]]; then

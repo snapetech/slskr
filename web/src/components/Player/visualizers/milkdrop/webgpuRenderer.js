@@ -986,7 +986,7 @@ export const createMilkdropWebGpuRenderer = async ({
 
   return {
     backend: 'webgpu',
-    name: 'slskR MilkDrop WebGPU',
+    name: 'slskr MilkDrop WebGPU',
     dispose: () => {
       disposeFeedbackTextures();
       disposeFilledPrimitiveBuffer();

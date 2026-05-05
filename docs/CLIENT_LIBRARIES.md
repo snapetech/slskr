@@ -1,6 +1,6 @@
-# soulseekR Client Libraries
+# slskr Client Libraries
 
-Official client libraries for the soulseekR HTTP API, providing language-specific implementations with batch operations, WebSocket support, and comprehensive examples.
+Official client libraries for the slskr HTTP API, providing language-specific implementations with batch operations, WebSocket support, and comprehensive examples.
 
 ## Overview
 
@@ -26,10 +26,10 @@ pip install aiohttp
 
 ```python
 import asyncio
-from soulseekr import SoulseekrClient
+from slskr import SlskrClient
 
 async def main():
-    client = SoulseekrClient(
+    client = SlskrClient(
         base_url="http://localhost:8080",
         token="your-api-key-here"
     )
@@ -132,7 +132,7 @@ await client.disconnect_ws()
 
 ```python
 # Auto-cleanup with context manager
-async with SoulseekrClient("http://localhost:8080", "token") as client:
+async with SlskrClient("http://localhost:8080", "token") as client:
     health = await client.health()
     searches = await client.list_searches()
     # Auto-closed when exiting
@@ -141,7 +141,7 @@ async with SoulseekrClient("http://localhost:8080", "token") as client:
 #### Error Handling
 
 ```python
-from soulseekr import ApiError, NetworkError, TimeoutError
+from slskr import ApiError, NetworkError, TimeoutError
 
 try:
     search = await client.create_search("query")
@@ -168,10 +168,10 @@ except NetworkError as e:
 
 ### API Reference
 
-**SoulseekrClient**
+**SlskrClient**
 
 ```python
-SoulseekrClient(
+SlskrClient(
     base_url: str,              # API server URL
     token: str,                 # API authentication token
     timeout: int = 30,          # Request timeout in seconds
@@ -208,7 +208,7 @@ SoulseekrClient(
 
 ```bash
 # Add to go.mod
-require github.com/your-org/soulseekr v0.1.0
+require github.com/snapetech/slskr/client-go v0.1.0
 
 # Or copy client files
 cp -r client-go/* your-project/
@@ -225,11 +225,11 @@ import (
     "log"
     "time"
     
-    "github.com/your-org/soulseekr"
+    "github.com/snapetech/slskr/client-go"
 )
 
 func main() {
-    client := soulseekr.NewClient(
+    client := slskr.NewClient(
         "http://localhost:8080",
         "your-api-key-here",
     )
@@ -446,17 +446,17 @@ See `docs/http-api-sdk.md` for complete documentation of the TypeScript client.
 ### Quick Installation
 
 ```bash
-npm install soulseekr-api
+npm install slskr-api
 # or
-yarn add soulseekr-api
+yarn add slskr-api
 ```
 
 ### Quick Usage
 
 ```typescript
-import { SoulseekrClient } from 'soulseekr-api';
+import { SlskrClient } from 'slskr-api';
 
-const client = new SoulseekrClient({
+const client = new SlskrClient({
     baseURL: 'http://localhost:8080',
     apiKey: 'your-api-key'
 });
@@ -575,7 +575,7 @@ for _, q := range queries {
 ### Python
 
 ```python
-from soulseekr import ApiError, NetworkError, TimeoutError
+from slskr import ApiError, NetworkError, TimeoutError
 
 try:
     await client.create_search(query)
@@ -640,7 +640,7 @@ Respect API rate limits:
 
 ```python
 # Automatic retry with exponential backoff
-client = SoulseekrClient(..., retries=3, retry_delay=1)
+client = SlskrClient(..., retries=3, retry_delay=1)
 
 # Manual rate limiting
 import asyncio
@@ -684,4 +684,4 @@ Client libraries are maintained in:
 
 ## License
 
-Same as soulseekR main project
+Same as slskr main project

@@ -12,10 +12,10 @@ This matrix proves `slskr` behavior against itself and adjacent/community client
 
 | Client | Role in matrix | Local path | Current status |
 | --- | --- | --- | --- |
-| `slskr` | Rust rewrite under test | `/home/keith/Documents/code/slskR` | Present |
+| `slskr` | Rust rewrite under test | `/home/keith/Documents/code/slskr` | Present |
 | `slskr` | Community daemon/client parity target | `/home/keith/Documents/code/slskr` | Present |
 | `slskr` | Sister fork parity target | `/home/keith/Documents/code/slskr` | Present |
-| `Soulseek.NET` | Upstream .NET library parity target | `/home/keith/Documents/code/Soulseek.NET` | Present |
+| `dotnet reference suite` | Upstream .NET library parity target | `/home/keith/Documents/code/dotnet reference suite` | Present |
 | `slskNet.Runtime` | Runtime fork parity target | `/home/keith/Documents/code/slskNet.Runtime` | Present |
 
 ## Capability matrix
@@ -112,7 +112,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | `slskr` Rust workspace tests | Passed | `cargo test --workspace`: all protocol, client, daemon, API smoke, and Soulfind contract tests passed |
 | `slskr` web tests | Passed | `web npm test`: 82 files, 508 tests passed |
 | `slskr` web production build | Passed | `web npm run build` |
-| `slskr` live account login | Passed | `scripts/run-live-interop-matrix.sh`: four generated `slskRtest20260504_*` accounts logged in |
+| `slskr` live account login | Passed | `scripts/run-live-interop-matrix.sh`: four generated `slskrtest20260504_*` accounts logged in |
 | `slskr` live account login over VPN | Passed | 2026-05-04 VPN-backed live matrix: accounts 5-8 logged in through fresh Proton namespaces |
 | `slskr` live peer smoke | Passed | 2026-05-04 VPN-backed live matrix: direct peer-message, obfuscated peer-message, file-transfer init, and indirect peer-message passed with fresh accounts |
 | `slskr` private-message live proof | Passed | 2026-05-04 VPN-backed live matrix: sender and receiver fresh accounts completed private-message probe |
@@ -136,7 +136,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | `slskr` unit tests | Passed | `/home/keith/Documents/code/slskr`: 3863/3863 passed |
 | vendored `slskNet.Runtime` library build | Passed | `/home/keith/Documents/code/slskr`: `dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj`, 0 warnings/errors |
 | vendored `slskNet.Runtime` unit behavior | Passed | `/home/keith/Documents/code/slskr`: 2303/2303 passed |
-| standalone `Soulseek.NET` unit behavior | Passed | `/home/keith/Documents/code/Soulseek.NET`: 2246/2246 passed |
+| standalone `dotnet reference suite` unit behavior | Passed | `/home/keith/Documents/code/dotnet reference suite`: 2246/2246 passed |
 
 ## Bugs fixed during matrix execution
 

@@ -12,11 +12,11 @@ This is an engineering compliance checklist, not legal advice.
 
 - This project is licensed AGPL-3.0-only from its first public release. Operators who modify and run a public network service must preserve the AGPL source-availability path for users interacting with that modified service.
 - We do not copy or link the official Soulseek client. The official client software license restrictions do not grant permission to decompile, reverse engineer, redistribute, or create derivative works of that official software.
-- This project is a clean-room Rust implementation from public protocol notes and observed behavior. Keep it that way: do not import official client code or disassembly.
+- This project is a independent Rust implementation from public protocol notes and observed behavior. Keep it that way: do not import official client code or disassembly.
 - Network access is governed by Soulseek's service terms and rules. Those rules say access can be revoked, prohibit abuse/spam/bots, and tolerate alternative clients only when they implement the expected Soulseek feature surface.
 - The protocol docs ask client authors not to extend the protocol without administrator approval and to avoid impersonating existing clients by reusing their version numbers.
 - Third-party client version ranges are useful operational guidance, but do not apply as license terms unless this project uses that code or binaries.
-- No public-source requirement was found to report clean-room reverse engineering work before private development or low-volume testing. Re-check before broad public distribution.
+- No public-source requirement was found to report independent reverse engineering work before private development or low-volume testing. Re-check before broad public distribution.
 - Do not falsely claim endorsement, affiliation, compatibility level, or origin. Public materials should say the client is an independent Soulseek-compatible implementation, and should credit public protocol documentation when used.
 
 ## Attribution Policy

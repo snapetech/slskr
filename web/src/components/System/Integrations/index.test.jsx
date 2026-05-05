@@ -43,7 +43,7 @@ describe('Integrations', () => {
         },
         mesh: {
           selfPeerIdConfigured: true,
-          soulseekRendezvousEnabled: false,
+          slskrendezvousEnabled: false,
         },
         pods: {
           joinSignatureMode: 'Off',
@@ -156,7 +156,7 @@ describe('Integrations', () => {
       target: { value: 'http://media.example.invalid' },
     });
     fireEvent.click(screen.getByLabelText('Media server token configured'));
-    fireEvent.change(screen.getByLabelText('slskR local file path'), {
+    fireEvent.change(screen.getByLabelText('slskr local file path'), {
       target: { value: '/downloads/complete/Artist/Album/track.flac' },
     });
     fireEvent.change(screen.getByLabelText('Media server file path'), {
@@ -198,7 +198,7 @@ describe('Integrations', () => {
     );
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskR media-server execution contract'),
+        expect.stringContaining('slskr media-server execution contract'),
       );
     });
   });
@@ -239,7 +239,7 @@ describe('Integrations', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskR Servarr compatibility review'),
+        expect.stringContaining('slskr Servarr compatibility review'),
       );
     });
     expect(lidarr.getStatus).not.toHaveBeenCalled();
@@ -321,7 +321,7 @@ describe('Integrations', () => {
       target: { value: 'https://api.acoustid.org/v2' },
     });
     fireEvent.change(screen.getByLabelText('MusicBrainz user agent'), {
-      target: { value: 'slskR-test/1.0' },
+      target: { value: 'slskr-test/1.0' },
     });
     fireEvent.click(screen.getByLabelText('Enable Lidarr integration settings'));
     fireEvent.change(screen.getByLabelText('Lidarr base URL setting'), {
@@ -345,7 +345,7 @@ describe('Integrations', () => {
     expect(yaml).toContain('ffmpeg_path: /usr/bin/ffmpeg');
     expect(yaml).toContain('acoustid');
     expect(yaml).toContain('musicbrainz');
-    expect(yaml).toContain('user_agent: slskR-test/1.0');
+    expect(yaml).toContain('user_agent: slskr-test/1.0');
     expect(yaml).toContain('lidarr');
     expect(yaml).toContain('url: http://lidarr.local:8686');
     expect(yaml).toContain('sync_wanted_to_wishlist: true');
@@ -471,13 +471,13 @@ describe('Integrations', () => {
           integration: {
             ntfy: {
               enabled: false,
-              notificationPrefix: 'slskR',
+              notificationPrefix: 'slskr',
             },
             pushbullet: {
               accessToken: '*****',
               cooldownTime: 900000,
               enabled: false,
-              notificationPrefix: 'From slskR:',
+              notificationPrefix: 'From slskr:',
               retryAttempts: 3,
             },
             pushover: {
@@ -507,7 +507,7 @@ describe('Integrations', () => {
         integration: {
           ntfy: {
             enabled: true,
-            notificationPrefix: 'slskR',
+            notificationPrefix: 'slskr',
             notifyOnPrivateMessage: true,
             notifyOnRoomMention: true,
             url: 'https://ntfy.sh/slskr',
@@ -515,14 +515,14 @@ describe('Integrations', () => {
           pushbullet: {
             cooldownTime: 900000,
             enabled: true,
-            notificationPrefix: 'From slskR:',
+            notificationPrefix: 'From slskr:',
             notifyOnPrivateMessage: true,
             notifyOnRoomMention: true,
             retryAttempts: 3,
           },
           pushover: {
             enabled: false,
-            notificationPrefix: 'slskR',
+            notificationPrefix: 'slskr',
             notifyOnPrivateMessage: true,
             notifyOnRoomMention: true,
           },

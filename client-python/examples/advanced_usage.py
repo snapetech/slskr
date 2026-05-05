@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Advanced usage example for soulseekR Python client
+Advanced usage example for slskr Python client
 - Error handling
 - Retries and timeouts
 - Context managers
@@ -8,7 +8,7 @@ Advanced usage example for soulseekR Python client
 """
 
 import asyncio
-from soulseekr import SoulseekrClient, ApiError, NetworkError, TimeoutError
+from slskr import SlskrClient, ApiError, NetworkError, TimeoutError
 
 
 async def search_with_retry(client, query, max_retries=3):
@@ -85,7 +85,7 @@ async def main():
     """Advanced usage examples"""
     
     # Using context manager
-    async with SoulseekrClient(
+    async with SlskrClient(
         base_url="http://localhost:8080",
         token="your-api-key-here",
         timeout=30,

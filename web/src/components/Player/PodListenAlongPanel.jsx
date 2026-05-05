@@ -272,7 +272,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
       </div>
       <div className="pod-listen-along-toggles">
         <Popup
-          content="List this party in the slskR mesh radio directory so nearby mesh members can discover it."
+          content="List this party in the slskr mesh radio directory so nearby mesh members can discover it."
           trigger={
             <Checkbox
               checked={globalRadio}
@@ -283,7 +283,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
           }
         />
         <Popup
-          content="Allow listeners who join from the directory to stream this party's current track from this slskR node."
+          content="Allow listeners who join from the directory to stream this party's current track from this slskr node."
           trigger={
             <Checkbox
               checked={meshStreaming}
@@ -349,7 +349,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
               <List.Item key={party.partyId}>
                 <List.Content floated="right">
                   <Popup
-                    content="Join this listed radio party and stream from the host's integrated slskR endpoint when available."
+                    content="Join this listed radio party and stream from the host's integrated slskr endpoint when available."
                     trigger={
                       <Button
                         disabled={!party.allowMeshStreaming}

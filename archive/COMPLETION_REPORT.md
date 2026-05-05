@@ -1,4 +1,4 @@
-# soulseekR HTTP API - Project Completion Report
+# slskr HTTP API - Project Completion Report
 
 **Project Status**: ✅ **COMPLETE - PRODUCTION READY**
 
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-Successfully completed the soulseekR HTTP API ecosystem with production-grade client libraries, monitoring infrastructure, and management tooling. The project delivers a fully functional REST API with 71 endpoints, batch operations, WebSocket support, and official client libraries in Python, Go, and TypeScript/JavaScript.
+Successfully completed the slskr HTTP API ecosystem with production-grade client libraries, monitoring infrastructure, and management tooling. The project delivers a fully functional REST API with 71 endpoints, batch operations, WebSocket support, and official client libraries in Python, Go, and TypeScript/JavaScript.
 
 ### Key Metrics
 
@@ -389,7 +389,7 @@ WebSocket: 10+ test cases
 │  (User Code)                        │
 ├─────────────────────────────────────┤
 │  Client Library (Python/Go/TS)      │
-│  ├─ SoulseekrClient                 │
+│  ├─ SlskrClient                 │
 │  ├─ BatchBuilder                    │
 │  ├─ WebSocketClient                 │
 │  └─ Error Handling                  │
@@ -480,7 +480,7 @@ Subscription Topics: Unlimited
 ## File Structure
 
 ```
-soulseekR/
+slskr/
 ├── crates/
 │   └── slskr/                 # Main Rust API server
 │       ├── src/
@@ -499,7 +499,7 @@ soulseekR/
 │       ├── src/               # 10 files, 1,960 LOC
 │       └── examples/          # 10+ example files
 ├── client-python/             # Python async client
-│       ├── soulseekr/         # 5 core files, 500+ LOC
+│       ├── slskr/         # 5 core files, 500+ LOC
 │       ├── examples/          # 5 example files
 │       └── setup.py           # Package configuration
 ├── client-go/                 # Go concurrent client
@@ -558,7 +558,7 @@ soulseekR/
 
 ## Conclusion
 
-The soulseekR HTTP API project is **complete and production-ready**. The implementation includes:
+The slskr HTTP API project is **complete and production-ready**. The implementation includes:
 
 - ✅ **71 fully functional REST API endpoints**
 - ✅ **3 production-grade client libraries** (TypeScript, Python, Go)

@@ -1,6 +1,8 @@
-# soulseekR API Client (TypeScript/JavaScript)
+# slskr API Client (TypeScript/JavaScript)
 
-Official TypeScript/JavaScript client library for the soulseekR HTTP API.
+TypeScript/JavaScript client library for the slskr HTTP API. This package is
+part of the independent `slskr` project and is not affiliated with or endorsed
+by Soulseek or its operators.
 
 ## Features
 
@@ -17,19 +19,19 @@ Official TypeScript/JavaScript client library for the soulseekR HTTP API.
 ## Installation
 
 ```bash
-npm install @soulseekr/api-client
+npm install @slskr/api-client
 ```
 
 ### Browser
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@soulseekr/api-client@latest/dist/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@slskr/api-client@latest/dist/index.js"></script>
 ```
 
 ### Node.js (with WebSocket support)
 
 ```bash
-npm install @soulseekr/api-client ws
+npm install @slskr/api-client ws
 ```
 
 ## Quick Start
@@ -37,9 +39,9 @@ npm install @soulseekr/api-client ws
 ### Basic Usage
 
 ```typescript
-import SoulseekrClient from '@soulseekr/api-client';
+import SlskrClient from '@slskr/api-client';
 
-const client = new SoulseekrClient({
+const client = new SlskrClient({
   baseUrl: 'http://localhost:8080',
   token: 'your-bearer-token',
 });
@@ -63,7 +65,7 @@ console.log(results.results);
 Execute multiple operations in a single request:
 
 ```typescript
-import { BatchClient } from '@soulseekr/api-client';
+import { BatchClient } from '@slskr/api-client';
 
 const batch = new BatchClient(client);
 
@@ -83,7 +85,7 @@ console.log(response.results);
 Listen to real-time events:
 
 ```typescript
-import { WebSocketClient } from '@soulseekr/api-client';
+import { WebSocketClient } from '@slskr/api-client';
 
 const ws = new WebSocketClient('http://localhost:8080', 'your-token');
 
@@ -104,14 +106,14 @@ setTimeout(() => ws.disconnect(), 60000);
 
 ## API Reference
 
-### SoulseekrClient
+### SlskrClient
 
 Main HTTP client for REST API operations.
 
 #### Constructor
 
 ```typescript
-new SoulseekrClient({
+new SlskrClient({
   baseUrl: string;
   token: string;
   timeout?: number; // default: 30000ms
@@ -225,7 +227,7 @@ ws.on('transfer.started', (event) => {
 ## Error Handling
 
 ```typescript
-import { ApiError, NetworkError, TimeoutError } from '@soulseekr/api-client';
+import { ApiError, NetworkError, TimeoutError } from '@slskr/api-client';
 
 try {
   await client.getTransfer('invalid-id');
@@ -311,7 +313,7 @@ await ws.connect();
 ### Client Options
 
 ```typescript
-const client = new SoulseekrClient({
+const client = new SlskrClient({
   // API server URL
   baseUrl: 'http://localhost:8080',
 
@@ -338,16 +340,16 @@ Full TypeScript support with strict type checking:
 
 ```typescript
 import {
-  SoulseekrClient,
+  SlskrClient,
   Transfer,
   Search,
   Message,
   Event,
   ApiError,
   TimeoutError,
-} from '@soulseekr/api-client';
+} from '@slskr/api-client';
 
-const client = new SoulseekrClient({...});
+const client = new SlskrClient({...});
 
 // Types are inferred
 const transfer: Transfer = await client.getTransfer('id');
@@ -360,9 +362,9 @@ const messages: Message[] = await client.listMessages();
 Works in all modern browsers with `fetch` API support:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@soulseekr/api-client@latest/dist/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@slskr/api-client@latest/dist/index.js"></script>
 <script>
-  const client = new SoulseekrClient({
+  const client = new SlskrClient({
     baseUrl: 'http://localhost:8080',
     token: 'token'
   });
@@ -376,9 +378,9 @@ Works in all modern browsers with `fetch` API support:
 Works in Node.js (tested on v14+):
 
 ```javascript
-const { default: SoulseekrClient } = require('@soulseekr/api-client');
+const { default: SlskrClient } = require('@slskr/api-client');
 
-const client = new SoulseekrClient({
+const client = new SlskrClient({
   baseUrl: 'http://localhost:8080',
   token: 'token'
 });
@@ -402,13 +404,13 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT - See [LICENSE](LICENSE) for details.
+AGPL-3.0-only. See the repository `LICENSE` and `NOTICE` files for details.
 
 ## Support
 
 - Documentation: [docs/http-api.md](../../docs/http-api.md)
-- GitHub Issues: [Report bugs](https://github.com/soulseekr/issues)
-- GitHub Discussions: [Ask questions](https://github.com/soulseekr/discussions)
+- GitHub Issues: [Report bugs](https://github.com/slskr/issues)
+- GitHub Discussions: [Ask questions](https://github.com/slskr/discussions)
 
 ## Changelog
 

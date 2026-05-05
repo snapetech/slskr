@@ -6,11 +6,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/your-org/soulseekr"
+	"github.com/snapetech/slskr/client-go"
 )
 
 func main() {
-	client := soulseekr.NewClient("http://localhost:8080", "your-api-key-here")
+	client := slskr.NewClient("http://localhost:8080", "your-api-key-here")
 	client.HTTPClient.Timeout = 30 * time.Second
 
 	ctx := context.Background()

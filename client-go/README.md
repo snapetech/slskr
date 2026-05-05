@@ -1,6 +1,6 @@
-# soulseekR Go API Client
+# slskr Go API Client
 
-Official Go client library for the soulseekR HTTP API.
+Official Go client library for the slskr HTTP API.
 
 ## Features
 
@@ -13,7 +13,7 @@ Official Go client library for the soulseekR HTTP API.
 ## Installation
 
 ```bash
-go get github.com/soulseekr/client-go
+go get github.com/snapetech/slskr/client-go
 ```
 
 ## Quick Start
@@ -27,11 +27,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/soulseekr/client-go"
+	"github.com/snapetech/slskr/client-go"
 )
 
 func main() {
-	client := soulseekr.NewClient(
+	client := slskr.NewClient(
 		"http://localhost:8080",
 		"your-bearer-token",
 	)
@@ -105,7 +105,7 @@ stats, err := client.GetStats(ctx)
 ## Configuration
 
 ```go
-client := soulseekr.NewClient(baseURL, token)
+client := slskr.NewClient(baseURL, token)
 client.Timeout = 60 * time.Second  // Custom timeout
 ```
 

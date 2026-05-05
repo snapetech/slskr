@@ -1,5 +1,5 @@
 /**
- * Main HTTP API client for soulseekR
+ * Main HTTP API client for slskr
  */
 
 import {
@@ -29,7 +29,7 @@ import {
 } from './types';
 import { ApiError, NetworkError, TimeoutError, ValidationError } from './errors';
 
-export class SoulseekrClient {
+export class SlskrClient {
   private baseUrl: string;
   private token: string;
   private timeout: number;
@@ -283,7 +283,7 @@ export class SoulseekrClient {
   ): Promise<T> {
     try {
       if (this.debug) {
-        console.debug(`[soulseekr] ${method} ${url}`, body);
+        console.debug(`[slskr] ${method} ${url}`, body);
       }
 
       const headers: Record<string, string> = {
@@ -362,4 +362,4 @@ export class SoulseekrClient {
   }
 }
 
-export default SoulseekrClient;
+export default SlskrClient;

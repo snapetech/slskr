@@ -1,4 +1,4 @@
-# slskR HTTP API Implementation Gap Analysis
+# slskr HTTP API Implementation Gap Analysis
 **Date:** 2026-05-04  
 **Scope:** Comprehensive analysis of HTTP API endpoints, comparing documented vs implemented
 
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-The slskR HTTP API has **31 documented endpoints** in `/docs/http-api.md` but only **24 are properly implemented** (77% coverage). Additionally, there are **16 extra endpoints** not documented. Key gaps include:
+The slskr HTTP API has **31 documented endpoints** in `/docs/http-api.md` but only **24 are properly implemented** (77% coverage). Additionally, there are **16 extra endpoints** not documented. Key gaps include:
 
 - 8 documented endpoints missing entirely or incorrectly implemented
 - Missing HTTP method support (PUT not implemented)

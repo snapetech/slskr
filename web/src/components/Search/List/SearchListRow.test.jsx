@@ -1,5 +1,5 @@
-// <copyright file="SearchListRow.test.jsx" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="SearchListRow.test.jsx" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import SearchListRow from './SearchListRow';

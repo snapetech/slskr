@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-Comprehensive audit of React code identified and fixed **all 10 common React mistakes**. Directory renamed from `soulseekR` to `slskR`.
+Comprehensive audit of React code identified and fixed **all 10 common React mistakes**. Directory renamed from `slskr` to `slskr`.
 
 **Status**: ✅ COMPLETE AND READY FOR PRODUCTION
 
@@ -130,15 +130,15 @@ const { data, loading, error, refetch } = useFetch(url, {
 **After**: useFetch hook with auto-cleanup
 
 ### Sidebar.tsx
-**Before**: soulseekR branding
-**After**: slskR branding
+**Before**: slskr branding
+**After**: slskr branding
 
 ---
 
-## Directory Structure - Now with slskR Naming
+## Directory Structure - Now with slskr Naming
 
 ```
-/home/keith/Documents/code/slskR/
+/home/keith/Documents/code/slskr/
 ├── dashboard/
 │   ├── src/
 │   │   ├── hooks/                (✅ NEW)
@@ -166,7 +166,7 @@ const { data, loading, error, refetch } = useFetch(url, {
 
 ---
 
-## Naming Updates - soulseekR → slskR
+## Naming Updates - slskr → slskr
 
 ### Files Updated
 - ✅ Cargo.toml: URL references
@@ -175,12 +175,12 @@ const { data, loading, error, refetch } = useFetch(url, {
 - ✅ crates/slskr-cli/src/admin_cli.rs: Comments
 - ✅ crates/slskr/src/persistence.rs: Comments
 - ✅ All documentation markdown files
-- ✅ Directory name: /home/keith/Documents/code/slskR
+- ✅ Directory name: /home/keith/Documents/code/slskr
 
 ### Branding
-- **Old**: soulseekR (10 characters, mixed case)
-- **New**: slskR (5 characters, consistent branding)
-- **CLI Tool**: soulseekr-admin
+- **Old**: slskr (10 characters, mixed case)
+- **New**: slskr (5 characters, consistent branding)
+- **CLI Tool**: slskr-admin
 - **NPM Package**: slskr-admin-dashboard
 
 ---
@@ -247,7 +247,7 @@ const { data, loading, error, refetch } = useFetch(url, {
 
 ### Build Dashboard
 ```bash
-cd /home/keith/Documents/code/slskR/dashboard
+cd /home/keith/Documents/code/slskr/dashboard
 npm install  # ✅ Already done
 npm run build  # ✅ Already done
 # Output: 195KB minified, 61KB gzipped
@@ -267,7 +267,7 @@ cargo test
 
 ### Deploy to Kubernetes
 ```bash
-kubectl apply -k /home/keith/Documents/code/slskR/k8s/
+kubectl apply -k /home/keith/Documents/code/slskr/k8s/
 ```
 
 ---
@@ -284,8 +284,8 @@ kubectl apply -k /home/keith/Documents/code/slskR/k8s/
 - [x] useCallback on all handlers
 - [x] useMemo on expensive computations
 - [x] Memory leak fixes verified
-- [x] Directory renamed to slskR
-- [x] All naming updated to slskR
+- [x] Directory renamed to slskr
+- [x] All naming updated to slskr
 - [x] Documentation complete
 - [x] Production ready
 
@@ -301,8 +301,8 @@ The React dashboard code has been comprehensively audited and improved:
 ✅ **Full TypeScript coverage**
 ✅ **Zero memory leaks**
 ✅ **Enterprise-grade quality**
-✅ **Directory renamed to slskR**
-✅ **All naming updated to slskR**
+✅ **Directory renamed to slskr**
+✅ **All naming updated to slskr**
 ✅ **Production ready** 🚀
 
 ---
@@ -312,7 +312,7 @@ The React dashboard code has been comprehensively audited and improved:
 1. **Commit these changes**:
    ```bash
    git add dashboard/src/ Cargo.toml
-   git commit -m "React audit: Fix 10 common mistakes + rename to slskR"
+   git commit -m "React audit: Fix 10 common mistakes + rename to slskr"
    ```
 
 2. **Deploy dashboard**:

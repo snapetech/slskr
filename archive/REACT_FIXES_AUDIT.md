@@ -1,4 +1,4 @@
-# React Code Audit & Fixes - slskR Dashboard
+# React Code Audit & Fixes - slskr Dashboard
 
 ## Common React Mistakes Fixed
 
@@ -214,7 +214,7 @@ const {
 
 ## Naming & Branding Update
 
-All instances of "soulseekR" have been renamed to "slskR":
+All instances of "slskr" have been renamed to "slskr":
 - Cargo.toml: Homepage & repository URLs
 - dashboard/package.json: Package name & description
 - Sidebar.tsx: Dashboard title

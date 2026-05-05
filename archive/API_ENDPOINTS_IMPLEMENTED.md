@@ -1,4 +1,4 @@
-# slskR API Endpoints - Complete Implementation Status
+# slskr API Endpoints - Complete Implementation Status
 
 **Last Updated:** 2026-05-04 (Phase 8 Implementation)
 

@@ -11,7 +11,7 @@ export const buildServarrReadiness = ({
   apiKey = '',
 } = {}) => [
   {
-    description: 'Lidarr/Radarr/Sonarr-compatible clients need a reachable slskR URL.',
+    description: 'Lidarr/Radarr/Sonarr-compatible clients need a reachable slskr URL.',
     id: 'base-url',
     ready: enabled && hasValue(url),
     title: 'Base URL configured',
@@ -23,7 +23,7 @@ export const buildServarrReadiness = ({
     title: 'API key configured',
   },
   {
-    description: 'Wanted and cutoff-unmet items can be pulled into slskR Wishlist review.',
+    description: 'Wanted and cutoff-unmet items can be pulled into slskr Wishlist review.',
     id: 'wanted-pull',
     ready: enabled && syncWantedToWishlist === true,
     title: 'Wanted pull enabled',
@@ -92,7 +92,7 @@ export const buildServarrCompatibilityPreview = ({
 
 export const formatServarrCompatibilityReport = (preview) => {
   const lines = [
-    'slskR Servarr compatibility review',
+    'slskr Servarr compatibility review',
     `Status: ${preview.summary.status}`,
     `Checks: ${preview.summary.ready}/${preview.summary.total}`,
     `Wanted pull: ${preview.supportsWantedPull ? 'ready' : 'not ready'}`,

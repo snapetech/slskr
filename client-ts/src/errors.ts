@@ -1,5 +1,5 @@
 /**
- * Error classes for soulseekR API client
+ * Error classes for slskr API client
  */
 
 export class ApiError extends Error {

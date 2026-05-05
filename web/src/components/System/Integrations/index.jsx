@@ -155,7 +155,7 @@ const buildNotificationForm = (options = {}) => {
       getOption(ntfy, 'notifyOnPrivateMessage', 'NotifyOnPrivateMessage') ?? true,
     ntfyNotifyOnRoomMention:
       getOption(ntfy, 'notifyOnRoomMention', 'NotifyOnRoomMention') ?? true,
-    ntfyPrefix: getOption(ntfy, 'notificationPrefix', 'NotificationPrefix') || 'slskR',
+    ntfyPrefix: getOption(ntfy, 'notificationPrefix', 'NotificationPrefix') || 'slskr',
     ntfyUrl: getOption(ntfy, 'url', 'Url') || '',
     pushbulletAccessToken: '',
     pushbulletAccessTokenConfigured: isConfigured(
@@ -175,7 +175,7 @@ const buildNotificationForm = (options = {}) => {
       getOption(pushbullet, 'notifyOnRoomMention', 'NotifyOnRoomMention') ?? true,
     pushbulletPrefix:
       getOption(pushbullet, 'notificationPrefix', 'NotificationPrefix') ||
-      'From slskR:',
+      'From slskr:',
     pushbulletRetryAttempts: String(
       getOption(pushbullet, 'retryAttempts', 'RetryAttempts') ?? 3,
     ),
@@ -189,7 +189,7 @@ const buildNotificationForm = (options = {}) => {
     pushoverNotifyOnRoomMention:
       getOption(pushover, 'notifyOnRoomMention', 'NotifyOnRoomMention') ?? true,
     pushoverPrefix:
-      getOption(pushover, 'notificationPrefix', 'NotificationPrefix') || 'slskR',
+      getOption(pushover, 'notificationPrefix', 'NotificationPrefix') || 'slskr',
     pushoverToken: '',
     pushoverTokenConfigured: isConfigured(getOption(pushover, 'token', 'Token')),
     pushoverUserKey: '',
@@ -1432,7 +1432,7 @@ const MetadataSettingsPanel = ({ options }) => {
             </Form.Group>
             <Form.Group grouped>
               <Popup
-                content="Sync Lidarr wanted albums into slskR Wishlist review items."
+                content="Sync Lidarr wanted albums into slskr Wishlist review items."
                 trigger={
                   <Checkbox
                     aria-label="Enable Lidarr wanted sync setting"
@@ -1460,7 +1460,7 @@ const MetadataSettingsPanel = ({ options }) => {
                 }
               />
               <Popup
-                content="Allow completed slskR download directories to be sent to Lidarr manual import."
+                content="Allow completed slskr download directories to be sent to Lidarr manual import."
                 trigger={
                   <Checkbox
                     aria-label="Enable Lidarr completed import setting"
@@ -2657,7 +2657,7 @@ const LidarrPanel = ({ options }) => {
             }
           />
           <Popup
-            content="Preview Lidarr wanted albums that can be synced into slskR Wishlist."
+            content="Preview Lidarr wanted albums that can be synced into slskr Wishlist."
             trigger={
               <Button
                 icon
@@ -2675,7 +2675,7 @@ const LidarrPanel = ({ options }) => {
             }
           />
           <Popup
-            content="Create or refresh slskR Wishlist entries from Lidarr wanted albums."
+            content="Create or refresh slskr Wishlist entries from Lidarr wanted albums."
             trigger={
               <Button
                 icon
@@ -2753,7 +2753,7 @@ const LidarrPanel = ({ options }) => {
             }}
             fluid
             onChange={(_, { value }) => setImportDirectory(value)}
-            placeholder="Completed download directory visible to slskR..."
+            placeholder="Completed download directory visible to slskr..."
             value={importDirectory}
           />
           {importResult && (
@@ -2917,7 +2917,7 @@ const MediaServerPanel = () => {
         <Segment className="integration-manual-import">
           <Header as="h4">Path Diagnostics</Header>
           <p>
-            Check whether a completed file path reported by slskR maps to the
+            Check whether a completed file path reported by slskr maps to the
             path a media server can scan.
           </p>
           <div className="media-server-path-grid">
@@ -2937,9 +2937,9 @@ const MediaServerPanel = () => {
               toggle
             />
             <Input
-              aria-label="slskR local file path"
+              aria-label="slskr local file path"
               fluid
-              label="slskR path"
+              label="slskr path"
               onChange={(_, { value }) => setLocalPath(value)}
               placeholder="/downloads/complete/Artist/Album/track.flac"
               value={localPath}
@@ -3498,7 +3498,7 @@ const FederationDiagnosticsPanel = () => {
             </Table.Row>
             <Table.Row>
               <Table.Cell>Soulseek rendezvous</Table.Cell>
-              <Table.Cell>{mesh.soulseekRendezvousEnabled ? 'Enabled' : 'Disabled'}</Table.Cell>
+              <Table.Cell>{mesh.slskrendezvousEnabled ? 'Enabled' : 'Disabled'}</Table.Cell>
             </Table.Row>
           </Table.Body>
         </Table>

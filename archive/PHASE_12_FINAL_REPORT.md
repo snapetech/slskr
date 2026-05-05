@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Comprehensive implementation of Phase 12+ advanced features for slskR REST API server, bringing production-grade capabilities for enterprise-level API infrastructure.
+Comprehensive implementation of Phase 12+ advanced features for slskr REST API server, bringing production-grade capabilities for enterprise-level API infrastructure.
 
 **Status:** ✅ **COMPLETE**  
 **Date:** 2026-05-04  
@@ -426,15 +426,15 @@ Phase 12 implementation delivers enterprise-grade API capabilities with:
 - ✅ Zero compiler errors
 - ✅ Production-ready code
 
-The slskR API now supports modern API patterns and can handle enterprise-level workloads with proper versioning, monitoring, and extensibility.
+The slskr API now supports modern API patterns and can handle enterprise-level workloads with proper versioning, monitoring, and extensibility.
 
 ---
 
 ## Contact & Support
 
 For questions or issues:
-- Repository: https://github.com/snapetech/slskR
-- Issues: https://github.com/snapetech/slskR/issues
+- Repository: https://github.com/snapetech/slskr
+- Issues: https://github.com/snapetech/slskr/issues
 - Documentation: See `/api/docs` endpoint
 
 ---

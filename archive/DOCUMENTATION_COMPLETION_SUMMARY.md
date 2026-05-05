@@ -1,8 +1,8 @@
-# slskR v1.0.1 Documentation Completion Summary
+# slskr v1.0.1 Documentation Completion Summary
 
 ## Overview
 
-Complete production-grade documentation suite for slskR v1.0.1 release, covering performance benchmarking, security hardening, load testing, monitoring, and v1.1.0 planning.
+Complete production-grade documentation suite for slskr v1.0.1 release, covering performance benchmarking, security hardening, load testing, monitoring, and v1.1.0 planning.
 
 **Release Date:** May 4, 2026
 **Commit:** c6ca33e0
@@ -369,7 +369,7 @@ v2.0.0:         500,000 req/s 1ms (60x improvement)
 
 ```
 ┌─────────────────────────────────────────────────┐
-│     slskR v1.0.1 Documentation Suite             │
+│     slskr v1.0.1 Documentation Suite             │
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │ PERFORMANCE_BENCHMARK.md                        │

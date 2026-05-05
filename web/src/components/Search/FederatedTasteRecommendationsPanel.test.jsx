@@ -1,5 +1,5 @@
-// <copyright file="FederatedTasteRecommendationsPanel.test.jsx" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="FederatedTasteRecommendationsPanel.test.jsx" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import FederatedTasteRecommendationsPanel from './FederatedTasteRecommendationsPanel';

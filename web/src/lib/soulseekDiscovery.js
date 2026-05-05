@@ -1,5 +1,5 @@
-// <copyright file="soulseekDiscovery.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="soulseekDiscovery.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import api from './api';

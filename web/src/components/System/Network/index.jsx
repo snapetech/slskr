@@ -236,13 +236,13 @@ const Network = ({ theme }) => {
           <Message.Header>LAN-only DHT is isolated</Message.Header>
           <p>
             DHT rendezvous is running with <code>dhtRendezvous.lanOnly: true</code>,
-            so slskR intentionally skips the public BitTorrent DHT bootstrap
+            so slskr intentionally skips the public BitTorrent DHT bootstrap
             routers. Seeing <code>0</code> DHT nodes and <code>0</code> discovered
             peers can be expected in this privacy mode even when the overlay and
             DHT ports are open.
           </p>
           <p>
-            To discover public slskR peers through DHT rendezvous, set
+            To discover public slskr peers through DHT rendezvous, set
             <code> dhtRendezvous.lanOnly: false</code> and restart. Keep LAN-only
             enabled if you want discovery limited to local or already-known
             private peers.
@@ -256,7 +256,7 @@ const Network = ({ theme }) => {
         >
           <Message.Header>Connectivity diagnostics</Message.Header>
           <p>
-            slskR is not seeing reachable peers yet. If you can log into the
+            slskr is not seeing reachable peers yet. If you can log into the
             Soulseek server but uploads, downloads, and peer counts stay at
             zero, verify that your configured Soulseek listen port is reachable
             from other peers. The default is <code>50300/tcp</code>.
@@ -279,7 +279,7 @@ const Network = ({ theme }) => {
             DHT rendezvous is enabled and this node can publish its public
             endpoint into the public BitTorrent DHT. This is expected when public
             rendezvous is enabled; this notice is only here so operators are aware
-            that other slskR peers can discover the node for mesh sync.
+            that other slskr peers can discover the node for mesh sync.
           </p>
           <p>
             If you want to keep mesh discovery confined to trusted local peers,
@@ -299,7 +299,7 @@ const Network = ({ theme }) => {
           icon="sitemap"
           inverted={darkTheme}
           label="Mesh Peers"
-          subLabel="slskR clients connected"
+          subLabel="slskr clients connected"
           value={mesh?.connectedPeerCount ?? meshPeers.length ?? 0}
         />
         <StatCard
@@ -445,7 +445,7 @@ const Network = ({ theme }) => {
           <Header.Content>
             Our Capabilities
             <Header.Subheader>
-              What we advertise to other slskR peers
+              What we advertise to other slskr peers
             </Header.Subheader>
           </Header.Content>
         </Header>
@@ -453,7 +453,7 @@ const Network = ({ theme }) => {
         <Label.Group>
           <Label color="blue">
             <Icon name="code branch" />
-            {capabilities?.version ?? 'slskR'}
+            {capabilities?.version ?? 'slskr'}
           </Label>
           {capabilities?.features?.map((feature) => (
             <Label
@@ -524,7 +524,7 @@ const Network = ({ theme }) => {
               <Header.Content>
                 Mesh Peers
                 <Header.Subheader>
-                  Connected slskR clients for hash sync
+                  Connected slskr clients for hash sync
                 </Header.Subheader>
               </Header.Content>
             </Header>
@@ -539,7 +539,7 @@ const Network = ({ theme }) => {
                   <Icon name="users" />
                   No mesh peers connected
                 </Header>
-                <p>Other slskR clients will appear here when discovered</p>
+                <p>Other slskr clients will appear here when discovered</p>
               </Segment>
             ) : (
               <Table
@@ -595,9 +595,9 @@ const Network = ({ theme }) => {
             <Header as="h4">
               <Icon name="search" />
               <Header.Content>
-                Discovered slskR Peers
+                Discovered slskr Peers
                 <Header.Subheader>
-                  Peers with slskR capabilities detected
+                  Peers with slskr capabilities detected
                 </Header.Subheader>
               </Header.Content>
             </Header>
@@ -610,7 +610,7 @@ const Network = ({ theme }) => {
               >
                 <Header icon>
                   <Icon name="crosshairs" />
-                  No slskR peers discovered yet
+                  No slskr peers discovered yet
                 </Header>
                 <p>Peers are discovered through searches and downloads</p>
               </Segment>
@@ -629,7 +629,7 @@ const Network = ({ theme }) => {
                     <List.Content>
                       <List.Header>{peer.username}</List.Header>
                       <List.Description>
-                        {peer.version ?? 'slskR'} • Last seen:{' '}
+                        {peer.version ?? 'slskr'} • Last seen:{' '}
                         {formatTimeAgo(peer.lastSeenAt)}
                       </List.Description>
                     </List.Content>
@@ -853,7 +853,7 @@ const Network = ({ theme }) => {
           <Header.Content>
             Backfill Scheduler
             <Header.Subheader>
-              Conservative discovery of hashes from non-slskR peers
+              Conservative discovery of hashes from non-slskr peers
             </Header.Subheader>
           </Header.Content>
         </Header>

@@ -1,8 +1,8 @@
-# slskR Database & Storage Layer Analysis
+# slskr Database & Storage Layer Analysis
 
 ## Executive Summary
 
-The slskR codebase currently has **NO persistent database layer**. All data (searches, transfers, messages, users, rooms) is stored in-memory using Rust `HashMap` and `Vec` structures. There is a placeholder `persistence.rs` module with in-memory structures but no actual SQLite or database integration.
+The slskr codebase currently has **NO persistent database layer**. All data (searches, transfers, messages, users, rooms) is stored in-memory using Rust `HashMap` and `Vec` structures. There is a placeholder `persistence.rs` module with in-memory structures but no actual SQLite or database integration.
 
 The only persistence implemented is:
 - **Share index cache** (TSV format): `shares.tsv`
@@ -451,7 +451,7 @@ CREATE INDEX idx_events_created ON events(created_at DESC);
 
 ## Conclusion
 
-The slskR codebase currently implements **file-based persistence only for share index and transfer snapshots**. All other data is purely in-memory and lost on restart. 
+The slskr codebase currently implements **file-based persistence only for share index and transfer snapshots**. All other data is purely in-memory and lost on restart. 
 
 To achieve production-quality persistence:
 1. Add SQLite dependency (`sqlx`)

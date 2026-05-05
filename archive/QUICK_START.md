@@ -1,4 +1,4 @@
-# Quick Start: Running slskR with WebUI
+# Quick Start: Running slskr with WebUI
 
 ## One-Command Reproduction
 
@@ -6,7 +6,7 @@ Everything works end-to-end with these two commands (in separate terminals):
 
 ### Terminal 1: Start the Daemon
 ```bash
-cd /home/keith/Documents/code/slskR
+cd /home/keith/Documents/code/slskr
 ./target/release/slskr serve
 ```
 
@@ -17,7 +17,7 @@ slskr listening on http://127.0.0.1:5030
 
 ### Terminal 2: Start the WebUI
 ```bash
-cd /home/keith/Documents/code/slskR/web
+cd /home/keith/Documents/code/slskr/web
 npm start
 ```
 
@@ -40,7 +40,7 @@ The webui will load and automatically communicate with the daemon on `:5030`.
 ## What You'll See
 
 1. **WebUI Page** (http://localhost:3001)
-   - React app loads with slskR branding ✓
+   - React app loads with slskr branding ✓
    - Sidebar navigation visible ✓
    - Empty project state (stub endpoints return minimal data) ✓
 
@@ -60,13 +60,13 @@ The webui will load and automatically communicate with the daemon on `:5030`.
 To see which endpoints are implemented vs missing:
 
 ```bash
-cd /home/keith/Documents/code/slskR
+cd /home/keith/Documents/code/slskr
 ./scripts/diff-webui-endpoints.sh
 ```
 
 Output:
 ```
-=== slskR WebUI Endpoint Coverage Report ===
+=== slskr WebUI Endpoint Coverage Report ===
 
 Canonical webui endpoints: 291 routes
 Scanning slskr implementation...
@@ -208,7 +208,7 @@ curl http://127.0.0.1:5030/api/health
 
 If not, start it:
 ```bash
-cd /home/keith/Documents/code/slskR
+cd /home/keith/Documents/code/slskr
 ./target/release/slskr serve
 ```
 
@@ -241,7 +241,7 @@ These will be implemented in Phase 2 with proper WebSocket support.
 ## File Structure
 
 ```
-slskR/
+slskr/
 ├── target/release/slskr              # Compiled daemon binary
 ├── crates/slskr/src/
 │   ├── main.rs                       # HTTP routing & handlers (10.5k lines)

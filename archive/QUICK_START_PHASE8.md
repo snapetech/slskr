@@ -84,7 +84,7 @@ Validate protocol compliance
 
 **Commands:**
 ```bash
-# Terminal 1: Start slskR
+# Terminal 1: Start slskr
 cargo build --release
 ./target/release/slskr serve
 

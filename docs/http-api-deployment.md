@@ -1,11 +1,11 @@
-# soulseekR HTTP API - Deployment & Troubleshooting Guide
+# slskr HTTP API - Deployment & Troubleshooting Guide
 
 ## Quick Start
 
-### 1. Build soulseekR
+### 1. Build slskr
 
 ```bash
-cd /path/to/soulseekR
+cd /path/to/slskr
 cargo build --release
 ```
 
@@ -79,7 +79,7 @@ http_api_cors_origins = ["http://localhost:3000", "https://example.com"]
 
 ### Scenario 1: Local Development
 
-**Goal**: Run soulseekR with API on localhost for testing
+**Goal**: Run slskr with API on localhost for testing
 
 ```toml
 http_api_host = "127.0.0.1"
@@ -105,17 +105,17 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates
 COPY --from=builder /build/target/release/slskr /usr/local/bin/
-COPY --from=builder /build/slskr.config.toml /etc/soulseekr/
+COPY --from=builder /build/slskr.config.toml /etc/slskr/
 EXPOSE 8080
 CMD ["slskr"]
 ```
 
 **Run:**
 ```bash
-docker build -t soulseekr .
+docker build -t slskr .
 docker run -p 8080:8080 \
            -e SLSKR_BEARER_TOKEN="my-token" \
-           soulseekr
+           slskr
 ```
 
 ### Scenario 3: Production with Nginx
@@ -123,7 +123,7 @@ docker run -p 8080:8080 \
 **Nginx Configuration:**
 
 ```nginx
-upstream soulseekr {
+upstream slskr {
     server localhost:8080;
 }
 
@@ -135,7 +135,7 @@ server {
     ssl_certificate_key /path/to/key.pem;
 
     location /api/ {
-        proxy_pass http://soulseekr;
+        proxy_pass http://slskr;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -154,9 +154,9 @@ server {
 }
 ```
 
-**Start soulseekR:**
+**Start slskr:**
 ```bash
-./target/release/slskr --config /etc/soulseekr/slskr.config.toml
+./target/release/slskr --config /etc/slskr/slskr.config.toml
 ```
 
 ### Scenario 4: Kubernetes Deployment
@@ -167,7 +167,7 @@ server {
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: soulseekr-config
+  name: slskr-config
 data:
   slskr.config.toml: |
     http_api_host = "0.0.0.0"
@@ -181,25 +181,25 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: soulseekr
+  name: slskr
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: soulseekr
+      app: slskr
   template:
     metadata:
       labels:
-        app: soulseekr
+        app: slskr
     spec:
       containers:
-      - name: soulseekr
-        image: soulseekr:latest
+      - name: slskr
+        image: slskr:latest
         ports:
         - containerPort: 8080
         volumeMounts:
         - name: config
-          mountPath: /etc/soulseekr
+          mountPath: /etc/slskr
         livenessProbe:
           httpGet:
             path: /api/health
@@ -215,19 +215,19 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: soulseekr-config
+          name: slskr-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: soulseekr-service
+  name: slskr-service
 spec:
   type: LoadBalancer
   ports:
   - port: 80
     targetPort: 8080
   selector:
-    app: soulseekr
+    app: slskr
 ```
 
 ## Troubleshooting
@@ -459,7 +459,7 @@ Access to XMLHttpRequest has been blocked by CORS policy
 
 3. **Add OPTIONS handler**
    ```bash
-   # soulseekR should handle OPTIONS automatically
+   # slskr should handle OPTIONS automatically
    # If not, check proxy configuration
    ```
 
@@ -475,9 +475,9 @@ while true; do
   response=$(curl -s -H "Authorization: Bearer TOKEN" \
                       http://localhost:8080/api/health)
   if [[ $response == *"ok"* ]]; then
-    echo "✓ soulseekR healthy at $(date)"
+    echo "✓ slskr healthy at $(date)"
   else
-    echo "✗ soulseekR unhealthy: $response"
+    echo "✗ slskr unhealthy: $response"
     # Send alert
   fi
   sleep 30
@@ -612,7 +612,7 @@ Currently uses default Tokio configuration. For high-load scenarios:
 // In main.rs (future enhancement)
 let rt = tokio::runtime::Builder::new_multi_thread()
     .worker_threads(num_cpus::get())
-    .thread_name("soulseekr-worker")
+    .thread_name("slskr-worker")
     .build()
     .unwrap();
 ```
@@ -631,7 +631,7 @@ cp slskr.config.toml.bak slskr.config.toml
 
 ### State Backup
 
-soulseekR state is stored in:
+slskr state is stored in:
 - Transfer queue (in-memory, not persisted)
 - Message store (in-memory)
 - Browse cache (in-memory, cleaned up)
@@ -694,7 +694,7 @@ RUST_LOG=trace ./target/release/slskr
   echo "=== System Info ==="
   uname -a
   
-  echo "=== soulseekR Version ==="
+  echo "=== slskr Version ==="
   curl http://localhost:8080/api/version
   
   echo "=== Config ==="

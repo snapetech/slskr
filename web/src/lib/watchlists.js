@@ -1,5 +1,5 @@
-// <copyright file="watchlists.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="watchlists.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';

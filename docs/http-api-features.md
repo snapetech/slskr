@@ -1,4 +1,4 @@
-# soulseekR HTTP API - Advanced Features Guide
+# slskr HTTP API - Advanced Features Guide
 
 ## Overview
 
@@ -8,7 +8,7 @@ This guide documents advanced HTTP API features including logging, batch operati
 
 ### Overview
 
-soulseekR includes built-in structured logging for HTTP API requests and responses to help with debugging, monitoring, and performance analysis.
+slskr includes built-in structured logging for HTTP API requests and responses to help with debugging, monitoring, and performance analysis.
 
 ### Configuration
 

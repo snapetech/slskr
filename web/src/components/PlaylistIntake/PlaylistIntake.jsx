@@ -294,11 +294,11 @@ const PlaylistIntake = () => {
                   </div>
                   <div className="playlist-intake-actions">
                     <Popup
-                      content="Preview the matched rows that will be used for a slskR playlist Collection."
+                      content="Preview the matched rows that will be used for a slskr playlist Collection."
                       position="top center"
                       trigger={
                         <Button
-                          aria-label={`Preview slskR playlist for ${playlist.name}`}
+                          aria-label={`Preview slskr playlist for ${playlist.name}`}
                           icon
                           onClick={() => previewSlskrPlaylist(playlist)}
                           size="small"
@@ -310,11 +310,11 @@ const PlaylistIntake = () => {
                       }
                     />
                     <Popup
-                      content="Create a slskR Playlist collection from matched rows. This writes local collection metadata only and does not search, browse, or download."
+                      content="Create a slskr Playlist collection from matched rows. This writes local collection metadata only and does not search, browse, or download."
                       position="top center"
                       trigger={
                         <Button
-                          aria-label={`Create slskR playlist for ${playlist.name}`}
+                          aria-label={`Create slskr playlist for ${playlist.name}`}
                           icon
                           loading={busyPlaylistId === playlist.id}
                           onClick={() => createSlskrPlaylist(playlist)}

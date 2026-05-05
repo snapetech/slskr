@@ -261,7 +261,7 @@ export const parseMeshEvidenceReviewInput = (value) => {
 
 export const formatMeshEvidenceReviewReport = (review) => {
   const lines = [
-    'slskR mesh evidence review',
+    'slskr mesh evidence review',
     `Total: ${review.summary.total}`,
     `Accepted: ${review.summary.accepted}`,
     `Rejected: ${review.summary.rejected}`,

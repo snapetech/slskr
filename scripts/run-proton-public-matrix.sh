@@ -119,15 +119,15 @@ run_probe() {
 
     set +e
     output="$(
-        timeout "${SLSKR_MATRIX_COMMAND_TIMEOUT_SECONDS:-${SLSKR_MATRIX_CASE_TIMEOUT_SECONDS:-45}}" \
+        SLSK_USERNAME="$probe_username" \
+        SLSK_PASSWORD="$probe_password" \
+        SLSK_SERVER="$server_address" \
+        SLSK_PEER_USERNAME="$listener_username" \
+        SLSK_PLAIN_PEER_USERNAME="$listener_username" \
+        SLSK_OBFUSCATED_PEER_USERNAME="$listener_username" \
+          timeout "${SLSKR_MATRIX_COMMAND_TIMEOUT_SECONDS:-${SLSKR_MATRIX_CASE_TIMEOUT_SECONDS:-45}}" \
             "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "${configs[$probe]}" \
             env \
-                SLSK_USERNAME="$probe_username" \
-                SLSK_PASSWORD="$probe_password" \
-                SLSK_SERVER="$server_address" \
-                SLSK_PEER_USERNAME="$listener_username" \
-                SLSK_PLAIN_PEER_USERNAME="$listener_username" \
-                SLSK_OBFUSCATED_PEER_USERNAME="$listener_username" \
                 SLSK_PEER_ADDRESS_PROBE_ATTEMPTS=1 \
                 SLSK_PEER_ADDRESS_PROBE_TIMEOUT_SECONDS=15 \
                 SLSK_PEER_ADDRESS_SHOW_IP="${SLSKR_MATRIX_SHOW_PEER_IP:-0}" \
@@ -156,14 +156,14 @@ run_indirect_probe() {
 
     set +e
     output="$(
-        timeout "${SLSKR_MATRIX_INDIRECT_TIMEOUT_SECONDS:-70}" \
+        SLSK_USERNAME="$probe_username" \
+        SLSK_PASSWORD="$probe_password" \
+        SLSK_SERVER="$server_address" \
+        SLSK_PEER_USERNAME="$listener_username" \
+        SLSK_INDIRECT_PEER_USERNAME="$listener_username" \
+          timeout "${SLSKR_MATRIX_INDIRECT_TIMEOUT_SECONDS:-70}" \
             "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "${configs[$probe]}" \
             env \
-                SLSK_USERNAME="$probe_username" \
-                SLSK_PASSWORD="$probe_password" \
-                SLSK_SERVER="$server_address" \
-                SLSK_PEER_USERNAME="$listener_username" \
-                SLSK_INDIRECT_PEER_USERNAME="$listener_username" \
                 SLSK_INDIRECT_LISTENER_BIND="${SLSK_INDIRECT_LISTENER_BIND:-0.0.0.0:2236}" \
                 SLSK_INDIRECT_PROBE_TIMEOUT_SECONDS=25 \
                 SLSK_INDIRECT_SEND_PEER_ADDRESS="${SLSKR_MATRIX_INDIRECT_SEND_PEER_ADDRESS:-0}" \

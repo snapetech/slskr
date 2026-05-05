@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: slskr-api
-  namespace: soulseekr
+  namespace: slskr
   labels:
     app: slskr-api
     version: "1.0"
@@ -130,7 +130,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: slskr-dashboard-standalone
-  namespace: soulseekr
+  namespace: slskr
   labels:
     app: slskr-dashboard
     version: "1.0"

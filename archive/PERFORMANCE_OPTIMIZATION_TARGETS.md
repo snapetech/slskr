@@ -1,8 +1,8 @@
-# slskR Performance Optimization Targets (v1.0.1 → v1.2.0)
+# slskr Performance Optimization Targets (v1.0.1 → v1.2.0)
 
 ## Executive Summary
 
-Detailed performance optimization roadmap for slskR across versions v1.0.1 through v1.2.0, with measurable targets, implementation strategies, and success criteria for each optimization.
+Detailed performance optimization roadmap for slskr across versions v1.0.1 through v1.2.0, with measurable targets, implementation strategies, and success criteria for each optimization.
 
 **Overall Vision:**
 - **v1.0.1:** 8,500 req/sec, p95=9ms (single instance, baseline)

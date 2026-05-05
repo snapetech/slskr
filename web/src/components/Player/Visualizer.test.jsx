@@ -74,7 +74,7 @@ const nativeEngine = {
       [key]: value,
     },
   })),
-  name: 'slskR MilkDrop WebGL',
+  name: 'slskr MilkDrop WebGL',
 };
 
 vi.mock('./audioGraph', () => ({

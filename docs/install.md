@@ -44,7 +44,7 @@ Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to 
 
 Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep credentials and API tokens out of git; use a local ignored env file, service environment file, or secret manager.
 
-SQLite persistence is default-off. Enable the current durable search persistence path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; transfer projection restart state is maintained in the slskR state directory.
+SQLite persistence is default-off. Enable the current durable search persistence path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; transfer projection restart state is maintained in the slskr state directory.
 
 ## Third-Party Integrations
 
@@ -58,11 +58,11 @@ enabled = true
 client_id = "spotify-app-client-id"
 # Optional; PKCE/browser authorization does not require a client secret.
 # client_secret = "spotify-app-client-secret"
-# Optional override. If omitted, slskR uses the existing WebUI/API port:
+# Optional override. If omitted, slskr uses the existing WebUI/API port:
 # redirect_uri = "http://127.0.0.1:5030/api/integrations/spotify/callback"
 ```
 
-Register the exact redirect URI shown in the WebUI with the Spotify developer dashboard. slskR multiplexes the callback on the existing HTTP listener at `/api/integrations/spotify/callback`; no second callback service or port is required.
+Register the exact redirect URI shown in the WebUI with the Spotify developer dashboard. slskr multiplexes the callback on the existing HTTP listener at `/api/integrations/spotify/callback`; no second callback service or port is required.
 
 Security behavior:
 

@@ -1,5 +1,5 @@
 /**
- * Type definitions for soulseekR HTTP API
+ * Type definitions for slskr HTTP API
  */
 
 // ============================================================================

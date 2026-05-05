@@ -1,6 +1,6 @@
 # slskr — Plan
 
-Independent clean-room Rust client/server app for the Soulseek network. Compatibility work uses public protocol documentation, interoperability tests, and observed network behavior; do not copy official client code or third-party client code unless its license is reviewed and attribution is added first. Wire protocol notes are maintained at [nicotine-plus.org/doc/SLSKPROTOCOL.html](https://nicotine-plus.org/doc/SLSKPROTOCOL.html).
+Independent independent Rust client/server app for the Soulseek network. Compatibility work uses public protocol documentation, interoperability tests, and observed network behavior; do not copy official client code or third-party client code unless its license is reviewed and attribution is added first. Wire protocol notes are maintained at [nicotine-plus.org/doc/SLSKPROTOCOL.html](https://nicotine-plus.org/doc/SLSKPROTOCOL.html).
 
 Public product posture: ship one runnable app named `slskr`, with daemon/API/web UI bundled. The workspace crates are internal implementation boundaries, not separate user-facing product names except where publishing a library is intentional.
 
@@ -170,7 +170,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - Install/service runbook. *(done initial cut: see `docs/install.md` for build/install, config/state paths, user/system service units, container shape, and exposure rules)*
 - App/API parity backlog. *(started: `docs/legacy-port-harvest.md` captures config/API/service requirements and sequencing for the bundled app)*
 - CLI consolidation. *(done initial cut: probe/admin commands are exposed as `slskr` subcommands; legacy `slskr-cli` command names remain accepted during migration)*
-- Public repo/package rename. *(pending: move public-facing metadata away from `soulseekR`; keep `slskr` as the user-visible app name and crate family)*
+- Public repo/package rename. *(pending: move public-facing metadata away from `slskr`; keep `slskr` as the user-visible app name and crate family)*
 - 24h soak test (search + transfer + distributed-tree health). *(running in tmux as `slskr-live-soak-proton` through Proton VPN NAT-PMP; public endpoint matrix is running separately as `slskr-proton-matrix`)*
 - License posture. *(done: project is AGPL-3.0-only from first public release, with stock AGPL text in `LICENSE` and concise project-specific notices in `NOTICE`; no third-party additional terms imported)*
 - Tag `0.1.0`, publish to internal registry. *(blocked until 24h soak passes and public-posture scrub is reviewed)*
@@ -208,7 +208,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - Build full daemon, API, and web UI into the new `slskr` app crate/binary.
 - Expand service/container docs into maintained release artifacts once packaging is selected.
 - Remove or fully privatize the legacy `slskr-cli` binary once scripts and operator workflows no longer need it.
-- Rename public repository and package metadata from `soulseekR` to `slskr` before publication.
+- Rename public repository and package metadata from `slskr` to `slskr` before publication.
 - Add end-user docs for install, first login, shares, search, transfers, rooms/messages, ports, NAT-PMP/UPnP behavior, and web UI auth.
 - Expand API contract tests as new daemon resources land.
 - Use `docs/legacy-port-harvest.md` as the app/API backlog source.

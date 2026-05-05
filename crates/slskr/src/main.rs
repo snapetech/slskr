@@ -2345,6 +2345,17 @@ impl RoomStore {
         format!("[{}]", records)
     }
 
+    fn joined_names_json(&self) -> String {
+        let records = self
+            .records
+            .iter()
+            .filter(|record| record.joined)
+            .map(|record| json_option(Some(record.name.as_str())))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{}]", records)
+    }
+
     fn summary_json(&self) -> String {
         let joined = self.records.iter().filter(|record| record.joined).count();
         let messages = self
@@ -2578,27 +2589,7 @@ impl WishlistItem {
 struct WishlistRecord {
     id: String,
     items: Vec<WishlistItem>,
-    created_at: u64,
     updated_at: u64,
-}
-
-impl WishlistRecord {
-    fn json(&self) -> String {
-        let items = self
-            .items
-            .iter()
-            .map(WishlistItem::json)
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            "{{\"id\":\"{}\",\"items\":[{}],\"item_count\":{},\"created_at\":{},\"updated_at\":{}}}",
-            json_escape(&self.id),
-            items,
-            self.items.len(),
-            self.created_at,
-            self.updated_at
-        )
-    }
 }
 
 #[derive(Debug)]
@@ -2623,7 +2614,6 @@ impl WishlistStore {
             let record = WishlistRecord {
                 id: "default".to_string(),
                 items: Vec::new(),
-                created_at: now,
                 updated_at: now,
             };
             self.records.push(record.clone());
@@ -2766,37 +2756,6 @@ impl ContactStore {
         } else {
             false
         }
-    }
-
-    fn json(&self, query: Option<&str>) -> String {
-        let filter = RecordListFilter::from_query(query);
-        let records = self
-            .records
-            .iter()
-            .filter(|record| {
-                filter
-                    .q
-                    .as_deref()
-                    .map_or(true, |q| record.username.to_ascii_lowercase().contains(q))
-            })
-            .collect::<Vec<_>>();
-        let filtered_count = records.len();
-        let records = records
-            .into_iter()
-            .skip(filter.offset)
-            .take(filter.limit.unwrap_or(usize::MAX))
-            .map(ContactRecord::json)
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            records,
-            self.records.len(),
-            filtered_count,
-            filter.offset,
-            json_usize_option(filter.limit),
-            self.updated_at
-        )
     }
 
     fn json_array(&self, query: Option<&str>) -> String {
@@ -3735,7 +3694,7 @@ async fn route_http_request_with_headers(
                 status: "200 OK",
                 content_type: "application/json",
                 body: serde_json::json!({
-                    "title": "slskR API Documentation",
+                    "title": "slskr API Documentation",
                     "version": "1.0.1",
                     "docs": {
                         "swagger_ui": "/api/docs",
@@ -5174,9 +5133,11 @@ async fn route_http_request_with_headers(
                 .iter()
                 .filter(|r| !r.joined)
                 .map(|r| format!(
-                    "{{\"name\":\"{}\",\"user_count\":{}}}",
+                    "{{\"name\":\"{}\",\"user_count\":{},\"userCount\":{},\"isPrivate\":{}}}",
                     json_escape(&r.name),
-                    r.user_count.unwrap_or(0)
+                    r.user_count.unwrap_or(0),
+                    r.user_count.unwrap_or(0),
+                    r.kind != "public"
                 ))
                 .collect::<Vec<_>>()
                 .join(",");
@@ -5190,7 +5151,7 @@ async fn route_http_request_with_headers(
             if parts.len() < 5 {
                 return Ok(routing::not_found_response());
             }
-            let room_name = parts[3];
+            let room_name = parts[4];
             let rooms = state.rooms.read().await;
             if let Some(_room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let json = "[]".to_string();
@@ -5207,7 +5168,7 @@ async fn route_http_request_with_headers(
             if parts.len() < 5 {
                 return Ok(routing::not_found_response());
             }
-            let room_name = parts[3];
+            let room_name = parts[4];
             let rooms = state.rooms.read().await;
             if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let messages = room.messages.iter()
@@ -5561,7 +5522,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: rooms.json_array(route.query),
+                body: rooms.joined_names_json(),
             })
         }
         ("POST", "/api/rooms/joined") => {
@@ -5660,7 +5621,7 @@ async fn route_http_request_with_headers(
                     "full": version,
                     "latest": version,
                     "latestTag": version,
-                    "latestUrl": "https://github.com/snapetech/slskR/releases",
+                    "latestUrl": "https://github.com/snapetech/slskr/releases",
                     "isUpdateAvailable": false
                 })
                 .to_string(),
@@ -8152,31 +8113,51 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
             }
 
             if let Some(active_session) = session.as_mut() {
-                let receive_result =
-                    time::timeout(Duration::from_millis(250), active_session.receive()).await;
-                match receive_result {
-                    Ok(Ok(message)) => {
-                        project_server_message(&state, active_session, &message).await;
-                        update_session(&state, |snapshot| {
-                            snapshot.state = "connected";
-                            snapshot.server_messages_seen += 1;
-                            snapshot.last_server_message =
-                                Some(server_message_name(&message).to_string());
-                        })
-                        .await;
+                if matches!(
+                    time::timeout(Duration::from_millis(250), active_session.readable()).await,
+                    Ok(Ok(()))
+                ) {
+                    match time::timeout(
+                        state.config.peer_response_timeout,
+                        active_session.receive(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(message)) => {
+                            project_server_message(&state, active_session, &message).await;
+                            update_session(&state, |snapshot| {
+                                snapshot.state = "connected";
+                                snapshot.server_messages_seen += 1;
+                                snapshot.last_server_message =
+                                    Some(server_message_name(&message).to_string());
+                            })
+                            .await;
+                        }
+                        Ok(Err(error)) => {
+                            session = None;
+                            update_session(&state, |snapshot| {
+                                snapshot.state = "error";
+                                snapshot.last_error =
+                                    Some(format!("server receive failed: {error}"));
+                                snapshot.supporter = None;
+                                snapshot.connected_at = None;
+                            })
+                            .await;
+                            reconnect_requested = state.config.reconnect;
+                        }
+                        Err(_) => {
+                            session = None;
+                            update_session(&state, |snapshot| {
+                                snapshot.state = "error";
+                                snapshot.last_error =
+                                    Some("server receive timed out after readability".to_owned());
+                                snapshot.supporter = None;
+                                snapshot.connected_at = None;
+                            })
+                            .await;
+                            reconnect_requested = state.config.reconnect;
+                        }
                     }
-                    Ok(Err(error)) => {
-                        session = None;
-                        update_session(&state, |snapshot| {
-                            snapshot.state = "error";
-                            snapshot.last_error = Some(format!("server receive failed: {error}"));
-                            snapshot.supporter = None;
-                            snapshot.connected_at = None;
-                        })
-                        .await;
-                        reconnect_requested = state.config.reconnect;
-                    }
-                    Err(_) => {}
                 }
 
                 if session.is_some() && Instant::now() >= next_ping {
@@ -9769,6 +9750,7 @@ async fn connect_file_transfer_preferred(
     address: &PeerAddress,
 ) -> Result<slskr_client::file_transfer::FileTransferConnection<TcpStream>, String> {
     let mut obfuscated_error = None;
+    let peer_ip = peer_connect_ip(state, address);
     if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
         match connect_obfuscated_file_transfer(state, address).await {
             Ok(connection) => return Ok(connection),
@@ -9784,7 +9766,7 @@ async fn connect_file_transfer_preferred(
     time::timeout(
         state.config.peer_response_timeout,
         connect_file_transfer(
-            SocketAddr::V4(SocketAddrV4::new(address.ip, port)),
+            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
             address.username.clone(),
         ),
     )
@@ -9797,10 +9779,11 @@ async fn connect_obfuscated_file_transfer(
     state: &AppState,
     address: &PeerAddress,
 ) -> Result<slskr_client::file_transfer::FileTransferConnection<TcpStream>, String> {
+    let peer_ip = peer_connect_ip(state, address);
     let stream = time::timeout(
         state.config.peer_response_timeout,
         TcpStream::connect(SocketAddr::V4(SocketAddrV4::new(
-            address.ip,
+            peer_ip,
             address.obfuscated_port,
         ))),
     )
@@ -9829,9 +9812,10 @@ async fn connect_indirect_file_transfer(
 ) -> Result<slskr_client::file_transfer::FileTransferConnection<TcpStream>, String> {
     let port = u16::try_from(response.port)
         .map_err(|_| format!("connect-to-peer port is out of range: {}", response.port))?;
+    let peer_ip = state.config.peer_host_override.unwrap_or(response.ip);
     let stream = time::timeout(
         state.config.peer_response_timeout,
-        TcpStream::connect(SocketAddr::V4(SocketAddrV4::new(response.ip, port))),
+        TcpStream::connect(SocketAddr::V4(SocketAddrV4::new(peer_ip, port))),
     )
     .await
     .map_err(|_| "indirect file-transfer connect timed out".to_owned())?
@@ -9854,9 +9838,10 @@ async fn connect_indirect_peer_messages(
 ) -> Result<PeerMessageConnection<TcpStream>, String> {
     let port = u16::try_from(response.port)
         .map_err(|_| format!("connect-to-peer port is out of range: {}", response.port))?;
+    let peer_ip = state.config.peer_host_override.unwrap_or(response.ip);
     let stream = time::timeout(
         state.config.peer_response_timeout,
-        TcpStream::connect(SocketAddr::V4(SocketAddrV4::new(response.ip, port))),
+        TcpStream::connect(SocketAddr::V4(SocketAddrV4::new(peer_ip, port))),
     )
     .await
     .map_err(|_| "indirect peer-message connect timed out".to_owned())?
@@ -9898,9 +9883,10 @@ async fn fetch_peer_browse(
 ) -> Result<Vec<BrowseEntry>, String> {
     let username = address.username.clone();
     let mut obfuscated_error = None;
+    let peer_ip = peer_connect_ip(state, address);
     if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
         match browse_obfuscated_peer(
-            SocketAddr::V4(SocketAddrV4::new(address.ip, address.obfuscated_port)),
+            SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
             username.clone(),
             state.config.peer_response_timeout,
         )
@@ -9914,7 +9900,7 @@ async fn fetch_peer_browse(
     let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
     if port != 0 {
         return browse_plain_peer(
-            SocketAddr::V4(SocketAddrV4::new(address.ip, port)),
+            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
             username,
             state.config.peer_response_timeout,
         )
@@ -10038,9 +10024,10 @@ async fn send_peer_message_request(
 ) -> Result<PeerMessage, String> {
     let username = address.username.clone();
     let mut obfuscated_error = None;
+    let peer_ip = peer_connect_ip(state, address);
     if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
         match send_obfuscated_peer_message_request(
-            SocketAddr::V4(SocketAddrV4::new(address.ip, address.obfuscated_port)),
+            SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
             username.clone(),
             message.clone(),
             state.config.peer_response_timeout,
@@ -10055,7 +10042,7 @@ async fn send_peer_message_request(
     let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
     if port != 0 {
         return send_plain_peer_message_request(
-            SocketAddr::V4(SocketAddrV4::new(address.ip, port)),
+            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
             username,
             message,
             state.config.peer_response_timeout,
@@ -10064,6 +10051,10 @@ async fn send_peer_message_request(
     }
 
     Err(obfuscated_error.unwrap_or_else(|| "peer did not advertise a peer-message port".to_owned()))
+}
+
+fn peer_connect_ip(state: &AppState, address: &PeerAddress) -> std::net::Ipv4Addr {
+    state.config.peer_host_override.unwrap_or(address.ip)
 }
 
 async fn send_plain_peer_message_request(
@@ -15074,6 +15065,21 @@ mod tests {
             .expect_err("missing API token should fail");
 
         assert!(error.contains("SLSKR_API_TOKEN"));
+    }
+
+    #[test]
+    fn peer_host_override_is_sanitized_config_only() {
+        let env = MapEnv::default().with("SLSKR_PEER_HOST_OVERRIDE", "127.0.0.1");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("config");
+
+        assert_eq!(
+            config.peer_host_override,
+            Some(std::net::Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert!(config
+            .sanitized_json()
+            .contains("\"peer_host_override\":\"127.0.0.1\""));
     }
 
     #[tokio::test]

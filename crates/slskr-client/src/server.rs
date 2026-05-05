@@ -3,7 +3,10 @@ use std::net::Ipv4Addr;
 use slskr_protocol::server::{
     LoginRequest, LoginResponse, ObfuscatedPort, ServerMessage, WaitPort,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+};
 
 use crate::{
     stream::ServerConnection,
@@ -164,6 +167,12 @@ where
 
     pub async fn receive(&mut self) -> Result<ServerMessage, ClientError> {
         self.connection.receive().await
+    }
+}
+
+impl ServerSession<TcpStream> {
+    pub async fn readable(&self) -> Result<(), ClientError> {
+        self.connection.readable().await
     }
 }
 

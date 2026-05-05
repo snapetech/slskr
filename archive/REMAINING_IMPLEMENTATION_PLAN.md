@@ -1,4 +1,4 @@
-# slskR Remaining Implementation Plan
+# slskr Remaining Implementation Plan
 
 **Status:** Phase 8 (Hardening) - Core functionality complete, finishing gaps
 
@@ -275,7 +275,7 @@ Checklist:
 ### Test Type-1 Obfuscation with slskr
 **Command:**
 ```bash
-# Terminal 1: Start slskR
+# Terminal 1: Start slskr
 cargo run -p slskr -- serve
 
 # Terminal 2: Start slskr (third-party client)

@@ -1,4 +1,4 @@
-# slskR Remediation Plan
+# slskr Remediation Plan
 
 This document is the single source of truth for what is real, what is theater,
 and what we are going to do about it. Anyone (human or agent) picking up this

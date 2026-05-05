@@ -1,5 +1,5 @@
-// <copyright file="setupTests.js" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="setupTests.js" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 // jest-dom adds custom jest matchers for asserting on DOM nodes.

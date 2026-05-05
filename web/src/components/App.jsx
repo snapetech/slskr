@@ -58,7 +58,7 @@ const Users = lazy(() => import('./Users/Users'));
 const Wishlist = lazy(() => import('./Wishlist/Wishlist'));
 
 const THEME_OPTIONS = [
-  { key: 'slskr', text: 'slskR', value: 'slskr' },
+  { key: 'slskr', text: 'slskr', value: 'slskr' },
   { key: 'classic-dark', text: 'Classic Dark', value: 'classic-dark' },
   { key: 'light', text: 'Light', value: 'light' },
 ];
@@ -267,7 +267,7 @@ const LEGACY_INGRESS_PORTS = [
   },
   {
     config: 'dht.overlay_port + dht.dht_port + overlay.quic_listen_port',
-    label: 'slskR mesh, DHT rendezvous, and QUIC overlay',
+    label: 'slskr mesh, DHT rendezvous, and QUIC overlay',
     port: 50305,
     proto: 'TCP/UDP',
   },
@@ -316,7 +316,7 @@ const buildCurrentIngressPorts = (options = {}) => {
   if (dhtOverlayPort === dhtPort) {
     ports.push({
       config: 'dht.overlay_port + dht.dht_port',
-      label: 'slskR mesh overlay and DHT rendezvous',
+      label: 'slskr mesh overlay and DHT rendezvous',
       port: dhtOverlayPort,
       proto: 'TCP/UDP',
     });
@@ -324,7 +324,7 @@ const buildCurrentIngressPorts = (options = {}) => {
     ports.push(
       {
         config: 'dht.overlay_port',
-        label: 'slskR mesh overlay',
+        label: 'slskr mesh overlay',
         port: dhtOverlayPort,
         proto: 'TCP',
       },
@@ -381,10 +381,10 @@ const VpnPortChangeNotice = ({ onDismiss, options, portForwards }) => {
       <div className="network-endpoint-change-notice-body">
         <Icon name="exchange" />
         <div className="network-endpoint-change-notice-copy">
-          <strong>slskR ingress ports were reduced.</strong>
+          <strong>slskr ingress ports were reduced.</strong>
           <span>
             Older builds needed five public forwards. Current builds need two:
-            Soulseek peer/file transfers and the slskR mesh/DHT/QUIC overlay.
+            Soulseek peer/file transfers and the slskr mesh/DHT/QUIC overlay.
           </span>
           <IngressPortList
             expectedPorts={LEGACY_INGRESS_PORTS}
@@ -960,7 +960,7 @@ class App extends Component {
           <ErrorSegment
             caption={
               <>
-                <span>Lost connection to slskR</span>
+                <span>Lost connection to slskr</span>
                 <br />
                 <span>
                   {retriesExhausted ? 'Refresh to reconnect' : 'Retrying...'}
@@ -984,7 +984,7 @@ class App extends Component {
     }
 
     const isAgent = mode === 'Agent';
-    document.title = 'slskR';
+    document.title = 'slskr';
 
     document.documentElement.classList.remove(
       'classic-dark',
@@ -1010,7 +1010,7 @@ class App extends Component {
             }}
           >
             <Icon name="attention" />
-            Lost connection to slskR. {retriesExhausted ? 'Refresh to reconnect.' : 'Retrying...'}
+            Lost connection to slskr. {retriesExhausted ? 'Refresh to reconnect.' : 'Retrying...'}
           </Segment>
         )}
         <PlayerProvider>

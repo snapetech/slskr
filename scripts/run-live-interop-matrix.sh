@@ -132,7 +132,9 @@ run_account_login() {
   stderr_file="$(mktemp)"
 
   set +e
-  run_sanitized "$stdout_file" "$stderr_file" run_live_command "$index" env SLSK_USERNAME="$username" SLSK_PASSWORD="$password" cargo run -q -p slskr -- login smoke
+  SLSK_USERNAME="$username" \
+  SLSK_PASSWORD="$password" \
+    run_sanitized "$stdout_file" "$stderr_file" run_live_command "$index" cargo run -q -p slskr -- login smoke
   status=$?
   set -e
 
@@ -160,13 +162,12 @@ local_peer_a_pass_var="SLSKR_TEST_${local_peer_a_index}_PASSWORD"
 local_peer_b_user_var="SLSKR_TEST_${local_peer_b_index}_USERNAME"
 local_peer_b_pass_var="SLSKR_TEST_${local_peer_b_index}_PASSWORD"
 set +e
-run_sanitized "$pair_stdout" "$pair_stderr" run_live_command "$local_peer_a_index" env \
-  SLSKR_A_USERNAME="${!local_peer_a_user_var}" \
-  SLSKR_A_PASSWORD="${!local_peer_a_pass_var}" \
-  SLSKR_B_USERNAME="${!local_peer_b_user_var}" \
-  SLSKR_B_PASSWORD="${!local_peer_b_pass_var}" \
-  SLSKR_INDIRECT_HOST_OVERRIDE="${SLSKR_INDIRECT_HOST_OVERRIDE:-127.0.0.1}" \
-  cargo run -q -p slskr -- smoke local-peer
+SLSKR_A_USERNAME="${!local_peer_a_user_var}" \
+SLSKR_A_PASSWORD="${!local_peer_a_pass_var}" \
+SLSKR_B_USERNAME="${!local_peer_b_user_var}" \
+SLSKR_B_PASSWORD="${!local_peer_b_pass_var}" \
+SLSKR_INDIRECT_HOST_OVERRIDE="${SLSKR_INDIRECT_HOST_OVERRIDE:-127.0.0.1}" \
+  run_sanitized "$pair_stdout" "$pair_stderr" run_live_command "$local_peer_a_index" cargo run -q -p slskr -- smoke local-peer
 pair_status=$?
 set -e
 pair_detail="$(summarize_output "$pair_stdout" "$pair_stderr")"
@@ -187,12 +188,11 @@ private_receiver_pass_var="SLSKR_TEST_${private_message_receiver_index}_PASSWORD
 social_stdout="$(mktemp)"
 social_stderr="$(mktemp)"
 set +e
-run_sanitized "$social_stdout" "$social_stderr" run_live_command "$private_message_sender_index" env \
-  SLSK_USERNAME="${!private_sender_user_var}" \
-  SLSK_PASSWORD="${!private_sender_pass_var}" \
-  SLSK_MESSAGE_USERNAME="${!private_receiver_user_var}" \
-  SLSK_MESSAGE_PASSWORD="${!private_receiver_pass_var}" \
-  cargo run -q -p slskr -- probe private-message
+SLSK_USERNAME="${!private_sender_user_var}" \
+SLSK_PASSWORD="${!private_sender_pass_var}" \
+SLSK_MESSAGE_USERNAME="${!private_receiver_user_var}" \
+SLSK_MESSAGE_PASSWORD="${!private_receiver_pass_var}" \
+  run_sanitized "$social_stdout" "$social_stderr" run_live_command "$private_message_sender_index" cargo run -q -p slskr -- probe private-message
 social_status=$?
 set -e
 social_detail="$(summarize_output "$social_stdout" "$social_stderr")"
@@ -209,10 +209,9 @@ room_stderr="$(mktemp)"
 room_user_var="SLSKR_TEST_${room_message_account_index}_USERNAME"
 room_pass_var="SLSKR_TEST_${room_message_account_index}_PASSWORD"
 set +e
-run_sanitized "$room_stdout" "$room_stderr" run_live_command "$room_message_account_index" env \
-  SLSK_USERNAME="${!room_user_var}" \
-  SLSK_PASSWORD="${!room_pass_var}" \
-  cargo run -q -p slskr -- probe room-message
+SLSK_USERNAME="${!room_user_var}" \
+SLSK_PASSWORD="${!room_pass_var}" \
+  run_sanitized "$room_stdout" "$room_stderr" run_live_command "$room_message_account_index" cargo run -q -p slskr -- probe room-message
 room_status=$?
 set -e
 room_detail="$(summarize_output "$room_stdout" "$room_stderr")"

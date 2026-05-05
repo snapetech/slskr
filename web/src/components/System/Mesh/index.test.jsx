@@ -1,5 +1,5 @@
-// <copyright file="index.test.jsx" company="slskR Team">
-// Copyright (c) slskR Team. All rights reserved.
+// <copyright file="index.test.jsx" company="slskr Team">
+// Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
 import Mesh from './index';
@@ -66,7 +66,7 @@ describe('System Mesh', () => {
         enabled: false,
         interestTag: 'slskr-mesh-v1',
         privacy:
-          'When enabled, adding the rendezvous interest publishes a recognizable slskR mesh tag on this Soulseek account.',
+          'When enabled, adding the rendezvous interest publishes a recognizable slskr mesh tag on this Soulseek account.',
       },
     });
 
@@ -85,7 +85,7 @@ describe('System Mesh', () => {
         enabled: true,
         interestTag: 'slskr-mesh-v1',
         privacy:
-          'When enabled, adding the rendezvous interest publishes a recognizable slskR mesh tag on this Soulseek account.',
+          'When enabled, adding the rendezvous interest publishes a recognizable slskr mesh tag on this Soulseek account.',
       },
     });
     soulseekDiscovery.discoverMeshRendezvous.mockResolvedValue({

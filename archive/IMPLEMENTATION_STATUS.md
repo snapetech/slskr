@@ -1,4 +1,4 @@
-# soulseekR - Complete Implementation Status
+# slskr - Complete Implementation Status
 
 **Last Updated**: May 4, 2026  
 **Status**: ✅ **ALL COMPONENTS FULLY IMPLEMENTED**
@@ -130,7 +130,7 @@ POST   /api/admin/webhooks/{id}/test - Test webhook
 ```rust
 use crate::persistence::{DatabaseManager, SearchRecord};
 
-let db = DatabaseManager::new("data/soulseekr.db")?;
+let db = DatabaseManager::new("data/slskr.db")?;
 
 let record = SearchRecord {
     id: search_id,
@@ -201,40 +201,40 @@ async fn handle_graphql(req: String) -> Result<String> {
 **Commands Available**:
 ```bash
 # API Keys
-soulseekr-admin api-key create --scopes read write
-soulseekr-admin api-key list
-soulseekr-admin api-key revoke <id>
-soulseekr-admin api-key rotate <id>
+slskr-admin api-key create --scopes read write
+slskr-admin api-key list
+slskr-admin api-key revoke <id>
+slskr-admin api-key rotate <id>
 
 # Server
-soulseekr-admin server health
-soulseekr-admin server version
-soulseekr-admin server stats
-soulseekr-admin server config
-soulseekr-admin server restart
-soulseekr-admin server shutdown
+slskr-admin server health
+slskr-admin server version
+slskr-admin server stats
+slskr-admin server config
+slskr-admin server restart
+slskr-admin server shutdown
 
 # Webhooks
-soulseekr-admin webhook create <url> --events search.created
-soulseekr-admin webhook list
-soulseekr-admin webhook test <id>
-soulseekr-admin webhook delete <id>
+slskr-admin webhook create <url> --events search.created
+slskr-admin webhook list
+slskr-admin webhook test <id>
+slskr-admin webhook delete <id>
 
 # Database
-soulseekr-admin database stats
-soulseekr-admin database cleanup --days 30
-soulseekr-admin database vacuum
-soulseekr-admin database export --format json
+slskr-admin database stats
+slskr-admin database cleanup --days 30
+slskr-admin database vacuum
+slskr-admin database export --format json
 
 # Health
-soulseekr-admin health check
-soulseekr-admin health monitor --interval 5
+slskr-admin health check
+slskr-admin health monitor --interval 5
 
 # Config
-soulseekr-admin config get
-soulseekr-admin config set <key> <value>
-soulseekr-admin config validate
-soulseekr-admin config export config.json
+slskr-admin config get
+slskr-admin config set <key> <value>
+slskr-admin config validate
+slskr-admin config export config.json
 ```
 
 **Status**: ✅ All command structures defined and ready to use
@@ -262,7 +262,7 @@ soulseekr-admin config export config.json
 **Deployment**:
 ```bash
 kubectl apply -f k8s/deployment.yaml
-kubectl get pods -n soulseekr
+kubectl get pods -n slskr
 ```
 
 **Status**: ✅ Ready to deploy
@@ -332,7 +332,7 @@ cd dashboard && npm run dev
 # Access: http://localhost:5173
 
 # Terminal 3: CLI Tool
-soulseekr-admin --api-url http://localhost:8080 server health
+slskr-admin --api-url http://localhost:8080 server health
 
 # Terminal 4: Prometheus (if configured)
 curl http://localhost:8080/api/metrics
@@ -342,14 +342,14 @@ curl http://localhost:8080/api/metrics
 
 ```bash
 # Build Docker image
-docker build -t soulseekr:latest .
+docker build -t slskr:latest .
 
 # Deploy to Kubernetes
 kubectl apply -f k8s/deployment.yaml
 
 # Verify deployment
-kubectl get all -n soulseekr
-kubectl logs -n soulseekr deployment/soulseekr-api
+kubectl get all -n slskr
+kubectl logs -n slskr deployment/slskr-api
 ```
 
 ---

@@ -197,7 +197,7 @@ export const formatAutomationRunHistoryReport = (
   history = buildAutomationRunHistory(),
 ) => {
   const lines = [
-    'slskR automation review history',
+    'slskr automation review history',
     `Entries: ${history.length}`,
     '',
   ];

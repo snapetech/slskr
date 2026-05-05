@@ -123,7 +123,7 @@ const getExternalVisualizerStatusText = (status, loading) => {
   if (!status.enabled) return 'Disabled in slskr.yml.';
   if (!status.configured) return 'No launcher path configured.';
   if (!status.available) return 'Configured launcher path was not found.';
-  return 'Ready to launch on the slskR host.';
+  return 'Ready to launch on the slskr host.';
 };
 
 const getExternalVisualizerError = (error) => {
@@ -1517,7 +1517,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
         }
       />
       <Popup
-        content="Browse shared and downloaded local audio that slskR can stream in this browser."
+        content="Browse shared and downloaded local audio that slskr can stream in this browser."
         trigger={
           <Button
             aria-label="Open local audio file browser"
@@ -1873,7 +1873,7 @@ const PlayerVisualTile = ({
   };
   const tileRef = useRef(null);
   const [visualizerRevision, setVisualizerRevision] = useState(0);
-  const title = current?.title || current?.fileName || 'slskR';
+  const title = current?.title || current?.fileName || 'slskr';
   const artist = current?.artist || '';
   const initials = (artist || title)
     .split(/\s+/)
@@ -2956,7 +2956,7 @@ const PlayerBar = () => {
             ) : null}
             <div className="player-external-visualizer-actions">
               <Popup
-                content="Start the configured external visualizer on the slskR host. Use this for MilkDrop3 or another local visualizer that captures system audio."
+                content="Start the configured external visualizer on the slskr host. Use this for MilkDrop3 or another local visualizer that captures system audio."
                 trigger={
                   <Button
                     data-testid="player-launch-external-visualizer"

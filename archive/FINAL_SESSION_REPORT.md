@@ -1,4 +1,4 @@
-# soulseekR HTTP API - Final Session Report
+# slskr HTTP API - Final Session Report
 
 **Session Completion Date:** May 4, 2026
 **Total Session Duration:** Extended continuous work
@@ -483,17 +483,17 @@ curl http://localhost:8080/api/health
 ### Docker
 
 ```bash
-docker build -t soulseekr .
+docker build -t slskr .
 docker run -p 8080:8080 \
   -e HTTP_API_BEARER_TOKEN=secret \
-  soulseekr
+  slskr
 ```
 
 ### Kubernetes
 
 ```bash
 kubectl apply -f k8s/deployment.yaml
-kubectl port-forward service/soulseekr 8080:8080
+kubectl port-forward service/slskr 8080:8080
 ```
 
 ---
@@ -515,7 +515,7 @@ These are **not blocking** for production deployment:
 
 ## Conclusion
 
-The soulseekR HTTP API is now **feature-complete, well-tested, comprehensively documented, and production-ready** with:
+The slskr HTTP API is now **feature-complete, well-tested, comprehensively documented, and production-ready** with:
 
 ### Core Deliverables
 ✅ **50+ REST endpoints** (100% test coverage)
