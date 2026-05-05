@@ -80,6 +80,12 @@ Completed across the main Rust routes:
   workspace: include/exclude terms, format, bitrate, size, duration, queue,
   duplicate folding, free-slot preference, locked-file filtering, ranking
   profile, result expansion, and ranking/duplicate chips.
+- Every native route now includes a route-specific final parity panel for the
+  remaining old WebUI sub-workflows: discovery graph canvas, playlist upload and
+  correction, wishlist quota/inbox, grouped transfers, upload policy,
+  multi-window messaging, selected-user context cards, contact QR invites, Solid
+  session/storage setup, collection share drafts, share-group member/token
+  mutations, inbound share manifests, cached browse sessions, and operator tabs.
 
 ## Route Gaps
 

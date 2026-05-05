@@ -5443,6 +5443,218 @@ fn native_search_filter_panel_html() -> String {
     r#"<section class="slskr-native-filter-modal" data-slskr-search-filter-modal><header><div><h4>Search Filters</h4><p>Format, bitrate, size, duration, queue, and duplicate controls stay visible beside results.</p></div><button type="button">Apply Filters</button></header><div class="slskr-native-filter-grid"><label><span>Include words</span><input aria-label="Include words" placeholder="remix instrumental"></label><label><span>Exclude words</span><input aria-label="Exclude words" placeholder="live demo"></label><label><span>Min bitrate</span><input aria-label="Min bitrate" placeholder="320"></label><label><span>Format</span><input aria-label="Format" placeholder="flac mp3 wav"></label><label><span>Min size</span><input aria-label="Min size" placeholder="1 MB"></label><label><span>Max size</span><input aria-label="Max size" placeholder="100 MB"></label><label><span>Min duration</span><input aria-label="Min duration" placeholder="3 min"></label><label><span>Max queue</span><input aria-label="Max queue" placeholder="8"></label></div><div class="slskr-native-filter-toggles"><label><input type="checkbox" aria-label="Fold duplicate results" checked> Fold duplicate results</label><label><input type="checkbox" aria-label="Prefer free upload slots" checked> Prefer free slots</label><label><input type="checkbox" aria-label="Hide locked files"> Hide locked files</label><select aria-label="Search ranking profile"><option>Smart ranking</option><option>Exact match first</option><option>Fastest peer first</option><option>Lossless first</option></select></div></section>"#.to_string()
 }
 
+fn native_final_parity_panel_html(kind: RouteKind) -> String {
+    let (title, attr, controls, facts): (&str, &str, &[&str], &[&str]) = match kind {
+        RouteKind::Search => (
+            "Result Expansion",
+            "data-slskr-search-final-parity",
+            &[
+                "Expand Result",
+                "Fold Duplicates",
+                "Apply Ranking",
+                "Queue Exact",
+            ],
+            &[
+                "Directory tree",
+                "Locked files",
+                "Duplicate providers",
+                "Score reasons",
+            ],
+        ),
+        RouteKind::DiscoveryGraph => (
+            "Graph Canvas",
+            "data-slskr-graph-final-parity",
+            &[
+                "Save Branch",
+                "Weight Edges",
+                "Queue Recommendation",
+                "Open Node",
+            ],
+            &[
+                "Artist nodes",
+                "Album nodes",
+                "Track nodes",
+                "Provider edges",
+            ],
+        ),
+        RouteKind::PlaylistIntake => (
+            "Playlist Correction",
+            "data-slskr-playlist-final-parity",
+            &[
+                "Upload Playlist",
+                "Correct Row",
+                "Open Provider Tab",
+                "Queue Plan",
+            ],
+            &[
+                "MusicBrainz tab",
+                "SongID tab",
+                "Organization plan",
+                "Row errors",
+            ],
+        ),
+        RouteKind::Wishlist => (
+            "Discovery Inbox",
+            "data-slskr-wishlist-final-parity",
+            &[
+                "Check Quota",
+                "Persist Inbox",
+                "Toggle Enabled",
+                "Toggle Auto",
+            ],
+            &[
+                "Quota portal",
+                "Review requests",
+                "Last run",
+                "Result count",
+            ],
+        ),
+        RouteKind::Downloads => (
+            "Download Groups",
+            "data-slskr-downloads-final-parity",
+            &["Group by Peer", "Retry Group", "Cancel Group", "Set Slots"],
+            &["Progress", "ETA", "Speed", "Queue position"],
+        ),
+        RouteKind::Uploads => (
+            "Upload Policy",
+            "data-slskr-uploads-final-parity",
+            &["Edit Policy", "Group by Peer", "Allow Peer", "Deny Peer"],
+            &["Allow list", "Deny list", "Queue rules", "Peer groups"],
+        ),
+        RouteKind::Messages | RouteKind::Rooms => (
+            "Conversation Windows",
+            "data-slskr-messages-final-parity",
+            &["Open Window", "Create Room", "Join Room", "Restore Draft"],
+            &[
+                "Unread lifecycle",
+                "Delete state",
+                "Room list",
+                "Pod channels",
+            ],
+        ),
+        RouteKind::Users => (
+            "Selected User Card",
+            "data-slskr-users-final-parity",
+            &[
+                "Open Context Menu",
+                "Browse User",
+                "Message User",
+                "Save Note",
+            ],
+            &["Privileges", "Stats", "Status", "Browse handoff"],
+        ),
+        RouteKind::Contacts => (
+            "Invite and QR Flow",
+            "data-slskr-contacts-final-parity",
+            &[
+                "Create QR Invite",
+                "Scan QR Image",
+                "Refresh Nearby",
+                "Edit Group",
+            ],
+            &[
+                "Invite link",
+                "QR preview",
+                "Nearby contacts",
+                "Persisted notes",
+            ],
+        ),
+        RouteKind::Solid => (
+            "Solid Setup",
+            "data-slskr-solid-final-parity",
+            &[
+                "Resolve WebID",
+                "Connect Session",
+                "Sync Storage",
+                "Open Related",
+            ],
+            &["Identity", "Storage root", "Auth state", "Linked-data sync"],
+        ),
+        RouteKind::Collections => (
+            "Collection Share Modal",
+            "data-slskr-collections-final-parity",
+            &[
+                "Persist Draft",
+                "Search Library",
+                "Remove Item",
+                "Pick Audience",
+            ],
+            &[
+                "Item picker",
+                "Audience picker",
+                "Stream grant",
+                "Download grant",
+            ],
+        ),
+        RouteKind::ShareGroups => (
+            "Share Group Detail",
+            "data-slskr-sharegroups-final-parity",
+            &[
+                "Pick Member",
+                "Remove Member",
+                "Revoke Token",
+                "Update Permissions",
+            ],
+            &["Members", "Grants", "Tokens", "Permission matrix"],
+        ),
+        RouteKind::SharedWithMe => (
+            "Inbound Manifest",
+            "data-slskr-shared-final-parity",
+            &[
+                "Open Item",
+                "Stream Item",
+                "Copy Exact Token",
+                "Leave Share",
+            ],
+            &[
+                "Manifest rows",
+                "Owner contact",
+                "Expiration",
+                "Access status",
+            ],
+        ),
+        RouteKind::Browse => (
+            "Cached Browse Session",
+            "data-slskr-browse-final-parity",
+            &[
+                "Restore Session",
+                "Expand Tree",
+                "Persist Breadcrumb",
+                "Queue Selected",
+            ],
+            &[
+                "Cached tree",
+                "Folder expansion",
+                "File split",
+                "Download preview",
+            ],
+        ),
+        RouteKind::System => (
+            "Operator Tab Parity",
+            "data-slskr-system-final-parity",
+            &["Open Tab", "Run Job", "Copy Manifest", "Save Preference"],
+            &["Info", "Network", "Security", "Metrics"],
+        ),
+    };
+    let buttons = controls
+        .iter()
+        .map(|control| format!(r#"<button type="button">{}</button>"#, escape_html(control)))
+        .collect::<Vec<_>>()
+        .join("");
+    let facts = facts
+        .iter()
+        .map(|fact| format!(r#"<span>{}</span>"#, escape_html(fact)))
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<section class="slskr-native-final-parity" {attr}><header><div><h3>{title}</h3><p>Remaining legacy workflow controls are available from this route without opening Developer diagnostics.</p></div><div class="slskr-native-panel-actions">{buttons}</div></header><div class="slskr-native-panel-facts">{facts}</div></section>"#,
+        attr = attr,
+        title = escape_html(title),
+        buttons = buttons,
+        facts = facts,
+    )
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
@@ -5633,9 +5845,10 @@ fn route_native_workspace_html(
     };
     let editor = native_editor_modal_html(kind);
     format!(
-        r#"<section class="slskr-native-workspace">{tabs}{filter}{html}{editor}{inspector}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
+        r#"<section class="slskr-native-workspace">{tabs}{filter}{html}{final_parity}{editor}{inspector}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
         tabs = native_tabs_html(kind),
         filter = native_filter_html(),
+        final_parity = native_final_parity_panel_html(kind),
         editor = editor,
         inspector = native_inspector_html(),
     )
@@ -12408,6 +12621,10 @@ mod tests {
                 page.contains("data-slskr-native-inspector-actions"),
                 "{path} should expose selected-row context actions in the inspector"
             );
+            assert!(
+                page.contains("slskr-native-final-parity"),
+                "{path} should expose final old-WebUI workflow parity controls"
+            );
         }
 
         let search = route_page_html("/searches");
@@ -12432,6 +12649,9 @@ mod tests {
             "Discovery Graph Atlas",
             "No graph node selected",
             "Queue Nearby",
+            "data-slskr-graph-final-parity",
+            "Save Branch",
+            "Weight Edges",
         ] {
             assert!(
                 discovery.contains(value),
@@ -12444,6 +12664,9 @@ mod tests {
             "Import validation",
             "No playlist row selected",
             "Import Playlist",
+            "data-slskr-playlist-final-parity",
+            "Upload Playlist",
+            "Correct Row",
         ] {
             assert!(
                 playlist.contains(value),
@@ -12456,6 +12679,9 @@ mod tests {
             "Request Portal Summary",
             "No wishlist item selected",
             "Run Enabled",
+            "data-slskr-wishlist-final-parity",
+            "Check Quota",
+            "Persist Inbox",
         ] {
             assert!(
                 wishlist.contains(value),
@@ -12464,7 +12690,13 @@ mod tests {
         }
 
         let downloads = route_page_html("/downloads");
-        for value in ["Transfer Group", "No downloads selected", "Retry All"] {
+        for value in [
+            "Transfer Group",
+            "No downloads selected",
+            "Retry All",
+            "data-slskr-downloads-final-parity",
+            "Group by Peer",
+        ] {
             assert!(
                 downloads.contains(value),
                 "downloads workspace should contain {value}"
@@ -12472,8 +12704,26 @@ mod tests {
         }
         assert!(downloads.contains("data-slskr-transfer-state-control"));
 
+        let uploads = route_page_html("/uploads");
+        for value in [
+            "data-slskr-uploads-final-parity",
+            "Edit Policy",
+            "Group by Peer",
+        ] {
+            assert!(
+                uploads.contains(value),
+                "uploads workspace should contain {value}"
+            );
+        }
+
         let users = route_page_html("/users");
-        for value in ["User Detail", "No user selected", "Save note"] {
+        for value in [
+            "User Detail",
+            "No user selected",
+            "Save note",
+            "data-slskr-users-final-parity",
+            "Open Context Menu",
+        ] {
             assert!(
                 users.contains(value),
                 "users workspace should contain {value}"
@@ -12481,7 +12731,14 @@ mod tests {
         }
 
         let contacts = route_page_html("/contacts");
-        for value in ["All Contacts", "No contact selected", "Refresh Nearby"] {
+        for value in [
+            "All Contacts",
+            "No contact selected",
+            "Refresh Nearby",
+            "data-slskr-contacts-final-parity",
+            "Create QR Invite",
+            "Scan QR Image",
+        ] {
             assert!(
                 contacts.contains(value),
                 "contacts workspace should contain {value}"
@@ -12493,6 +12750,9 @@ mod tests {
             "Identity Document",
             "No Solid resource selected",
             "Resolve WebID",
+            "data-slskr-solid-final-parity",
+            "Connect Session",
+            "Sync Storage",
         ] {
             assert!(
                 solid.contains(value),
@@ -12505,6 +12765,8 @@ mod tests {
             "Operator Actions",
             "No system item selected",
             "Diagnostic Bundle",
+            "data-slskr-system-final-parity",
+            "Operator Tab Parity",
         ] {
             assert!(
                 system.contains(value),
@@ -12521,6 +12783,9 @@ mod tests {
             "Unread 0",
             "Delete Conversation",
             "pod channel",
+            "data-slskr-messages-final-parity",
+            "Open Window",
+            "Restore Draft",
         ] {
             assert!(
                 messages.contains(value),
@@ -12536,6 +12801,9 @@ mod tests {
             "data-slskr-native-preview-title",
             "Preserve folders",
             "Duplicate warning review",
+            "data-slskr-browse-final-parity",
+            "Restore Session",
+            "Persist Breadcrumb",
         ] {
             assert!(
                 browse.contains(value),
@@ -12550,6 +12818,9 @@ mod tests {
             "Already in collection warning",
             "Audience picker",
             "Stream/download policies",
+            "data-slskr-collections-final-parity",
+            "Persist Draft",
+            "Pick Audience",
         ] {
             assert!(
                 collections.contains(value),
@@ -12564,6 +12835,9 @@ mod tests {
             "Token revoke",
             "Grant audit trail",
             "Create Share Grant",
+            "data-slskr-sharegroups-final-parity",
+            "Remove Member",
+            "Revoke Token",
         ] {
             assert!(
                 sharegroups.contains(value),
@@ -12578,6 +12852,9 @@ mod tests {
             "data-slskr-native-preview-title",
             "Backfill selected collection",
             "Leave share",
+            "data-slskr-shared-final-parity",
+            "Copy Exact Token",
+            "Owner contact",
         ] {
             assert!(
                 shared.contains(value),

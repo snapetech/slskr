@@ -1461,6 +1461,32 @@ body {
   font-size: 13px;
 }
 
+.slskr-native-final-parity {
+  background: #0f1717;
+  border: 1px solid #2b504d;
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.slskr-native-final-parity header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.slskr-native-final-parity h3,
+.slskr-native-final-parity p {
+  margin: 0;
+}
+
+.slskr-native-final-parity h3 {
+  color: #f4efe7;
+  font-size: 16px;
+}
+
 .slskr-native-row span,
 .slskr-native-empty span {
   color: #c6d0ca;
