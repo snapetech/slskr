@@ -406,6 +406,18 @@ describe('PlayerBar', () => {
     expect(window.sessionStorage.getItem('slskr.listenbrainz.token')).toBeNull();
   });
 
+  it('does not auto-open lyrics from stored browser state', () => {
+    window.localStorage.setItem('slskr.player.lyricsOpen', 'true');
+
+    renderPlayer();
+
+    expect(screen.queryByTestId('player-lyrics')).not.toBeInTheDocument();
+    expect(window.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining('https://lrclib.net'),
+      expect.any(Object),
+    );
+  });
+
   it('shows and launches the configured external visualizer', async () => {
     renderPlayer();
 

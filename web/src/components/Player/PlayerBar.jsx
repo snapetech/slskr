@@ -70,7 +70,6 @@ const collapsedStorageKey = 'slskr.player.collapsed';
 const visualizerStorageKey = 'slskr.player.visualizerEnabled';
 const visualizerEngineStorageKey = 'slskr.player.visualizerEngine';
 const eqPanelStorageKey = 'slskr.player.eqPanelOpen';
-const lyricsStorageKey = 'slskr.player.lyricsOpen';
 const karaokeStorageKey = 'slskr.player.karaokeEnabled';
 const crossfadeStorageKey = 'slskr.player.crossfadeEnabled';
 const visualTileStorageKey = 'slskr.player.visualTileMode';
@@ -2116,9 +2115,7 @@ const PlayerBar = () => {
   const [eqPanelOpen, setEqPanelOpen] = useState(() =>
     readStoredBoolean(eqPanelStorageKey),
   );
-  const [lyricsOpen, setLyricsOpen] = useState(() =>
-    readStoredBoolean(lyricsStorageKey),
-  );
+  const [lyricsOpen, setLyricsOpen] = useState(false);
   const [karaokeEnabled, setKaraokeEnabledState] = useState(() =>
     readStoredBoolean(karaokeStorageKey),
   );
@@ -2247,10 +2244,6 @@ const PlayerBar = () => {
   useEffect(() => {
     setLocalStorageItem(eqPanelStorageKey, eqPanelOpen ? 'true' : 'false');
   }, [eqPanelOpen]);
-
-  useEffect(() => {
-    setLocalStorageItem(lyricsStorageKey, lyricsOpen ? 'true' : 'false');
-  }, [lyricsOpen]);
 
   useEffect(() => {
     setLocalStorageItem(
