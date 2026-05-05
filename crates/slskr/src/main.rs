@@ -4033,7 +4033,7 @@ async fn route_http_request_with_headers(
 
     match (method, normalized_path.as_str()) {
         ("GET", "/") => Ok(index_html_response()),
-        ("GET", "/api/health") => Ok(health_response()),
+        ("GET", "/api/health") => Ok(health_response(&state.config)),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
         ("GET", "/api/application") => {
@@ -4329,7 +4329,7 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/summary") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_summary_report(&transfers);
+            let body = slskd_transfer_summary_report(route.query, &transfers);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
@@ -8045,11 +8045,18 @@ async fn route_http_request_with_headers(
           ("GET", "/api/player/external-visualizer") => {
               let visualizer = &state.config.integrations.external_visualizer;
               let json = format!(
-                  "{{\"visualizer\":{},\"configured\":{},\"status\":\"{}\",\"next_action\":\"{}\"}}",
+                  "{{\"visualizer\":{},\"configured\":{},\"launchEnabled\":{},\"status\":\"{}\",\"next_action\":\"{}\"}}",
                   json_option(visualizer.command.as_deref()),
                   visualizer.configured(),
-                  if visualizer.configured() { "configured" } else { "disabled" },
-                  if visualizer.configured() { "launch" } else { "set SLSKR_EXTERNAL_VISUALIZER_COMMAND" }
+                  visualizer.launch_enabled,
+                  if visualizer.launchable() { "configured" } else { "disabled" },
+                  if visualizer.launchable() {
+                      "launch"
+                  } else if visualizer.configured() {
+                      "set SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED=true"
+                  } else {
+                      "set SLSKR_EXTERNAL_VISUALIZER_COMMAND"
+                  }
               );
               Ok(routing::ok_response(json))
           }
@@ -8124,13 +8131,39 @@ async fn route_http_request_with_headers(
           // PLAYER LAUNCH ENDPOINT (Phase 6)
         ("POST", "/api/player/external-visualizer/launch") => {
             let visualizer = &state.config.integrations.external_visualizer;
+            if visualizer.configured() && !visualizer.launch_enabled {
+                record_event(
+                    state,
+                    "external_visualizer.launch.blocked",
+                    "external_visualizer",
+                    Some("launch is disabled by configuration".to_owned()),
+                )
+                .await;
+                return Ok(routing::forbidden_response("external visualizer launch is disabled"));
+            }
             if let Some(command) = visualizer.command.as_deref().filter(|value| !value.trim().is_empty()) {
                 match std::process::Command::new(command).spawn() {
-                    Ok(_) => Ok(routing::accepted_response(format!(
-                        "{{\"launched\":true,\"status\":\"launch_requested\",\"command\":\"{}\"}}",
-                        json_escape(command)
-                    ))),
+                    Ok(_) => {
+                        record_event(
+                            state,
+                            "external_visualizer.launch",
+                            command.to_owned(),
+                            Some("launch requested".to_owned()),
+                        )
+                        .await;
+                        Ok(routing::accepted_response(format!(
+                            "{{\"launched\":true,\"status\":\"launch_requested\",\"command\":\"{}\"}}",
+                            json_escape(command)
+                        )))
+                    }
                     Err(error) => {
+                        record_event(
+                            state,
+                            "external_visualizer.launch.failed",
+                            command.to_owned(),
+                            Some(error.to_string()),
+                        )
+                        .await;
                         let message = format!("failed to launch external visualizer: {error}");
                         Ok(routing::bad_request_response(&message))
                     }
@@ -8740,12 +8773,26 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     Ok(Some(bytes.len()))
 }
 
-fn health_response() -> HttpResponse {
+fn health_response(config: &AppConfig) -> HttpResponse {
+    let warnings = if auth_disabled_on_non_loopback(config) {
+        serde_json::json!(["auth_disabled_non_loopback"])
+    } else {
+        serde_json::json!([])
+    };
     HttpResponse {
         status: "200 OK",
         content_type: "application/json",
-        body: "{\"status\":\"ok\",\"service\":\"slskr\"}".to_owned(),
+        body: serde_json::json!({
+            "status": "ok",
+            "service": "slskr",
+            "warnings": warnings,
+        })
+        .to_string(),
     }
+}
+
+fn auth_disabled_on_non_loopback(config: &AppConfig) -> bool {
+    !config.auth_required && !config.http_bind.ip().is_loopback()
 }
 
 fn version_response() -> HttpResponse {
@@ -9363,24 +9410,22 @@ fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
     })
 }
 
-fn slskd_transfer_summary_report(transfers: &TransferQueue) -> String {
-    let downloads = transfers
+fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let direction = slskd_transfer_query_direction(query);
+    let username = slskd_transfer_query_username(query);
+    let entries = transfers
         .entries
         .iter()
-        .filter(|entry| entry.direction == 0)
-        .count();
-    let uploads = transfers
-        .entries
-        .iter()
-        .filter(|entry| entry.direction == 1)
-        .count();
-    let total_bytes = transfers
-        .entries
+        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .collect::<Vec<_>>();
+    let downloads = entries.iter().filter(|entry| entry.direction == 0).count();
+    let uploads = entries.iter().filter(|entry| entry.direction == 1).count();
+    let total_bytes = entries
         .iter()
         .map(|entry| entry.bytes_transferred)
         .sum::<u64>();
     let mut by_state = BTreeMap::new();
-    for entry in &transfers.entries {
+    for entry in &entries {
         let state = slskd_transfer_state(&entry.status).to_owned();
         let count = by_state.entry(state).or_insert(0usize);
         *count += 1;
@@ -9390,7 +9435,7 @@ fn slskd_transfer_summary_report(transfers: &TransferQueue) -> String {
         .map(|(state, count)| (state, serde_json::json!({ "count": count })))
         .collect::<BTreeMap<_, _>>();
     serde_json::json!({
-        "count": transfers.entries.len(),
+        "count": entries.len(),
         "downloads": downloads,
         "uploads": uploads,
         "totalBytes": total_bytes,
@@ -9433,6 +9478,14 @@ fn slskd_transfer_query_limit_offset(query: Option<&str>) -> (usize, usize) {
         }
     }
     (limit, offset)
+}
+
+fn slskd_transfer_query_value(query: Option<&str>, key: &str) -> Option<String> {
+    query_params(query.unwrap_or_default())
+        .into_iter()
+        .find_map(|(name, value)| {
+            (name.eq_ignore_ascii_case(key) && !value.is_empty()).then_some(value)
+        })
 }
 
 fn slskd_transfer_matches_query(
@@ -9486,6 +9539,12 @@ fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueu
 fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQueue) -> String {
     let direction = slskd_transfer_query_direction(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let sort_by = slskd_transfer_query_value(query, "sortBy")
+        .unwrap_or_else(|| "Count".to_owned())
+        .to_ascii_lowercase();
+    let descending = slskd_transfer_query_value(query, "sortOrder")
+        .map(|value| !value.eq_ignore_ascii_case("ASC"))
+        .unwrap_or(true);
     let mut by_user: BTreeMap<String, (usize, u64)> = BTreeMap::new();
     for entry in transfers
         .entries
@@ -9510,11 +9569,22 @@ fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQu
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| {
-        right["totalBytes"]
-            .as_u64()
-            .cmp(&left["totalBytes"].as_u64())
-            .then_with(|| right["count"].as_u64().cmp(&left["count"].as_u64()))
-            .then_with(|| left["username"].as_str().cmp(&right["username"].as_str()))
+        let ordering = match sort_by.as_str() {
+            "totalbytes" => left["totalBytes"]
+                .as_u64()
+                .cmp(&right["totalBytes"].as_u64()),
+            "averagespeed" => left["averageSpeed"]
+                .as_f64()
+                .partial_cmp(&right["averageSpeed"].as_f64())
+                .unwrap_or(std::cmp::Ordering::Equal),
+            _ => left["count"].as_u64().cmp(&right["count"].as_u64()),
+        };
+        let ordering = if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        };
+        ordering.then_with(|| left["username"].as_str().cmp(&right["username"].as_str()))
     });
     serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
 }
@@ -9523,7 +9593,10 @@ fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQue
     let direction = slskd_transfer_query_direction(query);
     let username = slskd_transfer_query_username(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
-    let rows = transfers
+    let descending = slskd_transfer_query_value(query, "sortOrder")
+        .map(|value| !value.eq_ignore_ascii_case("ASC"))
+        .unwrap_or(true);
+    let mut entries = transfers
         .entries
         .iter()
         .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
@@ -9533,6 +9606,20 @@ fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQue
                 "Cancelled" | "Failed" | "Rejected"
             )
         })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        let ordering = left.requested_at.cmp(&right.requested_at);
+        let ordering = if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        };
+        ordering
+            .then_with(|| left.filename.cmp(&right.filename))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let rows = entries
+        .into_iter()
         .skip(offset)
         .take(limit)
         .map(|entry| {
@@ -9736,7 +9823,12 @@ async fn serve(once: bool) -> Result<(), String> {
         .await
         .map_err(|error| format!("failed to bind {address}: {error}"))?;
     println!("slskr listening on http://{address}");
-    if !state.config.auth_required {
+    if auth_disabled_on_non_loopback(&state.config) {
+        eprintln!(
+            "WARNING: HTTP API authentication is disabled on non-loopback bind {}; remote clients can control slskr",
+            state.config.http_bind
+        );
+    } else if !state.config.auth_required {
         eprintln!(
             "WARNING: HTTP API authentication is disabled on {}; local processes can control slskr",
             state.config.http_bind
@@ -13862,6 +13954,22 @@ mod tests {
         assert!(!response.body.contains("secret-token"));
     }
 
+    #[tokio::test]
+    async fn health_warns_when_auth_disabled_on_non_loopback() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_HTTP_BIND", "0.0.0.0:5030")
+                .with("SLSKR_AUTH_DISABLED", "true"),
+        );
+
+        let response = super::route_http_request("GET", "/api/health", None, "", &state)
+            .await
+            .expect("health response");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["warnings"][0], "auth_disabled_non_loopback");
+    }
+
     fn test_state_with_env_parts(
         extra_env: MapEnv,
         search_store: super::SearchStore,
@@ -14786,6 +14894,33 @@ mod tests {
             .expect("telemetry leaderboard row");
         assert_eq!(telemetry_leader["totalBytes"], 321);
 
+        let asc_leaderboard = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/leaderboard?direction=Download&sortBy=TotalBytes&sortOrder=ASC",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("ascending leaderboard");
+        let asc_leaderboard_json =
+            serde_json::from_str::<serde_json::Value>(&asc_leaderboard.body).unwrap();
+        assert_eq!(asc_leaderboard_json[0]["username"], "peer1");
+
+        let summary = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/summary?direction=Download&username=telemetry%20peer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered summary");
+        let summary_json = serde_json::from_str::<serde_json::Value>(&summary.body).unwrap();
+        assert_eq!(summary_json["count"], 1);
+        assert_eq!(summary_json["downloads"], 1);
+        assert_eq!(summary_json["uploads"], 0);
+
         let user_transfers = super::route_http_request(
             "GET",
             "/api/v0/telemetry/reports/transfers/users/telemetry%20peer",
@@ -14799,6 +14934,10 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&user_transfers.body).unwrap();
         assert_eq!(user_transfers_json["username"], "telemetry peer");
         assert_eq!(user_transfers_json["count"], 1);
+        let telemetry_transfer_id = user_transfers_json["transfers"][0]["id"]
+            .as_str()
+            .expect("telemetry transfer id")
+            .to_owned();
 
         let directory_report = super::route_http_request(
             "GET",
@@ -14830,6 +14969,29 @@ mod tests {
         .expect("exceptions pareto");
         let pareto_json = serde_json::from_str::<serde_json::Value>(&pareto.body).unwrap();
         assert!(pareto_json.is_array());
+
+        let cancelled = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/transfers/downloads/telemetry%20peer/{telemetry_transfer_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("cancel telemetry transfer");
+        assert_eq!(cancelled.body, "true");
+        let exceptions = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/exceptions?direction=Download&username=telemetry%20peer&sortOrder=ASC",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered exceptions");
+        let exceptions_json = serde_json::from_str::<serde_json::Value>(&exceptions.body).unwrap();
+        assert_eq!(exceptions_json[0]["username"], "telemetry peer");
+        assert_eq!(exceptions_json[0]["state"], "Cancelled");
 
         let contract_routes = [
             ("GET", "/api/application", ""),
@@ -15486,6 +15648,59 @@ mod tests {
         .expect("patch webhook");
         assert_eq!(patched.status, "200 OK");
         assert!(patched.body.contains("\"active\":false"));
+    }
+
+    #[tokio::test]
+    async fn external_visualizer_launch_requires_explicit_enable_flag() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", "true"),
+        );
+
+        let status =
+            super::route_http_request("GET", "/api/player/external-visualizer", None, "", &state)
+                .await
+                .expect("external visualizer status");
+        assert_eq!(status.status, "200 OK");
+        assert!(status.body.contains("\"configured\":true"));
+        assert!(status.body.contains("\"launchEnabled\":false"));
+
+        let launch = super::route_http_request(
+            "POST",
+            "/api/player/external-visualizer/launch",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("external visualizer launch");
+        assert_eq!(launch.status, "403 Forbidden");
+        assert!(launch.body.contains("launch is disabled"));
+    }
+
+    #[tokio::test]
+    async fn external_visualizer_launch_records_audit_event_when_enabled() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", "true")
+                .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
+        );
+
+        let launch = super::route_http_request(
+            "POST",
+            "/api/player/external-visualizer/launch",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("external visualizer launch");
+        assert_eq!(launch.status, "202 Accepted");
+        assert!(launch.body.contains("\"launched\":true"));
+        let events = state.events.read().await;
+        assert!(events
+            .records
+            .iter()
+            .any(|event| event.kind == "external_visualizer.launch"));
     }
 
     #[tokio::test]
@@ -17467,6 +17682,10 @@ mod tests {
                 [auth]
                 disabled = false
                 api_token = "test-token"
+
+                [integrations.external_visualizer]
+                command = "projectm"
+                launch_enabled = true
             "#,
         )
         .unwrap();
@@ -17500,6 +17719,11 @@ mod tests {
         assert!(!config.transfer_allow_outbound);
         assert!(config.auth_required);
         assert_eq!(config.api_token.as_deref(), Some("test-token"));
+        assert_eq!(
+            config.integrations.external_visualizer.command.as_deref(),
+            Some("projectm")
+        );
+        assert!(config.integrations.external_visualizer.launch_enabled);
 
         let sanitized = config.sanitized_json();
         assert!(sanitized.contains("\"credentials_configured\":true"));
@@ -17507,6 +17731,7 @@ mod tests {
         assert!(sanitized.contains("\"transfer_allow_inbound\":false"));
         assert!(sanitized.contains("\"transfer_allow_outbound\":false"));
         assert!(sanitized.contains("\"api_token_configured\":true"));
+        assert!(sanitized.contains("\"launch_enabled\":true"));
         assert!(sanitized.contains("a***e"));
         assert!(!sanitized.contains("secret-password"));
         assert!(!sanitized.contains("test-token"));

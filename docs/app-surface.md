@@ -165,7 +165,7 @@ Initial configuration sources:
 - `SLSKR_PERSISTENCE_ENABLED` enables the default-off SQLite persistence path. Search create/list hydration is wired; transfer projection state is also restart-safe through `transfer-state.json`. Message and room projection persistence remain event/projection work items.
 - Spotify integration uses the existing slskr HTTP/WebUI port for OAuth callback handling. Configure `SLSKR_SPOTIFY_ENABLED=true` and `SLSKR_SPOTIFY_CLIENT_ID`; if `SLSKR_SPOTIFY_REDIRECT_URI` is unset, the daemon advertises `http://127.0.0.1:<http-port>/api/integrations/spotify/callback` for loopback use. The callback requires a daemon-issued cryptographically random state value, expires pending state after 10 minutes, and rejects replayed, missing, or invalid state.
 - Lidarr does not provide an OAuth clickthrough surface. Configure `SLSKR_LIDARR_ENABLED=true`, `SLSKR_LIDARR_URL`, and `SLSKR_LIDARR_API_KEY`; the WebUI can then test status and run wanted/import actions using API-key authentication.
-- `SLSKR_EXTERNAL_VISUALIZER_COMMAND` configures the optional local visualizer launch command; the daemon reports configured/disabled state before attempting launch.
+- `SLSKR_EXTERNAL_VISUALIZER_COMMAND` configures the optional local visualizer launch command. `SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED=true` is also required before the daemon will spawn that command; launch attempts are recorded as events.
 - `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold
 - gitignored `.secrets/` files for local lab credentials
 - OpenBao paths documented under `../k3s/slskr/README.md`

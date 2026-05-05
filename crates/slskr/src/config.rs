@@ -458,6 +458,7 @@ impl BridgeIntegrationSettings {
 #[derive(Clone, Debug, Default)]
 pub struct ExternalVisualizerSettings {
     pub command: Option<String>,
+    pub launch_enabled: bool,
 }
 
 impl ExternalVisualizerSettings {
@@ -469,6 +470,11 @@ impl ExternalVisualizerSettings {
             command: env
                 .var("SLSKR_EXTERNAL_VISUALIZER_COMMAND")
                 .or(file_config.command),
+            launch_enabled: env_bool_layer(
+                env,
+                "SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED",
+                file_config.launch_enabled.unwrap_or(false),
+            )?,
         })
     }
 
@@ -478,10 +484,15 @@ impl ExternalVisualizerSettings {
             .is_some_and(|value| !value.trim().is_empty())
     }
 
+    pub fn launchable(&self) -> bool {
+        self.configured() && self.launch_enabled
+    }
+
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"configured\":{},\"command\":{}}}",
+            "{{\"configured\":{},\"launch_enabled\":{},\"command\":{}}}",
             self.configured(),
+            self.launch_enabled,
             json_option(self.command.as_deref())
         )
     }
@@ -663,6 +674,7 @@ pub struct BridgeFileConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct ExternalVisualizerFileConfig {
     command: Option<String>,
+    launch_enabled: Option<bool>,
 }
 
 pub fn default_state_dir() -> PathBuf {

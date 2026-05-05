@@ -76,5 +76,7 @@ host = "localhost"
 port = 3000
 
 [integrations.external_visualizer]
-# Optional local command launched by the daemon.
+# Optional local command launched by the daemon. Launching is disabled unless
+# launch_enabled is explicitly set.
 # command = "projectm"
+launch_enabled = false

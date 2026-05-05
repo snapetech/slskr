@@ -24,8 +24,11 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | High | Kubernetes runtime | `slskr-api` ran three replicas against a daemon that owns a live Soulseek session and local in-memory/session state. | Fixed default manifests to run one API replica and constrained the API HPA to one replica. |
 | High | Kubernetes storage | `/data` used `emptyDir`, losing API state on pod restart and making replicated state inconsistent. | Fixed default manifests to mount a `slskr-data` PVC. |
 | High | Browser token persistence | Main React web UI supported `rememberMe` bearer-token persistence in `localStorage`. | Fixed by removing the login persistence toggle, storing login tokens in `sessionStorage`, and ignoring legacy persistent tokens. |
+| High | External process launch | `/api/player/external-visualizer/launch` could spawn the configured local command whenever a command was configured. | Fixed by requiring separate `SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED=true` opt-in and recording launch/blocked/failure events. |
 | Medium | Webhook registration | Webhook URL validation happened only at delivery/test time, so obviously blocked URLs could be saved. | Fixed by validating registration and admin creation URLs for scheme, host presence, localhost, direct private/link-local IP targets, and known ports. |
+| Medium | Auth disabled escape hatch | `SLSKR_AUTH_DISABLED=true` could expose protected APIs on non-loopback binds without a health-surface warning. | Fixed by adding a startup warning and `/api/health` warning when auth is disabled on a non-loopback bind. |
 | Low | Archive verification | `verify-release-artifacts.sh` extracted zip files without path traversal checks. | Fixed by rejecting absolute and parent-directory zip entries before extraction. |
+| Low | Kubernetes secrets | Manifest references `slskr-secrets` and `grafana-admin` without templates. | Fixed by adding `k8s/secrets.example.yaml` with placeholder-only Secret manifests. |
 
 ## Open Burn-Down
 
@@ -33,7 +36,6 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | --- | --- | --- | --- |
 | High | Legacy cookie auth | Backend still accepts `slskr.session` cookies for compatibility. CSRF checks reduce risk, but cookies widen the browser attack surface. | Keep for parity only if needed; otherwise add a config flag to disable cookie auth while keeping bearer/API-key auth. |
 | High | CSP | Static web responses require `'unsafe-inline'` and `wasm-unsafe-eval`. | Move inline scripts/styles to bundled assets or add nonce/hash generation. |
-| High | External process launch | `/api/player/external-visualizer/launch` can trigger a configured local command. It is auth protected but powerful. | Add an allowlist, audit event, and explicit config flag that cannot be changed from the UI. |
 | Medium | Webhook secret lifecycle | Webhook creation returns the secret in the response. This is acceptable as one-time display, but undocumented. | Document one-time secret return and avoid ever returning it from list/detail routes. |
 | Medium | CI tooling | Local environment lacks `actionlint`, `shellcheck`, `semgrep`, and `trivy`, so the gate cannot run those classes of checks locally. | Add optional gate steps that run when installed, and CI setup that installs the chosen tools. |
 | Medium | Python client | Python client has no lint/type/test/audit gate. | Add `ruff`, `mypy` or pyright, pytest smoke tests, and dependency audit. |
@@ -43,7 +45,6 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | OpenAPI drift | API parity work changes response shapes faster than OpenAPI/docs can track. | Add generated OpenAPI/doc drift checks to CI and fail when checked-in docs differ. |
 | Medium | Compatibility smoke | slskd API compatibility smoke is opt-in because it needs external Python package install and live-style behavior. | Keep opt-in locally, but run it in scheduled CI with explicit secrets or hermetic fixtures. |
 | Medium | Rate limiting | Rate limiting keys by raw peer socket address and token digest; deployments behind proxies may collapse clients into one IP. | Add trusted proxy parsing for `Forwarded`/`X-Forwarded-For` with an explicit trusted proxy allowlist. |
-| Medium | Auth disabled escape hatch | `SLSKR_AUTH_DISABLED=true` can intentionally expose protected APIs on non-loopback binds. | Emit a loud startup warning and expose a health warning when auth is disabled on non-loopback. |
 | Medium | Config mutability | Several option/config compatibility routes return success without persistent mutation. | Mark no-op compatibility endpoints clearly or implement persistence with validation. |
 | Medium | Path deletion parity | Download/incomplete file deletion compatibility routes currently return success stubs. | Implement scoped deletion under the download root or return explicit not-implemented status. |
 | Medium | Metrics docs | Kubernetes probes and ServiceMonitor assume `/api/metrics`; metrics route exists but docs and labels are inconsistent across files. | Normalize metric path labels and update docs. |
@@ -53,7 +54,6 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Low | Deprecated npm transitive deps | Web install warns on deprecated `lodash.get`, old core-js, and Babel proposal packages. | Upgrade or replace transitive owners where practical. |
 | Low | GitHub workflow lint | Workflows are valid YAML but not actionlint-verified locally. | Add actionlint to CI and local gate. |
 | Low | Kubernetes NetworkPolicy | Manifests do not define ingress/egress NetworkPolicies. | Add default-deny plus explicit ingress from ingress controller and metrics scraper, and scoped egress. |
-| Low | Kubernetes secrets | Manifest references `slskr-secrets` and `grafana-admin` but does not provide templates. | Add example Secret manifests with placeholder values or docs that create them. |
 | Low | Release tag policy | Release workflow triggers on `release-*`, not semantic `v*` tags. | Decide final tag convention and document/enforce it in release docs. |
 
 ## Scans Run
