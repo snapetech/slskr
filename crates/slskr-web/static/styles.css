@@ -413,7 +413,7 @@ body {
 .slskr-card-tools {
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
 }
 
 .slskr-card-filter {
@@ -422,6 +422,30 @@ body {
   color: #f4efe7;
   min-height: 32px;
   padding: 0 9px;
+}
+
+.slskr-card-clear {
+  background: #13201e;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 0 9px;
+  text-transform: uppercase;
+}
+
+.slskr-card-count {
+  align-items: center;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0 9px;
+  text-transform: uppercase;
 }
 
 .slskr-card-view {
@@ -579,9 +603,28 @@ body {
 
 .slskr-data-table th {
   background: #0f1112;
+}
+
+.slskr-data-table th button {
+  background: transparent;
+  border: 0;
   color: #cdbfab;
+  cursor: pointer;
+  display: block;
   font-size: 11px;
+  font-weight: 700;
+  padding: 0;
+  text-align: left;
   text-transform: uppercase;
+  width: 100%;
+}
+
+.slskr-data-table th button[data-slskr-sort-direction="asc"]::after {
+  content: " ↑";
+}
+
+.slskr-data-table th button[data-slskr-sort-direction="desc"]::after {
+  content: " ↓";
 }
 
 .slskr-data-table td {

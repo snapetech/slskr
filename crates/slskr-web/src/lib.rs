@@ -2274,7 +2274,14 @@ fn data_card_table_html(items: &[serde_json::Value]) -> String {
     let columns = json_table_columns(items);
     let header = columns
         .iter()
-        .map(|column| format!(r#"<th>{}</th>"#, escape_html(column)))
+        .enumerate()
+        .map(|(index, column)| {
+            format!(
+                r#"<th><button type="button" data-slskr-sort-index="{index}" aria-label="Sort by {column}">{column}</button></th>"#,
+                index = index,
+                column = escape_html(column),
+            )
+        })
         .collect::<Vec<_>>()
         .join("");
     let rows = items
@@ -2390,7 +2397,7 @@ fn data_card_result_html(response: &EndpointBody) -> String {
     if let Some(items) = json_display_array(&value) {
         if items.is_empty() {
             return format!(
-                r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>0 records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><div class="slskr-empty-state">No records</div>{table}{csv}</article>"#,
+                r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>0 records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><button type="button" class="slskr-card-clear" data-slskr-card-clear>Clear</button><span class="slskr-card-count" data-slskr-card-count>0 / 0</span><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><div class="slskr-empty-state">No records</div>{table}{csv}</article>"#,
                 title = escape_html(&title),
                 url = escape_html(&url),
                 table = data_card_table_html(items),
@@ -2417,7 +2424,7 @@ fn data_card_result_html(response: &EndpointBody) -> String {
             .collect::<Vec<_>>()
             .join("");
         return format!(
-            r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>{count} records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><ul class="slskr-record-list">{rows}</ul>{table}{inspector}{csv}</article>"#,
+            r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>{count} records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><button type="button" class="slskr-card-clear" data-slskr-card-clear>Clear</button><span class="slskr-card-count" data-slskr-card-count>{count} / {count}</span><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><ul class="slskr-record-list">{rows}</ul>{table}{inspector}{csv}</article>"#,
             title = escape_html(&title),
             url = escape_html(&url),
             count = items.len(),
@@ -2909,9 +2916,56 @@ fn mount_data_cards(document: &web_sys::Document) -> Result<(), JsValue> {
                             let _ = row.set_attribute("hidden", "");
                         }
                     }
+                    update_data_card_count(&card_for_filter);
                 },
             ));
             input.add_event_listener_with_callback("input", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+
+        if let Some(clear) = card.query_selector("[data-slskr-card-clear]")? {
+            let card_for_clear = card.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    if let Ok(Some(filter)) = card_for_clear.query_selector(".slskr-card-filter") {
+                        if let Ok(input) = filter.dyn_into::<web_sys::HtmlInputElement>() {
+                            input.set_value("");
+                        }
+                    }
+                    if let Ok(rows) = card_for_clear.query_selector_all("[data-slskr-row-text]") {
+                        for row_index in 0..rows.length() {
+                            let Some(row) = rows.item(row_index) else {
+                                continue;
+                            };
+                            let Ok(row) = row.dyn_into::<web_sys::Element>() else {
+                                continue;
+                            };
+                            let _ = row.remove_attribute("hidden");
+                        }
+                    }
+                    update_data_card_count(&card_for_clear);
+                },
+            ));
+            clear.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+
+        let sort_buttons = card.query_selector_all("[data-slskr-sort-index]")?;
+        for button_index in 0..sort_buttons.length() {
+            let Some(node) = sort_buttons.item(button_index) else {
+                continue;
+            };
+            let button: web_sys::Element = node.dyn_into()?;
+            let card_for_sort = card.clone();
+            let button_for_sort = button.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    sort_data_card_table(&card_for_sort, &button_for_sort);
+                },
+            ));
+            button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
             callback.forget();
         }
 
@@ -2989,6 +3043,102 @@ fn mount_data_cards(document: &web_sys::Document) -> Result<(), JsValue> {
         }
     }
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_data_card_count(card: &web_sys::Element) {
+    let Ok(Some(count)) = card.query_selector("[data-slskr-card-count]") else {
+        return;
+    };
+    let Ok(rows) = card.query_selector_all(".slskr-record-list [data-slskr-row-text]") else {
+        return;
+    };
+    let total = rows.length();
+    let mut visible = 0;
+    for row_index in 0..rows.length() {
+        let Some(row) = rows.item(row_index) else {
+            continue;
+        };
+        let Ok(row) = row.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        if !row.has_attribute("hidden") {
+            visible += 1;
+        }
+    }
+    count.set_text_content(Some(&format!("{visible} / {total}")));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sort_data_card_table(card: &web_sys::Element, button: &web_sys::Element) {
+    let column = button
+        .get_attribute("data-slskr-sort-index")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or_default();
+    let next_direction = match button.get_attribute("data-slskr-sort-direction").as_deref() {
+        Some("asc") => "desc",
+        _ => "asc",
+    };
+    let Ok(Some(tbody)) = card.query_selector(".slskr-data-table tbody") else {
+        return;
+    };
+    let Ok(rows) = tbody.query_selector_all("tr") else {
+        return;
+    };
+    let mut elements = Vec::new();
+    for row_index in 0..rows.length() {
+        let Some(row) = rows.item(row_index) else {
+            continue;
+        };
+        let Ok(row) = row.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        elements.push(row);
+    }
+    elements.sort_by(|left, right| {
+        let left_value = table_cell_text(left, column);
+        let right_value = table_cell_text(right, column);
+        if next_direction == "asc" {
+            left_value.cmp(&right_value)
+        } else {
+            right_value.cmp(&left_value)
+        }
+    });
+    if let Ok(buttons) = card.query_selector_all("[data-slskr-sort-index]") {
+        for index in 0..buttons.length() {
+            let Some(node) = buttons.item(index) else {
+                continue;
+            };
+            let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let _ = element.remove_attribute("data-slskr-sort-direction");
+            let _ = element.remove_attribute("aria-sort");
+        }
+    }
+    let _ = button.set_attribute("data-slskr-sort-direction", next_direction);
+    let _ = button.set_attribute(
+        "aria-sort",
+        if next_direction == "asc" {
+            "ascending"
+        } else {
+            "descending"
+        },
+    );
+    for row in elements {
+        let _ = tbody.append_child(&row);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn table_cell_text(row: &web_sys::Element, column: u32) -> String {
+    let selector = format!("td:nth-child({})", column + 1);
+    row.query_selector(&selector)
+        .ok()
+        .flatten()
+        .and_then(|cell| cell.text_content())
+        .unwrap_or_default()
+        .to_lowercase()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3471,7 +3621,11 @@ mod tests {
         assert!(html.contains("data-slskr-data-card"));
         assert!(html.contains("data-slskr-view=\"list\""));
         assert!(html.contains("slskr-card-filter"));
+        assert!(html.contains("data-slskr-card-clear"));
+        assert!(html.contains("data-slskr-card-count"));
+        assert!(html.contains("2 / 2"));
         assert!(html.contains("data-slskr-card-view=\"table\""));
+        assert!(html.contains("data-slskr-sort-index"));
         assert!(html.contains("slskr-data-table"));
         assert!(html.contains("2 records"));
         assert!(html.contains("public domain jazz"));
