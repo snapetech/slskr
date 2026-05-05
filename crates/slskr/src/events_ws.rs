@@ -118,6 +118,7 @@ where
     result
 }
 
+#[derive(Debug)]
 enum ClientFrame {
     Close,
     Ping(Vec<u8>),
@@ -135,8 +136,15 @@ where
         .await
         .map_err(|error| error.to_string())?;
     let fin = header[0] & 0x80 != 0;
+    let reserved_bits = header[0] & 0x70;
     let opcode = header[0] & 0x0f;
     let is_control = opcode >= 0x8;
+    if reserved_bits != 0 {
+        return Err("client websocket frame used reserved bits".to_owned());
+    }
+    if !matches!(opcode, 0x0 | 0x1 | 0x2 | 0x8 | 0x9 | 0xa) {
+        return Err("client websocket frame used reserved opcode".to_owned());
+    }
     if is_control && !fin {
         return Err("client websocket control frame was fragmented".to_owned());
     }
@@ -328,5 +336,30 @@ mod tests {
         assert!(text.contains(r#""topic":"searches""#), "{text}");
         assert!(text.contains(r#""type":"search.started""#), "{text}");
         assert!(text.contains(r#""resource":"42""#), "{text}");
+    }
+
+    fn masked_client_frame(first_byte: u8, payload: &[u8]) -> Vec<u8> {
+        let mut frame = Vec::with_capacity(6 + payload.len());
+        frame.push(first_byte);
+        frame.push(0x80 | payload.len() as u8);
+        frame.extend_from_slice(&[0, 0, 0, 0]);
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    #[tokio::test]
+    async fn websocket_client_frame_rejects_reserved_bits() {
+        let frame = masked_client_frame(0xc1, b"hello");
+        let mut reader = &frame[..];
+        let error = read_client_frame(&mut reader).await.unwrap_err();
+        assert_eq!(error, "client websocket frame used reserved bits");
+    }
+
+    #[tokio::test]
+    async fn websocket_client_frame_rejects_reserved_opcode() {
+        let frame = masked_client_frame(0x83, b"hello");
+        let mut reader = &frame[..];
+        let error = read_client_frame(&mut reader).await.unwrap_err();
+        assert_eq!(error, "client websocket frame used reserved opcode");
     }
 }
