@@ -302,7 +302,7 @@ export class SlskrClient {
   ): Promise<T> {
     try {
       if (this.debug) {
-        console.debug(`[slskr] ${method} ${url}`, this.debugBody(body));
+        console.debug('[slskr] request', method, url, this.debugBody(body));
       }
 
       const headers: Record<string, string> = {

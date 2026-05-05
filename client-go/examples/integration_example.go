@@ -1,3 +1,5 @@
+//go:build examples
+
 package main
 
 import (
@@ -12,10 +14,10 @@ import (
 
 // SearchCoordinator coordinates multiple search operations
 type SearchCoordinator struct {
-	client      *slskr.Client
-	searches    map[string]string // searchID -> query
-	resultsCnt  map[string]int
-	mu          sync.RWMutex
+	client     *slskr.Client
+	searches   map[string]string // searchID -> query
+	resultsCnt map[string]int
+	mu         sync.RWMutex
 }
 
 // NewSearchCoordinator creates a new search coordinator
@@ -103,10 +105,10 @@ func (sc *SearchCoordinator) MonitorSearches(ctx context.Context, searchIDs []st
 
 // MessageHandler handles message operations
 type MessageHandler struct {
-	client         *slskr.Client
-	messagesSent   int
-	messagesRecv   int
-	mu             sync.Mutex
+	client       *slskr.Client
+	messagesSent int
+	messagesRecv int
+	mu           sync.Mutex
 }
 
 // NewMessageHandler creates a new message handler

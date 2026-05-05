@@ -316,7 +316,8 @@ mod tests {
             let _ = stream_events(reader, &mut writer, &server_events, server_event_rx).await;
         });
 
-        let (mut socket, _) = connect_async(format!("ws://{address}/api/events/ws"))
+        // Local-only test listener: the production event feed should be served behind TLS as wss://.
+        let (mut socket, _) = connect_async(format!("ws://{address}/api/events/ws")) // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
             .await
             .unwrap();
         ready_rx.await.unwrap();

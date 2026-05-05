@@ -383,10 +383,21 @@ func pathSegment(value string) string {
 }
 
 func redactErrorBody(body []byte) string {
-	var decoded interface{}
+	var decoded map[string]interface{}
 	if err := json.Unmarshal(body, &decoded); err == nil {
 		redactJSONValue(decoded)
 		redacted, err := json.Marshal(decoded)
+		if err == nil {
+			return string(redacted)
+		}
+	}
+
+	var decodedList []map[string]interface{}
+	if err := json.Unmarshal(body, &decodedList); err == nil {
+		for _, item := range decodedList {
+			redactJSONValue(item)
+		}
+		redacted, err := json.Marshal(decodedList)
 		if err == nil {
 			return string(redacted)
 		}

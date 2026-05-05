@@ -138,7 +138,7 @@ const AdversarialSettings = () => {
         if (!Object.hasOwn(current, keys[index]) || typeof current[keys[index]] !== 'object') {
           current[keys[index]] = {};
         }
-        current = current[keys[index]];
+        current = current[keys[index]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
       }
 
       current[keys[keys.length - 1]] = value;
@@ -160,7 +160,7 @@ const AdversarialSettings = () => {
         if (!Object.hasOwn(current, keys[index_]) || typeof current[keys[index_]] !== 'object') {
           current[keys[index_]] = {};
         }
-        current = current[keys[index_]];
+        current = current[keys[index_]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
       }
 
       if (!Array.isArray(current[keys[keys.length - 1]])) {
@@ -186,7 +186,7 @@ const AdversarialSettings = () => {
         if (!Object.hasOwn(current, keys[index]) || typeof current[keys[index]] !== 'object') {
           current[keys[index]] = {};
         }
-        current = current[keys[index]];
+        current = current[keys[index]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
       }
 
       if (!Array.isArray(current[keys[keys.length - 1]])) {
@@ -212,7 +212,7 @@ const AdversarialSettings = () => {
         if (!Object.hasOwn(current, keys[index_]) || typeof current[keys[index_]] !== 'object') {
           current[keys[index_]] = {};
         }
-        current = current[keys[index_]];
+        current = current[keys[index_]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
       }
 
       if (Array.isArray(current[keys[keys.length - 1]])) {

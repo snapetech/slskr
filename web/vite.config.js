@@ -12,7 +12,10 @@ const resolveNodeModuleLessImport = (filename) => {
   if (path.isAbsolute(requested)) {
     throw new Error(`absolute Less alias imports are not allowed: ${filename}`);
   }
-  const resolved = path.resolve(nodeModulesPath, requested);
+  if (requested.split(/[\\/]+/u).includes('..')) {
+    throw new Error(`Less alias import escapes node_modules: ${filename}`);
+  }
+  const resolved = path.resolve(nodeModulesPath, requested); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const relative = path.relative(nodeModulesPath, resolved);
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`Less alias import escapes node_modules: ${filename}`);

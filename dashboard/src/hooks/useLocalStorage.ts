@@ -14,7 +14,7 @@ function useBrowserStorage<T>(
       const item = storage?.getItem(key) ?? null;
       return item ? JSON.parse(item) : initialValue;
     } catch (error) {
-      console.error(`Error reading ${storageName} key "${key}":`, error);
+      console.error('Error reading browser storage key:', storageName, key, error);
       return initialValue;
     }
   });
@@ -31,7 +31,7 @@ function useBrowserStorage<T>(
         }
       }
     } catch (error) {
-      console.error(`Error writing to ${storageName} key "${key}":`, error);
+      console.error('Error writing browser storage key:', storageName, key, error);
     }
   }, [key, storageName]);
 

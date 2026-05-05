@@ -2581,6 +2581,207 @@ fn workflow_table_html(headers: &[&str], rows: &[(&str, &str, &str, &str)]) -> S
     )
 }
 
+fn reference_field_html(label: &str, placeholder: &str) -> String {
+    format!(
+        r#"<label><span>{label}</span><input type="text" placeholder="{placeholder}" aria-label="{label}"></label>"#,
+        label = escape_html(label),
+        placeholder = escape_html(placeholder),
+    )
+}
+
+fn reference_buttons_html(labels: &[&str]) -> String {
+    labels
+        .iter()
+        .map(|label| format!(r#"<button type="button">{}</button>"#, escape_html(label)))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+type RouteReferenceSpec<'a> = (
+    &'a str,
+    &'a str,
+    Vec<(&'a str, &'a str)>,
+    Vec<&'a str>,
+    Vec<&'a str>,
+);
+
+fn route_reference_panel_html(kind: RouteKind) -> String {
+    let (title, detail, fields, buttons, facts): RouteReferenceSpec<'_> = match kind {
+            RouteKind::Search => (
+                "Search",
+                "Search phrase, acquisition profile, queue search, and open results.",
+                vec![
+                    ("Search phrase", "Search phrase"),
+                    ("Acquisition profile", "Balanced"),
+                ],
+                vec!["Queue Search", "Search and Open Results"],
+                vec!["Result review", "Duplicate folding", "Download preview"],
+            ),
+            RouteKind::DiscoveryGraph => (
+                "Discovery Graph Atlas",
+                "Persistent graph surface for wandering the neighborhood around a seed without opening a modal.",
+                vec![
+                    ("Seed Scope", "Song / Unknown Seed"),
+                    ("Artist Name", "Artist"),
+                    ("Album Title", "Album Title"),
+                    ("Track Title or Seed Label", "Track Title or Seed Label"),
+                    ("Optional Artist ID", "Optional Artist ID"),
+                    ("Optional Release ID", "Optional Release ID"),
+                    ("Optional Recording ID", "Optional Recording ID"),
+                ],
+                vec!["Build Atlas", "Queue Nearby"],
+                vec!["Depth 2", "Weight 20", "Saved branches"],
+            ),
+            RouteKind::PlaylistIntake => (
+                "Playlist Intake",
+                "Import playlist text for review before any provider or network activity.",
+                vec![
+                    ("Name", "Road trip, label sampler, friend recs"),
+                    ("Source", "Local file name or provider URL"),
+                    (
+                        "Playlist rows",
+                        "Artist - Title, one row per track, or simple CSV artist,title",
+                    ),
+                ],
+                vec!["Import Playlist"],
+                vec!["Playlists 0", "Tracks 0", "Unmatched 0"],
+            ),
+            RouteKind::Wishlist => (
+                "Wishlist",
+                "Saved searches that run automatically.",
+                vec![
+                    ("Search Text", "Enter search terms..."),
+                    ("Filter (optional)", "e.g., flac OR mp3"),
+                    ("Max Results", "25"),
+                ],
+                vec!["Add Search", "Import CSV", "Copy Review", "Run Enabled", "Add Your First Search"],
+                vec!["Request Portal Summary", "Requests 0", "Enabled 0", "Automatic 0", "Needs Review 0", "Within quota 25 left"],
+            ),
+            RouteKind::Downloads => (
+                "Downloads",
+                "Transfer queue for incoming files.",
+                Vec::new(),
+                vec!["Retry", "Cancel", "Remove", "Clear Completed"],
+                vec!["No downloads to display"],
+            ),
+            RouteKind::Uploads => (
+                "Uploads",
+                "Transfer queue for files requested by peers.",
+                Vec::new(),
+                vec!["Allow", "Deny", "Clear Completed"],
+                vec!["No uploads to display"],
+            ),
+            RouteKind::Messages => (
+                "Messages",
+                "Unified direct messages, saved chats, joined rooms, and pod channels.",
+                vec![
+                    ("Chat username", "username"),
+                    ("Search rooms", "Search rooms"),
+                    ("Message", "Message"),
+                ],
+                vec!["Direct Message", "Join Room", "Create Room", "Open Batch Private-Message Dialog", "Collapse All Message Panels"],
+                vec!["Saved Chats 0", "Joined Rooms 0", "Pod Channels 0", "Workspace 0 open"],
+            ),
+            RouteKind::Rooms => (
+                "Messages",
+                "Room-focused message workspace.",
+                vec![("Search rooms", "Search rooms")],
+                vec!["Join Room", "Create Room", "Leave Room"],
+                vec!["Joined Rooms 0", "Workspace 0 open"],
+            ),
+            RouteKind::Users => (
+                "Users",
+                "Peer user lookup and detail.",
+                vec![("Username", "Username")],
+                vec!["Search for User", "Clear Selected User", "Browse", "Message"],
+                vec!["No user info to display"],
+            ),
+            RouteKind::Contacts => (
+                "Contacts",
+                "Manage your peer contacts.",
+                vec![
+                    ("Invite", "slskr://invite/..."),
+                    ("Nickname", "Friend's name"),
+                ],
+                vec!["Create Invite", "Add Friend", "Refresh Nearby", "Message", "Browse", "Remove"],
+                vec!["All Contacts", "Nearby"],
+            ),
+            RouteKind::Solid => (
+                "Solid",
+                "Solid integration status, identity, storage, and WebID resolution.",
+                vec![("WebID", "https://example.com/profile/card#me")],
+                vec!["Resolve WebID", "Connect Identity", "Sync Storage"],
+                vec!["Solid integration is disabled (Feature.Solid=false)."],
+            ),
+            RouteKind::Collections => (
+                "Collections",
+                "Manage your playlists and share lists.",
+                vec![
+                    ("Title", "Enter collection title"),
+                    ("Description", "Optional description"),
+                    ("Search for item", "Search by filename (e.g., sintel, aria, treasure)..."),
+                ],
+                vec!["Create Collection", "Add Item", "Share", "Create Collection"],
+                vec!["No collections yet", "Title", "Type", "Items", "Actions"],
+            ),
+            RouteKind::ShareGroups => (
+                "Share Groups",
+                "Manage groups for sharing collections.",
+                vec![
+                    ("Group Name", "Enter group name"),
+                    ("Soulseek Username", "Enter username"),
+                ],
+                vec!["Create Group", "Create Your First Group", "Add Member", "Issue Token"],
+                vec!["No share groups yet", "Name", "Members", "Created", "Actions"],
+            ),
+            RouteKind::SharedWithMe => (
+                "Shared with Me",
+                "Collections shared with you.",
+                Vec::new(),
+                vec!["Open", "Stream", "Backfill"],
+                vec!["No shares yet", "Collection", "Shared By", "Type", "Permissions", "Actions"],
+            ),
+            RouteKind::Browse => (
+                "Browse",
+                "Tabbed peer browse sessions.",
+                vec![("Username", "Username")],
+                vec!["Open a New Browse Tab", "Download Selected"],
+                vec!["New Tab"],
+            ),
+            RouteKind::System => (
+                "System",
+                "Operator status, network, shares, jobs, automation, files, data, events, logs, and metrics.",
+                Vec::new(),
+                vec!["Check for Updates", "Get Privileges", "Diagnostic Bundle", "Setup Health", "Shut Down", "Restart"],
+                vec![
+                    "Info", "Network", "Mesh", "Bridge", "MediaCore", "Security Policies",
+                    "Experience", "Integrations", "Options", "Shares", "Jobs", "Automations",
+                    "Source Providers", "Swarm Analytics", "Library Health", "Quarantine Jury",
+                    "Files", "Data", "Events", "Logs", "Metrics",
+                ],
+            ),
+        };
+
+    let field_html = fields
+        .iter()
+        .map(|(label, placeholder)| reference_field_html(label, placeholder))
+        .collect::<Vec<_>>()
+        .join("");
+    let facts_html = facts
+        .iter()
+        .map(|fact| format!(r#"<span>{}</span>"#, escape_html(fact)))
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<section class="slskr-reference-panel"><header><div><h4>{title}</h4><p>{detail}</p></div><div>{buttons}</div></header><div class="slskr-reference-fields">{fields}</div><div class="slskr-reference-facts">{facts}</div></section>"#,
+        title = escape_html(title),
+        detail = escape_html(detail),
+        buttons = reference_buttons_html(&buttons),
+        fields = field_html,
+        facts = facts_html,
+    )
+}
+
 fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>) -> String {
     let stats = match kind {
         RouteKind::Search | RouteKind::DiscoveryGraph => vec![
@@ -2950,9 +3151,10 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
         ),
     };
     format!(
-        r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}"><div class="slskr-workflow-tabs">{tabs}</div><div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></div>"#,
+        r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}"><div class="slskr-workflow-tabs">{tabs}</div>{reference}<div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></div>"#,
         kind = kind,
         tabs = workflow_tabs_html(&tabs),
+        reference = route_reference_panel_html(kind),
         primary_title = escape_html(primary_title),
         primary_detail = escape_html(primary_detail),
         fresh = status_chip_html(

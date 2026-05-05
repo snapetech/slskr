@@ -953,6 +953,84 @@ body {
   grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.65fr);
 }
 
+.slskr-reference-panel {
+  background: #101819;
+  border: 1px solid #2b504d;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.slskr-reference-panel header {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.slskr-reference-panel h4 {
+  color: #f4efe7;
+  font-size: 16px;
+  margin: 0 0 5px;
+}
+
+.slskr-reference-panel header > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.slskr-reference-panel button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.slskr-reference-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.slskr-reference-fields label {
+  display: grid;
+  gap: 5px;
+}
+
+.slskr-reference-fields span {
+  color: #8dd7c8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.slskr-reference-fields input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.slskr-reference-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.slskr-reference-facts span {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  font-size: 12px;
+  min-height: 26px;
+  padding: 5px 8px;
+}
+
 .slskr-workflow-primary,
 .slskr-workflow-inspector {
   background: #111516;
@@ -1367,7 +1445,8 @@ body {
 
   .slskr-page-header,
   .slskr-work-area > header,
-  .slskr-workflow-primary > header {
+  .slskr-workflow-primary > header,
+  .slskr-reference-panel header {
     flex-direction: column;
   }
 

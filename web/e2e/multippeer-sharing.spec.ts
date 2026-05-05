@@ -261,7 +261,7 @@ test.describe('multi-peer sharing', () => {
     // Diagnostic: Check current state
     const tid = T.contactsCreateInvite;
     const count = await pageA.locator(`[data-testid="${tid}"]`).count();
-    console.log(`[Contacts Test] count([data-testid="${tid}"]) =`, count);
+    console.log('[Contacts Test] data-testid count', tid, count);
 
     // If present, dump visibility diagnostics
     if (count > 0) {
@@ -1173,7 +1173,8 @@ test.describe('multi-peer sharing', () => {
         // List all downloaded files for completeness
         const allFiles = await nodeCInstance.getDownloadedFiles();
         console.log(
-          `[Backfill Test] Total files in downloads: ${allFiles.length}`,
+          '[Backfill Test] Total files in downloads',
+          allFiles.length,
           allFiles.map((f) => `${f.name} (${f.size} bytes)`),
         );
       } else {

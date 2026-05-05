@@ -204,7 +204,7 @@ class SlskrClient {
     async request(method, url, body, authenticated = false, attempt = 0) {
         try {
             if (this.debug) {
-                console.debug(`[slskr] ${method} ${url}`, this.debugBody(body));
+                console.debug('[slskr] request', method, url, this.debugBody(body));
             }
             const headers = {
                 'Content-Type': 'application/json',
