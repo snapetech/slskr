@@ -2458,12 +2458,21 @@ pub fn route_workspace_pending_html(path: &str) -> String {
     let Some(page) = route_page(path) else {
         return String::new();
     };
-    route_endpoints(page.surface)
+    let pending = route_endpoints(page.surface)
         .iter()
         .filter(|endpoint| endpoint.method == "GET")
         .map(|endpoint| data_card_pending_html(*endpoint))
         .collect::<Vec<_>>()
-        .join("")
+        .join("");
+    match page.surface {
+        "integrations" => format!("{pending}{}", automation_center_panel_html()),
+        "system" => format!(
+            "{pending}{}{}",
+            experience_settings_panel_html(),
+            automation_center_panel_html()
+        ),
+        _ => pending,
+    }
 }
 
 pub fn route_workspace_result_html(path: &str, responses: &[EndpointBody]) -> String {
@@ -2536,6 +2545,73 @@ fn workspace_layout_html(tabs: &[&str], primary: String, secondary: String) -> S
         tabs = workspace_tabs_html(tabs),
         primary = primary,
         secondary = secondary,
+    )
+}
+
+fn experience_settings_panel_html() -> String {
+    let groups = ["Search", "Discovery", "Player", "Messages"];
+    let sections = groups
+        .iter()
+        .map(|group| {
+            let fields = experience_preferences()
+                .iter()
+                .filter(|preference| preference.group == *group)
+                .map(|preference| {
+                    if preference.input == "checkbox" {
+                        format!(
+                            r#"<label class="slskr-local-check"><input type="checkbox" data-slskr-pref="{id}" data-slskr-pref-default="{default}" {checked}>{label}</label>"#,
+                            id = escape_html(preference.id),
+                            default = escape_html(preference.default_value),
+                            checked = if preference.default_value == "true" { "checked" } else { "" },
+                            label = escape_html(preference.label),
+                        )
+                    } else {
+                        format!(
+                            r#"<label><span>{label}</span><input type="text" data-slskr-pref="{id}" data-slskr-pref-default="{default}" value="{default}"></label>"#,
+                            id = escape_html(preference.id),
+                            default = escape_html(preference.default_value),
+                            label = escape_html(preference.label),
+                        )
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            format!(
+                r#"<fieldset><legend>{group}</legend>{fields}</fieldset>"#,
+                group = escape_html(group),
+                fields = fields
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<article class="slskr-data-card slskr-local-panel" data-slskr-experience-panel><header><div><h3>Experience Preferences</h3><code>browser local</code></div><span id="slskr-experience-summary">Rust owned</span></header><form class="slskr-local-form">{sections}</form><div class="slskr-local-actions"><button type="button" data-slskr-pref-action="save">Save</button><button type="button" data-slskr-pref-action="reset">Reset</button><button type="button" data-slskr-pref-action="copy">Copy Report</button></div><pre id="slskr-experience-report"></pre><p id="slskr-experience-status" aria-live="polite"></p></article>"#,
+        sections = sections
+    )
+}
+
+fn automation_center_panel_html() -> String {
+    let recipes = automation_recipes()
+        .iter()
+        .map(|recipe| {
+            format!(
+                r#"<li data-slskr-recipe="{id}"><div><strong>{title}</strong><span>{description}</span></div><label class="slskr-local-check"><input type="checkbox" data-slskr-recipe-enabled="{id}" {checked}>Enabled</label><dl><dt>Cadence</dt><dd>{cadence}</dd><dt>Cooldown</dt><dd>{cooldown}</dd><dt>Network</dt><dd>{network}</dd><dt>Files</dt><dd>{files}</dd><dt>Approval</dt><dd>{approval}</dd></dl><div class="slskr-local-actions"><button type="button" data-slskr-recipe-dry-run="{id}">Dry Run</button><button type="button" data-slskr-recipe-copy="{id}">Copy Plan</button></div></li>"#,
+                id = escape_html(recipe.id),
+                title = escape_html(recipe.title),
+                description = escape_html(recipe.description),
+                checked = if recipe.enabled_by_default { "checked" } else { "" },
+                cadence = escape_html(recipe.cadence),
+                cooldown = escape_html(recipe.cooldown),
+                network = escape_html(recipe.network_impact),
+                files = escape_html(recipe.file_impact),
+                approval = escape_html(recipe.approval_gate),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<article class="slskr-data-card slskr-local-panel" data-slskr-automation-panel><header><div><h3>Automation Center</h3><code>browser local</code></div><span id="slskr-automation-summary">7 recipes</span></header><div class="slskr-local-actions"><button type="button" data-slskr-automation-action="copy-history">Copy History</button><button type="button" data-slskr-automation-action="reset">Reset</button></div><ul class="slskr-recipe-list">{recipes}</ul><pre id="slskr-automation-report"></pre><p id="slskr-automation-status" aria-live="polite"></p></article>"#,
+        recipes = recipes
     )
 }
 
@@ -2636,17 +2712,21 @@ fn integrations_workspace_html(responses: &[EndpointBody]) -> String {
                 "/musicbrainz/release-radar/subscriptions",
             ],
         ),
-        selected_cards_html(
-            responses,
-            &[
-                "/songid/runs",
-                "/solid/status",
-                "/pods",
-                "/bridge/status",
-                "/jobs",
-                "/mesh/stats",
-                "/security/dashboard",
-            ],
+        format!(
+            "{}{}",
+            selected_cards_html(
+                responses,
+                &[
+                    "/songid/runs",
+                    "/solid/status",
+                    "/pods",
+                    "/bridge/status",
+                    "/jobs",
+                    "/mesh/stats",
+                    "/security/dashboard",
+                ],
+            ),
+            automation_center_panel_html()
         ),
     )
 }
@@ -2663,9 +2743,14 @@ fn system_workspace_html(responses: &[EndpointBody]) -> String {
                 "/options",
             ],
         ),
-        selected_cards_html(
-            responses,
-            &["/events", "/logs", "/shares", "/database/stats"],
+        format!(
+            "{}{}{}",
+            selected_cards_html(
+                responses,
+                &["/events", "/logs", "/shares", "/database/stats"],
+            ),
+            experience_settings_panel_html(),
+            automation_center_panel_html()
         ),
     )
 }
@@ -2869,6 +2954,7 @@ fn render_current_route(
     mount_workspace_tabs(document)?;
     mount_data_cards(document)?;
     mount_live_controls(window, document)?;
+    mount_browser_local_panels(window, document)?;
     for item in nav_items() {
         let selector = format!(r#".slskr-nav-item[href="{}"]"#, item.href);
         let Some(element) = document.query_selector(&selector)? else {
@@ -3319,6 +3405,405 @@ pub struct SimilarQueueCandidate {
     pub index: usize,
     pub item: serde_json::Value,
     pub score: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExperiencePreference {
+    pub default_value: &'static str,
+    pub group: &'static str,
+    pub id: &'static str,
+    pub input: &'static str,
+    pub label: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AutomationRecipe {
+    pub approval_gate: &'static str,
+    pub cadence: &'static str,
+    pub cooldown: &'static str,
+    pub description: &'static str,
+    pub enabled_by_default: bool,
+    pub file_impact: &'static str,
+    pub id: &'static str,
+    pub max_run_time: &'static str,
+    pub network_impact: &'static str,
+    pub title: &'static str,
+}
+
+pub const fn experience_preferences() -> &'static [ExperiencePreference] {
+    &[
+        ExperiencePreference {
+            default_value: "balanced",
+            group: "Search",
+            id: "searchRankingProfile",
+            input: "text",
+            label: "Ranking Profile",
+        },
+        ExperiencePreference {
+            default_value: "lossless",
+            group: "Search",
+            id: "searchPreferredCondition",
+            input: "text",
+            label: "Preferred Condition",
+        },
+        ExperiencePreference {
+            default_value: "true",
+            group: "Search",
+            id: "searchDuplicateFolding",
+            input: "checkbox",
+            label: "Fold duplicate results",
+        },
+        ExperiencePreference {
+            default_value: "detailed",
+            group: "Search",
+            id: "searchActionPreviewDensity",
+            input: "text",
+            label: "Action Preview Density",
+        },
+        ExperiencePreference {
+            default_value: "current",
+            group: "Player",
+            id: "playerRadioSeedMode",
+            input: "text",
+            label: "Radio Seed",
+        },
+        ExperiencePreference {
+            default_value: "manual",
+            group: "Player",
+            id: "playerScrobbleMode",
+            input: "text",
+            label: "Scrobble Mode",
+        },
+        ExperiencePreference {
+            default_value: "last",
+            group: "Player",
+            id: "playerDefaultVisualizer",
+            input: "text",
+            label: "Default Visualizer",
+        },
+        ExperiencePreference {
+            default_value: "false",
+            group: "Player",
+            id: "playerQueueAutoFill",
+            input: "checkbox",
+            label: "Enable queue auto-fill",
+        },
+        ExperiencePreference {
+            default_value: "true",
+            group: "Player",
+            id: "playerShowRatings",
+            input: "checkbox",
+            label: "Show ratings",
+        },
+        ExperiencePreference {
+            default_value: "true",
+            group: "Player",
+            id: "playerCaptureHistory",
+            input: "checkbox",
+            label: "Capture history",
+        },
+        ExperiencePreference {
+            default_value: "true",
+            group: "Player",
+            id: "playerKeyboardShortcuts",
+            input: "checkbox",
+            label: "Keyboard shortcuts",
+        },
+        ExperiencePreference {
+            default_value: "all",
+            group: "Discovery",
+            id: "discoveryApprovalFilter",
+            input: "text",
+            label: "Approval Filter",
+        },
+        ExperiencePreference {
+            default_value: "0.70",
+            group: "Discovery",
+            id: "discoveryConfidenceFloor",
+            input: "text",
+            label: "Confidence Floor",
+        },
+        ExperiencePreference {
+            default_value: "14",
+            group: "Discovery",
+            id: "discoveryStaleDays",
+            input: "text",
+            label: "Stale Days",
+        },
+        ExperiencePreference {
+            default_value: "false",
+            group: "Messages",
+            id: "messagesDenseMode",
+            input: "checkbox",
+            label: "Dense mode",
+        },
+        ExperiencePreference {
+            default_value: "true",
+            group: "Messages",
+            id: "messagesPinnedRestore",
+            input: "checkbox",
+            label: "Restore pinned conversations",
+        },
+        ExperiencePreference {
+            default_value: "true",
+            group: "Messages",
+            id: "messagesUnreadBadges",
+            input: "checkbox",
+            label: "Unread badges",
+        },
+        ExperiencePreference {
+            default_value: "true",
+            group: "Messages",
+            id: "messagesSearchEnabled",
+            input: "checkbox",
+            label: "Message search",
+        },
+    ]
+}
+
+pub const fn automation_recipes() -> &'static [AutomationRecipe] {
+    &[
+        AutomationRecipe {
+            approval_gate: "None required",
+            cadence: "Continuous",
+            cooldown: "5 minutes",
+            description: "Checks connection, shares, paths, and credentials for setup drift.",
+            enabled_by_default: true,
+            file_impact: "Read only",
+            id: "local-diagnostics",
+            max_run_time: "30 seconds",
+            network_impact: "Local",
+            title: "Local Diagnostics",
+        },
+        AutomationRecipe {
+            approval_gate: "None required",
+            cadence: "Daily",
+            cooldown: "24 hours",
+            description:
+                "Surfaces stale share-cache and library-scan reminders before users hit missing results.",
+            enabled_by_default: true,
+            file_impact: "Read only",
+            id: "stale-cache-reminders",
+            max_run_time: "1 minute",
+            network_impact: "Local",
+            title: "Share and Library Reminders",
+        },
+        AutomationRecipe {
+            approval_gate: "None required",
+            cadence: "Every 15 minutes",
+            cooldown: "15 minutes",
+            description: "Keeps local dashboard summaries fresh without contacting public peers.",
+            enabled_by_default: true,
+            file_impact: "Read only",
+            id: "dashboard-refresh",
+            max_run_time: "20 seconds",
+            network_impact: "Local",
+            title: "Dashboard Refresh",
+        },
+        AutomationRecipe {
+            approval_gate: "Download approval",
+            cadence: "Manual or scheduled",
+            cooldown: "2 hours",
+            description: "Retries failed Wishlist items using the selected acquisition profile.",
+            enabled_by_default: false,
+            file_impact: "Downloads after approval",
+            id: "wishlist-retry",
+            max_run_time: "20 minutes",
+            network_impact: "Public peers possible",
+            title: "Wishlist Retry",
+        },
+        AutomationRecipe {
+            approval_gate: "Fix confirmation",
+            cadence: "Manual or scheduled",
+            cooldown: "24 hours",
+            description: "Finds duplicates, dead files, metadata gaps, fake lossless files, and missing art.",
+            enabled_by_default: false,
+            file_impact: "Read only until fixed",
+            id: "library-health-scan",
+            max_run_time: "30 minutes",
+            network_impact: "Local",
+            title: "Library Health Scan",
+        },
+        AutomationRecipe {
+            approval_gate: "Configured import success",
+            cadence: "After import",
+            cooldown: "10 minutes",
+            description: "Asks configured media servers to rescan after successful library imports.",
+            enabled_by_default: false,
+            file_impact: "Media-server scan",
+            id: "media-server-rescan",
+            max_run_time: "2 minutes",
+            network_impact: "Local network",
+            title: "Media Server Rescan",
+        },
+        AutomationRecipe {
+            approval_gate: "Explicit evidence publication opt-in",
+            cadence: "Manual or scheduled",
+            cooldown: "12 hours",
+            description:
+                "Publishes explicit opt-in signed quality and verification evidence to trusted mesh peers.",
+            enabled_by_default: false,
+            file_impact: "No file writes",
+            id: "mesh-evidence-publish",
+            max_run_time: "10 minutes",
+            network_impact: "Trusted mesh",
+            title: "Mesh Evidence Publish",
+        },
+    ]
+}
+
+pub fn default_experience_preferences() -> serde_json::Map<String, serde_json::Value> {
+    experience_preferences()
+        .iter()
+        .map(|preference| {
+            let value = if preference.input == "checkbox" {
+                serde_json::Value::Bool(preference.default_value == "true")
+            } else {
+                serde_json::Value::String(preference.default_value.to_string())
+            };
+            (preference.id.to_string(), value)
+        })
+        .collect()
+}
+
+fn preference_string(
+    values: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    fallback: &str,
+) -> String {
+    values
+        .get(key)
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn preference_bool(
+    values: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    fallback: bool,
+) -> bool {
+    values
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(fallback)
+}
+
+pub fn experience_preferences_report(
+    values: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    [
+        "slskr experience preferences".to_string(),
+        format!(
+            "Search: ranking={}, condition={}, duplicate_folding={}, previews={}",
+            preference_string(values, "searchRankingProfile", "balanced"),
+            preference_string(values, "searchPreferredCondition", "lossless"),
+            preference_bool(values, "searchDuplicateFolding", true),
+            preference_string(values, "searchActionPreviewDensity", "detailed")
+        ),
+        format!(
+            "Discovery: approval={}, confidence>={}, stale_days={}",
+            preference_string(values, "discoveryApprovalFilter", "all"),
+            preference_string(values, "discoveryConfidenceFloor", "0.70"),
+            preference_string(values, "discoveryStaleDays", "14")
+        ),
+        format!(
+            "Player: queue_auto_fill={}, radio_seed={}, ratings={}, history={}, scrobble={}, visualizer={}, shortcuts={}",
+            preference_bool(values, "playerQueueAutoFill", false),
+            preference_string(values, "playerRadioSeedMode", "current"),
+            preference_bool(values, "playerShowRatings", true),
+            preference_bool(values, "playerCaptureHistory", true),
+            preference_string(values, "playerScrobbleMode", "manual"),
+            preference_string(values, "playerDefaultVisualizer", "last"),
+            preference_bool(values, "playerKeyboardShortcuts", true)
+        ),
+        format!(
+            "Messages: dense={}, pinned_restore={}, unread_badges={}, search={}",
+            preference_bool(values, "messagesDenseMode", false),
+            preference_bool(values, "messagesPinnedRestore", true),
+            preference_bool(values, "messagesUnreadBadges", true),
+            preference_bool(values, "messagesSearchEnabled", true)
+        ),
+    ]
+    .join("\n")
+}
+
+pub fn automation_summary_from_state(
+    state: &serde_json::Map<String, serde_json::Value>,
+) -> (usize, usize, usize) {
+    let enabled = automation_recipes()
+        .iter()
+        .filter(|recipe| {
+            state
+                .get(recipe.id)
+                .and_then(|entry| entry.get("enabled"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(recipe.enabled_by_default)
+        })
+        .count();
+    let total = automation_recipes().len();
+    (total, enabled, total.saturating_sub(enabled))
+}
+
+pub fn automation_dry_run_report(recipe: AutomationRecipe, timestamp: &str) -> serde_json::Value {
+    serde_json::json!({
+        "approvalGate": recipe.approval_gate,
+        "cooldown": recipe.cooldown,
+        "executed": false,
+        "fileImpact": recipe.file_impact,
+        "generatedAt": timestamp,
+        "maxRunTime": recipe.max_run_time,
+        "networkImpact": recipe.network_impact,
+        "recipeId": recipe.id,
+        "title": recipe.title,
+    })
+}
+
+pub fn automation_history_report(state: &serde_json::Map<String, serde_json::Value>) -> String {
+    let mut entries = Vec::new();
+    for recipe in automation_recipes() {
+        let stored = state.get(recipe.id);
+        let enabled = stored
+            .and_then(|entry| entry.get("enabled"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(recipe.enabled_by_default);
+        let last_dry_run = stored
+            .and_then(|entry| entry.get("lastDryRunAt"))
+            .map(json_scalar_preview)
+            .filter(|value| !value.is_empty());
+        let last_run = stored
+            .and_then(|entry| entry.get("lastRunAt"))
+            .map(json_scalar_preview)
+            .filter(|value| !value.is_empty());
+        if enabled || last_dry_run.is_some() || last_run.is_some() {
+            entries.push((recipe, enabled, last_dry_run, last_run));
+        }
+    }
+
+    let mut lines = vec![
+        "slskr automation review history".to_string(),
+        format!("Entries: {}", entries.len()),
+        String::new(),
+    ];
+    if entries.is_empty() {
+        lines.push("No enabled recipes or dry-run checkpoints.".to_string());
+        return lines.join("\n");
+    }
+    for (recipe, enabled, last_dry_run, last_run) in entries {
+        lines.push(format!("- {}", recipe.title));
+        lines.push(format!("  Enabled: {}", if enabled { "yes" } else { "no" }));
+        lines.push(format!(
+            "  Last run: {}",
+            last_run.unwrap_or_else(|| "not recorded".to_string())
+        ));
+        lines.push(format!(
+            "  Last dry run: {}",
+            last_dry_run.unwrap_or_else(|| "not recorded".to_string())
+        ));
+        lines.push(format!("  Network impact: {}", recipe.network_impact));
+        lines.push(format!("  File impact: {}", recipe.file_impact));
+    }
+    lines.join("\n")
 }
 
 fn json_track_field(track: &serde_json::Value, keys: &[&str]) -> String {
@@ -4126,6 +4611,363 @@ fn mount_workspace_tabs(document: &web_sys::Document) -> Result<(), JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn storage_json_object(
+    window: &web_sys::Window,
+    key: &str,
+    fallback: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    window
+        .local_storage()
+        .ok()
+        .flatten()
+        .and_then(|storage| storage.get_item(key).ok().flatten())
+        .and_then(|body| {
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&body).ok()
+        })
+        .map(|stored| {
+            let mut merged = fallback.clone();
+            for (key, value) in stored {
+                merged.insert(key, value);
+            }
+            merged
+        })
+        .unwrap_or(fallback)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn write_storage_json_object(
+    window: &web_sys::Window,
+    key: &str,
+    value: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(storage) = window.local_storage().ok().flatten() {
+        let _ = storage.set_item(key, &serde_json::Value::Object(value.clone()).to_string());
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remove_storage_item(window: &web_sys::Window, key: &str) {
+    if let Some(storage) = window.local_storage().ok().flatten() {
+        let _ = storage.remove_item(key);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_experience_form(
+    document: &web_sys::Document,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut values = serde_json::Map::new();
+    if let Ok(inputs) = document.query_selector_all("[data-slskr-pref]") {
+        for index in 0..inputs.length() {
+            let Some(node) = inputs.item(index) else {
+                continue;
+            };
+            let Ok(input) = node.dyn_into::<web_sys::HtmlInputElement>() else {
+                continue;
+            };
+            let Some(key) = input.get_attribute("data-slskr-pref") else {
+                continue;
+            };
+            let value = if input.type_() == "checkbox" {
+                serde_json::Value::Bool(input.checked())
+            } else {
+                serde_json::Value::String(input.value())
+            };
+            values.insert(key, value);
+        }
+    }
+    values
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_experience_form(
+    document: &web_sys::Document,
+    values: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Ok(inputs) = document.query_selector_all("[data-slskr-pref]") {
+        for index in 0..inputs.length() {
+            let Some(node) = inputs.item(index) else {
+                continue;
+            };
+            let Ok(input) = node.dyn_into::<web_sys::HtmlInputElement>() else {
+                continue;
+            };
+            let Some(key) = input.get_attribute("data-slskr-pref") else {
+                continue;
+            };
+            let value = values.get(&key).cloned().unwrap_or_else(|| {
+                serde_json::Value::String(
+                    input
+                        .get_attribute("data-slskr-pref-default")
+                        .unwrap_or_default(),
+                )
+            });
+            if input.type_() == "checkbox" {
+                input.set_checked(value.as_bool().unwrap_or(false));
+            } else {
+                input.set_value(&json_scalar_preview(&value));
+            }
+        }
+    }
+    let report = experience_preferences_report(values);
+    if let Some(output) = document.get_element_by_id("slskr-experience-report") {
+        output.set_text_content(Some(&report));
+    }
+    if let Some(summary) = document.get_element_by_id("slskr-experience-summary") {
+        summary.set_text_content(Some("18 preferences"));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn default_automation_state() -> serde_json::Map<String, serde_json::Value> {
+    automation_recipes()
+        .iter()
+        .map(|recipe| {
+            (
+                recipe.id.to_string(),
+                serde_json::json!({
+                    "enabled": recipe.enabled_by_default,
+                    "lastDryRunAt": null,
+                }),
+            )
+        })
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_automation_state(
+    document: &web_sys::Document,
+    state: &serde_json::Map<String, serde_json::Value>,
+) {
+    for recipe in automation_recipes() {
+        let enabled = state
+            .get(recipe.id)
+            .and_then(|entry| entry.get("enabled"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(recipe.enabled_by_default);
+        let selector = format!(r#"[data-slskr-recipe-enabled="{}"]"#, recipe.id);
+        if let Ok(Some(input)) = document.query_selector(&selector) {
+            if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+                input.set_checked(enabled);
+            }
+        }
+    }
+    let (total, enabled, disabled) = automation_summary_from_state(state);
+    if let Some(summary) = document.get_element_by_id("slskr-automation-summary") {
+        summary.set_text_content(Some(&format!(
+            "{total} recipes / {enabled} enabled / {disabled} disabled"
+        )));
+    }
+    if let Some(report) = document.get_element_by_id("slskr-automation-report") {
+        report.set_text_content(Some(&automation_history_report(state)));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_browser_local_panels(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    if document
+        .query_selector("[data-slskr-experience-panel]")?
+        .is_some()
+    {
+        let values = storage_json_object(
+            window,
+            "slskr:experience-preferences:v1",
+            default_experience_preferences(),
+        );
+        apply_experience_form(document, &values);
+        let buttons = document.query_selector_all("[data-slskr-pref-action]")?;
+        for index in 0..buttons.length() {
+            let Some(node) = buttons.item(index) else {
+                continue;
+            };
+            let button: web_sys::Element = node.dyn_into()?;
+            let action = button
+                .get_attribute("data-slskr-pref-action")
+                .unwrap_or_default();
+            let window = window.clone();
+            let document = document.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    let values = if action == "reset" {
+                        remove_storage_item(&window, "slskr:experience-preferences:v1");
+                        default_experience_preferences()
+                    } else {
+                        collect_experience_form(&document)
+                    };
+                    if action == "save" {
+                        write_storage_json_object(
+                            &window,
+                            "slskr:experience-preferences:v1",
+                            &values,
+                        );
+                    }
+                    apply_experience_form(&document, &values);
+                    if let Some(status) = document.get_element_by_id("slskr-experience-status") {
+                        let message = match action.as_str() {
+                            "copy" => "Experience preference report prepared.",
+                            "reset" => "Experience preferences reset.",
+                            _ => "Experience preferences saved locally.",
+                        };
+                        status.set_text_content(Some(message));
+                    }
+                },
+            ));
+            button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+    }
+
+    if document
+        .query_selector("[data-slskr-automation-panel]")?
+        .is_some()
+    {
+        let state = storage_json_object(
+            window,
+            "slskr.automationRecipeState",
+            default_automation_state(),
+        );
+        apply_automation_state(document, &state);
+        let enabled_inputs = document.query_selector_all("[data-slskr-recipe-enabled]")?;
+        for index in 0..enabled_inputs.length() {
+            let Some(node) = enabled_inputs.item(index) else {
+                continue;
+            };
+            let input: web_sys::HtmlInputElement = node.dyn_into()?;
+            let recipe_id = input
+                .get_attribute("data-slskr-recipe-enabled")
+                .unwrap_or_default();
+            let window = window.clone();
+            let document = document.clone();
+            let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(
+                move |event: web_sys::Event| {
+                    let checked = event
+                        .current_target()
+                        .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+                        .map(|input| input.checked())
+                        .unwrap_or(false);
+                    let mut state = storage_json_object(
+                        &window,
+                        "slskr.automationRecipeState",
+                        default_automation_state(),
+                    );
+                    let entry = state
+                        .entry(recipe_id.clone())
+                        .or_insert_with(|| serde_json::json!({}));
+                    if let Some(object) = entry.as_object_mut() {
+                        object.insert("enabled".to_string(), serde_json::Value::Bool(checked));
+                    }
+                    write_storage_json_object(&window, "slskr.automationRecipeState", &state);
+                    apply_automation_state(&document, &state);
+                    if let Some(status) = document.get_element_by_id("slskr-automation-status") {
+                        status.set_text_content(Some("Automation recipe state saved."));
+                    }
+                },
+            ));
+            input.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+
+        let dry_run_buttons = document.query_selector_all("[data-slskr-recipe-dry-run]")?;
+        for index in 0..dry_run_buttons.length() {
+            let Some(node) = dry_run_buttons.item(index) else {
+                continue;
+            };
+            let button: web_sys::Element = node.dyn_into()?;
+            let recipe_id = button
+                .get_attribute("data-slskr-recipe-dry-run")
+                .unwrap_or_default();
+            let window = window.clone();
+            let document = document.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    let Some(recipe) = automation_recipes()
+                        .iter()
+                        .find(|recipe| recipe.id == recipe_id)
+                        .copied()
+                    else {
+                        return;
+                    };
+                    let report = automation_dry_run_report(recipe, "browser-local");
+                    let mut state = storage_json_object(
+                        &window,
+                        "slskr.automationRecipeState",
+                        default_automation_state(),
+                    );
+                    let entry = state
+                        .entry(recipe.id.to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                    if let Some(object) = entry.as_object_mut() {
+                        object.insert(
+                            "lastDryRunAt".to_string(),
+                            serde_json::Value::String("browser-local".to_string()),
+                        );
+                        object.insert("lastDryRunReport".to_string(), report.clone());
+                    }
+                    write_storage_json_object(&window, "slskr.automationRecipeState", &state);
+                    apply_automation_state(&document, &state);
+                    if let Some(output) = document.get_element_by_id("slskr-automation-report") {
+                        output.set_text_content(Some(
+                            &serde_json::to_string_pretty(&report).unwrap_or_default(),
+                        ));
+                    }
+                    if let Some(status) = document.get_element_by_id("slskr-automation-status") {
+                        status
+                            .set_text_content(Some(&format!("{} dry run recorded.", recipe.title)));
+                    }
+                },
+            ));
+            button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+
+        let action_buttons = document.query_selector_all("[data-slskr-automation-action]")?;
+        for index in 0..action_buttons.length() {
+            let Some(node) = action_buttons.item(index) else {
+                continue;
+            };
+            let button: web_sys::Element = node.dyn_into()?;
+            let action = button
+                .get_attribute("data-slskr-automation-action")
+                .unwrap_or_default();
+            let window = window.clone();
+            let document = document.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    let state = if action == "reset" {
+                        remove_storage_item(&window, "slskr.automationRecipeState");
+                        default_automation_state()
+                    } else {
+                        storage_json_object(
+                            &window,
+                            "slskr.automationRecipeState",
+                            default_automation_state(),
+                        )
+                    };
+                    apply_automation_state(&document, &state);
+                    if let Some(status) = document.get_element_by_id("slskr-automation-status") {
+                        status.set_text_content(Some(if action == "reset" {
+                            "Automation recipe state reset."
+                        } else {
+                            "Automation history report prepared."
+                        }));
+                    }
+                },
+            ));
+            button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
 fn mount_toolbar_actions(
     window: &web_sys::Window,
     document: &web_sys::Document,
@@ -4482,6 +5324,7 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
             page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
             mount_workspace_tabs(&document)?;
             mount_data_cards(&document)?;
+            mount_browser_local_panels(window, &document)?;
         }
     }
     let message = if errors == 0 {
@@ -4567,6 +5410,9 @@ mod tests {
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
         assert!(html.contains("slskr-route-view"));
+        let system = route_page_html("/system");
+        assert!(system.contains("Experience Preferences"));
+        assert!(system.contains("Automation Center"));
     }
 
     #[test]
@@ -4734,6 +5580,51 @@ mod tests {
             vec!["sha256:new"]
         );
         assert!(build_similar_queue_candidates(None, &history, &queue, 5).is_empty());
+    }
+
+    #[test]
+    fn rust_browser_local_system_panels_match_react_surfaces() {
+        assert_eq!(experience_preferences().len(), 18);
+        let defaults = default_experience_preferences();
+        assert_eq!(
+            defaults
+                .get("searchRankingProfile")
+                .and_then(|value| value.as_str()),
+            Some("balanced")
+        );
+        assert_eq!(
+            defaults
+                .get("playerKeyboardShortcuts")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        let report = experience_preferences_report(&defaults);
+        assert!(report.contains("slskr experience preferences"));
+        assert!(report.contains("Player: queue_auto_fill=false"));
+        assert!(
+            experience_settings_panel_html().contains("data-slskr-pref=\"playerRadioSeedMode\"")
+        );
+
+        assert_eq!(automation_recipes().len(), 7);
+        let mut state = serde_json::Map::new();
+        state.insert(
+            "wishlist-retry".to_string(),
+            serde_json::json!({
+                "enabled": true,
+                "lastDryRunAt": "browser-local"
+            }),
+        );
+        let (total, enabled, disabled) = automation_summary_from_state(&state);
+        assert_eq!((total, enabled, disabled), (7, 4, 3));
+        let dry_run = automation_dry_run_report(automation_recipes()[3], "browser-local");
+        assert_eq!(dry_run["recipeId"], "wishlist-retry");
+        assert_eq!(dry_run["executed"], false);
+        let history = automation_history_report(&state);
+        assert!(history.contains("slskr automation review history"));
+        assert!(history.contains("Wishlist Retry"));
+        assert!(
+            automation_center_panel_html().contains("data-slskr-recipe=\"library-health-scan\"")
+        );
     }
 
     #[test]
