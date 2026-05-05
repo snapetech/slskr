@@ -74,6 +74,17 @@ export const getCsrfTokenFromCookieString = (
   return null;
 };
 
+export const reloadAfterUnauthorized = (
+  location = window.location,
+  mode = import.meta.env.MODE,
+) => {
+  if (mode === 'test') {
+    return false;
+  }
+  location.reload();
+  return true;
+};
+
 api.interceptors.request.use((config) => {
   const token = getToken();
 
@@ -122,7 +133,7 @@ api.interceptors.response.use(
       ) {
         console.debug('received 401 from api route, logging out');
         clearToken();
-        window.location.reload(true);
+        reloadAfterUnauthorized();
         return Promise.reject(error);
       }
     }

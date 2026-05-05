@@ -5065,9 +5065,11 @@ async fn route_http_request_with_headers(
              let webhooks = state.webhooks.read().await;
              let webhooks_clone = webhooks.clone();
              drop(webhooks);
+             let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
              tokio::spawn(async move {
                  webhooks::WebhookDispatcher::dispatch(
                      &webhooks_clone,
+                     webhook_deliveries,
                      correlation_id,
                      webhooks::WebhookEvent::SearchCreated,
                      webhook_data,
@@ -5109,9 +5111,11 @@ async fn route_http_request_with_headers(
                 let webhooks = state.webhooks.read().await;
                 let webhooks_clone = webhooks.clone();
                 drop(webhooks);
+                let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
                 tokio::spawn(async move {
                     webhooks::WebhookDispatcher::dispatch(
                         &webhooks_clone,
+                        webhook_deliveries,
                         correlation_id,
                         webhooks::WebhookEvent::SearchCompleted,
                         webhook_data,
@@ -5501,9 +5505,11 @@ async fn route_http_request_with_headers(
                          let webhooks = state.webhooks.read().await;
                          let webhooks_clone = webhooks.clone();
                          drop(webhooks);
+                         let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
                          tokio::spawn(async move {
                              webhooks::WebhookDispatcher::dispatch(
                                  &webhooks_clone,
+                                 webhook_deliveries,
                                  correlation_id,
                                  webhook_event,
                                  webhook_data,
@@ -5796,9 +5802,11 @@ async fn route_http_request_with_headers(
               let webhooks = state.webhooks.read().await;
               let webhooks_clone = webhooks.clone();
               drop(webhooks);
+              let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
               tokio::spawn(async move {
                   webhooks::WebhookDispatcher::dispatch(
                       &webhooks_clone,
+                      webhook_deliveries,
                       correlation_id,
                       webhooks::WebhookEvent::MessageSent,
                       webhook_data,
@@ -8691,8 +8699,8 @@ async fn route_http_request_with_headers(
                  json_escape(grant_id)
              )))
          }
-        (method, path) if slskdn_native_compat_path(path) => {
-            Ok(slskdn_native_compat_response(method, path))
+        (method, path) if native_compat_path(path) => {
+            Ok(native_compat_response(method, path))
         }
         _ => {
             tracing::complete_request_span(404);
@@ -9443,7 +9451,7 @@ fn decoded_path_segment(segment: &str) -> String {
     percent_decode(segment)
 }
 
-fn slskdn_native_compat_path(path: &str) -> bool {
+fn native_compat_path(path: &str) -> bool {
     let path = path.to_ascii_lowercase();
     let prefixes = [
         "/api/slskdn",
@@ -9476,7 +9484,7 @@ fn slskdn_native_compat_path(path: &str) -> bool {
         .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
 }
 
-fn slskdn_native_compat_response(method: &str, path: &str) -> HttpResponse {
+fn native_compat_response(method: &str, path: &str) -> HttpResponse {
     let body = serde_json::json!({
         "path": path,
         "method": method,
@@ -9485,7 +9493,7 @@ fn slskdn_native_compat_response(method: &str, path: &str) -> HttpResponse {
         "supported": true,
         "items": [],
         "jobs": [],
-        "message": "slskdN compatibility surface is present, but this feature is not active in this runtime"
+        "message": "Compatibility surface is present, but this feature is not active in this runtime"
     })
     .to_string();
 
@@ -15924,7 +15932,7 @@ mod tests {
             while receiver.try_recv().is_ok() {}
         }
 
-        let slskdn_native_routes = [
+        let native_compat_routes = [
             ("GET", "/api/slskdn", ""),
             ("GET", "/api/slskdn/library/health", ""),
             ("POST", "/api/slskdn/warm-cache", ""),
@@ -15960,7 +15968,7 @@ mod tests {
             ("GET", "/api/federation/diagnostics", ""),
         ];
 
-        for (method, path, body) in slskdn_native_routes {
+        for (method, path, body) in native_compat_routes {
             let response = tokio::time::timeout(
                 Duration::from_secs(1),
                 super::route_http_request(method, path, None, body, &state),

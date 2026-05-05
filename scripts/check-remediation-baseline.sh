@@ -13,6 +13,7 @@ GATES=(
   scripts/check-workflow-release-policy.sh
   scripts/check-package-artifact-matrix.sh
   scripts/check-client-sdk-gates.sh
+  scripts/check-dev-tooling.sh
   scripts/check-openapi-docs-drift.sh
   scripts/check-shell-script-hygiene.sh
   scripts/check-kubernetes-public-posture.sh

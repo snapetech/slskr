@@ -35,7 +35,7 @@ It is built for operators who want a private, scriptable music-sharing client th
 
 - One `slskr serve` process for the daemon, API, web UI, session runtime, share scanner, transfer state, and static assets.
 - Rust protocol crates for server, peer-message, file-transfer, distributed, init, obfuscation, and wire-frame behavior.
-- Compatibility with the slskdN mesh-network model, pod/service-fabric deployment shape, and slskdN feature surfaces through the slskr API, WebUI, event, transfer, search, room, message, browse, share, integration, and network-status projections.
+- Compatibility-oriented mesh-network, pod/service-fabric deployment, and automation surfaces through the slskr API, WebUI, event, transfer, search, room, message, browse, share, integration, and network-status projections.
 - Browser UI for search, downloads, uploads, rooms, messages, users, contacts, browse, collections, share groups, shared-with-me views, discovery graph tools, playlist intake, integrations, system status, and playback.
 - Search workflow with query history, result aggregation, result ranking, deduplication, lossless/acquisition profiles, wishlist search, discovery graph views, release-radar panels, MusicBrainz lookup, SongID workflows, and local review controls.
 - Download and upload views with grouped transfers, progress, speed, queue position checks, retry/cancel/remove actions, accelerated download mode, and auto-replace controls.
@@ -72,7 +72,7 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
 | --- | --- | --- |
 | Daemon | `slskr serve`, bundled UI/API, session lifecycle, listener state, reconnect policy | [docs/app-surface.md](./docs/app-surface.md), [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) |
 | Protocol runtime | Login, keepalive, server commands, peer init, peer messages, distributed messages, transfer sockets, obfuscation | [crates/slskr-client](./crates/slskr-client), [crates/slskr-protocol](./crates/slskr-protocol) |
-| slskdN compatibility | Compatible mesh-network, pod/service-fabric, WebUI, API, event, transfer, search, browse, room, message, share, and integration surfaces for operators migrating from or interoperating with slskdN | [docs/app-surface.md](./docs/app-surface.md), [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md) |
+| Compatibility surfaces | Mesh-network, pod/service-fabric, WebUI, API, event, transfer, search, browse, room, message, share, and integration surfaces for operators migrating existing automation to slskr | [docs/app-surface.md](./docs/app-surface.md), [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md) |
 | Web UI | Search, transfers, rooms, messages, browse, users, contacts, system, player, collections, integrations | [web/README.md](./web/README.md), [web/src/components](./web/src/components), [docs/rust-web-ui.md](./docs/rust-web-ui.md) |
 | HTTP API | Versioned `/api/v0/*` endpoints, unversioned compatibility routes, auth, telemetry, metrics | [docs/http-api.md](./docs/http-api.md), [docs/openapi.json](./docs/openapi.json) |
 | Events | Polling event log and `/api/events/ws` WebSocket stream | [docs/app-surface.md](./docs/app-surface.md) |
@@ -97,19 +97,19 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
 
 The daemon owns the long-lived runtime state. The web UI and clients talk to the daemon through HTTP and the event feed rather than holding protocol sockets themselves.
 
-## slskdN Compatibility
+## Compatibility Surfaces
 
-`slskr` is intended to be compatible with the slskdN operating model while replacing the daemon/runtime implementation with Rust. Operators should be able to map slskdN mesh-network concepts, pod deployments, service-fabric topology, API-driven automation, WebUI workflows, player controls, integrations, and network-status views onto the slskr daemon.
+`slskr` keeps compatibility-oriented operating surfaces while using an independent Rust daemon/runtime implementation. Operators should be able to map mesh-network concepts, pod deployments, service-fabric topology, API-driven automation, WebUI workflows, player controls, integrations, and network-status views onto the slskr daemon.
 
 Compatibility coverage includes:
 
-- slskdN-style mesh and service-fabric projections for DHT, mesh peers, hash/catalog state, swarm/backfill activity, sequence state, transfer speed, and network health.
+- Mesh and service-fabric projections for DHT, mesh peers, hash/catalog state, swarm/backfill activity, sequence state, transfer speed, and network health.
 - Pod-oriented deployment and service-boundary operation using one daemon process that serves the API, WebUI, event stream, static assets, session runtime, share indexer, and transfer engine.
 - Feature-surface parity for search, wishlist-style searches, browse, downloads, uploads, private messages, rooms, users, contacts, share groups, shared-with-me views, collections, playlist intake, integrations, system status, and player workflows.
-- Compatibility APIs and event feeds for client automation and UI integration, with versioned `/api/v0/*` routes and selected unversioned aliases where existing slskdN-style clients expect them.
-- Live interoperability tooling that exercises Soulseek network behavior and adjacent-client compatibility against slskd, slskdN, Soulseek.NET-family libraries, and slskdNet.Runtime-derived clients.
+- Compatibility APIs and event feeds for client automation and UI integration, with versioned `/api/v0/*` routes and selected unversioned aliases where existing clients expect them.
+- Live interoperability tooling that exercises Soulseek network behavior and adjacent-client compatibility against slskd, Soulseek.NET-family libraries, and other compatible runtimes.
 
-The compatibility goal is behavioral and operational compatibility, not copied implementation. slskr keeps its own Rust protocol/runtime, API, storage, and UI integration code while preserving the externally useful slskdN workflows and deployment assumptions.
+The compatibility goal is behavioral and operational compatibility, not copied implementation. slskr keeps its own Rust protocol/runtime, API, storage, and UI integration code while preserving externally useful workflows and deployment assumptions.
 
 ## Install And Run
 

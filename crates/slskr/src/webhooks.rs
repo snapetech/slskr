@@ -10,7 +10,9 @@ use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use uuid::Uuid;
 
 const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
 const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
@@ -73,14 +75,11 @@ pub struct Webhook {
     pub timeout_seconds: u32,
 }
 
-static WEBHOOK_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 impl Webhook {
     /// Create new webhook
     pub fn new(url: String, events: Vec<WebhookEvent>, secret: String) -> Self {
-        let num = WEBHOOK_COUNTER.fetch_add(1, Ordering::Relaxed);
         Webhook {
-            id: format!("hook_{}", num),
+            id: format!("hook_{}", Uuid::new_v4()),
             url,
             events,
             secret,
@@ -141,14 +140,11 @@ pub struct WebhookPayload {
     pub data: serde_json::Value,
 }
 
-static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 impl WebhookPayload {
     /// Create new webhook payload
     pub fn new(event: WebhookEvent, correlation_id: String, data: serde_json::Value) -> Self {
-        let num = EVENT_COUNTER.fetch_add(1, Ordering::Relaxed);
         WebhookPayload {
-            id: format!("evt_{}", num),
+            id: format!("evt_{}", Uuid::new_v4()),
             event: event.to_string(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -336,6 +332,7 @@ impl WebhookDispatcher {
     /// Dispatch event to all matching webhooks
     pub async fn dispatch(
         manager: &WebhookManager,
+        deliveries: Arc<Semaphore>,
         correlation_id: String,
         event: WebhookEvent,
         data: serde_json::Value,
@@ -355,8 +352,16 @@ impl WebhookDispatcher {
             let webhook_secret = webhook.secret.clone();
             let webhook_timeout = webhook.timeout_seconds;
             let payload_clone = payload_json.clone();
+            let deliveries = Arc::clone(&deliveries);
 
             tokio::spawn(async move {
+                let Ok(_delivery_permit) = deliveries.try_acquire_owned() else {
+                    eprintln!(
+                        "[WEBHOOK] Dropped delivery to {} because the delivery pool is full",
+                        sanitized_webhook_url_for_log(&webhook_url)
+                    );
+                    return;
+                };
                 let _ = Self::send_webhook(
                     &webhook_url,
                     &webhook_secret,
@@ -574,6 +579,7 @@ mod tests {
         );
 
         assert!(webhook.id.starts_with("hook_"));
+        assert_ne!(webhook.id, "hook_0");
         assert_eq!(webhook.url, "http://example.com/hook");
         assert!(webhook.active);
         assert_eq!(webhook.max_retries, 3);
@@ -609,6 +615,7 @@ mod tests {
         );
 
         assert!(payload.id.starts_with("evt_"));
+        assert_ne!(payload.id, "evt_0");
         assert_eq!(payload.event, "search.created");
         assert_eq!(payload.correlation_id, "corr-123");
     }

@@ -2,7 +2,7 @@
 // Copyright (c) slskr Team. All rights reserved.
 // </copyright>
 
-import { getCsrfTokenFromCookieString } from './api';
+import { getCsrfTokenFromCookieString, reloadAfterUnauthorized } from './api';
 
 describe('api csrf token selection', () => {
   afterEach(() => {
@@ -50,5 +50,23 @@ describe('api csrf token selection', () => {
     );
 
     expect(token).toBe('request-token');
+  });
+
+  it('skips browser navigation reload in tests', () => {
+    const location = {
+      reload: vi.fn(),
+    };
+
+    expect(reloadAfterUnauthorized(location, 'test')).toBe(false);
+    expect(location.reload).not.toHaveBeenCalled();
+  });
+
+  it('reloads the page outside the test environment', () => {
+    const location = {
+      reload: vi.fn(),
+    };
+
+    expect(reloadAfterUnauthorized(location, 'production')).toBe(true);
+    expect(location.reload).toHaveBeenCalledWith();
   });
 });

@@ -7,7 +7,7 @@ cd "$repo_root"
 ledger="docs/dev/bug-burndown-ledger.md"
 status=0
 
-for id in BUG-006 BUG-007; do
+for id in BUG-005 BUG-006 BUG-007; do
   if ! rg -n "^\| ${id} \|" "$ledger" >/dev/null; then
     printf 'webhook outbound policy check failed: %s is missing from council ledger\n' "$id" >&2
     status=1
@@ -31,9 +31,15 @@ if ! rg -n 'MAX_WEBHOOK_DELIVERY_TASKS|webhook_deliveries' crates/slskr/src/main
   status=1
 fi
 
-if rg -n 'pub async fn dispatch' crates/slskr/src/webhooks.rs >/dev/null &&
-   rg -n 'tokio::spawn\(async move' crates/slskr/src/webhooks.rs >/dev/null; then
-  printf 'normal webhook dispatch concurrency remains accepted-open in BUG-006\n'
+if ! rg -n 'Uuid::new_v4\(\)' crates/slskr/src/webhooks.rs >/dev/null; then
+  printf 'webhook outbound policy check failed: webhook and event IDs must use random UUIDs\n' >&2
+  status=1
+fi
+
+if ! rg -n 'deliveries: Arc<Semaphore>' crates/slskr/src/webhooks.rs >/dev/null ||
+   ! rg -n 'try_acquire_owned\(\)' crates/slskr/src/webhooks.rs >/dev/null; then
+  printf 'webhook outbound policy check failed: normal dispatch must use the shared bounded delivery pool\n' >&2
+  status=1
 fi
 
 if [[ "$status" -ne 0 ]]; then

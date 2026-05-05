@@ -3039,6 +3039,48 @@ fn reference_buttons_html(labels: &[&str]) -> String {
         .join("")
 }
 
+fn route_component_parity_attrs(kind: RouteKind) -> &'static str {
+    match kind {
+        RouteKind::Search => r#" data-react-component="Searches""#,
+        RouteKind::DiscoveryGraph => {
+            r#" data-react-component="DiscoveryGraphAtlasPage" data-testid="discovery-graph-atlas""#
+        }
+        RouteKind::PlaylistIntake => r#" data-react-component="PlaylistIntake""#,
+        RouteKind::Wishlist => r#" data-react-component="Wishlist""#,
+        RouteKind::Downloads => r#" data-react-component="Transfers" data-testid="downloads""#,
+        RouteKind::Uploads => r#" data-react-component="Transfers" data-testid="uploads""#,
+        RouteKind::Messages | RouteKind::Rooms => r#" data-react-component="Messaging""#,
+        RouteKind::Users => r#" data-react-component="Users""#,
+        RouteKind::Contacts => r#" data-react-component="Contacts""#,
+        RouteKind::Solid => r#" data-react-component="SolidSettings" data-testid="solid-root""#,
+        RouteKind::Collections => r#" data-react-component="Collections""#,
+        RouteKind::ShareGroups => r#" data-react-component="ShareGroups""#,
+        RouteKind::SharedWithMe => r#" data-react-component="SharedWithMe""#,
+        RouteKind::Browse => r#" data-react-component="Browse""#,
+        RouteKind::System => r#" data-react-component="System""#,
+    }
+}
+
+fn route_component_parity_class(kind: RouteKind) -> &'static str {
+    match kind {
+        RouteKind::Search => "searches view",
+        RouteKind::DiscoveryGraph => "view discovery-graph-atlas-page",
+        RouteKind::PlaylistIntake => "playlist-intake",
+        RouteKind::Wishlist => "wishlist",
+        RouteKind::Downloads => "transfers transfers-downloads",
+        RouteKind::Uploads => "transfers transfers-uploads",
+        RouteKind::Messages | RouteKind::Rooms => "messaging-workspace",
+        RouteKind::Users => "users",
+        RouteKind::Contacts => "contacts",
+        RouteKind::Solid => "solid-settings",
+        RouteKind::Collections => "collections",
+        RouteKind::ShareGroups => "sharegroups",
+        RouteKind::SharedWithMe => "shared-with-me",
+        RouteKind::Browse => "browse",
+        RouteKind::System => "system",
+    }
+}
+
 type RouteReferenceSpec<'a> = (
     &'a str,
     &'a str,
@@ -3101,7 +3143,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                     ("Filter (optional)", "e.g., flac OR mp3"),
                     ("Max Results", "25"),
                 ],
-                vec!["Add Search", "Import CSV", "Copy Review", "Run Enabled", "Add Your First Search"],
+                vec!["Add Search", "Import List", "Copy Review", "Run Enabled", "Add Your First Search"],
                 vec![
                     "Wishlist Saved searches that run automatically",
                     "Request Portal Summary Operator view of wanted music before acquisition jobs are wired.",
@@ -3250,12 +3292,501 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-reference-panel"><header><div><h4>{title}</h4><p>{detail}</p></div><div>{buttons}</div></header><div class="slskr-reference-fields">{fields}</div><div class="slskr-reference-facts">{facts}</div></section>"#,
+        r#"<section class="slskr-reference-panel {component_class}" data-slskr-parity-reference{attrs}><header><div><p class="slskr-kicker">slskd compatibility</p><h2>{title}</h2><p>{detail}</p></div><div class="slskr-reference-actions">{buttons}</div></header><form class="slskr-reference-form">{fields}</form><div class="slskr-reference-facts">{facts}</div></section>"#,
+        component_class = escape_html(route_component_parity_class(kind)),
+        attrs = route_component_parity_attrs(kind),
         title = escape_html(title),
         detail = escape_html(detail),
         buttons = reference_buttons_html(&buttons),
         fields = field_html,
         facts = facts_html,
+    )
+}
+
+fn native_row_cards_html(rows: &[(String, String, String, String)], empty: &str) -> String {
+    if rows.is_empty() {
+        return format!(
+            r#"<div class="slskr-native-empty"><strong>{}</strong><span>Use the controls above to load this workspace.</span></div>"#,
+            escape_html(empty)
+        );
+    }
+    rows.iter()
+        .take(12)
+        .map(|(primary, secondary, meta, action)| {
+            format!(
+                r#"<article class="slskr-native-row"><div><strong>{primary}</strong><span>{secondary}</span></div><span>{meta}</span><button type="button">{action}</button></article>"#,
+                primary = escape_html(primary),
+                secondary = escape_html(secondary),
+                meta = escape_html(meta),
+                action = escape_html(action),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn native_table_html(
+    headers: &[&str],
+    rows: &[(String, String, String, String)],
+    empty: &str,
+) -> String {
+    if rows.is_empty() {
+        return native_row_cards_html(rows, empty);
+    }
+    let headers = headers
+        .iter()
+        .map(|header| format!(r#"<th>{}</th>"#, escape_html(header)))
+        .collect::<Vec<_>>()
+        .join("");
+    let rows = rows
+        .iter()
+        .take(50)
+        .map(|(primary, secondary, meta, action)| {
+            format!(
+                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
+                primary = escape_html(primary),
+                secondary = escape_html(secondary),
+                meta = escape_html(meta),
+                action = escape_html(action),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<div class="slskr-native-table-wrap"><table class="slskr-native-table"><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table></div>"#,
+        headers = headers,
+        rows = rows,
+    )
+}
+
+fn native_route_table_html(kind: RouteKind, rows: &[(String, String, String, String)]) -> String {
+    match kind {
+        RouteKind::Search | RouteKind::DiscoveryGraph => native_table_html(
+            &["File or query", "Peer or id", "Queue / score", "Action"],
+            rows,
+            "No search results to display",
+        ),
+        RouteKind::PlaylistIntake => native_table_html(
+            &["Parsed row", "Artist", "State", "Action"],
+            rows,
+            "No playlist rows to review",
+        ),
+        RouteKind::Wishlist => native_table_html(
+            &["Search Text", "Filter", "State", "Action"],
+            rows,
+            "No wishlist searches yet",
+        ),
+        RouteKind::Downloads | RouteKind::Uploads => native_table_html(
+            &["Filename", "Peer", "Progress", "Action"],
+            rows,
+            "No transfers to display",
+        ),
+        RouteKind::Messages | RouteKind::Rooms => native_table_html(
+            &["Thread", "Last message", "Unread", "Action"],
+            rows,
+            "No conversations to display",
+        ),
+        RouteKind::Users => native_table_html(
+            &["Username", "Status", "Stats", "Action"],
+            rows,
+            "No users to display",
+        ),
+        RouteKind::Contacts => native_table_html(
+            &["Contact", "Peer", "Verification", "Action"],
+            rows,
+            "No contacts to display",
+        ),
+        RouteKind::Solid => native_table_html(
+            &["Identity", "Storage", "Status", "Action"],
+            rows,
+            "No Solid status to display",
+        ),
+        RouteKind::Collections => native_table_html(
+            &["Title", "Type", "Items", "Action"],
+            rows,
+            "No collections yet",
+        ),
+        RouteKind::ShareGroups => native_table_html(
+            &["Name", "Members", "Created", "Action"],
+            rows,
+            "No share groups yet",
+        ),
+        RouteKind::SharedWithMe => native_table_html(
+            &["Collection", "Shared By", "Permissions", "Action"],
+            rows,
+            "No shares yet",
+        ),
+        RouteKind::Browse => native_table_html(
+            &["Path", "Type", "Size", "Action"],
+            rows,
+            "No browse entries to display",
+        ),
+        RouteKind::System => native_table_html(
+            &["Area", "State", "Detail", "Action"],
+            rows,
+            "No system status to display",
+        ),
+    }
+}
+
+fn native_stat_html(label: &str, value: &str) -> String {
+    format!(
+        r#"<span class="slskr-native-stat"><strong>{}</strong><em>{}</em></span>"#,
+        escape_html(value),
+        escape_html(label)
+    )
+}
+
+fn native_tab_labels(kind: RouteKind) -> &'static [&'static str] {
+    match kind {
+        RouteKind::Search => &[
+            "Results",
+            "Searches",
+            "Planner",
+            "Filters",
+            "Download Preview",
+        ],
+        RouteKind::DiscoveryGraph => &["Graph", "Recommendations", "Review Queue", "Profiles"],
+        RouteKind::PlaylistIntake => &["Parser", "Rows", "Classification", "Plans"],
+        RouteKind::Wishlist => &["Wanted", "Review", "History", "Discovery Inbox"],
+        RouteKind::Downloads => &["Active", "Queued", "Completed", "Failed"],
+        RouteKind::Uploads => &["Active", "Queued", "Completed", "Policy"],
+        RouteKind::Messages | RouteKind::Rooms => {
+            &["Conversations", "Thread", "Rooms", "Pods", "Search"]
+        }
+        RouteKind::Users => &["Directory", "Detail", "Watched", "Notes"],
+        RouteKind::Contacts => &["Contacts", "Groups", "Nearby", "Invites", "Notes"],
+        RouteKind::Solid => &["Identity", "Storage", "Session", "Sync", "Related"],
+        RouteKind::Collections => &["Collections", "Items", "Picker", "Sharing"],
+        RouteKind::ShareGroups => &["Groups", "Members", "Grants", "Tokens", "Permissions"],
+        RouteKind::SharedWithMe => &["Inbound", "Collections", "Tokens", "Owners", "Access"],
+        RouteKind::Browse => &["Tabs", "Tree", "Files", "Selected", "Queue"],
+        RouteKind::System => &[
+            "Info",
+            "Network",
+            "Mesh",
+            "Bridge",
+            "MediaCore",
+            "Security Policies",
+            "Experience",
+            "Integrations",
+            "Options",
+            "Shares",
+            "Jobs",
+            "Automations",
+            "Source Providers",
+            "Swarm Analytics",
+            "Library Health",
+            "Quarantine Jury",
+            "Files",
+            "Data",
+            "Events",
+            "Logs",
+            "Metrics",
+        ],
+    }
+}
+
+fn native_tab_detail(kind: RouteKind, label: &str) -> &'static str {
+    match (kind, label) {
+        (RouteKind::Search, "Results") => {
+            "Grouped file results with peer, queue, score, warning, and download actions."
+        }
+        (RouteKind::Search, "Searches") => {
+            "Active and historical searches with stop, clear, and reopen controls."
+        }
+        (RouteKind::Search, "Planner") => {
+            "Review selected results before acquisition plans or downloads are created."
+        }
+        (RouteKind::Search, "Filters") => "Format, bitrate, size, queue, and duplicate filters.",
+        (RouteKind::Search, "Download Preview") => {
+            "Selected files, peers, destination, and queued download summary."
+        }
+        (RouteKind::DiscoveryGraph, "Graph") => {
+            "Artist, album, track, query, and provider nodes with weighted links."
+        }
+        (RouteKind::DiscoveryGraph, "Recommendations") => {
+            "Next searches suggested from the selected graph neighborhood."
+        }
+        (RouteKind::DiscoveryGraph, "Review Queue") => {
+            "Candidate searches staged for acquisition review."
+        }
+        (RouteKind::DiscoveryGraph, "Profiles") => {
+            "Acquisition profile selector for graph-generated searches."
+        }
+        (RouteKind::PlaylistIntake, "Parser") => {
+            "Paste or upload playlist text before provider or network work starts."
+        }
+        (RouteKind::PlaylistIntake, "Rows") => {
+            "Parsed rows with artist, title, source, and row-level validation."
+        }
+        (RouteKind::PlaylistIntake, "Classification") => {
+            "Track, album, ambiguous, and error buckets for review."
+        }
+        (RouteKind::PlaylistIntake, "Plans") => {
+            "Queue searches or acquisition plans after validation."
+        }
+        (RouteKind::Wishlist, "Wanted") => {
+            "Saved wanted searches with enabled state, filters, and result limits."
+        }
+        (RouteKind::Wishlist, "Review") => {
+            "Result review state before automatic or manual download decisions."
+        }
+        (RouteKind::Wishlist, "History") => "Last run, result counts, failures, and audit trail.",
+        (RouteKind::Wishlist, "Discovery Inbox") => {
+            "Bridge selected wanted searches into acquisition request review."
+        }
+        (RouteKind::Downloads, "Active") => "Running downloads with progress, speed, and ETA.",
+        (RouteKind::Downloads, "Queued") => "Pending downloads ordered by peer and slot state.",
+        (RouteKind::Downloads, "Completed") => "Finished downloads ready to clear or inspect.",
+        (RouteKind::Downloads, "Failed") => "Failed downloads with retry and remove actions.",
+        (RouteKind::Uploads, "Active") => "Running uploads with requester, speed, and progress.",
+        (RouteKind::Uploads, "Queued") => "Peer requests waiting for an upload slot.",
+        (RouteKind::Uploads, "Completed") => "Finished uploads and clear-completed controls.",
+        (RouteKind::Uploads, "Policy") => "Allow, deny, queue, and sharing policy controls.",
+        (RouteKind::Messages | RouteKind::Rooms, "Conversations") => {
+            "Direct message list with unread and acknowledge state."
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "Thread") => {
+            "Selected direct message, room, or pod channel conversation."
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "Rooms") => {
+            "Joined and available rooms with join, leave, and compose actions."
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "Pods") => {
+            "Pod channels stay secondary inside Messages."
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "Search") => {
+            "Search conversations and room names without leaving the messenger."
+        }
+        (RouteKind::Users, "Directory") => "Watched and searched users with online state.",
+        (RouteKind::Users, "Detail") => {
+            "Readable user status, privileges, stats, and endpoint info."
+        }
+        (RouteKind::Users, "Watched") => "Watch list controls for peers you monitor.",
+        (RouteKind::Users, "Notes") => "Private notes tied to selected users.",
+        (RouteKind::Contacts, "Contacts") => {
+            "Saved contacts with message, browse, and remove actions."
+        }
+        (RouteKind::Contacts, "Groups") => "Contact grouping for trusted or nearby peers.",
+        (RouteKind::Contacts, "Nearby") => "Nearby contacts and invite candidates.",
+        (RouteKind::Contacts, "Invites") => "Invite, accept, and link handling.",
+        (RouteKind::Contacts, "Notes") => "Contact notes and verification context.",
+        (RouteKind::Solid, "Identity") => "WebID identity resolution and connection state.",
+        (RouteKind::Solid, "Storage") => "Solid storage root and linked-data persistence.",
+        (RouteKind::Solid, "Session") => "Authentication and session state.",
+        (RouteKind::Solid, "Sync") => "Linked-data sync status and retry controls.",
+        (RouteKind::Solid, "Related") => "Bridge, pod, and source-provider context.",
+        (RouteKind::Collections, "Collections") => {
+            "Collection list with create and select actions."
+        }
+        (RouteKind::Collections, "Items") => "Selected collection item table with remove controls.",
+        (RouteKind::Collections, "Picker") => "Library item browser used as an add-item picker.",
+        (RouteKind::Collections, "Sharing") => "Collection share controls and current grants.",
+        (RouteKind::ShareGroups, "Groups") => "Share group list with selected group detail.",
+        (RouteKind::ShareGroups, "Members") => "Add, remove, and inspect group members.",
+        (RouteKind::ShareGroups, "Grants") => "Collection grants issued to the selected group.",
+        (RouteKind::ShareGroups, "Tokens") => "Issue, copy, and revoke access tokens.",
+        (RouteKind::ShareGroups, "Permissions") => {
+            "Read, download, stream, and expiration settings."
+        }
+        (RouteKind::SharedWithMe, "Inbound") => "Inbound grants and tokens shared by other users.",
+        (RouteKind::SharedWithMe, "Collections") => {
+            "Shared collections and files available to open."
+        }
+        (RouteKind::SharedWithMe, "Tokens") => "Token status, copy actions, and expiration.",
+        (RouteKind::SharedWithMe, "Owners") => "Owner identity, trust, and contact actions.",
+        (RouteKind::SharedWithMe, "Access") => "Open, leave, revoke, or backfill where allowed.",
+        (RouteKind::Browse, "Tabs") => {
+            "Multiple peer browse sessions, matching the old tabbed browser."
+        }
+        (RouteKind::Browse, "Tree") => "Directory tree with breadcrumbs and folder expansion.",
+        (RouteKind::Browse, "Files") => "File list with size, type, filter, and selection state.",
+        (RouteKind::Browse, "Selected") => "Multi-select download preview before queueing.",
+        (RouteKind::Browse, "Queue") => "Download queue action for selected browse files.",
+        (RouteKind::System, "Info") => "Server, version, session, and operator overview.",
+        (RouteKind::System, "Network") => "Connection, ports, privileges, and server state.",
+        (RouteKind::System, "Mesh") => "Mesh and federation diagnostics.",
+        (RouteKind::System, "Bridge") => "External bridge and integration status.",
+        (RouteKind::System, "MediaCore") => {
+            "MediaCore routing, validation, storage, and content tools."
+        }
+        (RouteKind::System, "Security Policies") => "Security policy status and decisions.",
+        (RouteKind::System, "Experience") => "User experience preferences.",
+        (RouteKind::System, "Integrations") => {
+            "Lidarr, FTP, media server, and provider integrations."
+        }
+        (RouteKind::System, "Options") => "Daemon options and preferences.",
+        (RouteKind::System, "Shares") => "Share roots, scan status, and rescan controls.",
+        (RouteKind::System, "Jobs") => "Jobs, queues, and execution history.",
+        (RouteKind::System, "Automations") => "Automation recipes and bounded execution.",
+        (RouteKind::System, "Source Providers") => {
+            "Search, metadata, and verification source providers."
+        }
+        (RouteKind::System, "Swarm Analytics") => "Swarm and peer analytics.",
+        (RouteKind::System, "Library Health") => "Library health issues and replacement searches.",
+        (RouteKind::System, "Quarantine Jury") => "Quarantine review and decision workflow.",
+        (RouteKind::System, "Files") => "File index, fingerprints, and library records.",
+        (RouteKind::System, "Data") => "Database and storage maintenance.",
+        (RouteKind::System, "Events") => "Filterable event stream.",
+        (RouteKind::System, "Logs") => "Operator logs with filters.",
+        (RouteKind::System, "Metrics") => "Raw metrics summarized for operators.",
+        _ => "Route-specific workflow section.",
+    }
+}
+
+fn native_tabs_html(kind: RouteKind) -> String {
+    let labels = native_tab_labels(kind);
+    let buttons = labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            let selected = if index == 0 { "true" } else { "false" };
+            let class = if index == 0 { " is-active" } else { "" };
+            format!(
+                r#"<button type="button" role="tab" class="slskr-native-tab{class}" aria-selected="{selected}" data-slskr-native-tab="{index}">{}</button>"#,
+                escape_html(label)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let panels = labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            let hidden = if index == 0 { "" } else { " hidden" };
+            format!(
+                r#"<section class="slskr-native-subpanel" data-slskr-native-panel="{index}"{hidden}><h4>{}</h4><p>{}</p></section>"#,
+                escape_html(label),
+                escape_html(native_tab_detail(kind, label)),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<div class="slskr-native-subviews"><div class="slskr-native-subnav" role="tablist">{buttons}</div><div class="slskr-native-subpanels">{panels}</div></div>"#
+    )
+}
+
+fn route_native_workspace_html(
+    kind: RouteKind,
+    rows: &[(String, String, String, String)],
+) -> String {
+    let route_table = native_route_table_html(kind, rows);
+    let html = match kind {
+        RouteKind::Search => format!(
+            r#"<div class="slskr-native-grid search-native"><section class="slskr-native-main"><h3>Searches</h3><div class="slskr-native-command-row"><input aria-label="Search text" placeholder="Search" value="public domain jazz"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button">Search</button><button type="button">Stop</button><button type="button">Clear</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Search Detail</h3><p>Select a search to inspect files, peers, queue, warnings, duplicate groups, and download preview.</p>{stats}</aside></div>"#,
+            route_table = route_table,
+            stats = [
+                native_stat_html("Result review", "ready"),
+                native_stat_html("Duplicate folding", "on"),
+                native_stat_html("Download preview", "manual"),
+            ]
+            .join(""),
+        ),
+        RouteKind::DiscoveryGraph => format!(
+            r#"<div class="slskr-native-grid discovery-graph-native"><section class="slskr-native-main"><h3>Discovery Graph Atlas</h3><div class="slskr-native-command-row"><input aria-label="Artist Name" placeholder="Artist Name"><input aria-label="Album Title" placeholder="Album Title"><input aria-label="Track Title or Seed Label" placeholder="Track Title or Seed Label"><button type="button">Build Atlas</button><button type="button">Queue Nearby</button></div><div class="slskr-native-graph"><span>Artist</span><span>Album</span><span>Track</span><span>Query</span></div></section><aside class="slskr-native-side"><h3>Recommendations</h3>{route_table}</aside></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::PlaylistIntake => format!(
+            r#"<div class="slskr-native-grid playlist-intake-native"><section class="slskr-native-main"><h3>Playlist Intake</h3><div class="slskr-native-command-row"><input aria-label="Playlist name" placeholder="Road trip, label sampler, friend recs"><input aria-label="Playlist source" placeholder="Local file name or provider URL"><button type="button">Import Playlist</button></div><textarea aria-label="Playlist rows" placeholder="Artist - Title, one row per track, or simple CSV artist,title"></textarea>{route_table}</section><aside class="slskr-native-side"><h3>Import validation</h3>{stats}</aside></div>"#,
+            route_table = route_table,
+            stats = [
+                native_stat_html("Playlists", "0"),
+                native_stat_html("Tracks", "0"),
+                native_stat_html("Unmatched", "0"),
+            ]
+            .join(""),
+        ),
+        RouteKind::Wishlist => format!(
+            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{stats}<button type="button">Copy Review</button></aside></div>"#,
+            route_table = route_table,
+            stats = [
+                native_stat_html("Requests", "0"),
+                native_stat_html("Enabled", "0"),
+                native_stat_html("Automatic", "0"),
+                native_stat_html("Needs Review", "0"),
+                native_stat_html("Within quota", "25 left"),
+            ]
+            .join(""),
+        ),
+        RouteKind::Downloads | RouteKind::Uploads => {
+            let (title, empty, primary, secondary) = if kind == RouteKind::Downloads {
+                (
+                    "Downloads",
+                    "No downloads to display",
+                    "Retry All",
+                    "Cancel All",
+                )
+            } else {
+                (
+                    "Uploads",
+                    "No uploads to display",
+                    "Allow selected",
+                    "Deny selected",
+                )
+            };
+            let table = native_table_html(&["Filename", "Peer", "Progress", "Action"], rows, empty);
+            format!(
+                r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{stats}</aside></div>"#,
+                title = title,
+                primary = primary,
+                secondary = secondary,
+                table = table,
+                stats = [
+                    native_stat_html("Active", "0"),
+                    native_stat_html("Queued", "0"),
+                    native_stat_html("Completed", "0"),
+                ]
+                .join(""),
+            )
+        }
+        RouteKind::Messages | RouteKind::Rooms => format!(
+            r#"<div class="slskr-native-grid messaging-native"><aside class="slskr-native-side"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div><h4>Saved Chats</h4>{route_table}<h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Create Room</button></div></aside><section class="slskr-native-main"><h3>Workspace</h3><p>Select a direct message, joined room, or pod channel.</p><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row"><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Collapse All Message Panels</button></div></section></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::Users => format!(
+            r#"<div class="slskr-native-grid users-native"><section class="slskr-native-main"><h3>Users</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Search for User</button><button type="button">Clear Selected User</button><button type="button">Browse</button><button type="button">Message</button></div>{route_table}</section><aside class="slskr-native-side"><h3>User Detail</h3><p>No user info to display</p><button type="button">Save note</button><button type="button">Watch</button></aside></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::Contacts => format!(
+            r#"<div class="slskr-native-grid contacts-native"><section class="slskr-native-main"><h3>Contacts</h3><div class="slskr-native-command-row"><input aria-label="Invite" placeholder="slskr://invite/..."><input aria-label="Nickname" placeholder="Friend's name"><button type="button">Create Invite</button><button type="button">Add Friend</button><button type="button">Refresh Nearby</button></div>{route_table}</section><aside class="slskr-native-side"><h3>All Contacts</h3><button type="button">Message</button><button type="button">Browse</button><button type="button">Remove</button></aside></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::Solid => format!(
+            r#"<div class="slskr-native-grid solid-native"><section class="slskr-native-main" data-testid="solid-root"><h3>Solid</h3><p>Solid integration is disabled (Feature.Solid=false).</p><div class="slskr-native-command-row"><input data-testid="solid-webid-input" aria-label="WebID" placeholder="https://example.com/profile/card#me"><button data-testid="solid-resolve-webid" type="button">Resolve WebID</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Identity Document</h3><pre>{{}}</pre></aside></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::Collections => format!(
+            r#"<div class="slskr-native-grid collections-native"><section class="slskr-native-main"><h3>Collections</h3><div class="slskr-native-command-row"><input aria-label="Title" placeholder="Enter collection title"><input aria-label="Description" placeholder="Optional description"><button type="button">Create Collection</button></div><div class="slskr-native-command-row"><input aria-label="Search for item" placeholder="Search by filename (e.g., sintel, aria, treasure)..."><button type="button">Add Item</button><button type="button">Share</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Collection Detail</h3>{stats}</aside></div>"#,
+            route_table = route_table,
+            stats = [
+                native_stat_html("Title", "ready"),
+                native_stat_html("Type", "Playlist"),
+                native_stat_html("Items", "0"),
+            ]
+            .join(""),
+        ),
+        RouteKind::ShareGroups => format!(
+            r#"<div class="slskr-native-grid sharegroups-native"><section class="slskr-native-main"><h3>Share Groups</h3><div class="slskr-native-command-row"><input aria-label="Group Name" placeholder="Enter group name"><button type="button">Create Group</button><button type="button">Create Your First Group</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Members and Tokens</h3><input aria-label="Soulseek Username" placeholder="Enter username"><button type="button">Add Member</button><button type="button">Issue Token</button></aside></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::SharedWithMe => format!(
+            r#"<div class="slskr-native-grid shared-native"><section class="slskr-native-main"><h3>Shared with Me</h3>{route_table}</section><aside class="slskr-native-side"><h3>Access</h3><button type="button">Open</button><button type="button">Stream</button><button type="button">Backfill</button><button type="button">Copy token</button></aside></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::Browse => format!(
+            r#"<div class="slskr-native-grid browse-native"><aside class="slskr-native-side"><h3>Browse</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Open a New Browse Tab</button></div><button type="button">New Tab</button></aside><section class="slskr-native-main"><h3>Files</h3><div class="slskr-native-command-row"><input aria-label="Folder" placeholder="/"><button type="button">Download Selected</button></div>{route_table}</section></div>"#,
+            route_table = route_table,
+        ),
+        RouteKind::System => format!(
+            r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-tabs"><span>Info</span><span>Network</span><span>Options</span><span>Shares</span><span>Jobs</span><span>Automations</span><span>Logs</span><span>Metrics</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3><button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
+            route_table = route_table,
+        ),
+    };
+    format!(
+        r#"<section class="slskr-native-workspace">{tabs}{html}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
+        tabs = native_tabs_html(kind),
     )
 }
 
@@ -3640,10 +4171,11 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
             .collect()
     });
     format!(
-        r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}"><div class="slskr-workflow-tabs">{tabs}</div>{reference}<div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></div>"#,
+        r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}">{reference}{native}<details class="slskr-legacy-workflow"><summary>Additional workflow detail</summary><div class="slskr-workflow-tabs">{tabs}</div><div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></details></div>"#,
         kind = kind,
         tabs = workflow_tabs_html(&tabs),
         reference = route_reference_panel_html(kind),
+        native = route_native_workspace_html(kind, &table_rows),
         primary_title = escape_html(primary_title),
         primary_detail = escape_html(primary_detail),
         fresh = status_chip_html(
@@ -3961,6 +4493,8 @@ fn render_current_route(
     mount_toolbar_actions(window, document)?;
     mount_workspace_tabs(document)?;
     mount_data_cards(document)?;
+    mount_native_tables(document)?;
+    mount_native_subviews(document)?;
     mount_live_controls(window, document)?;
     mount_browser_local_panels(window, document)?;
     for item in nav_items() {
@@ -4149,6 +4683,172 @@ fn mount_data_cards(document: &web_sys::Document) -> Result<(), JsValue> {
         }
     }
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_native_tables(document: &web_sys::Document) -> Result<(), JsValue> {
+    let rows = document.query_selector_all("[data-slskr-native-select]")?;
+    for row_index in 0..rows.length() {
+        let Some(node) = rows.item(row_index) else {
+            continue;
+        };
+        let row: web_sys::Element = node.dyn_into()?;
+
+        let document_for_click = document.clone();
+        let row_for_click = row.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                select_native_row(&document_for_click, &row_for_click);
+            },
+        ));
+        row.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+
+        let document_for_key = document.clone();
+        let row_for_key = row.clone();
+        let callback = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+            move |event: web_sys::KeyboardEvent| {
+                let key = event.key();
+                if key == "Enter" || key == " " {
+                    event.prevent_default();
+                    select_native_row(&document_for_key, &row_for_key);
+                }
+            },
+        ));
+        row.add_event_listener_with_callback("keydown", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_native_subviews(document: &web_sys::Document) -> Result<(), JsValue> {
+    let tabs = document.query_selector_all("[data-slskr-native-tab]")?;
+    for tab_index in 0..tabs.length() {
+        let Some(node) = tabs.item(tab_index) else {
+            continue;
+        };
+        let tab: web_sys::Element = node.dyn_into()?;
+        let document_for_click = document.clone();
+        let tab_for_click = tab.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                select_native_subview(&document_for_click, &tab_for_click);
+            },
+        ));
+        tab.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn select_native_subview(document: &web_sys::Document, tab: &web_sys::Element) {
+    let selected_index = tab
+        .get_attribute("data-slskr-native-tab")
+        .unwrap_or_else(|| "0".to_string());
+    let workspace = tab
+        .closest(".slskr-native-workspace")
+        .ok()
+        .flatten()
+        .or_else(|| {
+            document
+                .query_selector(".slskr-native-workspace")
+                .ok()
+                .flatten()
+        });
+    let Some(workspace) = workspace else {
+        return;
+    };
+    if let Ok(tabs) = workspace.query_selector_all("[data-slskr-native-tab]") {
+        for index in 0..tabs.length() {
+            let Some(node) = tabs.item(index) else {
+                continue;
+            };
+            let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let active = element
+                .get_attribute("data-slskr-native-tab")
+                .is_some_and(|value| value == selected_index);
+            let _ = element.set_attribute("aria-selected", if active { "true" } else { "false" });
+            element.set_class_name(if active {
+                "slskr-native-tab is-active"
+            } else {
+                "slskr-native-tab"
+            });
+        }
+    }
+    if let Ok(panels) = workspace.query_selector_all("[data-slskr-native-panel]") {
+        for index in 0..panels.length() {
+            let Some(node) = panels.item(index) else {
+                continue;
+            };
+            let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let active = element
+                .get_attribute("data-slskr-native-panel")
+                .is_some_and(|value| value == selected_index);
+            if active {
+                let _ = element.remove_attribute("hidden");
+            } else {
+                let _ = element.set_attribute("hidden", "");
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn select_native_row(document: &web_sys::Document, row: &web_sys::Element) {
+    if let Ok(rows) = document.query_selector_all("[data-slskr-native-select]") {
+        for index in 0..rows.length() {
+            let Some(node) = rows.item(index) else {
+                continue;
+            };
+            let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let _ = element.remove_attribute("aria-selected");
+        }
+    }
+    let _ = row.set_attribute("aria-selected", "true");
+    if let Ok(Some(input)) = row.query_selector("input[type=checkbox]") {
+        if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+            input.set_checked(true);
+        }
+    }
+
+    let title = row
+        .get_attribute("data-slskr-native-title")
+        .unwrap_or_else(|| "Selected row".to_string());
+    let detail = row
+        .get_attribute("data-slskr-native-detail")
+        .unwrap_or_default();
+    let meta = row
+        .get_attribute("data-slskr-native-meta")
+        .unwrap_or_default();
+    let action = row
+        .get_attribute("data-slskr-native-action")
+        .unwrap_or_else(|| "Review".to_string());
+    let message = format!(
+        "<strong>{}</strong><span>{}</span><span>{}</span><button type=\"button\">{}</button>",
+        escape_html(&title),
+        escape_html(&detail),
+        escape_html(&meta),
+        escape_html(&action)
+    );
+    if let Some(status) = document.get_element_by_id("slskr-native-selection-status") {
+        status.set_inner_html(&message);
+    }
+    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+        status.set_inner_html(&format!(
+            "<strong>Selected</strong> {}",
+            escape_html(&title)
+        ));
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -7169,6 +7869,8 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
             page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
             mount_workspace_tabs(&document)?;
             mount_data_cards(&document)?;
+            mount_native_tables(&document)?;
+            mount_native_subviews(&document)?;
             mount_browser_local_panels(window, &document)?;
         }
     }
@@ -7691,24 +8393,74 @@ mod tests {
     #[test]
     fn route_pages_render_domain_workflows_before_developer_details() {
         let expectations = [
-            ("/searches", "Grouped results", "Search"),
-            ("/discovery-graph", "Discovery graph", "Build graph"),
-            ("/playlist-intake", "Playlist parser", "Preview playlist"),
-            ("/wishlist", "Wanted searches", "Add wanted search"),
-            ("/downloads", "Download queue", "Download"),
-            ("/uploads", "Upload queue", "Clear completed"),
-            ("/messages", "Conversations", "Reply"),
-            ("/users", "User directory", "Watch"),
-            ("/contacts", "Contact manager", "Add contact"),
-            ("/solid", "Solid status", "Connect identity"),
-            ("/collections", "Collection library", "Create collection"),
-            ("/sharegroups", "Share groups", "Issue token"),
-            ("/shared", "Inbound shares", "Open collection"),
-            ("/browse", "Peer browser", "Browse"),
-            ("/system", "Operator dashboard", "Rescan shares"),
+            ("/searches", "Grouped results", "Search", "search-native"),
+            (
+                "/discovery-graph",
+                "Discovery graph",
+                "Build graph",
+                "discovery-graph-native",
+            ),
+            (
+                "/playlist-intake",
+                "Playlist parser",
+                "Preview playlist",
+                "playlist-intake-native",
+            ),
+            (
+                "/wishlist",
+                "Wanted searches",
+                "Add wanted search",
+                "wishlist-native",
+            ),
+            (
+                "/downloads",
+                "Download queue",
+                "Download",
+                "transfers-native",
+            ),
+            (
+                "/uploads",
+                "Upload queue",
+                "Clear completed",
+                "transfers-native",
+            ),
+            ("/messages", "Conversations", "Reply", "messaging-native"),
+            ("/users", "User directory", "Watch", "users-native"),
+            (
+                "/contacts",
+                "Contact manager",
+                "Add contact",
+                "contacts-native",
+            ),
+            ("/solid", "Solid status", "Connect identity", "solid-native"),
+            (
+                "/collections",
+                "Collection library",
+                "Create collection",
+                "collections-native",
+            ),
+            (
+                "/sharegroups",
+                "Share groups",
+                "Issue token",
+                "sharegroups-native",
+            ),
+            (
+                "/shared",
+                "Inbound shares",
+                "Open collection",
+                "shared-native",
+            ),
+            ("/browse", "Peer browser", "Browse", "browse-native"),
+            (
+                "/system",
+                "Operator dashboard",
+                "Rescan shares",
+                "system-native",
+            ),
         ];
 
-        for (path, heading, action) in expectations {
+        for (path, heading, action, native_class) in expectations {
             let html = route_page_html(path);
             let heading_index = html
                 .find(heading)
@@ -7726,8 +8478,41 @@ mod tests {
                 "missing primary action {action} for route {path}"
             );
             assert!(html.contains("slskr-workflow"));
+            assert!(html.contains("slskr-native-workspace"));
+            assert!(html.contains("slskr-native-subviews"));
+            assert!(html.contains("data-slskr-native-tab=\"0\""));
+            assert!(html.contains("data-slskr-native-panel=\"0\""));
+            assert!(html.contains("slskr-native-table"));
+            assert!(html.contains("data-slskr-native-select"));
+            assert!(html.contains("slskr-native-selection-status"));
+            assert!(html.contains("slskr-legacy-workflow"));
+            assert!(html.contains("Additional workflow detail"));
+            assert!(
+                html.contains(native_class),
+                "route {path} should render native parity class {native_class}"
+            );
+            assert!(html.contains("data-slskr-parity-reference"));
+            assert!(html.contains("data-react-component="));
             assert!(html.contains("slskr-route-summary"));
             assert!(html.contains("data-slskr-refresh-route"));
+
+            let parity_index = html
+                .find("data-slskr-parity-reference")
+                .unwrap_or_else(|| panic!("missing slskd compatibility panel for route {path}"));
+            let workflow_tabs_index = html
+                .find("slskr-workflow-tabs")
+                .unwrap_or_else(|| panic!("missing workflow tabs for route {path}"));
+            let native_index = html
+                .find("slskr-native-workspace")
+                .unwrap_or_else(|| panic!("missing native workspace for route {path}"));
+            assert!(
+                parity_index < workflow_tabs_index,
+                "route {path} should show compatibility content before Rust workflow tabs"
+            );
+            assert!(
+                native_index < workflow_tabs_index,
+                "route {path} should show native page body before Rust workflow tabs"
+            );
         }
     }
 

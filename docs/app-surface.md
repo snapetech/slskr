@@ -35,19 +35,19 @@ The `slskr serve` process owns the app state and should grow into:
 
 The daemon calls `slskr-client` for protocol/runtime behavior rather than duplicating connection logic in the app crate. The current scaffold can optionally start a real server login session when credentials are provided through the environment.
 
-## slskdN Mesh, Pod, And Service-Fabric Compatibility
+## Mesh, Pod, And Service-Fabric Compatibility
 
-`slskr` is designed to remain compatible with the slskdN operating model while using an independent Rust daemon and protocol runtime. The compatibility target is the externally visible behavior operators depend on: mesh-network state, pod/service-fabric deployment shape, API and WebUI workflows, event feeds, transfer/search/browse/message/room behavior, player controls, integration affordances, and network-health reporting.
+`slskr` is designed to preserve compatibility-oriented operating surfaces while using an independent Rust daemon and protocol runtime. The compatibility target is the externally visible behavior operators depend on: mesh-network state, pod/service-fabric deployment shape, API and WebUI workflows, event feeds, transfer/search/browse/message/room behavior, player controls, integration affordances, and network-health reporting.
 
-The current app surface preserves the following slskdN-compatible concepts:
+The current app surface preserves the following compatibility concepts:
 
 - mesh and service-fabric status projections for DHT, mesh peers, hashes/catalog sequence state, sync/backfill activity, swarm jobs, transfer rates, and NAT/overlay health
 - one pod-friendly daemon process that owns the Soulseek session, HTTP API, WebUI, event stream, static assets, share scanner, transfer engine, runtime telemetry, and integration callbacks
 - versioned `/api/v0/*` APIs plus selected compatibility aliases for existing client and automation habits
 - WebUI surfaces for search, transfers, uploads, rooms, private messages, users, contacts, browse, collections, share groups, shared-with-me views, playlist intake, integrations, system state, and player/media tools
-- live interoperability scripts and fixtures that compare slskr behavior against slskd, slskdN, Soulseek.NET-family clients, and slskdNet.Runtime-derived clients
+- live interoperability scripts and fixtures that compare slskr behavior against slskd, Soulseek.NET-family clients, and other compatible runtimes
 
-This is a behavioral compatibility commitment rather than a source-code lineage statement. slskr should interoperate with slskdN-style deployments and clients, but implementation details remain Rust-native and separately maintained.
+This is a behavioral compatibility commitment rather than a source-code lineage statement. slskr should interoperate with existing deployment and client habits, but implementation details remain Rust-native and separately maintained.
 
 ## Initial HTTP Surface
 
