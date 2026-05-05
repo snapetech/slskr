@@ -4,6 +4,10 @@
 
 The project goal is simple: run a dependable self-hosted Soulseek client with first-class automation, observability, and browser control.
 
+## Responsible Use
+
+slskr does not endorse copyright infringement or unlawful sharing. Users and operators are responsible for complying with applicable law, third-party rights, and network rules.
+
 ## What It Includes
 
 - A bundled `slskr serve` daemon with the web UI and REST API.
