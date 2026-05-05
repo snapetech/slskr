@@ -59,6 +59,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Low | Go client URL escaping | Go client methods interpolated usernames, message IDs, and room IDs directly into paths. | Fixed by escaping path parameters with `url.PathEscape`. |
 | Low | Client error redaction | Go client errors included raw response bodies that could echo upstream secrets. | Fixed by redacting common secret fields from JSON and text error bodies before returning errors. |
 | Medium | Frontend prototype pollution | Adversarial settings used dynamic nested object writes and only guarded two of the array/object update helpers. | Fixed by rejecting `__proto__`, `constructor`, and `prototype` paths in all nested setting update helpers. |
+| Low | State write atomicity | Share cache and transfer state used direct truncating writes. | Fixed by writing state snapshots to a synced temp file in the same directory and renaming into place. |
 
 ## Open Burn-Down
 
@@ -93,7 +94,6 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Browser token persistence | ListenBrainz user tokens are saved in `localStorage` (`web/src/lib/listenBrainz.js:3`, `web/src/lib/listenBrainz.js:15`). | Move ListenBrainz tokens to sessionStorage or encrypt/explicitly warn for persistent local-only storage. |
 | Medium | External metadata privacy | Lyrics lookup sends artist/title/album metadata to `lrclib.net` from the browser (`web/src/components/Player/LyricsPane.jsx:106`). | Add a user-visible opt-in and disable third-party metadata requests by default in hardened mode. |
 | Low | Config secret permissions | TOML config can contain Soulseek credentials and API tokens, but startup does not warn on group/world-readable config files on Unix (`crates/slskr/src/config.rs:24`, `crates/slskr/src/config.rs:43`). | Warn or fail on insecure config permissions when sensitive values are loaded from a config file. |
-| Low | State write atomicity | Share cache and transfer state use direct `fs::write`, so a crash during write can leave truncated cache/state files (`crates/slskr/src/main.rs:13967`, `crates/slskr/src/main.rs:14036`). | Write to a temp file, fsync where practical, then atomically rename. |
 | Low | Transfer event growth | Transfer event history appends indefinitely and is recreated only when the file is absent (`crates/slskr/src/main.rs:13978`, `crates/slskr/src/main.rs:14039`). | Rotate or compact transfer event logs according to the configured transfer history limit or a byte cap. |
 | Low | Kubernetes NetworkPolicy | Manifests do not define ingress/egress NetworkPolicies. | Add default-deny plus explicit ingress from ingress controller and metrics scraper, and scoped egress for Soulseek/Lidarr/webhooks as configured. |
 | Low | Kubernetes hardening | Pods set non-root/read-only/drop-all but omit `seccompProfile`, `runAsGroup`, and explicit `automountServiceAccountToken: false` where API access is not needed (`k8s/deployment.yaml:30`). | Add restricted-profile fields and disable service account token mounting for pods that do not need Kubernetes API access. |

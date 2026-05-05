@@ -14063,7 +14063,10 @@ fn write_file_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result
     let temp_path = parent.join(format!(
         ".{file_name}.{}.{}.tmp",
         std::process::id(),
-        unix_timestamp()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
     ));
 
     {
@@ -14072,9 +14075,13 @@ fn write_file_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result
         file.sync_all()?;
     }
 
-    fs::rename(&temp_path, path).inspect_err(|_| {
-        let _ = fs::remove_file(&temp_path);
-    })
+    match fs::rename(&temp_path, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            Err(error)
+        }
+    }
 }
 
 fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), String> {
