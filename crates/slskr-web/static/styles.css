@@ -363,6 +363,16 @@ body {
   gap: 10px;
 }
 
+.slskr-workspace-grid.mode-primary,
+.slskr-workspace-grid.mode-secondary {
+  grid-template-columns: 1fr;
+}
+
+.slskr-workspace-grid.mode-primary .slskr-workspace-secondary,
+.slskr-workspace-grid.mode-secondary .slskr-workspace-primary {
+  display: none;
+}
+
 .slskr-data-card {
   background: #111516;
   border: 1px solid #34403f;
