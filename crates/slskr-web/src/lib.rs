@@ -1523,16 +1523,38 @@ pub fn concrete_endpoint_path(route_path: &str, endpoint: ApiEndpoint) -> String
 }
 
 pub fn concrete_action_path(route_path: &str, action: RouteAction) -> String {
+    concrete_action_path_with_target(route_path, action, None)
+}
+
+pub fn concrete_action_path_with_target(
+    route_path: &str,
+    action: RouteAction,
+    target: Option<&str>,
+) -> String {
     let search_id =
         if action.path.contains(":id") && !normalize_route_path(route_path).contains(":id") {
             "1".to_string()
         } else {
             route_param_value(route_path, "1")
         };
+    let target = target.filter(|value| safe_route_segment(value)).unwrap_or(
+        if action.path.contains(":roomName") {
+            "contract-room"
+        } else {
+            "peer1"
+        },
+    );
     endpoint_url(action.path)
         .replace(":id", &search_id)
-        .replace(":username", "peer1")
-        .replace(":roomName", "contract-room")
+        .replace(":username", target)
+        .replace(":roomName", target)
+}
+
+fn safe_route_segment(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
 }
 
 pub fn route_action_at(path: &str, index: usize) -> Option<RouteAction> {
@@ -5057,10 +5079,11 @@ fn run_native_route_action(
         .pathname()
         .unwrap_or_else(|_| "/searches".to_string());
     let value = native_action_value(document, button, action.body);
+    let target = native_action_target(document, button, action);
     let body = action_body_from_value(action.body, &value);
     let method = action.method.to_string();
     let label = action.label.to_string();
-    let path = concrete_action_path(&route_path, action);
+    let path = concrete_action_path_with_target(&route_path, action, target.as_deref());
     if let Some(status) = document.get_element_by_id("slskr-action-status") {
         status.set_inner_html(&format!(
             "<strong>{}</strong> sending {}",
@@ -5130,11 +5153,7 @@ fn native_action_value(
 #[cfg(target_arch = "wasm32")]
 fn native_action_value_selectors(body: ActionBody) -> &'static [&'static str] {
     match body {
-        ActionBody::BrowseDirectory => &[
-            r#"input[aria-label="Folder"]"#,
-            r#"input[aria-label="Username"]"#,
-            r#"input[aria-label="Chat username"]"#,
-        ],
+        ActionBody::BrowseDirectory => &[r#"input[aria-label="Folder"]"#],
         ActionBody::CollectionItem => &[
             r#"input[aria-label="Search for item"]"#,
             r#"input[aria-label="Title"]"#,
@@ -5196,6 +5215,48 @@ fn native_generic_value_selectors() -> &'static [&'static str] {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn native_action_target(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    action: RouteAction,
+) -> Option<String> {
+    if !action.path.contains(":username") && !action.path.contains(":roomName") {
+        return None;
+    }
+    let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
+    let selectors: &[&str] = if action.path.contains(":roomName") {
+        &[
+            r#"input[aria-label="Search rooms"]"#,
+            r#"input[aria-label="Room"]"#,
+        ]
+    } else {
+        &[
+            r#"input[aria-label="Username"]"#,
+            r#"input[aria-label="Chat username"]"#,
+            r#"input[aria-label="Contact username"]"#,
+            r#"input[aria-label="Soulseek Username"]"#,
+        ]
+    };
+    for selector in selectors {
+        if let Some(value) = first_workspace_value(&workspace, selector).filter(|value| {
+            value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+        }) {
+            return Some(value);
+        }
+    }
+    selected_native_row_detail(&workspace)
+        .or_else(|| selected_native_row_title(&workspace))
+        .or_else(|| document_selected_native_row_title(document))
+        .filter(|value| {
+            value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+        })
+}
+
+#[cfg(target_arch = "wasm32")]
 fn first_workspace_value(workspace: &web_sys::Element, selector: &str) -> Option<String> {
     workspace
         .query_selector(selector)
@@ -5204,6 +5265,16 @@ fn first_workspace_value(workspace: &web_sys::Element, selector: &str) -> Option
         .and_then(|element| form_control_value(&element))
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn selected_native_row_detail(workspace: &web_sys::Element) -> Option<String> {
+    workspace
+        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute("data-slskr-native-detail"))
+        .filter(|value| !value.trim().is_empty())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -10029,6 +10100,17 @@ mod tests {
         assert_eq!(
             concrete_action_path("/searches/42", remove),
             "/api/v0/searches/42"
+        );
+
+        let browse = route_action_for_native_label("/browse", "Open a New Browse Tab")
+            .expect("browse action");
+        assert_eq!(
+            concrete_action_path_with_target("/browse", browse, Some("browse-peer")),
+            "/api/v0/users/browse-peer/directory"
+        );
+        assert_eq!(
+            concrete_action_path_with_target("/browse", browse, Some("../bad")),
+            "/api/v0/users/peer1/directory"
         );
 
         assert!(route_action_at("/searches/42", usize::MAX).is_none());
