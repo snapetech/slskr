@@ -3335,7 +3335,13 @@ fn native_table_html(
     }
     let headers = headers
         .iter()
-        .map(|header| format!(r#"<th>{}</th>"#, escape_html(header)))
+        .enumerate()
+        .map(|(index, header)| {
+            format!(
+                r#"<th><button type="button" data-slskr-native-sort="{index}" aria-sort="none">{}</button></th>"#,
+                escape_html(header)
+            )
+        })
         .collect::<Vec<_>>()
         .join("");
     let rows = rows
@@ -3343,7 +3349,7 @@ fn native_table_html(
         .take(50)
         .map(|(primary, secondary, meta, action)| {
             format!(
-                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
+                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
@@ -3669,7 +3675,11 @@ fn native_tabs_html(kind: RouteKind) -> String {
 }
 
 fn native_filter_html() -> String {
-    r#"<div class="slskr-native-filterbar"><input type="search" data-slskr-native-filter aria-label="Filter visible rows" placeholder="Filter visible rows"><button type="button" data-slskr-native-filter-clear>Clear</button><span data-slskr-native-count>0 rows</span></div>"#.to_string()
+    r#"<div class="slskr-native-filterbar"><input type="search" data-slskr-native-filter aria-label="Filter visible rows" placeholder="Filter visible rows"><button type="button" data-slskr-native-filter-clear>Clear Filter</button><button type="button" data-slskr-native-select-visible>Select Visible</button><button type="button" data-slskr-native-clear-selection>Clear Selection</button><span data-slskr-native-count>0 rows</span></div>"#.to_string()
+}
+
+fn native_inspector_html() -> String {
+    r#"<aside class="slskr-native-inspector" id="slskr-native-inspector" aria-live="polite"><header><div><h3>Selection Inspector</h3><p>Choose a row to inspect details and actions.</p></div><span data-slskr-native-inspector-count>0 selected</span></header><dl><dt>Item</dt><dd data-slskr-native-inspector-title>Nothing selected</dd><dt>Detail</dt><dd data-slskr-native-inspector-detail>Use the table to choose an item.</dd><dt>State</dt><dd data-slskr-native-inspector-meta>Waiting</dd><dt>Action</dt><dd data-slskr-native-inspector-action>Review</dd></dl><div class="slskr-native-inspector-actions"><button type="button">Review Selection</button><button type="button">Queue Selected</button></div></aside>"#.to_string()
 }
 
 fn route_native_workspace_html(
@@ -3789,9 +3799,10 @@ fn route_native_workspace_html(
         ),
     };
     format!(
-        r#"<section class="slskr-native-workspace">{tabs}{filter}{html}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
+        r#"<section class="slskr-native-workspace">{tabs}{filter}{html}{inspector}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
         tabs = native_tabs_html(kind),
         filter = native_filter_html(),
+        inspector = native_inspector_html(),
     )
 }
 
@@ -4502,6 +4513,7 @@ fn render_current_route(
     mount_native_subviews(document)?;
     mount_native_actions(document)?;
     mount_native_filters(document)?;
+    mount_native_sorters(document)?;
     mount_live_controls(window, document)?;
     mount_browser_local_panels(window, document)?;
     for item in nav_items() {
@@ -4810,8 +4822,7 @@ fn select_native_subview(document: &web_sys::Document, tab: &web_sys::Element) {
 
 #[cfg(target_arch = "wasm32")]
 fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
-    let buttons = document
-        .query_selector_all(".slskr-native-workspace button:not([data-slskr-native-tab])")?;
+    let buttons = document.query_selector_all(".slskr-native-workspace button:not([data-slskr-native-tab]):not([data-slskr-native-filter-clear]):not([data-slskr-native-select-visible]):not([data-slskr-native-clear-selection])")?;
     for button_index in 0..buttons.length() {
         let Some(node) = buttons.item(button_index) else {
             continue;
@@ -4915,6 +4926,47 @@ fn mount_native_filters(document: &web_sys::Document) -> Result<(), JsValue> {
         callback.forget();
     }
 
+    let select_buttons = document.query_selector_all("[data-slskr-native-select-visible]")?;
+    for button_index in 0..select_buttons.length() {
+        let Some(node) = select_buttons.item(button_index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let workspace = button
+            .closest(".slskr-native-workspace")?
+            .ok_or_else(|| JsValue::from_str("native select visible is outside workspace"))?;
+        let workspace_for_select = workspace.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                select_visible_native_rows(&workspace_for_select);
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
+    let selection_clear_buttons =
+        document.query_selector_all("[data-slskr-native-clear-selection]")?;
+    for button_index in 0..selection_clear_buttons.length() {
+        let Some(node) = selection_clear_buttons.item(button_index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let workspace = button
+            .closest(".slskr-native-workspace")?
+            .ok_or_else(|| JsValue::from_str("native clear selection is outside workspace"))?;
+        let workspace_for_clear = workspace.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                clear_native_selection(&workspace_for_clear);
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
     Ok(())
 }
 
@@ -4967,6 +5019,227 @@ fn update_native_filter_count(workspace: &web_sys::Element) {
 fn set_native_filter_count(workspace: &web_sys::Element, visible: u32, total: u32) {
     if let Ok(Some(count)) = workspace.query_selector("[data-slskr-native-count]") {
         count.set_text_content(Some(&format!("{visible} / {total} rows")));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn select_visible_native_rows(workspace: &web_sys::Element) {
+    let mut selected = 0;
+    let mut first_selected: Option<web_sys::Element> = None;
+    if let Ok(rows) = workspace.query_selector_all("[data-slskr-native-select]") {
+        for index in 0..rows.length() {
+            let Some(node) = rows.item(index) else {
+                continue;
+            };
+            let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            if row.has_attribute("hidden") {
+                continue;
+            }
+            selected += 1;
+            if first_selected.is_none() {
+                first_selected = Some(row.clone());
+            }
+            let _ = row.set_attribute("aria-selected", "true");
+            if let Ok(Some(input)) = row.query_selector("input[type=checkbox]") {
+                if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+                    input.set_checked(true);
+                }
+            }
+        }
+    }
+    update_native_selection_summary(workspace, selected, "selected");
+    if let Some(row) = first_selected.as_ref() {
+        update_native_inspector(workspace, selected, Some(row));
+    } else {
+        update_native_inspector(workspace, selected, None);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_native_selection(workspace: &web_sys::Element) {
+    if let Ok(rows) = workspace.query_selector_all("[data-slskr-native-select]") {
+        for index in 0..rows.length() {
+            let Some(node) = rows.item(index) else {
+                continue;
+            };
+            let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let _ = row.remove_attribute("aria-selected");
+            if let Ok(Some(input)) = row.query_selector("input[type=checkbox]") {
+                if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+                    input.set_checked(false);
+                }
+            }
+        }
+    }
+    update_native_selection_summary(workspace, 0, "selected");
+    update_native_inspector(workspace, 0, None);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_native_selection_summary(workspace: &web_sys::Element, selected: u32, label: &str) {
+    let Some(document) = workspace.owner_document() else {
+        return;
+    };
+    let message = if selected == 0 {
+        "No rows selected".to_string()
+    } else {
+        format!("{selected} visible rows {label}")
+    };
+    if let Some(status) = document.get_element_by_id("slskr-native-selection-status") {
+        status.set_inner_html(&format!(
+            "<strong>Selection</strong><span>{}</span>",
+            escape_html(&message)
+        ));
+    }
+    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+        status.set_inner_html(&format!(
+            "<strong>Selection</strong> {}",
+            escape_html(&message)
+        ));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_native_inspector(
+    workspace: &web_sys::Element,
+    selected: u32,
+    row: Option<&web_sys::Element>,
+) {
+    let Ok(Some(inspector)) = workspace.query_selector("#slskr-native-inspector") else {
+        return;
+    };
+    let count = if selected == 1 {
+        "1 selected".to_string()
+    } else {
+        format!("{selected} selected")
+    };
+    if let Ok(Some(element)) = inspector.query_selector("[data-slskr-native-inspector-count]") {
+        element.set_text_content(Some(&count));
+    }
+    let title = row
+        .and_then(|row| row.get_attribute("data-slskr-native-title"))
+        .unwrap_or_else(|| {
+            if selected == 0 {
+                "Nothing selected".to_string()
+            } else {
+                "Multiple rows selected".to_string()
+            }
+        });
+    let detail = row
+        .and_then(|row| row.get_attribute("data-slskr-native-detail"))
+        .unwrap_or_else(|| {
+            if selected == 0 {
+                "Use the table to choose an item.".to_string()
+            } else {
+                "Bulk actions will apply to all selected visible rows.".to_string()
+            }
+        });
+    let meta = row
+        .and_then(|row| row.get_attribute("data-slskr-native-meta"))
+        .unwrap_or_else(|| count.clone());
+    let action = row
+        .and_then(|row| row.get_attribute("data-slskr-native-action"))
+        .unwrap_or_else(|| "Review".to_string());
+    for (selector, value) in [
+        ("[data-slskr-native-inspector-title]", title),
+        ("[data-slskr-native-inspector-detail]", detail),
+        ("[data-slskr-native-inspector-meta]", meta),
+        ("[data-slskr-native-inspector-action]", action),
+    ] {
+        if let Ok(Some(element)) = inspector.query_selector(selector) {
+            element.set_text_content(Some(&value));
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_native_sorters(document: &web_sys::Document) -> Result<(), JsValue> {
+    let buttons = document.query_selector_all("[data-slskr-native-sort]")?;
+    for button_index in 0..buttons.length() {
+        let Some(node) = buttons.item(button_index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let button_for_click = button.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                sort_native_table(&button_for_click);
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sort_native_table(button: &web_sys::Element) {
+    let index = button
+        .get_attribute("data-slskr-native-sort")
+        .unwrap_or_else(|| "0".to_string());
+    let next_direction = if button
+        .get_attribute("aria-sort")
+        .is_some_and(|direction| direction == "ascending")
+    {
+        "descending"
+    } else {
+        "ascending"
+    };
+    let Some(table) = button.closest("table").ok().flatten() else {
+        return;
+    };
+    if let Ok(sort_buttons) = table.query_selector_all("[data-slskr-native-sort]") {
+        for button_index in 0..sort_buttons.length() {
+            let Some(node) = sort_buttons.item(button_index) else {
+                continue;
+            };
+            let Ok(sort_button) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let active = sort_button
+                .get_attribute("data-slskr-native-sort")
+                .is_some_and(|value| value == index);
+            let _ = sort_button
+                .set_attribute("aria-sort", if active { next_direction } else { "none" });
+        }
+    }
+
+    let Some(tbody) = table.query_selector("tbody").ok().flatten() else {
+        return;
+    };
+    let Ok(row_nodes) = tbody.query_selector_all("[data-slskr-native-select]") else {
+        return;
+    };
+    let attr = format!("data-slskr-native-sort-{index}");
+    let mut rows = Vec::new();
+    for row_index in 0..row_nodes.length() {
+        let Some(node) = row_nodes.item(row_index) else {
+            continue;
+        };
+        let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        rows.push(row);
+    }
+    rows.sort_by(|left, right| {
+        let left_value = left.get_attribute(&attr).unwrap_or_default().to_lowercase();
+        let right_value = right
+            .get_attribute(&attr)
+            .unwrap_or_default()
+            .to_lowercase();
+        if next_direction == "descending" {
+            right_value.cmp(&left_value)
+        } else {
+            left_value.cmp(&right_value)
+        }
+    });
+    for row in rows {
+        let _ = tbody.append_child(&row);
     }
 }
 
@@ -5042,6 +5315,9 @@ fn select_native_row(document: &web_sys::Document, row: &web_sys::Element) {
             "<strong>Selected</strong> {}",
             escape_html(&title)
         ));
+    }
+    if let Some(workspace) = row.closest(".slskr-native-workspace").ok().flatten() {
+        update_native_inspector(&workspace, 1, Some(row));
     }
 }
 
@@ -8067,6 +8343,7 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
             mount_native_subviews(&document)?;
             mount_native_actions(&document)?;
             mount_native_filters(&document)?;
+            mount_native_sorters(&document)?;
             mount_browser_local_panels(window, &document)?;
         }
     }
@@ -8680,7 +8957,13 @@ mod tests {
             assert!(html.contains("data-slskr-native-panel=\"0\""));
             assert!(html.contains("data-slskr-native-filter"));
             assert!(html.contains("data-slskr-native-count"));
+            assert!(html.contains("data-slskr-native-select-visible"));
+            assert!(html.contains("data-slskr-native-clear-selection"));
             assert!(html.contains("slskr-native-table"));
+            assert!(html.contains("data-slskr-native-sort=\"0\""));
+            assert!(html.contains("data-slskr-native-sort-0="));
+            assert!(html.contains("slskr-native-inspector"));
+            assert!(html.contains("data-slskr-native-inspector-title"));
             assert!(html.contains("data-slskr-native-select"));
             assert!(html.contains("slskr-native-selection-status"));
             assert!(html.contains("slskr-toast-region"));

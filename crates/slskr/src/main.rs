@@ -9383,7 +9383,7 @@ fn rate_limit_user_key(authorization: Option<&str>, cookie: Option<&str>) -> Str
     format!("auth:{}", hex::encode(&digest[..16]))
 }
 
-fn websocket_auth_protocol<'a>(protocol_header: Option<&'a str>) -> Option<&'a str> {
+fn websocket_auth_protocol(protocol_header: Option<&str>) -> Option<&str> {
     protocol_header?.split(',').map(str::trim).find(|protocol| {
         let Some(encoded) = protocol.strip_prefix(WEBSOCKET_AUTH_PROTOCOL_PREFIX) else {
             return false;
@@ -12465,7 +12465,6 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 break;
             }
         };
-        let api_key_authorization;
         let websocket_route = routing::parse_route(method, path);
         let websocket_path = if let Some(versioned_path) = websocket_route
             .normalized_path
@@ -12483,16 +12482,17 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 websocket_protocol_authorization(req.headers.sec_websocket_protocol.as_deref())
             })
             .flatten();
-        let authorization = if let Some(authorization) = req.headers.authorization.as_deref() {
-            Some(authorization)
-        } else if let Some(api_key) = req.headers.x_api_key.as_deref() {
-            api_key_authorization = format!("ApiKey {api_key}");
-            Some(api_key_authorization.as_str())
-        } else if let Some(authorization) = websocket_protocol_authorization.as_deref() {
-            Some(authorization)
-        } else {
-            None
-        };
+        let api_key_authorization = req
+            .headers
+            .x_api_key
+            .as_ref()
+            .map(|api_key| format!("ApiKey {api_key}"));
+        let authorization = req
+            .headers
+            .authorization
+            .as_deref()
+            .or(api_key_authorization.as_deref())
+            .or(websocket_protocol_authorization.as_deref());
         let sec_headers = RequestSecurityHeaders::from_http_headers(&req.headers);
 
         // Rate limiting: unauthenticated traffic is IP-keyed. Authenticated

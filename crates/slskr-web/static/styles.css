@@ -1221,6 +1221,27 @@ body {
   text-transform: uppercase;
 }
 
+.slskr-native-table th button {
+  background: transparent;
+  border: 0;
+  color: #8dd7c8;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  text-transform: uppercase;
+  width: 100%;
+}
+
+.slskr-native-table th button[aria-sort="ascending"]::after {
+  content: " ↑";
+}
+
+.slskr-native-table th button[aria-sort="descending"]::after {
+  content: " ↓";
+}
+
 .slskr-native-table td {
   color: #c6d0ca;
   font-size: 13px;
@@ -1324,6 +1345,73 @@ body {
   color: #f4efe7;
   cursor: pointer;
   min-height: 30px;
+  padding: 0 10px;
+}
+
+.slskr-native-inspector {
+  background: #101819;
+  border: 1px solid #2b504d;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.slskr-native-inspector header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.slskr-native-inspector h3 {
+  color: #f4efe7;
+  font-size: 16px;
+  margin: 0 0 4px;
+}
+
+.slskr-native-inspector p,
+.slskr-native-inspector dd {
+  color: #c6d0ca;
+  overflow-wrap: anywhere;
+}
+
+.slskr-native-inspector p,
+.slskr-native-inspector dl,
+.slskr-native-inspector dd {
+  margin: 0;
+}
+
+.slskr-native-inspector [data-slskr-native-inspector-count] {
+  color: #8dd7c8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.slskr-native-inspector dl {
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: minmax(80px, 0.25fr) minmax(0, 1fr);
+}
+
+.slskr-native-inspector dt {
+  color: #8dd7c8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.slskr-native-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.slskr-native-inspector-actions button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 32px;
   padding: 0 10px;
 }
 
