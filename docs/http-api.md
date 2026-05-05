@@ -137,6 +137,24 @@ Get list of supported capabilities/features.
 }
 ```
 
+### Storage Compatibility Listings
+
+#### `GET /api/v0/files/downloads/directories`
+#### `GET /api/v0/files/incomplete/directories`
+
+List the scoped downloads or incomplete storage root using the slskd-compatible
+directory response shape. Add `/{base64-path}` to list a nested directory.
+
+**Query Parameters:**
+- `recursive` (optional): `true` to include nested directories.
+- `limit` (optional): maximum entries to emit. Recursive requests default to
+  256 and are capped at 1,024 entries per request; non-recursive requests
+  default to 1,024 and are capped at 4,096.
+- `offset` (optional): top-level entry offset for paged compatibility listings.
+
+Responses include `entryCount`, `limit`, `offset`, and `truncated` metadata so
+clients can detect bounded listings and request another page.
+
 ### Session Control
 
 #### `GET /api/sessions`

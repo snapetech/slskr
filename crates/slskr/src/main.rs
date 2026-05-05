@@ -4754,8 +4754,8 @@ async fn route_http_request_with_headers(
             } else {
                 file_storage_root(&state.config.state_dir, "incomplete")
             };
-            let recursive = query_bool(route.query, "recursive").unwrap_or(false);
-            match slskd_storage_directory_json(&root, None, recursive) {
+            let options = StorageDirectoryListOptions::from_query(route.query);
+            match slskd_storage_directory_json(&root, None, options) {
                 Ok(json) => Ok(routing::ok_response(json)),
                 Err(error) => Ok(routing::bad_request_response(&error)),
             }
@@ -4769,9 +4769,9 @@ async fn route_http_request_with_headers(
             } else {
                 file_storage_root(&state.config.state_dir, "incomplete")
             };
-            let recursive = query_bool(route.query, "recursive").unwrap_or(false);
+            let options = StorageDirectoryListOptions::from_query(route.query);
             let encoded_name = path.rsplit('/').next().unwrap_or("");
-            match slskd_storage_directory_json(&root, Some(encoded_name), recursive) {
+            match slskd_storage_directory_json(&root, Some(encoded_name), options) {
                 Ok(json) => Ok(routing::ok_response(json)),
                 Err(error) => Ok(routing::bad_request_response(&error)),
             }
@@ -9711,7 +9711,86 @@ fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
     })
 }
 
-const SLSKD_STORAGE_LIST_MAX_ENTRIES: usize = 16_384;
+const SLSKD_STORAGE_DIRECT_LIST_DEFAULT_ENTRIES: usize = 1_024;
+const SLSKD_STORAGE_DIRECT_LIST_MAX_ENTRIES: usize = 4_096;
+const SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES: usize = 256;
+const SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES: usize = 1_024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StorageDirectoryListOptions {
+    recursive: bool,
+    limit: usize,
+    offset: usize,
+}
+
+impl StorageDirectoryListOptions {
+    fn from_query(query: Option<&str>) -> Self {
+        let recursive = query_bool(query, "recursive").unwrap_or(false);
+        let default_limit = if recursive {
+            SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES
+        } else {
+            SLSKD_STORAGE_DIRECT_LIST_DEFAULT_ENTRIES
+        };
+        let max_limit = if recursive {
+            SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES
+        } else {
+            SLSKD_STORAGE_DIRECT_LIST_MAX_ENTRIES
+        };
+        let mut options = Self {
+            recursive,
+            limit: default_limit,
+            offset: 0,
+        };
+        for (name, value) in query_params(query.unwrap_or_default()) {
+            match name.as_str() {
+                "limit" => {
+                    options.limit = value
+                        .parse::<usize>()
+                        .ok()
+                        .filter(|limit| *limit > 0)
+                        .map(|limit| limit.min(max_limit))
+                        .unwrap_or(default_limit);
+                }
+                "offset" => options.offset = value.parse::<usize>().unwrap_or(0),
+                _ => {}
+            }
+        }
+        options
+    }
+}
+
+#[derive(Debug)]
+struct StorageDirectoryListState {
+    options: StorageDirectoryListOptions,
+    seen_top_level: usize,
+    emitted: usize,
+    truncated: bool,
+}
+
+impl StorageDirectoryListState {
+    fn new(options: StorageDirectoryListOptions) -> Self {
+        Self {
+            options,
+            seen_top_level: 0,
+            emitted: 0,
+            truncated: false,
+        }
+    }
+
+    fn should_emit_top_level(&mut self) -> bool {
+        self.seen_top_level += 1;
+        self.seen_top_level > self.options.offset
+    }
+
+    fn reserve_entry(&mut self) -> bool {
+        if self.emitted >= self.options.limit {
+            self.truncated = true;
+            return false;
+        }
+        self.emitted += 1;
+        true
+    }
+}
 
 fn query_bool(query: Option<&str>, key: &str) -> Option<bool> {
     query_params(query.unwrap_or_default())
@@ -9745,8 +9824,8 @@ fn slskd_storage_file_json(path: &Path, root: &Path) -> serde_json::Value {
 fn slskd_storage_directory_value(
     root: &Path,
     directory: &Path,
-    recursive: bool,
-    remaining_entries: &mut usize,
+    state: &mut StorageDirectoryListState,
+    top_level: bool,
 ) -> Result<serde_json::Value, String> {
     let relative = directory
         .strip_prefix(root)
@@ -9773,34 +9852,35 @@ fn slskd_storage_directory_value(
         return Err("storage path is not a directory".to_owned());
     }
 
-    let mut files = Vec::new();
-    let mut directories = Vec::new();
+    let mut entries = Vec::new();
     for entry in
         fs::read_dir(directory).map_err(|error| format!("directory read failed: {error}"))?
     {
         let entry = entry.map_err(|error| format!("directory entry read failed: {error}"))?;
-        let path = entry.path();
-        let metadata = entry
-            .path()
+        entries.push(entry.path());
+    }
+    entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+
+    let mut files = Vec::new();
+    let mut directories = Vec::new();
+    for path in entries {
+        let metadata = path
             .symlink_metadata()
             .map_err(|error| format!("directory entry metadata failed: {error}"))?;
         if metadata.file_type().is_symlink() {
             continue;
         }
-        if *remaining_entries == 0 {
-            return Err("storage directory listing is too large".to_owned());
+        if top_level && !state.should_emit_top_level() {
+            continue;
         }
-        *remaining_entries -= 1;
+        if !state.reserve_entry() {
+            break;
+        }
         if metadata.is_file() {
             files.push(slskd_storage_file_json(&path, root));
         } else if metadata.is_dir() {
-            if recursive {
-                directories.push(slskd_storage_directory_value(
-                    root,
-                    &path,
-                    true,
-                    remaining_entries,
-                )?);
+            if state.options.recursive {
+                directories.push(slskd_storage_directory_value(root, &path, state, false)?);
             } else {
                 let child_relative = path
                     .strip_prefix(root)
@@ -9822,13 +9902,17 @@ fn slskd_storage_directory_value(
         "modifiedAt": "",
         "files": files,
         "directories": directories,
+        "offset": if top_level { state.options.offset } else { 0 },
+        "limit": state.options.limit,
+        "entryCount": state.emitted,
+        "truncated": state.truncated,
     }))
 }
 
 fn slskd_storage_directory_json(
     root: &Path,
     encoded_name: Option<&str>,
-    recursive: bool,
+    options: StorageDirectoryListOptions,
 ) -> Result<String, String> {
     fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
     let path = if let Some(encoded_name) = encoded_name {
@@ -9856,9 +9940,8 @@ fn slskd_storage_directory_json(
     if !canonical_parent.starts_with(&canonical_root) {
         return Err("path escapes the storage root".to_owned());
     }
-    let mut remaining_entries = SLSKD_STORAGE_LIST_MAX_ENTRIES;
-    slskd_storage_directory_value(root, &path, recursive, &mut remaining_entries)
-        .map(|value| value.to_string())
+    let mut state = StorageDirectoryListState::new(options);
+    slskd_storage_directory_value(root, &path, &mut state, true).map(|value| value.to_string())
 }
 
 fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue) -> String {
@@ -15307,10 +15390,75 @@ mod tests {
         std::fs::write(dir.join("one.txt"), b"1").unwrap();
         std::fs::write(dir.join("two.txt"), b"2").unwrap();
 
-        let mut remaining_entries = 1;
-        let error = super::slskd_storage_directory_value(&dir, &dir, false, &mut remaining_entries)
-            .expect_err("bounded listing should reject extra entries");
-        assert_eq!(error, "storage directory listing is too large");
+        let remaining_entries = 1;
+        let mut state = super::StorageDirectoryListState::new(super::StorageDirectoryListOptions {
+            recursive: false,
+            limit: remaining_entries,
+            offset: 0,
+        });
+        let json =
+            super::slskd_storage_directory_value(&dir, &dir, &mut state, true).expect("listing");
+        assert_eq!(json["entryCount"], 1);
+        assert_eq!(json["truncated"], true);
+        assert_eq!(state.emitted, remaining_entries);
+    }
+
+    #[tokio::test]
+    async fn slskd_storage_directory_routes_support_pagination() {
+        let (state, _receiver) = test_state();
+        let root = state.config.state_dir.join("downloads");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), b"a").unwrap();
+        std::fs::write(root.join("b.txt"), b"b").unwrap();
+        std::fs::write(root.join("c.txt"), b"c").unwrap();
+
+        let response = super::route_http_request(
+            "GET",
+            "/api/v0/files/downloads/directories?limit=1&offset=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("paginated storage listing");
+        assert_eq!(response.status, "200 OK");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["offset"], 1);
+        assert_eq!(json["limit"], 1);
+        assert_eq!(json["entryCount"], 1);
+        assert_eq!(json["truncated"], true);
+        assert_eq!(json["files"][0]["name"], "b.txt");
+    }
+
+    #[tokio::test]
+    async fn slskd_recursive_storage_listing_has_lower_budget() {
+        let (state, _receiver) = test_state();
+        let root = state.config.state_dir.join("downloads");
+        std::fs::create_dir_all(&root).unwrap();
+        for index in 0..300 {
+            std::fs::write(root.join(format!("{index:03}.txt")), b"x").unwrap();
+        }
+
+        let response = super::route_http_request(
+            "GET",
+            "/api/v0/files/downloads/directories?recursive=true",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("recursive storage listing");
+        assert_eq!(response.status, "200 OK");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(
+            json["limit"],
+            super::SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES
+        );
+        assert_eq!(
+            json["entryCount"],
+            super::SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES
+        );
+        assert_eq!(json["truncated"], true);
     }
 
     #[tokio::test]

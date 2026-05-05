@@ -3759,9 +3759,8 @@ fn native_tabs_html(kind: RouteKind) -> String {
         .map(|(index, label)| {
             let hidden = if index == 0 { "" } else { " hidden" };
             format!(
-                r#"<section class="slskr-native-subpanel" data-slskr-native-panel="{index}"{hidden}><h4>{}</h4><p>{}</p></section>"#,
-                escape_html(label),
-                escape_html(native_tab_detail(kind, label)),
+                r#"<section class="slskr-native-subpanel" data-slskr-native-panel="{index}"{hidden}>{}</section>"#,
+                native_tab_panel_html(kind, label),
             )
         })
         .collect::<Vec<_>>()
@@ -3769,6 +3768,161 @@ fn native_tabs_html(kind: RouteKind) -> String {
     format!(
         r#"<div class="slskr-native-subviews"><div class="slskr-native-subnav" role="tablist">{buttons}</div><div class="slskr-native-subpanels">{panels}</div></div>"#
     )
+}
+
+fn native_tab_panel_html(kind: RouteKind, label: &str) -> String {
+    let detail = native_tab_detail(kind, label);
+    let controls = native_tab_controls(kind, label)
+        .iter()
+        .map(|control| format!(r#"<button type="button">{}</button>"#, escape_html(control)))
+        .collect::<Vec<_>>()
+        .join("");
+    let fields = native_tab_fields(kind, label)
+        .iter()
+        .map(|(field, placeholder)| {
+            format!(
+                r#"<label><span>{}</span><input type="text" aria-label="{}" placeholder="{}"></label>"#,
+                escape_html(field),
+                escape_html(field),
+                escape_html(placeholder)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let facts = native_tab_facts(kind, label)
+        .iter()
+        .map(|fact| format!(r#"<span>{}</span>"#, escape_html(fact)))
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<header><div><h4>{}</h4><p>{}</p></div><div class="slskr-native-panel-actions">{}</div></header><div class="slskr-native-panel-fields">{}</div><div class="slskr-native-panel-facts">{}</div>"#,
+        escape_html(label),
+        escape_html(detail),
+        controls,
+        fields,
+        facts,
+    )
+}
+
+fn native_tab_controls(kind: RouteKind, label: &str) -> &'static [&'static str] {
+    match (kind, label) {
+        (RouteKind::Messages | RouteKind::Rooms, "Thread") => {
+            &["Reply", "Acknowledge", "Delete Conversation"]
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "Rooms") => &["Join Room", "Leave Room"],
+        (RouteKind::Browse, "Tabs") => &["Open a New Browse Tab", "New Tab"],
+        (RouteKind::Browse, "Tree") => &["Browse", "Refresh Folder"],
+        (RouteKind::Browse, "Selected" | "Queue") => &["Download Selected"],
+        (RouteKind::Collections, "Collections") => &["Create Collection"],
+        (RouteKind::Collections, "Items" | "Picker") => &["Add Item"],
+        (RouteKind::Collections, "Sharing") => &["Share"],
+        (RouteKind::ShareGroups, "Groups") => &["Create Group"],
+        (RouteKind::ShareGroups, "Members") => &["Add Member"],
+        (RouteKind::ShareGroups, "Tokens") => &["Issue Token"],
+        (RouteKind::ShareGroups, "Grants" | "Permissions") => {
+            &["Create Share Grant", "Update Share Grant"]
+        }
+        (RouteKind::SharedWithMe, "Access") => &["Open", "Stream", "Backfill", "Copy token"],
+        (RouteKind::System, "Network") => &["Connect", "Disconnect", "Get Privileges"],
+        (RouteKind::System, "Shares") => &["Rescan Shares"],
+        (RouteKind::System, "Data") => &["Vacuum Database"],
+        (RouteKind::System, "Info") => &["Check for Updates", "Diagnostic Bundle"],
+        (RouteKind::System, "Logs" | "Events") => &["Refresh", "Clear Filter"],
+        (RouteKind::System, "Options" | "Experience") => &["Save", "Reset"],
+        (RouteKind::System, "Jobs" | "Automations") => &["Run Selected", "Cancel Selected"],
+        (RouteKind::System, "Library Health") => &["Run Replacement Searches", "Copy Action Plan"],
+        (RouteKind::System, "Quarantine Jury") => &["Approve", "Reject", "Copy Packet"],
+        (RouteKind::Search, "Results" | "Download Preview") => &["Download", "Queue Selected"],
+        (RouteKind::Search, "Searches") => &["Search", "Stop", "Clear"],
+        (RouteKind::DiscoveryGraph, "Graph" | "Recommendations") => {
+            &["Build Atlas", "Queue Nearby"]
+        }
+        (RouteKind::PlaylistIntake, "Parser" | "Rows") => &["Import Playlist", "Queue Plans"],
+        (RouteKind::Wishlist, "Wanted" | "Discovery Inbox") => &["Add Search", "Run Enabled"],
+        (RouteKind::Downloads, "Active" | "Failed") => &["Retry All", "Cancel All"],
+        (RouteKind::Downloads, "Completed") => &["Clear Completed"],
+        (RouteKind::Uploads, "Active" | "Queued" | "Policy") => {
+            &["Allow selected", "Deny selected"]
+        }
+        (RouteKind::Uploads, "Completed") => &["Clear Completed"],
+        (RouteKind::Users, "Directory" | "Detail") => &["Watch", "Browse", "Message"],
+        (RouteKind::Users, "Notes") => &["Save note"],
+        (RouteKind::Contacts, "Contacts" | "Nearby") => &["Add Friend", "Message", "Browse"],
+        (RouteKind::Contacts, "Invites") => &["Create Invite", "Add Friend"],
+        (RouteKind::Solid, "Identity" | "Session") => &["Resolve WebID", "Connect Identity"],
+        (RouteKind::Solid, "Storage" | "Sync") => &["Sync Storage"],
+        _ => &["Review Selection"],
+    }
+}
+
+fn native_tab_fields(kind: RouteKind, label: &str) -> &'static [(&'static str, &'static str)] {
+    match (kind, label) {
+        (RouteKind::Messages | RouteKind::Rooms, "Thread") => {
+            &[("Chat username", "peer1"), ("Message", "Message")]
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "Rooms") => &[("Search rooms", "public-domain")],
+        (RouteKind::Browse, "Tabs") => &[("Username", "peer1")],
+        (RouteKind::Browse, "Tree" | "Files") => &[("Username", "peer1"), ("Folder", "/Music")],
+        (RouteKind::Collections, "Collections") => &[
+            ("Title", "Collection title"),
+            ("Description", "Optional description"),
+        ],
+        (RouteKind::Collections, "Picker" | "Items") => &[("Search for item", "filename")],
+        (RouteKind::ShareGroups, "Groups") => &[("Group Name", "Trusted peers")],
+        (RouteKind::ShareGroups, "Members") => &[("Soulseek Username", "peer1")],
+        (RouteKind::ShareGroups, "Permissions") => &[("Permissions", "read,download,stream")],
+        (RouteKind::Solid, "Identity") => &[("WebID", "https://example.com/profile/card#me")],
+        (RouteKind::Search, "Searches" | "Results") => &[("Search text", "public domain jazz")],
+        (RouteKind::DiscoveryGraph, "Graph") => &[("Artist Name", "Archive Artist")],
+        (RouteKind::PlaylistIntake, "Parser") => &[("Playlist rows", "Artist - Title")],
+        (RouteKind::Wishlist, "Wanted") => &[("Search Text", "wanted search")],
+        (RouteKind::Users, "Directory" | "Detail") => &[("Username", "peer1")],
+        (RouteKind::Contacts, "Contacts" | "Invites") => &[("Nickname", "Friend's name")],
+        (RouteKind::System, "Logs" | "Events") => &[("Filter", "level:warn")],
+        (RouteKind::System, "Options") => &[("Option key", "shares.scanInterval")],
+        _ => &[],
+    }
+}
+
+fn native_tab_facts(kind: RouteKind, label: &str) -> &'static [&'static str] {
+    match (kind, label) {
+        (RouteKind::System, "Info") => &["Version", "Session", "Privileges", "Uptime"],
+        (RouteKind::System, "Network") => &["Server state", "Ports", "Rate limits", "Proxy trust"],
+        (RouteKind::System, "Mesh") => &["Federation health", "Evidence policy", "Conflicts"],
+        (RouteKind::System, "Bridge") => &["Bridge status", "Gateway", "Relay"],
+        (RouteKind::System, "MediaCore") => &["Routing", "Validation", "Storage", "Content tools"],
+        (RouteKind::System, "Security Policies") => {
+            &["Admin policy", "Quarantine", "Outbound webhooks"]
+        }
+        (RouteKind::System, "Experience") => &["Theme", "Density", "Player", "Notifications"],
+        (RouteKind::System, "Integrations") => &["Lidarr", "FTP", "Media server", "ListenBrainz"],
+        (RouteKind::System, "Options") => &["Config", "Debug", "Overrides"],
+        (RouteKind::System, "Shares") => &["Roots", "Exclusions", "Scan progress", "Contents"],
+        (RouteKind::System, "Jobs") => &["Queued", "Running", "Failed", "History"],
+        (RouteKind::System, "Automations") => &["Recipes", "Bounds", "Approvals"],
+        (RouteKind::System, "Source Providers") => &["Search", "Metadata", "Verification"],
+        (RouteKind::System, "Swarm Analytics") => &["Peers", "Availability", "Quality"],
+        (RouteKind::System, "Library Health") => &["Issues", "Replacements", "Reports"],
+        (RouteKind::System, "Quarantine Jury") => &["Pending", "Approved", "Rejected"],
+        (RouteKind::System, "Files") => &["Index", "Fingerprints", "Records"],
+        (RouteKind::System, "Data") => &["Database", "Vacuum", "Cleanup", "Storage"],
+        (RouteKind::System, "Events") => &["Filterable stream", "Acknowledgements"],
+        (RouteKind::System, "Logs") => &["Level", "Source", "Search"],
+        (RouteKind::System, "Metrics") => &["KPIs", "Transfer summary", "Raw metrics"],
+        (RouteKind::Browse, _) => &[
+            "Cached browse",
+            "Breadcrumb",
+            "Multi-select",
+            "Queue preview",
+        ],
+        (RouteKind::Messages | RouteKind::Rooms, _) => {
+            &["Conversations", "Unread", "Rooms", "Pods", "Compose"]
+        }
+        (RouteKind::Collections, _) => &["Collection detail", "Items", "Picker", "Sharing"],
+        (RouteKind::ShareGroups, _) => &["Members", "Grants", "Tokens", "Permissions"],
+        (RouteKind::SharedWithMe, _) => &["Owner", "Expiration", "Access", "Manifest"],
+        _ => &["Loading", "Empty", "Error", "Success"],
+    }
 }
 
 fn native_filter_html() -> String {
@@ -9624,6 +9778,9 @@ mod tests {
             assert!(html.contains("slskr-workflow"));
             assert!(html.contains("slskr-native-workspace"));
             assert!(html.contains("slskr-native-subviews"));
+            assert!(html.contains("slskr-native-panel-actions"));
+            assert!(html.contains("slskr-native-panel-fields"));
+            assert!(html.contains("slskr-native-panel-facts"));
             assert!(html.contains("data-slskr-native-tab=\"0\""));
             assert!(html.contains("data-slskr-native-panel=\"0\""));
             assert!(html.contains("data-slskr-native-filter"));
@@ -10008,6 +10165,54 @@ mod tests {
         assert_eq!(native_action_fallback(ActionBody::BrowseDirectory), "/");
         assert_eq!(native_action_fallback(ActionBody::Username), "peer1");
         assert!(native_action_fallback(ActionBody::None).is_empty());
+    }
+
+    #[test]
+    fn native_subpanels_cover_deep_route_workflows() {
+        let system = route_page_html("/system");
+        for value in [
+            "MediaCore",
+            "Security Policies",
+            "Library Health",
+            "Quarantine Jury",
+            "Run Replacement Searches",
+            "Vacuum Database",
+            "Proxy trust",
+        ] {
+            assert!(
+                system.contains(value),
+                "system panel should contain {value}"
+            );
+        }
+
+        let browse = route_page_html("/browse");
+        for value in [
+            "Open a New Browse Tab",
+            "Breadcrumb",
+            "Multi-select",
+            "Download Selected",
+        ] {
+            assert!(
+                browse.contains(value),
+                "browse panel should contain {value}"
+            );
+        }
+
+        let messages = route_page_html("/messages");
+        for value in ["Delete Conversation", "Unread", "Pods", "Compose"] {
+            assert!(
+                messages.contains(value),
+                "messages panel should contain {value}"
+            );
+        }
+
+        let sharing = route_page_html("/sharegroups");
+        for value in ["Create Share Grant", "Update Share Grant", "Permissions"] {
+            assert!(
+                sharing.contains(value),
+                "share groups panel should contain {value}"
+            );
+        }
     }
 
     #[test]

@@ -20,6 +20,9 @@ Completed across the main Rust routes:
 - native workflow buttons resolve to real route actions where a backend action
   exists, falling back to visible status/toast feedback when no matching action
   exists yet
+- native subpanels expose route-specific controls, fields, and status facts for
+  deep workflows such as browse tabs, messaging rooms, share grants, and system
+  operations
 
 ## Route Gaps
 
@@ -51,4 +54,3 @@ Completed across the main Rust routes:
   React or is explicitly marked as unsupported in this ledger.
 - Screenshots show the primary workflow in the first viewport on desktop and
   mobile.
-
