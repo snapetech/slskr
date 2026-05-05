@@ -2553,8 +2553,17 @@ fn empty_state_html(title: &str, detail: &str, action: &str) -> String {
     )
 }
 
-fn sample_rows_html(rows: &[(&str, &str, &str, &str)]) -> String {
-    rows.iter()
+fn workflow_table_owned_html(
+    headers: &[&str],
+    rows: &[(String, String, String, String)],
+) -> String {
+    let header = headers
+        .iter()
+        .map(|header| format!(r#"<th>{}</th>"#, escape_html(header)))
+        .collect::<Vec<_>>()
+        .join("");
+    let rows = rows
+        .iter()
         .map(|(primary, secondary, meta, action)| {
             format!(
                 r#"<tr><td><strong>{primary}</strong><span>{secondary}</span></td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
@@ -2565,20 +2574,453 @@ fn sample_rows_html(rows: &[(&str, &str, &str, &str)]) -> String {
             )
         })
         .collect::<Vec<_>>()
-        .join("")
-}
-
-fn workflow_table_html(headers: &[&str], rows: &[(&str, &str, &str, &str)]) -> String {
-    let header = headers
-        .iter()
-        .map(|header| format!(r#"<th>{}</th>"#, escape_html(header)))
-        .collect::<Vec<_>>()
         .join("");
     format!(
         r#"<div class="slskr-table-wrap slskr-domain-table"><table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table></div>"#,
         header = header,
-        rows = sample_rows_html(rows),
+        rows = rows,
     )
+}
+
+fn json_endpoint_value(
+    responses: Option<&[EndpointBody]>,
+    endpoint: &str,
+) -> Option<serde_json::Value> {
+    responses
+        .and_then(|items| endpoint_body(items, endpoint))
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+}
+
+fn value_array(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    if let Some(items) = value.as_array() {
+        return items.clone();
+    }
+    for key in [
+        "entries",
+        "items",
+        "records",
+        "results",
+        "responses",
+        "messages",
+        "conversations",
+        "rooms",
+        "users",
+        "contacts",
+        "collections",
+        "groups",
+        "grants",
+        "directories",
+        "files",
+        "shares",
+        "providers",
+        "jobs",
+    ] {
+        if let Some(items) = value.get(key).and_then(|entry| entry.as_array()) {
+            return items.clone();
+        }
+    }
+    Vec::new()
+}
+
+fn endpoint_array(responses: Option<&[EndpointBody]>, endpoint: &str) -> Vec<serde_json::Value> {
+    json_endpoint_value(responses, endpoint)
+        .map(|value| value_array(&value))
+        .unwrap_or_default()
+}
+
+fn value_text(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let mut current = value;
+        let mut found = true;
+        for part in key.split('.') {
+            if let Some(next) = current.get(part) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if !found {
+            continue;
+        }
+        match current {
+            serde_json::Value::String(text) if !text.is_empty() => return Some(text.clone()),
+            serde_json::Value::Bool(value) => return Some(value.to_string()),
+            serde_json::Value::Number(value) => return Some(value.to_string()),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn value_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+    for key in keys {
+        let mut current = value;
+        let mut found = true;
+        for part in key.split('.') {
+            if let Some(next) = current.get(part) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if !found {
+            continue;
+        }
+        if let Some(number) = current.as_f64() {
+            return Some(number);
+        }
+    }
+    None
+}
+
+fn value_bool(value: &serde_json::Value, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        let mut current = value;
+        let mut found = true;
+        for part in key.split('.') {
+            if let Some(next) = current.get(part) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if !found {
+            continue;
+        }
+        if let Some(value) = current.as_bool() {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn nested_items(value: &serde_json::Value, keys: &[&str]) -> Vec<serde_json::Value> {
+    for key in keys {
+        if let Some(items) = value.get(*key).and_then(|entry| entry.as_array()) {
+            return items.clone();
+        }
+    }
+    Vec::new()
+}
+
+fn first_nested_text(
+    value: &serde_json::Value,
+    array_keys: &[&str],
+    field_keys: &[&str],
+) -> Option<String> {
+    nested_items(value, array_keys)
+        .first()
+        .and_then(|item| value_text(item, field_keys))
+}
+
+fn format_transfer_progress(value: &serde_json::Value) -> String {
+    let state = value_text(value, &["state", "status"]).unwrap_or_else(|| "pending".to_string());
+    let progress = value_number(value, &["percentComplete", "percentage", "progress"])
+        .map(|value| {
+            if value <= 1.0 {
+                format!("{:.0}%", value * 100.0)
+            } else {
+                format!("{value:.0}%")
+            }
+        })
+        .unwrap_or_else(|| "0%".to_string());
+    let speed = value_text(value, &["speed", "bytesPerSecond", "averageSpeed"])
+        .unwrap_or_else(|| "0 B/s".to_string());
+    format!("{state} / {progress} / {speed}")
+}
+
+fn route_dynamic_rows(
+    kind: RouteKind,
+    responses: Option<&[EndpointBody]>,
+) -> Option<Vec<(String, String, String, String)>> {
+    let rows = match kind {
+        RouteKind::Search | RouteKind::DiscoveryGraph => {
+            let responses_rows = endpoint_array(responses, "/searches/:id/responses");
+            if !responses_rows.is_empty() {
+                responses_rows
+                    .iter()
+                    .take(50)
+                    .map(|item| {
+                        let filename =
+                            first_nested_text(item, &["files"], &["filename", "path", "name"])
+                                .unwrap_or_else(|| "Result group".to_string());
+                        let username = value_text(item, &["username", "user", "peer"])
+                            .unwrap_or_else(|| "unknown peer".to_string());
+                        let queue = value_text(item, &["queueLength", "queue", "placeInQueue"])
+                            .unwrap_or_else(|| "0".to_string());
+                        let slot = if value_bool(item, &["hasFreeUploadSlot", "freeUploadSlot"])
+                            .unwrap_or(false)
+                        {
+                            "free slot"
+                        } else {
+                            "queue"
+                        };
+                        (
+                            filename,
+                            username,
+                            format!("{slot} / queue {queue}"),
+                            "Download".to_string(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                endpoint_array(responses, "/searches")
+                    .iter()
+                    .take(50)
+                    .map(|item| {
+                        let query = value_text(item, &["searchText", "query", "text"])
+                            .unwrap_or_else(|| "Saved search".to_string());
+                        let id = value_text(item, &["id"]).unwrap_or_else(|| "pending".to_string());
+                        let state = value_text(item, &["state", "status"])
+                            .unwrap_or_else(|| "created".to_string());
+                        (query, format!("search {id}"), state, "Open".to_string())
+                    })
+                    .collect::<Vec<_>>()
+            }
+        }
+        RouteKind::PlaylistIntake => endpoint_array(responses, "/source-feed-imports/preview")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let title = value_text(item, &["title", "track", "name"])
+                    .unwrap_or_else(|| "Playlist row".to_string());
+                let artist = value_text(item, &["artist", "albumArtist"])
+                    .unwrap_or_else(|| "unknown artist".to_string());
+                let status = value_text(item, &["status", "classification"])
+                    .unwrap_or_else(|| "review".to_string());
+                (title, artist, status, "Import".to_string())
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::Wishlist => endpoint_array(responses, "/wishlist")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let text = value_text(item, &["searchText", "query", "text"])
+                    .unwrap_or_else(|| "Wanted search".to_string());
+                let filter = value_text(item, &["filter", "searchFilter"])
+                    .unwrap_or_else(|| "no filter".to_string());
+                let enabled = value_bool(item, &["enabled"]).unwrap_or(false);
+                let auto =
+                    value_bool(item, &["autoDownload", "autoDownloadEnabled"]).unwrap_or(false);
+                (
+                    text,
+                    filter,
+                    format!("enabled={enabled} / auto={auto}"),
+                    "Run".to_string(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::Downloads | RouteKind::Uploads => {
+            let endpoint = if kind == RouteKind::Downloads {
+                "/transfers/downloads"
+            } else {
+                "/transfers/uploads"
+            };
+            endpoint_array(responses, endpoint)
+                .iter()
+                .take(50)
+                .flat_map(|item| {
+                    let username = value_text(item, &["username", "user", "peer"])
+                        .unwrap_or_else(|| "unknown peer".to_string());
+                    let files = nested_items(item, &["files", "directories"]);
+                    if files.is_empty() {
+                        vec![(
+                            value_text(item, &["filename", "path", "name"])
+                                .unwrap_or_else(|| "Transfer".to_string()),
+                            username,
+                            format_transfer_progress(item),
+                            if kind == RouteKind::Downloads {
+                                "Cancel"
+                            } else {
+                                "Deny"
+                            }
+                            .to_string(),
+                        )]
+                    } else {
+                        files
+                            .iter()
+                            .map(|file| {
+                                (
+                                    value_text(file, &["filename", "path", "name"])
+                                        .unwrap_or_else(|| "Transfer".to_string()),
+                                    username.clone(),
+                                    format_transfer_progress(file),
+                                    if kind == RouteKind::Downloads {
+                                        "Cancel"
+                                    } else {
+                                        "Deny"
+                                    }
+                                    .to_string(),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    }
+                })
+                .collect::<Vec<_>>()
+        }
+        RouteKind::Messages | RouteKind::Rooms => endpoint_array(responses, "/conversations")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let username = value_text(item, &["username", "user", "roomName", "name"])
+                    .unwrap_or_else(|| "conversation".to_string());
+                let last = value_text(item, &["lastMessage", "message", "latestMessage"])
+                    .unwrap_or_else(|| "No messages".to_string());
+                let unread = value_text(
+                    item,
+                    &["unreadCount", "unacknowledgedCount", "messageCount"],
+                )
+                .unwrap_or_else(|| "0".to_string());
+                (
+                    username,
+                    last,
+                    format!("{unread} unread"),
+                    "Reply".to_string(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::Users => endpoint_array(responses, "/users")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let username =
+                    value_text(item, &["username", "name"]).unwrap_or_else(|| "peer".to_string());
+                let status =
+                    value_text(item, &["status", "state"]).unwrap_or_else(|| "unknown".to_string());
+                let stats = value_text(item, &["sharedFileCount", "files", "uploadSpeed"])
+                    .unwrap_or_else(|| "stats pending".to_string());
+                (username, status, stats, "Browse".to_string())
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::Contacts => endpoint_array(responses, "/contacts")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let name = value_text(item, &["nickname", "username", "name", "peerId"])
+                    .unwrap_or_else(|| "contact".to_string());
+                let peer = value_text(item, &["peerId", "username"])
+                    .unwrap_or_else(|| "unknown peer".to_string());
+                let verified = value_bool(item, &["verified"])
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "pending".to_string());
+                (
+                    name,
+                    peer,
+                    format!("verified={verified}"),
+                    "Message".to_string(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::Solid => json_endpoint_value(responses, "/solid/status")
+            .map(|value| {
+                vec![(
+                    value_text(&value, &["webId", "identity"])
+                        .unwrap_or_else(|| "Identity".to_string()),
+                    value_text(&value, &["storage", "pod", "storageRoot"])
+                        .unwrap_or_else(|| "No storage".to_string()),
+                    value_text(&value, &["status", "state"])
+                        .unwrap_or_else(|| "not connected".to_string()),
+                    "Resolve WebID".to_string(),
+                )]
+            })
+            .unwrap_or_default(),
+        RouteKind::Collections => endpoint_array(responses, "/collections")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let title = value_text(item, &["title", "name"])
+                    .unwrap_or_else(|| "Collection".to_string());
+                let kind =
+                    value_text(item, &["type", "kind"]).unwrap_or_else(|| "Playlist".to_string());
+                let count = value_text(item, &["itemCount", "itemsCount", "items"])
+                    .unwrap_or_else(|| "0".to_string());
+                (title, kind, format!("{count} items"), "Open".to_string())
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::ShareGroups => endpoint_array(responses, "/sharegroups")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let name = value_text(item, &["name", "title"])
+                    .unwrap_or_else(|| "Share group".to_string());
+                let members = value_text(item, &["memberCount", "members"])
+                    .unwrap_or_else(|| "0".to_string());
+                let created = value_text(item, &["createdAt", "created"])
+                    .unwrap_or_else(|| "created pending".to_string());
+                (
+                    name,
+                    format!("{members} members"),
+                    created,
+                    "Add Member".to_string(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::SharedWithMe => endpoint_array(responses, "/shared")
+            .iter()
+            .take(50)
+            .map(|item| {
+                let title = value_text(item, &["collection.title", "title", "name"])
+                    .unwrap_or_else(|| "Shared collection".to_string());
+                let owner = value_text(item, &["owner", "sharedBy", "username"])
+                    .unwrap_or_else(|| "unknown owner".to_string());
+                let permissions = value_text(item, &["permissions", "access", "grant.permissions"])
+                    .unwrap_or_else(|| "read".to_string());
+                (title, owner, permissions, "Open".to_string())
+            })
+            .collect::<Vec<_>>(),
+        RouteKind::Browse => {
+            let root = json_endpoint_value(responses, "/users/:username/browse");
+            let mut rows = root.as_ref().map(value_array).unwrap_or_default();
+            if let Some(value) = root.as_ref() {
+                rows.extend(nested_items(value, &["directories"]));
+                rows.extend(nested_items(value, &["files"]));
+            }
+            rows.iter()
+                .take(50)
+                .map(|item| {
+                    let name = value_text(item, &["name", "filename", "path", "directory"])
+                        .unwrap_or_else(|| "Browse entry".to_string());
+                    let kind =
+                        value_text(item, &["type", "kind"]).unwrap_or_else(|| "file".to_string());
+                    let size =
+                        value_text(item, &["size", "bytes"]).unwrap_or_else(|| "0".to_string());
+                    (name, kind, size, "Download".to_string())
+                })
+                .collect::<Vec<_>>()
+        }
+        RouteKind::System => {
+            let mut rows = Vec::new();
+            if let Some(server) = json_endpoint_value(responses, "/server") {
+                rows.push((
+                    "Connection".to_string(),
+                    value_text(&server, &["state", "status"])
+                        .unwrap_or_else(|| "pending".to_string()),
+                    value_text(&server, &["username", "server"])
+                        .unwrap_or_else(|| "session".to_string()),
+                    "Connect".to_string(),
+                ));
+            }
+            if let Some(database) = json_endpoint_value(responses, "/database/stats") {
+                rows.push((
+                    "Database".to_string(),
+                    value_text(&database, &["status", "state"])
+                        .unwrap_or_else(|| "ready".to_string()),
+                    value_text(&database, &["size", "path"]).unwrap_or_else(|| "stats".to_string()),
+                    "Vacuum".to_string(),
+                ));
+            }
+            rows
+        }
+    };
+
+    if rows.is_empty() {
+        None
+    } else {
+        Some(rows)
+    }
 }
 
 fn reference_field_html(label: &str, placeholder: &str) -> String {
@@ -3185,6 +3627,18 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
             "Filter events, update preferences, and review automation from tabs without exposing raw metrics by default.",
         ),
     };
+    let table_rows = route_dynamic_rows(kind, responses).unwrap_or_else(|| {
+        rows.iter()
+            .map(|(primary, secondary, meta, action)| {
+                (
+                    (*primary).to_string(),
+                    (*secondary).to_string(),
+                    (*meta).to_string(),
+                    (*action).to_string(),
+                )
+            })
+            .collect()
+    });
     format!(
         r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}"><div class="slskr-workflow-tabs">{tabs}</div>{reference}<div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></div>"#,
         kind = kind,
@@ -3200,7 +3654,7 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
                 "loading"
             }
         ),
-        table = workflow_table_html(&table_headers, &rows),
+        table = workflow_table_owned_html(&table_headers, &table_rows),
         side_title = escape_html(side_title),
         side_body = escape_html(side_body),
         empty = empty_state_html(
@@ -7275,6 +7729,70 @@ mod tests {
             assert!(html.contains("slskr-route-summary"));
             assert!(html.contains("data-slskr-refresh-route"));
         }
+    }
+
+    #[test]
+    fn route_workflows_render_populated_api_rows() {
+        let search = route_workspace_result_html(
+            "/searches/42",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/searches/:id/responses",
+                    surface: "search",
+                },
+                body: r#"[{"username":"peer-live","hasFreeUploadSlot":true,"queueLength":2,"files":[{"filename":"Artist/Album/01 Track.flac"}]}]"#.to_string(),
+            }],
+        );
+        assert!(search.contains("Artist/Album/01 Track.flac"));
+        assert!(search.contains("peer-live"));
+        assert!(search.contains("free slot / queue 2"));
+
+        let downloads = route_workspace_result_html(
+            "/downloads",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/transfers/downloads",
+                    surface: "transfers",
+                },
+                body: r#"[{"username":"peer-down","files":[{"filename":"Remote/Song.mp3","state":"InProgress","progress":0.5,"speed":"1 MB/s"}]}]"#.to_string(),
+            }],
+        );
+        assert!(downloads.contains("Remote/Song.mp3"));
+        assert!(downloads.contains("peer-down"));
+        assert!(downloads.contains("InProgress / 50% / 1 MB/s"));
+
+        let messages = route_workspace_result_html(
+            "/messages",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/conversations",
+                    surface: "messages",
+                },
+                body: r#"[{"username":"peer-msg","lastMessage":"hello","unreadCount":3}]"#
+                    .to_string(),
+            }],
+        );
+        assert!(messages.contains("peer-msg"));
+        assert!(messages.contains("hello"));
+        assert!(messages.contains("3 unread"));
+
+        let collections = route_workspace_result_html(
+            "/collections",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/collections",
+                    surface: "collections",
+                },
+                body: r#"[{"title":"Live Collection","type":"Playlist","itemCount":7}]"#
+                    .to_string(),
+            }],
+        );
+        assert!(collections.contains("Live Collection"));
+        assert!(collections.contains("7 items"));
     }
 
     #[test]

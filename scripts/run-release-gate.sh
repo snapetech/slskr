@@ -52,6 +52,7 @@ else
 fi
 
 run_step "Rust package check" scripts/check-release-package.sh
+run_step "Client SDK gates" scripts/check-client-sdk-gates.sh
 
 if [[ "${SLSKR_RUN_SLSKD_API_COMPAT_SMOKE:-0}" == "1" ]]; then
   run_step "slskd API compatibility smoke" scripts/run-slskd-api-compat-smoke.sh

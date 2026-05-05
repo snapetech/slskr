@@ -62,6 +62,13 @@ jobs:
             web/package-lock.json
             dashboard/package-lock.json
             client-ts/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: client-go/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install workflow and shell linters
         run: |
           sudo apt-get update
