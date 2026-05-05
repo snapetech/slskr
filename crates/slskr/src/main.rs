@@ -5811,7 +5811,7 @@ async fn route_http_request_with_headers(
             if parts.len() < 5 {
                 return Ok(routing::not_found_response());
             }
-            let room_name = parts[4];
+            let room_name = decoded_path_segment(parts[4]);
             let rooms = state.rooms.read().await;
             if let Some(_room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let json = "[]".to_string();
@@ -5828,7 +5828,7 @@ async fn route_http_request_with_headers(
             if parts.len() < 5 {
                 return Ok(routing::not_found_response());
             }
-            let room_name = parts[4];
+            let room_name = decoded_path_segment(parts[4]);
             let rooms = state.rooms.read().await;
             if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let messages = room
@@ -6203,7 +6203,7 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(record.json()))
         }
         ("GET", path) if path.starts_with("/api/rooms/joined/") && path.matches('/').count() == 4 => {
-            let room_name = path.rsplit('/').next().unwrap_or("");
+            let room_name = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
             let rooms = state.rooms.read().await;
             let response = rooms
                 .records
@@ -6219,6 +6219,7 @@ async fn route_http_request_with_headers(
                 .trim_start_matches("/api/rooms/joined/")
                 .strip_suffix("/messages")
                 .unwrap_or("");
+            let room_name = decoded_path_segment(room_name);
             let message_body = json_body_string(body)
                 .or_else(|| extract_json_string_field(body, "message"))
                 .or_else(|| extract_json_string_field(body, "body"))
@@ -6254,6 +6255,7 @@ async fn route_http_request_with_headers(
                 .split('/')
                 .next()
                 .unwrap_or("");
+            let room_name = decoded_path_segment(room_name);
             if room_name.is_empty() {
                 return Ok(routing::bad_request_response("room is required"));
             }
@@ -6275,7 +6277,7 @@ async fn route_http_request_with_headers(
         }
         // GET room detail by name
         ("GET", path) if path.starts_with("/api/rooms/") && !path.ends_with("/messages") && !path.ends_with("/users") && path.matches('/').count() == 3 => {
-            let room_name = path.rsplit('/').next().unwrap_or("");
+            let room_name = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
             let rooms = state.rooms.read().await;
             if let Some(record) = rooms.records.iter().find(|r| r.name == room_name) {
                 Ok(routing::ok_response(record.json()))
@@ -8015,6 +8017,7 @@ async fn route_http_request_with_headers(
             let Some(username) = path_segment_after(path, "/api/conversations/") else {
                 return Ok(routing::not_found_response());
             };
+            let username = decoded_path_segment(username);
             let mut messages = state.messages.write().await;
             let before = messages.records.len();
             messages.records.retain(|record| record.username != username);
@@ -8401,6 +8404,9 @@ async fn route_http_request_with_headers(
                  json_escape(grant_id)
              )))
          }
+        (method, path) if slskdn_native_compat_path(path) => {
+            Ok(slskdn_native_compat_response(method, path))
+        }
         _ => {
             tracing::complete_request_span(404);
             Ok(routing::not_found_response())
@@ -8904,6 +8910,59 @@ fn path_segment_after<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
 
 fn decoded_path_segment(segment: &str) -> String {
     percent_decode(segment)
+}
+
+fn slskdn_native_compat_path(path: &str) -> bool {
+    let path = path.to_ascii_lowercase();
+    let prefixes = [
+        "/api/slskdn",
+        "/api/multisource",
+        "/api/podcore",
+        "/api/hashdb",
+        "/api/streams",
+        "/api/listening-party",
+        "/api/mesh",
+        "/api/jobs",
+        "/api/library/items",
+        "/api/virtualsoulfind",
+        "/api/audio",
+        "/api/mediacore",
+        "/api/playback",
+        "/api/traces",
+        "/api/fairness",
+        "/api/ranking",
+        "/api/portforwarding",
+        "/api/signals",
+        "/api/backfill",
+        "/api/discovery",
+        "/api/security",
+        "/api/pods",
+        "/api/solid",
+        "/api/federation",
+    ];
+    prefixes
+        .iter()
+        .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+}
+
+fn slskdn_native_compat_response(method: &str, path: &str) -> HttpResponse {
+    let body = serde_json::json!({
+        "path": path,
+        "method": method,
+        "status": "disabled",
+        "enabled": false,
+        "supported": true,
+        "items": [],
+        "jobs": [],
+        "message": "slskdN compatibility surface is present, but this feature is not active in this runtime"
+    })
+    .to_string();
+
+    if method == "POST" {
+        routing::accepted_response(body)
+    } else {
+        routing::ok_response(body)
+    }
 }
 
 fn conversation_message_path(path: &str) -> Option<(&str, u64)> {
@@ -14184,6 +14243,106 @@ mod tests {
         ];
 
         for (method, path, body) in query_contract_routes {
+            let response = tokio::time::timeout(
+                Duration::from_secs(1),
+                super::route_http_request(method, path, None, body, &state),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
+            .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            assert!(
+                !response.status.starts_with('5'),
+                "{method} {path}: {}",
+                response.status
+            );
+            while receiver.try_recv().is_ok() {}
+        }
+
+        let encoded_path_routes = [
+            ("GET", "/api/users/peer%201/browse", ""),
+            ("GET", "/api/users/peer%201/browse/status", ""),
+            (
+                "POST",
+                "/api/transfers/downloads/peer%201",
+                r#"[{"filename":"Remote/Encoded.mp3","size":11}]"#,
+            ),
+            ("GET", "/api/transfers/downloads/peer%201", ""),
+            ("GET", "/api/transfers/downloads/peer%201/1", ""),
+            (
+                "DELETE",
+                "/api/transfers/downloads/peer%201/1?remove=true",
+                "",
+            ),
+            ("POST", "/api/rooms/joined", r#""room space""#),
+            ("GET", "/api/rooms/joined/room%20space", ""),
+            (
+                "POST",
+                "/api/rooms/joined/room%20space/messages",
+                r#""hello""#,
+            ),
+            ("GET", "/api/rooms/joined/room%20space/messages", ""),
+            ("POST", "/api/conversations/peer%201", r#""hello encoded""#),
+            ("GET", "/api/conversations/peer%201", ""),
+            ("GET", "/api/conversations/peer%201/messages", ""),
+            ("PUT", "/api/conversations/peer%201", ""),
+            ("DELETE", "/api/conversations/peer%201", ""),
+        ];
+
+        for (method, path, body) in encoded_path_routes {
+            let response = tokio::time::timeout(
+                Duration::from_secs(1),
+                super::route_http_request(method, path, None, body, &state),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
+            .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            assert!(
+                !response.status.starts_with('5'),
+                "{method} {path}: {}",
+                response.status
+            );
+            while receiver.try_recv().is_ok() {}
+        }
+
+        let slskdn_native_routes = [
+            ("GET", "/api/slskdn", ""),
+            ("GET", "/api/slskdn/library/health", ""),
+            ("POST", "/api/slskdn/warm-cache", ""),
+            ("GET", "/api/hashdb/stats", ""),
+            ("POST", "/api/hashdb/backfill/from-history", ""),
+            ("GET", "/api/streams/content-1", ""),
+            ("GET", "/api/listening-party", ""),
+            ("POST", "/api/listening-party/radio/party/content", ""),
+            ("GET", "/api/mesh/health", ""),
+            ("GET", "/api/mesh/stats", ""),
+            (
+                "POST",
+                "/api/multisource/download",
+                r#"{"filename":"x","size":1}"#,
+            ),
+            ("GET", "/api/multisource/jobs/job-1", ""),
+            ("GET", "/api/podcore/content/search?query=cover", ""),
+            ("POST", "/api/podcore/membership/join", r#"{"podId":"pod"}"#),
+            ("GET", "/api/library/items", ""),
+            ("GET", "/api/virtualsoulfind/canonical/status", ""),
+            ("POST", "/api/audio/variants/dedupe", ""),
+            ("POST", "/api/mediacore/retrieve", ""),
+            ("GET", "/api/playback/status", ""),
+            ("GET", "/api/traces", ""),
+            ("GET", "/api/fairness", ""),
+            ("GET", "/api/ranking", ""),
+            ("GET", "/api/portforwarding/status", ""),
+            ("GET", "/api/signals", ""),
+            ("POST", "/api/backfill", ""),
+            ("GET", "/api/security/status", ""),
+            ("GET", "/api/pods", ""),
+            ("GET", "/api/solid/status", ""),
+            ("GET", "/api/federation/diagnostics", ""),
+        ];
+
+        for (method, path, body) in slskdn_native_routes {
             let response = tokio::time::timeout(
                 Duration::from_secs(1),
                 super::route_http_request(method, path, None, body, &state),
