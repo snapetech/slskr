@@ -5056,7 +5056,7 @@ fn run_native_route_action(
         .location()
         .pathname()
         .unwrap_or_else(|_| "/searches".to_string());
-    let value = native_action_value(document, button);
+    let value = native_action_value(document, button, action.body);
     let body = action_body_from_value(action.body, &value);
     let method = action.method.to_string();
     let label = action.label.to_string();
@@ -5096,28 +5096,154 @@ fn run_native_route_action(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn native_action_value(document: &web_sys::Document, button: &web_sys::Element) -> String {
+fn native_action_value(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    body: ActionBody,
+) -> String {
     if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
-        for selector in [
-            "input:not([type=checkbox]):not([type=radio])",
-            "textarea",
-            "select",
-        ] {
-            if let Ok(Some(element)) = workspace.query_selector(selector) {
-                if let Some(value) = form_control_value(&element) {
-                    if !value.trim().is_empty() {
-                        return value;
-                    }
-                }
+        for selector in native_action_value_selectors(body) {
+            if let Some(value) = first_workspace_value(&workspace, selector) {
+                return value;
+            }
+        }
+        if matches!(
+            body,
+            ActionBody::DownloadFiles
+                | ActionBody::ShareGrant
+                | ActionBody::ShareGroupMember
+                | ActionBody::Username
+        ) {
+            if let Some(value) = selected_native_row_title(&workspace) {
+                return value;
+            }
+        }
+        for selector in native_generic_value_selectors() {
+            if let Some(value) = first_workspace_value(&workspace, selector) {
+                return value;
             }
         }
     }
+    document_selected_native_row_title(document).unwrap_or_else(|| native_action_fallback(body))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_action_value_selectors(body: ActionBody) -> &'static [&'static str] {
+    match body {
+        ActionBody::BrowseDirectory => &[
+            r#"input[aria-label="Folder"]"#,
+            r#"input[aria-label="Username"]"#,
+            r#"input[aria-label="Chat username"]"#,
+        ],
+        ActionBody::CollectionItem => &[
+            r#"input[aria-label="Search for item"]"#,
+            r#"input[aria-label="Title"]"#,
+        ],
+        ActionBody::ConversationMessage | ActionBody::RoomMessage => &[
+            r#"textarea[aria-label="Message"]"#,
+            r#"input[aria-label="Message"]"#,
+            r#"input[aria-label="Chat username"]"#,
+        ],
+        ActionBody::DownloadFiles => &[
+            r#"input[aria-label="Folder"]"#,
+            r#"input[aria-label="Search for item"]"#,
+        ],
+        ActionBody::FeedPreview => &[
+            r#"textarea[aria-label="Playlist rows"]"#,
+            r#"input[aria-label="Playlist source"]"#,
+            r#"input[aria-label="Playlist name"]"#,
+            r#"input[aria-label="Playlist text"]"#,
+        ],
+        ActionBody::JsonString => &[
+            r#"input[aria-label="Search rooms"]"#,
+            r#"input[aria-label="Room"]"#,
+            r#"input[aria-label="Chat username"]"#,
+            r#"input[aria-label="Artist Name"]"#,
+        ],
+        ActionBody::NameDescription => &[
+            r#"input[aria-label="Title"]"#,
+            r#"input[aria-label="Group Name"]"#,
+            r#"input[aria-label="Collection name"]"#,
+            r#"input[aria-label="Description"]"#,
+        ],
+        ActionBody::Permissions => &[r#"select[aria-label="Permissions"]"#],
+        ActionBody::SearchText => &[
+            r#"input[aria-label="Search text"]"#,
+            r#"input[aria-label="Search Text"]"#,
+            r#"input[aria-label="Wanted search"]"#,
+            r#"input[aria-label="Artist Name"]"#,
+            r#"input[aria-label="Seed artist or query"]"#,
+            r#"textarea[aria-label="Playlist rows"]"#,
+        ],
+        ActionBody::ShareGrant | ActionBody::ShareGroupMember | ActionBody::Username => &[
+            r#"input[aria-label="Username"]"#,
+            r#"input[aria-label="Soulseek Username"]"#,
+            r#"input[aria-label="Contact username"]"#,
+            r#"input[aria-label="Chat username"]"#,
+            r#"input[aria-label="Nickname"]"#,
+        ],
+        ActionBody::EnabledFalse | ActionBody::EnabledTrue | ActionBody::None => &[],
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_generic_value_selectors() -> &'static [&'static str] {
+    &[
+        "input:not([type=checkbox]):not([type=radio])",
+        "textarea",
+        "select",
+    ]
+}
+
+#[cfg(target_arch = "wasm32")]
+fn first_workspace_value(workspace: &web_sys::Element, selector: &str) -> Option<String> {
+    workspace
+        .query_selector(selector)
+        .ok()
+        .flatten()
+        .and_then(|element| form_control_value(&element))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn selected_native_row_title(workspace: &web_sys::Element) -> Option<String> {
+    workspace
+        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute("data-slskr-native-title"))
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn document_selected_native_row_title(document: &web_sys::Document) -> Option<String> {
     document
         .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
         .ok()
         .flatten()
         .and_then(|row| row.get_attribute("data-slskr-native-title"))
-        .unwrap_or_else(|| "peer1".to_string())
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn native_action_fallback(body: ActionBody) -> String {
+    match body {
+        ActionBody::BrowseDirectory => "/".to_string(),
+        ActionBody::CollectionItem => "Demo Track".to_string(),
+        ActionBody::ConversationMessage => "hello".to_string(),
+        ActionBody::DownloadFiles => "Remote/Song.mp3".to_string(),
+        ActionBody::FeedPreview => "Public Domain Jazz - Demo Track".to_string(),
+        ActionBody::JsonString => "contract-room".to_string(),
+        ActionBody::NameDescription => "Rust Web Demo".to_string(),
+        ActionBody::Permissions => "read".to_string(),
+        ActionBody::RoomMessage => "hello room".to_string(),
+        ActionBody::SearchText => "public domain jazz".to_string(),
+        ActionBody::ShareGrant | ActionBody::ShareGroupMember | ActionBody::Username => {
+            "peer1".to_string()
+        }
+        ActionBody::EnabledFalse | ActionBody::EnabledTrue | ActionBody::None => String::new(),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -9792,6 +9918,25 @@ mod tests {
                 .unwrap_or_else(|| panic!("{path} {label} should resolve"));
             assert_eq!(action.label, expected_action);
         }
+    }
+
+    #[test]
+    fn native_action_fallbacks_are_domain_specific() {
+        assert_eq!(
+            native_action_fallback(ActionBody::SearchText),
+            "public domain jazz"
+        );
+        assert_eq!(
+            native_action_fallback(ActionBody::FeedPreview),
+            "Public Domain Jazz - Demo Track"
+        );
+        assert_eq!(
+            native_action_fallback(ActionBody::DownloadFiles),
+            "Remote/Song.mp3"
+        );
+        assert_eq!(native_action_fallback(ActionBody::BrowseDirectory), "/");
+        assert_eq!(native_action_fallback(ActionBody::Username), "peer1");
+        assert!(native_action_fallback(ActionBody::None).is_empty());
     }
 
     #[test]
