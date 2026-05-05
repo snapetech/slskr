@@ -398,6 +398,20 @@ impl SearchResultEntry {
             json_u32_option(self.queue_length)
         )
     }
+
+    fn slskd_file_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "filename": self.filename,
+            "size": self.size,
+            "code": 1,
+            "isLocked": !self.slot_free.unwrap_or(true),
+            "extension": self.extension,
+            "bitRate": null,
+            "bitDepth": null,
+            "length": null,
+            "sampleRate": null,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -422,18 +436,60 @@ impl SearchRecord {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"token\":{},\"query\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"result_count\":{},\"results\":[{}],\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"responseCount\":{},\"results\":[{}],\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
             self.token,
+            self.token,
+            json_escape(&self.query),
             json_escape(&self.query),
             self.target,
             json_option(self.target_name.as_deref()),
             self.status,
+            if self.status == "active" { "InProgress" } else { "Completed" },
+            self.status != "active",
             self.results.len(),
+            self.results.len(),
+            self.results
+                .iter()
+                .filter(|entry| entry.peer_username.is_some())
+                .count(),
             results,
             self.expires_at,
             self.created_at,
             self.updated_at
         )
+    }
+
+    fn slskd_responses_json(&self) -> String {
+        let mut grouped: BTreeMap<String, Vec<&SearchResultEntry>> = BTreeMap::new();
+        for result in &self.results {
+            grouped
+                .entry(result.peer_username.clone().unwrap_or_default())
+                .or_default()
+                .push(result);
+        }
+        let responses = grouped
+            .into_iter()
+            .map(|(username, entries)| {
+                let files = entries
+                    .iter()
+                    .map(|entry| entry.slskd_file_json())
+                    .collect::<Vec<_>>();
+                let file_count = files.len();
+                let first = entries.first().copied();
+                serde_json::json!({
+                    "username": username,
+                    "token": self.token,
+                    "hasFreeUploadSlot": first.and_then(|entry| entry.slot_free).unwrap_or(true),
+                    "queueLength": first.and_then(|entry| entry.queue_length).unwrap_or(0),
+                    "uploadSpeed": first.and_then(|entry| entry.average_speed).unwrap_or(0),
+                    "fileCount": file_count,
+                    "files": files,
+                    "lockedFileCount": 0,
+                    "lockedFiles": [],
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::Value::Array(responses).to_string()
     }
 
     fn from_persisted(record: &persistence::SearchRecord) -> Option<Self> {
@@ -888,6 +944,61 @@ impl TransferEntry {
             self.updated_at
         )
     }
+
+    fn slskd_file_json(&self) -> serde_json::Value {
+        let size = self.size.unwrap_or(0);
+        let bytes_remaining = size.saturating_sub(self.bytes_transferred);
+        let percent_complete = if size == 0 {
+            0.0
+        } else {
+            (self.bytes_transferred as f64 / size as f64) * 100.0
+        };
+        let started_at = if self.status == "queued" {
+            String::new()
+        } else {
+            self.updated_at.to_string()
+        };
+        let ended_at = if matches!(
+            self.status.as_str(),
+            "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+        ) {
+            self.updated_at.to_string()
+        } else {
+            String::new()
+        };
+        serde_json::json!({
+            "id": self.id.to_string(),
+            "username": self.peer_username.as_deref().unwrap_or_default(),
+            "direction": if self.direction == 0 { "Download" } else { "Upload" },
+            "filename": self.filename,
+            "size": size,
+            "startOffset": 0,
+            "state": slskd_transfer_state(&self.status),
+            "requestedAt": self.requested_at.to_string(),
+            "enqueuedAt": self.requested_at.to_string(),
+            "startedAt": started_at,
+            "endedAt": ended_at,
+            "bytesTransferred": self.bytes_transferred,
+            "averageSpeed": 0.0,
+            "bytesRemaining": bytes_remaining,
+            "elapsedTime": "",
+            "percentComplete": percent_complete,
+            "remainingTime": "",
+        })
+    }
+}
+
+fn slskd_transfer_state(status: &str) -> &str {
+    match status {
+        "queued" => "Queued",
+        "accepted" | "peer_lookup" | "peer_negotiating" | "indirect_pending" | "in_progress" => {
+            "InProgress"
+        }
+        "succeeded" | "completed" => "Completed",
+        "cancelled" => "Cancelled",
+        "failed" | "rejected" => "Failed",
+        other => other,
+    }
 }
 
 #[derive(Debug)]
@@ -1217,6 +1328,49 @@ impl TransferQueue {
 
     fn summary_json(&self) -> String {
         self.stats_json()
+    }
+
+    fn slskd_transfers_json(&self, direction: u32, username: Option<&str>) -> String {
+        let mut grouped: BTreeMap<String, Vec<&TransferEntry>> = BTreeMap::new();
+        for entry in self.entries.iter().filter(|entry| {
+            entry.direction == direction
+                && username.map_or(true, |username| {
+                    entry.peer_username.as_deref() == Some(username)
+                })
+        }) {
+            grouped
+                .entry(entry.peer_username.clone().unwrap_or_default())
+                .or_default()
+                .push(entry);
+        }
+
+        let transfers = grouped
+            .into_iter()
+            .map(|(username, entries)| {
+                let files = entries
+                    .into_iter()
+                    .map(TransferEntry::slskd_file_json)
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "username": username,
+                    "directories": [{
+                        "directory": "",
+                        "fileCount": files.len(),
+                        "files": files,
+                    }],
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::Value::Array(transfers).to_string()
+    }
+
+    fn slskd_transfer_json(&self, direction: u32, username: &str, id: u64) -> Option<String> {
+        let entry = self.entries.iter().find(|entry| {
+            entry.direction == direction
+                && entry.id == id
+                && entry.peer_username.as_deref() == Some(username)
+        })?;
+        Some(entry.slskd_file_json().to_string())
     }
 
     fn json(&self, query: Option<&str>) -> String {
@@ -3601,6 +3755,50 @@ async fn route_http_request_with_headers(
         ("GET", "/api/health") => Ok(health_response()),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
+        ("GET", "/api/application") => {
+            let session = state.session.read().await;
+            let shares = state.shares.read().await;
+            let rooms = state.rooms.read().await;
+            let users = state.users.read().await;
+            let body = slskd_application_state_json(&session, &shares, &rooms, &users, &state.config);
+            drop(users);
+            drop(rooms);
+            drop(shares);
+            drop(session);
+            Ok(routing::ok_response(body))
+        }
+        ("GET", "/api/application/version/latest") => {
+            Ok(routing::ok_response(slskd_version_json().to_string()))
+        }
+        ("PUT", "/api/application") | ("DELETE", "/api/application") => {
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        }
+        ("GET", "/api/server") => {
+            let session = state.session.read().await;
+            let body = slskd_server_state_json(&session, &state.config).to_string();
+            drop(session);
+            Ok(routing::ok_response(body))
+        }
+        ("POST", "/api/server") => {
+            send_session_command(state, SessionCommand::Connect).await.ok();
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        }
+        ("DELETE", "/api/server") => {
+            send_session_command(state, SessionCommand::Disconnect).await.ok();
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        }
+        ("GET", "/api/session/enabled") => Ok(routing::ok_response(format!(
+            "{{\"enabled\":{}}}",
+            state.config.auth_required
+        ))),
+        ("POST", "/api/session") => Ok(routing::ok_response(serde_json::json!({
+            "name": "slskr",
+            "tokenType": "ApiKey",
+            "token": state.config.api_token.as_deref().unwrap_or_default(),
+            "issued": unix_timestamp().to_string(),
+            "notBefore": unix_timestamp().to_string(),
+            "expires": "",
+        }).to_string())),
         ("GET", "/api/capabilities/peers") => {
             let users = state.users.read().await;
             let peers: Vec<serde_json::Value> = users.records.iter().map(|user| {
@@ -4352,9 +4550,11 @@ async fn route_http_request_with_headers(
             })
         }
         ("POST", "/api/searches") => {
-            let query = match extract_json_string_field(body, "query") {
+            let query = match extract_json_string_field(body, "query")
+                .or_else(|| extract_json_string_field(body, "searchText"))
+            {
                 Some(q) => q,
-                None => return Ok(routing::bad_request_response("query is required")),
+                None => return Ok(routing::bad_request_response("query/searchText is required")),
             };
 
             let target_str = extract_json_string_field(body, "target").unwrap_or_else(|| "global".to_string());
@@ -4519,6 +4719,24 @@ async fn route_http_request_with_headers(
 
         // TRANSFER ENDPOINTS
         ("POST", "/api/transfers") => {
+            if let Some((username, files)) = slskd_enqueue_request(body) {
+                let mut transfers = state.transfers.write().await;
+                for file in files {
+                    let filename = file
+                        .get("filename")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned();
+                    if filename.is_empty() {
+                        continue;
+                    }
+                    let size = file.get("size").and_then(serde_json::Value::as_u64);
+                    transfers.create(0, Some(username.clone()), filename, None, size);
+                }
+                drop(transfers);
+                return Ok(routing::ok_response("true".to_owned()));
+            }
+
             let filename = match extract_json_string_field(body, "filename") {
                 Some(f) => f,
                 None => return Ok(routing::bad_request_response("filename is required")),
@@ -4540,17 +4758,133 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", "/api/transfers/downloads") => {
-             Ok(routing::ok_response("[]".to_string()))
+             let transfers = state.transfers.read().await;
+             let body = transfers.slskd_transfers_json(0, None);
+             drop(transfers);
+             Ok(routing::ok_response(body))
          }
 
          ("GET", "/api/transfers/uploads") => {
-             Ok(routing::ok_response("[]".to_string()))
+             let transfers = state.transfers.read().await;
+             let body = transfers.slskd_transfers_json(1, None);
+             drop(transfers);
+             Ok(routing::ok_response(body))
          }
 
          ("GET", "/api/transfers/downloads/accelerated") => {
              Ok(routing::ok_response(
                  "{\"enabled\":false,\"available\":false,\"accelerated\":[],\"count\":0}".to_string(),
              ))
+         }
+
+         ("GET", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
+             let Some(username) = slskd_transfer_user_path(path, "downloads") else {
+                 return Ok(routing::not_found_response());
+             };
+             let transfers = state.transfers.read().await;
+             let body = transfers.slskd_transfers_json(0, Some(username));
+             drop(transfers);
+             Ok(routing::ok_response(body))
+         }
+
+         ("GET", path) if slskd_transfer_user_path(path, "uploads").is_some() => {
+             let Some(username) = slskd_transfer_user_path(path, "uploads") else {
+                 return Ok(routing::not_found_response());
+             };
+             let transfers = state.transfers.read().await;
+             let body = transfers.slskd_transfers_json(1, Some(username));
+             drop(transfers);
+             Ok(routing::ok_response(body))
+         }
+
+         ("GET", path) if slskd_transfer_file_path(path, "downloads").is_some() && !path.ends_with("/position") => {
+             let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
+                 return Ok(routing::not_found_response());
+             };
+             let transfers = state.transfers.read().await;
+             let response = transfers
+                 .slskd_transfer_json(0, username, id)
+                 .map(routing::ok_response)
+                 .unwrap_or_else(routing::not_found_response);
+             drop(transfers);
+             Ok(response)
+         }
+
+         ("GET", path) if slskd_transfer_file_path(path, "uploads").is_some() && !path.ends_with("/position") => {
+             let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
+                 return Ok(routing::not_found_response());
+             };
+             let transfers = state.transfers.read().await;
+             let response = transfers
+                 .slskd_transfer_json(1, username, id)
+                 .map(routing::ok_response)
+                 .unwrap_or_else(routing::not_found_response);
+             drop(transfers);
+             Ok(response)
+         }
+
+         ("GET", path) if slskd_transfer_position_path(path).is_some() => {
+             Ok(routing::ok_response("0".to_owned()))
+         }
+
+         ("POST", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
+             let Some(username) = slskd_transfer_user_path(path, "downloads") else {
+                 return Ok(routing::not_found_response());
+             };
+             let files = slskd_files_from_body(body);
+             let mut transfers = state.transfers.write().await;
+             for file in files {
+                 let filename = file
+                     .get("filename")
+                     .and_then(serde_json::Value::as_str)
+                     .unwrap_or_default()
+                     .to_owned();
+                 if filename.is_empty() {
+                     continue;
+                 }
+                 let size = file.get("size").and_then(serde_json::Value::as_u64);
+                 transfers.create(0, Some(username.to_owned()), filename, None, size);
+             }
+             drop(transfers);
+             Ok(routing::ok_response("true".to_owned()))
+         }
+
+         ("DELETE", path) if slskd_transfer_file_path(path, "downloads").is_some() => {
+             let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
+                 return Ok(routing::not_found_response());
+             };
+             let mut transfers = state.transfers.write().await;
+             let matches_transfer = transfers.entries.iter().any(|entry| {
+                 entry.id == id && entry.direction == 0 && entry.peer_username.as_deref() == Some(username)
+             });
+             let updated = matches_transfer
+                 .then(|| transfers.update_status(id, "cancelled", None, None))
+                 .flatten();
+             drop(transfers);
+             Ok(if updated.is_some() {
+                 routing::ok_response("true".to_owned())
+             } else {
+                 routing::not_found_response()
+             })
+         }
+
+         ("DELETE", path) if slskd_transfer_file_path(path, "uploads").is_some() => {
+             let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
+                 return Ok(routing::not_found_response());
+             };
+             let mut transfers = state.transfers.write().await;
+             let matches_transfer = transfers.entries.iter().any(|entry| {
+                 entry.id == id && entry.direction == 1 && entry.peer_username.as_deref() == Some(username)
+             });
+             let updated = matches_transfer
+                 .then(|| transfers.update_status(id, "cancelled", None, None))
+                 .flatten();
+             drop(transfers);
+             Ok(if updated.is_some() {
+                 routing::ok_response("true".to_owned())
+             } else {
+                 routing::not_found_response()
+             })
          }
 
          // GET individual transfer
@@ -4890,18 +5224,7 @@ async fn route_http_request_with_headers(
             if let Ok(token) = parts[3].parse::<u32>() {
                 let searches = state.searches.read().await;
                 if let Some(record) = searches.records.iter().find(|s| s.token == token) {
-                    let responses = record
-                        .results
-                        .iter()
-                        .map(SearchResultEntry::json)
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let json = format!(
-                        "{{\"token\":{},\"responses\":[{}],\"count\":{}}}",
-                        token,
-                        responses,
-                        record.results.len()
-                    );
+                    let json = record.slskd_responses_json();
                     drop(searches);
                     Ok(routing::ok_response(json))
                 } else {
@@ -5598,20 +5921,6 @@ async fn route_http_request_with_headers(
             })
         }
         // WEBUI PARITY: Application/Server/Session status endpoints
-        ("GET", "/api/application") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"name":"slskr","version":"0.1.0","status":"running"}"#.to_owned(),
-            })
-        }
-        ("GET", "/api/application/version/latest") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"latest":"0.1.0","current":"0.1.0","update_available":false}"#.to_owned(),
-            })
-        }
         ("GET", "/api/application/build") => {
             Ok(routing::ok_response(
                 serde_json::json!({
@@ -5629,26 +5938,6 @@ async fn route_http_request_with_headers(
                 })
                 .to_string(),
             ))
-        }
-        ("GET", "/api/server") => {
-            let session = state.session.read().await;
-            let is_connected = session.state == "connected";
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: format!(
-                    r#"{{"address":"{}","port":2242,"connected":{}}}"#,
-                    "server.slsknet.org",
-                    is_connected
-                ),
-            })
-        }
-        ("GET", "/api/session/enabled") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: state.config.auth_required.to_string(),
-            })
         }
         // WEBUI PARITY: Options/Config read-write endpoints
         ("GET", "/api/options") => {
@@ -6617,10 +6906,6 @@ async fn route_http_request_with_headers(
         }
 
         // ADDITIONAL MISSING PUT ENDPOINTS (Phase 5)
-        ("PUT", "/api/application") => {
-            Ok(routing::ok_response("{\"status\":\"accepted\",\"restart_required\":false,\"persisted\":false}".to_owned()))
-        }
-
         ("PUT", "/api/autoreplace/disable") => {
             Ok(routing::ok_response("{\"enabled\":false,\"persisted\":false}".to_owned()))
         }
@@ -7207,10 +7492,6 @@ async fn route_http_request_with_headers(
         }
 
         // ADDITIONAL MISSING DELETE ENDPOINTS (Phase 5)
-        ("DELETE", "/api/application") => {
-            Ok(routing::accepted_response("{\"status\":\"shutdown_requested\"}".to_owned()))
-        }
-
         ("DELETE", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
             let conversation_id = &path[19..];
             Ok(routing::ok_response(format!(
@@ -7237,11 +7518,6 @@ async fn route_http_request_with_headers(
 
         ("DELETE", "/api/relay") => {
             Ok(routing::ok_response("{\"relay_enabled\":false,\"status\":\"disabled\"}".to_owned()))
-        }
-
-        ("DELETE", "/api/server") => {
-            send_session_command(state, SessionCommand::Disconnect).await.ok();
-            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
 
         ("DELETE", "/api/shares") => {
@@ -7555,10 +7831,6 @@ async fn route_http_request_with_headers(
              )))
          }
 
-         ("POST", "/api/session") => {
-             Ok(routing::bad_request_response("browser login sessions require SLSKR_API_TOKEN"))
-         }
-
          ("POST", "/api/musicbrainz/release-radar/subscriptions") => {
              Ok(routing::created_response("{\"subscriptions\":[],\"created\":false}".to_owned()))
          }
@@ -7772,6 +8044,71 @@ fn version_response() -> HttpResponse {
     }
 }
 
+fn slskd_version_json() -> serde_json::Value {
+    serde_json::json!({
+        "full": APP_VERSION,
+        "current": APP_VERSION,
+        "latest": APP_VERSION,
+        "isUpdateAvailable": false,
+        "isCanary": false,
+        "isDevelopment": cfg!(debug_assertions),
+    })
+}
+
+fn slskd_server_state_json(session: &SessionSnapshot, config: &AppConfig) -> serde_json::Value {
+    let connected = session.state == "connected";
+    serde_json::json!({
+        "address": config.server_address,
+        "ipEndPoint": config.server_address,
+        "state": session.state,
+        "isConnected": connected,
+        "isConnecting": session.state == "connecting",
+        "isLoggedIn": connected,
+        "isLoggingIn": session.state == "connecting",
+        "isTransitioning": session.state == "connecting" || session.state == "disconnecting",
+    })
+}
+
+fn slskd_application_state_json(
+    session: &SessionSnapshot,
+    shares: &ShareIndexSnapshot,
+    rooms: &RoomStore,
+    users: &UserStore,
+    config: &AppConfig,
+) -> String {
+    serde_json::json!({
+        "version": slskd_version_json(),
+        "pendingReconnect": false,
+        "pendingRestart": false,
+        "server": slskd_server_state_json(session, config),
+        "connectionWatchdog": {
+            "enabled": config.reconnect,
+            "reconnectDelaySeconds": config.reconnect_delay.as_secs(),
+        },
+        "relay": { "enabled": false },
+        "user": {
+            "username": session.username,
+            "privilegesSeconds": session.privileges_seconds,
+        },
+        "distributedNetwork": { "enabled": false },
+        "shares": {
+            "local": shares.roots.iter().map(|root| serde_json::json!({
+                "id": root.label,
+                "alias": root.label,
+                "isExcluded": false,
+                "localPath": root.label,
+                "raw": root.label,
+                "remotePath": root.label,
+                "directories": root.files,
+                "files": root.files,
+            })).collect::<Vec<_>>(),
+        },
+        "rooms": rooms.records.iter().map(|room| room.name.clone()).collect::<Vec<_>>(),
+        "users": users.records.iter().map(|user| user.username.clone()).collect::<Vec<_>>(),
+    })
+    .to_string()
+}
+
 fn capabilities_response() -> HttpResponse {
     HttpResponse {
         status: "200 OK",
@@ -7966,7 +8303,11 @@ fn rate_limit_user_key(authorization: Option<&str>, cookie: Option<&str>) -> Str
     use sha2::{Digest, Sha256};
 
     let token = authorization
-        .and_then(|value| value.strip_prefix("Bearer "))
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("ApiKey "))
+        })
         .or_else(|| {
             cookie?.split(';').find_map(|part| {
                 let (name, value) = part.trim().split_once('=')?;
@@ -7976,6 +8317,53 @@ fn rate_limit_user_key(authorization: Option<&str>, cookie: Option<&str>) -> Str
         .unwrap_or("authenticated");
     let digest = Sha256::digest(token.as_bytes());
     format!("auth:{}", hex::encode(&digest[..16]))
+}
+
+fn slskd_transfer_user_path<'a>(path: &'a str, direction: &str) -> Option<&'a str> {
+    let prefix = format!("/api/transfers/{direction}/");
+    path.strip_prefix(&prefix)
+        .filter(|username| !username.is_empty() && !username.contains('/'))
+}
+
+fn slskd_transfer_file_path<'a>(path: &'a str, direction: &str) -> Option<(&'a str, u64)> {
+    let prefix = format!("/api/transfers/{direction}/");
+    let rest = path.strip_prefix(&prefix)?;
+    let (username, tail) = rest.split_once('/')?;
+    let id = tail.split_once('/').map_or(tail, |(id, suffix)| {
+        (suffix == "position").then_some(id).unwrap_or("")
+    });
+    if username.is_empty() || username.contains('/') || id.is_empty() {
+        return None;
+    }
+    Some((username, id.parse().ok()?))
+}
+
+fn slskd_transfer_position_path(path: &str) -> Option<(&str, u64)> {
+    slskd_transfer_file_path(path, "downloads").filter(|_| path.ends_with("/position"))
+}
+
+fn slskd_files_from_body(body: &str) -> Vec<serde_json::Value> {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    if let Some(files) = payload.get("files").and_then(serde_json::Value::as_array) {
+        return files.clone();
+    }
+    if payload.get("filename").is_some() {
+        return vec![payload];
+    }
+    payload.as_array().cloned().unwrap_or_default()
+}
+
+fn slskd_enqueue_request(body: &str) -> Option<(String, Vec<serde_json::Value>)> {
+    let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let username = payload.get("username")?.as_str()?.to_owned();
+    let files = payload
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    (!files.is_empty()).then_some((username, files))
 }
 
 async fn serve(once: bool) -> Result<(), String> {
@@ -10249,7 +10637,15 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 break;
             }
         };
-        let authorization = req.headers.authorization.as_deref();
+        let api_key_authorization;
+        let authorization = if let Some(authorization) = req.headers.authorization.as_deref() {
+            Some(authorization)
+        } else if let Some(api_key) = req.headers.x_api_key.as_deref() {
+            api_key_authorization = format!("ApiKey {api_key}");
+            Some(api_key_authorization.as_str())
+        } else {
+            None
+        };
         let sec_headers = RequestSecurityHeaders::from_http_headers(&req.headers);
 
         // Rate limiting: unauthenticated traffic is IP-keyed. Authenticated
@@ -12769,6 +13165,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slskd_automation_compat_routes_use_expected_shapes() {
+        let (state, mut receiver) = test_state();
+
+        let app = super::route_http_request("GET", "/api/v0/application", None, "", &state)
+            .await
+            .expect("application route");
+        assert_eq!(app.status, "200 OK");
+        let app_json = serde_json::from_str::<serde_json::Value>(&app.body).unwrap();
+        assert_eq!(app_json["version"]["current"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(app_json["server"]["isConnected"], false);
+
+        let server_connect = super::route_http_request("POST", "/api/v0/server", None, "", &state)
+            .await
+            .expect("server connect");
+        assert_eq!(server_connect.status, "202 Accepted");
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            super::SessionCommand::Connect
+        ));
+
+        let search = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            r#"{"searchText":"Remote Song"}"#,
+            &state,
+        )
+        .await
+        .expect("search route");
+        assert_eq!(search.status, "201 Created");
+        assert!(search.body.contains("\"searchText\":\"Remote Song\""));
+        let _ = receiver.try_recv();
+
+        let _ = super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            r#"{"token":1,"peer_username":"peer1","filename":"Remote/Song.mp3","size":99}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let responses =
+            super::route_http_request("GET", "/api/v0/searches/1/responses", None, "", &state)
+                .await
+                .expect("search responses");
+        let responses_json = serde_json::from_str::<serde_json::Value>(&responses.body).unwrap();
+        assert!(responses_json.is_array());
+        assert_eq!(responses_json[0]["username"], "peer1");
+        assert_eq!(responses_json[0]["files"][0]["filename"], "Remote/Song.mp3");
+
+        let enqueue = super::route_http_request(
+            "POST",
+            "/api/v0/transfers/downloads/peer1",
+            None,
+            r#"{"files":[{"filename":"Remote/Song.mp3","size":99}]}"#,
+            &state,
+        )
+        .await
+        .expect("enqueue download");
+        assert_eq!(enqueue.body, "true");
+
+        let downloads =
+            super::route_http_request("GET", "/api/v0/transfers/downloads", None, "", &state)
+                .await
+                .expect("downloads route");
+        let downloads_json = serde_json::from_str::<serde_json::Value>(&downloads.body).unwrap();
+        assert_eq!(downloads_json[0]["username"], "peer1");
+        assert_eq!(
+            downloads_json[0]["directories"][0]["files"][0]["direction"],
+            "Download"
+        );
+    }
+
+    #[tokio::test]
     async fn share_rescan_route_rebuilds_snapshot() {
         let (state, _receiver) = test_state();
 
@@ -13226,8 +13697,8 @@ mod tests {
                 .await
                 .expect("search responses");
         assert_eq!(responses.status, "200 OK");
+        assert!(responses.body.starts_with('['));
         assert!(responses.body.contains("\"token\":1"));
-        assert!(responses.body.contains("\"count\":1"));
         assert!(responses.body.contains("\"filename\":\"Remote/Song.mp3\""));
     }
 
@@ -14838,7 +15309,10 @@ mod tests {
             .expect("bad search");
 
         assert_eq!(response.status, "400 Bad Request");
-        assert_eq!(response.body, "{\"error\":\"query is required\"}");
+        assert_eq!(
+            response.body,
+            "{\"error\":\"query/searchText is required\"}"
+        );
     }
 
     #[tokio::test]
@@ -15203,6 +15677,17 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(allowed.status, "200 OK");
+
+        let x_api_key_allowed = super::route_http_request(
+            "GET",
+            "/api/v0/config",
+            Some("ApiKey route-token"),
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(x_api_key_allowed.status, "200 OK");
 
         let cross_site = super::route_http_request_with_headers(
             "POST",

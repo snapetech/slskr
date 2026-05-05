@@ -68,7 +68,17 @@ body {
 
 .slskr-hero p {
   color: #cdbfab;
-  margin: 0;
+  margin: 0 0 14px;
+}
+
+.slskr-hero code {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  color: #9fd8ff;
+  display: inline-block;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  padding: 6px 8px;
 }
 
 .slskr-kicker {
@@ -110,5 +120,46 @@ body {
 .slskr-panel code {
   color: #9fd8ff;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.slskr-contract {
+  border: 1px solid #34403f;
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.slskr-contract h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+
+.slskr-contract ul {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-contract li {
+  align-items: center;
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.slskr-contract strong {
+  color: #ffd166;
+  font-size: 11px;
+}
+
+.slskr-contract span {
+  color: #c6d0ca;
   font-size: 12px;
 }

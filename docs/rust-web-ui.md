@@ -14,8 +14,10 @@ operator workflows.
 - Build script: `scripts/build-rust-web.sh`
 - Output directory: `target/slskr-web`
 
-The first Rust shell covers navigation metadata and the major API-backed
-surfaces: search, transfers, messages, rooms, browse, and system status.
+The first Rust shell covers the full current route/navigation inventory and the
+major API-backed surfaces: application state, session control, search, wishlist,
+transfers, messages, rooms, browse, identity, collections, integrations, and
+system status.
 
 ## Build
 
@@ -23,6 +25,12 @@ surfaces: search, transfers, messages, rooms, browse, and system status.
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli
 scripts/build-rust-web.sh
+```
+
+Serve the Rust build through the daemon with:
+
+```bash
+SLSKR_WEB_BUILD_DIR=target/slskr-web cargo run -p slskr -- serve
 ```
 
 ## Migration Rules
@@ -34,6 +42,8 @@ scripts/build-rust-web.sh
 - Capture screenshots for every promoted route.
 - Do not remove a React route until the Rust route has matching tests and
   browser verification.
+- Keep the Rust route inventory in `crates/slskr-web` aligned with
+  `web/src/components/App.jsx` until the React route is removed.
 
 ## Route Order
 

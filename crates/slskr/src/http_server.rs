@@ -40,6 +40,7 @@ pub struct HttpHeaders {
     pub content_length: Option<usize>,
     pub transfer_encoding: Option<String>,
     pub authorization: Option<String>,
+    pub x_api_key: Option<String>,
     pub upgrade: Option<String>,
     pub sec_websocket_key: Option<String>,
     pub sec_websocket_version: Option<String>,
@@ -76,6 +77,7 @@ impl HttpHeaders {
                     }
                     "transfer-encoding" => headers.transfer_encoding = Some(value.to_lowercase()),
                     "authorization" => headers.authorization = Some(value.to_string()),
+                    "x-api-key" => headers.x_api_key = Some(value.to_string()),
                     "upgrade" => headers.upgrade = Some(value.to_lowercase()),
                     "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
                     "sec-websocket-version" => {
@@ -228,6 +230,7 @@ pub async fn read_http_request<R: AsyncBufRead + Unpin>(
                 saw_transfer_encoding = true;
             }
             "authorization" => headers.authorization = Some(value.to_string()),
+            "x-api-key" => headers.x_api_key = Some(value.to_string()),
             "upgrade" => headers.upgrade = Some(value.to_lowercase()),
             "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
             "sec-websocket-version" => {
@@ -447,6 +450,7 @@ mod tests {
             "Content-Type: application/json",
             "Content-Length: 256",
             "Authorization: Bearer token123",
+            "X-API-Key: key123",
             "Connection: keep-alive",
         ];
         let headers = HttpHeaders::from_lines(&lines);
@@ -454,6 +458,7 @@ mod tests {
         assert_eq!(headers.content_type, Some("application/json".to_string()));
         assert_eq!(headers.content_length, Some(256));
         assert_eq!(headers.authorization, Some("Bearer token123".to_string()));
+        assert_eq!(headers.x_api_key, Some("key123".to_string()));
         assert_eq!(headers.connection, "keep-alive");
     }
 

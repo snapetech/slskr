@@ -155,7 +155,11 @@ pub fn is_authorized(
         return false;
     };
     let bearer_authorized = authorization
-        .and_then(|value| value.strip_prefix("Bearer "))
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("ApiKey "))
+        })
         .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes()));
     bearer_authorized
         || cookie_session_token(cookie)
@@ -697,7 +701,7 @@ pub fn cors_headers(origin: Option<&str>, allowed_origins: &[&str]) -> String {
         "Access-Control-Allow-Origin: {}\r\n\
          Vary: Origin\r\n\
          Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS\r\n\
-         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n\
          Access-Control-Max-Age: 86400\r\n",
         origin
     )

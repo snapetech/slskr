@@ -35,6 +35,7 @@ It is built for operators who want a private, scriptable music-sharing client th
 
 - One `slskr serve` process for the daemon, API, web UI, session runtime, share scanner, transfer state, and static assets.
 - Rust protocol crates for server, peer-message, file-transfer, distributed, init, obfuscation, and wire-frame behavior.
+- Compatibility with the slskdN mesh-network model, pod/service-fabric deployment shape, and slskdN feature surfaces through the slskr API, WebUI, event, transfer, search, room, message, browse, share, integration, and network-status projections.
 - Browser UI for search, downloads, uploads, rooms, messages, users, contacts, browse, collections, share groups, shared-with-me views, discovery graph tools, playlist intake, integrations, system status, and playback.
 - Search workflow with query history, result aggregation, result ranking, deduplication, lossless/acquisition profiles, wishlist search, discovery graph views, release-radar panels, MusicBrainz lookup, SongID workflows, and local review controls.
 - Download and upload views with grouped transfers, progress, speed, queue position checks, retry/cancel/remove actions, accelerated download mode, and auto-replace controls.
@@ -71,6 +72,7 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
 | --- | --- | --- |
 | Daemon | `slskr serve`, bundled UI/API, session lifecycle, listener state, reconnect policy | [docs/app-surface.md](./docs/app-surface.md), [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) |
 | Protocol runtime | Login, keepalive, server commands, peer init, peer messages, distributed messages, transfer sockets, obfuscation | [crates/slskr-client](./crates/slskr-client), [crates/slskr-protocol](./crates/slskr-protocol) |
+| slskdN compatibility | Compatible mesh-network, pod/service-fabric, WebUI, API, event, transfer, search, browse, room, message, share, and integration surfaces for operators migrating from or interoperating with slskdN | [docs/app-surface.md](./docs/app-surface.md), [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md) |
 | Web UI | Search, transfers, rooms, messages, browse, users, contacts, system, player, collections, integrations | [web/README.md](./web/README.md), [web/src/components](./web/src/components), [docs/rust-web-ui.md](./docs/rust-web-ui.md) |
 | HTTP API | Versioned `/api/v0/*` endpoints, unversioned compatibility routes, auth, telemetry, metrics | [docs/http-api.md](./docs/http-api.md), [docs/openapi.json](./docs/openapi.json) |
 | Events | Polling event log and `/api/events/ws` WebSocket stream | [docs/app-surface.md](./docs/app-surface.md) |
@@ -94,6 +96,20 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
 - `docs`, `examples`, `scripts`, and `k8s`: operator references, smoke automation, public posture checks, fixture policy, and deployment manifests.
 
 The daemon owns the long-lived runtime state. The web UI and clients talk to the daemon through HTTP and the event feed rather than holding protocol sockets themselves.
+
+## slskdN Compatibility
+
+`slskr` is intended to be compatible with the slskdN operating model while replacing the daemon/runtime implementation with Rust. Operators should be able to map slskdN mesh-network concepts, pod deployments, service-fabric topology, API-driven automation, WebUI workflows, player controls, integrations, and network-status views onto the slskr daemon.
+
+Compatibility coverage includes:
+
+- slskdN-style mesh and service-fabric projections for DHT, mesh peers, hash/catalog state, swarm/backfill activity, sequence state, transfer speed, and network health.
+- Pod-oriented deployment and service-boundary operation using one daemon process that serves the API, WebUI, event stream, static assets, session runtime, share indexer, and transfer engine.
+- Feature-surface parity for search, wishlist-style searches, browse, downloads, uploads, private messages, rooms, users, contacts, share groups, shared-with-me views, collections, playlist intake, integrations, system status, and player workflows.
+- Compatibility APIs and event feeds for client automation and UI integration, with versioned `/api/v0/*` routes and selected unversioned aliases where existing slskdN-style clients expect them.
+- Live interoperability tooling that exercises Soulseek network behavior and adjacent-client compatibility against slskd, slskdN, Soulseek.NET-family libraries, and slskdNet.Runtime-derived clients.
+
+The compatibility goal is behavioral and operational compatibility, not copied implementation. slskr keeps its own Rust protocol/runtime, API, storage, and UI integration code while preserving the externally useful slskdN workflows and deployment assumptions.
 
 ## Install And Run
 
@@ -184,7 +200,7 @@ The bundled UI is an operator dashboard, not a marketing page. It is designed fo
 
 ## HTTP API
 
-The daemon exposes versioned API routes under `/api/v0/*` plus selected compatibility aliases under `/api/*`. Security-sensitive operations require bearer-token auth when auth is enabled, and browser-origin mutating requests are checked for CSRF safety.
+The daemon exposes versioned API routes under `/api/v0/*` plus selected compatibility aliases under `/api/*`. Security-sensitive operations require bearer-token auth when auth is enabled. Automation clients may also send the same token as `X-API-Key`. Browser-origin mutating requests are checked for CSRF safety.
 
 Core endpoint groups:
 
@@ -198,7 +214,8 @@ Core endpoint groups:
 - Messages: `/api/v0/messages`, `/api/v0/messages/:username`, `/api/v0/messages/:id/ack`.
 - Rooms: `/api/v0/rooms`, `/api/v0/rooms/refresh`, `/api/v0/rooms/:room/join`, `/api/v0/rooms/:room/messages`.
 - Session/listeners: `/api/v0/session`, `/api/v0/session/connect`, `/api/v0/session/disconnect`, `/api/v0/session/ping`, `/api/v0/listeners`.
-- Transfers: `/api/v0/transfers`, `/api/v0/transfers/stats`, `/api/v0/transfers/:id/start`, `/api/v0/transfers/:id/progress`, `/api/v0/transfers/:id/complete`, `/api/v0/transfers/:id/cancel`, `/api/v0/transfers/:id/fail`.
+- Transfers: `/api/v0/transfers`, `/api/v0/transfers/stats`, `/api/v0/transfers/downloads`, `/api/v0/transfers/uploads`, `/api/v0/transfers/:id/start`, `/api/v0/transfers/:id/progress`, `/api/v0/transfers/:id/complete`, `/api/v0/transfers/:id/cancel`, `/api/v0/transfers/:id/fail`.
+- Automation compatibility: `/api/v0/application`, `/api/v0/application/version/latest`, `/api/v0/server`, `/api/v0/session/enabled`, `searchText` search bodies, grouped transfer download/upload views, and search response arrays.
 
 Example search request:
 
@@ -344,7 +361,7 @@ Some integrations are operationally dependent on local config and API keys. The 
 Default behavior is conservative:
 
 - `slskr serve` binds to loopback by default.
-- Protected API routes accept `Authorization: Bearer <token>` when `SLSKR_API_TOKEN` is configured.
+- Protected API routes accept `Authorization: Bearer <token>` or `X-API-Key: <token>` when `SLSKR_API_TOKEN` is configured.
 - The browser dashboard can use a same-site `slskr.session` cookie for protected APIs.
 - Mutating browser-origin API requests are checked against `Origin`/`Referer` to reduce CSRF exposure.
 - Non-loopback HTTP binds require auth unless `SLSKR_AUTH_DISABLED=true` is explicitly set.

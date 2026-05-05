@@ -35,6 +35,20 @@ The `slskr serve` process owns the app state and should grow into:
 
 The daemon calls `slskr-client` for protocol/runtime behavior rather than duplicating connection logic in the app crate. The current scaffold can optionally start a real server login session when credentials are provided through the environment.
 
+## slskdN Mesh, Pod, And Service-Fabric Compatibility
+
+`slskr` is designed to remain compatible with the slskdN operating model while using an independent Rust daemon and protocol runtime. The compatibility target is the externally visible behavior operators depend on: mesh-network state, pod/service-fabric deployment shape, API and WebUI workflows, event feeds, transfer/search/browse/message/room behavior, player controls, integration affordances, and network-health reporting.
+
+The current app surface preserves the following slskdN-compatible concepts:
+
+- mesh and service-fabric status projections for DHT, mesh peers, hashes/catalog sequence state, sync/backfill activity, swarm jobs, transfer rates, and NAT/overlay health
+- one pod-friendly daemon process that owns the Soulseek session, HTTP API, WebUI, event stream, static assets, share scanner, transfer engine, runtime telemetry, and integration callbacks
+- versioned `/api/v0/*` APIs plus selected compatibility aliases for existing client and automation habits
+- WebUI surfaces for search, transfers, uploads, rooms, private messages, users, contacts, browse, collections, share groups, shared-with-me views, playlist intake, integrations, system state, and player/media tools
+- live interoperability scripts and fixtures that compare slskr behavior against slskd, slskdN, Soulseek.NET-family clients, and slskdNet.Runtime-derived clients
+
+This is a behavioral compatibility commitment rather than a source-code lineage statement. slskr should interoperate with slskdN-style deployments and clients, but implementation details remain Rust-native and separately maintained.
+
 ## Initial HTTP Surface
 
 The first app shell exposes:
@@ -59,8 +73,12 @@ The first app shell exposes:
 - `GET /api/v0/files/:root`: list files under one configured share-root label without exposing local host paths. Supports `q`, `prefix`, `extension`, `limit`, and `offset` query parameters.
 - `POST /api/shares/rescan`: rebuild the in-memory share index from configured roots and rewrite the state-dir cache
 - `POST /api/v0/shares/rescan`: versioned alias for share rescan
+- `GET /api/v0/application`: automation-compatible application state with version, server, share, room, and watched-user summaries.
+- `GET /api/v0/server`: automation-compatible server connection state.
+- `POST /api/v0/server` and `DELETE /api/v0/server`: aliases for session connect/disconnect.
+- `GET /api/v0/session/enabled`: reports whether HTTP auth is enabled.
 - `GET /api/v0/searches`: list search records. Supports `q`, `status`, `target`, `limit`, and `offset` query parameters. When persistence is enabled, startup hydrates this projection from SQLite search rows.
-- `POST /api/v0/searches`: create a search record from JSON body `{"query":"..."}`, match against the current local share snapshot, optionally persist it to SQLite, and enqueue the public-network search command when connected. Optional `target` values are `global`, `user`, `room`, or `wishlist`; user searches require `username`, room searches require `room`, and `ttl_seconds` controls the active search expiration window.
+- `POST /api/v0/searches`: create a search record from JSON body `{"query":"..."}` or automation-compatible `{"searchText":"..."}`, match against the current local share snapshot, optionally persist it to SQLite, and enqueue the public-network search command when connected. Optional `target` values are `global`, `user`, `room`, or `wishlist`; user searches require `username`, room searches require `room`, and `ttl_seconds` controls the active search expiration window.
 - `GET /api/v0/searches/:token`: read one search record
 - `POST /api/v0/searches/:token/complete`: mark one search record completed
 - `POST /api/v0/searches/prune`: expire due active searches and remove expired records
@@ -91,6 +109,8 @@ The first app shell exposes:
 - `GET /api/v0/listeners`: versioned alias for listener state
 - `GET /api/transfers`: current in-memory transfer history and state-dir event log status
 - `GET /api/v0/transfers`: versioned alias for transfer history. Supports `q`, `status`, `direction`, `username`, `limit`, and `offset` query parameters.
+- `GET /api/v0/transfers/downloads` and `GET /api/v0/transfers/uploads`: automation-compatible grouped transfer views by peer and directory.
+- `POST /api/v0/transfers/downloads/:username`: enqueue one or more download records from a body containing `files`.
 - `POST /api/v0/transfers`: create an in-memory queued transfer projection from JSON body with `filename` and optional `direction`, `peer_username`, `local_path`, and `size`
 - `GET /api/v0/transfers/stats`: aggregate transfer projection counts and transferred bytes
 - `POST /api/v0/transfers/:id/start`: mark a transfer in progress; when `local_path` is present without a peer, validate the file on disk and complete or fail the projection from real metadata; when `peer_username` is present, request peer-address metadata, negotiate a peer-message `TransferRequest`/`TransferResponse`, and use the direct `F` connection token/offset handshake for local-path upload/download streaming, preferring type-1 obfuscated `F` init when advertised and falling back to plain direct `F`; if direct `F` connect fails, request server-mediated `ConnectToPeer`/`PierceFirewall` and retry the same file stream over the indirect socket. Inbound peer transfer requests for locally indexed share files are accepted and served over incoming direct `F`, `PeerInit F`, or `PierceFirewall` file-transfer sockets.
@@ -136,7 +156,7 @@ Initial configuration sources:
 - `SLSKR_TRANSFER_MAX_ACTIVE` for max concurrently active transfer records, including peer lookup/negotiation and inbound accepted transfers; defaults to `3`. Set to `0` to block transfer starts and inbound transfer acceptance.
 - `SLSKR_TRANSFER_ALLOW_INBOUND` controls whether peer `TransferRequest`s for local shares are accepted; defaults to `true`.
 - `SLSKR_TRANSFER_ALLOW_OUTBOUND` controls whether API-started peer transfers are allowed to begin; defaults to `true`.
-- `SLSKR_API_TOKEN` for HTTP API auth. If set, protected API routes accept either `Authorization: Bearer <token>` or the dashboard's same-site `slskr.session` cookie.
+- `SLSKR_API_TOKEN` for HTTP API auth. If set, protected API routes accept `Authorization: Bearer <token>`, automation-compatible `X-API-Key: <token>`, or the dashboard's same-site `slskr.session` cookie.
 - `SLSKR_API_RATE_LIMIT_ANONYMOUS` and `SLSKR_API_RATE_LIMIT_AUTHENTICATED` tune per-window HTTP API request limits; defaults are `1000` and `5000`.
 - `SLSKR_AUTH_DISABLED` to explicitly disable HTTP API auth. Loopback-only binds default to disabled when no token is configured; non-loopback binds require a token unless this is set.
 - `SLSKR_PERSISTENCE_ENABLED` enables the default-off SQLite persistence path. Search create/list hydration is wired; transfer projection state is also restart-safe through `transfer-state.json`. Message and room projection persistence remain event/projection work items.
@@ -162,7 +182,7 @@ Default `slskr serve` binds to loopback. Before exposing it outside localhost, a
 - explicit CORS defaults
 - reverse-proxy guidance
 
-Current behavior: bearer-token and same-site dashboard cookie auth are available for protected API routes. Auth is required automatically for non-loopback HTTP binds unless `SLSKR_AUTH_DISABLED=true` is set. When auth is enabled, unsafe API methods reject cross-site browser requests with foreign `Origin` or `Referer` headers. `GET /`, `GET /api/health`, `GET /api/version`, and `GET /api/v0/capabilities` remain public health/version/capability surfaces.
+Current behavior: bearer-token, `X-API-Key`, and same-site dashboard cookie auth are available for protected API routes. Auth is required automatically for non-loopback HTTP binds unless `SLSKR_AUTH_DISABLED=true` is set. When auth is enabled, unsafe API methods reject cross-site browser requests with foreign `Origin` or `Referer` headers. `GET /`, `GET /api/health`, `GET /api/version`, and `GET /api/v0/capabilities` remain public health/version/capability surfaces.
 
 ## Third-Party Authorization UX
 
