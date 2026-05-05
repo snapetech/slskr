@@ -559,20 +559,29 @@
       "VersionInfo": {
         "type": "object",
         "properties": {
+          "name": {
+            "type": "string"
+          },
           "version": {
             "type": "string"
           },
-          "client_name": {
-            "type": "string"
-          },
-          "major_version": {
-            "type": "integer"
-          },
-          "minor_version": {
-            "type": "integer"
+          "protocol": {
+            "type": "object",
+            "properties": {
+              "client_name": {
+                "type": "string"
+              },
+              "major": {
+                "type": "integer"
+              },
+              "minor": {
+                "type": "integer"
+              }
+            },
+            "required": ["client_name", "major", "minor"]
           }
         },
-        "required": ["version", "client_name"]
+        "required": ["name", "version", "protocol"]
       },
       "Configuration": {
         "type": "object",

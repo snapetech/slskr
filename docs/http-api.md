@@ -63,10 +63,13 @@ Get slskr version and build information.
 **Response:**
 ```json
 {
+  "name": "slskr",
   "version": "0.0.0",
-  "client_name": "slskr",
-  "major_version": 0,
-  "minor_version": 0
+  "protocol": {
+    "client_name": "slskr",
+    "major": 175,
+    "minor": 8800001
+  }
 }
 ```
 

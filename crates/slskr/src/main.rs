@@ -54,6 +54,8 @@ use tokio::{
     time::{self, Duration, Instant},
 };
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
     json_usize_option, AppConfig,
@@ -5611,18 +5613,19 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", "/api/application/build") => {
-            let version = format!(
-                "{}.{}.{}",
-                CLIENT_NAME, CLIENT_MAJOR_VERSION, CLIENT_MINOR_VERSION
-            );
             Ok(routing::ok_response(
                 serde_json::json!({
-                    "current": version,
-                    "full": version,
-                    "latest": version,
-                    "latestTag": version,
+                    "current": APP_VERSION,
+                    "full": APP_VERSION,
+                    "latest": APP_VERSION,
+                    "latestTag": APP_VERSION,
                     "latestUrl": "https://github.com/snapetech/slskr/releases",
-                    "isUpdateAvailable": false
+                    "isUpdateAvailable": false,
+                    "protocol": {
+                        "clientName": CLIENT_NAME,
+                        "major": CLIENT_MAJOR_VERSION,
+                        "minor": CLIENT_MINOR_VERSION
+                    }
                 })
                 .to_string(),
             ))
@@ -7763,8 +7766,8 @@ fn version_response() -> HttpResponse {
         status: "200 OK",
         content_type: "application/json",
         body: format!(
-            "{{\"name\":\"{}\",\"major\":{},\"minor\":{}}}",
-            CLIENT_NAME, CLIENT_MAJOR_VERSION, CLIENT_MINOR_VERSION
+            "{{\"name\":\"{}\",\"version\":\"{}\",\"protocol\":{{\"client_name\":\"{}\",\"major\":{},\"minor\":{}}}}}",
+            CLIENT_NAME, APP_VERSION, CLIENT_NAME, CLIENT_MAJOR_VERSION, CLIENT_MINOR_VERSION
         ),
     }
 }
@@ -12304,6 +12307,38 @@ mod tests {
                 response.body
             );
         }
+    }
+
+    #[tokio::test]
+    async fn build_info_uses_app_version_not_protocol_version() {
+        let (state, _receiver) = test_state();
+
+        let response = super::route_http_request("GET", "/api/application/build", None, "", &state)
+            .await
+            .unwrap();
+        assert_eq!(response.status, "200 OK");
+        let body: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+
+        assert_eq!(body["current"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(body["full"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(body["latestTag"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            body["protocol"]["major"],
+            serde_json::json!(super::CLIENT_MAJOR_VERSION)
+        );
+        assert_eq!(
+            body["protocol"]["minor"],
+            serde_json::json!(super::CLIENT_MINOR_VERSION)
+        );
+        assert_ne!(
+            body["current"],
+            serde_json::json!(format!(
+                "{}.{}.{}",
+                super::CLIENT_NAME,
+                super::CLIENT_MAJOR_VERSION,
+                super::CLIENT_MINOR_VERSION
+            ))
+        );
     }
 
     #[tokio::test]
