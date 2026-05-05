@@ -3778,7 +3778,8 @@ fn native_row_resource_id(
         RouteKind::Downloads | RouteKind::Uploads | RouteKind::Messages | RouteKind::Rooms => {
             &[secondary, primary]
         }
-        RouteKind::Users | RouteKind::Contacts | RouteKind::SharedWithMe => &[secondary, primary],
+        RouteKind::Users => &[primary],
+        RouteKind::Contacts | RouteKind::SharedWithMe => &[secondary, primary],
         RouteKind::Collections | RouteKind::ShareGroups | RouteKind::Wishlist => &[primary],
         RouteKind::Browse => &[primary],
         RouteKind::System => &[primary],
@@ -11867,6 +11868,9 @@ mod tests {
         assert!(html.contains(r#"data-slskr-native-row-action="Download Selected""#));
         assert!(html.contains(r#"data-slskr-native-row-action="Open a New Browse Tab""#));
         assert!(html.contains(r#"data-slskr-native-title="/Music/Open Sessions""#));
+        assert!(html.contains(r#"data-slskr-native-resource-id="row-1""#));
+        let users = route_page_html("/users");
+        assert!(users.contains(r#"data-slskr-native-resource-id="peer1""#));
     }
 
     #[test]
@@ -11920,6 +11924,11 @@ mod tests {
         assert_eq!(
             concrete_action_path_with_target("/browse", browse, Some("../bad")),
             "/api/v0/users/peer1/directory"
+        );
+        let remove_item = route_action_at("/searches", 2).expect("remove search");
+        assert_eq!(
+            concrete_action_path_with_target("/searches", remove_item, Some("search-42")),
+            "/api/v0/searches/search-42"
         );
 
         assert!(route_action_at("/searches/42", usize::MAX).is_none());
