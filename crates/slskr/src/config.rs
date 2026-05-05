@@ -742,8 +742,47 @@ fn read_file_config(path: &std::path::Path) -> Result<FileConfig, String> {
     }
     let body = fs::read_to_string(path)
         .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
-    toml::from_str::<FileConfig>(&body)
-        .map_err(|error| format!("failed to parse config file {}: {error}", path.display()))
+    let config = toml::from_str::<FileConfig>(&body)
+        .map_err(|error| format!("failed to parse config file {}: {error}", path.display()))?;
+    warn_insecure_config_permissions(path, &metadata, &config);
+    Ok(config)
+}
+
+#[cfg(unix)]
+fn warn_insecure_config_permissions(
+    path: &std::path::Path,
+    metadata: &fs::Metadata,
+    config: &FileConfig,
+) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !config_contains_sensitive_values(config) {
+        return;
+    }
+
+    let mode = metadata.permissions().mode();
+    if mode & 0o077 != 0 {
+        eprintln!(
+            "warning: config file {} contains secrets and is readable by group/other users; recommended mode is 0600",
+            path.display()
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn warn_insecure_config_permissions(
+    _path: &std::path::Path,
+    _metadata: &fs::Metadata,
+    _config: &FileConfig,
+) {
+}
+
+fn config_contains_sensitive_values(config: &FileConfig) -> bool {
+    config.network.username.is_some()
+        || config.network.password.is_some()
+        || config.auth.api_token.is_some()
+        || config.integrations.spotify.client_secret.is_some()
+        || config.integrations.lidarr.api_key.is_some()
 }
 
 pub trait ConfigEnv {
@@ -968,5 +1007,34 @@ mod tests {
         assert_eq!(config.app.http_bind.as_deref(), Some("127.0.0.1:5555"));
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn config_sensitive_value_detection_covers_secrets() {
+        let empty = super::FileConfig::default();
+        assert!(!super::config_contains_sensitive_values(&empty));
+
+        let with_api_token = super::FileConfig {
+            auth: super::AuthFileConfig {
+                api_token: Some("token".to_owned()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(super::config_contains_sensitive_values(&with_api_token));
+
+        let with_integration_secret = super::FileConfig {
+            integrations: super::IntegrationsFileConfig {
+                spotify: super::SpotifyFileConfig {
+                    client_secret: Some("secret".to_owned()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(super::config_contains_sensitive_values(
+            &with_integration_secret
+        ));
     }
 }
