@@ -6998,6 +6998,49 @@ mod tests {
     }
 
     #[test]
+    fn route_pages_render_domain_workflows_before_developer_details() {
+        let expectations = [
+            ("/searches", "Grouped results", "Search"),
+            ("/discovery-graph", "Discovery graph", "Build graph"),
+            ("/playlist-intake", "Playlist parser", "Preview playlist"),
+            ("/wishlist", "Wanted searches", "Add wanted search"),
+            ("/downloads", "Download queue", "Download"),
+            ("/uploads", "Upload queue", "Clear completed"),
+            ("/messages", "Conversations", "Reply"),
+            ("/users", "User directory", "Watch"),
+            ("/contacts", "Contact manager", "Add contact"),
+            ("/solid", "Solid status", "Connect identity"),
+            ("/collections", "Collection library", "Create collection"),
+            ("/sharegroups", "Share groups", "Issue token"),
+            ("/shared", "Inbound shares", "Open collection"),
+            ("/browse", "Peer browser", "Browse"),
+            ("/system", "Operator dashboard", "Rescan shares"),
+        ];
+
+        for (path, heading, action) in expectations {
+            let html = route_page_html(path);
+            let heading_index = html
+                .find(heading)
+                .unwrap_or_else(|| panic!("missing workflow heading {heading} for route {path}"));
+            let developer_index = html
+                .find("<summary>Developer</summary>")
+                .unwrap_or_else(|| panic!("missing developer drawer for route {path}"));
+
+            assert!(
+                heading_index < developer_index,
+                "route {path} should show workflow content before developer diagnostics"
+            );
+            assert!(
+                html.contains(action),
+                "missing primary action {action} for route {path}"
+            );
+            assert!(html.contains("slskr-workflow"));
+            assert!(html.contains("slskr-route-summary"));
+            assert!(html.contains("data-slskr-refresh-route"));
+        }
+    }
+
+    #[test]
     fn array_data_cards_render_filterable_table_and_csv_views() {
         let response = EndpointBody {
             endpoint: ApiEndpoint {
