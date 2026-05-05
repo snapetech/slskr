@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 ledger="docs/dev/bug-burndown-ledger.md"
+pin_policy="docs/dev/github-actions-pin-policy.md"
 status=0
 
 for id in BUG-002 BUG-012 BUG-014 BUG-016 BUG-023; do
@@ -20,7 +21,7 @@ for expected in \
   'SLSKR_SEMGREP_IMAGE: semgrep/semgrep:' \
   'SLSKR_TRIVY_IMAGE: aquasec/trivy:' \
   'concurrency:' \
-  'attest-build-provenance@' \
+  'actions/attest-build-provenance@v3' \
   'attestations: write' \
   'id-token: write'; do
   if ! rg -n -F "$expected" .github/workflows >/dev/null; then
@@ -28,6 +29,38 @@ for expected in \
     status=1
   fi
 done
+
+if [[ ! -f "$pin_policy" ]]; then
+  printf 'workflow release policy check failed: GitHub Actions pin policy is missing: %s\n' "$pin_policy" >&2
+  status=1
+else
+  while IFS= read -r line; do
+    action="${line#*uses: }"
+    action="${action%%#*}"
+    action="${action%%[[:space:]]*}"
+
+    if [[ "$action" == ./* || "$action" == docker://* ]]; then
+      continue
+    fi
+
+    if [[ ! "$action" =~ @([0-9a-f]{40})$ ]]; then
+      printf 'workflow release policy check failed: external action must be pinned to a 40-character commit SHA: %s\n' "$line" >&2
+      status=1
+      continue
+    fi
+
+    action_name="${action%@*}"
+    action_sha="${action##*@}"
+    if ! rg -n -F "| \`${action_name}\` |" "$pin_policy" >/dev/null; then
+      printf 'workflow release policy check failed: pinned action is missing from policy ledger: %s\n' "$action_name" >&2
+      status=1
+    fi
+    if ! rg -n -F "\`${action_sha}\`" "$pin_policy" >/dev/null; then
+      printf 'workflow release policy check failed: pinned action SHA is missing from policy ledger: %s\n' "$action_sha" >&2
+      status=1
+    fi
+  done < <(rg -n '^[[:space:]-]*uses:[[:space:]]+[^[:space:]#]+@[^[:space:]#]+' .github/workflows)
+fi
 
 if ! rg -n -F 'scripts/run-security-scans.sh' .github/workflows scripts/run-release-gate.sh >/dev/null; then
   printf 'workflow release policy check failed: required security scan runner is not wired into CI/release gates\n' >&2

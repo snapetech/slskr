@@ -65,6 +65,9 @@ Completed across the main Rust routes:
 - Selected rows now carry route-specific action summaries, and the Rust runtime
   uses those summaries in the selection status, inspector, and preview cards so
   users see the concrete operation target before firing row actions.
+- Selected rows now also carry route-specific field summaries for every
+  workflow route. The inspector and preview cards expose human labels like peer,
+  queue, progress, permissions, owner, path, and next action after selection.
 
 ## Route Gaps
 

@@ -1488,6 +1488,13 @@ body {
   overflow-wrap: anywhere;
 }
 
+.slskr-native-preview-card small {
+  color: #8fa09a;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .slskr-native-preview-card button {
   background: #253734;
   border: 1px solid #3d5c55;
