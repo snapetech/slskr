@@ -2743,6 +2743,10 @@ pub fn route_page_html(path: &str) -> String {
     )
 }
 
+fn player_footer_html() -> String {
+    r#"<footer class="slskr-player" data-slskr-player><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button></section><section><strong>Transfers</strong><span id="slskr-player-transfers">0 down / 0 up</span><span id="slskr-player-party">Listening party idle</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
+}
+
 pub fn shell_html() -> String {
     let nav = nav_items()
         .iter()
@@ -2758,9 +2762,10 @@ pub fn shell_html() -> String {
         .join("");
 
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main><footer class="slskr-player"><div><strong>Now Playing</strong><span>Queue idle</span></div><div class="slskr-player-controls"><button type="button">Prev</button><button type="button">Play</button><button type="button">Next</button></div><div><strong>Transfers</strong><span>0 down / 0 up</span></div></footer></div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main>{player}</div>"#,
         route_page = route_page_html("/searches"),
         runtime = runtime_probe_pending_html(),
+        player = player_footer_html(),
     )
 }
 
@@ -2777,8 +2782,13 @@ pub fn start() -> Result<(), JsValue> {
     root.set_inner_html(&shell_html());
     mount_router(&window, &document)?;
     mount_global_shortcuts(&window, &document)?;
+    mount_player_controls(&window, &document)?;
     wasm_bindgen_futures::spawn_local(async {
         let _ = refresh_runtime_status().await;
+    });
+    let window_for_player = window.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = refresh_player_status(&window_for_player).await;
     });
     Ok(())
 }
@@ -3196,6 +3206,80 @@ fn set_live_status(document: &web_sys::Document, message: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn mount_player_controls(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let buttons = document.query_selector_all("[data-slskr-player-action]")?;
+    for index in 0..buttons.length() {
+        let Some(node) = buttons.item(index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let action = button
+            .get_attribute("data-slskr-player-action")
+            .unwrap_or_default();
+        let window = window.clone();
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                let action = action.clone();
+                let window = window.clone();
+                let document = document.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    set_player_status(&document, "Player action running");
+                    let result = match action.as_str() {
+                        "clear" => {
+                            fetch_text_with_method(
+                                &window,
+                                &endpoint_url("/nowplaying"),
+                                "DELETE",
+                                None,
+                            )
+                            .await
+                        }
+                        "visualizer" => {
+                            fetch_text_with_method(
+                                &window,
+                                &endpoint_url("/player/external-visualizer/launch"),
+                                "POST",
+                                None,
+                            )
+                            .await
+                        }
+                        _ => Ok(String::new()),
+                    };
+                    match result {
+                        Ok(body) if !body.is_empty() => {
+                            set_player_status(&document, &compact_preview(&body));
+                        }
+                        Ok(_) => set_player_status(&document, "Player refreshed"),
+                        Err(error) => {
+                            let message = error
+                                .as_string()
+                                .unwrap_or_else(|| "player request failed".to_string());
+                            set_player_status(&document, &message);
+                        }
+                    }
+                    let _ = refresh_player_status(&window).await;
+                });
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_player_status(document: &web_sys::Document, message: &str) {
+    if let Some(status) = document.get_element_by_id("slskr-player-status") {
+        status.set_text_content(Some(message));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn update_data_card_count(card: &web_sys::Element) {
     let Ok(Some(count)) = card.query_selector("[data-slskr-card-count]") else {
         return;
@@ -3562,6 +3646,131 @@ async fn refresh_runtime_status() -> Result<(), JsValue> {
     Ok(())
 }
 
+pub fn player_now_playing_text(body: &str) -> (String, String) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return (
+            "Queue idle".to_string(),
+            "No local stream selected".to_string(),
+        );
+    };
+    let current = value
+        .get("now_playing")
+        .and_then(|entry| entry.as_array())
+        .and_then(|items| items.first())
+        .or_else(|| value.get("current"))
+        .or_else(|| value.get("track"))
+        .unwrap_or(&value);
+    let title = current
+        .get("title")
+        .or_else(|| current.get("fileName"))
+        .or_else(|| current.get("filename"))
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Queue idle".to_string());
+    let artist = current
+        .get("artist")
+        .or_else(|| current.get("username"))
+        .map(json_scalar_preview)
+        .unwrap_or_default();
+    let album = current
+        .get("album")
+        .map(json_scalar_preview)
+        .unwrap_or_default();
+    let detail = [artist, album]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let detail = if detail.is_empty() {
+        "No local stream selected".to_string()
+    } else {
+        detail
+    };
+    (title, detail)
+}
+
+pub fn player_transfer_text(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return "0 down / 0 up".to_string();
+    };
+    let downloads = value
+        .get("downloads")
+        .or_else(|| value.get("downloadSpeed"))
+        .or_else(|| value.get("down"))
+        .map(json_scalar_preview)
+        .unwrap_or_else(|| "0".to_string());
+    let uploads = value
+        .get("uploads")
+        .or_else(|| value.get("uploadSpeed"))
+        .or_else(|| value.get("up"))
+        .map(json_scalar_preview)
+        .unwrap_or_else(|| "0".to_string());
+    format!("{downloads} down / {uploads} up")
+}
+
+pub fn player_party_text(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return "Listening party idle".to_string();
+    };
+    let count = value
+        .get("count")
+        .or_else(|| value.get("active"))
+        .map(json_scalar_preview)
+        .unwrap_or_else(|| "0".to_string());
+    format!("{count} listening parties")
+}
+
+pub fn player_visualizer_text(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return "Visualizer status unavailable".to_string();
+    };
+    value
+        .get("status")
+        .or_else(|| value.get("next_action"))
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Visualizer status unavailable".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> {
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("document is unavailable"))?;
+    set_player_status(&document, "Refreshing player");
+
+    if let Ok(body) = fetch_text(window, &endpoint_url("/nowplaying")).await {
+        let (title, detail) = player_now_playing_text(&body);
+        if let Some(element) = document.get_element_by_id("slskr-player-now") {
+            element.set_text_content(Some(&title));
+        }
+        if let Some(element) = document.get_element_by_id("slskr-player-now-detail") {
+            element.set_text_content(Some(&detail));
+        }
+    }
+
+    if let Ok(body) = fetch_text(window, &endpoint_url("/transfers/speeds")).await {
+        if let Some(element) = document.get_element_by_id("slskr-player-transfers") {
+            element.set_text_content(Some(&player_transfer_text(&body)));
+        }
+    }
+
+    if let Ok(body) = fetch_text(window, &endpoint_url("/listening-party")).await {
+        if let Some(element) = document.get_element_by_id("slskr-player-party") {
+            element.set_text_content(Some(&player_party_text(&body)));
+        }
+    }
+
+    if let Ok(body) = fetch_text(window, &endpoint_url("/player/external-visualizer")).await {
+        if let Some(element) = document.get_element_by_id("slskr-player-visualizer") {
+            element.set_text_content(Some(&player_visualizer_text(&body)));
+        }
+    }
+
+    set_player_status(&document, "Player status updated");
+    Ok(())
+}
+
 #[cfg(target_arch = "wasm32")]
 async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
     let document = window
@@ -3681,10 +3890,37 @@ mod tests {
         }
         assert!(html.contains("Search, transfers, messages"));
         assert!(html.contains("slskr-player"));
+        assert!(html.contains("data-slskr-player"));
+        assert!(html.contains("data-slskr-player-action=\"refresh\""));
+        assert!(html.contains("data-slskr-player-action=\"clear\""));
+        assert!(html.contains("data-slskr-player-action=\"visualizer\""));
+        assert!(html.contains("slskr-player-now"));
+        assert!(html.contains("slskr-player-transfers"));
         assert!(html.contains("/api/v0/searches"));
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
         assert!(html.contains("slskr-route-view"));
+    }
+
+    #[test]
+    fn rust_player_surface_summarizes_live_payloads() {
+        let (title, detail) = player_now_playing_text(
+            r#"{"now_playing":[{"artist":"Archive Artist","album":"Open Sessions","title":"Public Domain Theme"}]}"#,
+        );
+        assert_eq!(title, "Public Domain Theme");
+        assert_eq!(detail, "Archive Artist / Open Sessions");
+        assert_eq!(
+            player_transfer_text(r#"{"downloads":2,"uploads":1}"#),
+            "2 down / 1 up"
+        );
+        assert_eq!(
+            player_party_text(r#"{"count":3,"active_parties":[]}"#),
+            "3 listening parties"
+        );
+        assert_eq!(
+            player_visualizer_text(r#"{"status":"configured","configured":true}"#),
+            "configured"
+        );
     }
 
     #[test]

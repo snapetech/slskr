@@ -701,7 +701,7 @@ body {
   bottom: 0;
   display: grid;
   gap: 16px;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 0.9fr) minmax(0, 0.9fr);
   left: 0;
   min-height: 58px;
   padding: 6px 16px;
@@ -713,6 +713,9 @@ body {
 .slskr-player strong,
 .slskr-player span {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .slskr-player span {
@@ -720,7 +723,8 @@ body {
   font-size: 12px;
 }
 
-.slskr-player > div:last-child {
+.slskr-player > section:last-child,
+.slskr-player > section:nth-child(3) {
   text-align: right;
 }
 
