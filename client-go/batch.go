@@ -22,8 +22,8 @@ type BatchResult struct {
 
 // BatchResponse represents the response from batch operations
 type BatchResponse struct {
-	Results      []BatchResult `json:"results"`
-	TotalTimeMs  int           `json:"total_time_ms"`
+	Results     []BatchResult `json:"results"`
+	TotalTimeMs int           `json:"total_time_ms"`
 }
 
 // IsSuccess checks if operation was successful
@@ -38,9 +38,9 @@ func (b *BatchResult) IsError() bool {
 
 // BatchBuilder helps build batch operations
 type BatchBuilder struct {
-	client      *Client
-	operations  []BatchOperation
-	opCounter   int
+	client     *Client
+	operations []BatchOperation
+	opCounter  int
 }
 
 // NewBatchBuilder creates a new batch builder
