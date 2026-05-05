@@ -727,6 +727,12 @@ pub fn load_file_config() -> Result<(Option<PathBuf>, FileConfig), String> {
 fn read_file_config(path: &std::path::Path) -> Result<FileConfig, String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "config path {} is not a regular file",
+            path.display()
+        ));
+    }
     if metadata.len() > MAX_CONFIG_FILE_BYTES {
         return Err(format!(
             "config file {} is too large: {} bytes, max is {MAX_CONFIG_FILE_BYTES}",
@@ -926,6 +932,24 @@ mod tests {
         assert!(error.contains("too large"));
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn config_file_reader_rejects_non_regular_paths() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-config-dir-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir(&path).unwrap();
+
+        let error = super::read_file_config(&path).expect_err("directory should be rejected");
+        assert!(error.contains("not a regular file"));
+
+        let _ = std::fs::remove_dir(path);
     }
 
     #[test]

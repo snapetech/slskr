@@ -12372,7 +12372,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             Err(e) => {
                 let (status, body) = if e.contains("too large") {
                     (
-                        "413 Content Too Large",
+                        "413 Payload Too Large",
                         r#"{"error":"request body too large"}"#,
                     )
                 } else {
@@ -12998,7 +12998,7 @@ pub fn index_html() -> String {
         <article class="panel">
           <h2>Browser Session</h2>
           <form id="token-form">
-            <input id="api-token" name="token" autocomplete="off" placeholder="bearer token">
+            <input id="api-token" name="token" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" placeholder="bearer token">
             <button type="submit">Sign in</button>
           </form>
           <div id="token-action-status" class="toast"></div>
@@ -14701,6 +14701,9 @@ mod tests {
         assert!(response.body.contains("id=\"room-message-form\""));
         assert!(response.body.contains("id=\"room-message-username\""));
         assert!(response.body.contains("id=\"token-form\""));
+        assert!(response
+            .body
+            .contains("id=\"api-token\" name=\"token\" type=\"password\""));
         assert!(response.body.contains("id=\"user-table\""));
         assert!(response.body.contains("id=\"share-table\""));
         assert!(response.body.contains("id=\"message-table\""));
