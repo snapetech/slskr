@@ -10318,7 +10318,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             {
                 events_ws::write_upgrade_response(&mut writer, websocket_key).await?;
                 events_ws::stream_events(
-                    &mut reader,
+                    reader,
                     &mut writer,
                     &state.events,
                     state.event_tx.subscribe(),

@@ -2,7 +2,7 @@
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::{broadcast, RwLock},
+    sync::{broadcast, mpsc, RwLock},
     time::{self, Duration},
 };
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
@@ -43,13 +43,13 @@ where
 }
 
 pub async fn stream_events<R, W>(
-    reader: &mut R,
+    mut reader: R,
     writer: &mut W,
     events: &RwLock<EventStore>,
     mut receiver: broadcast::Receiver<EventRecord>,
 ) -> Result<(), String>
 where
-    R: AsyncRead + Unpin,
+    R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin,
 {
     let mut last_sent_id = 0;
@@ -63,20 +63,27 @@ where
         last_sent_id = record.id;
     }
 
-    let mut heartbeat = time::interval(HEARTBEAT_INTERVAL);
-    loop {
-        let read_frame = read_client_frame(reader);
-        tokio::pin!(read_frame);
+    let (frame_tx, mut frame_rx) = mpsc::unbounded_channel();
+    let reader_task = tokio::spawn(async move {
         loop {
-            tokio::select! {
-                frame = &mut read_frame => {
-                match frame? {
-                    ClientFrame::Close => return Ok(()),
-                    ClientFrame::Ping(payload) => write_frame(writer, 0x8a, &payload).await?,
-                    ClientFrame::Pong | ClientFrame::Other => {}
-                }
+            let frame = read_client_frame(&mut reader).await;
+            let done = matches!(frame, Ok(ClientFrame::Close) | Err(_));
+            if frame_tx.send(frame).is_err() || done {
                 break;
             }
+        }
+    });
+
+    let mut heartbeat = time::interval(HEARTBEAT_INTERVAL);
+    let result = async {
+        loop {
+            tokio::select! {
+                frame = frame_rx.recv() => match frame {
+                    Some(Ok(ClientFrame::Close)) | None => return Ok(()),
+                    Some(Ok(ClientFrame::Ping(payload))) => write_frame(writer, 0x8a, &payload).await?,
+                    Some(Ok(ClientFrame::Pong | ClientFrame::Other)) => {}
+                    Some(Err(error)) => return Err(error),
+                },
             received = receiver.recv() => match received {
                 Ok(record) => {
                 if record.id > last_sent_id {
@@ -104,6 +111,10 @@ where
             }
         }
     }
+    .await;
+
+    reader_task.abort();
+    result
 }
 
 enum ClientFrame {
@@ -293,7 +304,7 @@ mod tests {
             let key = request.headers.sec_websocket_key.as_deref().unwrap();
             write_upgrade_response(&mut writer, key).await.unwrap();
             let _ = ready_tx.send(());
-            let _ = stream_events(&mut reader, &mut writer, &server_events, server_event_rx).await;
+            let _ = stream_events(reader, &mut writer, &server_events, server_event_rx).await;
         });
 
         let (mut socket, _) = connect_async(format!("ws://{address}/api/events/ws"))
