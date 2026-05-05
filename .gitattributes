@@ -1,11 +1,16 @@
 # GitHub Linguist classification.
 #
-# Count the maintained web/client source so GitHub language stats reflect the
-# real Rust-to-web migration. Exclude only generated dependency/build artifacts.
-/web/src/** linguist-vendored=false
-/web/public/** linguist-vendored=false
-/dashboard/src/** linguist-vendored=false
+# Count the Rust/WASM web migration and published client libraries. Keep the
+# legacy React web/dashboard trees available for production builds until routes
+# are fully promoted, but exclude them from language stats so replaced UI code
+# does not hide Rust migration progress.
+/crates/slskr-web/** linguist-vendored=false
 /client-ts/src/** linguist-vendored=false
+
+/web/src/** linguist-vendored
+/web/public/** linguist-vendored
+/dashboard/src/** linguist-vendored
+/dashboard/public/** linguist-vendored
 
 /dashboard/dist/** linguist-generated
 /web/build/** linguist-generated
