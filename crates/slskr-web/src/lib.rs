@@ -2281,7 +2281,10 @@ fn data_card_table_html(items: &[serde_json::Value]) -> String {
         .iter()
         .take(50)
         .map(|item| {
-            let search_text = compact_preview(&item.to_string()).to_lowercase();
+            let label = record_label(item);
+            let detail = record_detail(item);
+            let raw = record_json(item);
+            let search_text = record_search_text(item, &label, &detail);
             let cells = columns
                 .iter()
                 .map(|column| {
@@ -2293,8 +2296,11 @@ fn data_card_table_html(items: &[serde_json::Value]) -> String {
                 .collect::<Vec<_>>()
                 .join("");
             format!(
-                r#"<tr data-slskr-row-text="{search}">{cells}</tr>"#,
+                r#"<tr tabindex="0" data-slskr-row-text="{search}" data-slskr-record-select data-slskr-record-title="{title}" data-slskr-record-detail="{detail}" data-slskr-record-json="{raw}">{cells}</tr>"#,
                 search = escape_html(&search_text),
+                title = escape_html(&label),
+                detail = escape_html(&detail),
+                raw = escape_html(&raw),
                 cells = cells,
             )
         })
@@ -2325,6 +2331,39 @@ fn data_card_csv_html(items: &[serde_json::Value]) -> String {
         r#"<details class="slskr-card-csv"><summary>CSV</summary><pre>{}</pre></details>"#,
         escape_html(&lines.join("\n"))
     )
+}
+
+fn record_label(item: &serde_json::Value) -> String {
+    item.get("name")
+        .or_else(|| item.get("username"))
+        .or_else(|| item.get("query"))
+        .or_else(|| item.get("title"))
+        .or_else(|| item.get("filename"))
+        .or_else(|| item.get("id"))
+        .map(json_scalar_preview)
+        .unwrap_or_else(|| compact_preview(&item.to_string()))
+}
+
+fn record_detail(item: &serde_json::Value) -> String {
+    item.get("status")
+        .or_else(|| item.get("state"))
+        .or_else(|| item.get("kind"))
+        .or_else(|| item.get("message"))
+        .or_else(|| item.get("path"))
+        .map(json_scalar_preview)
+        .unwrap_or_else(|| format!("{} fields", json_object_fields(item).len()))
+}
+
+fn record_json(item: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(item).unwrap_or_else(|_| item.to_string())
+}
+
+fn record_search_text(item: &serde_json::Value, label: &str, detail: &str) -> String {
+    format!("{label} {detail} {}", compact_preview(&item.to_string())).to_lowercase()
+}
+
+fn data_card_inspector_html() -> String {
+    r#"<aside class="slskr-card-inspector" aria-live="polite"><h4>Record Inspector</h4><p>Select a list or table row to inspect its details.</p><pre></pre></aside>"#.to_string()
 }
 
 fn data_card_pending_html(endpoint: ApiEndpoint) -> String {
@@ -2362,29 +2401,15 @@ fn data_card_result_html(response: &EndpointBody) -> String {
             .iter()
             .take(50)
             .map(|item| {
-                let label = item
-                    .get("name")
-                    .or_else(|| item.get("username"))
-                    .or_else(|| item.get("query"))
-                    .or_else(|| item.get("title"))
-                    .or_else(|| item.get("filename"))
-                    .or_else(|| item.get("id"))
-                    .map(json_scalar_preview)
-                    .unwrap_or_else(|| compact_preview(&item.to_string()));
-                let detail = item
-                    .get("status")
-                    .or_else(|| item.get("state"))
-                    .or_else(|| item.get("kind"))
-                    .or_else(|| item.get("message"))
-                    .or_else(|| item.get("path"))
-                    .map(json_scalar_preview)
-                    .unwrap_or_else(|| format!("{} fields", json_object_fields(item).len()));
-                let search_text =
-                    format!("{label} {detail} {}", compact_preview(&item.to_string()))
-                        .to_lowercase();
+                let label = record_label(item);
+                let detail = record_detail(item);
+                let raw = record_json(item);
+                let search_text = record_search_text(item, &label, &detail);
                 format!(
-                    r#"<li data-slskr-row-text="{search}"><strong>{label}</strong><span>{detail}</span></li>"#,
+                    r#"<li tabindex="0" data-slskr-row-text="{search}" data-slskr-record-select data-slskr-record-title="{title}" data-slskr-record-detail="{detail}" data-slskr-record-json="{raw}"><strong>{label}</strong><span>{detail}</span></li>"#,
                     search = escape_html(&search_text),
+                    title = escape_html(&label),
+                    raw = escape_html(&raw),
                     label = escape_html(&label),
                     detail = escape_html(&detail),
                 )
@@ -2392,12 +2417,13 @@ fn data_card_result_html(response: &EndpointBody) -> String {
             .collect::<Vec<_>>()
             .join("");
         return format!(
-            r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>{count} records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><ul class="slskr-record-list">{rows}</ul>{table}{csv}</article>"#,
+            r#"<article class="slskr-data-card" data-slskr-data-card data-slskr-view="list"><header><div><h3>{title}</h3><code>GET {url}</code></div><span>{count} records</span></header><div class="slskr-card-tools"><input type="search" class="slskr-card-filter" placeholder="Filter records" aria-label="Filter {title}"><div class="slskr-card-view"><button type="button" class="is-active" data-slskr-card-view="list">List</button><button type="button" data-slskr-card-view="table">Table</button></div></div><ul class="slskr-record-list">{rows}</ul>{table}{inspector}{csv}</article>"#,
             title = escape_html(&title),
             url = escape_html(&url),
             count = items.len(),
             rows = rows,
             table = data_card_table_html(items),
+            inspector = data_card_inspector_html(),
             csv = data_card_csv_html(items),
         );
     }
@@ -2930,8 +2956,77 @@ fn mount_data_cards(document: &web_sys::Document) -> Result<(), JsValue> {
             button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
             callback.forget();
         }
+
+        let rows = card.query_selector_all("[data-slskr-record-select]")?;
+        for row_index in 0..rows.length() {
+            let Some(node) = rows.item(row_index) else {
+                continue;
+            };
+            let row: web_sys::Element = node.dyn_into()?;
+            let card_for_click = card.clone();
+            let row_for_click = row.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |_event: web_sys::MouseEvent| {
+                    select_data_card_record(&card_for_click, &row_for_click);
+                },
+            ));
+            row.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+
+            let card_for_key = card.clone();
+            let row_for_key = row.clone();
+            let callback = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+                move |event: web_sys::KeyboardEvent| {
+                    let key = event.key();
+                    if key == "Enter" || key == " " {
+                        event.prevent_default();
+                        select_data_card_record(&card_for_key, &row_for_key);
+                    }
+                },
+            ));
+            row.add_event_listener_with_callback("keydown", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
     }
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn select_data_card_record(card: &web_sys::Element, row: &web_sys::Element) {
+    if let Ok(rows) = card.query_selector_all("[data-slskr-record-select]") {
+        for index in 0..rows.length() {
+            let Some(node) = rows.item(index) else {
+                continue;
+            };
+            let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let _ = element.remove_attribute("aria-selected");
+            let _ = element.set_attribute("class", "");
+        }
+    }
+    let _ = row.set_attribute("aria-selected", "true");
+    let _ = row.set_attribute("class", "is-selected");
+
+    let title = row
+        .get_attribute("data-slskr-record-title")
+        .unwrap_or_else(|| "Selected Record".to_string());
+    let detail = row
+        .get_attribute("data-slskr-record-detail")
+        .unwrap_or_default();
+    let raw = row
+        .get_attribute("data-slskr-record-json")
+        .unwrap_or_default();
+
+    if let Ok(Some(header)) = card.query_selector(".slskr-card-inspector h4") {
+        header.set_text_content(Some(&title));
+    }
+    if let Ok(Some(description)) = card.query_selector(".slskr-card-inspector p") {
+        description.set_text_content(Some(&detail));
+    }
+    if let Ok(Some(pre)) = card.query_selector(".slskr-card-inspector pre") {
+        pre.set_text_content(Some(&raw));
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3380,6 +3475,10 @@ mod tests {
         assert!(html.contains("slskr-data-table"));
         assert!(html.contains("2 records"));
         assert!(html.contains("public domain jazz"));
+        assert!(html.contains("data-slskr-record-select"));
+        assert!(html.contains("data-slskr-record-json"));
+        assert!(html.contains("slskr-card-inspector"));
+        assert!(html.contains("Record Inspector"));
         assert!(html.contains("CSV"));
     }
 

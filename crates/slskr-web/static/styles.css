@@ -472,6 +472,27 @@ body {
   padding: 7px 8px;
 }
 
+.slskr-record-list li[data-slskr-record-select],
+.slskr-data-table tr[data-slskr-record-select] {
+  cursor: pointer;
+}
+
+.slskr-record-list li[data-slskr-record-select]:focus,
+.slskr-data-table tr[data-slskr-record-select]:focus {
+  outline: 2px solid #ffd166;
+  outline-offset: 2px;
+}
+
+.slskr-record-list li.is-selected {
+  background: #221f16;
+  border-color: #ffd166;
+}
+
+.slskr-data-table tr.is-selected td {
+  background: #221f16;
+  border-color: #ffd166;
+}
+
 .slskr-record-list strong,
 .slskr-field-list strong {
   overflow: hidden;
@@ -496,6 +517,46 @@ body {
 }
 
 .slskr-data-card[data-slskr-view="table"] .slskr-table-wrap {
+  display: block;
+}
+
+.slskr-card-inspector {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+}
+
+.slskr-card-inspector h4,
+.slskr-card-inspector p {
+  margin: 0;
+}
+
+.slskr-card-inspector h4 {
+  color: #f4efe7;
+  font-size: 13px;
+}
+
+.slskr-card-inspector p {
+  color: #9ba8a1;
+  font-size: 12px;
+}
+
+.slskr-card-inspector pre {
+  background: #090c0d;
+  border: 1px solid #263130;
+  color: #c6d0ca;
+  display: none;
+  font-size: 11px;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.slskr-card-inspector pre:not(:empty) {
   display: block;
 }
 
