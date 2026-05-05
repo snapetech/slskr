@@ -1251,6 +1251,11 @@ body {
   cursor: pointer;
 }
 
+.slskr-native-table tr[data-slskr-native-select]:focus-visible td {
+  outline: 2px solid #f6b84b;
+  outline-offset: -2px;
+}
+
 .slskr-native-table tr[aria-selected="true"] td {
   background: #172321;
   border-bottom-color: #8dd7c8;

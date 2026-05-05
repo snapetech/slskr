@@ -3350,7 +3350,7 @@ fn native_table_html(
         .enumerate()
         .map(|(index, (primary, secondary, meta, action))| {
             format!(
-                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
+                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
@@ -4731,9 +4731,28 @@ fn mount_native_tables(document: &web_sys::Document) -> Result<(), JsValue> {
         let callback = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
             move |event: web_sys::KeyboardEvent| {
                 let key = event.key();
-                if key == "Enter" || key == " " {
-                    event.prevent_default();
-                    select_native_row(&document_for_key, &row_for_key);
+                match key.as_str() {
+                    "Enter" | " " => {
+                        event.prevent_default();
+                        select_native_row(&document_for_key, &row_for_key);
+                    }
+                    "ArrowDown" => {
+                        event.prevent_default();
+                        focus_relative_native_row(&document_for_key, &row_for_key, 1);
+                    }
+                    "ArrowUp" => {
+                        event.prevent_default();
+                        focus_relative_native_row(&document_for_key, &row_for_key, -1);
+                    }
+                    "Home" => {
+                        event.prevent_default();
+                        focus_edge_native_row(&document_for_key, &row_for_key, true);
+                    }
+                    "End" => {
+                        event.prevent_default();
+                        focus_edge_native_row(&document_for_key, &row_for_key, false);
+                    }
+                    _ => {}
                 }
             },
         ));
@@ -4741,6 +4760,66 @@ fn mount_native_tables(document: &web_sys::Document) -> Result<(), JsValue> {
         callback.forget();
     }
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn focus_relative_native_row(
+    document: &web_sys::Document,
+    current: &web_sys::Element,
+    offset: isize,
+) {
+    let Some(workspace) = current.closest(".slskr-native-workspace").ok().flatten() else {
+        return;
+    };
+    let rows = visible_native_rows(&workspace);
+    let Some(current_index) = rows.iter().position(|row| row.is_same_node(Some(current))) else {
+        return;
+    };
+    let target_index = (current_index as isize + offset).clamp(0, rows.len() as isize - 1) as usize;
+    if let Some(row) = rows.get(target_index) {
+        focus_native_row(document, row);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn focus_edge_native_row(document: &web_sys::Document, current: &web_sys::Element, first: bool) {
+    let Some(workspace) = current.closest(".slskr-native-workspace").ok().flatten() else {
+        return;
+    };
+    let rows = visible_native_rows(&workspace);
+    let row = if first { rows.first() } else { rows.last() };
+    if let Some(row) = row {
+        focus_native_row(document, row);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn visible_native_rows(workspace: &web_sys::Element) -> Vec<web_sys::Element> {
+    let Ok(rows) = workspace.query_selector_all("[data-slskr-native-select]") else {
+        return Vec::new();
+    };
+    let mut visible = Vec::new();
+    for index in 0..rows.length() {
+        let Some(node) = rows.item(index) else {
+            continue;
+        };
+        let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        if row.has_attribute("hidden") {
+            continue;
+        }
+        visible.push(row);
+    }
+    visible
+}
+
+#[cfg(target_arch = "wasm32")]
+fn focus_native_row(document: &web_sys::Document, row: &web_sys::Element) {
+    if let Some(element) = row.dyn_ref::<web_sys::HtmlElement>() {
+        let _ = element.focus();
+    }
+    select_native_row(document, row);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -9175,6 +9254,7 @@ mod tests {
             assert!(html.contains("data-slskr-native-clear-selection"));
             assert!(html.contains("data-slskr-native-reset-state"));
             assert!(html.contains("slskr-native-table"));
+            assert!(html.contains("aria-keyshortcuts=\"Enter Space ArrowUp ArrowDown Home End\""));
             assert!(html.contains("data-slskr-native-sort=\"0\""));
             assert!(html.contains("data-slskr-native-sort-0="));
             assert!(html.contains("data-slskr-native-index="));
