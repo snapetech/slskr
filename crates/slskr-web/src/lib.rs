@@ -74,6 +74,26 @@ pub struct RoutePage {
     pub title: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RouteKind {
+    Search,
+    DiscoveryGraph,
+    PlaylistIntake,
+    Wishlist,
+    Downloads,
+    Uploads,
+    Messages,
+    Rooms,
+    Users,
+    Contacts,
+    Solid,
+    Collections,
+    ShareGroups,
+    SharedWithMe,
+    Browse,
+    System,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EndpointBody {
     pub endpoint: ApiEndpoint,
@@ -2131,6 +2151,7 @@ pub fn route_probe_pending_html(path: &str) -> String {
         .join("")
 }
 
+#[cfg(test)]
 fn endpoint_title(path: &str) -> String {
     path.trim_start_matches('/')
         .replace(['/', '-', '_'], " ")
@@ -2146,6 +2167,7 @@ fn endpoint_title(path: &str) -> String {
         .join(" ")
 }
 
+#[cfg(test)]
 fn json_display_array(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
     if let Some(items) = value.as_array() {
         return Some(items);
@@ -2188,6 +2210,7 @@ fn json_scalar_preview(value: &serde_json::Value) -> String {
     }
 }
 
+#[cfg(test)]
 fn json_object_fields(value: &serde_json::Value) -> Vec<(&str, String)> {
     value
         .as_object()
@@ -2204,6 +2227,7 @@ fn json_object_fields(value: &serde_json::Value) -> Vec<(&str, String)> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn json_table_columns(items: &[serde_json::Value]) -> Vec<String> {
     let preferred = [
         "name",
@@ -2253,6 +2277,7 @@ fn json_table_columns(items: &[serde_json::Value]) -> Vec<String> {
     columns
 }
 
+#[cfg(test)]
 fn json_cell_value(item: &serde_json::Value, column: &str) -> String {
     if column == "value" {
         return compact_preview(&item.to_string());
@@ -2262,6 +2287,7 @@ fn json_cell_value(item: &serde_json::Value, column: &str) -> String {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn csv_escape(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
@@ -2270,6 +2296,7 @@ fn csv_escape(value: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn data_card_table_html(items: &[serde_json::Value]) -> String {
     let columns = json_table_columns(items);
     let header = columns
@@ -2320,6 +2347,7 @@ fn data_card_table_html(items: &[serde_json::Value]) -> String {
     )
 }
 
+#[cfg(test)]
 fn data_card_csv_html(items: &[serde_json::Value]) -> String {
     let columns = json_table_columns(items);
     let mut lines = vec![columns
@@ -2340,6 +2368,7 @@ fn data_card_csv_html(items: &[serde_json::Value]) -> String {
     )
 }
 
+#[cfg(test)]
 fn record_label(item: &serde_json::Value) -> String {
     item.get("name")
         .or_else(|| item.get("username"))
@@ -2351,6 +2380,7 @@ fn record_label(item: &serde_json::Value) -> String {
         .unwrap_or_else(|| compact_preview(&item.to_string()))
 }
 
+#[cfg(test)]
 fn record_detail(item: &serde_json::Value) -> String {
     item.get("status")
         .or_else(|| item.get("state"))
@@ -2361,27 +2391,22 @@ fn record_detail(item: &serde_json::Value) -> String {
         .unwrap_or_else(|| format!("{} fields", json_object_fields(item).len()))
 }
 
+#[cfg(test)]
 fn record_json(item: &serde_json::Value) -> String {
     serde_json::to_string_pretty(item).unwrap_or_else(|_| item.to_string())
 }
 
+#[cfg(test)]
 fn record_search_text(item: &serde_json::Value, label: &str, detail: &str) -> String {
     format!("{label} {detail} {}", compact_preview(&item.to_string())).to_lowercase()
 }
 
+#[cfg(test)]
 fn data_card_inspector_html() -> String {
     r#"<aside class="slskr-card-inspector" aria-live="polite"><h4>Record Inspector</h4><p>Select a list or table row to inspect its details.</p><pre></pre></aside>"#.to_string()
 }
 
-fn data_card_pending_html(endpoint: ApiEndpoint) -> String {
-    format!(
-        r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>{method} {path}</code></header><div class="slskr-empty-state">Loading</div></article>"#,
-        title = escape_html(&endpoint_title(endpoint.path)),
-        method = escape_html(endpoint.method),
-        path = escape_html(&endpoint_url(endpoint.path)),
-    )
-}
-
+#[cfg(test)]
 fn data_card_result_html(response: &EndpointBody) -> String {
     let title = endpoint_title(response.endpoint.path);
     let url = endpoint_url(response.endpoint.path);
@@ -2454,71 +2479,63 @@ fn data_card_result_html(response: &EndpointBody) -> String {
     )
 }
 
-pub fn route_workspace_pending_html(path: &str) -> String {
-    let Some(page) = route_page(path) else {
-        return String::new();
-    };
-    let pending = route_endpoints(page.surface)
-        .iter()
-        .filter(|endpoint| endpoint.method == "GET")
-        .map(|endpoint| data_card_pending_html(*endpoint))
-        .collect::<Vec<_>>()
-        .join("");
-    match page.surface {
-        "search" => format!("{pending}{}", search_planner_panel_html()),
-        "integrations" => format!("{pending}{}", automation_center_panel_html()),
-        "system" => format!(
-            "{pending}{}{}",
-            experience_settings_panel_html(),
-            automation_center_panel_html()
-        ),
-        _ => pending,
+pub fn route_kind(path: &str) -> RouteKind {
+    match normalize_route_path(path) {
+        "/discovery-graph" => RouteKind::DiscoveryGraph,
+        "/playlist-intake" => RouteKind::PlaylistIntake,
+        "/wishlist" => RouteKind::Wishlist,
+        "/downloads" => RouteKind::Downloads,
+        "/uploads" => RouteKind::Uploads,
+        "/messages" | "/chat" | "/pods" | "/pods/:podId" | "/pods/:podId/channels/:channelId" => {
+            RouteKind::Messages
+        }
+        "/rooms" => RouteKind::Rooms,
+        "/users" => RouteKind::Users,
+        "/contacts" => RouteKind::Contacts,
+        "/solid" => RouteKind::Solid,
+        "/collections" => RouteKind::Collections,
+        "/sharegroups" => RouteKind::ShareGroups,
+        "/shared" => RouteKind::SharedWithMe,
+        "/browse" => RouteKind::Browse,
+        "/system" | "/system/:tab" => RouteKind::System,
+        _ => RouteKind::Search,
     }
 }
 
-pub fn route_workspace_result_html(path: &str, responses: &[EndpointBody]) -> String {
-    if responses.is_empty() {
-        return route_workspace_pending_html(path);
-    }
-    let Some(page) = route_page(path) else {
-        return String::new();
-    };
-    match page.surface {
-        "search" => search_workspace_html(responses),
-        "transfers" => transfers_workspace_html(responses),
-        "messages" => messages_workspace_html(responses),
-        "rooms" => rooms_workspace_html(responses),
-        "browse" => browse_workspace_html(responses),
-        "identity" => identity_workspace_html(responses),
-        "collections" => collections_workspace_html(responses),
-        "integrations" => integrations_workspace_html(responses),
-        "system" => system_workspace_html(responses),
-        "wishlist" => wishlist_workspace_html(responses),
-        _ => data_cards_html(responses),
-    }
-}
-
-fn data_cards_html(responses: &[EndpointBody]) -> String {
+fn response_count(responses: Option<&[EndpointBody]>, endpoint: &str) -> String {
     responses
-        .iter()
-        .map(data_card_result_html)
-        .collect::<Vec<_>>()
-        .join("")
+        .and_then(|items| endpoint_body(items, endpoint))
+        .and_then(json_array_len)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "0".to_string())
 }
 
-fn workspace_tabs_html(tabs: &[&str]) -> String {
-    let modes = ["all", "primary", "secondary"];
+fn response_value(responses: Option<&[EndpointBody]>, endpoint: &str, field: &str) -> String {
+    responses
+        .and_then(|items| endpoint_body(items, endpoint))
+        .and_then(|body| json_field_string(body, field))
+        .unwrap_or_else(|| "pending".to_string())
+}
+
+fn status_chip_html(label: &str, value: &str) -> String {
+    format!(
+        r#"<span class="slskr-status-chip"><strong>{}</strong>{}</span>"#,
+        escape_html(label),
+        escape_html(value)
+    )
+}
+
+fn workflow_tabs_html(tabs: &[&str]) -> String {
     tabs.iter()
         .enumerate()
         .map(|(index, tab)| {
             format!(
-                r#"<button type="button" class="{class}" data-slskr-workspace-mode="{mode}" aria-selected="{selected}">{tab}</button>"#,
+                r#"<button type="button" class="{class}" aria-selected="{selected}">{tab}</button>"#,
                 class = if index == 0 {
-                    "slskr-workspace-tab is-active"
+                    "slskr-tab is-active"
                 } else {
-                    "slskr-workspace-tab"
+                    "slskr-tab"
                 },
-                mode = modes.get(index).copied().unwrap_or("all"),
                 selected = if index == 0 { "true" } else { "false" },
                 tab = escape_html(tab),
             )
@@ -2527,28 +2544,445 @@ fn workspace_tabs_html(tabs: &[&str]) -> String {
         .join("")
 }
 
-fn selected_cards_html(responses: &[EndpointBody], paths: &[&str]) -> String {
-    paths
-        .iter()
-        .filter_map(|path| {
-            responses
-                .iter()
-                .find(|response| response.endpoint.path == *path)
+fn empty_state_html(title: &str, detail: &str, action: &str) -> String {
+    format!(
+        r#"<div class="slskr-empty-workflow"><strong>{title}</strong><span>{detail}</span><button type="button">{action}</button></div>"#,
+        title = escape_html(title),
+        detail = escape_html(detail),
+        action = escape_html(action),
+    )
+}
+
+fn sample_rows_html(rows: &[(&str, &str, &str, &str)]) -> String {
+    rows.iter()
+        .map(|(primary, secondary, meta, action)| {
+            format!(
+                r#"<tr><td><strong>{primary}</strong><span>{secondary}</span></td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
+                primary = escape_html(primary),
+                secondary = escape_html(secondary),
+                meta = escape_html(meta),
+                action = escape_html(action),
+            )
         })
-        .map(data_card_result_html)
         .collect::<Vec<_>>()
         .join("")
 }
 
-fn workspace_layout_html(tabs: &[&str], primary: String, secondary: String) -> String {
+fn workflow_table_html(headers: &[&str], rows: &[(&str, &str, &str, &str)]) -> String {
+    let header = headers
+        .iter()
+        .map(|header| format!(r#"<th>{}</th>"#, escape_html(header)))
+        .collect::<Vec<_>>()
+        .join("");
     format!(
-        r#"<div class="slskr-workspace-tabs">{tabs}</div><div class="slskr-workspace-grid" data-slskr-workspace-grid><section class="slskr-workspace-primary">{primary}</section><aside class="slskr-workspace-secondary">{secondary}</aside></div>"#,
-        tabs = workspace_tabs_html(tabs),
-        primary = primary,
-        secondary = secondary,
+        r#"<div class="slskr-table-wrap slskr-domain-table"><table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table></div>"#,
+        header = header,
+        rows = sample_rows_html(rows),
     )
 }
 
+fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>) -> String {
+    let stats = match kind {
+        RouteKind::Search | RouteKind::DiscoveryGraph => vec![
+            ("Searches", response_count(responses, "/searches"), "active"),
+            (
+                "Responses",
+                response_count(responses, "/searches/:id/responses"),
+                "selected",
+            ),
+            ("Profile", "balanced".to_string(), "ranking"),
+        ],
+        RouteKind::PlaylistIntake | RouteKind::Solid => vec![
+            (
+                "Providers",
+                response_value(responses, "/source-providers", "count"),
+                "sources",
+            ),
+            ("Jobs", response_count(responses, "/jobs"), "automation"),
+            ("Review", "ready".to_string(), "queue"),
+        ],
+        RouteKind::Wishlist => vec![
+            ("Wanted", response_count(responses, "/wishlist"), "searches"),
+            ("Enabled", "review".to_string(), "state"),
+            ("Inbox", "0".to_string(), "pending"),
+        ],
+        RouteKind::Downloads => vec![
+            (
+                "Active",
+                response_count(responses, "/transfers/downloads"),
+                "downloads",
+            ),
+            (
+                "Speed",
+                response_value(responses, "/transfers/speeds", "download"),
+                "down",
+            ),
+            ("Slots", "auto".to_string(), "limit"),
+        ],
+        RouteKind::Uploads => vec![
+            (
+                "Active",
+                response_count(responses, "/transfers/uploads"),
+                "uploads",
+            ),
+            (
+                "Speed",
+                response_value(responses, "/transfers/speeds", "upload"),
+                "up",
+            ),
+            ("Policy", "allow list".to_string(), "mode"),
+        ],
+        RouteKind::Messages => vec![
+            (
+                "Threads",
+                response_count(responses, "/conversations"),
+                "inbox",
+            ),
+            ("Unread", "0".to_string(), "messages"),
+            ("Pods", response_count(responses, "/pods"), "secondary"),
+        ],
+        RouteKind::Rooms => vec![
+            (
+                "Available",
+                response_count(responses, "/rooms/available"),
+                "rooms",
+            ),
+            (
+                "Joined",
+                response_count(responses, "/rooms/joined"),
+                "rooms",
+            ),
+            ("Activity", "live".to_string(), "stream"),
+        ],
+        RouteKind::Users => vec![
+            ("Watched", response_count(responses, "/users"), "users"),
+            ("Online", "pending".to_string(), "presence"),
+            ("Notes", response_count(responses, "/users/notes"), "saved"),
+        ],
+        RouteKind::Contacts => vec![
+            ("Contacts", response_count(responses, "/contacts"), "people"),
+            (
+                "Nearby",
+                response_count(responses, "/contacts/nearby"),
+                "peers",
+            ),
+            ("Invites", "0".to_string(), "open"),
+        ],
+        RouteKind::Collections => vec![
+            (
+                "Collections",
+                response_count(responses, "/collections"),
+                "sets",
+            ),
+            (
+                "Items",
+                response_count(responses, "/library/items"),
+                "library",
+            ),
+            ("Shared", response_count(responses, "/shared"), "inbound"),
+        ],
+        RouteKind::ShareGroups => vec![
+            ("Groups", response_count(responses, "/sharegroups"), "sets"),
+            (
+                "Grants",
+                response_count(responses, "/share-grants"),
+                "active",
+            ),
+            ("Tokens", "0".to_string(), "issued"),
+        ],
+        RouteKind::SharedWithMe => vec![
+            ("Shared", response_count(responses, "/shared"), "records"),
+            (
+                "Grants",
+                response_count(responses, "/share-grants"),
+                "access",
+            ),
+            ("Expiring", "0".to_string(), "soon"),
+        ],
+        RouteKind::Browse => vec![
+            ("Peer", "peer1".to_string(), "target"),
+            (
+                "Folders",
+                response_count(responses, "/users/:username/browse"),
+                "cached",
+            ),
+            ("Selected", "0".to_string(), "files"),
+        ],
+        RouteKind::System => vec![
+            (
+                "Server",
+                response_value(responses, "/server", "state"),
+                "connection",
+            ),
+            ("Shares", response_count(responses, "/shares"), "roots"),
+            (
+                "Database",
+                response_value(responses, "/database/stats", "status"),
+                "storage",
+            ),
+        ],
+    };
+    stats
+        .iter()
+        .map(|(label, value, detail)| stat_card_html(label, value, detail))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn route_workflow_toolbar_html(kind: RouteKind) -> String {
+    match kind {
+        RouteKind::Search => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Search text"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Clear</button></form>"#.to_string(),
+        RouteKind::DiscoveryGraph => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Archive Artist" aria-label="Seed artist or query"><select aria-label="Source"><option>Search history</option><option>Playlist</option><option>MusicBrainz</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Build graph</button></form>"#.to_string(),
+        RouteKind::PlaylistIntake => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Artist - Title" aria-label="Playlist text"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Preview playlist</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Queue plans</button></form>"#.to_string(),
+        RouteKind::Wishlist => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Wanted search"><label><input type="checkbox" checked> Enabled</label><label><input type="checkbox"> Auto-download</label><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Add wanted search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Run selected</button></form>"#.to_string(),
+        RouteKind::Downloads => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Download</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Clear completed</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Enable acceleration</button></div>"#.to_string(),
+        RouteKind::Uploads => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="2">Clear completed</button><button type="button" class="slskr-toolbar-command">Allow selected</button><button type="button" class="slskr-toolbar-command">Deny selected</button></div>"#.to_string(),
+        RouteKind::Messages => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><input class="slskr-toolbar-input" value="hello" aria-label="Message"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Reply</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Acknowledge</button></form>"#.to_string(),
+        RouteKind::Rooms => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="public-domain" aria-label="Room"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Join</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Leave</button></form>"#.to_string(),
+        RouteKind::Users => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="1">Watch</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Save note</button><button type="button" class="slskr-toolbar-command">Browse</button></form>"#.to_string(),
+        RouteKind::Contacts => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Contact username"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Add contact</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Edit note</button></form>"#.to_string(),
+        RouteKind::Solid => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary">Connect identity</button><button type="button" class="slskr-toolbar-command">Sync storage</button><button type="button" class="slskr-toolbar-command">Refresh session</button></div>"#.to_string(),
+        RouteKind::Collections => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Open Sessions" aria-label="Collection name"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Create collection</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="4">Add item</button></form>"#.to_string(),
+        RouteKind::ShareGroups => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Trusted peers" aria-label="Group name"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="1">Create group</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Add member</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Issue token</button></form>"#.to_string(),
+        RouteKind::SharedWithMe => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary">Open collection</button><button type="button" class="slskr-toolbar-command">Copy token</button><button type="button" class="slskr-toolbar-command">Leave share</button></div>"#.to_string(),
+        RouteKind::Browse => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><input class="slskr-toolbar-input" value="/" aria-label="Folder"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Browse</button><button type="button" class="slskr-toolbar-command">Download selected</button></form>"#.to_string(),
+        RouteKind::System => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Connect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Disconnect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Rescan shares</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Vacuum database</button></div>"#.to_string(),
+    }
+}
+
+fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String {
+    let kind = route_kind(path);
+    let tabs = match kind {
+        RouteKind::Search => vec!["Results", "Searches", "Planner"],
+        RouteKind::DiscoveryGraph => vec!["Graph", "Recommendations", "Review"],
+        RouteKind::PlaylistIntake => vec!["Parser", "Rows", "Plans"],
+        RouteKind::Wishlist => vec!["Wanted", "Review", "History"],
+        RouteKind::Downloads => vec!["Active", "Queued", "Completed", "Failed"],
+        RouteKind::Uploads => vec!["Active", "Queued", "Completed", "Policy"],
+        RouteKind::Messages => vec!["Conversations", "Thread", "Pods"],
+        RouteKind::Rooms => vec!["Joined", "Available", "Activity"],
+        RouteKind::Users => vec!["Directory", "Detail", "Notes"],
+        RouteKind::Contacts => vec!["Contacts", "Groups", "Invites"],
+        RouteKind::Solid => vec!["Identity", "Storage", "Sync"],
+        RouteKind::Collections => vec!["Collections", "Items", "Sharing"],
+        RouteKind::ShareGroups => vec!["Groups", "Members", "Tokens"],
+        RouteKind::SharedWithMe => vec!["Inbound", "Tokens", "Owners"],
+        RouteKind::Browse => vec!["Tree", "Files", "Queue"],
+        RouteKind::System => vec!["Connection", "Shares", "Storage", "Logs"],
+    };
+    let (primary_title, primary_detail, table_headers, rows, side_title, side_body) = match kind {
+        RouteKind::Search => (
+            "Grouped results",
+            "Ranked peers with duplicate folding, warnings, and download review.",
+            vec!["File", "Peer and score", "Action"],
+            vec![
+                ("01 Public Domain Theme.flac", "Archive Artist / Open Sessions", "peer1 / 94 / free slot", "Download"),
+                ("02 Live Room Take.mp3", "Archive Artist / Broadcast", "peer2 / 71 / queue 2", "Preview"),
+            ],
+            "Search planner",
+            "Select a result to review score reasons, duplicate groups, locked files, and the exact download action before queueing.",
+        ),
+        RouteKind::DiscoveryGraph => (
+            "Discovery graph",
+            "Seed an artist, album, track, or query and expand nearby searches.",
+            vec!["Node", "Relationship", "Action"],
+            vec![
+                ("Archive Artist", "artist seed", "12 neighbors", "Expand"),
+                ("Open Sessions", "album candidate", "lossless profile", "Search"),
+            ],
+            "Review queue",
+            "Recommended next searches are staged here with acquisition profile and source-provider context.",
+        ),
+        RouteKind::PlaylistIntake => (
+            "Playlist parser",
+            "Paste or upload playlist text, validate rows, and queue searches.",
+            vec!["Parsed row", "Classification", "Action"],
+            vec![
+                ("Archive Artist - Public Domain Theme", "track / valid", "balanced", "Queue search"),
+                ("Unknown entry", "needs review", "missing artist", "Fix row"),
+            ],
+            "Import validation",
+            "Row-level errors stay visible until every item has a title, artist or query, and acquisition profile.",
+        ),
+        RouteKind::Wishlist => (
+            "Wanted searches",
+            "Persistent searches with review state and optional automatic downloads.",
+            vec!["Search", "State", "Action"],
+            vec![
+                ("public domain jazz", "enabled / manual review", "last run pending", "Run"),
+                ("archive live set flac", "enabled / auto-download off", "0 results", "Review"),
+            ],
+            "Discovery inbox",
+            "Send selected wanted searches to acquisition review, inspect quota, and approve reruns.",
+        ),
+        RouteKind::Downloads => (
+            "Download queue",
+            "Active, queued, completed, and failed downloads with progress controls.",
+            vec!["File", "Progress", "Action"],
+            vec![
+                ("Open Sessions/01 Theme.flac", "peer1 / 42% / 1.2 MB/s", "ETA 03:10", "Cancel"),
+                ("Broadcast/02 Take.mp3", "peer2 / queued", "slot pending", "Retry"),
+            ],
+            "Transfer controls",
+            "Aggregate speed, active-slot limits, retry, cancel, and remove actions live here. Uploads are kept on the Uploads page.",
+        ),
+        RouteKind::Uploads => (
+            "Upload queue",
+            "Peer requests, progress, speed, and allow/deny state.",
+            vec!["Request", "Progress", "Action"],
+            vec![
+                ("peer3 wants Theme.flac", "18% / 420 KB/s", "allow list", "Deny"),
+                ("peer4 wants Notes.txt", "queued", "waiting", "Allow"),
+            ],
+            "Upload policy",
+            "Review sharing policy, active upload slots, and clear completed uploads without download queue noise.",
+        ),
+        RouteKind::Messages => (
+            "Conversations",
+            "Two-pane private messenger with unread state and compose actions.",
+            vec!["Thread", "Last message", "Action"],
+            vec![
+                ("peer1", "unread / today", "Can you browse my folder?", "Reply"),
+                ("peer2", "read / yesterday", "Thanks", "Open"),
+            ],
+            "Selected thread",
+            "Select a conversation or start one by username, then reply, acknowledge, search, or delete.",
+        ),
+        RouteKind::Rooms => (
+            "Room activity",
+            "Joined rooms, available rooms, users, and recent messages.",
+            vec!["Room", "Activity", "Action"],
+            vec![
+                ("public-domain", "joined / 18 users", "2 new messages", "Open"),
+                ("ambient", "available", "54 users", "Join"),
+            ],
+            "Compose",
+            "Send room messages from the selected joined room and keep available-room browsing secondary.",
+        ),
+        RouteKind::Users => (
+            "User directory",
+            "Watched users with status, stats, notes, browse and message actions.",
+            vec!["User", "Status", "Action"],
+            vec![
+                ("peer1", "online / privileged", "note saved", "Browse"),
+                ("peer2", "away", "shared 1,240 files", "Message"),
+            ],
+            "User detail",
+            "Readable info, presence, privileges, and endpoint data appear here after selecting a user.",
+        ),
+        RouteKind::Contacts => (
+            "Contact manager",
+            "Contacts, groups, nearby peers, invites, and notes.",
+            vec!["Contact", "Group", "Action"],
+            vec![
+                ("peer1", "trusted / online", "note saved", "Message"),
+                ("peer5", "nearby", "invite pending", "Accept"),
+            ],
+            "Contact detail",
+            "Edit notes, browse, watch, remove, or invite from the selected contact context.",
+        ),
+        RouteKind::Solid => (
+            "Solid status",
+            "Identity, storage, session, linked-data sync, and setup controls.",
+            vec!["Area", "State", "Action"],
+            vec![
+                ("Identity", "not connected", "WebID required", "Connect"),
+                ("Storage", "pending", "no pod selected", "Configure"),
+            ],
+            "Related integrations",
+            "Bridge, pods, source providers, and automation state stay secondary to Solid setup.",
+        ),
+        RouteKind::Collections => (
+            "Collection library",
+            "Create collections, inspect items, add or remove files, and share.",
+            vec!["Collection", "Items", "Action"],
+            vec![
+                ("Open Sessions", "12 items", "private", "Open"),
+                ("Radio Finds", "4 items", "shared", "Share"),
+            ],
+            "Item picker",
+            "Browse library items here, then add selected files to the active collection.",
+        ),
+        RouteKind::ShareGroups => (
+            "Share groups",
+            "Groups, members, grants, tokens, and permissions.",
+            vec!["Group", "Grant", "Action"],
+            vec![
+                ("Trusted peers", "read collections", "3 members", "Issue token"),
+                ("Reviewers", "expires soon", "1 member", "Update"),
+            ],
+            "Permissions",
+            "Add members, issue tokens, revoke grants, and adjust selected group access.",
+        ),
+        RouteKind::SharedWithMe => (
+            "Inbound shares",
+            "Collections, files, grants, tokens, owners, expiration, and access status.",
+            vec!["Shared item", "Owner and access", "Action"],
+            vec![
+                ("Open Sessions", "peer1 / valid", "expires never", "Open"),
+                ("Live Notes", "peer2 / token", "expires soon", "Copy token"),
+            ],
+            "Access detail",
+            "Inspect owner, token, expiration, and leave or revoke where allowed.",
+        ),
+        RouteKind::Browse => (
+            "Peer browser",
+            "Enter a username, expand folders, filter files, and queue selected downloads.",
+            vec!["Path", "Contents", "Action"],
+            vec![
+                ("/Music/Open Sessions", "12 files / 2 folders", "cached", "Open"),
+                ("/Music/Open Sessions/Theme.flac", "24 MB", "selected", "Download"),
+            ],
+            "Download preview",
+            "Selected files appear here before queueing so peers, paths, and sizes can be checked.",
+        ),
+        RouteKind::System => (
+            "Operator dashboard",
+            "Connection, shares, database, logs, preferences, and automation.",
+            vec!["Area", "State", "Action"],
+            vec![
+                ("Connection", "server pending", "session unknown", "Connect"),
+                ("Shares", "scan idle", "0 roots", "Rescan"),
+                ("Database", "stats pending", "maintenance ready", "Vacuum"),
+            ],
+            "Logs and preferences",
+            "Filter events, update preferences, and review automation from tabs without exposing raw metrics by default.",
+        ),
+    };
+    format!(
+        r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}"><div class="slskr-workflow-tabs">{tabs}</div><div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></div>"#,
+        kind = kind,
+        tabs = workflow_tabs_html(&tabs),
+        primary_title = escape_html(primary_title),
+        primary_detail = escape_html(primary_detail),
+        fresh = status_chip_html(
+            "Data",
+            if responses.is_some() {
+                "loaded"
+            } else {
+                "loading"
+            }
+        ),
+        table = workflow_table_html(&table_headers, &rows),
+        side_title = escape_html(side_title),
+        side_body = escape_html(side_body),
+        empty = empty_state_html(
+            "Nothing selected",
+            "Choose a row to inspect details and available actions.",
+            "Review"
+        ),
+    )
+}
+
+pub fn route_workspace_pending_html(path: &str) -> String {
+    route_workflow_html(path, None)
+}
+
+pub fn route_workspace_result_html(path: &str, responses: &[EndpointBody]) -> String {
+    route_workflow_html(path, Some(responses))
+}
+
+#[cfg(test)]
 fn experience_settings_panel_html() -> String {
     let groups = ["Search", "Discovery", "Player", "Messages"];
     let sections = groups
@@ -2591,6 +3025,7 @@ fn experience_settings_panel_html() -> String {
     )
 }
 
+#[cfg(test)]
 fn automation_center_panel_html() -> String {
     let recipes = automation_recipes()
         .iter()
@@ -2613,162 +3048,6 @@ fn automation_center_panel_html() -> String {
     format!(
         r#"<article class="slskr-data-card slskr-local-panel" data-slskr-automation-panel><header><div><h3>Automation Center</h3><code>browser local</code></div><span id="slskr-automation-summary">7 recipes</span></header><div class="slskr-local-actions"><button type="button" data-slskr-automation-action="copy-history">Copy History</button><button type="button" data-slskr-automation-action="reset">Reset</button></div><ul class="slskr-recipe-list">{recipes}</ul><pre id="slskr-automation-report"></pre><p id="slskr-automation-status" aria-live="polite"></p></article>"#,
         recipes = recipes
-    )
-}
-
-fn search_planner_panel_html() -> String {
-    r#"<article class="slskr-data-card slskr-local-panel" data-slskr-search-planner><header><div><h3>Search Planner</h3><code>browser local</code></div><span id="slskr-search-planner-summary">Ranking, duplicate folding, and action previews</span></header><form class="slskr-local-form"><fieldset><legend>Ranking</legend><label><span>Search Text</span><input type="text" data-slskr-search-setting="query" value="public domain theme"></label><label><span>Acquisition Profile</span><input type="text" data-slskr-search-setting="profile" value="lossless-exact"></label><label class="slskr-local-check"><input type="checkbox" data-slskr-search-setting="foldDuplicates" checked>Fold duplicate responses</label></fieldset></form><div class="slskr-local-actions"><button type="button" data-slskr-search-action="plan">Build Preview</button><button type="button" data-slskr-search-action="reset">Reset</button></div><pre id="slskr-search-planner-report"></pre><p id="slskr-search-planner-status" aria-live="polite"></p></article>"#.to_string()
-}
-
-fn search_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Searches", "Responses", "Interests"],
-        selected_cards_html(responses, &["/searches", "/searches/:id/responses"]),
-        format!(
-            "{}{}",
-            selected_cards_html(
-                responses,
-                &[
-                    "/searches/records",
-                    "/soulseek/interests",
-                    "/soulseek/hated-interests",
-                ],
-            ),
-            search_planner_panel_html()
-        ),
-    )
-}
-
-fn transfers_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Downloads", "Uploads", "Speeds"],
-        selected_cards_html(responses, &["/transfers/downloads", "/transfers/uploads"]),
-        selected_cards_html(responses, &["/transfers/speeds"]),
-    )
-}
-
-fn messages_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Inbox", "Thread", "Pods"],
-        selected_cards_html(responses, &["/conversations", "/conversations/:username"]),
-        selected_cards_html(responses, &["/pods"]),
-    )
-}
-
-fn rooms_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Available", "Joined", "Activity"],
-        selected_cards_html(responses, &["/rooms/available", "/rooms/joined"]),
-        r#"<article class="slskr-data-card"><header><h3>Room Activity</h3><code>rooms stream</code></header><div class="slskr-empty-state">Join a room to show users and messages.</div></article>"#.to_string(),
-    )
-}
-
-fn browse_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Folders", "Files", "Peer"],
-        selected_cards_html(responses, &["/users/:username/browse"]),
-        r#"<article class="slskr-data-card"><header><h3>Peer Browse</h3><code>directory request</code></header><div class="slskr-empty-state">Request a directory to populate the tree.</div></article>"#.to_string(),
-    )
-}
-
-fn identity_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Users", "Contacts", "Notes"],
-        selected_cards_html(responses, &["/users", "/contacts"]),
-        selected_cards_html(
-            responses,
-            &[
-                "/users/:username/info",
-                "/users/:username/status",
-                "/users/:username/endpoint",
-                "/contacts/nearby",
-                "/users/notes",
-            ],
-        ),
-    )
-}
-
-fn collections_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Collections", "Sharing", "Library"],
-        selected_cards_html(
-            responses,
-            &["/collections", "/sharegroups", "/share-grants", "/shared"],
-        ),
-        selected_cards_html(
-            responses,
-            &[
-                "/shares/catalog",
-                "/shares",
-                "/library/items",
-                "/library/items/browser",
-                "/files/downloads/directories",
-                "/files/incomplete/directories",
-            ],
-        ),
-    )
-}
-
-fn integrations_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Sources", "Metadata", "Automation"],
-        selected_cards_html(
-            responses,
-            &[
-                "/source-providers",
-                "/source-feeds",
-                "/musicbrainz/albums/completion",
-                "/musicbrainz/release-radar/subscriptions",
-            ],
-        ),
-        format!(
-            "{}{}",
-            selected_cards_html(
-                responses,
-                &[
-                    "/songid/runs",
-                    "/solid/status",
-                    "/pods",
-                    "/bridge/status",
-                    "/jobs",
-                    "/mesh/stats",
-                    "/security/dashboard",
-                ],
-            ),
-            automation_center_panel_html()
-        ),
-    )
-}
-
-fn system_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Runtime", "Events", "Storage"],
-        selected_cards_html(
-            responses,
-            &[
-                "/telemetry/metrics",
-                "/telemetry/metrics/kpis",
-                "/telemetry/reports/transfers/summary",
-                "/options",
-            ],
-        ),
-        format!(
-            "{}{}{}",
-            selected_cards_html(
-                responses,
-                &["/events", "/logs", "/shares", "/database/stats"],
-            ),
-            experience_settings_panel_html(),
-            automation_center_panel_html()
-        ),
-    )
-}
-
-fn wishlist_workspace_html(responses: &[EndpointBody]) -> String {
-    workspace_layout_html(
-        &["Wishlist", "Search", "Import"],
-        selected_cards_html(responses, &["/wishlist"]),
-        r#"<article class="slskr-data-card"><header><h3>Wishlist Actions</h3><code>add / run / import</code></header><div class="slskr-empty-state">Add wanted searches, rerun them, or import a CSV.</div></article>"#.to_string(),
     )
 }
 
@@ -2796,6 +3075,7 @@ pub fn route_page_html(path: &str) -> String {
     let Some(page) = route_page(path) else {
         return route_page_html("/searches");
     };
+    let kind = route_kind(path);
     let endpoints = route_endpoints(page.surface)
         .iter()
         .map(|endpoint| {
@@ -2821,14 +3101,42 @@ pub fn route_page_html(path: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("");
+    let chips = match kind {
+        RouteKind::Search => [
+            status_chip_html("Network", "ready"),
+            status_chip_html("Ranking", "balanced"),
+        ]
+        .join(""),
+        RouteKind::Downloads => [
+            status_chip_html("Queue", "downloads"),
+            status_chip_html("Slots", "auto"),
+        ]
+        .join(""),
+        RouteKind::Uploads => [
+            status_chip_html("Queue", "uploads"),
+            status_chip_html("Policy", "active"),
+        ]
+        .join(""),
+        RouteKind::System => [
+            status_chip_html("Daemon", "checking"),
+            status_chip_html("Events", "live"),
+        ]
+        .join(""),
+        _ => [
+            status_chip_html("Workspace", "ready"),
+            status_chip_html("Review", "manual"),
+        ]
+        .join(""),
+    };
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-chip">{surface} workspace</div></header>{toolbar}<div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-functional-layout"><aside class="slskr-route-actions"><h3>Commands</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></aside><section class="slskr-work-area"><header><div><h3>Live Data</h3><span id="slskr-live-status" aria-live="polite">Updates from daemon APIs</span></div><div class="slskr-live-controls"><button type="button" data-slskr-refresh-route>Refresh</button><button type="button" data-slskr-focus-filter>Filter</button><button type="button" data-slskr-clear-filters>Clear Filters</button></div></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div></section></div><details class="slskr-diagnostics"><summary>Route diagnostics</summary><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-status">{chips}</div></header>{toolbar}<div class="slskr-route-summary"><h3>Overview</h3><ul id="slskr-route-summary">{summary}</ul></div><section class="slskr-work-area"><header><div><h3>Workspace</h3><span id="slskr-live-status" aria-live="polite">Workflow data refreshes from the daemon</span></div><div class="slskr-live-controls"><button type="button" data-slskr-refresh-route>Refresh</button><button type="button" data-slskr-focus-filter>Filter</button><button type="button" data-slskr-clear-filters>Clear filters</button></div></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div><p id="slskr-action-status" aria-live="polite"></p></section><details class="slskr-diagnostics"><summary>Developer</summary><div class="slskr-route-actions"><h3>Action wiring</h3><ul id="slskr-route-actions">{actions}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
         description = escape_html(page.description),
-        toolbar = route_toolbar_html(path),
-        summary = route_summary_pending_html(path),
+        chips = chips,
+        toolbar = route_workflow_toolbar_html(kind),
+        summary = route_workflow_stats_html(kind, None),
         routes = route_inventory,
         endpoints = endpoints,
         actions = route_actions_html(path),
@@ -6161,7 +6469,10 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         rendered.push_str(&row);
         status.set_inner_html(&rendered);
         if let Some(summary) = summary.as_ref() {
-            summary.set_inner_html(&route_summary_result_html(&path, &responses));
+            summary.set_inner_html(&route_workflow_stats_html(
+                route_kind(&path),
+                Some(&responses),
+            ));
         }
         if let Some(page_data) = page_data.as_ref() {
             page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
@@ -6247,8 +6558,9 @@ mod tests {
         assert!(html.contains("data-slskr-player-rating=\"5\""));
         assert!(html.contains("slskr-player-rating-status"));
         assert!(html.contains("slskr-player-radio"));
-        assert!(html.contains("Search Planner"));
-        assert!(html.contains("data-slskr-search-planner"));
+        assert!(html.contains("Grouped results"));
+        assert!(html.contains("Search planner"));
+        assert!(html.contains("data-slskr-route-kind=\"Search\""));
         assert!(html.contains("slskr-player-now"));
         assert!(html.contains("slskr-player-transfers"));
         assert!(html.contains("/api/v0/searches"));
@@ -6256,8 +6568,8 @@ mod tests {
         assert!(html.contains("/api/v0/health"));
         assert!(html.contains("slskr-route-view"));
         let system = route_page_html("/system");
-        assert!(system.contains("Experience Preferences"));
-        assert!(system.contains("Automation Center"));
+        assert!(system.contains("Operator dashboard"));
+        assert!(system.contains("Rescan shares"));
     }
 
     #[test]
@@ -6671,12 +6983,13 @@ mod tests {
         assert!(html.contains("/api/v0/transfers/downloads"));
         assert!(html.contains("data-route=\"/downloads\""));
         assert!(html.contains("slskr-route-data"));
-        assert!(html.contains("Live Data"));
+        assert!(html.contains("Workspace"));
+        assert!(html.contains("Download queue"));
         assert!(html.contains("slskr-route-actions"));
         assert!(html.contains("slskr-route-summary"));
-        assert!(html.contains("Summary"));
+        assert!(html.contains("Overview"));
         assert!(html.contains("slskr-page-data"));
-        assert!(html.contains("Route diagnostics"));
+        assert!(html.contains("Developer"));
         assert!(html.contains("Clear Completed Downloads"));
         assert!(html.contains("data-slskr-refresh-route"));
         assert!(html.contains("data-slskr-focus-filter"));

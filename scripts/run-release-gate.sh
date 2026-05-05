@@ -30,6 +30,7 @@ run_optional_step() {
   fi
 }
 
+run_step "Remediation baseline" scripts/check-remediation-baseline.sh
 run_step "Public posture check" scripts/check-public-posture.sh
 run_step "Shell syntax check" bash -n scripts/*.sh
 run_optional_step shellcheck "Shell lint" shellcheck \

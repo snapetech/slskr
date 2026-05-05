@@ -9,7 +9,7 @@
 
 body {
   margin: 0;
-  padding-bottom: 66px;
+  padding-bottom: 108px;
 }
 
 .slskr-shell {
@@ -58,7 +58,7 @@ body {
 .slskr-main {
   margin: 0 auto;
   max-width: 1480px;
-  padding: 16px 22px 24px;
+  padding: 16px 22px 132px;
 }
 
 .slskr-appbar {
@@ -254,6 +254,31 @@ body {
   text-transform: uppercase;
 }
 
+.slskr-page-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.slskr-status-chip {
+  align-items: center;
+  background: #12201e;
+  border: 1px solid #3d5c55;
+  color: #dce8e3;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.slskr-status-chip strong {
+  color: #8dd7c8;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
 .slskr-toolbar {
   align-items: center;
   background: #0f1112;
@@ -283,6 +308,29 @@ body {
   font-weight: 700;
   min-height: 34px;
   padding: 0 12px;
+}
+
+.slskr-toolbar select,
+.slskr-toolbar label {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.slskr-toolbar label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.slskr-toolbar-command.primary,
+.slskr-action-button.primary {
+  background: #ffd166;
+  border-color: #ffd166;
+  color: #15100d;
+  font-weight: 800;
 }
 
 .slskr-toolbar button:first-of-type {
@@ -827,6 +875,134 @@ body {
   font-size: 12px;
 }
 
+.slskr-work-area {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  padding: 14px;
+}
+
+.slskr-work-area > header,
+.slskr-workflow-primary > header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.slskr-work-area h3,
+.slskr-workflow h3 {
+  font-size: 16px;
+  margin: 0 0 5px;
+}
+
+.slskr-work-area p,
+.slskr-work-area span,
+.slskr-workflow p {
+  color: #c6d0ca;
+  font-size: 13px;
+}
+
+.slskr-live-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.slskr-live-controls button,
+.slskr-empty-workflow button,
+.slskr-domain-table button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.slskr-workflow {
+  display: grid;
+  gap: 12px;
+}
+
+.slskr-workflow-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.slskr-tab {
+  background: #151b1b;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 11px;
+}
+
+.slskr-tab.is-active {
+  background: #253734;
+  border-color: #8dd7c8;
+  color: #f4efe7;
+}
+
+.slskr-workflow-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.65fr);
+}
+
+.slskr-workflow-primary,
+.slskr-workflow-inspector {
+  background: #111516;
+  border: 1px solid #263130;
+  padding: 14px;
+}
+
+.slskr-domain-table table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.slskr-domain-table th {
+  color: #8dd7c8;
+  font-size: 11px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.slskr-domain-table td,
+.slskr-domain-table th {
+  border-bottom: 1px solid #263130;
+  padding: 10px 8px;
+  vertical-align: top;
+}
+
+.slskr-domain-table td strong,
+.slskr-domain-table td span {
+  display: block;
+}
+
+.slskr-domain-table td span {
+  color: #9ba8a1;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.slskr-empty-workflow {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.slskr-empty-workflow strong {
+  color: #f4efe7;
+}
+
 .slskr-contract.slskr-surface-matrix {
   border-color: #34403f;
   margin-top: 18px;
@@ -1172,6 +1348,7 @@ body {
   .slskr-appbar,
   .slskr-functional-layout,
   .slskr-workspace-grid,
+  .slskr-workflow-grid,
   .slskr-player {
     grid-template-columns: 1fr;
   }
@@ -1182,6 +1359,16 @@ body {
 
   body {
     padding-bottom: 0;
+  }
+
+  .slskr-main {
+    padding: 12px;
+  }
+
+  .slskr-page-header,
+  .slskr-work-area > header,
+  .slskr-workflow-primary > header {
+    flex-direction: column;
   }
 
   .slskr-route-actions li,

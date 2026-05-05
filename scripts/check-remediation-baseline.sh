@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+GATES=(
+  scripts/check-endpoint-parity-drift.sh
+  scripts/check-browser-token-persistence.sh
+  scripts/check-unsafe-blank-opens.sh
+  scripts/check-websocket-auth-coverage.sh
+  scripts/check-webhook-outbound-policy.sh
+  scripts/check-workflow-release-policy.sh
+  scripts/check-package-artifact-matrix.sh
+  scripts/check-openapi-docs-drift.sh
+  scripts/check-shell-script-hygiene.sh
+  scripts/check-kubernetes-public-posture.sh
+  scripts/check-compatibility-noop-documentation.sh
+  scripts/check-remediation-script-registry.sh
+)
+
+run_gate() {
+  local gate="$1"
+  printf '\n==> %s\n' "$gate"
+  "$gate"
+}
+
+for gate in "${GATES[@]}"; do
+  run_gate "$gate"
+done
+
+printf '\nRemediation baseline passed.\n'
