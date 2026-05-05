@@ -2,7 +2,6 @@
 ///
 /// Allows clients to send multiple API requests in a single HTTP call with
 /// proper validation, error handling, and optional atomic execution.
-
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -48,59 +47,70 @@ impl Default for BatchConfig {
 
 /// Parse and validate a batch request
 pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConfig), String> {
-    let json: Value = serde_json::from_str(body)
-        .map_err(|e| format!("Invalid JSON: {}", e))?;
-    
-    let operations_arr = json.get("operations")
+    let json: Value = serde_json::from_str(body).map_err(|e| format!("Invalid JSON: {}", e))?;
+
+    let operations_arr = json
+        .get("operations")
         .and_then(|v| v.as_array())
         .ok_or("Missing 'operations' array")?;
-    
+
     // Check max operations
     if operations_arr.len() > 100 {
-        return Err(format!("Too many operations: {}, max is 100", operations_arr.len()));
+        return Err(format!(
+            "Too many operations: {}, max is 100",
+            operations_arr.len()
+        ));
     }
-    
+
     let mut operations = Vec::new();
-    
+
     for (idx, op) in operations_arr.iter().enumerate() {
-        let id = op.get("id")
+        let id = op
+            .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or(&format!("op_{}", idx))
             .to_string();
-        
-        let method = op.get("method")
+
+        let method = op
+            .get("method")
             .and_then(|v| v.as_str())
             .ok_or_else(|| format!("Operation {} missing method", idx))?
             .to_string();
-        
-        let path = op.get("path")
+
+        let path = op
+            .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| format!("Operation {} missing path", idx))?
             .to_string();
-        
+
         // Validate method
-        if !matches!(method.as_str(), "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS") {
+        if !matches!(
+            method.as_str(),
+            "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+        ) {
             return Err(format!("Operation {} has invalid method: {}", idx, method));
         }
-        
+
         // Validate path
         if !path.starts_with('/') {
             return Err(format!("Operation {} has invalid path: {}", idx, path));
         }
-        
-        let body = op.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
-        
-        let headers = op.get("headers")
+
+        let body = op
+            .get("body")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let headers = op
+            .get("headers")
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
-                    .map(|(k, v)| {
-                        (k.clone(), v.as_str().unwrap_or("").to_string())
-                    })
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
                     .collect()
             })
             .unwrap_or_default();
-        
+
         operations.push(BatchOperation {
             id,
             method,
@@ -109,28 +119,32 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
             headers,
         });
     }
-    
+
     // Parse batch config
     let config = if let Some(batch_config) = json.get("config").and_then(|v| v.as_object()) {
         BatchConfig {
-            max_operations: batch_config.get("maxOperations")
+            max_operations: batch_config
+                .get("maxOperations")
                 .and_then(|v| v.as_u64())
                 .map(|v| v as usize)
                 .unwrap_or(100),
-            timeout_ms: batch_config.get("timeoutMs")
+            timeout_ms: batch_config
+                .get("timeoutMs")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(30000),
-            atomic: batch_config.get("atomic")
+            atomic: batch_config
+                .get("atomic")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            continue_on_error: batch_config.get("continueOnError")
+            continue_on_error: batch_config
+                .get("continueOnError")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
         }
     } else {
         BatchConfig::default()
     };
-    
+
     Ok((operations, config))
 }
 
@@ -139,7 +153,7 @@ pub fn validate_batch_operations(operations: &[BatchOperation]) -> Result<(), St
     if operations.is_empty() {
         return Err("No operations in batch".to_string());
     }
-    
+
     // Check for duplicate IDs
     let mut ids = std::collections::HashSet::new();
     for op in operations {
@@ -147,17 +161,19 @@ pub fn validate_batch_operations(operations: &[BatchOperation]) -> Result<(), St
             return Err(format!("Duplicate operation ID: {}", op.id));
         }
     }
-    
+
     // Validate individual operations
     for op in operations {
         // Check for POST/PUT/PATCH without body on paths that need it
-        if matches!(op.method.as_str(), "POST" | "PUT" | "PATCH") {
-            if op.body.is_none() && !op.path.ends_with("/cancel") && !op.path.ends_with("/resume") {
-                // Some endpoints might not require body, so we be lenient here
-            }
+        if matches!(op.method.as_str(), "POST" | "PUT" | "PATCH")
+            && op.body.is_none()
+            && !op.path.ends_with("/cancel")
+            && !op.path.ends_with("/resume")
+        {
+            // Some endpoints might not require body, so we be lenient here
         }
     }
-    
+
     Ok(())
 }
 
@@ -178,7 +194,7 @@ pub fn format_batch_response(results: Vec<BatchOperationResult>) -> String {
             .unwrap()
             .as_secs()
     });
-    
+
     response.to_string()
 }
 
@@ -210,12 +226,12 @@ pub fn is_safe_operation(method: &str, path: &str) -> bool {
     if matches!(method, "GET" | "HEAD") {
         return true;
     }
-    
+
     // POST/PUT/PATCH/DELETE to test paths are safe
     if path.contains("/test") || path.contains("/validate") {
         return true;
     }
-    
+
     // Most operations are safe - only prevent atomic execution if explicitly marked
     !path.contains("/atomic-unsafe")
 }
@@ -235,7 +251,7 @@ mod tests {
                 }
             ]
         }"#;
-        
+
         let (ops, config) = parse_batch_request(body).unwrap();
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].id, "op1");
@@ -261,7 +277,7 @@ mod tests {
                 }
             ]
         }"#;
-        
+
         let (ops, _config) = parse_batch_request(body).unwrap();
         assert_eq!(ops.len(), 2);
     }
@@ -282,7 +298,7 @@ mod tests {
                 "continueOnError": false
             }
         }"#;
-        
+
         let (_ops, config) = parse_batch_request(body).unwrap();
         assert!(config.atomic);
         assert_eq!(config.timeout_ms, 60000);
@@ -328,7 +344,7 @@ mod tests {
                 headers: HashMap::new(),
             },
         ];
-        
+
         let result = validate_batch_operations(&ops);
         assert!(result.is_err());
     }
@@ -351,7 +367,7 @@ mod tests {
                 headers: HashMap::new(),
             },
         ];
-        
+
         let result = validate_batch_operations(&ops);
         assert!(result.is_ok());
     }
@@ -379,7 +395,7 @@ mod tests {
             create_success_result("op1".to_string(), 200, "OK".to_string()),
             create_error_result("op2".to_string(), "Failed".to_string()),
         ];
-        
+
         let response = format_batch_response(results);
         // Parse JSON to verify structure
         let json: Result<serde_json::Value, _> = serde_json::from_str(&response);
@@ -397,7 +413,10 @@ mod tests {
         assert!(is_safe_operation("HEAD", "/api/health"));
         assert!(is_safe_operation("POST", "/api/test"));
         assert!(is_safe_operation("POST", "/api/validate"));
-        assert!(!is_safe_operation("POST", "/api/transfers/123/atomic-unsafe"));
+        assert!(!is_safe_operation(
+            "POST",
+            "/api/transfers/123/atomic-unsafe"
+        ));
     }
 
     #[test]

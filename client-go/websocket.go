@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
 // WebSocketClient represents a WebSocket connection to the API
@@ -18,14 +20,12 @@ type WebSocketClient struct {
 	connected        bool
 	subscriptionMu   sync.RWMutex
 	subscribedTopics map[string]bool
+	conn             *websocket.Conn
 
 	// Channels for events
 	eventChannels map[string][]chan interface{}
 	connectionCh  []chan bool
 	errorCh       []chan error
-
-	// Mock connection state (in production, would use actual WebSocket)
-	mockMessages chan map[string]interface{}
 }
 
 // NewWebSocketClient creates a new WebSocket client
@@ -39,22 +39,32 @@ func (c *Client) NewWebSocketClient(debug bool) *WebSocketClient {
 		debug:            debug,
 		subscribedTopics: make(map[string]bool),
 		eventChannels:    make(map[string][]chan interface{}),
-		mockMessages:     make(chan map[string]interface{}, 100),
 	}
 }
 
 // Connect connects to the WebSocket
 func (w *WebSocketClient) Connect(ctx context.Context) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	if w.connected {
+		w.mu.Unlock()
 		return fmt.Errorf("already connected")
 	}
+	w.mu.Unlock()
 
-	// In a real implementation, this would establish a WebSocket connection
-	// For now, we simulate with channels
+	headers := http.Header{}
+	if w.token != "" {
+		headers.Set("Authorization", "Bearer "+w.token)
+	}
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, w.url, headers)
+	if err != nil {
+		return err
+	}
+
+	w.mu.Lock()
+	w.conn = conn
 	w.connected = true
+	w.mu.Unlock()
 
 	if w.debug {
 		fmt.Printf("[WebSocket] Connected to %s\n", w.url)
@@ -72,14 +82,20 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 // Disconnect closes the WebSocket connection
 func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	if !w.connected {
+		w.mu.Unlock()
 		return fmt.Errorf("not connected")
 	}
 
 	w.connected = false
-	close(w.mockMessages)
+	conn := w.conn
+	w.conn = nil
+	w.mu.Unlock()
+
+	if conn != nil {
+		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		_ = conn.Close()
+	}
 
 	if w.debug {
 		fmt.Println("[WebSocket] Disconnected")
@@ -118,7 +134,9 @@ func (w *WebSocketClient) Subscribe(topics ...string) error {
 	}
 
 	if w.IsConnected() {
-		w.mockMessages <- msg
+		if err := w.writeJSON(msg); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -182,9 +200,48 @@ func (w *WebSocketClient) OnError(ch chan error) {
 // ============================================================================
 
 func (w *WebSocketClient) handleMessages() {
-	for msg := range w.mockMessages {
+	for {
+		w.mu.RLock()
+		conn := w.conn
+		w.mu.RUnlock()
+		if conn == nil {
+			return
+		}
+
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			w.mu.Lock()
+			wasConnected := w.connected
+			w.connected = false
+			w.conn = nil
+			w.mu.Unlock()
+
+			if wasConnected {
+				w.notifyConnectionListeners(false)
+				w.notifyErrorListeners(err)
+			}
+			return
+		}
+
+		msg, err := parseMessage(data)
+		if err != nil {
+			w.notifyErrorListeners(err)
+			continue
+		}
 		w.processMessage(msg)
 	}
+}
+
+func (w *WebSocketClient) writeJSON(msg map[string]interface{}) error {
+	w.mu.RLock()
+	conn := w.conn
+	w.mu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	return conn.WriteJSON(msg)
 }
 
 func (w *WebSocketClient) processMessage(msg map[string]interface{}) {

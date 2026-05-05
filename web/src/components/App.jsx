@@ -39,6 +39,7 @@ const LEGACY_NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY =
 const LEGACY_VPN_PORT_NOTICE_STORAGE_KEY =
   'slskr.vpnForwardedPorts.dismissedSignature';
 const ROOM_ACTIVITY_SEEN_STORAGE_KEY = 'slskr.rooms.lastSeenActivity';
+const LEGACY_ROOM_ACTIVITY_SEEN_STORAGE_KEY = 'slskdn.rooms.lastSeenActivity';
 const NAV_ACTIVITY_POLL_INTERVAL_MS = 10_000;
 
 const Browse = lazy(() => import('./Browse/Browse'));
@@ -199,7 +200,22 @@ const storeDismissedVpnPortNotice = (signature, portForwards) => {
 
 const getStoredRoomActivity = () => {
   try {
-    return JSON.parse(getLocalStorageItem(ROOM_ACTIVITY_SEEN_STORAGE_KEY, '{}')) || {};
+    const activity =
+      JSON.parse(getLocalStorageItem(ROOM_ACTIVITY_SEEN_STORAGE_KEY, '{}')) ||
+      {};
+    if (Object.keys(activity).length > 0) {
+      return activity;
+    }
+  } catch {
+    // Fall through to the slskdN key used before the slskR web state rename.
+  }
+
+  try {
+    return (
+      JSON.parse(
+        getLocalStorageItem(LEGACY_ROOM_ACTIVITY_SEEN_STORAGE_KEY, '{}'),
+      ) || {}
+    );
   } catch {
     return {};
   }
@@ -723,7 +739,7 @@ class App extends Component {
 
         if (error?.message === 'HubConnectionTimeout') {
           console.warn(
-            'Hub connection timed out during background startup; allowing the UI to continue while SignalR retries.',
+            'Event feed timed out during background startup; allowing the UI to continue while WebSocket reconnects.',
           );
           return;
         }

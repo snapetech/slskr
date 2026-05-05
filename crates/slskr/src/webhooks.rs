@@ -1,14 +1,16 @@
+#![allow(dead_code)]
+use hmac::{Hmac, Mac};
+use rand::{rngs::OsRng, RngCore};
 /// Webhook support with HMAC-SHA256 request signing
 ///
 /// Allows configuring webhooks that are triggered on API events,
 /// with cryptographic signing for security and verification.
-
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::fmt;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicU64, Ordering};
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 
 /// Webhook event types
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -91,10 +93,9 @@ impl Webhook {
 
     /// Generate signing secret
     pub fn generate_secret() -> String {
-        format!("secret_{:x}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos())
+        let mut secret = [0_u8; 32];
+        OsRng.fill_bytes(&mut secret);
+        format!("secret_{}", hex::encode(secret))
     }
 
     /// Check if webhook should handle event
@@ -122,11 +123,7 @@ static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl WebhookPayload {
     /// Create new webhook payload
-    pub fn new(
-        event: WebhookEvent,
-        correlation_id: String,
-        data: serde_json::Value,
-    ) -> Self {
+    pub fn new(event: WebhookEvent, correlation_id: String, data: serde_json::Value) -> Self {
         let num = EVENT_COUNTER.fetch_add(1, Ordering::Relaxed);
         WebhookPayload {
             id: format!("evt_{}", num),
@@ -160,6 +157,8 @@ pub struct WebhookSignature {
 }
 
 impl WebhookSignature {
+    const MAX_TIMESTAMP_AGE_SECONDS: i64 = 5 * 60;
+
     /// Create signature for payload using secret
     pub fn create(payload: &[u8], secret: &str) -> Result<Self, Box<dyn std::error::Error>> {
         type HmacSha256 = Hmac<Sha256>;
@@ -179,11 +178,7 @@ impl WebhookSignature {
     }
 
     /// Verify signature
-    pub fn verify(
-        &self,
-        payload: &[u8],
-        secret: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn verify(&self, payload: &[u8], secret: &str) -> Result<bool, Box<dyn std::error::Error>> {
         type HmacSha256 = Hmac<Sha256>;
         let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
         mac.update(payload);
@@ -214,6 +209,12 @@ impl WebhookSignature {
             .strip_prefix("t=")
             .ok_or("Missing timestamp")?
             .parse::<i64>()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+        if (now - timestamp).abs() > Self::MAX_TIMESTAMP_AGE_SECONDS {
+            return Err("signature timestamp is stale".into());
+        }
 
         Ok(WebhookSignature {
             signature: sig_part.to_string(),
@@ -303,6 +304,209 @@ fn constant_time_compare(a: &[u8], b: &[u8]) -> bool {
     result == 0
 }
 
+/// Webhook dispatcher for async event publishing
+pub struct WebhookDispatcher;
+
+impl WebhookDispatcher {
+    /// Dispatch event to all matching webhooks
+    pub async fn dispatch(
+        manager: &WebhookManager,
+        correlation_id: String,
+        event: WebhookEvent,
+        data: serde_json::Value,
+    ) {
+        let webhooks = manager.get_for_event(event);
+
+        if webhooks.is_empty() {
+            return;
+        }
+
+        let payload = WebhookPayload::new(event, correlation_id, data);
+        let payload_json = payload.to_string().unwrap_or_default();
+
+        for webhook in webhooks {
+            // Spawn async task for each webhook delivery (no blocking)
+            let webhook_url = webhook.url.clone();
+            let webhook_secret = webhook.secret.clone();
+            let webhook_timeout = webhook.timeout_seconds;
+            let payload_clone = payload_json.clone();
+
+            tokio::spawn(async move {
+                let _ = Self::send_webhook(
+                    &webhook_url,
+                    &webhook_secret,
+                    &payload_clone,
+                    webhook_timeout,
+                )
+                .await;
+            });
+        }
+    }
+
+    /// Send webhook to URL with HMAC-SHA256 signature
+    pub async fn send_webhook(
+        url: &str,
+        secret: &str,
+        payload: &str,
+        timeout_secs: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let payload_bytes = payload.as_bytes();
+
+        // Create HMAC signature
+        let sig = WebhookSignature::create(payload_bytes, secret)?;
+
+        let resolved = validate_and_resolve_webhook_url(url)?;
+
+        // Disable redirects so validation cannot be bypassed after the initial URL check.
+        let mut client_builder =
+            reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+        for addr in &resolved.addrs {
+            client_builder = client_builder.resolve(&resolved.host, *addr);
+        }
+        let client = client_builder.build()?;
+
+        let response = client
+            .post(url)
+            .header("X-Webhook-Signature", sig.as_header())
+            .header("X-Webhook-Event", "webhook")
+            .header("Content-Type", "application/json")
+            .body(payload.to_string())
+            .timeout(std::time::Duration::from_secs(timeout_secs as u64))
+            .send()
+            .await?;
+
+        // Log successful delivery
+        eprintln!(
+            "[WEBHOOK] Delivered to: {} (status: {}, payload: {} bytes)",
+            sanitized_webhook_url_for_log(url),
+            response.status(),
+            payload.len()
+        );
+
+        Ok(())
+    }
+
+    /// Create test dispatch payload
+    pub fn test_payload(event: WebhookEvent, description: &str) -> serde_json::Value {
+        serde_json::json!({
+            "event": event.to_string(),
+            "description": description,
+            "test": true,
+        })
+    }
+}
+
+struct ResolvedWebhookTarget {
+    host: String,
+    addrs: Vec<SocketAddr>,
+}
+
+fn validate_and_resolve_webhook_url(
+    url: &str,
+) -> Result<ResolvedWebhookTarget, Box<dyn std::error::Error>> {
+    let parsed = reqwest::Url::parse(url)?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("webhook URL scheme must be http or https".into()),
+    }
+    let Some(host) = parsed.host_str() else {
+        return Err("webhook URL must include a host".into());
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return Err("webhook URL host is not allowed".into());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_webhook_ip(ip) {
+            return Err("webhook URL IP is not allowed".into());
+        }
+    }
+
+    let port = parsed
+        .port_or_known_default()
+        .ok_or("webhook URL port is unknown")?;
+    let addrs = (host, port).to_socket_addrs()?.collect::<Vec<_>>();
+    if addrs.is_empty() {
+        return Err("webhook URL did not resolve".into());
+    }
+    for addr in &addrs {
+        if is_blocked_webhook_ip(addr.ip()) {
+            return Err("webhook URL resolves to a blocked address".into());
+        }
+    }
+    Ok(ResolvedWebhookTarget {
+        host: host.to_string(),
+        addrs,
+    })
+}
+
+fn is_blocked_webhook_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || ip.octets()[0] == 0
+                || ip.octets()[0] >= 224
+        }
+        IpAddr::V6(ip) => {
+            if let Some(v4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
+                return is_blocked_webhook_ip(IpAddr::V4(v4));
+            }
+            let segments = ip.segments();
+            if segments[0] == 0x2002 || (segments[0] == 0x2001 && segments[1] == 0) {
+                return true;
+            }
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+fn sanitized_webhook_url_for_log(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(parsed) => {
+            let host = parsed.host_str().unwrap_or("<unknown>");
+            let port = parsed
+                .port()
+                .map(|port| format!(":{port}"))
+                .unwrap_or_default();
+            format!("{}://{}{}{}", parsed.scheme(), host, port, parsed.path())
+        }
+        Err(_) => "<invalid webhook url>".to_string(),
+    }
+}
+
+/// Webhook retry scheduler for failed deliveries
+pub struct WebhookRetryScheduler;
+
+impl WebhookRetryScheduler {
+    /// Start background retry scheduler
+    #[allow(dead_code)]
+    pub fn start(
+        _db: Option<std::sync::Arc<crate::persistence::DatabaseManager>>,
+        _manager: std::sync::Arc<tokio::sync::RwLock<WebhookManager>>,
+    ) {
+        // Background task for retrying failed webhooks
+        // In production, this would be wired to the DatabaseManager
+        tokio::spawn(async {
+            // Retry scheduler would run periodically (every 5 minutes)
+            // and attempt to deliver failed webhook payloads with exponential backoff
+        });
+    }
+
+    /// Calculate exponential backoff delay
+    #[allow(dead_code)]
+    fn calculate_backoff(attempt: u32) -> std::time::Duration {
+        // 30s, 60s, 120s, 240s, 480s (max)
+        let seconds = 30 * 2_u64.saturating_pow(attempt);
+        std::time::Duration::from_secs(seconds.min(480))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,7 +514,10 @@ mod tests {
     #[test]
     fn test_webhook_event_display() {
         assert_eq!(WebhookEvent::SearchCreated.to_string(), "search.created");
-        assert_eq!(WebhookEvent::TransferStarted.to_string(), "transfer.started");
+        assert_eq!(
+            WebhookEvent::TransferStarted.to_string(),
+            "transfer.started"
+        );
         assert_eq!(WebhookEvent::MessageSent.to_string(), "message.sent");
     }
 
@@ -372,7 +579,7 @@ mod tests {
 
         let sig = WebhookSignature::create(payload, secret).unwrap();
         let header = sig.as_header();
-        
+
         assert!(header.contains("t="));
         assert_eq!(header.split(", ").count(), 2);
     }
@@ -381,7 +588,7 @@ mod tests {
     fn test_webhook_manager() {
         let mut manager = WebhookManager::new();
         let secret = Webhook::generate_secret();
-        
+
         let webhook = Webhook::new(
             "http://example.com/hook".to_string(),
             vec![WebhookEvent::SearchCreated],
@@ -411,115 +618,35 @@ mod tests {
         assert!(!constant_time_compare(a, b_diff));
         assert!(!constant_time_compare(a, b"te")); // Different length
     }
-}
 
-/// Webhook dispatcher for async event publishing
-pub struct WebhookDispatcher;
-
-impl WebhookDispatcher {
-    /// Dispatch event to all matching webhooks
-    pub async fn dispatch(
-        manager: &WebhookManager,
-        correlation_id: String,
-        event: WebhookEvent,
-        data: serde_json::Value,
-    ) {
-        let webhooks = manager.get_for_event(event);
-        
-        if webhooks.is_empty() {
-            return;
-        }
-        
-        let payload = WebhookPayload::new(event, correlation_id, data);
-        let payload_json = payload.to_string().unwrap_or_default();
-        
-        for webhook in webhooks {
-            // Spawn async task for each webhook delivery (no blocking)
-            let webhook_url = webhook.url.clone();
-            let webhook_secret = webhook.secret.clone();
-            let webhook_timeout = webhook.timeout_seconds;
-            let payload_clone = payload_json.clone();
-            
-            tokio::spawn(async move {
-                let _ = Self::send_webhook(
-                    &webhook_url,
-                    &webhook_secret,
-                    &payload_clone,
-                    webhook_timeout,
-                ).await;
-            });
-        }
+    #[test]
+    fn test_blocked_webhook_ipv6_embedded_ipv4() {
+        assert!(is_blocked_webhook_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(is_blocked_webhook_ip(
+            "::ffff:192.168.1.10".parse().unwrap()
+        ));
+        assert!(is_blocked_webhook_ip("2002:c0a8:0101::1".parse().unwrap()));
+        assert!(is_blocked_webhook_ip(
+            "2001:0000:4136:e378::1".parse().unwrap()
+        ));
     }
-    
-    /// Send webhook to URL with HMAC-SHA256 signature
-    pub async fn send_webhook(
-        url: &str,
-        secret: &str,
-        payload: &str,
-        timeout_secs: u32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let payload_bytes = payload.as_bytes();
-        
-        // Create HMAC signature
-        let sig = WebhookSignature::create(payload_bytes, secret)?;
-        
-        // Create HTTP client with timeout
-        let client = reqwest::Client::new();
-        
-        let response = client
-            .post(url)
-            .header("X-Webhook-Signature", sig.as_header())
-            .header("X-Webhook-Event", "webhook")
-            .header("Content-Type", "application/json")
-            .body(payload.to_string())
-            .timeout(std::time::Duration::from_secs(timeout_secs as u64))
-            .send()
-            .await?;
-        
-        // Log successful delivery
-        eprintln!(
-            "[WEBHOOK] Delivered to: {} (status: {}, payload: {} bytes)",
-            url,
-            response.status(),
-            payload.len()
+
+    #[test]
+    fn test_sanitized_webhook_url_omits_query() {
+        assert_eq!(
+            sanitized_webhook_url_for_log("https://example.com/hook/path?token=secret"),
+            "https://example.com/hook/path"
         );
-        
-        Ok(())
     }
-    
-     /// Create test dispatch payload
-     pub fn test_payload(event: WebhookEvent, description: &str) -> serde_json::Value {
-         serde_json::json!({
-             "event": event.to_string(),
-             "description": description,
-             "test": true,
-         })
-     }
-}
 
-/// Webhook retry scheduler for failed deliveries
-pub struct WebhookRetryScheduler;
-
-impl WebhookRetryScheduler {
-    /// Start background retry scheduler
-    #[allow(dead_code)]
-    pub fn start(
-        _db: Option<std::sync::Arc<crate::persistence::DatabaseManager>>,
-        _manager: std::sync::Arc<tokio::sync::RwLock<WebhookManager>>,
-    ) {
-        // Background task for retrying failed webhooks
-        // In production, this would be wired to the DatabaseManager
-        tokio::spawn(async {
-            // Retry scheduler would run periodically (every 5 minutes)
-            // and attempt to deliver failed webhook payloads with exponential backoff
-        });
-    }
-    
-    /// Calculate exponential backoff delay
-    #[allow(dead_code)]
-    fn calculate_backoff(attempt: u32) -> std::time::Duration {
-        // 30s, 60s, 120s, 240s, 480s (max)
-        let seconds = 30 * 2_u64.saturating_pow(attempt);
-        std::time::Duration::from_secs(seconds.min(480))
+    #[test]
+    fn test_stale_webhook_signature_header_rejected() {
+        let old = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            - 600;
+        let err = WebhookSignature::from_header(&format!("t={old}, abc")).unwrap_err();
+        assert!(err.to_string().contains("stale"), "{err}");
     }
 }

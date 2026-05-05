@@ -11,6 +11,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sha2 = "0.10"
 slskr-client = { version = "0.0.0", path = "../slskr-client" }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
 

@@ -35,6 +35,7 @@ pub struct AppConfig {
     pub api_token: Option<String>,
     pub api_rate_limit_anonymous: u32,
     pub api_rate_limit_authenticated: u32,
+    pub persistence_enabled: bool,
 }
 
 impl AppConfig {
@@ -162,6 +163,23 @@ impl AppConfig {
                     .to_owned(),
             );
         }
+        let api_rate_limit_anonymous = env_parse_layer(
+            env,
+            "SLSKR_API_RATE_LIMIT_ANONYMOUS",
+            file_config.auth.rate_limit_anonymous,
+            1000_u32,
+        )?;
+        let api_rate_limit_authenticated = env_parse_layer(
+            env,
+            "SLSKR_API_RATE_LIMIT_AUTHENTICATED",
+            file_config.auth.rate_limit_authenticated,
+            5000_u32,
+        )?;
+        let persistence_enabled = env_bool_layer(
+            env,
+            "SLSKR_PERSISTENCE_ENABLED",
+            file_config.persistence.enabled.unwrap_or(false),
+        )?;
 
         Ok(Self {
             config_file,
@@ -188,8 +206,9 @@ impl AppConfig {
             transfer_allow_outbound,
             auth_required,
             api_token,
-            api_rate_limit_anonymous: 1000,
-            api_rate_limit_authenticated: 5000,
+            api_rate_limit_anonymous,
+            api_rate_limit_authenticated,
+            persistence_enabled,
         })
     }
 
@@ -202,7 +221,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"persistence_enabled\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -233,7 +252,8 @@ impl AppConfig {
             self.transfer_allow_inbound,
             self.transfer_allow_outbound,
             self.auth_required,
-            self.api_token.is_some()
+            self.api_token.is_some(),
+            self.persistence_enabled
         )
     }
 }
@@ -294,6 +314,7 @@ pub struct FileConfig {
     shares: ShareFileConfig,
     transfers: TransferFileConfig,
     auth: AuthFileConfig,
+    persistence: PersistenceFileConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -361,6 +382,14 @@ pub struct TransferFileConfig {
 pub struct AuthFileConfig {
     disabled: Option<bool>,
     api_token: Option<String>,
+    rate_limit_anonymous: Option<u32>,
+    rate_limit_authenticated: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PersistenceFileConfig {
+    enabled: Option<bool>,
 }
 
 pub fn default_state_dir() -> PathBuf {
@@ -489,12 +518,21 @@ pub fn json_bool_option(value: Option<bool>) -> String {
 }
 
 pub fn json_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0c}' => escaped.push_str("\\f"),
+            ch if ch <= '\u{1f}' => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 pub fn json_u32_option(value: Option<u32>) -> String {

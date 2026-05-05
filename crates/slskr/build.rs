@@ -26,29 +26,27 @@ fn main() {
     }
 
     // Optionally build webui if requested via env var
-    if std::env::var("SLSKR_BUILD_WEB").is_ok() {
-        if web_root.exists() {
-            println!("Building webui...");
-            let output = Command::new("npm")
-                .arg("--prefix")
-                .arg(&web_root)
-                .arg("run")
-                .arg("build")
-                .output();
+    if std::env::var("SLSKR_BUILD_WEB").is_ok() && web_root.exists() {
+        println!("Building webui...");
+        let output = Command::new("npm")
+            .arg("--prefix")
+            .arg(&web_root)
+            .arg("run")
+            .arg("build")
+            .output();
 
-            match output {
-                Ok(out) if out.status.success() => {
-                    println!("Webui built successfully");
-                }
-                Ok(out) => {
-                    eprintln!(
-                        "Webui build failed:\n{}",
-                        String::from_utf8_lossy(&out.stderr)
-                    );
-                }
-                Err(e) => {
-                    eprintln!("Failed to run npm build: {}", e);
-                }
+        match output {
+            Ok(out) if out.status.success() => {
+                println!("Webui built successfully");
+            }
+            Ok(out) => {
+                eprintln!(
+                    "Webui build failed:\n{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+            Err(e) => {
+                eprintln!("Failed to run npm build: {}", e);
             }
         }
     }

@@ -213,7 +213,10 @@ pub fn encode_file_entry(writer: &mut Writer, entry: &FileEntry) -> Result<(), S
     Ok(())
 }
 
-pub fn build_folder_contents_payload(entries: &[FileEntry], folder: &str) -> Result<Vec<u8>, String> {
+pub fn build_folder_contents_payload(
+    entries: &[FileEntry],
+    folder: &str,
+) -> Result<Vec<u8>, String> {
     let matching = entries
         .iter()
         .filter(|entry| virtual_folder(&entry.filename) == folder)
@@ -326,10 +329,11 @@ fn folder_parent(filename: &str, parent: &str) -> Option<String> {
 // ============================================================================
 
 pub fn group_share_entries(entries: &[FileEntry]) -> Vec<(String, Vec<FileEntry>)> {
-    let mut groups: std::collections::BTreeMap<String, Vec<FileEntry>> = std::collections::BTreeMap::new();
+    let mut groups: std::collections::BTreeMap<String, Vec<FileEntry>> =
+        std::collections::BTreeMap::new();
     for entry in entries {
         let folder = virtual_folder(&entry.filename).to_owned();
-        groups.entry(folder).or_insert_with(Vec::new).push(entry.clone());
+        groups.entry(folder).or_default().push(entry.clone());
     }
     groups.into_iter().collect()
 }

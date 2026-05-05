@@ -1,11 +1,10 @@
+#![allow(dead_code)]
 /// Database persistence layer for soulseekR
 ///
 /// SQLite-backed durable storage using sqlx for async operations.
 /// Provides full persistence for searches, transfers, messages, and user stats.
-
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions};
-use std::str::FromStr;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Search record for persistence
@@ -75,7 +74,7 @@ pub struct RoomRecord {
 pub struct WebhookRecord {
     pub id: String,
     pub url: String,
-    pub events: String,  // JSON-encoded array of event types
+    pub events: String, // JSON-encoded array of event types
     pub secret: String,
     pub active: bool,
     pub created_at: i64,
@@ -92,8 +91,8 @@ pub struct WebhookLogRecord {
     pub webhook_id: String,
     pub event: String,
     pub correlation_id: String,
-    pub status: String,  // success, failed, timeout, etc.
-    pub request_body: String,  // JSON payload sent
+    pub status: String,       // success, failed, timeout, etc.
+    pub request_body: String, // JSON payload sent
     pub response_status: Option<i32>,
     pub response_body: Option<String>,
     pub error_message: Option<String>,
@@ -116,7 +115,8 @@ impl std::fmt::Debug for DatabaseManager {
 impl DatabaseManager {
     /// Create new database manager with SQLite backend
     pub async fn new(db_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let connect_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path))?
+        let connect_options = SqliteConnectOptions::new()
+            .filename(db_path)
             .create_if_missing(true);
 
         let pool = SqlitePoolOptions::new()
@@ -152,7 +152,7 @@ impl DatabaseManager {
                 room TEXT,
                 target TEXT
             )
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -171,7 +171,7 @@ impl DatabaseManager {
                 started_at INTEGER NOT NULL,
                 completed_at INTEGER
             )
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -187,7 +187,7 @@ impl DatabaseManager {
                 read INTEGER DEFAULT 0,
                 created_at INTEGER NOT NULL
             )
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -206,7 +206,7 @@ impl DatabaseManager {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -221,7 +221,7 @@ impl DatabaseManager {
                 joined_at INTEGER NOT NULL,
                 last_activity INTEGER NOT NULL
             )
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -241,7 +241,7 @@ impl DatabaseManager {
                 max_retries INTEGER DEFAULT 3,
                 timeout_seconds INTEGER DEFAULT 30
             )
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -263,7 +263,7 @@ impl DatabaseManager {
                 timestamp INTEGER NOT NULL,
                 FOREIGN KEY (webhook_id) REFERENCES webhooks(id)
             )
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -273,9 +273,11 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_transfers_started ON transfers(started_at DESC)")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_transfers_started ON transfers(started_at DESC)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_username ON messages(username)")
             .execute(&self.pool)
@@ -289,13 +291,17 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook ON webhook_logs(webhook_id)")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook ON webhook_logs(webhook_id)",
+        )
+        .execute(&self.pool)
+        .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_webhook_logs_timestamp ON webhook_logs(timestamp DESC)")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_logs_timestamp ON webhook_logs(timestamp DESC)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
@@ -305,7 +311,10 @@ impl DatabaseManager {
     // ========================================================================
 
     /// Insert search record
-    pub async fn insert_search(&self, record: &SearchRecord) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn insert_search(
+        &self,
+        record: &SearchRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query(
             r#"
             INSERT OR REPLACE INTO searches (id, query, status, result_count, created_at, completed_at, room, target)
@@ -315,7 +324,7 @@ impl DatabaseManager {
         .bind(&record.id)
         .bind(&record.query)
         .bind(&record.status)
-        .bind(record.result_count as i64)
+        .bind(record.result_count)
         .bind(record.created_at)
         .bind(record.completed_at)
         .bind(&record.room)
@@ -326,7 +335,10 @@ impl DatabaseManager {
     }
 
     /// Get search record
-    pub async fn get_search(&self, id: &str) -> Result<Option<SearchRecord>, Box<dyn std::error::Error>> {
+    pub async fn get_search(
+        &self,
+        id: &str,
+    ) -> Result<Option<SearchRecord>, Box<dyn std::error::Error>> {
         let record = sqlx::query_as::<_, SearchRecord>(
             "SELECT id, query, status, result_count, created_at, completed_at, room, target FROM searches WHERE id = ?"
         )
@@ -337,7 +349,11 @@ impl DatabaseManager {
     }
 
     /// List recent searches
-    pub async fn list_searches(&self, limit: i32, offset: i32) -> Result<Vec<SearchRecord>, Box<dyn std::error::Error>> {
+    pub async fn list_searches(
+        &self,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<SearchRecord>, Box<dyn std::error::Error>> {
         let records = sqlx::query_as::<_, SearchRecord>(
             "SELECT id, query, status, result_count, created_at, completed_at, room, target FROM searches ORDER BY created_at DESC LIMIT ? OFFSET ?"
         )
@@ -349,7 +365,11 @@ impl DatabaseManager {
     }
 
     /// Update search status
-    pub async fn update_search_status(&self, id: &str, status: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn update_search_status(
+        &self,
+        id: &str,
+        status: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query("UPDATE searches SET status = ? WHERE id = ?")
             .bind(status)
             .bind(id)
@@ -359,7 +379,11 @@ impl DatabaseManager {
     }
 
     /// Update search results
-    pub async fn update_search_results(&self, id: &str, count: u32) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn update_search_results(
+        &self,
+        id: &str,
+        count: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query("UPDATE searches SET result_count = ? WHERE id = ?")
             .bind(count as i64)
             .bind(id)
@@ -373,7 +397,10 @@ impl DatabaseManager {
     // ========================================================================
 
     /// Insert transfer record
-    pub async fn insert_transfer(&self, record: &TransferRecord) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn insert_transfer(
+        &self,
+        record: &TransferRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query(
             r#"
             INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at)
@@ -384,8 +411,8 @@ impl DatabaseManager {
         .bind(&record.direction)
         .bind(&record.filename)
         .bind(&record.peer_username)
-        .bind(record.filesize as i64)
-        .bind(record.progress as i64)
+        .bind(record.filesize)
+        .bind(record.progress)
         .bind(&record.status)
         .bind(record.started_at)
         .bind(record.completed_at)
@@ -395,7 +422,10 @@ impl DatabaseManager {
     }
 
     /// Get transfer record
-    pub async fn get_transfer(&self, id: &str) -> Result<Option<TransferRecord>, Box<dyn std::error::Error>> {
+    pub async fn get_transfer(
+        &self,
+        id: &str,
+    ) -> Result<Option<TransferRecord>, Box<dyn std::error::Error>> {
         let record = sqlx::query_as::<_, TransferRecord>(
             "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at FROM transfers WHERE id = ?"
         )
@@ -434,7 +464,11 @@ impl DatabaseManager {
     }
 
     /// Update transfer progress
-    pub async fn update_transfer_progress(&self, id: &str, progress: u64) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn update_transfer_progress(
+        &self,
+        id: &str,
+        progress: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query("UPDATE transfers SET progress = ? WHERE id = ?")
             .bind(progress as i64)
             .bind(id)
@@ -448,12 +482,15 @@ impl DatabaseManager {
     // ========================================================================
 
     /// Insert message record
-    pub async fn insert_message(&self, record: &MessageRecord) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn insert_message(
+        &self,
+        record: &MessageRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query(
             r#"
             INSERT INTO messages (id, username, content, direction, read, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-            "#
+            "#,
         )
         .bind(&record.id)
         .bind(&record.username)
@@ -498,7 +535,10 @@ impl DatabaseManager {
     // ========================================================================
 
     /// Get or create user stats
-    pub async fn get_user_stats(&self, username: &str) -> Result<Option<UserStatsRecord>, Box<dyn std::error::Error>> {
+    pub async fn get_user_stats(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserStatsRecord>, Box<dyn std::error::Error>> {
         let record = sqlx::query_as::<_, UserStatsRecord>(
             "SELECT username, uploads, downloads, total_uploaded, total_downloaded, watched, last_seen, created_at, updated_at FROM user_stats WHERE username = ?"
         )
@@ -534,7 +574,11 @@ impl DatabaseManager {
     }
 
     /// Mark user as watched
-    pub async fn set_user_watched(&self, username: &str, watched: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn set_user_watched(
+        &self,
+        username: &str,
+        watched: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query("UPDATE user_stats SET watched = ? WHERE username = ?")
             .bind(watched as i32)
             .bind(username)
@@ -544,7 +588,9 @@ impl DatabaseManager {
     }
 
     /// List watched users
-    pub async fn list_watched_users(&self) -> Result<Vec<UserStatsRecord>, Box<dyn std::error::Error>> {
+    pub async fn list_watched_users(
+        &self,
+    ) -> Result<Vec<UserStatsRecord>, Box<dyn std::error::Error>> {
         let records = sqlx::query_as::<_, UserStatsRecord>(
             "SELECT username, uploads, downloads, total_uploaded, total_downloaded, watched, last_seen, created_at, updated_at FROM user_stats WHERE watched = 1 ORDER BY username"
         )
@@ -558,7 +604,11 @@ impl DatabaseManager {
     // ========================================================================
 
     /// Subscribe to room
-    pub async fn subscribe_room(&self, name: &str, owner: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn subscribe_room(
+        &self,
+        name: &str,
+        owner: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         sqlx::query(
             "INSERT OR REPLACE INTO rooms (name, owner, subscribed, joined_at, last_activity) VALUES (?, ?, 1, ?, ?)"
@@ -582,7 +632,9 @@ impl DatabaseManager {
     }
 
     /// List subscribed rooms
-    pub async fn list_subscribed_rooms(&self) -> Result<Vec<RoomRecord>, Box<dyn std::error::Error>> {
+    pub async fn list_subscribed_rooms(
+        &self,
+    ) -> Result<Vec<RoomRecord>, Box<dyn std::error::Error>> {
         let records = sqlx::query_as::<_, RoomRecord>(
             "SELECT name, owner, subscribed, joined_at, last_activity FROM rooms WHERE subscribed = 1 ORDER BY name"
         )
@@ -600,19 +652,19 @@ impl DatabaseManager {
         let search_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM searches")
             .fetch_one(&self.pool)
             .await?;
-        
+
         let transfer_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transfers")
             .fetch_one(&self.pool)
             .await?;
-        
+
         let message_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages")
             .fetch_one(&self.pool)
             .await?;
-        
+
         let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM user_stats")
             .fetch_one(&self.pool)
             .await?;
-        
+
         let room_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM rooms WHERE subscribed = 1")
             .fetch_one(&self.pool)
             .await?;
@@ -628,9 +680,8 @@ impl DatabaseManager {
 
     /// Cleanup old records (older than specified days)
     pub async fn cleanup_old_records(&self, days: i32) -> Result<u32, Box<dyn std::error::Error>> {
-        let cutoff = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs() as i64 - (days as i64 * 86400);
+        let cutoff =
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64 - (days as i64 * 86400);
 
         let result = sqlx::query("DELETE FROM messages WHERE created_at < ?")
             .bind(cutoff)
@@ -642,9 +693,7 @@ impl DatabaseManager {
 
     /// Vacuum database (optimize storage)
     pub async fn vacuum(&self) -> Result<(), Box<dyn std::error::Error>> {
-        sqlx::query("VACUUM")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query("VACUUM").execute(&self.pool).await?;
         Ok(())
     }
 
@@ -653,7 +702,10 @@ impl DatabaseManager {
     // ========================================================================
 
     /// Insert or update webhook record
-    pub async fn insert_webhook(&self, record: &WebhookRecord) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn insert_webhook(
+        &self,
+        record: &WebhookRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query(
             r#"
             INSERT OR REPLACE INTO webhooks (id, url, events, secret, active, created_at, last_triggered, retry_count, max_retries, timeout_seconds)
@@ -667,16 +719,19 @@ impl DatabaseManager {
         .bind(record.active as i32)
         .bind(record.created_at)
         .bind(record.last_triggered)
-        .bind(record.retry_count as i32)
-        .bind(record.max_retries as i32)
-        .bind(record.timeout_seconds as i32)
+        .bind(record.retry_count)
+        .bind(record.max_retries)
+        .bind(record.timeout_seconds)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
     /// Get webhook record by ID
-    pub async fn get_webhook(&self, id: &str) -> Result<Option<WebhookRecord>, Box<dyn std::error::Error>> {
+    pub async fn get_webhook(
+        &self,
+        id: &str,
+    ) -> Result<Option<WebhookRecord>, Box<dyn std::error::Error>> {
         let record = sqlx::query_as::<_, WebhookRecord>(
             r#"SELECT id, url, events, secret, active, created_at, last_triggered, retry_count, max_retries, timeout_seconds FROM webhooks WHERE id = ?"#
         )
@@ -697,7 +752,9 @@ impl DatabaseManager {
     }
 
     /// List active webhooks
-    pub async fn list_active_webhooks(&self) -> Result<Vec<WebhookRecord>, Box<dyn std::error::Error>> {
+    pub async fn list_active_webhooks(
+        &self,
+    ) -> Result<Vec<WebhookRecord>, Box<dyn std::error::Error>> {
         let records = sqlx::query_as::<_, WebhookRecord>(
             r#"SELECT id, url, events, secret, active, created_at, last_triggered, retry_count, max_retries, timeout_seconds FROM webhooks WHERE active = 1 ORDER BY created_at DESC"#
         )
@@ -716,7 +773,11 @@ impl DatabaseManager {
     }
 
     /// Update webhook active status
-    pub async fn update_webhook_active(&self, id: &str, active: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn update_webhook_active(
+        &self,
+        id: &str,
+        active: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query("UPDATE webhooks SET active = ? WHERE id = ?")
             .bind(active as i32)
             .bind(id)
@@ -726,7 +787,10 @@ impl DatabaseManager {
     }
 
     /// Insert webhook log record
-    pub async fn insert_webhook_log(&self, record: &WebhookLogRecord) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn insert_webhook_log(
+        &self,
+        record: &WebhookLogRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         sqlx::query(
             r#"
             INSERT INTO webhook_logs (id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp)
@@ -742,7 +806,7 @@ impl DatabaseManager {
         .bind(record.response_status)
         .bind(&record.response_body)
         .bind(&record.error_message)
-        .bind(record.attempt as i32)
+        .bind(record.attempt)
         .bind(record.timestamp)
         .execute(&self.pool)
         .await?;
@@ -798,10 +862,12 @@ impl DatabaseManager {
     }
 
     /// Delete old webhook logs
-    pub async fn delete_old_webhook_logs(&self, days: i32) -> Result<u32, Box<dyn std::error::Error>> {
-        let cutoff = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs() as i64 - (days as i64 * 86400);
+    pub async fn delete_old_webhook_logs(
+        &self,
+        days: i32,
+    ) -> Result<u32, Box<dyn std::error::Error>> {
+        let cutoff =
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64 - (days as i64 * 86400);
 
         let result = sqlx::query("DELETE FROM webhook_logs WHERE timestamp < ?")
             .bind(cutoff)
@@ -861,7 +927,9 @@ mod tests {
         assert_eq!(retrieved.query, "test query");
         assert_eq!(retrieved.result_count, 42);
 
-        db.update_search_status("search_1", "archived").await.unwrap();
+        db.update_search_status("search_1", "archived")
+            .await
+            .unwrap();
         let updated = db.get_search("search_1").await.unwrap().unwrap();
         assert_eq!(updated.status, "archived");
     }
@@ -891,7 +959,9 @@ mod tests {
         assert_eq!(retrieved.filename, "test.mp3");
         assert_eq!(retrieved.progress, 500000);
 
-        db.update_transfer_progress("transfer_1", 750000).await.unwrap();
+        db.update_transfer_progress("transfer_1", 750000)
+            .await
+            .unwrap();
         let updated = db.get_transfer("transfer_1").await.unwrap().unwrap();
         assert_eq!(updated.progress, 750000);
     }
@@ -922,8 +992,10 @@ mod tests {
     #[tokio::test]
     async fn test_user_stats_operations() {
         let db = DatabaseManager::in_memory().await.unwrap();
-        
-        db.update_user_stats("testuser", 10, 5, 1000000, 500000).await.unwrap();
+
+        db.update_user_stats("testuser", 10, 5, 1000000, 500000)
+            .await
+            .unwrap();
         let stats = db.get_user_stats("testuser").await.unwrap();
         assert!(stats.is_some());
         let s = stats.unwrap();

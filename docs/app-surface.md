@@ -30,7 +30,7 @@ The `slskr serve` process owns the app state and should grow into:
 - search dispatch, result aggregation, and wishlist state
 - transfer queue and resume state
 - room, private-message, user-watch, and privilege state
-- HTTP API and WebSocket/SSE event stream
+- HTTP API and plain WebSocket event stream
 - static web UI assets
 
 The daemon calls `slskr-client` for protocol/runtime behavior rather than duplicating connection logic in the app crate. The current scaffold can optionally start a real server login session when credentials are provided through the environment.
@@ -52,14 +52,15 @@ The first app shell exposes:
 - `GET /api/v0/metrics`: Prometheus-style text counters/gauges for session, listeners, shares, searches, users, browse cache, messages, rooms, and transfers
 - `GET /api/v0/telemetry`: protected JSON runtime health snapshot with sanitized config flags, listener/session state, storage status, and projection counts
 - `GET /api/v0/events`: bounded in-memory event log for recent search, transfer, share, user, browse, message, room, and session workflows. Supports `kind`, `q`, `limit`, and `offset` query parameters.
+- `GET /api/events/ws`: WebSocket event feed backed by the same event store as `/api/v0/events`. Frames include `topic`, `type`, `data`, `timestamp`, and the raw `event` record for SDK compatibility.
 - `GET /api/shares`: sanitized share-index status, root labels, file/byte counts, per-root extension summaries, scan errors, and cache status
 - `GET /api/v0/shares`: versioned alias for share-index status
 - `GET /api/v0/shares/catalog`: deterministic sorted share catalog with virtual path, size, extension, attribute count, file count, filtered count, and total bytes. Supports `q`, `prefix`, `extension`, `limit`, and `offset` query parameters.
 - `GET /api/v0/files/:root`: list files under one configured share-root label without exposing local host paths. Supports `q`, `prefix`, `extension`, `limit`, and `offset` query parameters.
 - `POST /api/shares/rescan`: rebuild the in-memory share index from configured roots and rewrite the state-dir cache
 - `POST /api/v0/shares/rescan`: versioned alias for share rescan
-- `GET /api/v0/searches`: list in-memory search records. Supports `q`, `status`, `target`, `limit`, and `offset` query parameters.
-- `POST /api/v0/searches`: create an in-memory search record from JSON body `{"query":"..."}`, match against the current local share snapshot, and enqueue the public-network search command when connected. Optional `target` values are `global`, `user`, `room`, or `wishlist`; user searches require `username`, room searches require `room`, and `ttl_seconds` controls the active search expiration window.
+- `GET /api/v0/searches`: list search records. Supports `q`, `status`, `target`, `limit`, and `offset` query parameters. When persistence is enabled, startup hydrates this projection from SQLite search rows.
+- `POST /api/v0/searches`: create a search record from JSON body `{"query":"..."}`, match against the current local share snapshot, optionally persist it to SQLite, and enqueue the public-network search command when connected. Optional `target` values are `global`, `user`, `room`, or `wishlist`; user searches require `username`, room searches require `room`, and `ttl_seconds` controls the active search expiration window.
 - `GET /api/v0/searches/:token`: read one search record
 - `POST /api/v0/searches/:token/complete`: mark one search record completed
 - `POST /api/v0/searches/prune`: expire due active searches and remove expired records
@@ -136,7 +137,9 @@ Initial configuration sources:
 - `SLSKR_TRANSFER_ALLOW_INBOUND` controls whether peer `TransferRequest`s for local shares are accepted; defaults to `true`.
 - `SLSKR_TRANSFER_ALLOW_OUTBOUND` controls whether API-started peer transfers are allowed to begin; defaults to `true`.
 - `SLSKR_API_TOKEN` for HTTP API auth. If set, protected API routes accept either `Authorization: Bearer <token>` or the dashboard's same-site `slskr.session` cookie.
+- `SLSKR_API_RATE_LIMIT_ANONYMOUS` and `SLSKR_API_RATE_LIMIT_AUTHENTICATED` tune per-window HTTP API request limits; defaults are `1000` and `5000`.
 - `SLSKR_AUTH_DISABLED` to explicitly disable HTTP API auth. Loopback-only binds default to disabled when no token is configured; non-loopback binds require a token unless this is set.
+- `SLSKR_PERSISTENCE_ENABLED` enables the default-off SQLite persistence path. Search create/list hydration is wired; transfer/message/room persistence remains incomplete.
 - `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold
 - gitignored `.secrets/` files for local lab credentials
 - OpenBao paths documented under `../k3s/slskr/README.md`
@@ -179,7 +182,7 @@ Target distribution shape:
 - expand `/api/v0/stats` from projection counts into durable health metrics once the database/event-log layout lands
 - expand `/api/v0/metrics` with durable counters and process/runtime gauges once the database/event-log layout lands
 - expand `/api/v0/telemetry` with process/runtime, database, and long-running task health once those subsystems land
-- expand `/api/v0/events` into SSE or WebSocket streaming once the web UI needs live push updates
+- expand event coverage and topic mapping for `/api/events/ws` as the web UI moves more views to live updates
 - broaden `/api/v0/transfers` real transfer execution with richer production policy; current implementation has reloadable projection state in `transfer-state.json`, restart-safe queued resume records for interrupted active transfers, local-path file metadata execution, configurable max-active transfer policy, inbound/outbound transfer allow switches, peer-message transfer negotiation, direct plain/obfuscated `F` streaming/resume, chunked progress events, requester-side indirect `F` fallback, and inbound shared-file serving over direct or pierced `F` sockets
 - add durable config and state
 - expand API route tests as new `/api/v0/*` resources land

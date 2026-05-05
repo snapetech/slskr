@@ -1,15 +1,15 @@
+#![allow(dead_code, clippy::inherent_to_string_shadow_display)]
 /// Request tracing and correlation ID support
 ///
 /// Implements distributed request tracing with correlation IDs,
 /// allowing tracking of requests across service boundaries.
-
 use std::cell::RefCell;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 thread_local! {
-    static CORRELATION_ID: RefCell<Option<String>> = RefCell::new(None);
-    static REQUEST_SPAN: RefCell<Option<RequestSpan>> = RefCell::new(None);
+    static CORRELATION_ID: RefCell<Option<String>> = const { RefCell::new(None) };
+    static REQUEST_SPAN: RefCell<Option<RequestSpan>> = const { RefCell::new(None) };
 }
 
 /// Unique correlation ID for request tracing
@@ -238,7 +238,8 @@ mod tests {
         assert_eq!(timing.status, 0);
         timing.complete(200);
         assert_eq!(timing.status, 200);
-        assert!(timing.duration_ms >= 0);
+        assert_eq!(timing.method, "GET");
+        assert_eq!(timing.path, "/api/test");
     }
 
     #[test]
@@ -246,11 +247,11 @@ mod tests {
         let mut timing = RequestTiming::new("GET".to_string(), "/api/test".to_string());
         timing.duration_ms = 500;
         assert!(!timing.is_slow());
-        
+
         timing.duration_ms = 1500;
         assert!(timing.is_slow());
         assert!(!timing.is_very_slow());
-        
+
         timing.duration_ms = 6000;
         assert!(timing.is_very_slow());
     }
@@ -263,7 +264,7 @@ mod tests {
             Some("Mozilla/5.0".to_string()),
             Some("127.0.0.1".to_string()),
         );
-        
+
         assert!(span.correlation_id.as_str().starts_with("corr-"));
         assert_eq!(span.user_agent, Some("Mozilla/5.0".to_string()));
         assert_eq!(span.client_ip, Some("127.0.0.1".to_string()));
@@ -272,13 +273,13 @@ mod tests {
     #[test]
     fn test_correlation_context_storage() {
         clear_context();
-        
+
         let id = CorrelationId::new();
         set_correlation_id(id.clone());
-        
+
         let retrieved = get_correlation_id();
         assert_eq!(retrieved, id);
-        
+
         clear_context();
         let new_id = get_correlation_id();
         assert_ne!(new_id, id); // Should generate new ID
@@ -287,21 +288,13 @@ mod tests {
     #[test]
     fn test_request_span_context() {
         clear_context();
-        
-        let span = RequestSpan::new(
-            "POST".to_string(),
-            "/api/search".to_string(),
-            None,
-            None,
-        );
-        
+
+        let span = RequestSpan::new("POST".to_string(), "/api/search".to_string(), None, None);
+
         set_request_span(span.clone());
-        
+
         let retrieved = get_request_span();
         assert!(retrieved.is_some());
-        assert_eq!(
-            retrieved.unwrap().correlation_id,
-            span.correlation_id
-        );
+        assert_eq!(retrieved.unwrap().correlation_id, span.correlation_id);
     }
 }

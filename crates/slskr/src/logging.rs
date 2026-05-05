@@ -1,4 +1,5 @@
 //! Structured logging for HTTP API requests and responses.
+#![allow(dead_code)]
 
 use std::time::Instant;
 
@@ -89,7 +90,7 @@ pub fn format_timestamp() -> String {
     let secs = now.as_secs();
     let millis = now.subsec_millis();
     let datetime = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
-    
+
     // Simple ISO8601 formatting
     format!("{:?}Z+{:03}", datetime, millis)
 }
@@ -112,7 +113,7 @@ pub fn log_request(config: &LogConfig, log: &HttpRequestLog) {
     let query_str = log
         .query
         .as_ref()
-        .map(|q| format!("?{}", q))
+        .map(|_| "?<redacted>")
         .unwrap_or_default();
     eprintln!(
         "[{}] {} {} {} (from {})",
@@ -209,10 +210,12 @@ pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
         .unwrap_or_default();
 
     eprintln!(
-        "[{}] \x1b[{}m{}\x1b[0m \x1b[{}m{}\x1b[0m {} bytes in {}ms{}",
+        "[{}] \x1b[{}m{} {}{}\x1b[0m \x1b[{}m{}\x1b[0m {} bytes in {}ms{}",
         log.request.timestamp,
         method_color,
-        format!("{} {}{}", log.request.method, log.request.path, query_str),
+        log.request.method,
+        log.request.path,
+        query_str,
         status_color,
         log.response.status_code,
         log.response.content_length,

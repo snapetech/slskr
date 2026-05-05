@@ -4,6 +4,32 @@ Independent clean-room Rust client/server app for the Soulseek network. Compatib
 
 Public product posture: ship one runnable app named `slskr`, with daemon/API/web UI bundled. The workspace crates are internal implementation boundaries, not separate user-facing product names except where publishing a library is intentional.
 
+## Current Reality
+
+The protocol and client runtime crates are the reliable core of the project.
+They implement real Soulseek wire codecs, session/listener/peer runtime,
+search, transfer, distributed search, obfuscation type 1, and live probe
+tooling.
+
+The `slskr` product binary now exists and runs a single-node daemon with a
+manual HTTP/1.1 API server, bundled local dashboard, bearer-token/browser-cookie
+auth, CSRF origin checks for protected mutating routes, share/search/browse/
+transfer/message/room/user projections, `/api/events` polling, and
+`/api/events/ws` WebSocket events. The web UI is partially wired to the REST API
+and plain WebSocket event feed. SignalR, GraphQL, SSE, clustering, sharding,
+gRPC, Redis/Postgres cache layers, and HTTP/2 performance claims are descoped.
+
+Persistence is intentionally default-off. One proof path is real: search create
+can write to SQLite and startup can hydrate `/api/searches` when
+`SLSKR_PERSISTENCE_ENABLED` or `[persistence].enabled` is true. Transfer,
+message, room, and user persistence remain incomplete and must be wired before
+the default can flip on.
+
+Remaining product work is narrower than the historical phase list below:
+single-node daemon hardening, removal or replacement of compatibility stubs,
+durable storage for the remaining app resources, API/web parity for the
+documented endpoint surface, and public-posture cleanup before any release.
+
 ## Scope
 
 In-scope (normal Soulseek client behavior):
@@ -18,12 +44,15 @@ In-scope (normal Soulseek client behavior):
 - **Indirect connect / firewall piercing**: race direct dial against server-mediated `ConnectToPeer`.
 - **Share-list zlib**: Adler32 + inflate; stream-decompress browse/share payloads.
 
-Out-of-scope (initial cut):
+Out-of-scope:
 
-- Bundled daemon/API/web UI. This is the main product gap after protocol/runtime hardening.
-- CLI beyond smoke/admin/probe tooling.
-- Persistent share index / on-disk cache (consumer concern).
-- TLS — Soulseek wire is plaintext; nothing to add.
+- Distributed clustering, sharding, mesh routing, GraphQL, gRPC, Redis/Postgres
+  cache layers, and HTTP/2 performance theater.
+- TLS for Soulseek wire traffic. The network protocol is plaintext; protect the
+  local HTTP API by binding locally or placing a deliberate reverse proxy in
+  front of it.
+- Presenting the repository/package as an official client or successor
+  distribution.
 
 ## Architecture
 

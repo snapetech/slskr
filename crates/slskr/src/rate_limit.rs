@@ -1,7 +1,8 @@
 //! Rate limiting middleware for HTTP API
+#![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -45,6 +46,8 @@ pub struct RateLimiter {
     user_windows: Arc<RwLock<HashMap<String, RequestWindow>>>,
 }
 
+const MAX_USER_WINDOWS: usize = 16_384;
+
 impl RateLimiter {
     /// Create new rate limiter
     pub fn new(config: RateLimitConfig) -> Self {
@@ -77,11 +80,17 @@ impl RateLimiter {
         let max_requests = self.config.max_requests_authenticated;
         let now = Instant::now();
         let mut windows = self.user_windows.write().await;
+        windows.retain(|_, window| now < window.reset_at);
+        if !windows.contains_key(username) && windows.len() >= MAX_USER_WINDOWS {
+            return false;
+        }
 
-        let window = windows.entry(username.to_string()).or_insert_with(|| RequestWindow {
-            count: 0,
-            reset_at: now + Duration::from_secs(self.config.window_seconds),
-        });
+        let window = windows
+            .entry(username.to_string())
+            .or_insert_with(|| RequestWindow {
+                count: 0,
+                reset_at: now + Duration::from_secs(self.config.window_seconds),
+            });
 
         // Reset window if expired
         if now >= window.reset_at {
@@ -101,9 +110,7 @@ impl RateLimiter {
     /// Check rate limit for anonymous IP
     async fn check_ip_limit(&self, remote_addr: Option<SocketAddr>) -> bool {
         let max_requests = self.config.max_requests_anonymous;
-        let key = remote_addr
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        let key = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_string());
 
         let now = Instant::now();
         let mut windows = self.ip_windows.write().await;
@@ -129,11 +136,7 @@ impl RateLimiter {
     }
 
     /// Get remaining requests for user or IP
-    pub async fn get_remaining(
-        &self,
-        remote_addr: Option<SocketAddr>,
-        user: Option<&str>,
-    ) -> u32 {
+    pub async fn get_remaining(&self, remote_addr: Option<SocketAddr>, user: Option<&str>) -> u32 {
         if !self.config.enabled {
             return if user.is_some() {
                 self.config.max_requests_authenticated
@@ -165,9 +168,7 @@ impl RateLimiter {
 
     async fn get_ip_remaining(&self, remote_addr: Option<SocketAddr>) -> u32 {
         let max_requests = self.config.max_requests_anonymous;
-        let key = remote_addr
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        let key = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_string());
 
         let now = Instant::now();
         let windows = self.ip_windows.read().await;
@@ -182,11 +183,7 @@ impl RateLimiter {
     }
 
     /// Get time until reset for user or IP
-    pub async fn get_reset_time(
-        &self,
-        remote_addr: Option<SocketAddr>,
-        user: Option<&str>,
-    ) -> u64 {
+    pub async fn get_reset_time(&self, remote_addr: Option<SocketAddr>, user: Option<&str>) -> u64 {
         if !self.config.enabled {
             return 0;
         }
@@ -212,9 +209,7 @@ impl RateLimiter {
     }
 
     async fn get_ip_reset_time(&self, remote_addr: Option<SocketAddr>) -> u64 {
-        let key = remote_addr
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        let key = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_string());
 
         let now = Instant::now();
         let windows = self.ip_windows.read().await;
@@ -242,12 +237,12 @@ impl RateLimiter {
         let user_windows = self.user_windows.read().await;
 
         let ip_entries = ip_windows.len();
-        let ip_requests: u32 = ip_windows.iter().map(|(_, w)| w.count).sum();
-        let ip_max = ip_windows.iter().map(|(_, w)| w.count).max().unwrap_or(0);
+        let ip_requests: u32 = ip_windows.values().map(|w| w.count).sum();
+        let ip_max = ip_windows.values().map(|w| w.count).max().unwrap_or(0);
 
         let user_entries = user_windows.len();
-        let user_requests: u32 = user_windows.iter().map(|(_, w)| w.count).sum();
-        let user_max = user_windows.iter().map(|(_, w)| w.count).max().unwrap_or(0);
+        let user_requests: u32 = user_windows.values().map(|w| w.count).sum();
+        let user_max = user_windows.values().map(|w| w.count).max().unwrap_or(0);
 
         RateLimitStats {
             ip_entries,
@@ -270,6 +265,13 @@ impl RateLimiter {
         let mut user_windows = self.user_windows.write().await;
         user_windows.retain(|_, window| now < window.reset_at);
     }
+}
+
+fn ip_key(remote_addr: Option<SocketAddr>) -> Option<String> {
+    remote_addr.map(|addr| match addr.ip() {
+        IpAddr::V4(ip) => ip.to_string(),
+        IpAddr::V6(ip) => ip.to_string(),
+    })
 }
 
 /// Rate limit statistics
@@ -332,7 +334,10 @@ mod tests {
         };
         let limiter = RateLimiter::new(config);
 
-        let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
+        let addr = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            8080,
+        ));
 
         for _ in 0..2000 {
             assert!(limiter.check_rate_limit(addr, None).await);
@@ -349,13 +354,23 @@ mod tests {
         };
         let limiter = RateLimiter::new(config);
 
-        let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
+        let addr = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            8080,
+        ));
 
         for i in 0..5 {
-            assert!(limiter.check_rate_limit(addr, None).await, "Request {} should pass", i + 1);
+            assert!(
+                limiter.check_rate_limit(addr, None).await,
+                "Request {} should pass",
+                i + 1
+            );
         }
 
-        assert!(!limiter.check_rate_limit(addr, None).await, "6th request should fail");
+        assert!(
+            !limiter.check_rate_limit(addr, None).await,
+            "6th request should fail"
+        );
     }
 
     #[tokio::test]
@@ -369,10 +384,17 @@ mod tests {
         let limiter = RateLimiter::new(config);
 
         for i in 0..5 {
-            assert!(limiter.check_rate_limit(None, Some("testuser")).await, "Request {} should pass", i + 1);
+            assert!(
+                limiter.check_rate_limit(None, Some("testuser")).await,
+                "Request {} should pass",
+                i + 1
+            );
         }
 
-        assert!(!limiter.check_rate_limit(None, Some("testuser")).await, "6th request should fail");
+        assert!(
+            !limiter.check_rate_limit(None, Some("testuser")).await,
+            "6th request should fail"
+        );
     }
 
     #[tokio::test]
@@ -385,8 +407,14 @@ mod tests {
         };
         let limiter = RateLimiter::new(config);
 
-        let addr1 = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
-        let addr2 = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8080));
+        let addr1 = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            8080,
+        ));
+        let addr2 = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+            8080,
+        ));
 
         assert!(limiter.check_rate_limit(addr1, None).await);
         assert!(limiter.check_rate_limit(addr2, None).await);
@@ -426,7 +454,10 @@ mod tests {
         };
         let limiter = RateLimiter::new(config);
 
-        let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
+        let addr = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            8080,
+        ));
 
         assert_eq!(limiter.get_remaining(addr, None).await, 10);
         limiter.check_rate_limit(addr, None).await;
@@ -468,7 +499,10 @@ mod tests {
         };
         let limiter = RateLimiter::new(config);
 
-        let addr = Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080));
+        let addr = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            8080,
+        ));
 
         for _ in 0..5 {
             limiter.check_rate_limit(addr, None).await;

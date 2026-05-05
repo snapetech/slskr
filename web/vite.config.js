@@ -99,7 +99,6 @@ export default defineConfig({
           ) {
             return 'react-vendor';
           }
-          if (id.includes('@microsoft/signalr')) return 'signalr';
           if (id.includes('axios')) return 'api-vendor';
 
           return 'vendor';

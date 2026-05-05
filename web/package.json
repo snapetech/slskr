@@ -16,7 +16,6 @@
   "dependencies": {
     "@codemirror/language": "^6.12.3",
     "@codemirror/legacy-modes": "^6.5.2",
-    "@microsoft/signalr": "^7.0.14",
     "@uiw/react-codemirror": "^4.25.9",
     "axios": "^1.16.0",
     "butterchurn": "^2.6.7",
@@ -30,7 +29,6 @@
     "react-toastify": "^11.1.0",
     "semantic-ui-less": "^2.5.0",
     "semantic-ui-react": "^2.1.5",
-    "signalr": "^2.4.1",
     "uuid": "^14.0.0",
     "yaml": "^2.8.4"
   },

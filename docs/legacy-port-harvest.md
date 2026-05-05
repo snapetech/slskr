@@ -85,7 +85,7 @@ These are the pieces worth bringing into this repo first, reimplemented against 
 
 9. Events
    - Bounded in-process event log with named events exists now through `GET /api/v0/events`.
-   - Later expose via SSE or WebSocket; SignalR compatibility can remain a separate decision.
+   - Plain WebSocket event delivery exists at `GET /api/events/ws`; SignalR compatibility is descoped.
    - Useful event names now include search started/completed/pruned, transfer queued/progress/completed/cancelled/failed, share scan completed, user watch/stat/browse/folder-browse requests, message sent/received/acknowledged, room join/leave/message/list requests, and session command requests.
 
 10. Metrics and telemetry

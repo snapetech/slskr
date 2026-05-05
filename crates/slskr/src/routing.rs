@@ -3,8 +3,8 @@
 //! HTTP routing module: request dispatching and path extraction.
 
 use crate::utils::{
-    normalize_api_path, split_request_target, route_requires_auth, csrf_origin_allowed,
-    is_authorized, RequestSecurityHeaders,
+    csrf_origin_allowed, is_authorized, normalize_api_path, route_requires_auth,
+    split_request_target, RequestSecurityHeaders,
 };
 use crate::AppConfig;
 
@@ -46,11 +46,13 @@ pub fn check_route_auth(
     method: &str,
     path: &str,
     auth: Option<&str>,
-    headers: &RequestSecurityHeaders<'_>,
+    headers: &RequestSecurityHeaders,
 ) -> Result<(), &'static str> {
     let normalized = normalize_api_path(path);
 
-    if route_requires_auth(config, normalized) && !is_authorized(config, auth, headers.cookie) {
+    if route_requires_auth(config, normalized)
+        && !is_authorized(config, auth, headers.cookie.as_deref())
+    {
         return Err("unauthorized");
     }
 

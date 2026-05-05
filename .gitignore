@@ -6,3 +6,6 @@ Cargo.lock.bak
 .idea/
 .vscode/
 .secrets/
+
+# Local live-test credentials
+.env

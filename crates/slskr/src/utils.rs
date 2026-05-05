@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use slskr_client::listener::IncomingConnection;
@@ -40,33 +41,22 @@ pub fn authorization_header(request: &str) -> Option<&str> {
     })
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct RequestSecurityHeaders<'a> {
-    pub host: Option<&'a str>,
-    pub origin: Option<&'a str>,
-    pub referer: Option<&'a str>,
-    pub cookie: Option<&'a str>,
+#[derive(Clone, Debug, Default)]
+pub struct RequestSecurityHeaders {
+    pub host: Option<String>,
+    pub origin: Option<String>,
+    pub referer: Option<String>,
+    pub cookie: Option<String>,
 }
 
-impl<'a> RequestSecurityHeaders<'a> {
-    pub fn from_request(request: &'a str) -> Self {
-        let mut headers = Self::default();
-        for line in request.lines().skip(1) {
-            let Some((name, value)) = line.split_once(':') else {
-                continue;
-            };
-            let value = value.trim();
-            if name.eq_ignore_ascii_case("host") {
-                headers.host = Some(value);
-            } else if name.eq_ignore_ascii_case("origin") {
-                headers.origin = Some(value);
-            } else if name.eq_ignore_ascii_case("referer") {
-                headers.referer = Some(value);
-            } else if name.eq_ignore_ascii_case("cookie") {
-                headers.cookie = Some(value);
-            }
+impl RequestSecurityHeaders {
+    pub fn from_http_headers(h: &crate::http_server::HttpHeaders) -> Self {
+        Self {
+            host: h.host.clone(),
+            origin: h.origin.clone(),
+            referer: h.referer.clone(),
+            cookie: h.cookie.clone(),
         }
-        headers
     }
 }
 
@@ -89,19 +79,19 @@ pub fn csrf_origin_allowed(
     config: &AppConfig,
     method: &str,
     path: &str,
-    headers: &RequestSecurityHeaders<'_>,
+    headers: &RequestSecurityHeaders,
 ) -> bool {
     if !config.auth_required || !is_unsafe_http_method(method) || !path.starts_with("/api/") {
         return true;
     }
-    let Some(source) = headers.origin.or(headers.referer) else {
-        return true;
+    let Some(source) = headers.origin.as_deref().or(headers.referer.as_deref()) else {
+        return cookie_session_token(headers.cookie.as_deref()).is_none();
     };
     let Some(source_host) = origin_host(source) else {
         return false;
     };
     let fallback_host = config.http_bind.to_string();
-    let expected_host = headers.host.unwrap_or(fallback_host.as_str());
+    let expected_host = headers.host.as_deref().unwrap_or(fallback_host.as_str());
     same_origin_host(source_host, expected_host)
 }
 
@@ -129,14 +119,31 @@ fn normalize_origin_host(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub fn is_authorized(config: &AppConfig, authorization: Option<&str>, cookie: Option<&str>) -> bool {
+pub fn is_authorized(
+    config: &AppConfig,
+    authorization: Option<&str>,
+    cookie: Option<&str>,
+) -> bool {
     let Some(expected_token) = config.api_token.as_deref() else {
         return false;
     };
     let bearer_authorized = authorization
         .and_then(|value| value.strip_prefix("Bearer "))
-        .is_some_and(|token| token == expected_token);
-    bearer_authorized || cookie_session_token(cookie).is_some_and(|token| token == expected_token)
+        .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes()));
+    bearer_authorized
+        || cookie_session_token(cookie)
+            .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes()))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let max_len = left.len().max(right.len());
+    let mut diff = left.len() ^ right.len();
+    for index in 0..max_len {
+        let left_byte = left.get(index).copied().unwrap_or(0);
+        let right_byte = right.get(index).copied().unwrap_or(0);
+        diff |= usize::from(left_byte ^ right_byte);
+    }
+    diff == 0
 }
 
 fn cookie_session_token(cookie: Option<&str>) -> Option<String> {
@@ -339,7 +346,8 @@ pub fn room_messages_path(path: &str) -> Option<&str> {
 pub fn room_path(path: &str) -> Option<&str> {
     path.strip_prefix("/api/rooms/")
         .or_else(|| path.strip_prefix("/api/v0/rooms/"))?
-        .split('/').next()
+        .split('/')
+        .next()
         .filter(|room| !room.is_empty())
 }
 
@@ -359,58 +367,21 @@ pub fn message_id_path(path: &str) -> Option<u64> {
 // ============================================================================
 
 pub fn extract_json_string_field(body: &str, field: &str) -> Option<String> {
-    let key = format!("\"{}\"", field);
-    let after_key = json_field_after_key(body, &key)?;
-    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
-    let value = after_colon.strip_prefix('"')?;
-    let mut output = String::new();
-    let mut escaped = false;
-    for character in value.chars() {
-        if escaped {
-            match character {
-                '"' => output.push('"'),
-                '\\' => output.push('\\'),
-                'n' => output.push('\n'),
-                'r' => output.push('\r'),
-                't' => output.push('\t'),
-                other => output.push(other),
-            }
-            escaped = false;
-            continue;
-        }
-        match character {
-            '\\' => escaped = true,
-            '"' => return Some(output),
-            other => output.push(other),
-        }
-    }
-    None
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get(field)?
+        .as_str()
+        .map(ToOwned::to_owned)
 }
 
 pub fn extract_json_string_array_field(body: &str, field: &str) -> Option<Vec<String>> {
-    let key = format!("\"{}\"", field);
-    let after_key = json_field_after_key(body, &key)?;
-    let mut value = after_key
-        .trim_start()
-        .strip_prefix(':')?
-        .trim_start()
-        .strip_prefix('[')?;
-    let mut items = Vec::new();
-    loop {
-        value = value.trim_start();
-        if value.starts_with(']') {
-            return Some(items);
-        }
-        let item = parse_json_string_prefix(value)?;
-        value = &value[item.consumed..];
-        items.push(item.value);
-        value = value.trim_start();
-        if let Some(rest) = value.strip_prefix(',') {
-            value = rest;
-            continue;
-        }
-        return value.starts_with(']').then_some(items);
-    }
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get(field)?
+        .as_array()?
+        .iter()
+        .map(|value| value.as_str().map(ToOwned::to_owned))
+        .collect()
 }
 
 pub struct JsonStringPrefix {
@@ -661,57 +632,56 @@ pub fn cache_control_header(method: &str, content_type: &str, path: &str) -> Opt
     if method != "GET" {
         return None;
     }
-    
+
     // Don't cache HTML (dynamic dashboard)
     if content_type.contains("text/html") {
         return Some("Cache-Control: no-cache, must-revalidate\r\n".to_string());
     }
-    
+
     // Cache static endpoints for longer
     if path == "/api/health" || path == "/api/version" || path == "/api/capabilities" {
-        return Some("Cache-Control: public, max-age=3600\r\n".to_string());  // 1 hour
+        return Some("Cache-Control: public, max-age=3600\r\n".to_string()); // 1 hour
     }
-    
+
     // Cache config for medium duration
     if path == "/api/config" {
-        return Some("Cache-Control: private, max-age=300\r\n".to_string());  // 5 minutes
+        return Some("Cache-Control: private, max-age=300\r\n".to_string()); // 5 minutes
     }
-    
+
     // Cache stats briefly (they change frequently)
     if path.starts_with("/api/stats") || path.starts_with("/api/metrics") {
-        return Some("Cache-Control: public, max-age=10\r\n".to_string());  // 10 seconds
+        return Some("Cache-Control: public, max-age=10\r\n".to_string()); // 10 seconds
     }
-    
+
     // Cache shares catalog
     if path.starts_with("/api/shares") {
-        return Some("Cache-Control: public, max-age=60\r\n".to_string());  // 1 minute
+        return Some("Cache-Control: public, max-age=60\r\n".to_string()); // 1 minute
     }
-    
+
     // Default: no caching for dynamic endpoints
     Some("Cache-Control: no-store\r\n".to_string())
 }
 
 /// Generate ETag for response body
 pub fn generate_etag(body: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    
-    let mut hasher = DefaultHasher::new();
-    body.hash(&mut hasher);
-    let hash = hasher.finish();
-    format!("\"{}\"", hash)
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(body.as_bytes());
+    format!("\"{}\"", hex::encode(&digest[..16]))
 }
 
 /// Generate CORS headers for API responses
 pub fn cors_headers(origin: Option<&str>, allowed_origins: &[&str]) -> String {
     let origin = match origin {
+        Some(o) if allowed_origins.contains(&"*") => o,
         Some(o) if allowed_origins.contains(&o) => o,
-        Some(_) => return String::new(),  // Origin not allowed
-        None => return String::new(),      // No origin header
+        Some(_) => return String::new(), // Origin not allowed
+        None => return String::new(),    // No origin header
     };
-    
+
     format!(
         "Access-Control-Allow-Origin: {}\r\n\
+         Vary: Origin\r\n\
          Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS\r\n\
          Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
          Access-Control-Max-Age: 86400\r\n",
@@ -726,15 +696,15 @@ pub fn is_cors_preflight(method: &str) -> bool {
 
 /// Generate a unique request ID
 pub fn generate_request_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    
+    static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
-    
-    // Combine timestamp nanos with a counter for uniqueness
-    format!("req-{:x}", nanos)
+    let counter = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    format!("req-{nanos:x}-{counter:x}")
 }
 
 /// Standard error codes for API responses
@@ -746,7 +716,7 @@ pub enum ErrorCode {
     Forbidden = 403,
     NotFound = 404,
     RateLimited = 429,
-    
+
     // Server errors (5xx)
     InternalError = 500,
     ServiceUnavailable = 503,
@@ -764,7 +734,7 @@ impl ErrorCode {
             Self::ServiceUnavailable => "503 Service Unavailable",
         }
     }
-    
+
     pub fn code_string(self) -> &'static str {
         match self {
             Self::BadRequest => "BAD_REQUEST",
@@ -790,9 +760,19 @@ pub fn error_response_json(code: ErrorCode, message: &str) -> String {
 
 /// Escape JSON string values
 pub fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
+    let mut escaped = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0c}' => escaped.push_str("\\f"),
+            ch if ch <= '\u{1f}' => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
 }

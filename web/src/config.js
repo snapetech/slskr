@@ -8,7 +8,6 @@ const rootUrl =
       ? `http://localhost:${developmentPort}${urlBase}`
       : urlBase;
 const apiBaseUrl = `${rootUrl}/api/v0`;
-const hubBaseUrl = `${rootUrl}/hub`;
 const tokenKey = 'slskd-token';
 const tokenPassthroughValue = 'n/a';
 const activeChatKey = 'slskd-active-chat';
@@ -20,7 +19,6 @@ export {
   activeRoomKey,
   activeUserInfoKey,
   apiBaseUrl,
-  hubBaseUrl,
   rootUrl,
   tokenKey,
   tokenPassthroughValue,

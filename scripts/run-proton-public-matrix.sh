@@ -2,12 +2,18 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+pool_file="${SLSKR_PROTON_CREDENTIAL_POOL_FILE:-$repo_root/.secrets/proton-credential-pool.env}"
+if [[ -f "$pool_file" ]]; then
+    # shellcheck disable=SC1090
+    source "$pool_file"
+fi
 listener_credential_file="${SLSKR_LISTENER_CREDENTIAL_FILE:-$repo_root/.secrets/live-listener-account.env}"
 probe_credential_file="${SLSKR_PROBE_CREDENTIAL_FILE:-$repo_root/.secrets/live-probe-account.env}"
 output_file="${1:-$repo_root/target/live-soak/proton-public-matrix-$(date +%Y%m%d-%H%M%S).tsv}"
 
-listener_labels=(${SLSKR_MATRIX_LISTENERS:-il741 usca32 uk577})
-probe_labels=(${SLSKR_MATRIX_PROBES:-il741 au162 usca32 uk577})
+default_labels="${SLSKR_PROTON_CONFIG_LABELS:-il741 au162 usca32 uk577}"
+listener_labels=(${SLSKR_MATRIX_LISTENERS:-${SLSKR_PROTON_LISTENER_LABELS:-$default_labels}})
+probe_labels=(${SLSKR_MATRIX_PROBES:-${SLSKR_PROTON_PROBE_LABELS:-$default_labels}})
 
 declare -A configs=(
     [il741]="$repo_root/.secrets/proton-slskr-1.conf"
@@ -15,6 +21,16 @@ declare -A configs=(
     [usca32]="$repo_root/.secrets/proton-slskr-3.conf"
     [uk577]="$repo_root/.secrets/proton-slskr-4.conf"
 )
+for label in $default_labels; do
+    var_name="SLSKR_PROTON_CONFIG_${label}"
+    if [[ -n "${!var_name:-}" ]]; then
+        configured_path="${!var_name}"
+        if [[ "$configured_path" != /* ]]; then
+            configured_path="$repo_root/$configured_path"
+        fi
+        configs[$label]="$configured_path"
+    fi
+done
 
 mkdir -p "$(dirname "$output_file")"
 

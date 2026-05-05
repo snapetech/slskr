@@ -44,6 +44,8 @@ Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to 
 
 Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep credentials and API tokens out of git; use a local ignored env file, service environment file, or secret manager.
 
+SQLite persistence is default-off while the remaining transfer/message/room paths are being wired. Enable the current search persistence proof path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; this creates `slskr.db` under the state directory.
+
 ## First Run
 
 Loopback-only HTTP binds default to no API auth unless `SLSKR_API_TOKEN` is configured. Non-loopback binds require an API token unless `SLSKR_AUTH_DISABLED=true` is explicitly set.

@@ -62,134 +62,146 @@ impl OpenApiSpec {
         let mut paths = BTreeMap::new();
 
         // Health endpoint
-        paths.insert("/api/health".to_string(), json!({
-            "get": {
-                "tags": ["Health & Info"],
-                "summary": "Check server health",
-                "operationId": "getHealth",
-                "responses": {
-                    "200": {
-                        "description": "Server is healthy",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Health"
+        paths.insert(
+            "/api/health".to_string(),
+            json!({
+                "get": {
+                    "tags": ["Health & Info"],
+                    "summary": "Check server health",
+                    "operationId": "getHealth",
+                    "responses": {
+                        "200": {
+                            "description": "Server is healthy",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/Health"
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-        }));
+            }),
+        );
 
         // Stats endpoint
-        paths.insert("/api/stats".to_string(), json!({
-            "get": {
-                "tags": ["Session"],
-                "summary": "Get server statistics",
-                "operationId": "getStats",
-                "security": [{"bearerAuth": []}],
-                "responses": {
-                    "200": {
-                        "description": "Server statistics",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Stats"
+        paths.insert(
+            "/api/stats".to_string(),
+            json!({
+                "get": {
+                    "tags": ["Session"],
+                    "summary": "Get server statistics",
+                    "operationId": "getStats",
+                    "security": [{"bearerAuth": []}],
+                    "responses": {
+                        "200": {
+                            "description": "Server statistics",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/Stats"
+                                    }
                                 }
                             }
-                        }
-                    },
-                    "401": {"description": "Unauthorized"}
+                        },
+                        "401": {"description": "Unauthorized"}
+                    }
                 }
-            }
-        }));
+            }),
+        );
 
         // Config endpoint
-        paths.insert("/api/config".to_string(), json!({
-            "get": {
-                "tags": ["Session"],
-                "summary": "Get server configuration",
-                "operationId": "getConfig",
-                "security": [{"bearerAuth": []}],
-                "responses": {
-                    "200": {
-                        "description": "Server configuration",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Config"
+        paths.insert(
+            "/api/config".to_string(),
+            json!({
+                "get": {
+                    "tags": ["Session"],
+                    "summary": "Get server configuration",
+                    "operationId": "getConfig",
+                    "security": [{"bearerAuth": []}],
+                    "responses": {
+                        "200": {
+                            "description": "Server configuration",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/Config"
+                                    }
                                 }
                             }
-                        }
-                    },
-                    "401": {"description": "Unauthorized"}
+                        },
+                        "401": {"description": "Unauthorized"}
+                    }
                 }
-            }
-        }));
+            }),
+        );
 
         // Search endpoint
-        paths.insert("/api/searches".to_string(), json!({
-            "get": {
-                "tags": ["Search"],
-                "summary": "List active searches",
-                "operationId": "listSearches",
-                "parameters": [
-                    {
-                        "name": "limit",
-                        "in": "query",
-                        "description": "Items per page (1-100)",
-                        "schema": {"type": "integer", "default": 20}
-                    },
-                    {
-                        "name": "offset",
-                        "in": "query",
-                        "description": "Page offset",
-                        "schema": {"type": "integer", "default": 0}
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of searches",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SearchList"
-                                }
-                            }
+        paths.insert(
+            "/api/searches".to_string(),
+            json!({
+                "get": {
+                    "tags": ["Search"],
+                    "summary": "List active searches",
+                    "operationId": "listSearches",
+                    "parameters": [
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "description": "Items per page (1-100)",
+                            "schema": {"type": "integer", "default": 20}
+                        },
+                        {
+                            "name": "offset",
+                            "in": "query",
+                            "description": "Page offset",
+                            "schema": {"type": "integer", "default": 0}
                         }
-                    }
-                }
-            },
-            "post": {
-                "tags": ["Search"],
-                "summary": "Start new search",
-                "operationId": "startSearch",
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/SearchRequest"
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "List of searches",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/SearchList"
+                                    }
+                                }
                             }
                         }
                     }
                 },
-                "responses": {
-                    "201": {
-                        "description": "Search started",
+                "post": {
+                    "tags": ["Search"],
+                    "summary": "Start new search",
+                    "operationId": "startSearch",
+                    "requestBody": {
+                        "required": true,
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/Search"
+                                    "$ref": "#/components/schemas/SearchRequest"
                                 }
                             }
                         }
                     },
-                    "400": {"description": "Bad request"}
+                    "responses": {
+                        "201": {
+                            "description": "Search started",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/Search"
+                                    }
+                                }
+                            }
+                        },
+                        "400": {"description": "Bad request"}
+                    }
                 }
-            }
-        }));
+            }),
+        );
 
         paths
     }
@@ -291,7 +303,7 @@ impl OpenApiSpec {
             json!({
                 "name": "Webhooks",
                 "description": "Webhook management"
-            })
+            }),
         ]
     }
 }
@@ -341,7 +353,7 @@ mod tests {
     fn test_openapi_generation() {
         let spec = OpenApiSpec::new("Test API", "1.0.0");
         let generated = spec.generate();
-        
+
         assert_eq!(generated["openapi"], "3.0.0");
         assert_eq!(generated["info"]["title"], "Test API");
         assert_eq!(generated["info"]["version"], "1.0.0");
