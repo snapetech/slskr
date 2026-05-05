@@ -25,6 +25,22 @@ Environment:
 USAGE
 }
 
+write_sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file"
+  elif command -v openssl >/dev/null 2>&1; then
+    local digest
+    digest="$(openssl dgst -sha256 -r "$file")"
+    printf '%s\n' "$digest"
+  else
+    echo "no SHA-256 command found; install sha256sum, shasum, or openssl" >&2
+    return 1
+  fi
+}
+
 while (($# > 0)); do
   case "$1" in
     --target)
@@ -134,5 +150,5 @@ else
   tar -C "$dist_dir" -czf "$archive" "$root_name"
 fi
 
-sha256sum "$archive" > "$archive.sha256"
+write_sha256_file "$archive" > "$archive.sha256"
 printf '%s\n' "$archive"
