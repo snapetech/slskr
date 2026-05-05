@@ -254,6 +254,76 @@ body {
   padding: 18px;
 }
 
+.slskr-bulk-workbench {
+  border-bottom: 1px solid #263130;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+}
+
+.slskr-bulk-workbench h2,
+.slskr-bulk-workbench h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.slskr-workbench-surface {
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 12px;
+}
+
+.slskr-workbench-surface header {
+  align-items: center;
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.slskr-workbench-surface h4,
+.slskr-workbench-surface h5 {
+  color: #ffd166;
+  font-size: 12px;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.slskr-workbench-surface header span,
+.slskr-workbench-surface li span {
+  color: #c6d0ca;
+  font-size: 12px;
+}
+
+.slskr-workbench-surface ul {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-workbench-surface li {
+  align-items: center;
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  min-height: 30px;
+  padding: 7px 8px;
+}
+
+.slskr-workbench-surface code {
+  overflow-wrap: anywhere;
+}
+
 .slskr-route-columns h3 {
   color: #f4efe7;
   font-size: 14px;
@@ -407,5 +477,14 @@ body {
   .slskr-route-live li {
     align-items: start;
     grid-template-columns: 1fr;
+  }
+
+  .slskr-workbench-surface {
+    grid-template-columns: 1fr;
+  }
+
+  .slskr-workbench-surface header {
+    align-items: start;
+    flex-direction: column;
   }
 }

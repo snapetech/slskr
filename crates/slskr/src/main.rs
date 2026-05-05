@@ -4044,7 +4044,8 @@ async fn route_http_request_with_headers(
         ("POST", "/api/session") => Ok(routing::ok_response(serde_json::json!({
             "name": "slskr",
             "tokenType": "ApiKey",
-            "token": state.config.api_token.as_deref().unwrap_or_default(),
+            "token": null,
+            "tokenConfigured": state.config.api_token.is_some(),
             "issued": unix_timestamp().to_string(),
             "notBefore": unix_timestamp().to_string(),
             "expires": "",
@@ -4317,10 +4318,7 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response("[]".to_owned()))
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions/pareto") => {
-            Ok(routing::ok_response(serde_json::json!({
-                "items": [],
-                "total": 0,
-            }).to_string()))
+            Ok(routing::ok_response("[]".to_owned()))
         }
         ("GET", "/api/telemetry/reports/transfers/directories") => {
             Ok(routing::ok_response("[]".to_owned()))
@@ -5260,6 +5258,7 @@ async fn route_http_request_with_headers(
          // GET individual transfer
          ("GET", path) if (path.starts_with("/api/transfers/") || path.starts_with("/api/v0/transfers/"))
              && !path.ends_with("/start") && !path.ends_with("/progress") && !path.ends_with("/complete")
+             && !path.ends_with("/speeds")
              && !path.ends_with("/stats") => {
              let id_str = path.rsplit('/').next().unwrap_or("");
              if let Ok(id) = id_str.parse::<u64>() {
@@ -5509,15 +5508,19 @@ async fn route_http_request_with_headers(
         ("POST", path) if path.starts_with("/api/users/") && path.ends_with("/directory") => {
             let username = path.strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/directory"))
-                .unwrap_or("unknown");
+                .map(decoded_path_segment)
+                .unwrap_or_else(|| "unknown".to_string());
             let directory = extract_json_string_field(body, "directory").unwrap_or_default();
-            let json = format!(
-                "{{\"username\":\"{}\",\"directory\":\"{}\",\"requested_at\":{}}}",
-                json_escape(username),
-                json_escape(&directory),
-                unix_timestamp()
-            );
-            Ok(routing::created_response(json))
+            let browse = state.browse.read().await;
+            let entries = browse
+                .records
+                .iter()
+                .find(|record| record.username == username)
+                .map(|record| record.entries.as_slice())
+                .unwrap_or(&[]);
+            let json = slskd_user_directories_json(&directory, entries);
+            drop(browse);
+            Ok(routing::ok_response(json))
         }
 
         // USER STATUS ENDPOINTS
@@ -5610,7 +5613,7 @@ async fn route_http_request_with_headers(
                 Ok(routing::ok_response(json))
             } else {
                 drop(searches);
-                Ok(routing::not_found_response())
+                Ok(routing::ok_response("[]".to_string()))
             }
         }
 
@@ -6483,6 +6486,46 @@ async fn route_http_request_with_headers(
                 Ok(routing::conflict_response("database not initialized"))
             }
         }
+        ("GET", "/api/database/stats") => {
+            let response_body = if let Some(ref db) = state.db {
+                match db.get_stats().await {
+                    Ok(stats) => serde_json::json!({
+                        "searches": stats.search_count,
+                        "transfers": stats.transfer_count,
+                        "messages": stats.message_count,
+                        "users": stats.user_count,
+                        "rooms": stats.room_count,
+                    })
+                    .to_string(),
+                    Err(_) => serde_json::json!({
+                        "searches": 0,
+                        "transfers": 0,
+                        "messages": 0,
+                        "users": 0,
+                        "rooms": 0,
+                    })
+                    .to_string(),
+                }
+            } else {
+                serde_json::json!({
+                    "searches": 0,
+                    "transfers": 0,
+                    "messages": 0,
+                    "users": 0,
+                    "rooms": 0,
+                })
+                .to_string()
+            };
+            Ok(routing::ok_response(response_body))
+        }
+        ("POST", "/api/database/cleanup") => {
+            Ok(routing::ok_response(
+                "{\"cleaned\":0,\"days\":30}".to_owned(),
+            ))
+        }
+        ("POST", "/api/database/vacuum") => {
+            Ok(routing::ok_response("{\"vacuumed\":false}".to_owned()))
+        }
 
         // COLLECTIONS ENDPOINTS
         ("GET", "/api/collections") => {
@@ -7040,7 +7083,7 @@ async fn route_http_request_with_headers(
             drop(grants);
             Ok(routing::created_response(json))
         }
-        ("GET", path) if path.starts_with("/api/share-grants/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
+        ("GET", path) if path.starts_with("/api/share-grants/") && !path.starts_with("/api/share-grants/by-collection/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
             let id = &path[18..];
             let grants = state.share_grants.read().await;
             if let Some(record) = grants.get(id) {
@@ -7762,6 +7805,17 @@ async fn route_http_request_with_headers(
          ("GET", "/api/source-providers") => {
              let json = "{\"providers\":[],\"count\":0}".to_string();
              Ok(routing::ok_response(json))
+         }
+
+         ("GET", "/api/source-feeds") => {
+             Ok(routing::ok_response("[]".to_string()))
+         }
+
+         ("POST", "/api/source-feeds") => {
+             Ok(routing::created_response(format!(
+                 "{{\"id\":\"source-feed-{}\",\"enabled\":false,\"items\":[]}}",
+                 unix_timestamp()
+             )))
          }
 
          ("GET", "/api/songid/runs") => {
@@ -8491,6 +8545,7 @@ fn web_static_content_type(path: &Path) -> &'static str {
         Some("svg") => "image/svg+xml",
         Some("ttf") => "font/ttf",
         Some("txt") => "text/plain; charset=utf-8",
+        Some("wasm") => "application/wasm",
         Some("woff") => "font/woff",
         Some("woff2") => "font/woff2",
         _ => "application/octet-stream",
@@ -8543,7 +8598,7 @@ fn read_web_index_html() -> Option<String> {
 fn security_headers() -> &'static str {
     "X-Content-Type-Options: nosniff\r\n\
 Referrer-Policy: no-referrer\r\n\
-Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:\r\n\
+Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:\r\n\
 Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n"
 }
 
@@ -12065,18 +12120,7 @@ pub fn index_html() -> String {
   <script>
     const text = (id, value) => { document.getElementById(id).textContent = value; };
     const number = (value) => new Intl.NumberFormat().format(value || 0);
-    const cookieValue = (name) => document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) || "";
-    const setSessionCookie = (value) => {
-      const encoded = encodeURIComponent(value);
-      const secure = location.protocol === "https:" ? "; Secure" : "";
-      document.cookie = `slskr.session=${encoded}; Path=/; SameSite=Strict${secure}`;
-    };
-    const clearSessionCookie = () => {
-      const secure = location.protocol === "https:" ? "; Secure" : "";
-      document.cookie = `slskr.session=; Path=/; SameSite=Strict; Max-Age=0${secure}`;
-    };
-    let apiToken = decodeURIComponent(cookieValue("slskr.session"));
-    document.getElementById("api-token").value = apiToken;
+    let apiToken = "";
     const bytes = (value) => {
       let amount = value || 0;
       const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -12561,10 +12605,8 @@ pub fn index_html() -> String {
       event.preventDefault();
       apiToken = document.getElementById("api-token").value.trim();
       if (apiToken) {
-        setSessionCookie(apiToken);
-        text("token-action-status", "Session saved");
+        text("token-action-status", "Session active");
       } else {
-        clearSessionCookie();
         text("token-action-status", "Session cleared");
       }
       loadAll();
@@ -14085,6 +14127,32 @@ mod tests {
                 .await
                 .expect("user status");
         assert!(user_status.body.contains("\"presence\""));
+
+        let user_directory = super::route_http_request(
+            "POST",
+            "/api/v0/users/peer1/directory",
+            None,
+            r#"{"directory":"Virtual"}"#,
+            &state,
+        )
+        .await
+        .expect("user directory");
+        let user_directory_json =
+            serde_json::from_str::<serde_json::Value>(&user_directory.body).unwrap();
+        assert!(user_directory_json.is_array());
+        assert_eq!(user_directory_json[0]["name"], "Virtual");
+
+        let pareto = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/exceptions/pareto?direction=Download",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("exceptions pareto");
+        let pareto_json = serde_json::from_str::<serde_json::Value>(&pareto.body).unwrap();
+        assert!(pareto_json.is_array());
 
         let contract_routes = [
             ("GET", "/api/application", ""),
