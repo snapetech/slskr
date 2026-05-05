@@ -1334,6 +1334,18 @@ body {
   padding: 0 10px;
 }
 
+.slskr-native-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 210px;
+}
+
+.slskr-native-row-actions button:first-child {
+  background: #2f4d47;
+  border-color: #6aa99b;
+}
+
 .slskr-native-row {
   align-items: center;
   background: #0f1112;

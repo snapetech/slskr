@@ -1744,6 +1744,7 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::Browse, "browse" | "open a new browse tab" | "new tab") => {
             &["Request Directory"]
         }
+        (RouteKind::Browse, "open") => &["Request Directory"],
         (RouteKind::Browse, "download selected" | "download") => &["Queue Download"],
         (RouteKind::System, "connect") => &["Connect"],
         (RouteKind::System, "disconnect") => &["Disconnect"],
@@ -3554,6 +3555,7 @@ fn native_row_cards_html(rows: &[(String, String, String, String)], empty: &str)
 }
 
 fn native_table_html(
+    kind: RouteKind,
     headers: &[&str],
     rows: &[(String, String, String, String)],
     empty: &str,
@@ -3577,12 +3579,14 @@ fn native_table_html(
         .take(50)
         .enumerate()
         .map(|(index, (primary, secondary, meta, action))| {
+            let actions = native_row_action_buttons_html(kind, action);
             format!(
-                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
+                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
                 action = escape_html(action),
+                actions = actions,
                 index = index,
             )
         })
@@ -3595,69 +3599,147 @@ fn native_table_html(
     )
 }
 
+fn native_row_action_buttons_html(kind: RouteKind, primary_action: &str) -> String {
+    let labels: Vec<&str> = match kind {
+        RouteKind::Search => vec![primary_action, "Preview", "Download"],
+        RouteKind::DiscoveryGraph => vec![primary_action, "Queue Nearby", "Build Atlas"],
+        RouteKind::PlaylistIntake => vec![primary_action, "Import Playlist", "Queue Plans"],
+        RouteKind::Wishlist => vec![primary_action, "Run Enabled", "Copy Review"],
+        RouteKind::Downloads => vec![primary_action, "Retry", "Cancel", "Remove"],
+        RouteKind::Uploads => vec![primary_action, "Allow selected", "Deny selected"],
+        RouteKind::Messages | RouteKind::Rooms => {
+            vec![
+                primary_action,
+                "Reply",
+                "Acknowledge",
+                "Delete Conversation",
+            ]
+        }
+        RouteKind::Users => vec![primary_action, "Message", "Watch", "Save note"],
+        RouteKind::Contacts => vec![primary_action, "Message", "Browse", "Remove"],
+        RouteKind::Solid => vec![
+            primary_action,
+            "Resolve WebID",
+            "Connect Identity",
+            "Sync Storage",
+        ],
+        RouteKind::Collections => vec![primary_action, "Add Item", "Share", "Remove item"],
+        RouteKind::ShareGroups => vec![
+            "Add Member",
+            "Issue Token",
+            "Create Share Grant",
+            "Update Share Grant",
+            primary_action,
+        ],
+        RouteKind::SharedWithMe => vec![
+            primary_action,
+            "Stream",
+            "Backfill",
+            "Copy token",
+            "Leave share",
+        ],
+        RouteKind::Browse => vec![primary_action, "Download Selected", "Open a New Browse Tab"],
+        RouteKind::System => vec![
+            primary_action,
+            "Rescan shares",
+            "Vacuum database",
+            "Diagnostic Bundle",
+        ],
+    };
+    let mut seen = Vec::new();
+    labels
+        .into_iter()
+        .filter(|label| !label.trim().is_empty())
+        .filter(|label| {
+            let normalized = label.trim().to_ascii_lowercase();
+            if seen.contains(&normalized) {
+                false
+            } else {
+                seen.push(normalized);
+                true
+            }
+        })
+        .map(|label| format!(r#"<button type="button">{}</button>"#, escape_html(label)))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 fn native_route_table_html(kind: RouteKind, rows: &[(String, String, String, String)]) -> String {
     match kind {
         RouteKind::Search | RouteKind::DiscoveryGraph => native_table_html(
+            kind,
             &["File or query", "Peer or id", "Queue / score", "Action"],
             rows,
             "No search results to display",
         ),
         RouteKind::PlaylistIntake => native_table_html(
+            kind,
             &["Parsed row", "Artist", "State", "Action"],
             rows,
             "No playlist rows to review",
         ),
         RouteKind::Wishlist => native_table_html(
+            kind,
             &["Search Text", "Filter", "State", "Action"],
             rows,
             "No wishlist searches yet",
         ),
         RouteKind::Downloads | RouteKind::Uploads => native_table_html(
+            kind,
             &["Filename", "Peer", "Progress", "Action"],
             rows,
             "No transfers to display",
         ),
         RouteKind::Messages | RouteKind::Rooms => native_table_html(
+            kind,
             &["Thread", "Last message", "Unread", "Action"],
             rows,
             "No conversations to display",
         ),
         RouteKind::Users => native_table_html(
+            kind,
             &["Username", "Status", "Stats", "Action"],
             rows,
             "No users to display",
         ),
         RouteKind::Contacts => native_table_html(
+            kind,
             &["Contact", "Peer", "Verification", "Action"],
             rows,
             "No contacts to display",
         ),
         RouteKind::Solid => native_table_html(
+            kind,
             &["Identity", "Storage", "Status", "Action"],
             rows,
             "No Solid status to display",
         ),
         RouteKind::Collections => native_table_html(
+            kind,
             &["Title", "Type", "Items", "Action"],
             rows,
             "No collections yet",
         ),
         RouteKind::ShareGroups => native_table_html(
+            kind,
             &["Name", "Members", "Created", "Action"],
             rows,
             "No share groups yet",
         ),
         RouteKind::SharedWithMe => native_table_html(
+            kind,
             &["Collection", "Shared By", "Permissions", "Action"],
             rows,
             "No shares yet",
         ),
         RouteKind::Browse => native_table_html(
+            kind,
             &["Path", "Type", "Size", "Action"],
             rows,
             "No browse entries to display",
         ),
         RouteKind::System => native_table_html(
+            kind,
             &["Area", "State", "Detail", "Action"],
             rows,
             "No system status to display",
@@ -4158,7 +4240,12 @@ fn route_native_workspace_html(
                     "Deny selected",
                 )
             };
-            let table = native_table_html(&["Filename", "Peer", "Progress", "Action"], rows, empty);
+            let table = native_table_html(
+                kind,
+                &["Filename", "Peer", "Progress", "Action"],
+                rows,
+                empty,
+            );
             format!(
                 r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{preview}{stats}</aside></div>"#,
                 title = title,
@@ -5452,6 +5539,10 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
 fn native_local_action_message(route_path: &str, action: &str, target: &str) -> Option<String> {
     let action = action.trim().to_ascii_lowercase();
     match (route_kind(route_path), action.as_str()) {
+        (RouteKind::Search, "preview") => Some(format!("download preview opened for {target}")),
+        (RouteKind::DiscoveryGraph, "expand") => {
+            Some(format!("graph inspector expanded for {target}"))
+        }
         (RouteKind::Messages | RouteKind::Rooms, "collapse all message panels") => {
             Some("message panels collapsed in this workspace".to_string())
         }
@@ -5467,6 +5558,10 @@ fn native_local_action_message(route_path: &str, action: &str, target: &str) -> 
         }
         (RouteKind::Contacts, "refresh nearby") => {
             Some("nearby contacts refresh requested".to_string())
+        }
+        (RouteKind::Collections, "open") => Some(format!("collection opened for {target}")),
+        (RouteKind::Collections, "remove item") => {
+            Some(format!("remove-item review staged for {target}"))
         }
         (RouteKind::SharedWithMe, "copy token") => Some(format!("token copied for {target}")),
         (RouteKind::ShareGroups, "token revoke") => {
@@ -10766,6 +10861,61 @@ mod tests {
                 shared.contains(value),
                 "shared workspace should contain {value}"
             );
+        }
+    }
+
+    #[test]
+    fn native_tables_expose_domain_row_action_sets() {
+        let expectations = [
+            ("/searches", &["Preview", "Download"][..]),
+            ("/discovery-graph", &["Queue Nearby", "Build Atlas"]),
+            ("/playlist-intake", &["Import Playlist", "Queue Plans"]),
+            ("/wishlist", &["Run Enabled", "Copy Review"]),
+            ("/downloads", &["Retry", "Cancel", "Remove"]),
+            ("/uploads", &["Allow selected", "Deny selected"]),
+            (
+                "/messages",
+                &["Reply", "Acknowledge", "Delete Conversation"],
+            ),
+            ("/users", &["Message", "Watch", "Save note"]),
+            ("/contacts", &["Message", "Browse", "Remove"]),
+            (
+                "/solid",
+                &["Resolve WebID", "Connect Identity", "Sync Storage"],
+            ),
+            ("/collections", &["Add Item", "Share", "Remove item"]),
+            (
+                "/sharegroups",
+                &[
+                    "Add Member",
+                    "Issue Token",
+                    "Create Share Grant",
+                    "Update Share Grant",
+                ],
+            ),
+            (
+                "/shared",
+                &["Stream", "Backfill", "Copy token", "Leave share"],
+            ),
+            ("/browse", &["Download Selected", "Open a New Browse Tab"]),
+            (
+                "/system",
+                &["Rescan shares", "Vacuum database", "Diagnostic Bundle"],
+            ),
+        ];
+
+        for (path, labels) in expectations {
+            let html = route_page_html(path);
+            assert!(
+                html.contains("slskr-native-row-actions"),
+                "{path} should render row action toolbar"
+            );
+            for label in labels {
+                assert!(
+                    html.contains(label),
+                    "{path} row action toolbar should contain {label}"
+                );
+            }
         }
     }
 
