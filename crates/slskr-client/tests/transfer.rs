@@ -143,6 +143,33 @@ async fn receive_file_validates_token_sends_offset_and_reads_bytes() {
     uploader_task.await.unwrap();
 }
 
+#[tokio::test]
+async fn receive_file_rejects_oversized_remaining_before_allocation() {
+    let (uploader, downloader) = duplex(64);
+    let mut uploader = FileTransferConnection::new(uploader);
+    let mut downloader = FileTransferConnection::new(downloader);
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+
+    let uploader_task = tokio::spawn(async move {
+        uploader.send_token(7).await.unwrap();
+        assert_eq!(uploader.receive_offset().await.unwrap(), 5);
+    });
+
+    let error = transfer
+        .receive_file_from(&mut downloader, 5, usize::MAX)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::FrameTooLarge {
+            length: usize::MAX,
+            ..
+        }
+    ));
+    uploader_task.await.unwrap();
+}
+
 #[test]
 fn upload_transfer_request_marks_requested() {
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 100);

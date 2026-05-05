@@ -46,6 +46,9 @@ Completed across the main Rust routes:
 - Browse now exposes tabbed peer sessions, cached folder state, breadcrumb
   controls, file filtering, refresh-folder controls, and a selected-file
   download manifest so the page behaves closer to the expected session browser
+- Messages now exposes explicit conversation lifecycle state, room and pod side
+  state, selected-thread metadata, transcript preview, message actions, search,
+  and compose history inside the native two-pane messenger
 
 ## Route Gaps
 

@@ -4825,6 +4825,20 @@ fn native_browse_workspace_html(route_table: &str) -> String {
     )
 }
 
+fn native_messaging_workspace_html(route_table: &str) -> String {
+    let preview = native_selection_preview_html(
+        "Select a conversation",
+        "Pick a thread, room, or pod row to load its reply and acknowledgement actions.",
+        "Waiting",
+        "Reply",
+    );
+    format!(
+        r#"<div class="slskr-native-grid messaging-native" data-slskr-messages-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div><div class="slskr-native-message-search"><input aria-label="Search conversations" placeholder="Search conversations, rooms, pods"><button type="button">Clear Search</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<div class="slskr-native-mini-list" data-slskr-message-lifecycle><span>Unread badges</span><span>Acknowledge state</span><span>Delete lifecycle</span><span>Compose history</span></div><h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button><button type="button">Create Room</button></div><div class="slskr-native-table-wrap"><table class="slskr-native-table" data-slskr-room-state><thead><tr><th>Room</th><th>State</th><th>Action</th></tr></thead><tbody><tr><td>public-domain</td><td>joined / 18 users / 2 unread</td><td><button type="button">Leave Room</button></td></tr><tr><td>ambient</td><td>available / 54 users</td><td><button type="button">Join Room</button></td></tr></tbody></table></div><h4>Pods</h4><div class="slskr-native-mini-list" data-slskr-pod-state><span>Pod channels stay secondary</span><span>Unread badges and room activity remain visible</span><span>Pod channel: library-review</span></div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3>{preview}<div class="slskr-native-thread-grid" data-slskr-thread-state><article data-slskr-thread-kind="direct"><strong>peer1</strong><span class="slskr-native-badge">Unread 0</span><p>Last private message and acknowledgement state.</p><button type="button">Acknowledge</button></article><article data-slskr-thread-kind="room"><strong>public-domain</strong><span class="slskr-native-badge">Room</span><p>Joined room messages and member activity.</p><button type="button">Leave Room</button></article><article data-slskr-thread-kind="pod"><strong>pod channel</strong><span class="slskr-native-badge">Pod</span><p>Pod-linked channel messages stay in the same workspace.</p><button type="button">Delete Conversation</button></article></div><div class="slskr-native-thread-transcript" data-slskr-message-transcript><article><strong>peer1</strong><p>Can you browse my shared folder?</p><time>unread</time></article><article><strong>you</strong><p>I can, sending a browse request now.</p><time>draft history</time></article></div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row" data-slskr-message-actions><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Delete Conversation</button><button type="button">Collapse All Message Panels</button></div><div class="slskr-native-mini-list" data-slskr-compose-history><span>Last draft restored</span><span>Reply target: peer1</span><span>Enter sends when enabled</span></div></section></div>"#,
+        route_table = route_table,
+        preview = preview,
+    )
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
@@ -4933,16 +4947,7 @@ fn route_native_workspace_html(
                 .join(""),
             )
         }
-        RouteKind::Messages | RouteKind::Rooms => format!(
-            r#"<div class="slskr-native-grid messaging-native"><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button><button type="button">Create Room</button></div><h4>Pods</h4><div class="slskr-native-mini-list"><span>Pod channels stay secondary</span><span>Unread badges and room activity remain visible</span></div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3>{preview}<div class="slskr-native-thread-grid"><article><strong>peer1</strong><span class="slskr-native-badge">Unread 0</span><p>Last private message and acknowledgement state.</p><button type="button">Acknowledge</button></article><article><strong>public-domain</strong><span class="slskr-native-badge">Room</span><p>Joined room messages and member activity.</p><button type="button">Leave Room</button></article><article><strong>pod channel</strong><span class="slskr-native-badge">Pod</span><p>Pod-linked channel messages stay in the same workspace.</p><button type="button">Delete Conversation</button></article></div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row"><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Collapse All Message Panels</button></div></section></div>"#,
-            route_table = route_table,
-            preview = native_selection_preview_html(
-                "Select a conversation",
-                "Pick a thread, room, or pod row to load its reply and acknowledgement actions.",
-                "Waiting",
-                "Reply",
-            ),
-        ),
+        RouteKind::Messages | RouteKind::Rooms => native_messaging_workspace_html(&route_table),
         RouteKind::Users => format!(
             r#"<div class="slskr-native-grid users-native"><section class="slskr-native-main"><h3>Users</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Search for User</button><button type="button">Clear Selected User</button><button type="button">Browse</button><button type="button">Message</button></div>{route_table}</section><aside class="slskr-native-side"><h3>User Detail</h3><p>No user info to display</p>{preview}<button type="button">Save note</button><button type="button">Watch</button></aside></div>"#,
             route_table = route_table,
@@ -11531,7 +11536,22 @@ mod tests {
         }
 
         let messages = route_page_html("/messages");
-        for value in ["Delete Conversation", "Unread", "Pods", "Compose"] {
+        for value in [
+            "Delete Conversation",
+            "Unread",
+            "Pods",
+            "Compose",
+            "data-slskr-messages-workspace",
+            "data-slskr-message-lifecycle",
+            "data-slskr-room-state",
+            "data-slskr-pod-state",
+            "data-slskr-thread-state",
+            "data-slskr-message-transcript",
+            "data-slskr-message-actions",
+            "data-slskr-compose-history",
+            "Search conversations",
+            "Clear Search",
+        ] {
             assert!(
                 messages.contains(value),
                 "messages panel should contain {value}"

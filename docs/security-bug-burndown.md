@@ -101,6 +101,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Low | Docs drift | General docs still contained stale `http_api_*` config names, mutable `slskr:latest` image guidance, and obsolete WebSocket unsupported text. | Fixed by updating the docs and adding `scripts/check-docs-freshness.sh` to block those stale patterns and wildcard CORS examples from returning. |
 | Medium | Council loop | The audit council could run broad scans but still promote only one small confirmed batch, leaving remaining candidate classes invisible and unclassified. | Fixed by adding `docs/dev/council-scan-inventory.md`, `scripts/run-council-scan.sh`, and `scripts/check-council-loop.sh`; BUG-031 now requires the remaining candidate classes and active section to stay visible. |
 | Medium | Python SDK mutable batch inputs | Batch operation and response constructors kept caller-owned mutable dict/list objects by reference. | Fixed by deep-copying batch request bodies, returning fresh serialized bodies, copying response lists, and adding mutation-isolation tests. |
+| Medium | Client transfer chunk allocation | The reusable client transfer helper could allocate a caller-supplied remaining length in one `Vec`. | Fixed by adding `DEFAULT_MAX_TRANSFER_CHUNK_LEN`, rejecting oversized chunk reads before allocation, and covering direct chunk and `receive_file_from` paths. |
 
 ## Open Burn-Down
 

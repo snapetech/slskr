@@ -2,6 +2,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::ClientError;
 
+pub const DEFAULT_MAX_TRANSFER_CHUNK_LEN: usize = 16 * 1024 * 1024;
+
 #[derive(Debug)]
 pub struct FileTransferConnection<S> {
     stream: S,
@@ -49,6 +51,21 @@ where
     }
 
     pub async fn read_chunk(&mut self, length: usize) -> Result<Vec<u8>, ClientError> {
+        self.read_chunk_with_max(length, DEFAULT_MAX_TRANSFER_CHUNK_LEN)
+            .await
+    }
+
+    pub async fn read_chunk_with_max(
+        &mut self,
+        length: usize,
+        max_len: usize,
+    ) -> Result<Vec<u8>, ClientError> {
+        if length > max_len {
+            return Err(ClientError::FrameTooLarge {
+                length,
+                max: max_len,
+            });
+        }
         let mut chunk = vec![0; length];
         self.stream.read_exact(&mut chunk).await?;
         Ok(chunk)

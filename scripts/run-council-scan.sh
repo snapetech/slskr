@@ -28,7 +28,14 @@ scan_rg 'Constructor/mutable collection candidates' \
   -e 'func New[A-Za-z]*\([^)]*\[\]' \
   crates web dashboard client-ts client-python client-go
 scan_rg 'Protocol count/length candidates' \
-  -e 'count|length|len\(|with_capacity|resize|reserve|read_u(16|32|64)|read_i(16|32|64)' \
+  -e 'read_u32_le\(\)\? as usize' \
+  -e 'read_u16_le\(\)\? as usize' \
+  -e 'Vec::with_capacity\(' \
+  -e 'resize\(' \
+  -e 'read_chunk\(' \
+  -e 'read_raw_frame\(' \
+  -e 'read_bytes\(length\)' \
+  -e 'for _ in 0\.\.(count|attribute_count|counts_len)' \
   crates/slskr-protocol crates/slskr-client crates/slskr/src
 scan_rg 'Protocol scalar emission candidates' \
   -e 'write_u(8|16|32|64)|write_i(8|16|32|64)|write_string|as u(8|16|32|64)|\.len\(\) as' \
