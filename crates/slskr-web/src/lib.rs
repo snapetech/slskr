@@ -4883,7 +4883,13 @@ fn mount_native_filters(document: &web_sys::Document) -> Result<(), JsValue> {
         let workspace = input
             .closest(".slskr-native-workspace")?
             .ok_or_else(|| JsValue::from_str("native filter is outside workspace"))?;
-        update_native_filter_count(&workspace);
+        let restored = restore_native_filter(document, &workspace);
+        if restored.is_empty() {
+            update_native_filter_count(&workspace);
+        } else {
+            input.set_value(&restored);
+            apply_native_filter(&workspace, &restored);
+        }
 
         let workspace_for_input = workspace.clone();
         let callback =
@@ -4894,6 +4900,7 @@ fn mount_native_filters(document: &web_sys::Document) -> Result<(), JsValue> {
                     .map(|input| input.value().to_lowercase())
                     .unwrap_or_default();
                 apply_native_filter(&workspace_for_input, &term);
+                persist_native_filter(&workspace_for_input, &term);
             }));
         input.add_event_listener_with_callback("input", callback.as_ref().unchecked_ref())?;
         callback.forget();
@@ -4920,6 +4927,7 @@ fn mount_native_filters(document: &web_sys::Document) -> Result<(), JsValue> {
                     }
                 }
                 apply_native_filter(&workspace_for_clear, "");
+                persist_native_filter(&workspace_for_clear, "");
             },
         ));
         button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
@@ -4968,6 +4976,59 @@ fn mount_native_filters(document: &web_sys::Document) -> Result<(), JsValue> {
     }
 
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_state_key(workspace: &web_sys::Element, suffix: &str) -> Option<String> {
+    let route = workspace
+        .closest("[data-route]")
+        .ok()
+        .flatten()
+        .and_then(|route| route.get_attribute("data-route"))?;
+    Some(format!("slskr.native.{route}.{suffix}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn session_storage_for_workspace(workspace: &web_sys::Element) -> Option<web_sys::Storage> {
+    workspace
+        .owner_document()
+        .and_then(|document| document.default_view())
+        .and_then(|window| window.session_storage().ok().flatten())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn restore_native_filter(document: &web_sys::Document, workspace: &web_sys::Element) -> String {
+    let Some(key) = native_state_key(workspace, "filter") else {
+        return String::new();
+    };
+    let Some(storage) = session_storage_for_workspace(workspace) else {
+        return String::new();
+    };
+    let value = storage.get_item(&key).ok().flatten().unwrap_or_default();
+    if !value.is_empty() {
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            status.set_inner_html(&format!(
+                "<strong>Restored</strong> filter {}",
+                escape_html(&value)
+            ));
+        }
+    }
+    value
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_native_filter(workspace: &web_sys::Element, term: &str) {
+    let Some(key) = native_state_key(workspace, "filter") else {
+        return;
+    };
+    let Some(storage) = session_storage_for_workspace(workspace) else {
+        return;
+    };
+    if term.is_empty() {
+        let _ = storage.remove_item(&key);
+    } else {
+        let _ = storage.set_item(&key, term);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -5174,6 +5235,7 @@ fn mount_native_sorters(document: &web_sys::Document) -> Result<(), JsValue> {
         button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
         callback.forget();
     }
+    restore_native_sort(document);
     Ok(())
 }
 
@@ -5190,6 +5252,11 @@ fn sort_native_table(button: &web_sys::Element) {
     } else {
         "ascending"
     };
+    apply_native_sort(button, &index, next_direction, true);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_native_sort(button: &web_sys::Element, index: &str, direction: &str, persist: bool) {
     let Some(table) = button.closest("table").ok().flatten() else {
         return;
     };
@@ -5204,8 +5271,7 @@ fn sort_native_table(button: &web_sys::Element) {
             let active = sort_button
                 .get_attribute("data-slskr-native-sort")
                 .is_some_and(|value| value == index);
-            let _ = sort_button
-                .set_attribute("aria-sort", if active { next_direction } else { "none" });
+            let _ = sort_button.set_attribute("aria-sort", if active { direction } else { "none" });
         }
     }
 
@@ -5232,7 +5298,7 @@ fn sort_native_table(button: &web_sys::Element) {
             .get_attribute(&attr)
             .unwrap_or_default()
             .to_lowercase();
-        if next_direction == "descending" {
+        if direction == "descending" {
             right_value.cmp(&left_value)
         } else {
             left_value.cmp(&right_value)
@@ -5241,6 +5307,57 @@ fn sort_native_table(button: &web_sys::Element) {
     for row in rows {
         let _ = tbody.append_child(&row);
     }
+    if persist {
+        if let Some(workspace) = table.closest(".slskr-native-workspace").ok().flatten() {
+            persist_native_sort(&workspace, index, direction);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn restore_native_sort(document: &web_sys::Document) {
+    let Ok(workspaces) = document.query_selector_all(".slskr-native-workspace") else {
+        return;
+    };
+    for workspace_index in 0..workspaces.length() {
+        let Some(node) = workspaces.item(workspace_index) else {
+            continue;
+        };
+        let Ok(workspace) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        let Some(key) = native_state_key(&workspace, "sort") else {
+            continue;
+        };
+        let Some(storage) = session_storage_for_workspace(&workspace) else {
+            continue;
+        };
+        let Some(value) = storage.get_item(&key).ok().flatten() else {
+            continue;
+        };
+        let Some((index, direction)) = value.split_once(':') else {
+            continue;
+        };
+        if !matches!(direction, "ascending" | "descending") {
+            continue;
+        }
+        let selector = format!(r#"[data-slskr-native-sort="{index}"]"#);
+        let Ok(Some(button)) = workspace.query_selector(&selector) else {
+            continue;
+        };
+        apply_native_sort(&button, index, direction, false);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_native_sort(workspace: &web_sys::Element, index: &str, direction: &str) {
+    let Some(key) = native_state_key(workspace, "sort") else {
+        return;
+    };
+    let Some(storage) = session_storage_for_workspace(workspace) else {
+        return;
+    };
+    let _ = storage.set_item(&key, &format!("{index}:{direction}"));
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -8782,9 +8899,9 @@ mod tests {
     #[test]
     fn static_index_supports_direct_nested_route_loads() {
         assert!(STATIC_INDEX.contains("href=\"/styles.css\""));
-        assert!(STATIC_INDEX.contains("import init from '/slskr_web.js'"));
+        assert!(STATIC_INDEX.contains("src=\"/slskr_web_bootstrap.js\""));
         assert!(!STATIC_INDEX.contains("href=\"./styles.css\""));
-        assert!(!STATIC_INDEX.contains("from './slskr_web.js'"));
+        assert!(!STATIC_INDEX.contains("src=\"./slskr_web_bootstrap.js\""));
     }
 
     #[test]

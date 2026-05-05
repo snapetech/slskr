@@ -8823,11 +8823,29 @@ fn read_web_index_html() -> Option<String> {
     read_bounded_web_static_string(&path).ok()
 }
 
-fn security_headers() -> &'static str {
-    "X-Content-Type-Options: nosniff\r\n\
+fn security_headers(file: &Path) -> String {
+    format!(
+        "X-Content-Type-Options: nosniff\r\n\
 Referrer-Policy: no-referrer\r\n\
-Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:\r\n\
-Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n"
+Content-Security-Policy: {}\r\n\
+Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
+        web_static_content_security_policy(file)
+    )
+}
+
+fn web_static_content_security_policy(file: &Path) -> &'static str {
+    if is_rust_wasm_shell(file) {
+        return "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:";
+    }
+
+    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:"
+}
+
+fn is_rust_wasm_shell(file: &Path) -> bool {
+    file.file_name().and_then(|name| name.to_str()) == Some("index.html")
+        && file
+            .parent()
+            .is_some_and(|parent| parent.join("slskr_web.wasm").is_file())
 }
 
 fn read_bounded_web_static_file(file: &Path) -> Result<Vec<u8>, String> {
@@ -8873,7 +8891,7 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     let headers = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: {connection_header}\r\n{}{}\r\n",
         bytes.len(),
-        security_headers(),
+        security_headers(&file),
         extra_headers,
     );
     writer
@@ -14934,6 +14952,33 @@ mod tests {
         assert!(error.contains("static asset is not UTF-8"));
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn web_static_csp_rejects_inline_and_scopes_wasm_eval() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-web-static-csp-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let react_index = root.join("index.html");
+        std::fs::write(&react_index, "<html></html>").unwrap();
+
+        let react_csp = super::web_static_content_security_policy(&react_index);
+        assert!(react_csp.contains("script-src 'self'"));
+        assert!(!react_csp.contains("'unsafe-inline'"));
+        assert!(!react_csp.contains("wasm-unsafe-eval"));
+
+        std::fs::write(root.join("slskr_web.wasm"), []).unwrap();
+        let wasm_csp = super::web_static_content_security_policy(&react_index);
+        assert!(wasm_csp.contains("script-src 'self' 'wasm-unsafe-eval'"));
+        assert!(!wasm_csp.contains("'unsafe-inline'"));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

@@ -29,6 +29,7 @@ cargo build -p slskr-web --release --target "$wasm_target"
 rm -rf "$target_dir"
 mkdir -p "$target_dir"
 cp crates/slskr-web/static/index.html "$target_dir/"
+cp crates/slskr-web/static/slskr_web_bootstrap.js "$target_dir/"
 cp crates/slskr-web/static/styles.css "$target_dir/"
 
 wasm_bindgen_target_dir="target/$wasm_target/release"

@@ -1,6 +1,8 @@
 //! Optimized HTTP server with keep-alive, proper parsing, and streaming responses
 //! Replaces manual HTTP parsing in main.rs
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use rand::{rngs::OsRng, RngCore};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{self, Duration};
 
@@ -373,7 +375,8 @@ pub async fn write_http_response<W: AsyncWrite + Unpin>(
         "Connection: close\r\n"
     };
 
-    let body_bytes = response.body.as_bytes();
+    let (body, csp_header) = body_with_content_security_policy(response);
+    let body_bytes = body.as_bytes();
     let e = |err: std::io::Error| err.to_string();
 
     // Write status line and headers
@@ -399,11 +402,11 @@ pub async fn write_http_response<W: AsyncWrite + Unpin>(
         .write_all(
             b"X-Content-Type-Options: nosniff\r\n\
 Referrer-Policy: no-referrer\r\n\
-Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:\r\n\
 Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
         )
         .await
         .map_err(e)?;
+    writer.write_all(csp_header.as_bytes()).await.map_err(e)?;
     writer
         .write_all(connection_header.as_bytes())
         .await
@@ -419,6 +422,32 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
     writer.flush().await.map_err(e)?;
 
     Ok(())
+}
+
+fn body_with_content_security_policy(response: &HttpResponse) -> (String, String) {
+    if response.content_type.starts_with("text/html") {
+        let nonce = csp_nonce();
+        let body = response
+            .body
+            .replace("<script>", &format!(r#"<script nonce="{nonce}">"#))
+            .replace("<style>", &format!(r#"<style nonce="{nonce}">"#));
+        let header = format!(
+            "Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'nonce-{nonce}'; img-src 'self' data:; connect-src 'self' ws: wss:\r\n"
+        );
+        return (body, header);
+    }
+
+    (
+        response.body.clone(),
+        "Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'\r\n"
+            .to_owned(),
+    )
+}
+
+fn csp_nonce() -> String {
+    let mut bytes = [0_u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
 }
 
 #[cfg(test)]
@@ -699,9 +728,37 @@ mod tests {
         assert!(raw.contains("X-Content-Type-Options: nosniff\r\n"));
         assert!(raw.contains("Referrer-Policy: no-referrer\r\n"));
         assert!(raw.contains("Content-Security-Policy: "));
+        assert!(raw.contains("default-src 'none'"));
+        assert!(!raw.contains("'unsafe-inline'"));
+        assert!(!raw.contains("wasm-unsafe-eval"));
         assert!(raw.contains(&format!("Content-Length: {}\r\n", response.body.len())));
         assert!(raw.contains("Connection: keep-alive\r\n"));
         assert!(raw.ends_with(&response.body));
+    }
+
+    #[tokio::test]
+    async fn test_html_response_uses_nonce_csp_without_unsafe_inline() {
+        let (client, mut server) = tokio::io::duplex(4096);
+        let response = HttpResponse {
+            status: "200 OK",
+            content_type: "text/html; charset=utf-8",
+            body: "<!doctype html><style>body{color:black}</style><script>window.ok=true</script>"
+                .to_string(),
+        };
+        let mut writer = BufWriter::new(client);
+        write_http_response(&mut writer, &response, false, "")
+            .await
+            .unwrap();
+        drop(writer);
+
+        let mut raw = String::new();
+        server.read_to_string(&mut raw).await.unwrap();
+        assert!(raw.contains("Content-Security-Policy: "));
+        assert!(raw.contains("'nonce-"));
+        assert!(raw.contains("<style nonce=\""));
+        assert!(raw.contains("<script nonce=\""));
+        assert!(!raw.contains("'unsafe-inline'"));
+        assert!(!raw.contains("wasm-unsafe-eval"));
     }
 
     // ── round-trip over a real TCP socket ─────────────────────────────────────

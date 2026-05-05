@@ -9,6 +9,7 @@ GATES=(
   scripts/check-browser-token-persistence.sh
   scripts/check-unsafe-blank-opens.sh
   scripts/check-websocket-auth-coverage.sh
+  scripts/check-csp-policy.sh
   scripts/check-webhook-outbound-policy.sh
   scripts/check-workflow-release-policy.sh
   scripts/check-package-artifact-matrix.sh

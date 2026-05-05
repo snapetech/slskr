@@ -84,12 +84,12 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | High | Browser WebSocket auth | Browser clients opened `/api/events/ws` without a bearer-capable auth mechanism. | Fixed by accepting a `slskr.api-token.<percent-encoded-token>` WebSocket subprotocol on the server and using it from the TypeScript SDK. |
 | High | Main web event feed auth | The React web event hub opened `/api/events/ws` without a browser-safe token path. | Fixed by sending the same auth subprotocol for session bearer tokens, omitting passthrough/missing tokens, and adding Vitest coverage. |
 | High | Release security scans | Semgrep and Trivy were optional local checks and absent from CI/tag-gate required mode. | Fixed by adding `scripts/run-security-scans.sh`, required CI/release mode, pinned scanner images, and workflow policy coverage while keeping local scanner infrastructure non-blocking by default. |
+| High | CSP | Static and generic responses used broad inline script/style allowances, and the Rust WASM shell used an inline module bootstrap. | Fixed by adding strict or nonce-backed generic CSP, moving the Rust WASM bootstrap to a static module, rejecting broad inline allowances for static web assets, and scoping `wasm-unsafe-eval` only to Rust WASM builds. |
 
 ## Open Burn-Down
 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
-| High | CSP | Static web responses require `'unsafe-inline'` and `wasm-unsafe-eval` (`crates/slskr/src/main.rs:8783`, `crates/slskr/src/http_server.rs:398`). | Move inline scripts/styles to bundled assets or add nonce/hash generation; keep WASM permissions scoped to the Rust web shell only if still required. |
 | Medium | Webhook SSRF policy | Webhook validation blocks private/loopback/link-local but does not explicitly block IPv6 documentation, multicast beyond existing checks, or operator-defined deny/allow CIDRs (`crates/slskr/src/webhooks.rs:466`). | Centralize outbound URL policy with configurable CIDR allow/deny lists and tests for all special-use address ranges. |
 | Medium | Rate limiting | Rate limiting keys by raw peer socket address and token digest; deployments behind proxies may collapse clients into one IP (`crates/slskr/src/main.rs:12304`). | Add trusted proxy parsing for `Forwarded`/`X-Forwarded-For` with an explicit trusted proxy allowlist. |
 | Medium | Storage listing | Recursive downloads/incomplete directory listing can walk up to 16,384 entries per request (`crates/slskr/src/main.rs:9453`), which is large enough for CPU/disk pressure under repeated calls. | Lower defaults, paginate directory listing, and rate-limit recursive storage scans. |
