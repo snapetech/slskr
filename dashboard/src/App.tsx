@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ApiProvider, useApi } from './context/ApiContext';
@@ -59,11 +59,11 @@ function AppContent() {
             ) : (
               <Routes>
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/api-keys" element={<ApiKeys />} />
-                <Route path="/webhooks" element={<Webhooks />} />
-                <Route path="/database" element={<Database />} />
-                <Route path="/monitoring" element={<Monitoring />} />
-                <Route path="/configuration" element={<Configuration />} />
+                <Route path="/api-keys" element={<ApiKeys apiUrl={apiUrl} apiKey={apiKey} />} />
+                <Route path="/webhooks" element={<Webhooks apiUrl={apiUrl} apiKey={apiKey} />} />
+                <Route path="/database" element={<Database apiUrl={apiUrl} apiKey={apiKey} />} />
+                <Route path="/monitoring" element={<Monitoring apiUrl={apiUrl} apiKey={apiKey} />} />
+                <Route path="/configuration" element={<Configuration apiUrl={apiUrl} apiKey={apiKey} />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             )}

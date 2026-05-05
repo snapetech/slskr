@@ -217,6 +217,12 @@ Core endpoint groups:
 - Transfers: `/api/v0/transfers`, `/api/v0/transfers/stats`, `/api/v0/transfers/downloads`, `/api/v0/transfers/uploads`, `/api/v0/transfers/:id/start`, `/api/v0/transfers/:id/progress`, `/api/v0/transfers/:id/complete`, `/api/v0/transfers/:id/cancel`, `/api/v0/transfers/:id/fail`.
 - Automation compatibility: `/api/v0/application`, `/api/v0/application/version/latest`, `/api/v0/server`, `/api/v0/session/enabled`, `searchText` search bodies, slskd-style top-level search/event arrays, grouped transfer download/upload views, JSON-string YAML options, and search response arrays.
 
+Run the local slskd automation-client compatibility smoke with:
+
+```bash
+scripts/run-slskd-api-compat-smoke.sh
+```
+
 Example search request:
 
 ```bash

@@ -145,7 +145,7 @@ impl OpenApiSpec {
             json!({
                 "get": {
                     "tags": ["Search"],
-                    "summary": "List active searches",
+                    "summary": "List active searches as a slskd-compatible array",
                     "operationId": "listSearches",
                     "parameters": [
                         {
@@ -167,7 +167,8 @@ impl OpenApiSpec {
                             "content": {
                                 "application/json": {
                                     "schema": {
-                                        "$ref": "#/components/schemas/SearchList"
+                                        "type": "array",
+                                        "items": {"$ref": "#/components/schemas/Search"}
                                     }
                                 }
                             }
@@ -200,6 +201,82 @@ impl OpenApiSpec {
                             }
                         },
                         "400": {"description": "Bad request"}
+                    }
+                }
+            }),
+        );
+
+        paths.insert(
+            "/api/searches/records".to_string(),
+            json!({
+                "get": {
+                    "tags": ["Search"],
+                    "summary": "List active searches with slskr metadata envelope",
+                    "operationId": "listSearchRecords",
+                    "security": [{"bearerAuth": []}],
+                    "responses": {
+                        "200": {
+                            "description": "Search list envelope",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/SearchRecordList"
+                                    }
+                                }
+                            }
+                        },
+                        "401": {"description": "Unauthorized"}
+                    }
+                }
+            }),
+        );
+
+        paths.insert(
+            "/api/events".to_string(),
+            json!({
+                "get": {
+                    "tags": ["Events"],
+                    "summary": "List events as a slskd-compatible array",
+                    "operationId": "listEvents",
+                    "security": [{"bearerAuth": []}],
+                    "responses": {
+                        "200": {
+                            "description": "Event array",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": {"$ref": "#/components/schemas/Event"}
+                                    }
+                                }
+                            }
+                        },
+                        "401": {"description": "Unauthorized"}
+                    }
+                }
+            }),
+        );
+
+        paths.insert(
+            "/api/events/records".to_string(),
+            json!({
+                "get": {
+                    "tags": ["Events"],
+                    "summary": "List events with slskr metadata envelope",
+                    "operationId": "listEventRecords",
+                    "security": [{"bearerAuth": []}],
+                    "responses": {
+                        "200": {
+                            "description": "Event list envelope",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/EventRecordList"
+                                    }
+                                }
+                            }
+                        },
+                        "401": {"description": "Unauthorized"}
                     }
                 }
             }),
@@ -240,34 +317,70 @@ impl OpenApiSpec {
                 "Search": {
                     "type": "object",
                     "properties": {
+                        "id": {"type": "string"},
                         "token": {"type": "integer"},
                         "query": {"type": "string"},
+                        "searchText": {"type": "string"},
+                        "state": {"type": "string"},
+                        "isComplete": {"type": "boolean"},
+                        "fileCount": {"type": "integer"},
+                        "lockedFileCount": {"type": "integer"},
+                        "responseCount": {"type": "integer"},
+                        "responses": {"type": "array"},
                         "results": {"type": "array"},
-                        "status": {"type": "string"}
-                    }
+                        "status": {"type": "string"},
+                        "startedAt": {"type": "string"},
+                        "endedAt": {"type": "string", "nullable": true}
+                    },
+                    "required": ["id", "token", "query", "searchText", "state", "isComplete", "fileCount", "lockedFileCount", "responseCount", "responses", "startedAt"]
                 },
                 "SearchList": {
+                    "type": "array",
+                    "items": {"$ref": "#/components/schemas/Search"}
+                },
+                "SearchRecordList": {
                     "type": "object",
                     "properties": {
-                        "items": {"type": "array", "items": {"$ref": "#/components/schemas/Search"}},
-                        "pagination": {
-                            "type": "object",
-                            "properties": {
-                                "limit": {"type": "integer"},
-                                "offset": {"type": "integer"},
-                                "total": {"type": "integer"},
-                                "pages": {"type": "integer"}
-                            }
-                        }
-                    }
+                        "entries": {"type": "array", "items": {"$ref": "#/components/schemas/Search"}},
+                        "count": {"type": "integer"},
+                        "filtered_count": {"type": "integer"},
+                        "offset": {"type": "integer"},
+                        "limit": {"type": "integer", "nullable": true},
+                        "next_token": {"type": "integer"}
+                    },
+                    "required": ["entries", "count", "filtered_count", "offset", "next_token"]
                 },
                 "SearchRequest": {
                     "type": "object",
-                    "required": ["query"],
+                    "description": "Provide either query or slskd-compatible searchText.",
                     "properties": {
                         "query": {"type": "string", "minLength": 1, "maxLength": 1000},
+                        "searchText": {"type": "string", "minLength": 1, "maxLength": 1000},
                         "target": {"type": "string", "enum": ["peers", "all"]}
                     }
+                },
+                "Event": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "type": {"type": "string"},
+                        "kind": {"type": "string"},
+                        "resource": {"type": "string"},
+                        "detail": {"type": "string", "nullable": true},
+                        "createdAt": {"type": "integer"}
+                    },
+                    "required": ["id", "type", "kind", "resource", "createdAt"]
+                },
+                "EventRecordList": {
+                    "type": "object",
+                    "properties": {
+                        "entries": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}},
+                        "count": {"type": "integer"},
+                        "filtered_count": {"type": "integer"},
+                        "offset": {"type": "integer"},
+                        "limit": {"type": "integer", "nullable": true}
+                    },
+                    "required": ["entries", "count", "filtered_count", "offset"]
                 }
             },
             "securitySchemes": {
@@ -293,6 +406,10 @@ impl OpenApiSpec {
             json!({
                 "name": "Search",
                 "description": "Search operations"
+            }),
+            json!({
+                "name": "Events",
+                "description": "Event feed and event history"
             }),
             json!({
                 "name": "Transfers",
@@ -375,5 +492,78 @@ mod tests {
         assert!(json.contains("openapi"));
         assert!(json.contains("slskr API"));
         assert!(json.contains("AGPL-3.0-only"));
+    }
+
+    #[test]
+    fn test_openapi_documents_slskd_compatible_arrays() {
+        let spec = OpenApiSpec::new("Test API", "1.0.0").generate();
+        assert_eq!(
+            spec["paths"]["/api/searches"]["get"]["responses"]["200"]["content"]
+                ["application/json"]["schema"]["type"],
+            "array"
+        );
+        assert_eq!(
+            spec["paths"]["/api/events"]["get"]["responses"]["200"]["content"]["application/json"]
+                ["schema"]["type"],
+            "array"
+        );
+        assert_eq!(
+            spec["paths"]["/api/searches/records"]["get"]["responses"]["200"]["content"]
+                ["application/json"]["schema"]["$ref"],
+            "#/components/schemas/SearchRecordList"
+        );
+        assert_eq!(
+            spec["paths"]["/api/events/records"]["get"]["responses"]["200"]["content"]
+                ["application/json"]["schema"]["$ref"],
+            "#/components/schemas/EventRecordList"
+        );
+        assert!(spec["components"]["schemas"]["Search"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "responses"));
+        assert!(
+            spec["components"]["schemas"]["SearchRequest"]
+                .get("required")
+                .is_none(),
+            "searchText-only slskd requests must be valid in the schema"
+        );
+    }
+
+    #[test]
+    fn test_checked_in_openapi_documents_slskd_compatible_arrays() {
+        let spec: Value =
+            serde_json::from_str(include_str!("../../../docs/openapi.json")).expect("openapi json");
+        assert_eq!(
+            spec["paths"]["/api/searches"]["get"]["responses"]["200"]["content"]
+                ["application/json"]["schema"]["type"],
+            "array"
+        );
+        assert_eq!(
+            spec["paths"]["/api/events"]["get"]["responses"]["200"]["content"]["application/json"]
+                ["schema"]["type"],
+            "array"
+        );
+        assert_eq!(
+            spec["paths"]["/api/searches/records"]["get"]["responses"]["200"]["content"]
+                ["application/json"]["schema"]["$ref"],
+            "#/components/schemas/SearchRecordList"
+        );
+        assert_eq!(
+            spec["paths"]["/api/events/records"]["get"]["responses"]["200"]["content"]
+                ["application/json"]["schema"]["$ref"],
+            "#/components/schemas/EventRecordList"
+        );
+        assert!(spec["components"]["schemas"]["Search"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "responses"));
+        assert!(
+            spec["components"]["schemas"]["SearchCreateRequest"]
+                .get("required")
+                .is_none(),
+            "searchText-only slskd requests must be valid in the checked-in schema"
+        );
     }
 }

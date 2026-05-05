@@ -42,12 +42,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            dashboard/package-lock.json
+            client-ts/package-lock.json
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run release gate
@@ -126,6 +130,8 @@ jobs:
     permissions:
       actions: read
       contents: write
+      attestations: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -139,6 +145,14 @@ jobs:
           find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec cp {} release/ \;
           (cd release && find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
           ls -lh release
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/*.zip
+            release/*.sha256
+            release/SHA256SUMS.txt
       - name: Create release notes
         shell: bash
         run: |

@@ -149,7 +149,7 @@
     },
     "/api/searches": {
       "get": {
-        "summary": "List searches",
+        "summary": "List searches as a slskd-compatible array",
         "operationId": "listSearches",
         "tags": ["Search"],
         "parameters": [
@@ -166,18 +166,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Search results",
+            "description": "Search array",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "searches": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Search"
-                      }
-                    }
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Search"
                   }
                 }
               }
@@ -221,6 +216,28 @@
           },
           "403": {
             "$ref": "#/components/responses/ForbiddenError"
+          }
+        }
+      }
+    },
+    "/api/searches/records": {
+      "get": {
+        "summary": "List searches with slskr metadata envelope",
+        "operationId": "listSearchRecords",
+        "tags": ["Search"],
+        "responses": {
+          "200": {
+            "description": "Search record envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchRecordList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
           }
         }
       }
@@ -538,6 +555,53 @@
           }
         }
       }
+    },
+    "/api/events": {
+      "get": {
+        "summary": "List events as a slskd-compatible array",
+        "operationId": "listEvents",
+        "tags": ["Events"],
+        "responses": {
+          "200": {
+            "description": "Event array",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Event"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          }
+        }
+      }
+    },
+    "/api/events/records": {
+      "get": {
+        "summary": "List events with slskr metadata envelope",
+        "operationId": "listEventRecords",
+        "tags": ["Events"],
+        "responses": {
+          "200": {
+            "description": "Event record envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventRecordList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -667,22 +731,84 @@
           "id": {
             "type": "string"
           },
+          "token": {
+            "type": "integer"
+          },
           "query": {
+            "type": "string"
+          },
+          "searchText": {
             "type": "string"
           },
           "status": {
             "type": "string",
-            "enum": ["active", "completed", "failed"]
+            "enum": ["active", "completed", "expired", "failed"]
           },
-          "results_count": {
+          "state": {
+            "type": "string"
+          },
+          "isComplete": {
+            "type": "boolean"
+          },
+          "fileCount": {
             "type": "integer"
+          },
+          "lockedFileCount": {
+            "type": "integer"
+          },
+          "responseCount": {
+            "type": "integer"
+          },
+          "responses": {
+            "type": "array"
+          },
+          "results": {
+            "type": "array"
+          },
+          "result_count": {
+            "type": "integer"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string",
+            "nullable": true
           },
           "started_at": {
             "type": "string",
             "format": "date-time"
           }
         },
-        "required": ["id", "query", "status", "started_at"]
+        "required": ["id", "query", "searchText", "status", "state", "isComplete", "fileCount", "lockedFileCount", "responseCount", "responses"]
+      },
+      "SearchRecordList": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Search"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "filtered_count": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer",
+            "nullable": true
+          },
+          "next_token": {
+            "type": "integer"
+          }
+        },
+        "required": ["entries", "count", "filtered_count", "offset", "next_token"]
       },
       "SearchDetails": {
         "allOf": [
@@ -725,8 +851,12 @@
       },
       "SearchCreateRequest": {
         "type": "object",
+        "description": "Provide either query or slskd-compatible searchText.",
         "properties": {
           "query": {
+            "type": "string"
+          },
+          "searchText": {
             "type": "string"
           },
           "room": {
@@ -737,8 +867,57 @@
             "type": "string",
             "nullable": true
           }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "integer"
+          }
         },
-        "required": ["query"]
+        "required": ["id", "type", "kind", "resource", "createdAt"]
+      },
+      "EventRecordList": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "filtered_count": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer",
+            "nullable": true
+          }
+        },
+        "required": ["entries", "count", "filtered_count", "offset"]
       },
       "Message": {
         "type": "object",

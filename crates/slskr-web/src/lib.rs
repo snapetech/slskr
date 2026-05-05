@@ -2305,11 +2305,209 @@ pub fn route_workspace_result_html(path: &str, responses: &[EndpointBody]) -> St
     if responses.is_empty() {
         return route_workspace_pending_html(path);
     }
+    let Some(page) = route_page(path) else {
+        return String::new();
+    };
+    match page.surface {
+        "search" => search_workspace_html(responses),
+        "transfers" => transfers_workspace_html(responses),
+        "messages" => messages_workspace_html(responses),
+        "rooms" => rooms_workspace_html(responses),
+        "browse" => browse_workspace_html(responses),
+        "identity" => identity_workspace_html(responses),
+        "collections" => collections_workspace_html(responses),
+        "integrations" => integrations_workspace_html(responses),
+        "system" => system_workspace_html(responses),
+        "wishlist" => wishlist_workspace_html(responses),
+        _ => data_cards_html(responses),
+    }
+}
+
+fn data_cards_html(responses: &[EndpointBody]) -> String {
     responses
         .iter()
         .map(data_card_result_html)
         .collect::<Vec<_>>()
         .join("")
+}
+
+fn workspace_tabs_html(tabs: &[&str]) -> String {
+    tabs.iter()
+        .enumerate()
+        .map(|(index, tab)| {
+            format!(
+                r#"<button type="button" class="{class}">{tab}</button>"#,
+                class = if index == 0 {
+                    "slskr-workspace-tab is-active"
+                } else {
+                    "slskr-workspace-tab"
+                },
+                tab = escape_html(tab),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn selected_cards_html(responses: &[EndpointBody], paths: &[&str]) -> String {
+    paths
+        .iter()
+        .filter_map(|path| {
+            responses
+                .iter()
+                .find(|response| response.endpoint.path == *path)
+        })
+        .map(data_card_result_html)
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn workspace_layout_html(tabs: &[&str], primary: String, secondary: String) -> String {
+    format!(
+        r#"<div class="slskr-workspace-tabs">{tabs}</div><div class="slskr-workspace-grid"><section class="slskr-workspace-primary">{primary}</section><aside class="slskr-workspace-secondary">{secondary}</aside></div>"#,
+        tabs = workspace_tabs_html(tabs),
+        primary = primary,
+        secondary = secondary,
+    )
+}
+
+fn search_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Searches", "Responses", "Interests"],
+        selected_cards_html(responses, &["/searches", "/searches/:id/responses"]),
+        selected_cards_html(
+            responses,
+            &[
+                "/searches/records",
+                "/soulseek/interests",
+                "/soulseek/hated-interests",
+            ],
+        ),
+    )
+}
+
+fn transfers_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Downloads", "Uploads", "Speeds"],
+        selected_cards_html(responses, &["/transfers/downloads", "/transfers/uploads"]),
+        selected_cards_html(responses, &["/transfers/speeds"]),
+    )
+}
+
+fn messages_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Inbox", "Thread", "Pods"],
+        selected_cards_html(responses, &["/conversations", "/conversations/:username"]),
+        selected_cards_html(responses, &["/pods"]),
+    )
+}
+
+fn rooms_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Available", "Joined", "Activity"],
+        selected_cards_html(responses, &["/rooms/available", "/rooms/joined"]),
+        r#"<article class="slskr-data-card"><header><h3>Room Activity</h3><code>rooms stream</code></header><div class="slskr-empty-state">Join a room to show users and messages.</div></article>"#.to_string(),
+    )
+}
+
+fn browse_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Folders", "Files", "Peer"],
+        selected_cards_html(responses, &["/users/:username/browse"]),
+        r#"<article class="slskr-data-card"><header><h3>Peer Browse</h3><code>directory request</code></header><div class="slskr-empty-state">Request a directory to populate the tree.</div></article>"#.to_string(),
+    )
+}
+
+fn identity_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Users", "Contacts", "Notes"],
+        selected_cards_html(responses, &["/users", "/contacts"]),
+        selected_cards_html(
+            responses,
+            &[
+                "/users/:username/info",
+                "/users/:username/status",
+                "/users/:username/endpoint",
+                "/contacts/nearby",
+                "/users/notes",
+            ],
+        ),
+    )
+}
+
+fn collections_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Collections", "Sharing", "Library"],
+        selected_cards_html(
+            responses,
+            &["/collections", "/sharegroups", "/share-grants", "/shared"],
+        ),
+        selected_cards_html(
+            responses,
+            &[
+                "/shares/catalog",
+                "/shares",
+                "/library/items",
+                "/library/items/browser",
+                "/files/downloads/directories",
+                "/files/incomplete/directories",
+            ],
+        ),
+    )
+}
+
+fn integrations_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Sources", "Metadata", "Automation"],
+        selected_cards_html(
+            responses,
+            &[
+                "/source-providers",
+                "/source-feeds",
+                "/musicbrainz/albums/completion",
+                "/musicbrainz/release-radar/subscriptions",
+            ],
+        ),
+        selected_cards_html(
+            responses,
+            &[
+                "/songid/runs",
+                "/solid/status",
+                "/pods",
+                "/bridge/status",
+                "/jobs",
+                "/mesh/stats",
+                "/security/dashboard",
+            ],
+        ),
+    )
+}
+
+fn system_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Runtime", "Events", "Storage"],
+        selected_cards_html(
+            responses,
+            &[
+                "/telemetry/metrics",
+                "/telemetry/metrics/kpis",
+                "/telemetry/reports/transfers/summary",
+                "/options",
+            ],
+        ),
+        selected_cards_html(
+            responses,
+            &["/events", "/logs", "/shares", "/database/stats"],
+        ),
+    )
+}
+
+fn wishlist_workspace_html(responses: &[EndpointBody]) -> String {
+    workspace_layout_html(
+        &["Wishlist", "Search", "Import"],
+        selected_cards_html(responses, &["/wishlist"]),
+        r#"<article class="slskr-data-card"><header><h3>Wishlist Actions</h3><code>add / run / import</code></header><div class="slskr-empty-state">Add wanted searches, rerun them, or import a CSV.</div></article>"#.to_string(),
+    )
 }
 
 #[allow(dead_code)]

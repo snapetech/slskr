@@ -16,7 +16,7 @@ mod webhooks;
 use std::{
     collections::BTreeMap,
     env, fs,
-    net::{SocketAddr, SocketAddrV4},
+    net::{IpAddr, SocketAddr, SocketAddrV4, ToSocketAddrs},
     path::{Component, Path, PathBuf},
     sync::Arc,
 };
@@ -117,6 +117,17 @@ const STORAGE_CAPABILITIES: &[&str] = &[
 ];
 
 const MAX_TRANSFER_STATE_BYTES: u64 = 16 * 1024 * 1024;
+
+fn same_origin_cors_headers(headers: &RequestSecurityHeaders, fallback_host: &str) -> String {
+    let Some(origin) = headers.origin.as_deref() else {
+        return String::new();
+    };
+    if request_origin_matches_host(headers, fallback_host) {
+        cors_headers(Some(origin), &[origin])
+    } else {
+        String::new()
+    }
+}
 
 #[allow(dead_code)]
 const EXPERIMENTAL_CAPABILITIES: &[&str] = &[
@@ -436,8 +447,24 @@ impl SearchRecord {
             .map(SearchResultEntry::json)
             .collect::<Vec<_>>()
             .join(",");
+        let responses = self.slskd_responses_json();
+        let response_count = self
+            .results
+            .iter()
+            .filter(|entry| entry.peer_username.is_some())
+            .count();
+        let state = if self.status == "active" {
+            "InProgress"
+        } else {
+            "Completed"
+        };
+        let ended_at = if self.status == "active" {
+            "null".to_owned()
+        } else {
+            format!("\"{}\"", self.updated_at)
+        };
         format!(
-            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"responseCount\":{},\"results\":[{}],\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":0,\"responseCount\":{},\"responses\":{},\"results\":[{}],\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
             json_escape(&self.id),
             self.token,
             json_escape(&self.query),
@@ -445,15 +472,15 @@ impl SearchRecord {
             self.target,
             json_option(self.target_name.as_deref()),
             self.status,
-            if self.status == "active" { "InProgress" } else { "Completed" },
+            state,
             self.status != "active",
             self.results.len(),
             self.results.len(),
-            self.results
-                .iter()
-                .filter(|entry| entry.peer_username.is_some())
-                .count(),
+            response_count,
+            responses,
             results,
+            self.created_at,
+            ended_at,
             self.expires_at,
             self.created_at,
             self.updated_at
@@ -1710,9 +1737,14 @@ impl UserRecord {
     }
 
     fn slskd_status_json(&self) -> serde_json::Value {
+        let presence = match self.status.as_deref() {
+            Some("online") | Some("Online") => "Online",
+            Some("away") | Some("Away") => "Away",
+            _ => "Offline",
+        };
         serde_json::json!({
             "username": self.username,
-            "presence": self.status.as_deref().unwrap_or("Unknown"),
+            "presence": presence,
             "isPrivileged": false,
         })
     }
@@ -5524,7 +5556,16 @@ async fn route_http_request_with_headers(
         }
 
         // USER STATUS ENDPOINTS
-        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/status") => {
+        ("GET", path)
+            if path.starts_with("/api/users/")
+                && path.ends_with("/status")
+                && path
+                    .trim_start_matches("/api/users/")
+                    .trim_end_matches("/status")
+                    .trim_end_matches('/')
+                    .find('/')
+                    .is_none() =>
+        {
             let username = path
                 .strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/status"))
@@ -5564,10 +5605,11 @@ async fn route_http_request_with_headers(
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/endpoint") => {
             let username = path.strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/endpoint"))
-                .unwrap_or("unknown");
+                .map(decoded_path_segment)
+                .unwrap_or_else(|| "unknown".to_owned());
             let json = format!(
-                "{{\"username\":\"{}\",\"address\":\"0.0.0.0\",\"port\":0}}",
-                json_escape(username)
+                "{{\"username\":\"{}\",\"addressFamily\":\"IPv4\",\"address\":\"0.0.0.0\",\"port\":0}}",
+                json_escape(&username)
             );
             Ok(routing::ok_response(json))
         }
@@ -6226,11 +6268,12 @@ async fn route_http_request_with_headers(
             };
             let mut rooms = state.rooms.write().await;
             let record = rooms.join(room_name.to_string());
+            let body = record.slskd_room_json().to_string();
             drop(rooms);
 
             send_session_command(state, SessionCommand::JoinRoom(room_name)).await.ok();
 
-            Ok(routing::created_response(record.json()))
+            Ok(routing::created_response(body))
         }
         ("GET", path) if path.starts_with("/api/rooms/joined/") && path.matches('/').count() == 4 => {
             let room_name = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
@@ -8663,10 +8706,16 @@ fn slskd_version_json() -> serde_json::Value {
 
 fn slskd_server_state_json(session: &SessionSnapshot, config: &AppConfig) -> serde_json::Value {
     let connected = session.state == "connected";
+    let state = match session.state {
+        "connected" => "Connected, LoggedIn",
+        "connecting" => "Connecting",
+        "disconnecting" => "Disconnecting",
+        _ => "Disconnected",
+    };
     serde_json::json!({
         "address": config.server_address,
         "ipEndPoint": config.server_address,
-        "state": session.state,
+        "state": state,
         "isConnected": connected,
         "isConnecting": session.state == "connecting",
         "isLoggedIn": connected,
@@ -8798,6 +8847,7 @@ async fn fetch_lidarr_system_status(
         .url
         .as_deref()
         .ok_or("Lidarr URL is not configured")?;
+    validate_integration_base_url(base_url)?;
     let api_key = lidarr
         .api_key
         .as_deref()
@@ -8829,6 +8879,7 @@ async fn fetch_lidarr_wanted_missing(
         .url
         .as_deref()
         .ok_or("Lidarr URL is not configured")?;
+    validate_integration_base_url(base_url)?;
     let api_key = lidarr
         .api_key
         .as_deref()
@@ -8854,6 +8905,77 @@ async fn fetch_lidarr_wanted_missing(
         .json::<serde_json::Value>()
         .await
         .map_err(|error| format!("invalid Lidarr wanted JSON: {error}"))
+}
+
+fn validate_integration_base_url(base_url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(base_url)
+        .map_err(|error| format!("integration URL is invalid: {error}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("integration URL scheme must be http or https".to_owned()),
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "integration URL must include a host".to_owned())?;
+    let allow_private = matches!(
+        env::var("SLSKR_ALLOW_PRIVATE_INTEGRATION_URLS")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    );
+    if allow_private {
+        return Ok(());
+    }
+    if host.eq_ignore_ascii_case("localhost") {
+        return Err("integration URL host is private".to_owned());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_integration_ip(ip) {
+            return Err("integration URL IP is private".to_owned());
+        }
+    }
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "integration URL port is unknown".to_owned())?;
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|error| format!("integration URL resolution failed: {error}"))?
+        .collect::<Vec<_>>();
+    if addrs.is_empty() {
+        return Err("integration URL did not resolve".to_owned());
+    }
+    if addrs
+        .iter()
+        .any(|addr| is_blocked_integration_ip(addr.ip()))
+    {
+        return Err("integration URL resolves to a private address".to_owned());
+    }
+    Ok(())
+}
+
+fn is_blocked_integration_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || ip.octets()[0] == 0
+                || ip.octets()[0] >= 224
+        }
+        IpAddr::V6(ip) => {
+            if let Some(v4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
+                return is_blocked_integration_ip(IpAddr::V4(v4));
+            }
+            let segments = ip.segments();
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+        }
+    }
 }
 
 #[cfg(test)]
@@ -11529,7 +11651,8 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
 
         // CORS preflight
         if is_cors_preflight(method) {
-            let cors_str = cors_headers(sec_headers.origin.as_deref(), &["*"]);
+            let fallback_host = state.config.http_bind.to_string();
+            let cors_str = same_origin_cors_headers(&sec_headers, &fallback_host);
             let _ = writer.write_all(
                 format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 0\r\nconnection: {}\r\n{}\r\n",
                     if keep_alive { "keep-alive" } else { "close" }, cors_str).as_bytes()
@@ -11542,7 +11665,8 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         }
 
         if method == "GET" && allowed {
-            let cors_str = cors_headers(req.headers.origin.as_deref(), &["*"]);
+            let fallback_host = state.config.http_bind.to_string();
+            let cors_str = same_origin_cors_headers(&sec_headers, &fallback_host);
             match write_web_static_response(&mut writer, path, keep_alive, &cors_str).await {
                 Ok(Some(content_length)) => {
                     let resp_log = logging::HttpResponseLog {
@@ -11590,7 +11714,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 authorization,
                 body,
                 &state,
-                sec_headers,
+                sec_headers.clone(),
             )
             .await
             {
@@ -11624,7 +11748,8 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         } else {
             String::new()
         };
-        let cors_str = cors_headers(req.headers.origin.as_deref(), &["*"]);
+        let fallback_host = state.config.http_bind.to_string();
+        let cors_str = same_origin_cors_headers(&sec_headers, &fallback_host);
         let request_id = generate_request_id();
         let extra = format!(
             "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n{}{}{}X-Request-ID: {}\r\n",
@@ -13331,6 +13456,28 @@ mod tests {
         test_state_with_env_parts(extra_env, super::SearchStore::new(), None)
     }
 
+    #[tokio::test]
+    async fn session_create_does_not_echo_api_token() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", "secret-token"),
+        );
+        let response = super::route_http_request(
+            "POST",
+            "/api/session",
+            Some("Bearer secret-token"),
+            r#"{"username":"user"}"#,
+            &state,
+        )
+        .await
+        .expect("session response");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["token"], serde_json::Value::Null);
+        assert_eq!(json["tokenConfigured"], true);
+        assert!(!response.body.contains("secret-token"));
+    }
+
     fn test_state_with_env_parts(
         extra_env: MapEnv,
         search_store: super::SearchStore,
@@ -13989,6 +14136,12 @@ mod tests {
         .expect("search route");
         assert_eq!(search.status, "201 Created");
         assert!(search.body.contains("\"searchText\":\"Remote Song\""));
+        let search_json = serde_json::from_str::<serde_json::Value>(&search.body).unwrap();
+        assert_eq!(search_json["state"], "InProgress");
+        assert_eq!(search_json["isComplete"], false);
+        assert_eq!(search_json["lockedFileCount"], 0);
+        assert!(search_json["responses"].is_array());
+        assert!(search_json["startedAt"].is_string());
         let _ = receiver.try_recv();
 
         let _ = super::route_http_request(
@@ -15251,7 +15404,7 @@ mod tests {
     #[tokio::test]
     async fn peer_address_response_negotiates_pending_transfer() {
         let (state, _receiver) = test_state();
-        {
+        let token = {
             let mut transfers = state.transfers.write().await;
             let entry = transfers.create(
                 1,
@@ -15260,9 +15413,10 @@ mod tests {
                 None,
                 Some(4),
             );
-            assert_eq!(entry.token, 1);
+            let token = entry.token;
             transfers.update_status(entry.id, "peer_lookup", None, None);
-        }
+            token
+        };
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -15285,14 +15439,14 @@ mod tests {
                 peer.receive().await.expect("transfer request"),
                 super::PeerMessage::TransferRequest(super::TransferRequest {
                     direction: 1,
-                    token: 1,
+                    token,
                     filename: "Remote/Song.flac".to_owned(),
                     size: Some(4),
                 })
             );
             peer.send(&super::PeerMessage::TransferResponse(
                 super::TransferResponse::Allowed {
-                    token: 1,
+                    token,
                     size: Some(4),
                 },
             ))
@@ -15327,7 +15481,7 @@ mod tests {
         ));
         std::fs::write(&path, [1_u8, 2, 3, 4]).expect("write upload file");
         add_test_share(&state, "Remote/Song.flac", &path, 4).await;
-        {
+        let token = {
             let mut transfers = state.transfers.write().await;
             let entry = transfers.create(
                 1,
@@ -15336,9 +15490,10 @@ mod tests {
                 Some(path.display().to_string()),
                 Some(4),
             );
-            assert_eq!(entry.token, 1);
+            let token = entry.token;
             transfers.update_status(entry.id, "peer_lookup", None, None);
-        }
+            token
+        };
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -15361,14 +15516,14 @@ mod tests {
                 peer.receive().await.expect("transfer request"),
                 super::PeerMessage::TransferRequest(super::TransferRequest {
                     direction: 1,
-                    token: 1,
+                    token,
                     filename: "Remote/Song.flac".to_owned(),
                     size: Some(4),
                 })
             );
             peer.send(&super::PeerMessage::TransferResponse(
                 super::TransferResponse::Allowed {
-                    token: 1,
+                    token,
                     size: Some(4),
                 },
             ))
@@ -15388,7 +15543,7 @@ mod tests {
             );
             let mut file =
                 slskr_client::file_transfer::FileTransferConnection::new(init.into_inner());
-            assert_eq!(file.receive_token().await.expect("token"), 1);
+            assert_eq!(file.receive_token().await.expect("token"), token);
             file.send_offset(1).await.expect("offset");
             file.read_chunk(3).await.expect("chunk")
         });
