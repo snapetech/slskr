@@ -7733,66 +7733,178 @@ mod tests {
 
     #[test]
     fn route_workflows_render_populated_api_rows() {
-        let search = route_workspace_result_html(
-            "/searches/42",
-            &[EndpointBody {
-                endpoint: ApiEndpoint {
+        let cases = [
+            (
+                "/searches/42",
+                ApiEndpoint {
                     method: "GET",
                     path: "/searches/:id/responses",
                     surface: "search",
                 },
-                body: r#"[{"username":"peer-live","hasFreeUploadSlot":true,"queueLength":2,"files":[{"filename":"Artist/Album/01 Track.flac"}]}]"#.to_string(),
-            }],
-        );
-        assert!(search.contains("Artist/Album/01 Track.flac"));
-        assert!(search.contains("peer-live"));
-        assert!(search.contains("free slot / queue 2"));
-
-        let downloads = route_workspace_result_html(
-            "/downloads",
-            &[EndpointBody {
-                endpoint: ApiEndpoint {
+                r#"[{"username":"peer-live","hasFreeUploadSlot":true,"queueLength":2,"files":[{"filename":"Artist/Album/01 Track.flac"}]}]"#,
+                &[
+                    "Artist/Album/01 Track.flac",
+                    "peer-live",
+                    "free slot / queue 2",
+                ][..],
+            ),
+            (
+                "/discovery-graph",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/searches",
+                    surface: "search",
+                },
+                r#"[{"id":42,"searchText":"public domain jazz","state":"Running"}]"#,
+                &["public domain jazz", "search 42", "Running"][..],
+            ),
+            (
+                "/playlist-intake",
+                ApiEndpoint {
+                    method: "POST",
+                    path: "/source-feed-imports/preview",
+                    surface: "source",
+                },
+                r#"[{"artist":"Archive Artist","title":"Public Domain Theme","status":"Matched"}]"#,
+                &["Public Domain Theme", "Archive Artist", "Matched"][..],
+            ),
+            (
+                "/wishlist",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/wishlist",
+                    surface: "wishlist",
+                },
+                r#"[{"searchText":"rare live set","filter":"flac","enabled":true,"autoDownload":false}]"#,
+                &["rare live set", "flac", "enabled=true / auto=false"][..],
+            ),
+            (
+                "/downloads",
+                ApiEndpoint {
                     method: "GET",
                     path: "/transfers/downloads",
                     surface: "transfers",
                 },
-                body: r#"[{"username":"peer-down","files":[{"filename":"Remote/Song.mp3","state":"InProgress","progress":0.5,"speed":"1 MB/s"}]}]"#.to_string(),
-            }],
-        );
-        assert!(downloads.contains("Remote/Song.mp3"));
-        assert!(downloads.contains("peer-down"));
-        assert!(downloads.contains("InProgress / 50% / 1 MB/s"));
-
-        let messages = route_workspace_result_html(
-            "/messages",
-            &[EndpointBody {
-                endpoint: ApiEndpoint {
+                r#"[{"username":"peer-down","files":[{"filename":"Remote/Song.mp3","state":"InProgress","progress":0.5,"speed":"1 MB/s"}]}]"#,
+                &["Remote/Song.mp3", "peer-down", "InProgress / 50% / 1 MB/s"][..],
+            ),
+            (
+                "/uploads",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/transfers/uploads",
+                    surface: "transfers",
+                },
+                r#"[{"username":"peer-up","files":[{"filename":"Local/Song.flac","state":"Queued","progress":0.25,"speed":"512 KB/s"}]}]"#,
+                &["Local/Song.flac", "peer-up", "Queued / 25% / 512 KB/s"][..],
+            ),
+            (
+                "/messages",
+                ApiEndpoint {
                     method: "GET",
                     path: "/conversations",
                     surface: "messages",
                 },
-                body: r#"[{"username":"peer-msg","lastMessage":"hello","unreadCount":3}]"#
-                    .to_string(),
-            }],
-        );
-        assert!(messages.contains("peer-msg"));
-        assert!(messages.contains("hello"));
-        assert!(messages.contains("3 unread"));
-
-        let collections = route_workspace_result_html(
-            "/collections",
-            &[EndpointBody {
-                endpoint: ApiEndpoint {
+                r#"[{"username":"peer-msg","lastMessage":"hello","unreadCount":3}]"#,
+                &["peer-msg", "hello", "3 unread"][..],
+            ),
+            (
+                "/users",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/users",
+                    surface: "users",
+                },
+                r#"[{"username":"peer-user","status":"Online","sharedFileCount":100}]"#,
+                &["peer-user", "Online", "100"][..],
+            ),
+            (
+                "/contacts",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/contacts",
+                    surface: "contacts",
+                },
+                r#"[{"nickname":"Friend","peerId":"peer-contact","verified":true}]"#,
+                &["Friend", "peer-contact", "verified=true"][..],
+            ),
+            (
+                "/solid",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/solid/status",
+                    surface: "solid",
+                },
+                r#"{"webId":"https://example.test/profile#me","storage":"pod-a","status":"connected"}"#,
+                &["https://example.test/profile#me", "pod-a", "connected"][..],
+            ),
+            (
+                "/collections",
+                ApiEndpoint {
                     method: "GET",
                     path: "/collections",
                     surface: "collections",
                 },
-                body: r#"[{"title":"Live Collection","type":"Playlist","itemCount":7}]"#
-                    .to_string(),
-            }],
-        );
-        assert!(collections.contains("Live Collection"));
-        assert!(collections.contains("7 items"));
+                r#"[{"title":"Live Collection","type":"Playlist","itemCount":7}]"#,
+                &["Live Collection", "Playlist", "7 items"][..],
+            ),
+            (
+                "/sharegroups",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/sharegroups",
+                    surface: "sharegroups",
+                },
+                r#"[{"name":"Trusted peers","memberCount":2,"createdAt":"today"}]"#,
+                &["Trusted peers", "2 members", "today"][..],
+            ),
+            (
+                "/shared",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/shared",
+                    surface: "sharegroups",
+                },
+                r#"[{"title":"Shared Collection","owner":"peer-owner","permissions":"read"}]"#,
+                &["Shared Collection", "peer-owner", "read"][..],
+            ),
+            (
+                "/browse",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/users/:username/browse",
+                    surface: "browse",
+                },
+                r#"{"directories":[{"name":"Music","type":"folder","size":0}],"files":[{"filename":"Music/Track.flac","type":"file","size":12345}]}"#,
+                &["Music", "Music/Track.flac", "Download"][..],
+            ),
+            (
+                "/system",
+                ApiEndpoint {
+                    method: "GET",
+                    path: "/server",
+                    surface: "system",
+                },
+                r#"{"state":"Connected","username":"audit-user"}"#,
+                &["Connection", "Connected", "audit-user"][..],
+            ),
+        ];
+
+        for (route, endpoint, body, expected) in cases {
+            let html = route_workspace_result_html(
+                route,
+                &[EndpointBody {
+                    endpoint,
+                    body: body.to_string(),
+                }],
+            );
+            for value in expected {
+                assert!(
+                    html.contains(value),
+                    "route {route} should render live workflow value {value}"
+                );
+            }
+        }
     }
 
     #[test]
