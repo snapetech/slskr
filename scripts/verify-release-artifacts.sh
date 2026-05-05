@@ -62,11 +62,21 @@ for artifact in "${artifacts[@]}"; do
   case "$artifact" in
     *.tar.gz) tar -C "$tmp" -xzf "$artifact" ;;
     *.zip) python - "$artifact" "$tmp" <<'PY'
+import pathlib
 import sys
 import zipfile
 
+destination = pathlib.Path(sys.argv[2]).resolve()
+
 with zipfile.ZipFile(sys.argv[1]) as zf:
-    zf.extractall(sys.argv[2])
+    for member in zf.infolist():
+        member_path = pathlib.PurePosixPath(member.filename)
+        if member_path.is_absolute() or ".." in member_path.parts:
+            raise SystemExit(f"unsafe zip entry path: {member.filename}")
+        target = (destination / pathlib.Path(*member_path.parts)).resolve()
+        if target != destination and destination not in target.parents:
+            raise SystemExit(f"zip entry escapes destination: {member.filename}")
+    zf.extractall(destination)
 PY
       ;;
   esac

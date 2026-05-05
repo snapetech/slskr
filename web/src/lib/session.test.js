@@ -36,6 +36,13 @@ describe('session', () => {
     });
   });
 
+  it('ignores legacy tokens left in persistent browser storage', () => {
+    localStorage.setItem('slskr-token', 'persistent-token');
+
+    expect(session.authHeaders()).toEqual({});
+    expect(session.isLoggedIn()).toBe(false);
+  });
+
   it('adds CSRF only when requested for direct fetch mutations', () => {
     expect(session.authHeaders()).toEqual({});
     expect(session.authHeaders({ csrf: true })).toEqual({
@@ -44,6 +51,7 @@ describe('session', () => {
   });
 
   it('verifies a user supplied token without accepting a token echo from the API', async () => {
+    localStorage.setItem('slskr-token', 'stale-persistent-token');
     api.post.mockResolvedValue({
       data: {
         name: 'slskr',
@@ -62,6 +70,7 @@ describe('session', () => {
       { headers: { Authorization: 'Bearer user-token' } },
     );
     expect(sessionStorage.getItem('slskr-token')).toBe('user-token');
+    expect(localStorage.getItem('slskr-token')).toBeNull();
     expect(sessionStorage.getItem('slskr-token')).not.toBe(
       'server-token-must-not-be-used',
     );

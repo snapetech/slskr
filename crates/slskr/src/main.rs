@@ -4073,15 +4073,18 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
         ("GET", "/api/session/enabled") => Ok(routing::ok_response(state.config.auth_required.to_string())),
-        ("POST", "/api/session") => Ok(routing::ok_response(serde_json::json!({
-            "name": "slskr",
-            "tokenType": "ApiKey",
-            "token": null,
-            "tokenConfigured": state.config.api_token.is_some(),
-            "issued": unix_timestamp().to_string(),
-            "notBefore": unix_timestamp().to_string(),
-            "expires": "",
-        }).to_string())),
+        ("POST", "/api/session") => {
+            let issued = unix_timestamp();
+            Ok(routing::ok_response(serde_json::json!({
+                "name": "slskr",
+                "tokenType": "ApiKey",
+                "token": "",
+                "tokenConfigured": state.config.api_token.is_some(),
+                "issued": issued,
+                "notBefore": issued,
+                "expires": 0,
+            }).to_string()))
+        }
         ("GET", "/api/capabilities/peers") => {
             let users = state.users.read().await;
             let peers: Vec<serde_json::Value> = users.records.iter().map(|user| {
@@ -4482,6 +4485,9 @@ async fn route_http_request_with_headers(
              };
              if url.len() > 2048 {
                  return Ok(routing::bad_request_response("url is too long"));
+             }
+             if let Err(error) = webhooks::validate_webhook_url_for_registration(&url) {
+                 return Ok(routing::bad_request_response(&error.to_string()));
              }
 
              let events_str = extract_json_string_field(body, "events");
@@ -5585,7 +5591,8 @@ async fn route_http_request_with_headers(
             let username = path
                 .strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/status"))
-                .unwrap_or("unknown");
+                .map(decoded_path_segment)
+                .unwrap_or_else(|| "unknown".to_owned());
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
                 let json = record.slskd_status_json().to_string();
@@ -5610,10 +5617,11 @@ async fn route_http_request_with_headers(
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
             let username = path.strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/group"))
-                .unwrap_or("unknown");
+                .map(decoded_path_segment)
+                .unwrap_or_else(|| "unknown".to_owned());
             let json = format!(
                 "{{\"username\":\"{}\",\"group\":\"default\"}}",
-                json_escape(username)
+                json_escape(&username)
             );
             Ok(routing::ok_response(json))
         }
@@ -6145,6 +6153,12 @@ async fn route_http_request_with_headers(
                 Some(u) => u,
                 None => return Ok(routing::bad_request_response("url is required")),
             };
+            if url.len() > 2048 {
+                return Ok(routing::bad_request_response("url is too long"));
+            }
+            if let Err(error) = webhooks::validate_webhook_url_for_registration(&url) {
+                return Ok(routing::bad_request_response(&error.to_string()));
+            }
             let secret = extract_json_string_field(body, "secret").unwrap_or_else(webhooks::Webhook::generate_secret);
             let webhook = webhooks::Webhook::new(
                 url,
@@ -7921,14 +7935,21 @@ async fn route_http_request_with_headers(
              Ok(routing::ok_response(json))
          }
 
-         ("GET", "/api/telemetry/metrics") => {
-             let json = format!(
-                 "{{\"metrics\":{},\"timestamp\":{},\"version\":\"1.0.0\"}}",
-                 "{}",
-                 unix_timestamp()
-             );
-             Ok(routing::ok_response(json))
-         }
+        ("GET", "/api/telemetry/metrics") => {
+            let transfers = state.transfers.read().await;
+            let transfer_count = transfers.entries.len();
+            drop(transfers);
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "text/plain; version=0.0.4; charset=utf-8",
+                body: format!(
+                    "# HELP slskr_telemetry_transfers Transfer count\n\
+                     # TYPE slskr_telemetry_transfers gauge\n\
+                     slskr_telemetry_transfers {}\n",
+                    transfer_count
+                ),
+            })
+        }
 
           ("GET", "/api/telemetry/metrics/kpi") | ("GET", "/api/telemetry/metrics/kpis") => {
               let json = "{\"kpis\":[],\"count\":0}".to_string();
@@ -8062,7 +8083,11 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/options/yaml/validate") => {
-              Ok(routing::ok_response("{\"valid\":true,\"errors\":[],\"warnings\":[]}".to_owned()))
+              Ok(HttpResponse {
+                  status: "200 OK",
+                  content_type: "text/plain",
+                  body: String::new(),
+              })
           }
 
           ("POST", "/api/source-feed-imports/preview") => {
@@ -13829,7 +13854,10 @@ mod tests {
         .await
         .expect("session response");
         let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
-        assert_eq!(json["token"], serde_json::Value::Null);
+        assert_eq!(json["token"], "");
+        assert!(json["issued"].is_number());
+        assert!(json["notBefore"].is_number());
+        assert!(json["expires"].is_number());
         assert_eq!(json["tokenConfigured"], true);
         assert!(!response.body.contains("secret-token"));
     }
@@ -14680,6 +14708,7 @@ mod tests {
                 .expect("user status");
         let user_status_json =
             serde_json::from_str::<serde_json::Value>(&user_status.body).unwrap();
+        assert_eq!(user_status_json["username"], "peer 1");
         assert_eq!(user_status_json["presence"], "Offline");
 
         let shares = super::route_http_request("GET", "/api/v0/shares", None, "", &state)
@@ -15391,6 +15420,34 @@ mod tests {
         .expect("capped webhook");
         assert_eq!(capped.status, "400 Bad Request");
         assert_eq!(capped.body, "{\"error\":\"webhook limit reached\"}");
+    }
+
+    #[tokio::test]
+    async fn webhook_registration_rejects_blocked_urls() {
+        let (state, _receiver) = test_state();
+
+        for body in [
+            r#"{"url":"ftp://example.test/hook","events":"search.created"}"#,
+            r#"{"url":"http://localhost/hook","events":"search.created"}"#,
+            r#"{"url":"http://127.0.0.1/hook","events":"search.created"}"#,
+            r#"{"url":"http://169.254.169.254/hook","events":"search.created"}"#,
+        ] {
+            let response = super::route_http_request("POST", "/api/webhooks", None, body, &state)
+                .await
+                .expect("blocked webhook URL");
+            assert_eq!(response.status, "400 Bad Request");
+        }
+
+        let admin_response = super::route_http_request(
+            "POST",
+            "/api/admin/webhooks",
+            None,
+            r#"{"url":"http://127.0.0.1/hook"}"#,
+            &state,
+        )
+        .await
+        .expect("blocked admin webhook URL");
+        assert_eq!(admin_response.status, "400 Bad Request");
     }
 
     #[tokio::test]

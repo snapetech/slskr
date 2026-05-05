@@ -3,7 +3,6 @@ import { urlBase } from '../config';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
-  Checkbox,
   Form,
   Grid,
   Header,
@@ -15,7 +14,6 @@ import {
 
 const initialState = {
   password: '',
-  rememberMe: true,
   username: '',
 };
 
@@ -64,7 +62,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
     });
   };
 
-  const { password, rememberMe, username } = state;
+  const { password, username } = state;
 
   return (
     <>
@@ -118,12 +116,6 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
                 placeholder="Password"
                 type="password"
               />
-              <Checkbox
-                checked={rememberMe}
-                disabled={loading}
-                label="Remember Me"
-                onChange={() => handleChange('rememberMe', !rememberMe)}
-              />
             </Segment>
             <Button
               className="login-button"
@@ -131,7 +123,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
               disabled={!ready || loading}
               fluid
               loading={loading}
-              onClick={() => onLoginAttempt(username, password, rememberMe)}
+              onClick={() => onLoginAttempt(username, password, false)}
               primary
               size="large"
             >

@@ -20,7 +20,7 @@ export const isLoggedIn = () => {
   );
 };
 
-export const login = async ({ username, password, rememberMe = false }) => {
+export const login = async ({ username, password }) => {
   const candidateToken = password?.trim();
   if (!candidateToken) {
     throw new Error('API token is required');
@@ -31,7 +31,8 @@ export const login = async ({ username, password, rememberMe = false }) => {
     { username },
     { headers: { Authorization: `Bearer ${candidateToken}` } },
   );
-  setToken(rememberMe ? localStorage : sessionStorage, candidateToken);
+  clearToken();
+  setToken(sessionStorage, candidateToken);
   return candidateToken;
 };
 

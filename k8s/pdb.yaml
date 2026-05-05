@@ -4,7 +4,7 @@ metadata:
   name: slskr-api-pdb
   namespace: slskr
 spec:
-  minAvailable: 2
+  maxUnavailable: 1
   selector:
     matchLabels:
       app: slskr-api

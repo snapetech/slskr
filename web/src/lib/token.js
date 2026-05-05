@@ -8,7 +8,7 @@ import {
 } from './storage';
 
 export const getToken = () =>
-  getSessionStorageItem(tokenKey) || getLocalStorageItem(tokenKey);
+  getSessionStorageItem(tokenKey);
 export const setToken = (storage, token) => setStorageItem(storage, tokenKey, token);
 export const clearToken = () => {
   removeLocalStorageItem(tokenKey);

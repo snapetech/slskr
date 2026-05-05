@@ -413,9 +413,9 @@ struct ResolvedWebhookTarget {
     addrs: Vec<SocketAddr>,
 }
 
-fn validate_and_resolve_webhook_url(
+pub(crate) fn validate_webhook_url_for_registration(
     url: &str,
-) -> Result<ResolvedWebhookTarget, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let parsed = reqwest::Url::parse(url)?;
     match parsed.scheme() {
         "http" | "https" => {}
@@ -432,6 +432,18 @@ fn validate_and_resolve_webhook_url(
             return Err("webhook URL IP is not allowed".into());
         }
     }
+    parsed
+        .port_or_known_default()
+        .ok_or("webhook URL port is unknown")?;
+    Ok(())
+}
+
+fn validate_and_resolve_webhook_url(
+    url: &str,
+) -> Result<ResolvedWebhookTarget, Box<dyn std::error::Error>> {
+    validate_webhook_url_for_registration(url)?;
+    let parsed = reqwest::Url::parse(url)?;
+    let host = parsed.host_str().ok_or("webhook URL must include a host")?;
 
     let port = parsed
         .port_or_known_default()
@@ -641,6 +653,16 @@ mod tests {
         assert!(is_blocked_webhook_ip(
             "2001:0000:4136:e378::1".parse().unwrap()
         ));
+    }
+
+    #[test]
+    fn test_webhook_registration_url_validation() {
+        assert!(validate_webhook_url_for_registration("https://example.com/hook").is_ok());
+        assert!(validate_webhook_url_for_registration("ftp://example.com/hook").is_err());
+        assert!(validate_webhook_url_for_registration("http://localhost/hook").is_err());
+        assert!(validate_webhook_url_for_registration("http://127.0.0.1/hook").is_err());
+        assert!(validate_webhook_url_for_registration("http://10.0.0.5/hook").is_err());
+        assert!(validate_webhook_url_for_registration("http://169.254.169.254/hook").is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@ namespace: slskr
 
 resources:
   - namespace.yaml
+  - pvc.yaml
   - configmap.yaml
   - deployment.yaml
   - service.yaml
@@ -16,4 +17,4 @@ resources:
 
 replicas:
   - name: slskr-api
-    count: 3
+    count: 1

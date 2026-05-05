@@ -275,6 +275,67 @@ def is_log_entry(value):
     return has_keys(value, "timestamp", "context", "level", "message")
 
 
+def is_session_status(value):
+    return (
+        has_keys(value, "expires", "issued", "name", "notBefore", "token", "tokenType")
+        and isinstance(value["expires"], int)
+        and isinstance(value["issued"], int)
+        and isinstance(value["notBefore"], int)
+        and isinstance(value["token"], str)
+        and value["tokenType"] == "ApiKey"
+    )
+
+
+def is_app_version(value):
+    return (
+        has_keys(
+            value,
+            "full",
+            "current",
+            "latest",
+            "isUpdateAvailable",
+            "isCanary",
+            "isDevelopment",
+        )
+        and isinstance(value["full"], str)
+        and isinstance(value["current"], str)
+        and isinstance(value["latest"], str)
+        and isinstance(value["isUpdateAvailable"], bool)
+        and isinstance(value["isCanary"], bool)
+        and isinstance(value["isDevelopment"], bool)
+    )
+
+
+def is_app_state(value):
+    return (
+        has_keys(
+            value,
+            "version",
+            "pendingReconnect",
+            "pendingRestart",
+            "server",
+            "connectionWatchdog",
+            "relay",
+            "user",
+            "distributedNetwork",
+            "shares",
+            "rooms",
+            "users",
+        )
+        and is_app_version(value["version"])
+        and isinstance(value["pendingReconnect"], bool)
+        and isinstance(value["pendingRestart"], bool)
+        and is_server_state(value["server"])
+        and isinstance(value["connectionWatchdog"], dict)
+        and isinstance(value["relay"], dict)
+        and isinstance(value["user"], dict)
+        and isinstance(value["distributedNetwork"], dict)
+        and is_shares(value["shares"])
+        and isinstance(value["rooms"], list)
+        and isinstance(value["users"], list)
+    )
+
+
 def is_transfer_summary(value):
     return (
         has_keys(
@@ -320,18 +381,13 @@ def is_directory_report(value):
     return has_keys(value, "path", "directory", "count", "totalBytes", "distinctUsers")
 
 
-record(
-    "application.state",
-    client.application.state,
-    lambda v: has_keys(v, "version", "server", "shares", "rooms", "users")
-    and is_server_state(v["server"]),
-)
+record("application.state", client.application.state, is_app_state)
 record("application.version", client.application.version, lambda v: isinstance(v, str) and v)
-record("application.check_updates", lambda: client.application.check_updates(forceCheck=True), lambda v: has_keys(v, "full", "current", "latest", "isUpdateAvailable"))
+record("application.check_updates", lambda: client.application.check_updates(forceCheck=True), is_app_version)
 record("application.gc", client.application.gc, lambda v: v is True)
 record("session.auth_valid", client.session.auth_valid, lambda v: v is True)
 record("session.security_enabled", client.session.security_enabled, lambda v: isinstance(v, bool))
-record("session.login", lambda: client.session.login("user", "pass"), lambda v: isinstance(v, dict) and v.get("tokenType") == "ApiKey")
+record("session.login", lambda: client.session.login("user", "pass"), is_session_status)
 record("server.state", client.server.state, is_server_state)
 record("server.connect", client.server.connect, lambda v: v is True)
 record("server.disconnect", client.server.disconnect, lambda v: v is True)
@@ -381,7 +437,7 @@ record("users.browse", lambda: client.users.browse("peer 1"), is_user_root)
 record("users.browsing_status", lambda: client.users.browsing_status("peer 1"), is_browsing_status)
 record("users.directory", lambda: client.users.directory("peer 1", "Virtual"), lambda v: isinstance(v, list) and all(is_user_directory(item) for item in v))
 record("users.info", lambda: client.users.info("peer 1"), is_user_info)
-record("users.status", lambda: client.users.status("peer 1"), is_user_status)
+record("users.status", lambda: client.users.status("peer 1"), lambda v: is_user_status(v) and v.get("username") == "peer 1")
 
 record("shares.get_all", client.shares.get_all, is_shares)
 record("shares.start_scan", client.shares.start_scan, lambda v: v is True)
@@ -411,7 +467,7 @@ record("options.debug", client.options.debug, lambda v: isinstance(v, dict))
 record("options.yaml_location", client.options.yaml_location, lambda v: isinstance(v, str) and v)
 record("options.download_yaml", client.options.download_yaml, lambda v: isinstance(v, str))
 record("options.upload_yaml", lambda: client.options.upload_yaml("app: {}"), lambda v: v is True)
-record("options.validate_yaml", lambda: client.options.validate_yaml("app: {}"), lambda v: isinstance(v, str))
+record("options.validate_yaml", lambda: client.options.validate_yaml("app: {}"), lambda v: v == "")
 
 record("events.get", client.events.get, lambda v: isinstance(v, list) and all(is_event(item) for item in v))
 record("events.create", lambda: client.events.create("Smoke", {"ok": True}), lambda v: v is True)
@@ -420,8 +476,8 @@ record("logs.get", client.logs.get, lambda v: isinstance(v, list) and all(is_log
 if client.transfers.enqueue("telemetry peer", [{"filename": "Telemetry/Album/Track.flac", "size": 321}]) is not True:
     raise AssertionError("transfers.enqueue for telemetry fixture failed")
 
-record("telemetry.get_metrics", client.telemetry.get_metrics, lambda v: isinstance(v, str))
-record("telemetry.get_kpis", client.telemetry.get_kpis, lambda v: isinstance(v, str))
+record("telemetry.get_metrics", client.telemetry.get_metrics, lambda v: isinstance(v, str) and "slskr_telemetry_transfers" in v)
+record("telemetry.get_kpis", client.telemetry.get_kpis, lambda v: isinstance(v, str) and "kpis" in v)
 record("telemetry.get_transfer_summary", client.telemetry.get_transfer_summary, is_transfer_summary)
 record("telemetry.get_transfer_histogram", client.telemetry.get_transfer_histogram, is_transfer_histogram)
 record("telemetry.get_transfer_leaderboard", lambda: client.telemetry.get_transfer_leaderboard("Download"), lambda v: isinstance(v, list) and len(v) >= 1 and all(is_transfer_leaderboard_entry(item) for item in v))

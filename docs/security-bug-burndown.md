@@ -21,18 +21,19 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Low | Docs | Security docs said the dashboard saves API tokens in a cookie, which no longer describes the preferred browser behavior. | Fixed to document bearer/session-storage behavior and legacy cookie compatibility. |
 | Low | Release setup | Release gate setup cached only the web lockfile and did not install the wasm target in the gate job. | Fixed by adding wasm and all npm lockfiles. |
 | Low | API parity | slskd transfer report routes referenced missing helpers in this checkout. | Fixed by preserving the routes and adding report helper implementations. |
+| High | Kubernetes runtime | `slskr-api` ran three replicas against a daemon that owns a live Soulseek session and local in-memory/session state. | Fixed default manifests to run one API replica and constrained the API HPA to one replica. |
+| High | Kubernetes storage | `/data` used `emptyDir`, losing API state on pod restart and making replicated state inconsistent. | Fixed default manifests to mount a `slskr-data` PVC. |
+| High | Browser token persistence | Main React web UI supported `rememberMe` bearer-token persistence in `localStorage`. | Fixed by removing the login persistence toggle, storing login tokens in `sessionStorage`, and ignoring legacy persistent tokens. |
+| Medium | Webhook registration | Webhook URL validation happened only at delivery/test time, so obviously blocked URLs could be saved. | Fixed by validating registration and admin creation URLs for scheme, host presence, localhost, direct private/link-local IP targets, and known ports. |
+| Low | Archive verification | `verify-release-artifacts.sh` extracted zip files without path traversal checks. | Fixed by rejecting absolute and parent-directory zip entries before extraction. |
 
 ## Open Burn-Down
 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
-| High | Kubernetes runtime | `slskr-api` runs three replicas against a daemon that owns a live Soulseek session and local in-memory/session state. | Make the API deployment single-replica by default or split stateless API from stateful worker/session ownership. |
-| High | Kubernetes storage | `/data` is `emptyDir`, so API state is lost on pod restart and inconsistent across replicas. | Use a PVC for stateful mode, or make persistence explicitly disabled in the manifest. |
-| High | Browser token persistence | Main React web UI still supports `rememberMe`, which stores the bearer token in `localStorage`. | Prefer session-only auth by default; gate persistent token storage behind an explicit warning or remove it. |
 | High | Legacy cookie auth | Backend still accepts `slskr.session` cookies for compatibility. CSRF checks reduce risk, but cookies widen the browser attack surface. | Keep for parity only if needed; otherwise add a config flag to disable cookie auth while keeping bearer/API-key auth. |
 | High | CSP | Static web responses require `'unsafe-inline'` and `wasm-unsafe-eval`. | Move inline scripts/styles to bundled assets or add nonce/hash generation. |
 | High | External process launch | `/api/player/external-visualizer/launch` can trigger a configured local command. It is auth protected but powerful. | Add an allowlist, audit event, and explicit config flag that cannot be changed from the UI. |
-| Medium | Webhook registration | Webhook URL validation happens at delivery/test time, not at registration. | Validate and reject blocked webhook URLs during `POST /api/webhooks` and admin webhook creation. |
 | Medium | Webhook secret lifecycle | Webhook creation returns the secret in the response. This is acceptable as one-time display, but undocumented. | Document one-time secret return and avoid ever returning it from list/detail routes. |
 | Medium | CI tooling | Local environment lacks `actionlint`, `shellcheck`, `semgrep`, and `trivy`, so the gate cannot run those classes of checks locally. | Add optional gate steps that run when installed, and CI setup that installs the chosen tools. |
 | Medium | Python client | Python client has no lint/type/test/audit gate. | Add `ruff`, `mypy` or pyright, pytest smoke tests, and dependency audit. |
@@ -54,14 +55,13 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Low | Kubernetes NetworkPolicy | Manifests do not define ingress/egress NetworkPolicies. | Add default-deny plus explicit ingress from ingress controller and metrics scraper, and scoped egress. |
 | Low | Kubernetes secrets | Manifest references `slskr-secrets` and `grafana-admin` but does not provide templates. | Add example Secret manifests with placeholder values or docs that create them. |
 | Low | Release tag policy | Release workflow triggers on `release-*`, not semantic `v*` tags. | Decide final tag convention and document/enforce it in release docs. |
-| Low | Archive verification | `verify-release-artifacts.sh` extracts zip files without path traversal checks. | Use safe zip extraction that rejects absolute paths and `..` entries. |
 
 ## Scans Run
 
 - `cargo audit`
-- `npm --prefix web audit --audit-level=moderate`
-- `npm --prefix dashboard audit --audit-level=moderate`
-- `npm --prefix client-ts audit --audit-level=moderate`
+- `npm --prefix web audit --audit-level=high`
+- `npm --prefix dashboard audit --audit-level=high`
+- `npm --prefix client-ts audit --audit-level=high`
 - `scripts/check-public-posture.sh`
 - Source grep passes for secrets, auth/CORS/CSRF, process execution, path handling, URL fetches, docs/deployment exposure, and frontend storage/navigation sinks.
 - `scripts/run-release-gate.sh` passed before the final Lidarr DNS-pinning fix; focused Rust/frontend checks passed after that fix.
