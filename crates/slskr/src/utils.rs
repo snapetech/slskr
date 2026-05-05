@@ -73,6 +73,7 @@ pub fn route_requires_auth(config: &AppConfig, path: &str) -> bool {
         && path != "/api/health"
         && path != "/api/version"
         && path != "/api/capabilities"
+        && path != "/api/session/enabled"
 }
 
 pub fn csrf_origin_allowed(

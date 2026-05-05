@@ -49,13 +49,12 @@ export const check = async () => {
     await api.get('/session');
     return true;
   } catch (error) {
-    if (error.response.status === 401) {
+    if (error.response?.status === 401) {
       console.debug('session expired; clearing stored token');
       logout();
       return false;
-    } else {
-      throw error;
     }
+    throw error;
   }
 };
 

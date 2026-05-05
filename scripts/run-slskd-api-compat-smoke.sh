@@ -6,7 +6,11 @@ cd "$repo_root"
 
 python_bin="${PYTHON:-python3}"
 api_version="${SLSKD_API_VERSION:-0.2.4}"
-api_token="${SLSKR_SLSKD_API_SMOKE_TOKEN:-slskd-api-smoke-token}"
+api_token="${SLSKR_SLSKD_API_SMOKE_TOKEN:-}"
+if [[ -z "$api_token" ]]; then
+  echo "missing SLSKR_SLSKD_API_SMOKE_TOKEN" >&2
+  exit 2
+fi
 work_dir="${SLSKR_SLSKD_API_SMOKE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskd-api-smoke.XXXXXX")}"
 state_dir="$work_dir/state"
 log_file="$work_dir/slskr.log"
@@ -111,6 +115,37 @@ def is_search_state(value):
     )
 
 
+def is_search_file(value):
+    return has_keys(
+        value,
+        "filename",
+        "size",
+        "code",
+        "isLocked",
+        "extension",
+    )
+
+
+def is_search_response(value):
+    return (
+        has_keys(
+            value,
+            "username",
+            "token",
+            "hasFreeUploadSlot",
+            "queueLength",
+            "uploadSpeed",
+            "fileCount",
+            "files",
+            "lockedFileCount",
+            "lockedFiles",
+        )
+        and isinstance(value["files"], list)
+        and value["fileCount"] == len(value["files"])
+        and all(is_search_file(item) for item in value["files"])
+    )
+
+
 def is_server_state(value):
     return (
         has_keys(
@@ -135,7 +170,36 @@ def is_event(value):
 def is_transfer_group(value, username=None):
     if not has_keys(value, "username", "directories") or not isinstance(value["directories"], list):
         return False
-    return username is None or value["username"] == username
+    if username is not None and value["username"] != username:
+        return False
+    return all(is_transfer_directory(item) for item in value["directories"])
+
+
+def is_transfer_directory(value):
+    return (
+        has_keys(value, "directory", "fileCount", "files")
+        and isinstance(value["files"], list)
+        and value["fileCount"] == len(value["files"])
+        and all(is_transfer_file(item) for item in value["files"])
+    )
+
+
+def is_transfer_file(value):
+    return has_keys(
+        value,
+        "id",
+        "username",
+        "direction",
+        "filename",
+        "size",
+        "startOffset",
+        "state",
+        "requestedAt",
+        "bytesTransferred",
+        "averageSpeed",
+        "bytesRemaining",
+        "percentComplete",
+    ) and value["direction"] in {"Download", "Upload"}
 
 
 def is_room(value):
@@ -163,7 +227,16 @@ def is_message(value):
 
 
 def is_user_directory(value):
-    return has_keys(value, "name", "fileCount", "files") and isinstance(value["files"], list)
+    return (
+        has_keys(value, "name", "fileCount", "files")
+        and isinstance(value["files"], list)
+        and value["fileCount"] == len(value["files"])
+        and all(is_user_file(item) for item in value["files"])
+    )
+
+
+def is_user_file(value):
+    return has_keys(value, "filename", "size", "code", "extension", "attributeCount", "attributes")
 
 
 def is_user_root(value):
@@ -202,6 +275,51 @@ def is_log_entry(value):
     return has_keys(value, "timestamp", "context", "level", "message")
 
 
+def is_transfer_summary(value):
+    return (
+        has_keys(
+            value,
+            "count",
+            "downloads",
+            "uploads",
+            "totalBytes",
+            "averageSpeed",
+            "byDirection",
+            "byState",
+        )
+        and isinstance(value["byDirection"], dict)
+        and isinstance(value["byState"], dict)
+    )
+
+
+def is_transfer_histogram(value):
+    return has_keys(value, "interval", "buckets") and isinstance(value["buckets"], list)
+
+
+def is_transfer_leaderboard_entry(value):
+    return has_keys(value, "username", "count", "totalBytes", "averageSpeed")
+
+
+def is_user_transfer_report(value):
+    return (
+        has_keys(value, "username", "count", "transfers")
+        and isinstance(value["transfers"], list)
+        and all(is_transfer_file(item) for item in value["transfers"])
+    )
+
+
+def is_transfer_exception(value):
+    return has_keys(value, "username", "direction", "filename", "state", "exception")
+
+
+def is_transfer_exception_pareto(value):
+    return has_keys(value, "exception", "count", "distinctUsers")
+
+
+def is_directory_report(value):
+    return has_keys(value, "path", "directory", "count", "totalBytes", "distinctUsers")
+
+
 record(
     "application.state",
     client.application.state,
@@ -222,20 +340,20 @@ created = record("searches.search_text", lambda: client.searches.search_text("sl
 identifier = created.get("id") or created.get("token")
 record("searches.get_all", client.searches.get_all, lambda v: isinstance(v, list) and len(v) >= 1 and is_search_state(v[0]))
 record("searches.state", lambda: client.searches.state(identifier), lambda v: is_search_state(v) and v.get("searchText") == "slskd api smoke")
-record("searches.search_responses", lambda: client.searches.search_responses(identifier), lambda v: isinstance(v, list) and all(has_keys(item, "username", "files", "fileCount") for item in v))
+record("searches.search_responses", lambda: client.searches.search_responses(identifier), lambda v: isinstance(v, list) and all(is_search_response(item) for item in v))
 record("searches.stop", lambda: client.searches.stop(identifier), lambda v: v is True)
 record("searches.delete", lambda: client.searches.delete(identifier), lambda v: v is True)
 
 record("transfers.enqueue", lambda: client.transfers.enqueue("peer 1", [{"filename": "Remote/Song.mp3", "size": 99}]), lambda v: v is True)
 record("transfers.get_all_downloads", client.transfers.get_all_downloads, lambda v: isinstance(v, list) and all(is_transfer_group(item) for item in v))
-record("transfers.get_all_uploads", client.transfers.get_all_uploads, lambda v: isinstance(v, list))
+record("transfers.get_all_uploads", client.transfers.get_all_uploads, lambda v: isinstance(v, list) and all(is_transfer_group(item) for item in v))
 record("transfers.get_downloads", lambda: client.transfers.get_downloads("peer 1"), lambda v: isinstance(v, list) and all(is_transfer_group(item, "peer 1") for item in v))
-record("transfers.get_uploads", lambda: client.transfers.get_uploads("peer 1"), lambda v: isinstance(v, list))
+record("transfers.get_uploads", lambda: client.transfers.get_uploads("peer 1"), lambda v: isinstance(v, list) and all(is_transfer_group(item, "peer 1") for item in v))
 record("transfers.get_queue_position", lambda: client.transfers.get_queue_position("peer 1", "1"), lambda v: isinstance(v, (int, str)))
-record("transfers.get_download", lambda: client.transfers.get_download("peer 1", "1"), lambda v: isinstance(v, dict))
+record("transfers.get_download", lambda: client.transfers.get_download("peer 1", "1"), is_transfer_file)
 record("transfers.cancel_download", lambda: client.transfers.cancel_download("peer 1", "1", remove=True), lambda v: v is True)
 record("transfers.remove_completed_downloads", client.transfers.remove_completed_downloads, lambda v: v is True)
-record("transfers.get_upload", lambda: client.transfers.get_upload("peer 1", "1"), lambda v: isinstance(v, dict))
+record("transfers.get_upload", lambda: client.transfers.get_upload("peer 1", "1"), is_transfer_file)
 record("transfers.cancel_upload", lambda: client.transfers.cancel_upload("peer 1", "1", remove=True), lambda v: v is True)
 record("transfers.remove_completed_uploads", client.transfers.remove_completed_uploads, lambda v: v is True)
 
@@ -298,15 +416,19 @@ record("options.validate_yaml", lambda: client.options.validate_yaml("app: {}"),
 record("events.get", client.events.get, lambda v: isinstance(v, list) and all(is_event(item) for item in v))
 record("events.create", lambda: client.events.create("Smoke", {"ok": True}), lambda v: v is True)
 record("logs.get", client.logs.get, lambda v: isinstance(v, list) and all(is_log_entry(item) for item in v))
+
+if client.transfers.enqueue("telemetry peer", [{"filename": "Telemetry/Album/Track.flac", "size": 321}]) is not True:
+    raise AssertionError("transfers.enqueue for telemetry fixture failed")
+
 record("telemetry.get_metrics", client.telemetry.get_metrics, lambda v: isinstance(v, str))
 record("telemetry.get_kpis", client.telemetry.get_kpis, lambda v: isinstance(v, str))
-record("telemetry.get_transfer_summary", client.telemetry.get_transfer_summary, lambda v: isinstance(v, dict))
-record("telemetry.get_transfer_histogram", client.telemetry.get_transfer_histogram, lambda v: isinstance(v, dict))
-record("telemetry.get_transfer_leaderboard", lambda: client.telemetry.get_transfer_leaderboard("Download"), lambda v: isinstance(v, list))
-record("telemetry.get_user_transfers", lambda: client.telemetry.get_user_transfers("peer 1"), lambda v: isinstance(v, dict))
-record("telemetry.get_transfer_exceptions", lambda: client.telemetry.get_transfer_exceptions("Download"), lambda v: isinstance(v, list))
-record("telemetry.get_transfer_exceptions_pareto", lambda: client.telemetry.get_transfer_exceptions_pareto("Download"), lambda v: isinstance(v, list))
-record("telemetry.get_most_dl_directories", client.telemetry.get_most_dl_directories, lambda v: isinstance(v, list))
+record("telemetry.get_transfer_summary", client.telemetry.get_transfer_summary, is_transfer_summary)
+record("telemetry.get_transfer_histogram", client.telemetry.get_transfer_histogram, is_transfer_histogram)
+record("telemetry.get_transfer_leaderboard", lambda: client.telemetry.get_transfer_leaderboard("Download"), lambda v: isinstance(v, list) and len(v) >= 1 and all(is_transfer_leaderboard_entry(item) for item in v))
+record("telemetry.get_user_transfers", lambda: client.telemetry.get_user_transfers("telemetry peer"), lambda v: is_user_transfer_report(v) and v["count"] >= 1)
+record("telemetry.get_transfer_exceptions", lambda: client.telemetry.get_transfer_exceptions("Download"), lambda v: isinstance(v, list) and all(is_transfer_exception(item) for item in v))
+record("telemetry.get_transfer_exceptions_pareto", lambda: client.telemetry.get_transfer_exceptions_pareto("Download"), lambda v: isinstance(v, list) and all(is_transfer_exception_pareto(item) for item in v))
+record("telemetry.get_most_dl_directories", client.telemetry.get_most_dl_directories, lambda v: isinstance(v, list) and len(v) >= 1 and all(is_directory_report(item) for item in v))
 record("application.restart", client.application.restart, lambda v: v is True)
 record("application.stop", client.application.stop, lambda v: v is True)
 

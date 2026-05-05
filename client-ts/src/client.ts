@@ -44,6 +44,27 @@ export class SlskrClient {
     this.debug = config.debug || false;
   }
 
+  private debugBody(body: any): any {
+    if (body === null || body === undefined) {
+      return body;
+    }
+    if (Array.isArray(body)) {
+      return body.map((item) => this.debugBody(item));
+    }
+    if (typeof body !== 'object') {
+      return body;
+    }
+    const redacted: Record<string, any> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (/(api[-_]?key|authorization|credential|pass(word)?|secret|session|token)/i.test(key)) {
+        redacted[key] = '[REDACTED]';
+      } else {
+        redacted[key] = this.debugBody(value);
+      }
+    }
+    return redacted;
+  }
+
   // =========================================================================
   // Health & Version
   // =========================================================================
@@ -281,7 +302,7 @@ export class SlskrClient {
   ): Promise<T> {
     try {
       if (this.debug) {
-        console.debug(`[slskr] ${method} ${url}`, body);
+        console.debug(`[slskr] ${method} ${url}`, this.debugBody(body));
       }
 
       const headers: Record<string, string> = {

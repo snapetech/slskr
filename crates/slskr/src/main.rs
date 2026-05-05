@@ -4331,29 +4331,41 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/histogram") => {
-            Ok(routing::ok_response(serde_json::json!({
-                "interval": 60,
-                "buckets": [],
-            }).to_string()))
+            let transfers = state.transfers.read().await;
+            let body = slskd_transfer_histogram_report(route.query, &transfers);
+            drop(transfers);
+            Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/leaderboard") => {
-            Ok(routing::ok_response("[]".to_owned()))
+            let transfers = state.transfers.read().await;
+            let body = slskd_transfer_leaderboard_report(route.query, &transfers);
+            drop(transfers);
+            Ok(routing::ok_response(body))
         }
         ("GET", path) if path.starts_with("/api/telemetry/reports/transfers/users/") => {
-            let username = path.rsplit('/').next().unwrap_or("");
+            let username = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
             let transfers = state.transfers.read().await;
-            let body = slskd_user_transfer_report(username, &transfers);
+            let body = slskd_user_transfer_report(&username, &transfers);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions") => {
-            Ok(routing::ok_response("[]".to_owned()))
+            let transfers = state.transfers.read().await;
+            let body = slskd_transfer_exceptions_report(route.query, &transfers);
+            drop(transfers);
+            Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions/pareto") => {
-            Ok(routing::ok_response("[]".to_owned()))
+            let transfers = state.transfers.read().await;
+            let body = slskd_transfer_exceptions_pareto_report(route.query, &transfers);
+            drop(transfers);
+            Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/directories") => {
-            Ok(routing::ok_response("[]".to_owned()))
+            let transfers = state.transfers.read().await;
+            let body = slskd_transfer_directories_report(route.query, &transfers);
+            drop(transfers);
+            Ok(routing::ok_response(body))
         }
         ("GET", "/api/metrics") => {
             let session = state.session.read().await;
@@ -4656,7 +4668,9 @@ async fn route_http_request_with_headers(
                 .map(|root| {
                     serde_json::json!({
                         "localPath": root.label,
+                        "id": root.label,
                         "alias": root.label,
+                        "raw": root.label,
                         "remotePath": root.label,
                         "directories": 0,
                         "files": root.files,
@@ -4668,7 +4682,9 @@ async fn route_http_request_with_headers(
             if roots.is_empty() && !shares.entries.is_empty() {
                 roots.push(serde_json::json!({
                     "localPath": "shares",
+                    "id": "shares",
                     "alias": "shares",
+                    "raw": "shares",
                     "remotePath": "shares",
                     "directories": 0,
                     "files": shares.entries.len(),
@@ -8180,33 +8196,58 @@ async fn route_http_request_with_headers(
 
         ("GET", "/api/shares/contents") => {
             let shares = state.shares.read().await;
-            let json = shares.json();
+            let json = slskd_share_directories_json(&shares.entries, None);
             drop(shares);
             Ok(routing::ok_response(json))
         }
 
         ("GET", path) if path.starts_with("/api/shares/") && path.ends_with("/contents") => {
-            let share_id = path.split('/').nth(3).unwrap_or("unknown");
+            let share_id = decoded_path_segment(path.split('/').nth(3).unwrap_or(""));
             let shares = state.shares.read().await;
-            let json = shares.json();
+            let json = slskd_share_directories_json(&shares.entries, Some(&share_id));
             drop(shares);
-            Ok(routing::ok_response(format!(
-                "{{\"share_id\":\"{}\",\"contents\":{},\"status\":\"ok\"}}",
-                json_escape(share_id),
-                json
-            )))
+            Ok(routing::ok_response(json))
         }
 
         ("GET", path) if path.starts_with("/api/shares/") && path.len() > 12 => {
-            let share_id = &path[12..];
+            let share_id = decoded_path_segment(&path[12..]);
             let shares = state.shares.read().await;
-            let json = shares.summary_json();
+            let (directories, files, bytes) = shares
+                .roots
+                .iter()
+                .find(|root| root.label == share_id)
+                .map(|root| (0_usize, root.files, root.bytes))
+                .unwrap_or_else(|| {
+                    let filtered = shares
+                        .entries
+                        .iter()
+                        .filter(|entry| share_entry_matches_prefix(entry, &share_id))
+                        .collect::<Vec<_>>();
+                    let files = filtered.len();
+                    let bytes = filtered.iter().map(|entry| entry.size).sum::<u64>();
+                    let directories = filtered
+                        .iter()
+                        .map(|entry| virtual_folder(&entry.filename))
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len();
+                    (
+                        directories,
+                        files,
+                        bytes,
+                    )
+                });
             drop(shares);
-            Ok(routing::ok_response(format!(
-                "{{\"id\":\"{}\",\"summary\":{}}}",
-                json_escape(share_id),
-                json
-            )))
+            Ok(routing::ok_response(serde_json::json!({
+                "id": share_id,
+                "alias": share_id,
+                "isExcluded": false,
+                "localPath": share_id,
+                "raw": share_id,
+                "remotePath": share_id,
+                "directories": directories,
+                "files": files,
+                "bytes": bytes,
+            }).to_string()))
         }
 
         ("DELETE", path) if path.starts_with("/api/transfers/") && path.ends_with("/all/completed") => {
@@ -8754,7 +8795,7 @@ fn slskd_application_state_json(
                 "localPath": root.label,
                 "raw": root.label,
                 "remotePath": root.label,
-                "directories": root.files,
+                "directories": 0,
                 "files": root.files,
             })).collect::<Vec<_>>(),
         },
@@ -8847,14 +8888,18 @@ async fn fetch_lidarr_system_status(
         .url
         .as_deref()
         .ok_or("Lidarr URL is not configured")?;
-    validate_integration_base_url(base_url)?;
+    let resolved = validate_integration_base_url(base_url)?;
     let api_key = lidarr
         .api_key
         .as_deref()
         .ok_or("Lidarr API key is not configured")?;
     let url = format!("{}/api/v1/system/status", base_url.trim_end_matches('/'));
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+    let mut client_builder =
+        reqwest::Client::builder().timeout(std::time::Duration::from_secs(lidarr.timeout_seconds));
+    for addr in &resolved.addrs {
+        client_builder = client_builder.resolve(&resolved.host, *addr);
+    }
+    let client = client_builder
         .build()
         .map_err(|error| format!("failed to build Lidarr client: {error}"))?;
     let response = client
@@ -8879,7 +8924,7 @@ async fn fetch_lidarr_wanted_missing(
         .url
         .as_deref()
         .ok_or("Lidarr URL is not configured")?;
-    validate_integration_base_url(base_url)?;
+    let resolved = validate_integration_base_url(base_url)?;
     let api_key = lidarr
         .api_key
         .as_deref()
@@ -8888,8 +8933,12 @@ async fn fetch_lidarr_wanted_missing(
         "{}/api/v1/wanted/missing?pageSize=100",
         base_url.trim_end_matches('/')
     );
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+    let mut client_builder =
+        reqwest::Client::builder().timeout(std::time::Duration::from_secs(lidarr.timeout_seconds));
+    for addr in &resolved.addrs {
+        client_builder = client_builder.resolve(&resolved.host, *addr);
+    }
+    let client = client_builder
         .build()
         .map_err(|error| format!("failed to build Lidarr client: {error}"))?;
     let response = client
@@ -8907,7 +8956,12 @@ async fn fetch_lidarr_wanted_missing(
         .map_err(|error| format!("invalid Lidarr wanted JSON: {error}"))
 }
 
-fn validate_integration_base_url(base_url: &str) -> Result<(), String> {
+struct ResolvedIntegrationTarget {
+    host: String,
+    addrs: Vec<SocketAddr>,
+}
+
+fn validate_integration_base_url(base_url: &str) -> Result<ResolvedIntegrationTarget, String> {
     let parsed = reqwest::Url::parse(base_url)
         .map_err(|error| format!("integration URL is invalid: {error}"))?;
     match parsed.scheme() {
@@ -8925,7 +8979,16 @@ fn validate_integration_base_url(base_url: &str) -> Result<(), String> {
         "1" | "true" | "yes"
     );
     if allow_private {
-        return Ok(());
+        let port = parsed
+            .port_or_known_default()
+            .ok_or_else(|| "integration URL port is unknown".to_owned())?;
+        return Ok(ResolvedIntegrationTarget {
+            host: host.to_owned(),
+            addrs: (host, port)
+                .to_socket_addrs()
+                .map_err(|error| format!("integration URL resolution failed: {error}"))?
+                .collect(),
+        });
     }
     if host.eq_ignore_ascii_case("localhost") {
         return Err("integration URL host is private".to_owned());
@@ -8951,7 +9014,10 @@ fn validate_integration_base_url(base_url: &str) -> Result<(), String> {
     {
         return Err("integration URL resolves to a private address".to_owned());
     }
-    Ok(())
+    Ok(ResolvedIntegrationTarget {
+        host: host.to_owned(),
+        addrs,
+    })
 }
 
 fn is_blocked_integration_ip(ip: IpAddr) -> bool {
@@ -9195,6 +9261,48 @@ fn slskd_user_file_json(entry: &BrowseEntry) -> serde_json::Value {
     })
 }
 
+fn slskd_share_file_json(entry: &FileEntry) -> serde_json::Value {
+    serde_json::json!({
+        "filename": entry.filename,
+        "size": entry.size,
+        "code": 1,
+        "extension": entry.extension,
+        "attributeCount": 0,
+        "attributes": [],
+    })
+}
+
+fn share_entry_matches_prefix(entry: &FileEntry, share_id: &str) -> bool {
+    share_id.is_empty()
+        || share_id == "shares"
+        || entry.filename == share_id
+        || entry
+            .filename
+            .strip_prefix(share_id)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn slskd_share_directories_json(entries: &[FileEntry], share_id: Option<&str>) -> String {
+    let filtered = entries
+        .iter()
+        .filter(|entry| {
+            share_id.map_or(true, |share_id| share_entry_matches_prefix(entry, share_id))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let directories = group_share_entries(&filtered)
+        .into_iter()
+        .map(|(name, files)| {
+            serde_json::json!({
+                "name": name,
+                "fileCount": files.len(),
+                "files": files.iter().map(slskd_share_file_json).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::Value::Array(directories).to_string()
+}
+
 fn slskd_user_directories_json(directory: &str, entries: &[BrowseEntry]) -> String {
     serde_json::Value::Array(vec![serde_json::json!({
         "name": directory,
@@ -9221,7 +9329,7 @@ fn slskd_user_root_json(entries: &[BrowseEntry]) -> String {
 fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "fullname": name,
+        "fullName": name,
         "attributes": "",
         "createdAt": "",
         "modifiedAt": "",
@@ -9246,6 +9354,16 @@ fn slskd_transfer_summary_report(transfers: &TransferQueue) -> String {
         .iter()
         .map(|entry| entry.bytes_transferred)
         .sum::<u64>();
+    let mut by_state = BTreeMap::new();
+    for entry in &transfers.entries {
+        let state = slskd_transfer_state(&entry.status).to_owned();
+        let count = by_state.entry(state).or_insert(0usize);
+        *count += 1;
+    }
+    let by_state = by_state
+        .into_iter()
+        .map(|(state, count)| (state, serde_json::json!({ "count": count })))
+        .collect::<BTreeMap<_, _>>();
     serde_json::json!({
         "count": transfers.entries.len(),
         "downloads": downloads,
@@ -9256,9 +9374,247 @@ fn slskd_transfer_summary_report(transfers: &TransferQueue) -> String {
             "Download": { "count": downloads },
             "Upload": { "count": uploads },
         },
-        "byState": {},
+        "byState": by_state,
     })
     .to_string()
+}
+
+fn slskd_transfer_query_direction(query: Option<&str>) -> Option<u32> {
+    query_params(query.unwrap_or_default())
+        .into_iter()
+        .find_map(|(name, value)| {
+            (name == "direction").then(|| match value.to_ascii_lowercase().as_str() {
+                "download" | "0" => Some(0),
+                "upload" | "1" => Some(1),
+                _ => None,
+            })?
+        })
+}
+
+fn slskd_transfer_query_username(query: Option<&str>) -> Option<String> {
+    query_params(query.unwrap_or_default())
+        .into_iter()
+        .find_map(|(name, value)| (name == "username" && !value.is_empty()).then_some(value))
+}
+
+fn slskd_transfer_query_limit_offset(query: Option<&str>) -> (usize, usize) {
+    let mut limit = DEFAULT_LIST_LIMIT;
+    let mut offset = 0usize;
+    for (name, value) in query_params(query.unwrap_or_default()) {
+        match name.as_str() {
+            "limit" => limit = parse_list_limit(&value),
+            "offset" => offset = value.parse::<usize>().unwrap_or(0),
+            _ => {}
+        }
+    }
+    (limit, offset)
+}
+
+fn slskd_transfer_matches_query(
+    entry: &TransferEntry,
+    direction: Option<u32>,
+    username: Option<&str>,
+) -> bool {
+    direction.map_or(true, |direction| entry.direction == direction)
+        && username.map_or(true, |username| {
+            entry.peer_username.as_deref() == Some(username)
+        })
+}
+
+fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let interval = query_params(query.unwrap_or_default())
+        .into_iter()
+        .find_map(|(name, value)| (name == "interval").then(|| value.parse::<u64>().ok())?)
+        .unwrap_or(60);
+    let direction = slskd_transfer_query_direction(query);
+    let username = slskd_transfer_query_username(query);
+    let entries = transfers
+        .entries
+        .iter()
+        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .collect::<Vec<_>>();
+    let buckets = if entries.is_empty() {
+        Vec::new()
+    } else {
+        let downloads = entries.iter().filter(|entry| entry.direction == 0).count();
+        let uploads = entries.iter().filter(|entry| entry.direction == 1).count();
+        let total_bytes = entries
+            .iter()
+            .map(|entry| entry.bytes_transferred)
+            .sum::<u64>();
+        vec![serde_json::json!({
+            "start": entries.iter().map(|entry| entry.requested_at).min().unwrap_or(0).to_string(),
+            "end": entries.iter().map(|entry| entry.updated_at).max().unwrap_or(0).to_string(),
+            "count": entries.len(),
+            "downloads": downloads,
+            "uploads": uploads,
+            "totalBytes": total_bytes,
+        })]
+    };
+    serde_json::json!({
+        "interval": interval,
+        "buckets": buckets,
+    })
+    .to_string()
+}
+
+fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let direction = slskd_transfer_query_direction(query);
+    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let mut by_user: BTreeMap<String, (usize, u64)> = BTreeMap::new();
+    for entry in transfers
+        .entries
+        .iter()
+        .filter(|entry| slskd_transfer_matches_query(entry, direction, None))
+    {
+        let username = entry.peer_username.clone().unwrap_or_default();
+        let bytes = entry.size.unwrap_or(entry.bytes_transferred);
+        let summary = by_user.entry(username).or_insert((0, 0));
+        summary.0 += 1;
+        summary.1 = summary.1.saturating_add(bytes);
+    }
+    let mut rows = by_user
+        .into_iter()
+        .map(|(username, (count, total_bytes))| {
+            serde_json::json!({
+                "username": username,
+                "count": count,
+                "totalBytes": total_bytes,
+                "averageSpeed": 0.0,
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        right["totalBytes"]
+            .as_u64()
+            .cmp(&left["totalBytes"].as_u64())
+            .then_with(|| right["count"].as_u64().cmp(&left["count"].as_u64()))
+            .then_with(|| left["username"].as_str().cmp(&right["username"].as_str()))
+    });
+    serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
+}
+
+fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let direction = slskd_transfer_query_direction(query);
+    let username = slskd_transfer_query_username(query);
+    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let rows = transfers
+        .entries
+        .iter()
+        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .filter(|entry| {
+            matches!(
+                slskd_transfer_state(&entry.status),
+                "Cancelled" | "Failed" | "Rejected"
+            )
+        })
+        .skip(offset)
+        .take(limit)
+        .map(|entry| {
+            serde_json::json!({
+                "username": entry.peer_username.as_deref().unwrap_or_default(),
+                "direction": if entry.direction == 0 { "Download" } else { "Upload" },
+                "filename": entry.filename,
+                "state": slskd_transfer_state(&entry.status),
+                "exception": entry.reason.as_deref().unwrap_or(slskd_transfer_state(&entry.status)),
+                "requestedAt": entry.requested_at.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::Value::Array(rows).to_string()
+}
+
+fn slskd_transfer_exceptions_pareto_report(
+    query: Option<&str>,
+    transfers: &TransferQueue,
+) -> String {
+    let direction = slskd_transfer_query_direction(query);
+    let username = slskd_transfer_query_username(query);
+    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let mut grouped: BTreeMap<String, (usize, BTreeMap<String, ()>)> = BTreeMap::new();
+    for entry in transfers
+        .entries
+        .iter()
+        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .filter(|entry| {
+            matches!(
+                slskd_transfer_state(&entry.status),
+                "Cancelled" | "Failed" | "Rejected"
+            )
+        })
+    {
+        let exception = entry
+            .reason
+            .clone()
+            .unwrap_or_else(|| slskd_transfer_state(&entry.status).to_owned());
+        let group = grouped.entry(exception).or_insert((0, BTreeMap::new()));
+        group.0 += 1;
+        group
+            .1
+            .insert(entry.peer_username.clone().unwrap_or_default(), ());
+    }
+    let mut rows = grouped
+        .into_iter()
+        .map(|(exception, (count, users))| {
+            serde_json::json!({
+                "exception": exception,
+                "count": count,
+                "distinctUsers": users.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        right["count"]
+            .as_u64()
+            .cmp(&left["count"].as_u64())
+            .then_with(|| left["exception"].as_str().cmp(&right["exception"].as_str()))
+    });
+    serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
+}
+
+fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let username = slskd_transfer_query_username(query);
+    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let mut grouped: BTreeMap<String, (usize, u64, BTreeMap<String, ()>)> = BTreeMap::new();
+    for entry in transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0)
+        .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
+    {
+        let directory = Path::new(&entry.filename)
+            .parent()
+            .and_then(|path| path.to_str())
+            .filter(|path| !path.is_empty())
+            .unwrap_or("")
+            .replace('\\', "/");
+        let bytes = entry.size.unwrap_or(entry.bytes_transferred);
+        let group = grouped.entry(directory).or_insert((0, 0, BTreeMap::new()));
+        group.0 += 1;
+        group.1 = group.1.saturating_add(bytes);
+        group
+            .2
+            .insert(entry.peer_username.clone().unwrap_or_default(), ());
+    }
+    let mut rows = grouped
+        .into_iter()
+        .map(|(directory, (count, total_bytes, users))| {
+            serde_json::json!({
+                "path": directory,
+                "directory": directory,
+                "count": count,
+                "totalBytes": total_bytes,
+                "distinctUsers": users.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        right["count"]
+            .as_u64()
+            .cmp(&left["count"].as_u64())
+            .then_with(|| left["path"].as_str().cmp(&right["path"].as_str()))
+    });
+    serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
 }
 
 fn slskd_user_transfer_report(username: &str, transfers: &TransferQueue) -> String {
@@ -14295,6 +14651,145 @@ mod tests {
         assert!(user_directory_json.is_array());
         assert_eq!(user_directory_json[0]["name"], "Virtual");
 
+        let user_endpoint =
+            super::route_http_request("GET", "/api/v0/users/peer%201/endpoint", None, "", &state)
+                .await
+                .expect("user endpoint");
+        let user_endpoint_json =
+            serde_json::from_str::<serde_json::Value>(&user_endpoint.body).unwrap();
+        assert_eq!(user_endpoint_json["username"], "peer 1");
+        assert_eq!(user_endpoint_json["addressFamily"], "IPv4");
+
+        let browse_status = super::route_http_request(
+            "GET",
+            "/api/v0/users/peer%201/browse/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("browse status");
+        let browse_status_json =
+            serde_json::from_str::<serde_json::Value>(&browse_status.body).unwrap();
+        assert_eq!(browse_status_json["username"], "peer 1");
+        assert!(browse_status_json["bytesTransferred"].is_number());
+
+        let user_status =
+            super::route_http_request("GET", "/api/v0/users/peer%201/status", None, "", &state)
+                .await
+                .expect("user status");
+        let user_status_json =
+            serde_json::from_str::<serde_json::Value>(&user_status.body).unwrap();
+        assert_eq!(user_status_json["presence"], "Offline");
+
+        let shares = super::route_http_request("GET", "/api/v0/shares", None, "", &state)
+            .await
+            .expect("shares");
+        let shares_json = serde_json::from_str::<serde_json::Value>(&shares.body).unwrap();
+        let first_share = shares_json
+            .as_object()
+            .and_then(|object| object.values().next())
+            .and_then(|value| value.as_array())
+            .and_then(|array| array.first())
+            .expect("first share");
+        assert!(first_share["id"].is_string());
+        assert!(first_share["raw"].is_string());
+
+        let share_contents =
+            super::route_http_request("GET", "/api/v0/shares/contents", None, "", &state)
+                .await
+                .expect("share contents");
+        let share_contents_json =
+            serde_json::from_str::<serde_json::Value>(&share_contents.body).unwrap();
+        assert!(share_contents_json.is_array());
+
+        let virtual_share =
+            super::route_http_request("GET", "/api/v0/shares/Virtual", None, "", &state)
+                .await
+                .expect("virtual share");
+        let virtual_share_json =
+            serde_json::from_str::<serde_json::Value>(&virtual_share.body).unwrap();
+        assert_eq!(virtual_share_json["id"], "Virtual");
+        assert_eq!(virtual_share_json["files"], 1);
+
+        let download_dir = super::route_http_request(
+            "GET",
+            "/api/v0/files/downloads/directories",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("download dir");
+        let download_dir_json =
+            serde_json::from_str::<serde_json::Value>(&download_dir.body).unwrap();
+        assert!(download_dir_json["fullName"].is_string());
+        assert!(download_dir_json.get("fullname").is_none());
+
+        let telemetry_transfer = super::route_http_request(
+            "POST",
+            "/api/v0/transfers/downloads/telemetry%20peer",
+            None,
+            r#"[{"filename":"Telemetry/Album/Track.flac","size":321}]"#,
+            &state,
+        )
+        .await
+        .expect("telemetry transfer");
+        assert_eq!(telemetry_transfer.status, "200 OK");
+
+        let leaderboard = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/leaderboard?direction=Download",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("leaderboard");
+        let leaderboard_json =
+            serde_json::from_str::<serde_json::Value>(&leaderboard.body).unwrap();
+        let telemetry_leader = leaderboard_json
+            .as_array()
+            .and_then(|rows| {
+                rows.iter()
+                    .find(|row| row["username"].as_str() == Some("telemetry peer"))
+            })
+            .expect("telemetry leaderboard row");
+        assert_eq!(telemetry_leader["totalBytes"], 321);
+
+        let user_transfers = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/users/telemetry%20peer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("user transfer report");
+        let user_transfers_json =
+            serde_json::from_str::<serde_json::Value>(&user_transfers.body).unwrap();
+        assert_eq!(user_transfers_json["username"], "telemetry peer");
+        assert_eq!(user_transfers_json["count"], 1);
+
+        let directory_report = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/directories",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("directory report");
+        let directory_report_json =
+            serde_json::from_str::<serde_json::Value>(&directory_report.body).unwrap();
+        assert!(directory_report_json
+            .as_array()
+            .and_then(|rows| {
+                rows.iter()
+                    .find(|row| row["path"].as_str() == Some("Telemetry/Album"))
+            })
+            .is_some());
+
         let pareto = super::route_http_request(
             "GET",
             "/api/v0/telemetry/reports/transfers/exceptions/pareto?direction=Download",
@@ -17126,6 +17621,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(health.status, "200 OK");
+
+        let session_enabled =
+            super::route_http_request("GET", "/api/v0/session/enabled", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(session_enabled.status, "200 OK");
+        assert_eq!(session_enabled.body, "true");
 
         let capabilities =
             super::route_http_request("GET", "/api/v0/capabilities", None, "", &state)

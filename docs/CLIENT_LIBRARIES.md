@@ -226,11 +226,12 @@ print(client.searches.get_all())
 Run the local compatibility smoke against a temporary authenticated daemon:
 
 ```bash
-scripts/run-slskd-api-compat-smoke.sh
+SLSKR_SLSKD_API_SMOKE_TOKEN=slskd-api-smoke-token scripts/run-slskd-api-compat-smoke.sh
 ```
 
 Useful overrides:
 
+- `SLSKR_SLSKD_API_SMOKE_TOKEN`: required bearer token for the temporary authenticated daemon.
 - `SLSKD_API_VERSION`: Python `slskd-api` package version, default `0.2.4`.
 - `SLSKD_API_PYTHONPATH`: preinstalled package directory to reuse instead of installing.
 - `SLSKR_SLSKD_API_SMOKE_PORT`: fixed local daemon port.

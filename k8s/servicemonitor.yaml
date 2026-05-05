@@ -5,6 +5,7 @@ metadata:
   namespace: slskr
   labels:
     app: slskr-api
+    prometheus: "true"
 spec:
   selector:
     matchLabels:

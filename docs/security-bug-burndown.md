@@ -1,0 +1,67 @@
+# Security And Bug Burn-Down
+
+Date: 2026-05-05
+
+Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React web UI, standalone dashboard, TypeScript/Python/Go clients, scripts, CI, release, and Kubernetes manifests.
+
+## Fixed In This Pass
+
+| Severity | Area | Finding | Status |
+| --- | --- | --- | --- |
+| High | Backend integrations | Lidarr SSRF validation resolved hosts but did not pin the resolved address for the outbound request, leaving DNS rebinding risk between validation and request. | Fixed by pinning resolved Lidarr addresses into the reqwest client. |
+| High | CI/release | CI only ran Rust checks, so web, dashboard, TypeScript client, wasm, and advisory regressions could merge. | Fixed by expanding CI to the full release-gate surface. |
+| High | Release provenance | Release publishing produced checksums but no GitHub artifact attestations. | Fixed with build provenance attestations and required permissions. |
+| Medium | Dashboard auth | Standalone dashboard persisted API keys in `localStorage`. | Fixed by keeping API keys in `sessionStorage`; API URL remains persistent. |
+| Medium | Client logging | TypeScript client debug logging printed request bodies, which can include secrets. | Fixed with recursive secret-field redaction. |
+| Medium | Test script auth | slskd API compatibility smoke had a deterministic default API token. | Fixed by requiring `SLSKR_SLSKD_API_SMOKE_TOKEN`. |
+| Medium | API auth bootstrap | `/api/session/enabled` could require auth even though login bootstrap calls it before a token exists. | Fixed by making it explicitly public and adding route coverage. |
+| Medium | Frontend session handling | Web session check masked network failures with a secondary `error.response.status` TypeError. | Fixed with optional response handling and a regression test. |
+| Medium | Kubernetes RBAC | The app ServiceAccount had pod/configmap read/list/watch permissions that the deployment does not need. | Fixed by removing the unused Role and RoleBinding. |
+| Medium | Monitoring | ServiceMonitor labels did not match the Prometheus selector in `prometheus-values.yaml`. | Fixed by adding `prometheus: "true"`. |
+| Low | Docs | Security docs said the dashboard saves API tokens in a cookie, which no longer describes the preferred browser behavior. | Fixed to document bearer/session-storage behavior and legacy cookie compatibility. |
+| Low | Release setup | Release gate setup cached only the web lockfile and did not install the wasm target in the gate job. | Fixed by adding wasm and all npm lockfiles. |
+| Low | API parity | slskd transfer report routes referenced missing helpers in this checkout. | Fixed by preserving the routes and adding report helper implementations. |
+
+## Open Burn-Down
+
+| Severity | Area | Finding | Proposed fix |
+| --- | --- | --- | --- |
+| High | Kubernetes runtime | `slskr-api` runs three replicas against a daemon that owns a live Soulseek session and local in-memory/session state. | Make the API deployment single-replica by default or split stateless API from stateful worker/session ownership. |
+| High | Kubernetes storage | `/data` is `emptyDir`, so API state is lost on pod restart and inconsistent across replicas. | Use a PVC for stateful mode, or make persistence explicitly disabled in the manifest. |
+| High | Browser token persistence | Main React web UI still supports `rememberMe`, which stores the bearer token in `localStorage`. | Prefer session-only auth by default; gate persistent token storage behind an explicit warning or remove it. |
+| High | Legacy cookie auth | Backend still accepts `slskr.session` cookies for compatibility. CSRF checks reduce risk, but cookies widen the browser attack surface. | Keep for parity only if needed; otherwise add a config flag to disable cookie auth while keeping bearer/API-key auth. |
+| High | CSP | Static web responses require `'unsafe-inline'` and `wasm-unsafe-eval`. | Move inline scripts/styles to bundled assets or add nonce/hash generation. |
+| High | External process launch | `/api/player/external-visualizer/launch` can trigger a configured local command. It is auth protected but powerful. | Add an allowlist, audit event, and explicit config flag that cannot be changed from the UI. |
+| Medium | Webhook registration | Webhook URL validation happens at delivery/test time, not at registration. | Validate and reject blocked webhook URLs during `POST /api/webhooks` and admin webhook creation. |
+| Medium | Webhook secret lifecycle | Webhook creation returns the secret in the response. This is acceptable as one-time display, but undocumented. | Document one-time secret return and avoid ever returning it from list/detail routes. |
+| Medium | CI tooling | Local environment lacks `actionlint`, `shellcheck`, `semgrep`, and `trivy`, so the gate cannot run those classes of checks locally. | Add optional gate steps that run when installed, and CI setup that installs the chosen tools. |
+| Medium | Python client | Python client has no lint/type/test/audit gate. | Add `ruff`, `mypy` or pyright, pytest smoke tests, and dependency audit. |
+| Medium | Go client | Go client has no `go test`, `govulncheck`, or staticcheck gate. | Add Go CI steps and client examples compile checks. |
+| Medium | Release artifacts | Release archives include the main web build but not standalone dashboard artifacts/images. | Decide whether standalone dashboard is supported as a release asset; if yes, build and publish it explicitly. |
+| Medium | Docs | `docs/http-api-deployment.md` still contains stale config names, `rust:latest`, `slskr:latest`, and wildcard CORS examples. | Rewrite or archive that doc so it cannot be used as production guidance. |
+| Medium | OpenAPI drift | API parity work changes response shapes faster than OpenAPI/docs can track. | Add generated OpenAPI/doc drift checks to CI and fail when checked-in docs differ. |
+| Medium | Compatibility smoke | slskd API compatibility smoke is opt-in because it needs external Python package install and live-style behavior. | Keep opt-in locally, but run it in scheduled CI with explicit secrets or hermetic fixtures. |
+| Medium | Rate limiting | Rate limiting keys by raw peer socket address and token digest; deployments behind proxies may collapse clients into one IP. | Add trusted proxy parsing for `Forwarded`/`X-Forwarded-For` with an explicit trusted proxy allowlist. |
+| Medium | Auth disabled escape hatch | `SLSKR_AUTH_DISABLED=true` can intentionally expose protected APIs on non-loopback binds. | Emit a loud startup warning and expose a health warning when auth is disabled on non-loopback. |
+| Medium | Config mutability | Several option/config compatibility routes return success without persistent mutation. | Mark no-op compatibility endpoints clearly or implement persistence with validation. |
+| Medium | Path deletion parity | Download/incomplete file deletion compatibility routes currently return success stubs. | Implement scoped deletion under the download root or return explicit not-implemented status. |
+| Medium | Metrics docs | Kubernetes probes and ServiceMonitor assume `/api/metrics`; metrics route exists but docs and labels are inconsistent across files. | Normalize metric path labels and update docs. |
+| Low | Rust module hygiene | `#![allow(dead_code)]` appears at crate/module level in multiple Rust modules. | Remove broad allowances and gate intentionally unused compatibility helpers behind tests/features. |
+| Low | Script dependencies | Release/live scripts assume Node, Python, pip, curl, tmux, sudo, network namespace tools, and WireGuard tools without a preflight summary. | Add `scripts/check-dev-tooling.sh` and call it from relevant live scripts. |
+| Low | Test noise | Web tests emit repeated jsdom navigation warnings. | Mock `window.location.assign/reload` centrally in test setup. |
+| Low | Deprecated npm transitive deps | Web install warns on deprecated `lodash.get`, old core-js, and Babel proposal packages. | Upgrade or replace transitive owners where practical. |
+| Low | GitHub workflow lint | Workflows are valid YAML but not actionlint-verified locally. | Add actionlint to CI and local gate. |
+| Low | Kubernetes NetworkPolicy | Manifests do not define ingress/egress NetworkPolicies. | Add default-deny plus explicit ingress from ingress controller and metrics scraper, and scoped egress. |
+| Low | Kubernetes secrets | Manifest references `slskr-secrets` and `grafana-admin` but does not provide templates. | Add example Secret manifests with placeholder values or docs that create them. |
+| Low | Release tag policy | Release workflow triggers on `release-*`, not semantic `v*` tags. | Decide final tag convention and document/enforce it in release docs. |
+| Low | Archive verification | `verify-release-artifacts.sh` extracts zip files without path traversal checks. | Use safe zip extraction that rejects absolute paths and `..` entries. |
+
+## Scans Run
+
+- `cargo audit`
+- `npm --prefix web audit --audit-level=moderate`
+- `npm --prefix dashboard audit --audit-level=moderate`
+- `npm --prefix client-ts audit --audit-level=moderate`
+- `scripts/check-public-posture.sh`
+- Source grep passes for secrets, auth/CORS/CSRF, process execution, path handling, URL fetches, docs/deployment exposure, and frontend storage/navigation sinks.
+- `scripts/run-release-gate.sh` passed before the final Lidarr DNS-pinning fix; focused Rust/frontend checks passed after that fix.

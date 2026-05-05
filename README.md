@@ -41,7 +41,7 @@ It is built for operators who want a private, scriptable music-sharing client th
 - Download and upload views with grouped transfers, progress, speed, queue position checks, retry/cancel/remove actions, accelerated download mode, and auto-replace controls.
 - Share indexing with virtual paths, scan limits, hidden-file/symlink policy, extension summaries, deterministic catalog APIs, and safe file listing that avoids leaking host paths.
 - Direct, obfuscated, and indirect peer paths for messaging, browsing, and file-transfer probes.
-- Bearer-token API authentication, same-site browser session cookies, CSRF origin checks for mutating browser requests, loopback-safe defaults, and non-loopback exposure guards.
+- Bearer-token API authentication, automation-compatible API-key headers, CSRF origin checks for mutating browser requests, loopback-safe defaults, and non-loopback exposure guards.
 - WebSocket event feed plus bounded event polling for search, transfer, share, user, browse, message, room, and session workflows.
 - Health, metrics, telemetry, release/build metadata, configuration inspection, and live smoke automation.
 - TypeScript, Python, Go, and Rust client surfaces for API automation and validation.
@@ -220,7 +220,7 @@ Core endpoint groups:
 Run the local slskd automation-client compatibility smoke with:
 
 ```bash
-scripts/run-slskd-api-compat-smoke.sh
+SLSKR_SLSKD_API_SMOKE_TOKEN=slskd-api-smoke-token scripts/run-slskd-api-compat-smoke.sh
 ```
 
 Example search request:
@@ -368,7 +368,7 @@ Default behavior is conservative:
 
 - `slskr serve` binds to loopback by default.
 - Protected API routes accept `Authorization: Bearer <token>` or `X-API-Key: <token>` when `SLSKR_API_TOKEN` is configured.
-- The browser dashboard can use a same-site `slskr.session` cookie for protected APIs.
+- Browser clients use bearer-token headers for protected APIs and should avoid long-lived token persistence. Legacy same-site `slskr.session` cookie auth remains accepted for compatibility.
 - Mutating browser-origin API requests are checked against `Origin`/`Referer` to reduce CSRF exposure.
 - Non-loopback HTTP binds require auth unless `SLSKR_AUTH_DISABLED=true` is explicitly set.
 - Health, version, and public capability endpoints remain available for lightweight checks.

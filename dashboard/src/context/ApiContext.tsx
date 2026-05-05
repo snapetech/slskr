@@ -1,5 +1,5 @@
 import React, { createContext, useContext, ReactNode } from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useLocalStorage, useSessionStorage } from '../hooks/useLocalStorage';
 
 interface ApiContextType {
   apiUrl: string;
@@ -22,7 +22,7 @@ interface ApiProviderProps {
  */
 export function ApiProvider({ children }: ApiProviderProps) {
   const [apiUrl, setApiUrl] = useLocalStorage('apiUrl', 'http://localhost:8080');
-  const [apiKey, setApiKey] = useLocalStorage<string | null>('apiKey', null);
+  const [apiKey, setApiKey] = useSessionStorage<string | null>('apiKey', null);
   const [isConnected, setIsConnected] = React.useState(false);
 
   const value: ApiContextType = {

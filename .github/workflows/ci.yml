@@ -14,8 +14,38 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            dashboard/package-lock.json
+            client-ts/package-lock.json
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
       - run: scripts/check-public-posture.sh
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo check -p slskr-web --target wasm32-unknown-unknown
       - run: cargo test --workspace
+      - run: cargo audit
+      - run: npm --prefix web ci
+      - run: npm --prefix web audit --audit-level=moderate
+      - run: npm --prefix web run lint
+      - run: npm --prefix web test
+      - run: npm --prefix web run build
+      - run: node web/scripts/verify-build-output.mjs
+      - run: node web/scripts/smoke-subpath-build.mjs
+      - run: npm --prefix dashboard ci
+      - run: npm --prefix dashboard audit --audit-level=moderate
+      - run: npm --prefix dashboard run type-check
+      - run: npm --prefix dashboard run lint
+      - run: npm --prefix dashboard test
+      - run: npm --prefix dashboard run build
+      - run: npm --prefix client-ts ci --ignore-scripts
+      - run: npm --prefix client-ts audit --audit-level=moderate
+      - run: npm --prefix client-ts run lint
+      - run: npm --prefix client-ts run build

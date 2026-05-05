@@ -53,7 +53,7 @@ This is a behavioral compatibility commitment rather than a source-code lineage 
 
 The first app shell exposes:
 
-- `GET /`: bundled local dashboard for session, listener, share, search, browse, message, room, user, catalog, and transfer projections, with controls for session connect/ping/disconnect/privilege-check, starting/completing searches, watching/unwatching users, requesting browse, rescanning shares, queueing/updating transfer projections with explicit progress bytes, sending/acknowledging private messages, joining/leaving rooms, syncing the server room list, sending room messages with an explicit sender, filtering search/transfer/catalog/message/room/browse tables, refreshing projection tables, and saving the configured API token as a same-site browser session cookie for protected APIs
+- `GET /`: bundled local dashboard for session, listener, share, search, browse, message, room, user, catalog, and transfer projections, with controls for session connect/ping/disconnect/privilege-check, starting/completing searches, watching/unwatching users, requesting browse, rescanning shares, queueing/updating transfer projections with explicit progress bytes, sending/acknowledging private messages, joining/leaving rooms, syncing the server room list, sending room messages with an explicit sender, filtering search/transfer/catalog/message/room/browse tables, refreshing projection tables, and using the configured API token as an in-memory browser bearer token for protected APIs
 - `GET /api/health`: service health JSON
 - `GET /api/v0/health`: versioned alias for service health JSON
 - `GET /api/version`: client name and version JSON
@@ -159,7 +159,7 @@ Initial configuration sources:
 - `SLSKR_TRANSFER_MAX_ACTIVE` for max concurrently active transfer records, including peer lookup/negotiation and inbound accepted transfers; defaults to `3`. Set to `0` to block transfer starts and inbound transfer acceptance.
 - `SLSKR_TRANSFER_ALLOW_INBOUND` controls whether peer `TransferRequest`s for local shares are accepted; defaults to `true`.
 - `SLSKR_TRANSFER_ALLOW_OUTBOUND` controls whether API-started peer transfers are allowed to begin; defaults to `true`.
-- `SLSKR_API_TOKEN` for HTTP API auth. If set, protected API routes accept `Authorization: Bearer <token>`, automation-compatible `X-API-Key: <token>`, or the dashboard's same-site `slskr.session` cookie.
+- `SLSKR_API_TOKEN` for HTTP API auth. If set, protected API routes accept `Authorization: Bearer <token>`, automation-compatible `X-API-Key: <token>`, or legacy same-site `slskr.session` cookie auth for compatibility. Browser clients should keep tokens in memory or session storage rather than long-lived persistent storage.
 - `SLSKR_API_RATE_LIMIT_ANONYMOUS` and `SLSKR_API_RATE_LIMIT_AUTHENTICATED` tune per-window HTTP API request limits; defaults are `1000` and `5000`.
 - `SLSKR_AUTH_DISABLED` to explicitly disable HTTP API auth. Loopback-only binds default to disabled when no token is configured; non-loopback binds require a token unless this is set.
 - `SLSKR_PERSISTENCE_ENABLED` enables the default-off SQLite persistence path. Search create/list hydration is wired; transfer projection state is also restart-safe through `transfer-state.json`. Message and room projection persistence remain event/projection work items.
@@ -185,7 +185,7 @@ Default `slskr serve` binds to loopback. Before exposing it outside localhost, a
 - explicit CORS defaults
 - reverse-proxy guidance
 
-Current behavior: bearer-token, `X-API-Key`, and same-site dashboard cookie auth are available for protected API routes. Auth is required automatically for non-loopback HTTP binds unless `SLSKR_AUTH_DISABLED=true` is set. When auth is enabled, unsafe API methods reject cross-site browser requests with foreign `Origin` or `Referer` headers. `GET /`, `GET /api/health`, `GET /api/version`, and `GET /api/v0/capabilities` remain public health/version/capability surfaces.
+Current behavior: bearer-token, `X-API-Key`, and legacy same-site dashboard cookie auth are available for protected API routes. Auth is required automatically for non-loopback HTTP binds unless `SLSKR_AUTH_DISABLED=true` is set. When auth is enabled, unsafe API methods reject cross-site browser requests with foreign `Origin` or `Referer` headers. `GET /`, `GET /api/health`, `GET /api/version`, `GET /api/session/enabled`, and `GET /api/v0/capabilities` remain public health/version/capability surfaces.
 
 ## Third-Party Authorization UX
 

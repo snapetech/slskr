@@ -66,4 +66,13 @@ describe('session', () => {
       'server-token-must-not-be-used',
     );
   });
+
+  it('rethrows network session-check errors without masking them', async () => {
+    setToken(sessionStorage, 'jwt-token');
+    const error = new Error('network down');
+    api.get.mockRejectedValue(error);
+
+    await expect(session.check()).rejects.toThrow('network down');
+    expect(sessionStorage.getItem('slskr-token')).toBe('jwt-token');
+  });
 });

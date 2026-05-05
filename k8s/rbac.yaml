@@ -3,30 +3,3 @@ kind: ServiceAccount
 metadata:
   name: slskr
   namespace: slskr
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: slskr
-  namespace: slskr
-rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: slskr
-  namespace: slskr
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: slskr
-subjects:
-- kind: ServiceAccount
-  name: slskr
-  namespace: slskr
