@@ -71,6 +71,7 @@ use config::redact_username;
 const TRANSFER_PROGRESS_CHUNK_BYTES: usize = 64 * 1024;
 const EVENT_HISTORY_LIMIT: usize = 500;
 const DEFAULT_LIST_LIMIT: usize = 500;
+const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 
 #[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
@@ -947,7 +948,6 @@ impl EventStore {
     }
 
     #[allow(dead_code)]
-    #[allow(dead_code)]
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
@@ -1022,7 +1022,6 @@ struct TransferEntry {
 }
 
 impl TransferEntry {
-    #[allow(dead_code)]
     #[allow(dead_code)]
     fn json(&self) -> String {
         format!(
@@ -4589,9 +4588,10 @@ async fn route_http_request_with_headers(
 
           // ADDITIONAL MISSING PATCH ENDPOINTS (Phase 5)
           ("PATCH", "/api/options") => {
-              Ok(routing::ok_response(
-                  "{\"status\":\"accepted\",\"persisted\":false,\"note\":\"runtime option mutation is not enabled\"}".to_owned(),
-              ))
+              match slskd_options_mutation_response(body) {
+                  Ok(json) => Ok(routing::ok_response(json)),
+                  Err(error) => Ok(routing::bad_request_response(&error)),
+              }
           }
 
           ("PATCH", path) if path.starts_with("/api/library/health/issues/") && path.len() > 27 => {
@@ -6451,11 +6451,7 @@ async fn route_http_request_with_headers(
         }
         // WEBUI PARITY: Options/Config read-write endpoints
         ("GET", "/api/options") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"options":{},"version":"0.1.0"}"#.to_owned(),
-            })
+            Ok(routing::ok_response(slskd_options_json(&state.config)))
         }
         ("GET", "/api/options/startup") => {
             Ok(routing::ok_response(state.config.sanitized_json()))
@@ -6483,9 +6479,10 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("PUT", "/api/options") => {
-            Ok(routing::ok_response(
-                "{\"status\":\"accepted\",\"persisted\":false,\"restart_required\":false}".to_owned(),
-            ))
+            match slskd_options_mutation_response(body) {
+                Ok(json) => Ok(routing::ok_response(json)),
+                Err(error) => Ok(routing::bad_request_response(&error)),
+            }
         }
         // HEALTH & DIAGNOSTICS ENDPOINTS
         ("GET", "/api/v0/health/detailed") => {
@@ -8740,6 +8737,14 @@ fn web_static_file_for_request(path: &str) -> Option<(PathBuf, &'static str)> {
     }
 
     let root = web_build_root()?;
+    web_static_file_for_request_under_root(&root, path)
+}
+
+fn web_static_file_for_request_under_root(
+    root: &Path,
+    path: &str,
+) -> Option<(PathBuf, &'static str)> {
+    let canonical_root = root.canonicalize().ok()?;
     let path_without_query = path.split_once('?').map_or(path, |(path, _)| path);
     let relative = path_without_query.trim_start_matches('/');
     let requested = if relative.is_empty() {
@@ -8766,15 +8771,20 @@ fn web_static_file_for_request(path: &str) -> Option<(PathBuf, &'static str)> {
     };
 
     let file = root.join(requested);
-    file.is_file().then(|| {
-        let content_type = web_static_content_type(&file);
-        (file, content_type)
-    })
+    if !file.is_file() {
+        return None;
+    }
+    let canonical_file = file.canonicalize().ok()?;
+    if !canonical_file.starts_with(canonical_root) {
+        return None;
+    }
+    let content_type = web_static_content_type(&file);
+    Some((canonical_file, content_type))
 }
 
 fn read_web_index_html() -> Option<String> {
     let (path, _) = web_static_file_for_request("/")?;
-    fs::read_to_string(path).ok()
+    read_bounded_web_static_string(&path).ok()
 }
 
 fn security_headers() -> &'static str {
@@ -8782,6 +8792,22 @@ fn security_headers() -> &'static str {
 Referrer-Policy: no-referrer\r\n\
 Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:\r\n\
 Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n"
+}
+
+fn read_bounded_web_static_file(file: &Path) -> Result<Vec<u8>, String> {
+    let metadata = fs::metadata(file).map_err(|error| error.to_string())?;
+    if metadata.len() > MAX_WEB_STATIC_BYTES {
+        return Err(format!(
+            "static asset is too large: {} bytes, max is {MAX_WEB_STATIC_BYTES}",
+            metadata.len()
+        ));
+    }
+    fs::read(file).map_err(|error| error.to_string())
+}
+
+fn read_bounded_web_static_string(file: &Path) -> Result<String, String> {
+    let bytes = read_bounded_web_static_file(file)?;
+    String::from_utf8(bytes).map_err(|error| format!("static asset is not UTF-8: {error}"))
 }
 
 async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
@@ -8793,7 +8819,7 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     let Some((file, content_type)) = web_static_file_for_request(path) else {
         return Ok(None);
     };
-    let bytes = fs::read(&file).map_err(|error| error.to_string())?;
+    let bytes = read_bounded_web_static_file(&file)?;
     let connection_header = if keep_alive { "keep-alive" } else { "close" };
     let headers = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: {connection_header}\r\n{}{}\r\n",
@@ -8855,6 +8881,37 @@ fn slskd_version_json() -> serde_json::Value {
         "isCanary": false,
         "isDevelopment": cfg!(debug_assertions),
     })
+}
+
+fn slskd_options_json(config: &AppConfig) -> String {
+    let options = serde_json::from_str::<serde_json::Value>(&config.sanitized_json())
+        .unwrap_or_else(|_| serde_json::json!({}));
+    serde_json::json!({
+        "options": options,
+        "version": APP_VERSION,
+        "persisted": true,
+        "readOnly": true,
+        "runtimeMutationEnabled": false,
+    })
+    .to_string()
+}
+
+fn slskd_options_mutation_response(body: &str) -> Result<String, String> {
+    let payload = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|error| format!("invalid options JSON: {error}"))?;
+    let Some(object) = payload.as_object() else {
+        return Err("options payload must be a JSON object".to_owned());
+    };
+    let accepted_keys = object.keys().cloned().collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "status": "accepted",
+        "persisted": false,
+        "restart_required": false,
+        "runtimeMutationEnabled": false,
+        "acceptedKeys": accepted_keys,
+        "note": "runtime option mutation is not enabled",
+    })
+    .to_string())
 }
 
 fn slskd_server_state_json(session: &SessionSnapshot, config: &AppConfig) -> serde_json::Value {
@@ -14613,6 +14670,105 @@ mod tests {
         assert!(response.body.contains("data-room-action=\"leave\""));
     }
 
+    #[test]
+    fn web_static_resolver_stays_under_build_root() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-web-static-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("index.html"), "<html></html>").unwrap();
+        std::fs::write(root.join("assets").join("app.js"), "console.log('ok')").unwrap();
+
+        let (asset, content_type) =
+            super::web_static_file_for_request_under_root(&root, "/assets/app.js")
+                .expect("asset resolved");
+        assert!(asset.ends_with("assets/app.js"));
+        assert_eq!(content_type, "text/javascript; charset=utf-8");
+
+        let (fallback, _) = super::web_static_file_for_request_under_root(&root, "/missing-route")
+            .expect("SPA fallback resolved");
+        assert!(fallback.ends_with("index.html"));
+        assert!(super::web_static_file_for_request_under_root(&root, "/../Cargo.toml").is_none());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn web_static_resolver_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-web-static-symlink-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "slskr-web-static-outside-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.html"), "<html></html>").unwrap();
+        std::fs::write(&outside, "secret").unwrap();
+        symlink(&outside, root.join("leak.txt")).unwrap();
+
+        assert!(super::web_static_file_for_request_under_root(&root, "/leak.txt").is_none());
+
+        let _ = std::fs::remove_file(outside);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn web_static_reader_rejects_oversized_assets() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-web-static-large-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(super::MAX_WEB_STATIC_BYTES + 1).unwrap();
+
+        let error = super::read_bounded_web_static_file(&path)
+            .expect_err("oversized static asset should be rejected");
+        assert!(error.contains("static asset is too large"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn web_static_string_reader_rejects_invalid_utf8() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-web-static-invalid-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(&path, [0xff_u8]).unwrap();
+
+        let error = super::read_bounded_web_static_string(&path)
+            .expect_err("invalid UTF-8 static text should be rejected");
+        assert!(error.contains("static asset is not UTF-8"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
     #[tokio::test]
     async fn share_catalog_supports_filters_and_pagination() {
         let (state, _receiver) = test_state();
@@ -18030,6 +18186,16 @@ mod tests {
     async fn patch_options_reports_non_persisted_runtime_update() {
         let (state, _receiver) = test_state();
 
+        let options = super::route_http_request("GET", "/api/options", None, "", &state)
+            .await
+            .expect("options get");
+        assert_eq!(options.status, "200 OK");
+        let options_json = serde_json::from_str::<serde_json::Value>(&options.body).unwrap();
+        assert_eq!(options_json["version"], super::APP_VERSION);
+        assert_eq!(options_json["runtimeMutationEnabled"], false);
+        assert!(options_json["options"]["api_token_configured"].is_boolean());
+        assert!(options_json["options"].get("api_token").is_none());
+
         let response = super::route_http_request(
             "PATCH",
             "/api/options",
@@ -18042,6 +18208,12 @@ mod tests {
 
         assert_eq!(response.status, "200 OK");
         assert!(response.body.contains("\"persisted\":false"));
+        assert!(response.body.contains("\"acceptedKeys\""));
+
+        let invalid = super::route_http_request("PATCH", "/api/options", None, "[]", &state)
+            .await
+            .expect("invalid options response");
+        assert_eq!(invalid.status, "400 Bad Request");
     }
 
     #[test]

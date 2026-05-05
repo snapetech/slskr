@@ -30,6 +30,9 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Webhook secret lifecycle | Webhook creation returned the secret without documenting that it is a one-time creation-only value. | Fixed by adding `docs/WEBHOOK_API.md`, marking create responses with `secretReturnedOnce`, and documenting that list/detail/log routes omit secrets. |
 | Medium | Auth disabled escape hatch | `SLSKR_AUTH_DISABLED=true` could expose protected APIs on non-loopback binds without a health-surface warning. | Fixed by adding a startup warning and `/api/health` warning when auth is disabled on a non-loopback bind. |
 | Medium | Path deletion parity | Download/incomplete file deletion compatibility routes returned success stubs instead of scoped deletion. | Fixed by decoding slskd path segments, rejecting traversal/absolute paths/symlinks, and deleting only under the downloads or incomplete storage root. |
+| Medium | Path listing parity | Download/incomplete directory compatibility routes returned empty shells and recursive listings had no traversal budget. | Fixed by listing scoped storage roots, rejecting traversal/symlink escapes, supporting recursive responses, and capping listings at 16,384 entries. |
+| Medium | Static asset serving | Configured web build assets followed symlinks and were read into memory without a size cap. | Fixed by canonicalizing resolved assets under the build root, rejecting symlink escapes, and capping static asset reads at 16 MiB. |
+| Medium | Config mutability | `/api/options` mutation compatibility routes accepted arbitrary bodies while reporting success. | Fixed by returning sanitized runtime config from `GET /api/options` and requiring valid JSON-object bodies for read-only mutation acknowledgements. |
 | Low | Archive verification | `verify-release-artifacts.sh` extracted zip files without path traversal checks. | Fixed by rejecting absolute and parent-directory zip entries before extraction. |
 | Low | Kubernetes secrets | Manifest references `slskr-secrets` and `grafana-admin` without templates. | Fixed by adding `k8s/secrets.example.yaml` with placeholder-only Secret manifests. |
 | Medium | CI tooling | Local gate lacked workflow/shell/security tool hooks beyond Rust/npm advisory checks. | Fixed by adding optional local `shellcheck`, `actionlint`, `semgrep`, and `trivy` release-gate steps plus CI setup for shellcheck/actionlint. |
@@ -40,20 +43,45 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
-| High | CSP | Static web responses require `'unsafe-inline'` and `wasm-unsafe-eval`. | Move inline scripts/styles to bundled assets or add nonce/hash generation. |
-| Medium | Python client | Python client has no lint/type/test/audit gate. | Add `ruff`, `mypy` or pyright, pytest smoke tests, and dependency audit. |
-| Medium | Go client | Go client has no `go test`, `govulncheck`, or staticcheck gate. | Add Go CI steps and client examples compile checks. |
-| Medium | Release artifacts | Release archives include the main web build but not standalone dashboard artifacts/images. | Decide whether standalone dashboard is supported as a release asset; if yes, build and publish it explicitly. |
-| Medium | OpenAPI drift | API parity work changes response shapes faster than OpenAPI/docs can track. | Add generated OpenAPI/doc drift checks to CI and fail when checked-in docs differ. |
-| Medium | Compatibility smoke | slskd API compatibility smoke is opt-in because it needs external Python package install and live-style behavior. | Keep opt-in locally, but run it in scheduled CI with explicit secrets or hermetic fixtures. |
-| Medium | Rate limiting | Rate limiting keys by raw peer socket address and token digest; deployments behind proxies may collapse clients into one IP. | Add trusted proxy parsing for `Forwarded`/`X-Forwarded-For` with an explicit trusted proxy allowlist. |
-| Medium | Config mutability | Several option/config compatibility routes return success without persistent mutation. | Mark no-op compatibility endpoints clearly or implement persistence with validation. |
-| Low | Rust module hygiene | `#![allow(dead_code)]` appears at crate/module level in multiple Rust modules. | Remove broad allowances and gate intentionally unused compatibility helpers behind tests/features. |
+| High | Go client | `client-go/client.go` defines `SendMessage` twice (`client-go/client.go:124` and `client-go/client.go:182`), so the Go client will not compile once Go tooling runs. | Remove the duplicate method, add `go test ./...`, `govulncheck`, `staticcheck`, and example compile checks to CI/release gate. |
+| High | Release workflow | The version step interpolates `${{ github.event_name }}` and `${{ inputs.version }}` directly inside a shell script (`.github/workflows/release.yml:26`), which Semgrep flags as GitHub Actions shell-injection risk. | Pass GitHub context values through `env:` and quote shell variables. |
+| High | CSP | Static web responses require `'unsafe-inline'` and `wasm-unsafe-eval` (`crates/slskr/src/main.rs:8783`, `crates/slskr/src/http_server.rs:398`). | Move inline scripts/styles to bundled assets or add nonce/hash generation; keep WASM permissions scoped to the Rust web shell only if still required. |
+| High | Kubernetes metrics | `ServiceMonitor` scrapes `/api/metrics`, but `/api/metrics` is protected by API auth and the ServiceMonitor supplies no bearer token (`crates/slskr/src/utils.rs:70`, `k8s/servicemonitor.yaml:10`). | Add a separate authenticated metrics scrape Secret, make metrics explicitly public only on a private metrics listener, or implement a dedicated unauthenticated metrics bind. |
+| High | Kubernetes release artifacts | Manifests deploy `ghcr.io/slskr/slskr-dashboard:REPLACE_WITH_RELEASE_TAG` (`k8s/deployment.yaml:125`), but release builds publish binary archives and not dashboard container images (`.github/workflows/release.yml:115`). | Either build/push the dashboard image in release CI or remove the standalone dashboard deployment from default manifests. |
+| High | Release security scans | `run-release-gate.sh` includes Semgrep and Trivy as optional local checks (`scripts/run-release-gate.sh:39`), but CI installs only shellcheck/actionlint (`.github/workflows/ci.yml:27`, `.github/workflows/release.yml:55`), so the security scans skip in tag gates. | Install Semgrep/Trivy in CI or split them into explicit required/optional modes with scheduled full scans. |
+| Medium | Webhook secrets | Webhook creation accepts caller-supplied `secret` without minimum length or entropy checks (`crates/slskr/src/main.rs:4534`). | Enforce a minimum length/entropy floor for supplied secrets and keep generated secrets as the default. |
+| Medium | Webhook identifiers | Webhook IDs and event IDs are process-local counters (`crates/slskr/src/webhooks.rs:75`, `crates/slskr/src/webhooks.rs:126`), causing predictable identifiers and possible collisions after restart if webhooks become persisted. | Use random UUID/ULID IDs or persistence-backed monotonic IDs. |
+| Medium | Webhook delivery DoS | `/api/webhooks/:id/test` spawns a delivery task for each request without a per-webhook or global concurrency limit (`crates/slskr/src/main.rs:4616`). | Add delivery queueing/concurrency limits and rate-limit webhook test sends by webhook ID. |
+| Medium | Webhook SSRF policy | Webhook validation blocks private/loopback/link-local but does not explicitly block IPv6 documentation, multicast beyond existing checks, or operator-defined deny/allow CIDRs (`crates/slskr/src/webhooks.rs:466`). | Centralize outbound URL policy with configurable CIDR allow/deny lists and tests for all special-use address ranges. |
+| Medium | Rate limiting | Rate limiting keys by raw peer socket address and token digest; deployments behind proxies may collapse clients into one IP (`crates/slskr/src/main.rs:12304`). | Add trusted proxy parsing for `Forwarded`/`X-Forwarded-For` with an explicit trusted proxy allowlist. |
+| Medium | API pagination | Multiple list routes allow `limit` to become effectively unbounded (`crates/slskr/src/main.rs:4824` and similar `.take(filter.limit.unwrap_or(usize::MAX))` sites). | Clamp all list/report limits to a shared maximum and add route tests for excessive limits. |
+| Medium | Storage listing | Recursive downloads/incomplete directory listing can walk up to 16,384 entries per request (`crates/slskr/src/main.rs:9453`), which is large enough for CPU/disk pressure under repeated calls. | Lower defaults, paginate directory listing, and rate-limit recursive storage scans. |
+| Medium | Config persistence | Options/config compatibility mutation routes are validated and clearly non-persisted (`crates/slskr/src/main.rs:4591`), but clients may assume durable mutation. | Implement a schema-validated config writer or document/OpenAPI-mark these routes as non-persistent compatibility acknowledgements. |
+| Medium | Release package check | `scripts/check-release-package.sh` runs `cargo package --workspace --allow-dirty --no-verify` (`scripts/check-release-package.sh:10`), which can mask packaging failures and dirty release state. | Drop `--allow-dirty --no-verify` in CI, or add a strict CI-only packaging path. |
+| Medium | Release provenance | Release assets are attested, but there is no SBOM generation or dependency/license manifest attached to releases (`.github/workflows/release.yml:154`). | Generate CycloneDX/SPDX SBOMs for Rust/npm/Go artifacts and publish them with attestations. |
+| Medium | Release tag policy | Release workflow triggers on `release-*`, not semantic `v*` tags (`.github/workflows/release.yml:10`). | Decide final tag convention and enforce it in release workflow and docs. |
+| Medium | Release reproducibility | CI installs `actionlint` with `go install ...@latest` (`.github/workflows/ci.yml:31`, `.github/workflows/release.yml:59`), making the gate non-deterministic over time. | Pin actionlint by version or use a pinned action/container digest. |
+| Medium | OpenAPI drift | API parity work changes response shapes faster than `docs/openapi.json` and docs can track. | Add generated OpenAPI/doc drift checks to CI and fail when checked-in docs differ. |
+| Medium | Compatibility smoke | slskd API compatibility smoke is opt-in because it needs external Python package install and live-style behavior (`scripts/run-release-gate.sh:55`). | Keep opt-in locally, but run it in scheduled CI with explicit secrets or hermetic fixtures. |
+| Medium | Python client | Python client has no lint/type/test/audit gate, only compile coverage was run locally. | Add `ruff`, pyright or mypy, pytest smoke tests, and dependency audit. |
+| Medium | Frontend auth passthrough | `session.authHeaders()` returns `Authorization: Bearer n/a` if passthrough mode is enabled because it does not check `tokenPassthroughValue` (`web/src/lib/session.js:80`). | Mirror the Axios interceptor behavior and omit Authorization when passthrough is active; add direct-fetch regression tests. |
+| Medium | Browser token persistence | ListenBrainz user tokens are saved in `localStorage` (`web/src/lib/listenBrainz.js:3`, `web/src/lib/listenBrainz.js:15`). | Move ListenBrainz tokens to sessionStorage or encrypt/explicitly warn for persistent local-only storage. |
+| Medium | External metadata privacy | Lyrics lookup sends artist/title/album metadata to `lrclib.net` from the browser (`web/src/components/Player/LyricsPane.jsx:106`). | Add a user-visible opt-in and disable third-party metadata requests by default in hardened mode. |
+| Medium | Frontend prototype pollution | Semgrep flagged dynamic nested object writes in adversarial settings (`web/src/components/System/Security/AdversarialSettings.jsx:141`, `:163`, `:184`, `:205`); two paths lack the forbidden-key guard. | Use a safe setter that rejects `__proto__`, `constructor`, and `prototype` for all nested updates or use `Map`/schema updates. |
+| Medium | Vite Less alias traversal | Semgrep flagged `filename.slice(1)` flowing to `path.resolve(__dirname, 'node_modules', ...)` in the Less file manager (`web/vite.config.js:31`). | Normalize and reject paths escaping `node_modules` before reading. |
+| Low | Kubernetes NetworkPolicy | Manifests do not define ingress/egress NetworkPolicies. | Add default-deny plus explicit ingress from ingress controller and metrics scraper, and scoped egress for Soulseek/Lidarr/webhooks as configured. |
+| Low | Kubernetes hardening | Pods set non-root/read-only/drop-all but omit `seccompProfile`, `runAsGroup`, and explicit `automountServiceAccountToken: false` where API access is not needed (`k8s/deployment.yaml:30`). | Add restricted-profile fields and disable service account token mounting for pods that do not need Kubernetes API access. |
+| Low | Kubernetes availability | API PDB allows `maxUnavailable: 1` with one replica (`k8s/pdb.yaml:4`), so voluntary disruption can take the API fully down. | Use `minAvailable: 1` or omit the API PDB until multi-replica operation is supported. |
+| Low | Kubernetes config drift | `SLSKR_METRICS_PORT` is set in Kubernetes config (`k8s/configmap.yaml:9`) but the daemon exposes metrics on the HTTP API, not a separate metrics listener. | Remove the unused variable or implement a real metrics listener. |
+| Low | Kubernetes image freshness | Default manifests use `imagePullPolicy: IfNotPresent` with release-placeholder tags (`k8s/deployment.yaml:37`, `:126`). | Use immutable version tags/digests and `Always` only where mutable tags are unavoidable. |
+| Low | Rust module hygiene | `#![allow(dead_code)]` appears at crate/module level in multiple Rust modules (`crates/slskr/src/main.rs:1`, `crates/slskr/src/webhooks.rs:1`, `crates/slskr/src/routing.rs:1`). | Remove broad allowances and gate intentionally unused compatibility helpers behind tests/features. |
 | Low | Script dependencies | Release/live scripts assume Node, Python, pip, curl, tmux, sudo, network namespace tools, and WireGuard tools without a preflight summary. | Add `scripts/check-dev-tooling.sh` and call it from relevant live scripts. |
-| Low | Test noise | Web tests emit repeated jsdom navigation warnings. | Mock `window.location.assign/reload` centrally in test setup. |
+| Low | Test noise | Web tests emit repeated jsdom navigation warnings from reload/navigation paths. | Mock `window.location.assign/reload` centrally in test setup. |
 | Low | Deprecated npm transitive deps | Web install warns on deprecated `lodash.get`, old core-js, and Babel proposal packages. | Upgrade or replace transitive owners where practical. |
-| Low | Kubernetes NetworkPolicy | Manifests do not define ingress/egress NetworkPolicies. | Add default-deny plus explicit ingress from ingress controller and metrics scraper, and scoped egress. |
-| Low | Release tag policy | Release workflow triggers on `release-*`, not semantic `v*` tags. | Decide final tag convention and document/enforce it in release docs. |
+| Low | Service worker cache scope | Service worker activation deletes every cache key on the origin (`web/public/service-worker.js:13`). | Delete only cache names with the `slskr-` prefix. |
+| Low | Docs drift | Current docs still contain stale `localhost:8080`, `http_api_*`, `slskr:latest`, and wildcard CORS examples outside the deployment guide (`docs/http-api.md:658`, `docs/INTEGRATION_GUIDE.md:229`, `docs/http-api-features.md:272`). | Update or archive stale docs and add a grep-based docs freshness check. |
+| Low | Go client URL escaping | Go client interpolates path segments with `fmt.Sprintf` instead of `url.PathEscape` (`client-go/client.go:163`, `:257`). | Escape path parameters before constructing URLs. |
+| Low | Client error redaction | Go client returns full error bodies (`client-go/client.go:373`), which can echo secrets if a proxy/upstream includes them. | Redact common secret fields in error strings or expose structured error bodies without dumping raw content by default. |
 
 ## Scans Run
 
@@ -61,8 +89,21 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `npm --prefix web audit --audit-level=high`
 - `npm --prefix dashboard audit --audit-level=high`
 - `npm --prefix client-ts audit --audit-level=high`
+- `cargo fmt --all --check`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `python3 -m compileall -q client-python`
+- `npm --prefix web run lint`
+- `npm --prefix web test`
+- `npm --prefix dashboard run type-check`
+- `npm --prefix dashboard run lint`
+- `npm --prefix client-ts run lint`
+- `npm --prefix client-ts run build`
+- `kubectl kustomize k8s`
+- `trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed .` via container
+- `semgrep scan --config auto --error` via container; produced findings now captured in the open burn-down.
 - `scripts/check-public-posture.sh`
 - `shellcheck scripts/*.sh` via container, with documented legacy-noise exclusions used by the release gate.
 - `actionlint` via container.
 - Source grep passes for secrets, auth/CORS/CSRF, process execution, path handling, URL fetches, docs/deployment exposure, and frontend storage/navigation sinks.
 - Focused Rust tests, formatting, clippy, shell syntax checks, and diff whitespace checks passed after the latest fixes.
+- `go test ./...` was attempted in `client-go` but blocked because `go` is not installed in this environment.
