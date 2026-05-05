@@ -34,7 +34,7 @@ spec:
       containers:
       - name: slskr-api
         image: ghcr.io/slskr/slskr:REPLACE_WITH_RELEASE_TAG
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - name: http
           containerPort: 8080

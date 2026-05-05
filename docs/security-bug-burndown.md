@@ -73,6 +73,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Release concurrency | Release workflow had no concurrency group. | Fixed with a ref-scoped release concurrency group and cancellation disabled. |
 | Medium | Browser token persistence | ListenBrainz user tokens were saved in persistent `localStorage`. | Fixed by storing ListenBrainz tokens in `sessionStorage` and updating UI regression coverage. |
 | Medium | Endpoint parity tooling drift | Endpoint parity tooling reported implemented conversation routes as missing and included malformed `GET /conversations:var`. | Fixed by removing the malformed manifest entry and teaching the checker about `path_segment_after` dynamic handlers. |
+| Low | Kubernetes NetworkPolicy | Manifests did not define ingress/egress NetworkPolicies. | Fixed by adding an API pod NetworkPolicy with explicit ingress and scoped DNS/web/Soulseek egress. |
+| Low | Kubernetes image freshness | Default manifests used `IfNotPresent` with release-placeholder tags. | Fixed by switching the API image pull policy to `Always` while placeholder tags remain mutable. |
 
 ## Open Burn-Down
 
@@ -103,8 +105,6 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | GitHub Actions supply chain | CI/release workflows use mutable action tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `softprops/action-gh-release@v2` (`.github/workflows/release.yml:44`, `.github/workflows/release.yml:175`). | Pin third-party and first-party actions to reviewed commit SHAs, automate update PRs, and document the trust policy. |
 | Medium | External metadata privacy | Lyrics lookup sends artist/title/album metadata to `lrclib.net` from the browser (`web/src/components/Player/LyricsPane.jsx:106`). | Add a user-visible opt-in and disable third-party metadata requests by default in hardened mode. |
 | Low | Transfer event growth | Transfer event history appends indefinitely and is recreated only when the file is absent (`crates/slskr/src/main.rs:13978`, `crates/slskr/src/main.rs:14039`). | Rotate or compact transfer event logs according to the configured transfer history limit or a byte cap. |
-| Low | Kubernetes NetworkPolicy | Manifests do not define ingress/egress NetworkPolicies. | Add default-deny plus explicit ingress from ingress controller and metrics scraper, and scoped egress for Soulseek/Lidarr/webhooks as configured. |
-| Low | Kubernetes image freshness | Default manifests use `imagePullPolicy: IfNotPresent` with release-placeholder tags (`k8s/deployment.yaml:37`, `:126`). | Use immutable version tags/digests and `Always` only where mutable tags are unavoidable. |
 | Low | Rust module hygiene | `#![allow(dead_code)]` appears at crate/module level in multiple Rust modules (`crates/slskr/src/main.rs:1`, `crates/slskr/src/webhooks.rs:1`, `crates/slskr/src/routing.rs:1`). | Remove broad allowances and gate intentionally unused compatibility helpers behind tests/features. |
 | Low | Script dependencies | Release/live scripts assume Node, Python, pip, curl, tmux, sudo, network namespace tools, and WireGuard tools without a preflight summary. | Add `scripts/check-dev-tooling.sh` and call it from relevant live scripts. |
 | Low | Test noise | Web tests emit repeated jsdom navigation warnings from reload/navigation paths. | Mock `window.location.assign/reload` centrally in test setup. |
