@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version label
+        required: false
+        default: manual
+  push:
+    tags:
+      - 'release-*'
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+            if [[ -z "$version" || "$version" == "manual" ]]; then
+              version="manual-${GITHUB_SHA::12}"
+            fi
+          else
+            version="${GITHUB_REF_NAME#release-}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  gate:
+    name: Release Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run release gate
+        run: scripts/run-release-gate.sh
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: [version, gate]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            apt: ''
+          - name: linux-musl-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            apt: musl-tools
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            apt: ''
+          - name: macos-x64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            apt: ''
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            apt: ''
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            apt: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install native packages
+        if: matrix.apt != ''
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.apt }}
+      - name: Build archive
+        shell: bash
+        env:
+          SLSKR_RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: scripts/build-release-archive.sh --target '${{ matrix.target }}'
+      - name: Verify archive layout
+        shell: bash
+        run: scripts/verify-release-artifacts.sh target/dist
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: slskr-${{ matrix.name }}
+          path: |
+            target/dist/slskr-*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/release-')
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: slskr-*
+      - name: Prepare assets
+        shell: bash
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec cp {} release/ \;
+          (cd release && find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          ls -lh release
+      - name: Create release notes
+        shell: bash
+        run: |
+          cat > release/RELEASE_NOTES.md <<EOF
+          # slskr ${{ needs.version.outputs.version }}
+
+          Binary archives for Linux, macOS, and Windows.
+
+          Verify downloads with \`SHA256SUMS.txt\`.
+          EOF
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: slskr ${{ needs.version.outputs.version }}
+          body_path: release/RELEASE_NOTES.md
+          files: release/*
