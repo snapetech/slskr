@@ -4225,6 +4225,40 @@ async fn route_http_request_with_headers(
                 body,
             })
         }
+        ("GET", "/api/telemetry/reports/transfers/summary") => {
+            let transfers = state.transfers.read().await;
+            let body = slskd_transfer_summary_report(&transfers);
+            drop(transfers);
+            Ok(routing::ok_response(body))
+        }
+        ("GET", "/api/telemetry/reports/transfers/histogram") => {
+            Ok(routing::ok_response(serde_json::json!({
+                "interval": 60,
+                "buckets": [],
+            }).to_string()))
+        }
+        ("GET", "/api/telemetry/reports/transfers/leaderboard") => {
+            Ok(routing::ok_response("[]".to_owned()))
+        }
+        ("GET", path) if path.starts_with("/api/telemetry/reports/transfers/users/") => {
+            let username = path.rsplit('/').next().unwrap_or("");
+            let transfers = state.transfers.read().await;
+            let body = slskd_user_transfer_report(username, &transfers);
+            drop(transfers);
+            Ok(routing::ok_response(body))
+        }
+        ("GET", "/api/telemetry/reports/transfers/exceptions") => {
+            Ok(routing::ok_response("[]".to_owned()))
+        }
+        ("GET", "/api/telemetry/reports/transfers/exceptions/pareto") => {
+            Ok(routing::ok_response(serde_json::json!({
+                "items": [],
+                "total": 0,
+            }).to_string()))
+        }
+        ("GET", "/api/telemetry/reports/transfers/directories") => {
+            Ok(routing::ok_response("[]".to_owned()))
+        }
         ("GET", "/api/metrics") => {
             let session = state.session.read().await;
             let _listeners = state.listeners.read().await;
@@ -4305,6 +4339,9 @@ async fn route_http_request_with_headers(
              events.record("compat.event", kind, json_body_string(body).or_else(|| Some(body.to_owned())));
              drop(events);
              Ok(routing::ok_response("true".to_owned()))
+         }
+         ("GET", "/api/logs") => {
+             Ok(routing::ok_response("[]".to_owned()))
          }
          // WEBHOOK ENDPOINTS
          ("GET", "/api/webhooks") => {
@@ -4567,6 +4604,25 @@ async fn route_http_request_with_headers(
             drop(shares);
             record_event(state, "share.scan.completed", "shares", None).await;
             Ok(routing::ok_response((!json.is_empty()).to_string()))
+        }
+        ("GET", "/api/files/downloads/directories")
+        | ("GET", "/api/files/incomplete/directories") => {
+            Ok(routing::ok_response(slskd_empty_directory_json("").to_string()))
+        }
+        ("GET", path)
+            if (path.starts_with("/api/files/downloads/directories/")
+                || path.starts_with("/api/files/incomplete/directories/")) =>
+        {
+            let name = path.rsplit('/').next().unwrap_or("");
+            Ok(routing::ok_response(slskd_empty_directory_json(name).to_string()))
+        }
+        ("DELETE", path)
+            if path.starts_with("/api/files/downloads/directories/")
+                || path.starts_with("/api/files/downloads/files/")
+                || path.starts_with("/api/files/incomplete/directories/")
+                || path.starts_with("/api/files/incomplete/files/") =>
+        {
+            Ok(routing::ok_response("false".to_owned()))
         }
         ("GET", path) if path.starts_with("/api/files/") || path.starts_with("/api/v0/files/") => {
             let folder = path.strip_prefix("/api/v0/files/")
@@ -6184,6 +6240,9 @@ async fn route_http_request_with_headers(
                 body: r#"{"options":{},"version":"0.1.0"}"#.to_owned(),
             })
         }
+        ("GET", "/api/options/startup") => {
+            Ok(routing::ok_response(state.config.sanitized_json()))
+        }
         ("GET", "/api/options/yaml") => {
             Ok(HttpResponse {
                 status: "200 OK",
@@ -7422,6 +7481,10 @@ async fn route_http_request_with_headers(
             )))
         }
 
+        ("PUT", "/api/relay/agent") => {
+            Ok(routing::ok_response("true".to_owned()))
+        }
+
         ("PUT", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
             let token = path.rsplit('/').next().unwrap_or("unknown");
             Ok(routing::ok_response(format!(
@@ -7568,6 +7631,18 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
+        ("GET", path) if path.starts_with("/api/relay/controller/downloads/") => {
+            Ok(routing::not_found_response())
+        }
+
+        ("POST", path) if path.starts_with("/api/relay/controller/files/") => {
+            Ok(routing::ok_response("true".to_owned()))
+        }
+
+        ("POST", path) if path.starts_with("/api/relay/controller/shares/") => {
+            Ok(routing::ok_response("true".to_owned()))
+        }
+
          ("GET", "/api/transfers/downloads/user-stats") => {
              let json = "{\"users\":[],\"count\":0}".to_string();
              Ok(routing::ok_response(json))
@@ -7632,7 +7707,7 @@ async fn route_http_request_with_headers(
              Ok(routing::ok_response(json))
          }
 
-          ("GET", "/api/telemetry/metrics/kpi") => {
+          ("GET", "/api/telemetry/metrics/kpi") | ("GET", "/api/telemetry/metrics/kpis") => {
               let json = "{\"kpis\":[],\"count\":0}".to_string();
               Ok(routing::ok_response(json))
           }
@@ -7885,6 +7960,10 @@ async fn route_http_request_with_headers(
 
         ("DELETE", "/api/relay") => {
             Ok(routing::ok_response("{\"relay_enabled\":false,\"status\":\"disabled\"}".to_owned()))
+        }
+
+        ("DELETE", "/api/relay/agent") => {
+            Ok(routing::ok_response("true".to_owned()))
         }
 
         ("DELETE", "/api/shares") => {
@@ -8787,6 +8866,64 @@ fn slskd_user_root_json(entries: &[BrowseEntry]) -> String {
         "directoryCount": 1,
         "lockedDirectories": [],
         "lockedDirectoryCount": 0,
+    })
+    .to_string()
+}
+
+fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "fullname": name,
+        "attributes": "",
+        "createdAt": "",
+        "modifiedAt": "",
+        "files": [],
+        "directories": [],
+    })
+}
+
+fn slskd_transfer_summary_report(transfers: &TransferQueue) -> String {
+    let downloads = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0)
+        .count();
+    let uploads = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 1)
+        .count();
+    let total_bytes = transfers
+        .entries
+        .iter()
+        .map(|entry| entry.bytes_transferred)
+        .sum::<u64>();
+    serde_json::json!({
+        "count": transfers.entries.len(),
+        "downloads": downloads,
+        "uploads": uploads,
+        "totalBytes": total_bytes,
+        "averageSpeed": 0.0,
+        "byDirection": {
+            "Download": { "count": downloads },
+            "Upload": { "count": uploads },
+        },
+        "byState": {},
+    })
+    .to_string()
+}
+
+fn slskd_user_transfer_report(username: &str, transfers: &TransferQueue) -> String {
+    let entries = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.peer_username.as_deref() == Some(username))
+        .map(TransferEntry::slskd_file_json)
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "username": username,
+        "count": entries.len(),
+        "transfers": entries,
     })
     .to_string()
 }
@@ -13740,6 +13877,40 @@ mod tests {
                 .await
                 .expect("user status");
         assert!(user_status.body.contains("\"presence\""));
+
+        let support_routes = [
+            ("GET", "/api/v0/application/version", ""),
+            ("POST", "/api/v0/application/gc", ""),
+            ("GET", "/api/v0/options/startup", ""),
+            ("GET", "/api/v0/options/yaml", ""),
+            ("POST", "/api/v0/options/yaml/validate", r#""app: {}""#),
+            ("GET", "/api/v0/logs", ""),
+            ("GET", "/api/v0/files/downloads/directories", ""),
+            ("GET", "/api/v0/files/incomplete/directories", ""),
+            ("PUT", "/api/v0/relay/agent", ""),
+            ("DELETE", "/api/v0/relay/agent", ""),
+            ("POST", "/api/v0/relay/controller/files/token", ""),
+            ("POST", "/api/v0/relay/controller/shares/token", ""),
+            ("GET", "/api/v0/telemetry/metrics/kpis", ""),
+            ("GET", "/api/v0/telemetry/reports/transfers/summary", ""),
+            ("GET", "/api/v0/telemetry/reports/transfers/histogram", ""),
+            ("GET", "/api/v0/telemetry/reports/transfers/leaderboard", ""),
+            ("GET", "/api/v0/telemetry/reports/transfers/users/peer1", ""),
+            ("GET", "/api/v0/telemetry/reports/transfers/exceptions", ""),
+            (
+                "GET",
+                "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+                "",
+            ),
+            ("GET", "/api/v0/telemetry/reports/transfers/directories", ""),
+        ];
+
+        for (method, path, body) in support_routes {
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+        }
     }
 
     #[tokio::test]

@@ -37,6 +37,14 @@ pub struct RuntimeProbe {
     pub path: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RoutePage {
+    pub description: &'static str,
+    pub path: &'static str,
+    pub surface: &'static str,
+    pub title: &'static str,
+}
+
 pub const fn api_base_path() -> &'static str {
     "/api/v0"
 }
@@ -479,14 +487,155 @@ pub const fn runtime_probes() -> &'static [RuntimeProbe] {
     ]
 }
 
+pub const fn route_pages() -> &'static [RoutePage] {
+    &[
+        RoutePage {
+            description:
+                "Create searches, inspect result groups, and open individual search records.",
+            path: "/searches",
+            surface: "search",
+            title: "Search",
+        },
+        RoutePage {
+            description: "Inspect one search, its peer responses, files, and action targets.",
+            path: "/searches/:id",
+            surface: "search",
+            title: "Search Detail",
+        },
+        RoutePage {
+            description:
+                "Review release, artist, track, and query neighborhoods from discovery data.",
+            path: "/discovery-graph",
+            surface: "search",
+            title: "Discovery Graph",
+        },
+        RoutePage {
+            description: "Preview playlist imports and stage them for search or library workflows.",
+            path: "/playlist-intake",
+            surface: "integrations",
+            title: "Playlist Intake",
+        },
+        RoutePage {
+            description: "Keep persistent wanted-search intents and rerun them from one view.",
+            path: "/wishlist",
+            surface: "wishlist",
+            title: "Wishlist",
+        },
+        RoutePage {
+            description: "Track download queues, progress, peer grouping, and transfer actions.",
+            path: "/downloads",
+            surface: "transfers",
+            title: "Downloads",
+        },
+        RoutePage {
+            description: "Track upload queues, progress, peer grouping, and transfer actions.",
+            path: "/uploads",
+            surface: "transfers",
+            title: "Uploads",
+        },
+        RoutePage {
+            description: "Read private conversations and room-linked messaging activity.",
+            path: "/messages",
+            surface: "messages",
+            title: "Messages",
+        },
+        RoutePage {
+            description: "Use the legacy chat landing route while message surfaces converge.",
+            path: "/chat",
+            surface: "messages",
+            title: "Chat",
+        },
+        RoutePage {
+            description: "Join rooms, inspect room users, and read recent room messages.",
+            path: "/rooms",
+            surface: "rooms",
+            title: "Rooms",
+        },
+        RoutePage {
+            description: "Watch users, inspect presence, and request peer user context.",
+            path: "/users",
+            surface: "identity",
+            title: "Users",
+        },
+        RoutePage {
+            description: "Manage contacts, notes, groups, and peer relationship metadata.",
+            path: "/contacts",
+            surface: "identity",
+            title: "Contacts",
+        },
+        RoutePage {
+            description: "Manage Solid identity and linked-data integration state.",
+            path: "/solid",
+            surface: "integrations",
+            title: "Solid",
+        },
+        RoutePage {
+            description: "Inspect local collections and the records used for sharing workflows.",
+            path: "/collections",
+            surface: "collections",
+            title: "Collections",
+        },
+        RoutePage {
+            description: "Manage share groups and collection grants.",
+            path: "/sharegroups",
+            surface: "collections",
+            title: "Share Groups",
+        },
+        RoutePage {
+            description: "Inspect records and files shared with this user.",
+            path: "/shared",
+            surface: "collections",
+            title: "Shared with Me",
+        },
+        RoutePage {
+            description: "Request and inspect peer browse trees and cached folders.",
+            path: "/browse",
+            surface: "browse",
+            title: "Browse",
+        },
+        RoutePage {
+            description:
+                "Inspect daemon status, telemetry, configuration, network, and integration state.",
+            path: "/system",
+            surface: "system",
+            title: "System",
+        },
+        RoutePage {
+            description: "Inspect a specific system tab while preserving the current route shape.",
+            path: "/system/:tab",
+            surface: "system",
+            title: "System Tab",
+        },
+        RoutePage {
+            description: "Inspect pod-oriented messaging and service-fabric route compatibility.",
+            path: "/pods",
+            surface: "messages",
+            title: "Pods",
+        },
+        RoutePage {
+            description: "Redirect pod detail routes back into the message surface.",
+            path: "/pods/:podId",
+            surface: "messages",
+            title: "Pod Redirect",
+        },
+        RoutePage {
+            description: "Redirect pod channel routes back into the message surface.",
+            path: "/pods/:podId/channels/:channelId",
+            surface: "messages",
+            title: "Pod Channel Redirect",
+        },
+    ]
+}
+
 pub fn endpoint_url(endpoint: &str) -> String {
     format!("{}{}", api_base_path(), endpoint)
 }
 
 pub fn compatibility_report() -> String {
     format!(
-        "{} UI routes, {} nav items, {} API contracts, {} runtime probes",
+        "{} UI routes, {} route pages, {} nav items, {} API contracts, {} runtime probes",
         ui_routes().len(),
+        route_pages().len(),
         nav_items().len(),
         api_endpoints().len(),
         runtime_probes().len()
@@ -563,6 +712,81 @@ pub fn runtime_probe_result_html(results: &[(&str, &str, Result<&str, &str>)]) -
         .join("")
 }
 
+pub fn normalize_route_path(path: &str) -> &str {
+    if path == "/" {
+        return "/searches";
+    }
+    if path.starts_with("/searches/") {
+        return "/searches/:id";
+    }
+    if path.starts_with("/system/") {
+        return "/system/:tab";
+    }
+    if path.starts_with("/pods/") && path.contains("/channels/") {
+        return "/pods/:podId/channels/:channelId";
+    }
+    if path.starts_with("/pods/") {
+        return "/pods/:podId";
+    }
+    path
+}
+
+pub fn route_page(path: &str) -> Option<RoutePage> {
+    let normalized = normalize_route_path(path);
+    route_pages()
+        .iter()
+        .copied()
+        .find(|page| page.path == normalized)
+}
+
+pub fn route_endpoints(surface: &str) -> Vec<ApiEndpoint> {
+    api_endpoints()
+        .iter()
+        .copied()
+        .filter(|endpoint| endpoint.surface == surface)
+        .collect()
+}
+
+pub fn route_page_html(path: &str) -> String {
+    let Some(page) = route_page(path) else {
+        return route_page_html("/searches");
+    };
+    let endpoints = route_endpoints(page.surface)
+        .iter()
+        .map(|endpoint| {
+            format!(
+                r#"<li><strong>{method}</strong><code>{path}</code><span>{surface}</span></li>"#,
+                method = endpoint.method,
+                path = endpoint_url(endpoint.path),
+                surface = endpoint.surface
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let route_inventory = ui_routes()
+        .iter()
+        .filter(|route| route.title == page.title || route.path == page.path)
+        .map(|route| {
+            format!(
+                r#"<li><strong>{nav}</strong><code>{path}</code><span>{title}</span></li>"#,
+                nav = if route.nav { "nav" } else { "route" },
+                path = route.path,
+                title = route.title
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div></section>"#,
+        path = escape_html(path),
+        surface = escape_html(page.surface),
+        title = escape_html(page.title),
+        description = escape_html(page.description),
+        routes = route_inventory,
+        endpoints = endpoints,
+    )
+}
+
 pub fn shell_html() -> String {
     let nav = nav_items()
         .iter()
@@ -617,7 +841,8 @@ pub fn shell_html() -> String {
         .join("");
 
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-hero"><p class="slskr-kicker">Rust web migration target</p><h1>slskr</h1><p>Native Rust/WASM app shell for porting the existing browser UI one route at a time.</p><code>{report}</code></header><section class="slskr-contract slskr-runtime"><h2>Runtime Status</h2><ul id="slskr-runtime-status">{runtime}</ul></section><div class="slskr-grid">{sections}</div><section class="slskr-contract"><h2>Route Parity</h2><ul>{routes}</ul></section><section class="slskr-contract"><h2>API Contracts</h2><ul>{endpoints}</ul></section></main></div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-hero"><p class="slskr-kicker">Rust web migration target</p><h1>slskr</h1><p>Native Rust/WASM app shell for porting the existing browser UI one route at a time.</p><code>{report}</code></header><section id="slskr-route-view">{route_page}</section><section class="slskr-contract slskr-runtime"><h2>Runtime Status</h2><ul id="slskr-runtime-status">{runtime}</ul></section><div class="slskr-grid">{sections}</div><section class="slskr-contract"><h2>Route Parity</h2><ul>{routes}</ul></section><section class="slskr-contract"><h2>API Contracts</h2><ul>{endpoints}</ul></section></main></div>"#,
+        route_page = route_page_html("/searches"),
         runtime = runtime_probe_pending_html(),
         report = compatibility_report()
     )
@@ -634,6 +859,7 @@ pub fn start() -> Result<(), JsValue> {
         .get_element_by_id("root")
         .ok_or_else(|| JsValue::from_str("#root is missing"))?;
     root.set_inner_html(&shell_html());
+    mount_router(&window, &document)?;
     wasm_bindgen_futures::spawn_local(async {
         let _ = refresh_runtime_status().await;
     });
@@ -659,6 +885,71 @@ pub fn wasm_compatibility_report() -> String {
 #[wasm_bindgen(js_name = renderRuntimeProbePendingHtml)]
 pub fn wasm_runtime_probe_pending_html() -> String {
     runtime_probe_pending_html()
+}
+
+#[wasm_bindgen(js_name = renderRoutePageHtml)]
+pub fn wasm_route_page_html(path: &str) -> String {
+    route_page_html(path)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_router(window: &web_sys::Window, document: &web_sys::Document) -> Result<(), JsValue> {
+    render_current_route(window, document)?;
+
+    for item in nav_items() {
+        let selector = format!(r#".slskr-nav-item[href="{}"]"#, item.href);
+        let Some(element) = document.query_selector(&selector)? else {
+            continue;
+        };
+        let href = item.href.to_owned();
+        let window = window.clone();
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                if let Ok(history) = window.history() {
+                    let _ = history.push_state_with_url(&JsValue::NULL, "", Some(&href));
+                }
+                let _ = render_current_route(&window, &document);
+            },
+        ));
+        element.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
+    let window_for_pop = window.clone();
+    let document_for_pop = document.clone();
+    let popstate = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+        let _ = render_current_route(&window_for_pop, &document_for_pop);
+    }));
+    window.add_event_listener_with_callback("popstate", popstate.as_ref().unchecked_ref())?;
+    popstate.forget();
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_current_route(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let path = window.location().pathname()?;
+    if let Some(view) = document.get_element_by_id("slskr-route-view") {
+        view.set_inner_html(&route_page_html(&path));
+    }
+    for item in nav_items() {
+        let selector = format!(r#".slskr-nav-item[href="{}"]"#, item.href);
+        let Some(element) = document.query_selector(&selector)? else {
+            continue;
+        };
+        let active = normalize_route_path(&path) == normalize_route_path(item.href);
+        if active {
+            element.set_attribute("aria-current", "page")?;
+        } else {
+            element.remove_attribute("aria-current")?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -725,6 +1016,7 @@ mod tests {
         assert!(html.contains("/api/v0/searches"));
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
+        assert!(html.contains("slskr-route-view"));
     }
 
     #[test]
@@ -750,6 +1042,44 @@ mod tests {
                 "missing runtime probe {expected}"
             );
         }
+    }
+
+    #[test]
+    fn rust_route_pages_cover_current_route_inventory() {
+        let pages = route_pages()
+            .iter()
+            .map(|page| page.path)
+            .collect::<Vec<_>>();
+        for route in ui_routes() {
+            if route.path == "/" {
+                continue;
+            }
+            assert!(
+                pages.contains(&route.path),
+                "missing route page for {}",
+                route.path
+            );
+        }
+    }
+
+    #[test]
+    fn route_normalization_handles_dynamic_routes() {
+        assert_eq!(normalize_route_path("/"), "/searches");
+        assert_eq!(normalize_route_path("/searches/42"), "/searches/:id");
+        assert_eq!(normalize_route_path("/system/network"), "/system/:tab");
+        assert_eq!(normalize_route_path("/pods/abc"), "/pods/:podId");
+        assert_eq!(
+            normalize_route_path("/pods/abc/channels/general"),
+            "/pods/:podId/channels/:channelId"
+        );
+    }
+
+    #[test]
+    fn route_pages_render_api_surface() {
+        let html = route_page_html("/downloads");
+        assert!(html.contains("Downloads"));
+        assert!(html.contains("/api/v0/transfers/downloads"));
+        assert!(html.contains("data-route=\"/downloads\""));
     }
 
     #[test]

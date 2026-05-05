@@ -43,6 +43,11 @@ body {
   background: #33261f;
 }
 
+.slskr-nav-item[aria-current="page"] {
+  background: #33261f;
+  box-shadow: inset 0 -3px 0 #ffd166;
+}
+
 .slskr-nav-icon {
   color: #ffd166;
   font-size: 13px;
@@ -162,6 +167,54 @@ body {
 .slskr-contract span {
   color: #c6d0ca;
   font-size: 12px;
+}
+
+.slskr-route-page {
+  background: #101314;
+  border: 1px solid #5f4229;
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.slskr-route-page header h2 {
+  font-size: 26px;
+  margin: 0 0 8px;
+}
+
+.slskr-route-page header p {
+  color: #cdbfab;
+  margin: 0 0 14px;
+}
+
+.slskr-route-columns {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.slskr-route-columns h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-route-columns ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-route-columns li {
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  min-height: 34px;
+  padding: 8px 10px;
 }
 
 .slskr-runtime {
