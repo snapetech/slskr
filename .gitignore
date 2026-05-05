@@ -1,4 +1,7 @@
 /target
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
 **/*.rs.bk
 Cargo.lock.bak
 .DS_Store
