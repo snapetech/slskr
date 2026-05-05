@@ -1643,12 +1643,22 @@ pub fn concrete_action_path_with_target(
     action: RouteAction,
     target: Option<&str>,
 ) -> String {
-    let search_id =
+    let selected_id = target.filter(|value| safe_route_segment(value));
+    let search_id = selected_id.unwrap_or_else(|| {
         if action.path.contains(":id") && !normalize_route_path(route_path).contains(":id") {
-            "1".to_string()
+            "1"
         } else {
-            route_param_value(route_path, "1")
-        };
+            // Keep the owned route parameter alive below by falling back after this branch.
+            ""
+        }
+    });
+    let route_search_id;
+    let search_id = if search_id.is_empty() {
+        route_search_id = route_param_value(route_path, "1");
+        route_search_id.as_str()
+    } else {
+        search_id
+    };
     let target = target.filter(|value| safe_route_segment(value)).unwrap_or(
         if action.path.contains(":roomName") {
             "contract-room"
@@ -3733,13 +3743,15 @@ fn native_table_html(
         .enumerate()
         .map(|(index, (primary, secondary, meta, action))| {
             let actions = native_row_action_buttons_html(kind, action);
+            let resource_id = native_row_resource_id(kind, primary, secondary, meta, index);
             format!(
-                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
+                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-resource-id="{resource_id}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
                 action = escape_html(action),
                 actions = actions,
+                resource_id = escape_html(&resource_id),
                 index = index,
             )
         })
@@ -3750,6 +3762,48 @@ fn native_table_html(
         headers = headers,
         rows = rows,
     )
+}
+
+fn native_row_resource_id(
+    kind: RouteKind,
+    primary: &str,
+    secondary: &str,
+    meta: &str,
+    index: usize,
+) -> String {
+    let candidates: &[&str] = match kind {
+        RouteKind::Search | RouteKind::DiscoveryGraph if secondary.starts_with("search ") => {
+            &[secondary]
+        }
+        RouteKind::Downloads | RouteKind::Uploads | RouteKind::Messages | RouteKind::Rooms => {
+            &[secondary, primary]
+        }
+        RouteKind::Users | RouteKind::Contacts | RouteKind::SharedWithMe => &[secondary, primary],
+        RouteKind::Collections | RouteKind::ShareGroups | RouteKind::Wishlist => &[primary],
+        RouteKind::Browse => &[primary],
+        RouteKind::System => &[primary],
+        _ => &[primary, secondary, meta],
+    };
+    candidates
+        .iter()
+        .find_map(|candidate| native_resource_candidate(candidate))
+        .unwrap_or_else(|| format!("row-{}", index + 1))
+}
+
+fn native_resource_candidate(value: &str) -> Option<String> {
+    let value = value
+        .trim()
+        .strip_prefix("search ")
+        .unwrap_or_else(|| value.trim())
+        .split('/')
+        .next()
+        .unwrap_or(value)
+        .trim();
+    if safe_route_segment(value) {
+        Some(value.to_string())
+    } else {
+        None
+    }
 }
 
 fn native_row_action_buttons_html(kind: RouteKind, primary_action: &str) -> String {
@@ -6447,10 +6501,23 @@ fn native_action_target(
     button: &web_sys::Element,
     action: RouteAction,
 ) -> Option<String> {
-    if !action.path.contains(":username") && !action.path.contains(":roomName") {
+    if !action.path.contains(":username")
+        && !action.path.contains(":roomName")
+        && !action.path.contains(":id")
+    {
         return None;
     }
     let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
+    if let Some(value) =
+        button_native_row_resource_id(button).filter(|value| safe_route_segment(value))
+    {
+        return Some(value);
+    }
+    if let Some(value) =
+        selected_native_row_resource_id(&workspace).filter(|value| safe_route_segment(value))
+    {
+        return Some(value);
+    }
     if let Some(value) = button_native_row_target(button).filter(|value| safe_route_segment(value))
     {
         return Some(value);
@@ -6551,6 +6618,16 @@ fn selected_native_row_target(workspace: &web_sys::Element) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn selected_native_row_resource_id(workspace: &web_sys::Element) -> Option<String> {
+    workspace
+        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute("data-slskr-native-resource-id"))
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
 fn button_native_row_title(button: &web_sys::Element) -> Option<String> {
     button
         .closest("[data-slskr-native-select]")
@@ -6574,6 +6651,16 @@ fn button_native_row_target(button: &web_sys::Element) -> Option<String> {
                         .filter(|value| safe_route_segment(value))
                 })
         })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn button_native_row_resource_id(button: &web_sys::Element) -> Option<String> {
+    button
+        .closest("[data-slskr-native-select]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute("data-slskr-native-resource-id"))
+        .filter(|value| !value.trim().is_empty())
 }
 
 #[cfg(target_arch = "wasm32")]
