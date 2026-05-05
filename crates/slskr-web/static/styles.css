@@ -306,6 +306,7 @@ body {
 .slskr-work-area > header {
   align-items: center;
   display: flex;
+  gap: 12px;
   justify-content: space-between;
 }
 
@@ -318,6 +319,31 @@ body {
 .slskr-work-area span {
   color: #9ba8a1;
   font-size: 12px;
+}
+
+.slskr-live-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.slskr-live-controls button {
+  background: #13201e;
+  border: 1px solid #34403f;
+  color: #c6d0ca;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0 9px;
+  text-transform: uppercase;
+}
+
+.slskr-live-controls button:first-child {
+  background: #ffd166;
+  border-color: #ffd166;
+  color: #17120d;
 }
 
 .slskr-page-data {

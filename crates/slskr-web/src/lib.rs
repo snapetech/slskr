@@ -2728,7 +2728,7 @@ pub fn route_page_html(path: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-chip">{surface} workspace</div></header>{toolbar}<div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-functional-layout"><aside class="slskr-route-actions"><h3>Commands</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></aside><section class="slskr-work-area"><header><h3>Live Data</h3><span>Updates from daemon APIs</span></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div></section></div><details class="slskr-diagnostics"><summary>Route diagnostics</summary><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-chip">{surface} workspace</div></header>{toolbar}<div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-functional-layout"><aside class="slskr-route-actions"><h3>Commands</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></aside><section class="slskr-work-area"><header><div><h3>Live Data</h3><span id="slskr-live-status" aria-live="polite">Updates from daemon APIs</span></div><div class="slskr-live-controls"><button type="button" data-slskr-refresh-route>Refresh</button><button type="button" data-slskr-focus-filter>Filter</button><button type="button" data-slskr-clear-filters>Clear Filters</button></div></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div></section></div><details class="slskr-diagnostics"><summary>Route diagnostics</summary><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
@@ -2776,6 +2776,7 @@ pub fn start() -> Result<(), JsValue> {
         .ok_or_else(|| JsValue::from_str("#root is missing"))?;
     root.set_inner_html(&shell_html());
     mount_router(&window, &document)?;
+    mount_global_shortcuts(&window, &document)?;
     wasm_bindgen_futures::spawn_local(async {
         let _ = refresh_runtime_status().await;
     });
@@ -2857,6 +2858,7 @@ fn render_current_route(
     mount_toolbar_actions(window, document)?;
     mount_workspace_tabs(document)?;
     mount_data_cards(document)?;
+    mount_live_controls(window, document)?;
     for item in nav_items() {
         let selector = format!(r#".slskr-nav-item[href="{}"]"#, item.href);
         let Some(element) = document.query_selector(&selector)? else {
@@ -3043,6 +3045,154 @@ fn mount_data_cards(document: &web_sys::Document) -> Result<(), JsValue> {
         }
     }
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_live_controls(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    if let Some(button) = document.query_selector("[data-slskr-refresh-route]")? {
+        let window = window.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                let window = window.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = refresh_route_data(&window).await;
+                });
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
+    if let Some(button) = document.query_selector("[data-slskr-focus-filter]")? {
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                focus_first_card_filter(&document);
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
+    if let Some(button) = document.query_selector("[data-slskr-clear-filters]")? {
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                clear_all_card_filters(&document);
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_global_shortcuts(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let window = window.clone();
+    let listener_document = document.clone();
+    let document = document.clone();
+    let callback = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::wrap(Box::new(
+        move |event: web_sys::KeyboardEvent| {
+            if keyboard_event_started_in_text_control(&document) {
+                return;
+            }
+            let key = event.key();
+            if key == "/" {
+                event.prevent_default();
+                focus_first_card_filter(&document);
+            } else if key == "Escape" {
+                event.prevent_default();
+                clear_all_card_filters(&document);
+            } else if key.eq_ignore_ascii_case("r") && (event.ctrl_key() || event.meta_key()) {
+                event.prevent_default();
+                let window = window.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = refresh_route_data(&window).await;
+                });
+            }
+        },
+    ));
+    listener_document
+        .add_event_listener_with_callback("keydown", callback.as_ref().unchecked_ref())?;
+    callback.forget();
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn keyboard_event_started_in_text_control(document: &web_sys::Document) -> bool {
+    document
+        .active_element()
+        .map(|element| matches!(element.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT"))
+        .unwrap_or(false)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn focus_first_card_filter(document: &web_sys::Document) {
+    if let Ok(Some(filter)) = document.query_selector(".slskr-card-filter") {
+        if let Ok(input) = filter.dyn_into::<web_sys::HtmlInputElement>() {
+            let _ = input.focus();
+            let _ = input.select();
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_all_card_filters(document: &web_sys::Document) {
+    if let Ok(filters) = document.query_selector_all(".slskr-card-filter") {
+        for filter_index in 0..filters.length() {
+            let Some(filter) = filters.item(filter_index) else {
+                continue;
+            };
+            let Ok(input) = filter.dyn_into::<web_sys::HtmlInputElement>() else {
+                continue;
+            };
+            input.set_value("");
+        }
+    }
+
+    if let Ok(rows) = document.query_selector_all("[data-slskr-row-text]") {
+        for row_index in 0..rows.length() {
+            let Some(row) = rows.item(row_index) else {
+                continue;
+            };
+            let Ok(row) = row.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let _ = row.remove_attribute("hidden");
+        }
+    }
+
+    if let Ok(cards) = document.query_selector_all("[data-slskr-data-card]") {
+        for card_index in 0..cards.length() {
+            let Some(card) = cards.item(card_index) else {
+                continue;
+            };
+            let Ok(card) = card.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            update_data_card_count(&card);
+        }
+    }
+
+    set_live_status(document, "Filters cleared");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_live_status(document: &web_sys::Document, message: &str) {
+    if let Some(status) = document.get_element_by_id("slskr-live-status") {
+        status.set_text_content(Some(message));
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3426,9 +3576,11 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
     let Some(page) = route_page(&path) else {
         return Ok(());
     };
+    set_live_status(&document, "Refreshing live data");
 
     let mut rendered = String::new();
     let mut responses = Vec::new();
+    let mut errors = 0;
     for endpoint in route_endpoints(page.surface)
         .into_iter()
         .filter(|endpoint| endpoint.method == "GET")
@@ -3443,6 +3595,7 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
                 runtime_probe_result_html(&[(endpoint.method, &url, Ok(body.as_str()))])
             }
             Err(error) => {
+                errors += 1;
                 let message = error
                     .as_string()
                     .unwrap_or_else(|| "request failed".to_string());
@@ -3460,6 +3613,12 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
             mount_data_cards(&document)?;
         }
     }
+    let message = if errors == 0 {
+        format!("Updated {} live probes", responses.len())
+    } else {
+        format!("Updated {} live probes, {} errors", responses.len(), errors)
+    };
+    set_live_status(&document, &message);
 
     Ok(())
 }
@@ -3605,6 +3764,10 @@ mod tests {
         assert!(html.contains("slskr-page-data"));
         assert!(html.contains("Route diagnostics"));
         assert!(html.contains("Clear Completed Downloads"));
+        assert!(html.contains("data-slskr-refresh-route"));
+        assert!(html.contains("data-slskr-focus-filter"));
+        assert!(html.contains("data-slskr-clear-filters"));
+        assert!(html.contains("slskr-live-status"));
     }
 
     #[test]
