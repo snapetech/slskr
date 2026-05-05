@@ -12,6 +12,8 @@ use slskr_client::{
     version::{DEFAULT_LISTEN_PORT, DEFAULT_SERVER_ADDRESS},
 };
 
+const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub config_file: Option<PathBuf>,
@@ -718,11 +720,24 @@ pub fn load_file_config() -> Result<(Option<PathBuf>, FileConfig), String> {
     let Some(path) = path else {
         return Ok((None, FileConfig::default()));
     };
-    let body = fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
-    let config = toml::from_str::<FileConfig>(&body)
-        .map_err(|error| format!("failed to parse config file {}: {error}", path.display()))?;
+    let config = read_file_config(&path)?;
     Ok((Some(path), config))
+}
+
+fn read_file_config(path: &std::path::Path) -> Result<FileConfig, String> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
+    if metadata.len() > MAX_CONFIG_FILE_BYTES {
+        return Err(format!(
+            "config file {} is too large: {} bytes, max is {MAX_CONFIG_FILE_BYTES}",
+            path.display(),
+            metadata.len()
+        ));
+    }
+    let body = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
+    toml::from_str::<FileConfig>(&body)
+        .map_err(|error| format!("failed to parse config file {}: {error}", path.display()))
 }
 
 pub trait ConfigEnv {
@@ -886,4 +901,48 @@ fn extension_for(filename: &str) -> String {
         .rsplit_once('.')
         .map(|(_, ext)| ext.to_ascii_lowercase())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn config_file_reader_rejects_oversized_files() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-config-large-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(super::MAX_CONFIG_FILE_BYTES + 1).unwrap();
+
+        let error =
+            super::read_file_config(&path).expect_err("oversized config should be rejected");
+        assert!(error.contains("config file"));
+        assert!(error.contains("too large"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn config_file_reader_parses_small_files() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-config-small-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(&path, "[app]\nhttp_bind = \"127.0.0.1:5555\"\n").unwrap();
+
+        let config = super::read_file_config(&path).expect("small config parsed");
+        assert_eq!(config.app.http_bind.as_deref(), Some("127.0.0.1:5555"));
+
+        let _ = std::fs::remove_file(path);
+    }
 }

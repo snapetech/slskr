@@ -6460,7 +6460,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: format!("\"{}\"", json_escape("# Configuration YAML\napp: {}\n")),
+                body: slskd_options_config_text_json(&state.config),
             })
         }
         ("GET", "/api/options/debug") => {
@@ -6471,8 +6471,7 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", "/api/options/yaml/location") => {
-            let json = format!("\"{}\"", json_escape("/etc/slskr/config.yaml"));
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response(slskd_options_config_location_json(&state.config)))
         }
         ("GET", "/api/autoreplace") => {
             let json = "{\"enabled\":false,\"rules\":[],\"count\":0}".to_string();
@@ -7725,7 +7724,10 @@ async fn route_http_request_with_headers(
         }
 
         ("PUT", "/api/options/yaml") => {
-            Ok(routing::ok_response("{\"persisted\":false,\"restart_required\":false}".to_owned()))
+            match slskd_options_config_upload_response(body) {
+                Ok(json) => Ok(routing::ok_response(json)),
+                Err(error) => Ok(routing::bad_request_response(&error)),
+            }
         }
 
         ("PUT", "/api/profile/me") => {
@@ -8127,11 +8129,10 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/options/yaml/validate") => {
-              Ok(HttpResponse {
-                  status: "200 OK",
-                  content_type: "text/plain",
-                  body: String::new(),
-              })
+              match slskd_options_config_validate_response(body) {
+                  Ok(response) => Ok(response),
+                  Err(error) => Ok(routing::bad_request_response(&error)),
+              }
           }
 
           ("POST", "/api/source-feed-imports/preview") => {
@@ -8810,6 +8811,19 @@ fn read_bounded_web_static_string(file: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|error| format!("static asset is not UTF-8: {error}"))
 }
 
+fn web_static_error_response(error: &str) -> HttpResponse {
+    let status = if error.contains("too large") {
+        "413 Payload Too Large"
+    } else {
+        "500 Internal Server Error"
+    };
+    routing::HttpResponse {
+        status,
+        content_type: "application/json",
+        body: format!("{{\"error\":\"{}\"}}", json_escape(error)),
+    }
+}
+
 async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     writer: &mut W,
     path: &str,
@@ -8894,6 +8908,58 @@ fn slskd_options_json(config: &AppConfig) -> String {
         "runtimeMutationEnabled": false,
     })
     .to_string()
+}
+
+fn slskd_options_config_location_json(config: &AppConfig) -> String {
+    let location = config
+        .config_file
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "runtime://memory".to_owned());
+    serde_json::Value::String(location).to_string()
+}
+
+fn slskd_options_config_text_json(config: &AppConfig) -> String {
+    let text = format!(
+        "# slskr uses TOML configuration; this compatibility endpoint is read-only.\n\
+         # config_file = {}\n\
+         # runtime_mutation_enabled = false\n",
+        config
+            .config_file
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "(none)".to_owned())
+    );
+    serde_json::Value::String(text).to_string()
+}
+
+fn slskd_options_config_body(body: &str) -> Result<String, String> {
+    let value = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|error| format!("invalid config JSON string: {error}"))?;
+    let Some(text) = value.as_str() else {
+        return Err("config payload must be a JSON string".to_owned());
+    };
+    Ok(text.to_owned())
+}
+
+fn slskd_options_config_upload_response(body: &str) -> Result<String, String> {
+    let text = slskd_options_config_body(body)?;
+    Ok(serde_json::json!({
+        "persisted": false,
+        "restart_required": false,
+        "runtimeMutationEnabled": false,
+        "bytes": text.len(),
+    })
+    .to_string())
+}
+
+fn slskd_options_config_validate_response(body: &str) -> Result<HttpResponse, String> {
+    let _ = slskd_options_config_body(body)?;
+    Ok(HttpResponse {
+        status: "200 OK",
+        content_type: "text/plain",
+        body: String::new(),
+    })
 }
 
 fn slskd_options_mutation_response(body: &str) -> Result<String, String> {
@@ -12489,11 +12555,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    let response = routing::HttpResponse {
-                        status: "500 Internal Server Error",
-                        content_type: "application/json",
-                        body: format!("{{\"error\":\"{}\"}}", json_escape(&error)),
-                    };
+                    let response = web_static_error_response(&error);
                     let _ =
                         http_server::write_http_response(&mut writer, &response, false, "").await;
                     break;
@@ -14748,6 +14810,13 @@ mod tests {
         assert!(error.contains("static asset is too large"));
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn web_static_oversize_errors_return_413() {
+        let response = super::web_static_error_response("static asset is too large: 1 bytes");
+        assert_eq!(response.status, "413 Payload Too Large");
+        assert!(response.body.contains("static asset is too large"));
     }
 
     #[test]
@@ -18214,6 +18283,41 @@ mod tests {
             .await
             .expect("invalid options response");
         assert_eq!(invalid.status, "400 Bad Request");
+
+        let location =
+            super::route_http_request("GET", "/api/options/yaml/location", None, "", &state)
+                .await
+                .expect("options location");
+        assert_eq!(location.status, "200 OK");
+        assert_eq!(location.body, "\"runtime://memory\"");
+
+        let config_text = super::route_http_request("GET", "/api/options/yaml", None, "", &state)
+            .await
+            .expect("options config text");
+        let config_text_json =
+            serde_json::from_str::<serde_json::Value>(&config_text.body).unwrap();
+        assert!(config_text_json
+            .as_str()
+            .is_some_and(|text| text.contains("slskr uses TOML configuration")));
+
+        let uploaded =
+            super::route_http_request("PUT", "/api/options/yaml", None, r#""app: {}""#, &state)
+                .await
+                .expect("options upload");
+        assert_eq!(uploaded.status, "200 OK");
+        assert!(uploaded.body.contains("\"persisted\":false"));
+
+        let invalid_upload =
+            super::route_http_request("PUT", "/api/options/yaml", None, "{}", &state)
+                .await
+                .expect("invalid options upload");
+        assert_eq!(invalid_upload.status, "400 Bad Request");
+
+        let invalid_validate =
+            super::route_http_request("POST", "/api/options/yaml/validate", None, "{}", &state)
+                .await
+                .expect("invalid options validate");
+        assert_eq!(invalid_validate.status, "400 Bad Request");
     }
 
     #[test]
