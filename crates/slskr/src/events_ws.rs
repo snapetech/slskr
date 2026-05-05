@@ -12,6 +12,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const WEBSOCKET_KEY_DECODED_LEN: usize = 16;
+const CLIENT_FRAME_CHANNEL_CAPACITY: usize = 16;
 
 pub fn valid_sec_websocket_key(sec_websocket_key: &str) -> bool {
     let Ok(decoded) = STANDARD.decode(sec_websocket_key.as_bytes()) else {
@@ -63,12 +64,12 @@ where
         last_sent_id = record.id;
     }
 
-    let (frame_tx, mut frame_rx) = mpsc::unbounded_channel();
+    let (frame_tx, mut frame_rx) = mpsc::channel(CLIENT_FRAME_CHANNEL_CAPACITY);
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = read_client_frame(&mut reader).await;
             let done = matches!(frame, Ok(ClientFrame::Close) | Err(_));
-            if frame_tx.send(frame).is_err() || done {
+            if frame_tx.send(frame).await.is_err() || done {
                 break;
             }
         }
