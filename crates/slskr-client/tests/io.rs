@@ -2,7 +2,8 @@ use slskr_client::{
     connection::ConnectionKind,
     io::{
         read_connection_kind, read_init_frame, read_message_frame_with_max, read_raw_frame,
-        write_connection_kind, write_init_frame, write_message_frame, write_raw_frame,
+        read_raw_frame_with_max, write_connection_kind, write_init_frame, write_message_frame,
+        write_raw_frame,
     },
     ClientError,
 };
@@ -20,6 +21,22 @@ async fn connection_kind_round_trips() {
         read_connection_kind(&mut server).await.unwrap(),
         ConnectionKind::PeerMessages
     );
+}
+
+#[tokio::test]
+async fn oversized_raw_frame_is_rejected_before_payload_read() {
+    let (_client, mut server) = duplex(64);
+
+    let error = read_raw_frame_with_max(&mut server, 1024, 16)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::FrameTooLarge {
+            length: 1024,
+            max: 16
+        }
+    ));
 }
 
 #[tokio::test]

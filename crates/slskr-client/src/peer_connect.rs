@@ -3,6 +3,7 @@ use slskr_protocol::server::{ConnectToPeerRequest, ServerMessage};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, ToSocketAddrs},
+    time::{self, Duration},
 };
 
 use crate::{
@@ -11,6 +12,7 @@ use crate::{
     listener::IncomingConnection,
     stream::{
         DistributedConnection, InitConnection, ObfuscatedInitConnection, PeerMessageConnection,
+        DEFAULT_CONNECT_TIMEOUT,
     },
     ClientError,
 };
@@ -209,7 +211,22 @@ pub async fn connect_peer_messages<A>(
 where
     A: ToSocketAddrs,
 {
-    let stream = TcpStream::connect(address).await?;
+    connect_peer_messages_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+}
+
+pub async fn connect_peer_messages_with_timeout<A>(
+    address: A,
+    username: impl Into<String>,
+    timeout: Duration,
+) -> Result<PeerMessageConnection<TcpStream>, ClientError>
+where
+    A: ToSocketAddrs,
+{
+    let stream = time::timeout(timeout, TcpStream::connect(address))
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "peer-message connect",
+        })??;
     let stream = send_peer_init(stream, username, ConnectionKind::PeerMessages).await?;
     Ok(PeerMessageConnection::new(stream))
 }
@@ -221,7 +238,22 @@ pub async fn connect_distributed<A>(
 where
     A: ToSocketAddrs,
 {
-    let stream = TcpStream::connect(address).await?;
+    connect_distributed_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+}
+
+pub async fn connect_distributed_with_timeout<A>(
+    address: A,
+    username: impl Into<String>,
+    timeout: Duration,
+) -> Result<DistributedConnection<TcpStream>, ClientError>
+where
+    A: ToSocketAddrs,
+{
+    let stream = time::timeout(timeout, TcpStream::connect(address))
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "distributed connect",
+        })??;
     let stream = send_peer_init(stream, username, ConnectionKind::Distributed).await?;
     Ok(DistributedConnection::new(stream))
 }
@@ -233,7 +265,22 @@ pub async fn connect_file_transfer<A>(
 where
     A: ToSocketAddrs,
 {
-    let stream = TcpStream::connect(address).await?;
+    connect_file_transfer_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+}
+
+pub async fn connect_file_transfer_with_timeout<A>(
+    address: A,
+    username: impl Into<String>,
+    timeout: Duration,
+) -> Result<FileTransferConnection<TcpStream>, ClientError>
+where
+    A: ToSocketAddrs,
+{
+    let stream = time::timeout(timeout, TcpStream::connect(address))
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "file-transfer connect",
+        })??;
     let stream = send_peer_init(stream, username, ConnectionKind::FileTransfer).await?;
     Ok(FileTransferConnection::new(stream))
 }

@@ -27,7 +27,7 @@ scripts/run-council-scan.sh
 | Constructor/mutable collection candidates | Fixed | Re-run after new constructors are added; BUG-032 covers the accepted Python mutable input bug. |
 | Protocol count/length candidates | Fixed | Re-run after new wire-count or chunk-read code is added; BUG-033 covers the accepted transfer chunk allocation bug. |
 | Protocol scalar emission candidates | Fixed | Re-run after new protocol scalar casts or length-prefix writers are added; BUG-034 covers accepted API-to-protocol narrowing bugs. |
-| Resolver/raw stream candidates | Unclassified | Classify direct socket, resolver, stream read/write, and raw connection lifecycle candidates. |
+| Resolver/raw stream candidates | Fixed | Re-run after new direct socket, resolver, stream read/write, or raw connection lifecycle code is added; BUG-035 and BUG-036 cover accepted raw-stream bugs. |
 | Task/cancellation/lifecycle candidates | Unclassified | Classify spawn, timeout, interval, channel, cancellation, and shutdown candidates. |
 | Example Web API candidates | Unclassified | Classify docs/examples for stale auth, storage, WebSocket, CORS, and URL guidance. |
 
@@ -43,7 +43,7 @@ scripts/run-council-scan.sh
 
 ## Current Section Review
 
-Current section: `Protocol scalar emission candidates`
+Current section: `Resolver/raw stream candidates`
 
 Latest scanner counts:
 
@@ -52,9 +52,9 @@ Latest scanner counts:
 | Constructor/mutable collection candidates | 7 |
 | Protocol count/length candidates | 41 |
 | Protocol scalar emission candidates | 30 |
-| Resolver/raw stream candidates | 628 |
-| Task/cancellation/lifecycle candidates | 229 |
-| Example Web API candidates | 283 |
+| Resolver/raw stream candidates | 220 |
+| Task/cancellation/lifecycle candidates | 236 |
+| Example Web API candidates | 281 |
 
 ### Constructor/mutable collection candidates
 
@@ -75,7 +75,7 @@ Latest scanner counts:
 | `Reader::read_string` and `Reader::read_len_prefixed_bytes` | Protocol primitives | Existing Guard | Length-prefixed values are rejected when length exceeds remaining input before allocation/copy. | Primitive tests cover trailing/invalid reads. |
 | `MessageFrame::decode` and `InitFrame::decode` | Protocol frames | Existing Guard | Frame lengths reject too-short code widths and lengths larger than remaining input. | `message_frame_rejects_len_shorter_than_code`, `init_frame_rejects_zero_len`, frame round-trip tests. |
 | `read_len_prefixed_frame`, `read_init_frame_with_first_len_byte_and_max`, and `read_obfuscated_len_prefixed_frame` | Client stream I/O | Existing Guard | Async frame readers reject length values over `DEFAULT_MAX_FRAME_LEN` before allocating. | `oversized_message_frame_is_rejected_before_payload_read`. |
-| `read_raw_frame(reader, length)` | Client stream I/O | Existing Guard | Raw frame length is caller-supplied, not decoded from untrusted wire metadata in current call sites. | Keep in resolver/raw stream review class for call-site lifecycle classification. |
+| `read_raw_frame(reader, length)` | Client stream I/O | Fixed | BUG-035: raw frame reads now route through `read_raw_frame_with_max` and reject lengths above `DEFAULT_MAX_FRAME_LEN` before allocating. | `oversized_raw_frame_is_rejected_before_payload_read`. |
 | `decode_file_entries` file and attribute counts | Peer protocol | Existing Guard | Counts are not preallocated and each entry/attribute consumes bounded remaining bytes, so impossible counts fail on EOF. | `file_search_response_rejects_untrusted_count_without_preallocating`. |
 | `decode_string_vec`, `decode_room_entries`, `decode_possible_parents` | Server protocol | Existing Guard | Counts are decoded without preallocating count-sized vectors; room count vectors validate matching lengths. | Room list and possible parent round-trip/selection tests. |
 | `FileTransferConnection::read_chunk` and `DownloadTransfer::receive_file_from` | Client SDKs | Fixed | BUG-033: transfer chunk reads now reject lengths above `DEFAULT_MAX_TRANSFER_CHUNK_LEN` before allocating. | `oversized_chunk_is_rejected_before_allocation` and `receive_file_rejects_oversized_remaining_before_allocation`. |
@@ -92,3 +92,17 @@ Latest scanner counts:
 | Protocol and share-cache length prefix writers | Protocol + Backend/API | Existing Guard | Length prefixes use `u32::try_from(...len())` or `write_len_prefixed_bytes`, which returns `LengthOverflow` before emission. | Frame, primitive, share payload tests. |
 | Widening casts to `u64` for durations and byte lengths | Backend/API + Client SDKs | Existing Guard | Casts widen from bounded/nonnegative values or `usize` byte lengths into `u64`; they do not truncate protocol scalars. | Existing transfer/tracing tests. |
 | Fixed small constants cast to `u32` | Backend/API | Existing Guard | `MAX_WEBHOOK_DELIVERY_TASKS` is 32 and cast only for semaphore permit acquisition. | Webhook delivery pool tests. |
+
+### Resolver/raw stream candidates
+
+| Candidate | Scope | Classification | Evidence | Follow-up |
+| --- | --- | --- | --- | --- |
+| `read_raw_frame(reader, length)` caller-supplied allocation | Client SDKs + Network Runtime | Fixed | BUG-035: raw frame reads now reject lengths over `DEFAULT_MAX_FRAME_LEN` by default and expose `read_raw_frame_with_max` for stricter callers. | `oversized_raw_frame_is_rejected_before_payload_read`; `cargo test -p slskr-client`. |
+| `ServerConnection::connect` public SDK helper | Client SDKs + Network Runtime | Fixed | BUG-036: default server connects now use `DEFAULT_CONNECT_TIMEOUT`; callers needing tighter policy can call `connect_with_timeout`. | `cargo test -p slskr-client`; runtime callers already wrap with app-specific timeouts. |
+| `connect_peer_messages`, `connect_distributed`, `connect_file_transfer` public SDK helpers | Client SDKs + Network Runtime | Fixed | BUG-036: direct peer/distributed/file-transfer SDK helpers now use `DEFAULT_CONNECT_TIMEOUT` and expose timeout-specific variants. | `cargo test -p slskr-client`; daemon call sites continue using shorter configured peer timeouts. |
+| Daemon direct peer/file connect call sites | Backend/API + Network Runtime | Existing Guard | `crates/slskr/src/main.rs` wraps direct and indirect peer/file `TcpStream::connect`, handshake, read, write, and transfer operations in `state.config.peer_response_timeout`. | Existing daemon peer/transfer tests plus client tests. |
+| HTTP request body reads | Backend/API | Existing Guard | `http_server.rs` wraps body reads in `BODY_READ_TIMEOUT` and caps body size before routing. | HTTP server tests and release gate. |
+| WebSocket client frame reads | Backend/API | Existing Guard | `events_ws.rs` caps client frames at 64 KiB, rejects malformed control frames, and the reader task is owned by connection shutdown. | WebSocket auth/frame tests. |
+| Webhook outbound URL resolver | Backend/API + Release/Ops | Existing Guard | Webhook URLs are validated/resolved before client construction, private/blocklisted addresses are rejected, and reqwest is configured with the resolved address and a delivery timeout. | `scripts/check-webhook-outbound-policy.sh`; webhook tests. |
+| Lidarr integration URL resolver | Backend/API + Docs/Config | Existing Guard | Integration base URLs reject private/reserved/public-suffix escapes and pin resolved addresses into the reqwest client with configured timeouts. | Integration resolver tests in `slskr`. |
+| Test/CLI/examples socket helpers | Tests/Tooling | False Positive | Remaining raw socket hits are contract tests, local smoke tests, CLI diagnostics, examples, README snippets, or generated/non-source artifacts excluded from scanner counts. | Keep out of production bug ledger unless promoted by a failing gate. |

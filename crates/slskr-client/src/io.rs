@@ -188,6 +188,23 @@ pub async fn read_raw_frame<R>(reader: &mut R, length: usize) -> Result<RawFrame
 where
     R: AsyncRead + Unpin,
 {
+    read_raw_frame_with_max(reader, length, DEFAULT_MAX_FRAME_LEN).await
+}
+
+pub async fn read_raw_frame_with_max<R>(
+    reader: &mut R,
+    length: usize,
+    max_len: usize,
+) -> Result<RawFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    if length > max_len {
+        return Err(ClientError::FrameTooLarge {
+            length,
+            max: max_len,
+        });
+    }
     let mut payload = vec![0; length];
     reader.read_exact(&mut payload).await?;
     Ok(RawFrame::new(payload))

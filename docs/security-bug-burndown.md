@@ -103,6 +103,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Python SDK mutable batch inputs | Batch operation and response constructors kept caller-owned mutable dict/list objects by reference. | Fixed by deep-copying batch request bodies, returning fresh serialized bodies, copying response lists, and adding mutation-isolation tests. |
 | Medium | Client transfer chunk allocation | The reusable client transfer helper could allocate a caller-supplied remaining length in one `Vec`. | Fixed by adding `DEFAULT_MAX_TRANSFER_CHUNK_LEN`, rejecting oversized chunk reads before allocation, and covering direct chunk and `receive_file_from` paths. |
 | Medium | Protocol scalar narrowing | API routes narrowed oversized JSON tokens/message IDs into protocol `u32` values with `as`. | Fixed by rejecting out-of-range search response tokens and message acknowledgement IDs before protocol command emission, with regression tests. |
+| Medium | Raw frame allocation | `read_raw_frame` allocated caller-supplied lengths without enforcing the SDK frame maximum. | Fixed by routing raw frame reads through `read_raw_frame_with_max`, rejecting oversized lengths before allocation, and adding regression coverage. |
+| Medium | SDK connect timeout | Public SDK connect helpers delegated directly to `TcpStream::connect`, leaving consumers without default bounded connect behavior. | Fixed by adding `DEFAULT_CONNECT_TIMEOUT`, timeout-backed defaults, and explicit timeout variants for server, peer-message, distributed, and file-transfer connects. |
 
 ## Open Burn-Down
 

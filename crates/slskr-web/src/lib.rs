@@ -3744,14 +3744,16 @@ fn native_table_html(
         .map(|(index, (primary, secondary, meta, action))| {
             let actions = native_row_action_buttons_html(kind, action);
             let resource_id = native_row_resource_id(kind, primary, secondary, meta, index);
+            let row_attrs = native_row_data_attrs(kind, primary, secondary, meta);
             format!(
-                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-resource-id="{resource_id}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
+                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-resource-id="{resource_id}"{row_attrs} data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
                 action = escape_html(action),
                 actions = actions,
                 resource_id = escape_html(&resource_id),
+                row_attrs = row_attrs,
                 index = index,
             )
         })
@@ -3762,6 +3764,94 @@ fn native_table_html(
         headers = headers,
         rows = rows,
     )
+}
+
+fn native_row_data_attrs(kind: RouteKind, primary: &str, secondary: &str, meta: &str) -> String {
+    let mut attrs: Vec<(&str, &str)> = Vec::new();
+    match kind {
+        RouteKind::Search | RouteKind::DiscoveryGraph => {
+            if secondary.starts_with("search ") {
+                attrs.push((
+                    "data-slskr-native-search-id",
+                    secondary.trim_start_matches("search "),
+                ));
+                attrs.push(("data-slskr-native-search-text", primary));
+            } else {
+                attrs.push(("data-slskr-native-filename", primary));
+                attrs.push(("data-slskr-native-peer", secondary));
+                attrs.push(("data-slskr-native-queue-state", meta));
+            }
+        }
+        RouteKind::PlaylistIntake => {
+            attrs.push(("data-slskr-native-track", primary));
+            attrs.push(("data-slskr-native-artist", secondary));
+            attrs.push(("data-slskr-native-row-state", meta));
+        }
+        RouteKind::Wishlist => {
+            attrs.push(("data-slskr-native-search-text", primary));
+            attrs.push(("data-slskr-native-filter", secondary));
+            attrs.push(("data-slskr-native-row-state", meta));
+        }
+        RouteKind::Downloads | RouteKind::Uploads => {
+            attrs.push(("data-slskr-native-filename", primary));
+            attrs.push(("data-slskr-native-peer", secondary));
+            attrs.push(("data-slskr-native-transfer-state", meta));
+        }
+        RouteKind::Messages | RouteKind::Rooms => {
+            attrs.push(("data-slskr-native-conversation", primary));
+            attrs.push(("data-slskr-native-peer", primary));
+            attrs.push(("data-slskr-native-last-message", secondary));
+            attrs.push(("data-slskr-native-row-state", meta));
+        }
+        RouteKind::Users => {
+            attrs.push(("data-slskr-native-username", primary));
+            attrs.push(("data-slskr-native-row-state", secondary));
+            attrs.push(("data-slskr-native-user-stats", meta));
+        }
+        RouteKind::Contacts => {
+            attrs.push(("data-slskr-native-contact", primary));
+            attrs.push(("data-slskr-native-username", secondary));
+            attrs.push(("data-slskr-native-row-state", meta));
+        }
+        RouteKind::Solid => {
+            attrs.push(("data-slskr-native-solid-identity", primary));
+            attrs.push(("data-slskr-native-solid-storage", secondary));
+            attrs.push(("data-slskr-native-row-state", meta));
+        }
+        RouteKind::Collections => {
+            attrs.push(("data-slskr-native-collection", primary));
+            attrs.push(("data-slskr-native-collection-kind", secondary));
+            attrs.push(("data-slskr-native-row-state", meta));
+        }
+        RouteKind::ShareGroups => {
+            attrs.push(("data-slskr-native-share-group", primary));
+            attrs.push(("data-slskr-native-member-count", secondary));
+            attrs.push(("data-slskr-native-row-state", meta));
+        }
+        RouteKind::SharedWithMe => {
+            attrs.push(("data-slskr-native-collection", primary));
+            attrs.push(("data-slskr-native-owner", secondary));
+            attrs.push(("data-slskr-native-permissions", meta));
+        }
+        RouteKind::Browse => {
+            attrs.push(("data-slskr-native-path", primary));
+            attrs.push(("data-slskr-native-entry-kind", secondary));
+            attrs.push(("data-slskr-native-size", meta));
+            if secondary != "folder" {
+                attrs.push(("data-slskr-native-filename", primary));
+            }
+        }
+        RouteKind::System => {
+            attrs.push(("data-slskr-native-system-area", primary));
+            attrs.push(("data-slskr-native-row-state", secondary));
+        }
+    }
+    attrs
+        .into_iter()
+        .filter(|(_, value)| !value.trim().is_empty())
+        .map(|(name, value)| format!(r#" {name}="{}""#, escape_html(value.trim())))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 fn native_row_resource_id(
@@ -6598,21 +6688,44 @@ fn native_action_value(
 ) -> String {
     if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
         if matches!(body, ActionBody::DownloadFiles) {
+            if let Some(value) =
+                selected_native_row_attribute_values(&workspace, "data-slskr-native-filename")
+            {
+                return value;
+            }
+            if let Some(value) = button_native_row_attribute(button, "data-slskr-native-filename") {
+                return value;
+            }
             if let Some(value) = selected_native_row_titles(&workspace) {
                 return value;
             }
-            if let Some(value) = button_native_row_title(button) {
+        }
+        if matches!(body, ActionBody::BrowseDirectory) {
+            if let Some(value) = button_native_row_attribute(button, "data-slskr-native-path")
+                .filter(|_| {
+                    button_native_row_attribute(button, "data-slskr-native-entry-kind").as_deref()
+                        == Some("folder")
+                })
+            {
                 return value;
             }
         }
-        if matches!(
-            body,
-            ActionBody::CollectionItem
-                | ActionBody::SearchText
-                | ActionBody::ShareGrant
-                | ActionBody::ShareGroupMember
-                | ActionBody::Username
-        ) {
+        if matches!(body, ActionBody::Username) {
+            for attr in [
+                "data-slskr-native-username",
+                "data-slskr-native-peer",
+                "data-slskr-native-owner",
+                "data-slskr-native-contact",
+            ] {
+                if let Some(value) = button_native_row_attribute(button, attr) {
+                    return value;
+                }
+                if let Some(value) = selected_native_row_attribute(&workspace, attr) {
+                    return value;
+                }
+            }
+        }
+        if matches!(body, ActionBody::SearchText) {
             if let Some(value) = button_native_row_target(button) {
                 return value;
             }
@@ -6623,6 +6736,29 @@ fn native_action_value(
         for selector in native_action_value_selectors(body) {
             if let Some(value) = first_workspace_value(&workspace, selector) {
                 return value;
+            }
+        }
+        if matches!(body, ActionBody::CollectionItem) {
+            if let Some(value) = button_native_row_attribute(button, "data-slskr-native-collection")
+                .or_else(|| {
+                    selected_native_row_attribute(&workspace, "data-slskr-native-collection")
+                })
+            {
+                return value;
+            }
+        }
+        if matches!(body, ActionBody::ShareGrant | ActionBody::ShareGroupMember) {
+            for attr in [
+                "data-slskr-native-username",
+                "data-slskr-native-peer",
+                "data-slskr-native-owner",
+            ] {
+                if let Some(value) = button_native_row_attribute(button, attr) {
+                    return value;
+                }
+                if let Some(value) = selected_native_row_attribute(&workspace, attr) {
+                    return value;
+                }
             }
         }
         if matches!(
@@ -6825,6 +6961,46 @@ fn selected_native_row_titles(workspace: &web_sys::Element) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn selected_native_row_attribute(workspace: &web_sys::Element, attribute: &str) -> Option<String> {
+    workspace
+        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute(attribute))
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn selected_native_row_attribute_values(
+    workspace: &web_sys::Element,
+    attribute: &str,
+) -> Option<String> {
+    let rows = workspace
+        .query_selector_all("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()?;
+    let mut values = Vec::new();
+    for index in 0..rows.length() {
+        let Some(node) = rows.item(index) else {
+            continue;
+        };
+        let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        if let Some(value) = row
+            .get_attribute(attribute)
+            .filter(|value| !value.trim().is_empty())
+        {
+            values.push(value);
+        }
+    }
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.join("\n"))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn selected_native_row_target(workspace: &web_sys::Element) -> Option<String> {
     selected_native_row_detail(workspace)
         .filter(|value| safe_route_segment(value))
@@ -6865,6 +7041,16 @@ fn button_native_row_target(button: &web_sys::Element) -> Option<String> {
                         .filter(|value| safe_route_segment(value))
                 })
         })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn button_native_row_attribute(button: &web_sys::Element, attribute: &str) -> Option<String> {
+    button
+        .closest("[data-slskr-native-select]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute(attribute))
+        .filter(|value| !value.trim().is_empty())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -12191,6 +12377,67 @@ mod tests {
         assert!(html.contains(r#"data-slskr-native-resource-id="row-1""#));
         let users = route_page_html("/users");
         assert!(users.contains(r#"data-slskr-native-resource-id="peer1""#));
+    }
+
+    #[test]
+    fn native_rows_expose_structured_domain_action_values() {
+        let search = route_workspace_result_html(
+            "/searches",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/searches/:id/responses",
+                    surface: "search",
+                },
+                body: r#"[{"username":"peer1","files":[{"filename":"Archive/Track.flac"}],"queueLength":2,"hasFreeUploadSlot":true}]"#.to_string(),
+            }],
+        );
+        assert!(search.contains(r#"data-slskr-native-filename="Archive/Track.flac""#));
+        assert!(search.contains(r#"data-slskr-native-peer="peer1""#));
+        assert!(search.contains(r#"data-slskr-native-queue-state="free slot / queue 2""#));
+
+        let downloads = route_workspace_result_html(
+            "/downloads",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/transfers/downloads",
+                    surface: "transfers",
+                },
+                body: r#"[{"username":"peer2","filename":"Remote/Song.mp3","state":"Queued","progress":0.5}]"#.to_string(),
+            }],
+        );
+        assert!(downloads.contains(r#"data-slskr-native-filename="Remote/Song.mp3""#));
+        assert!(downloads.contains(r#"data-slskr-native-peer="peer2""#));
+        assert!(downloads.contains(r#"data-slskr-native-transfer-state="Queued / 50% / 0 B/s""#));
+
+        let contacts = route_workspace_result_html(
+            "/contacts",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/contacts",
+                    surface: "identity",
+                },
+                body: r#"[{"nickname":"Nick","peerId":"peer3","group":"trusted","verified":true}]"#
+                    .to_string(),
+            }],
+        );
+        assert!(contacts.contains(r#"data-slskr-native-contact="Nick""#));
+        assert!(contacts.contains(r#"data-slskr-native-username="peer3""#));
+
+        let sharing = route_page_html("/sharegroups");
+        assert!(sharing.contains("data-slskr-native-share-group"));
+        assert!(sharing.contains("data-slskr-native-member-count"));
+
+        let shared = route_page_html("/shared");
+        assert!(shared.contains("data-slskr-native-owner"));
+        assert!(shared.contains("data-slskr-native-permissions"));
+
+        let browse = route_page_html("/browse");
+        assert!(browse.contains("data-slskr-native-path"));
+        assert!(browse.contains("data-slskr-native-entry-kind"));
+        assert!(browse.contains("data-slskr-native-filename"));
     }
 
     #[test]

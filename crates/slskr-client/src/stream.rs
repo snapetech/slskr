@@ -7,6 +7,7 @@ use slskr_protocol::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, ToSocketAddrs},
+    time::{self, Duration},
 };
 
 use crate::{
@@ -18,6 +19,8 @@ use crate::{
     ClientError,
 };
 
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Debug)]
 pub struct ServerConnection<S> {
     stream: S,
@@ -28,7 +31,18 @@ impl ServerConnection<TcpStream> {
     where
         A: ToSocketAddrs,
     {
-        let stream = TcpStream::connect(address).await?;
+        Self::connect_with_timeout(address, DEFAULT_CONNECT_TIMEOUT).await
+    }
+
+    pub async fn connect_with_timeout<A>(address: A, timeout: Duration) -> Result<Self, ClientError>
+    where
+        A: ToSocketAddrs,
+    {
+        let stream = time::timeout(timeout, TcpStream::connect(address))
+            .await
+            .map_err(|_| ClientError::TimedOut {
+                operation: "server connect",
+            })??;
         Ok(Self::new(stream))
     }
 

@@ -10,7 +10,8 @@ scan_rg() {
   local tmp
   tmp="$(mktemp)"
   rg -n --glob '!target/**' --glob '!web/node_modules/**' --glob '!dashboard/node_modules/**' \
-    --glob '!client-ts/node_modules/**' "$@" >"$tmp" || true
+    --glob '!client-ts/node_modules/**' --glob '!**/dist/**' --glob '!**/package-lock.json' \
+    "$@" >"$tmp" || true
   local count
   count="$(wc -l <"$tmp" | tr -d ' ')"
   printf '| %s | %s |\n' "$title" "$count"
