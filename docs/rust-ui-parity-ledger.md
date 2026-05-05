@@ -58,6 +58,10 @@ Completed across the main Rust routes:
   paths, transfer states, and system areas. The WASM action resolver uses those
   values before generic fallbacks so row actions can build closer selected-item
   payloads across search, transfers, contacts, sharing, messaging, and browse.
+- Native action path resolution now separates selected route targets from
+  selected item IDs. Wishlist runs, transfer cancel/allow/deny, contact remove,
+  share-group member edits, and share-grant update/token/backfill/delete actions
+  can use live row IDs instead of hardcoded demo IDs when API rows provide them.
 
 ## Route Gaps
 
@@ -66,9 +70,9 @@ Completed across the main Rust routes:
 | Search | Query toolbar, grouped result rows, planner copy, filters, result inspector, search/download actions, structured peer/filename row payloads. | Full result expansion, search filter modal parity, exact ranking/duplicate controls. |
 | Discovery Graph | Seed inputs, graph labels, recommendations table, build graph action. | Canvas-level graph interaction, node inspector behavior, saved branches, weighted edge controls, recommendation queue behavior. |
 | Playlist Intake | Paste/import shell, parsed row table, validation summary, preview action. | Upload/file import controls, organization plan detail, provider/MusicBrainz/SongID tabs, row-level correction workflow. |
-| Wishlist | Wanted-search form/table, run/add actions, review summary, editor surface with enable/auto-download fields. | Quota portal behavior, persisted discovery inbox bridge, per-row enable/auto-download toggles wired to persisted data. |
-| Downloads | Active queue table, speed/slot summary, clear/download/acceleration actions, structured selected filename/peer/state values. | Per-transfer retry/cancel/remove with exact transfer IDs where the backend exposes them, grouped transfer rows, detailed progress/ETA controls. |
-| Uploads | Upload queue table, allow/deny/policy shell, clear-completed action, structured selected filename/peer/state values. | Real allow/deny backend mapping, per-peer grouping, policy editor parity, upload-specific selected-transfer identifiers. |
+| Wishlist | Wanted-search form/table, run/add actions, review summary, editor surface with enable/auto-download fields, selected-row IDs for run actions. | Quota portal behavior, persisted discovery inbox bridge, per-row enable/auto-download toggles wired to persisted data. |
+| Downloads | Active queue table, speed/slot summary, clear/download/acceleration actions, structured selected filename/peer/state/id values. | Grouped transfer rows and detailed progress/ETA controls beyond the current row model. |
+| Uploads | Upload queue table, allow/deny/policy shell, clear-completed action, structured selected filename/peer/state/id values. | Policy editor parity and richer per-peer grouping beyond the current row model. |
 | Messages | Two-pane messaging shell, conversation table, reply/acknowledge/join actions. | Multi-window thread state, room/pod channel lists, unread/delete lifecycle, compose history, room create/join modals. |
 | Users | Directory table, lookup/watch/note/browse/message actions, user note editor surface. | Full selected user card, live privileges/stats rendering, context menu parity, browse/message handoff. |
 | Contacts | Contact table, invite/add/nearby shell, add contact action, contact/group/note editor surface. | Invite QR flow, scan/upload invite, nearby contacts refresh behavior, persisted groups/notes edits, remove/edit action wiring. |
