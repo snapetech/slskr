@@ -9,6 +9,9 @@ Cargo.lock.bak
 .idea/
 .vscode/
 .secrets/
+__pycache__/
+*.py[cod]
+*.egg-info/
 
 # Local live-test credentials
 .env

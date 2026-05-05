@@ -3347,13 +3347,15 @@ fn native_table_html(
     let rows = rows
         .iter()
         .take(50)
-        .map(|(primary, secondary, meta, action)| {
+        .enumerate()
+        .map(|(index, (primary, secondary, meta, action))| {
             format!(
-                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
+                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
                 action = escape_html(action),
+                index = index,
             )
         })
         .collect::<Vec<_>>()
@@ -3675,7 +3677,7 @@ fn native_tabs_html(kind: RouteKind) -> String {
 }
 
 fn native_filter_html() -> String {
-    r#"<div class="slskr-native-filterbar"><input type="search" data-slskr-native-filter aria-label="Filter visible rows" placeholder="Filter visible rows"><button type="button" data-slskr-native-filter-clear>Clear Filter</button><button type="button" data-slskr-native-select-visible>Select Visible</button><button type="button" data-slskr-native-clear-selection>Clear Selection</button><span data-slskr-native-count>0 rows</span></div>"#.to_string()
+    r#"<div class="slskr-native-filterbar"><input type="search" data-slskr-native-filter aria-label="Filter visible rows" placeholder="Filter visible rows"><button type="button" data-slskr-native-filter-clear>Clear Filter</button><button type="button" data-slskr-native-select-visible>Select Visible</button><button type="button" data-slskr-native-clear-selection>Clear Selection</button><button type="button" data-slskr-native-reset-state>Reset Table</button><span data-slskr-native-count>0 rows</span></div>"#.to_string()
 }
 
 fn native_inspector_html() -> String {
@@ -4822,7 +4824,7 @@ fn select_native_subview(document: &web_sys::Document, tab: &web_sys::Element) {
 
 #[cfg(target_arch = "wasm32")]
 fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
-    let buttons = document.query_selector_all(".slskr-native-workspace button:not([data-slskr-native-tab]):not([data-slskr-native-filter-clear]):not([data-slskr-native-select-visible]):not([data-slskr-native-clear-selection])")?;
+    let buttons = document.query_selector_all(".slskr-native-workspace button:not([data-slskr-native-tab]):not([data-slskr-native-filter-clear]):not([data-slskr-native-select-visible]):not([data-slskr-native-clear-selection]):not([data-slskr-native-reset-state])")?;
     for button_index in 0..buttons.length() {
         let Some(node) = buttons.item(button_index) else {
             continue;
@@ -4975,6 +4977,26 @@ fn mount_native_filters(document: &web_sys::Document) -> Result<(), JsValue> {
         callback.forget();
     }
 
+    let reset_buttons = document.query_selector_all("[data-slskr-native-reset-state]")?;
+    for button_index in 0..reset_buttons.length() {
+        let Some(node) = reset_buttons.item(button_index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let workspace = button
+            .closest(".slskr-native-workspace")?
+            .ok_or_else(|| JsValue::from_str("native reset table is outside workspace"))?;
+        let workspace_for_reset = workspace.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                reset_native_table_state(&workspace_for_reset);
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
     Ok(())
 }
 
@@ -5028,6 +5050,26 @@ fn persist_native_filter(workspace: &web_sys::Element, term: &str) {
         let _ = storage.remove_item(&key);
     } else {
         let _ = storage.set_item(&key, term);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn reset_native_table_state(workspace: &web_sys::Element) {
+    if let Ok(Some(filter)) = workspace.query_selector("[data-slskr-native-filter]") {
+        if let Ok(input) = filter.dyn_into::<web_sys::HtmlInputElement>() {
+            input.set_value("");
+        }
+    }
+    apply_native_filter(workspace, "");
+    persist_native_filter(workspace, "");
+    clear_native_selection(workspace);
+    reset_native_sort(workspace);
+
+    if let Some(document) = workspace.owner_document() {
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            status.set_inner_html("<strong>Reset</strong> table controls cleared");
+        }
+        show_toast(&document, "Table controls reset");
     }
 }
 
@@ -5358,6 +5400,61 @@ fn persist_native_sort(workspace: &web_sys::Element, index: &str, direction: &st
         return;
     };
     let _ = storage.set_item(&key, &format!("{index}:{direction}"));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn reset_native_sort(workspace: &web_sys::Element) {
+    if let Some(key) = native_state_key(workspace, "sort") {
+        if let Some(storage) = session_storage_for_workspace(workspace) {
+            let _ = storage.remove_item(&key);
+        }
+    }
+    if let Ok(sort_buttons) = workspace.query_selector_all("[data-slskr-native-sort]") {
+        for button_index in 0..sort_buttons.length() {
+            let Some(node) = sort_buttons.item(button_index) else {
+                continue;
+            };
+            let Ok(sort_button) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let _ = sort_button.set_attribute("aria-sort", "none");
+        }
+    }
+    let Ok(tables) = workspace.query_selector_all("table") else {
+        return;
+    };
+    for table_index in 0..tables.length() {
+        let Some(table_node) = tables.item(table_index) else {
+            continue;
+        };
+        let Ok(table) = table_node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        let Some(tbody) = table.query_selector("tbody").ok().flatten() else {
+            continue;
+        };
+        let Ok(row_nodes) = tbody.query_selector_all("[data-slskr-native-select]") else {
+            continue;
+        };
+        let mut rows = Vec::new();
+        for row_index in 0..row_nodes.length() {
+            let Some(node) = row_nodes.item(row_index) else {
+                continue;
+            };
+            let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            rows.push(row);
+        }
+        rows.sort_by_key(|row| {
+            row.get_attribute("data-slskr-native-index")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(usize::MAX)
+        });
+        for row in rows {
+            let _ = tbody.append_child(&row);
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -9076,9 +9173,11 @@ mod tests {
             assert!(html.contains("data-slskr-native-count"));
             assert!(html.contains("data-slskr-native-select-visible"));
             assert!(html.contains("data-slskr-native-clear-selection"));
+            assert!(html.contains("data-slskr-native-reset-state"));
             assert!(html.contains("slskr-native-table"));
             assert!(html.contains("data-slskr-native-sort=\"0\""));
             assert!(html.contains("data-slskr-native-sort-0="));
+            assert!(html.contains("data-slskr-native-index="));
             assert!(html.contains("slskr-native-inspector"));
             assert!(html.contains("data-slskr-native-inspector-title"));
             assert!(html.contains("data-slskr-native-select"));

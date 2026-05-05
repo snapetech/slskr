@@ -38,6 +38,11 @@ run_python_checks() {
     exit 1
   fi
 
+  if git ls-files 'client-python/__pycache__/*' 'client-python/**/__pycache__/*' 'client-python/**/*.egg-info/*' 'client-python/*.egg-info/*' | grep -q .; then
+    printf 'tracked Python build artifacts found under client-python; remove __pycache__ and egg-info outputs from git.\n' >&2
+    exit 1
+  fi
+
   local venv_dir
   venv_dir="$(mktemp -d)"
   cleanup_python_artifacts() {
