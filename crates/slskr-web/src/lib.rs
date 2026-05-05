@@ -3933,6 +3933,16 @@ fn native_inspector_html() -> String {
     r#"<aside class="slskr-native-inspector" id="slskr-native-inspector" aria-live="polite"><header><div><h3>Selection Inspector</h3><p>Choose a row to inspect details and actions.</p></div><span data-slskr-native-inspector-count>0 selected</span></header><dl><dt>Item</dt><dd data-slskr-native-inspector-title>Nothing selected</dd><dt>Detail</dt><dd data-slskr-native-inspector-detail>Use the table to choose an item.</dd><dt>State</dt><dd data-slskr-native-inspector-meta>Waiting</dd><dt>Action</dt><dd data-slskr-native-inspector-action>Review</dd></dl><div class="slskr-native-inspector-actions"><button type="button">Review Selection</button><button type="button">Queue Selected</button></div></aside>"#.to_string()
 }
 
+fn native_selection_preview_html(title: &str, detail: &str, meta: &str, action: &str) -> String {
+    format!(
+        r#"<div class="slskr-native-preview-card" aria-live="polite"><span data-slskr-native-preview-count>0 selected</span><strong data-slskr-native-preview-title>{}</strong><p data-slskr-native-preview-detail>{}</p><em data-slskr-native-preview-meta>{}</em><button type="button" data-slskr-native-preview-action>{}</button></div>"#,
+        escape_html(title),
+        escape_html(detail),
+        escape_html(meta),
+        escape_html(action)
+    )
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
@@ -4007,8 +4017,14 @@ fn route_native_workspace_html(
             )
         }
         RouteKind::Messages | RouteKind::Rooms => format!(
-            r#"<div class="slskr-native-grid messaging-native"><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button><button type="button">Create Room</button></div><h4>Pods</h4><div class="slskr-native-mini-list"><span>Pod channels stay secondary</span><span>Unread badges and room activity remain visible</span></div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3><div class="slskr-native-thread-grid"><article><strong>peer1</strong><span class="slskr-native-badge">Unread 0</span><p>Last private message and acknowledgement state.</p><button type="button">Acknowledge</button></article><article><strong>public-domain</strong><span class="slskr-native-badge">Room</span><p>Joined room messages and member activity.</p><button type="button">Leave Room</button></article><article><strong>pod channel</strong><span class="slskr-native-badge">Pod</span><p>Pod-linked channel messages stay in the same workspace.</p><button type="button">Delete Conversation</button></article></div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row"><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Collapse All Message Panels</button></div></section></div>"#,
+            r#"<div class="slskr-native-grid messaging-native"><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button><button type="button">Create Room</button></div><h4>Pods</h4><div class="slskr-native-mini-list"><span>Pod channels stay secondary</span><span>Unread badges and room activity remain visible</span></div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3>{preview}<div class="slskr-native-thread-grid"><article><strong>peer1</strong><span class="slskr-native-badge">Unread 0</span><p>Last private message and acknowledgement state.</p><button type="button">Acknowledge</button></article><article><strong>public-domain</strong><span class="slskr-native-badge">Room</span><p>Joined room messages and member activity.</p><button type="button">Leave Room</button></article><article><strong>pod channel</strong><span class="slskr-native-badge">Pod</span><p>Pod-linked channel messages stay in the same workspace.</p><button type="button">Delete Conversation</button></article></div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row"><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Collapse All Message Panels</button></div></section></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "Select a conversation",
+                "Pick a thread, room, or pod row to load its reply and acknowledgement actions.",
+                "Waiting",
+                "Reply",
+            ),
         ),
         RouteKind::Users => format!(
             r#"<div class="slskr-native-grid users-native"><section class="slskr-native-main"><h3>Users</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Search for User</button><button type="button">Clear Selected User</button><button type="button">Browse</button><button type="button">Message</button></div>{route_table}</section><aside class="slskr-native-side"><h3>User Detail</h3><p>No user info to display</p><button type="button">Save note</button><button type="button">Watch</button></aside></div>"#,
@@ -4023,8 +4039,14 @@ fn route_native_workspace_html(
             route_table = route_table,
         ),
         RouteKind::Collections => format!(
-            r#"<div class="slskr-native-grid collections-native"><section class="slskr-native-main"><h3>Collections</h3><div class="slskr-native-command-row"><input aria-label="Title" placeholder="Enter collection title"><input aria-label="Description" placeholder="Optional description"><button type="button">Create Collection</button></div><div class="slskr-native-command-row"><input aria-label="Search for item" placeholder="Search by filename (e.g., sintel, aria, treasure)..."><button type="button">Add Item</button><button type="button">Share</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Item Picker</h4><p>Search library items, preview candidate metadata, and add selected tracks.</p><div class="slskr-native-mini-list"><span>Filename match</span><span>Artist/title match</span><span>Already in collection warning</span></div></aside></div></section><aside class="slskr-native-side"><h3>Collection Detail</h3>{stats}<div class="slskr-native-mini-list"><span>Items table</span><span>Remove item</span><span>Audience picker</span><span>Stream/download policies</span></div></aside></div>"#,
+            r#"<div class="slskr-native-grid collections-native"><section class="slskr-native-main"><h3>Collections</h3><div class="slskr-native-command-row"><input aria-label="Title" placeholder="Enter collection title"><input aria-label="Description" placeholder="Optional description"><button type="button">Create Collection</button></div><div class="slskr-native-command-row"><input aria-label="Search for item" placeholder="Search by filename (e.g., sintel, aria, treasure)..."><button type="button">Add Item</button><button type="button">Share</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Item Picker</h4><p>Search library items, preview candidate metadata, and add selected tracks.</p>{preview}<div class="slskr-native-mini-list"><span>Filename match</span><span>Artist/title match</span><span>Already in collection warning</span></div></aside></div></section><aside class="slskr-native-side"><h3>Collection Detail</h3>{stats}<div class="slskr-native-mini-list"><span>Items table</span><span>Remove item</span><span>Audience picker</span><span>Stream/download policies</span></div></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No collection selected",
+                "Choose a collection or library candidate before adding, removing, or sharing items.",
+                "Waiting",
+                "Review",
+            ),
             stats = [
                 native_stat_html("Title", "ready"),
                 native_stat_html("Type", "Playlist"),
@@ -4033,16 +4055,34 @@ fn route_native_workspace_html(
             .join(""),
         ),
         RouteKind::ShareGroups => format!(
-            r#"<div class="slskr-native-grid sharegroups-native"><section class="slskr-native-main"><h3>Share Groups</h3><div class="slskr-native-command-row"><input aria-label="Group Name" placeholder="Enter group name"><button type="button">Create Group</button><button type="button">Create Your First Group</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Grant Matrix</h4><div class="slskr-native-permission-grid"><span>Read</span><span>Stream</span><span>Download</span><span>Expires</span></div><button type="button">Create Share Grant</button><button type="button">Update Share Grant</button></aside></div></section><aside class="slskr-native-side"><h3>Members and Tokens</h3><input aria-label="Soulseek Username" placeholder="Enter username"><button type="button">Add Member</button><button type="button">Issue Token</button><div class="slskr-native-mini-list"><span>Member picker</span><span>Token revoke</span><span>Grant audit trail</span></div></aside></div>"#,
+            r#"<div class="slskr-native-grid sharegroups-native"><section class="slskr-native-main"><h3>Share Groups</h3><div class="slskr-native-command-row"><input aria-label="Group Name" placeholder="Enter group name"><button type="button">Create Group</button><button type="button">Create Your First Group</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Grant Matrix</h4>{preview}<div class="slskr-native-permission-grid"><span>Read</span><span>Stream</span><span>Download</span><span>Expires</span></div><button type="button">Create Share Grant</button><button type="button">Update Share Grant</button></aside></div></section><aside class="slskr-native-side"><h3>Members and Tokens</h3><input aria-label="Soulseek Username" placeholder="Enter username"><button type="button">Add Member</button><button type="button">Issue Token</button><div class="slskr-native-mini-list"><span>Member picker</span><span>Token revoke</span><span>Grant audit trail</span></div></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No group selected",
+                "Select a group, member, grant, or token to inspect permissions.",
+                "Waiting",
+                "Update Grant",
+            ),
         ),
         RouteKind::SharedWithMe => format!(
-            r#"<div class="slskr-native-grid shared-native"><section class="slskr-native-main"><h3>Shared with Me</h3><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Shared Manifest</h4><p>Owner, expiration, permissions, and file-level access preview.</p><div class="slskr-native-mini-list"><span>Manifest item rows</span><span>Stream available files</span><span>Backfill selected collection</span></div></aside></div></section><aside class="slskr-native-side"><h3>Access</h3><button type="button">Open</button><button type="button">Stream</button><button type="button">Backfill</button><button type="button">Copy token</button><button type="button">Leave share</button></aside></div>"#,
+            r#"<div class="slskr-native-grid shared-native"><section class="slskr-native-main"><h3>Shared with Me</h3><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Shared Manifest</h4><p>Owner, expiration, permissions, and file-level access preview.</p>{preview}<div class="slskr-native-mini-list"><span>Manifest item rows</span><span>Stream available files</span><span>Backfill selected collection</span></div></aside></div></section><aside class="slskr-native-side"><h3>Access</h3><button type="button">Open</button><button type="button">Stream</button><button type="button">Backfill</button><button type="button">Copy token</button><button type="button">Leave share</button></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No shared item selected",
+                "Choose an inbound grant or manifest row before opening or backfilling.",
+                "Waiting",
+                "Open",
+            ),
         ),
         RouteKind::Browse => format!(
-            r#"<div class="slskr-native-grid browse-native"><aside class="slskr-native-side slskr-native-sidebar"><h3>Browse</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Open a New Browse Tab</button></div><button type="button">New Tab</button><div class="slskr-native-tree"><strong>Directory Tree</strong><button type="button">/Music</button><button type="button">/Music/Open Sessions</button><button type="button">/Incoming</button></div></aside><section class="slskr-native-main"><h3>Files</h3><div class="slskr-native-breadcrumb"><span>peer1</span><span>/</span><span>Music</span><span>Open Sessions</span></div><div class="slskr-native-command-row"><input aria-label="Folder" placeholder="/"><button type="button">Download Selected</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Download Preview</h4><p>Selected files, destination, peer, queue impact, and duplicate warnings.</p><div class="slskr-native-mini-list"><span>2 selected</span><span>Queue as batch</span><span>Preserve folders</span></div></aside></div></section></div>"#,
+            r#"<div class="slskr-native-grid browse-native"><aside class="slskr-native-side slskr-native-sidebar"><h3>Browse</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Open a New Browse Tab</button></div><button type="button">New Tab</button><div class="slskr-native-tree"><strong>Directory Tree</strong><button type="button">/Music</button><button type="button">/Music/Open Sessions</button><button type="button">/Incoming</button></div></aside><section class="slskr-native-main"><h3>Files</h3><div class="slskr-native-breadcrumb"><span>peer1</span><span>/</span><span>Music</span><span>Open Sessions</span></div><div class="slskr-native-command-row"><input aria-label="Folder" placeholder="/"><button type="button">Download Selected</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Download Preview</h4><p>Selected files, destination, peer, queue impact, and duplicate warnings.</p>{preview}<div class="slskr-native-mini-list"><span>Queue as batch</span><span>Preserve folders</span><span>Duplicate warning review</span></div></aside></div></section></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No files selected",
+                "Select browsed files to preview batch download impact.",
+                "Waiting",
+                "Download Selected",
+            ),
         ),
         RouteKind::System => format!(
             r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-tabs"><span>Info</span><span>Network</span><span>Options</span><span>Shares</span><span>Jobs</span><span>Automations</span><span>Logs</span><span>Metrics</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3><button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
@@ -5766,8 +5806,10 @@ fn select_visible_native_rows(workspace: &web_sys::Element) {
     update_native_selection_summary(workspace, selected, "selected");
     if let Some(row) = first_selected.as_ref() {
         update_native_inspector(workspace, selected, Some(row));
+        update_native_selection_preview(workspace, selected, Some(row));
     } else {
         update_native_inspector(workspace, selected, None);
+        update_native_selection_preview(workspace, selected, None);
     }
 }
 
@@ -5791,6 +5833,7 @@ fn clear_native_selection(workspace: &web_sys::Element) {
     }
     update_native_selection_summary(workspace, 0, "selected");
     update_native_inspector(workspace, 0, None);
+    update_native_selection_preview(workspace, 0, None);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -5866,6 +5909,72 @@ fn update_native_inspector(
     ] {
         if let Ok(Some(element)) = inspector.query_selector(selector) {
             element.set_text_content(Some(&value));
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_native_selection_preview(
+    workspace: &web_sys::Element,
+    selected: u32,
+    row: Option<&web_sys::Element>,
+) {
+    let count = if selected == 1 {
+        "1 selected".to_string()
+    } else {
+        format!("{selected} selected")
+    };
+    let title = row
+        .and_then(|row| row.get_attribute("data-slskr-native-title"))
+        .unwrap_or_else(|| {
+            if selected == 0 {
+                "Nothing selected".to_string()
+            } else {
+                "Multiple rows selected".to_string()
+            }
+        });
+    let detail = row
+        .and_then(|row| row.get_attribute("data-slskr-native-detail"))
+        .unwrap_or_else(|| {
+            if selected == 0 {
+                "Choose a row to review actions.".to_string()
+            } else {
+                "Bulk actions will apply to the selected visible rows.".to_string()
+            }
+        });
+    let meta = row
+        .and_then(|row| row.get_attribute("data-slskr-native-meta"))
+        .unwrap_or_else(|| {
+            if selected == 0 {
+                "Waiting".to_string()
+            } else {
+                count.clone()
+            }
+        });
+    let action = row
+        .and_then(|row| row.get_attribute("data-slskr-native-action"))
+        .unwrap_or_else(|| "Review".to_string());
+    let title = if selected > 1 {
+        format!("{selected} rows selected")
+    } else {
+        title
+    };
+    for (selector, value) in [
+        ("[data-slskr-native-preview-count]", count),
+        ("[data-slskr-native-preview-title]", title),
+        ("[data-slskr-native-preview-detail]", detail),
+        ("[data-slskr-native-preview-meta]", meta),
+        ("[data-slskr-native-preview-action]", action),
+    ] {
+        if let Ok(elements) = workspace.query_selector_all(selector) {
+            for index in 0..elements.length() {
+                let Some(node) = elements.item(index) else {
+                    continue;
+                };
+                if let Ok(element) = node.dyn_into::<web_sys::Element>() {
+                    element.set_text_content(Some(&value));
+                }
+            }
         }
     }
 }
@@ -6143,6 +6252,7 @@ fn select_native_row(document: &web_sys::Document, row: &web_sys::Element) {
     }
     if let Some(workspace) = row.closest(".slskr-native-workspace").ok().flatten() {
         update_native_inspector(&workspace, 1, Some(row));
+        update_native_selection_preview(&workspace, 1, Some(row));
     }
 }
 
@@ -10221,6 +10331,8 @@ mod tests {
         for value in [
             "Thread Workspace",
             "slskr-native-thread-grid",
+            "data-slskr-native-preview-title",
+            "data-slskr-native-preview-count",
             "Unread 0",
             "Delete Conversation",
             "pod channel",
@@ -10236,7 +10348,9 @@ mod tests {
             "Directory Tree",
             "slskr-native-breadcrumb",
             "Download Preview",
+            "data-slskr-native-preview-title",
             "Preserve folders",
+            "Duplicate warning review",
         ] {
             assert!(
                 browse.contains(value),
@@ -10247,6 +10361,7 @@ mod tests {
         let collections = route_page_html("/collections");
         for value in [
             "Item Picker",
+            "data-slskr-native-preview-title",
             "Already in collection warning",
             "Audience picker",
             "Stream/download policies",
@@ -10260,6 +10375,7 @@ mod tests {
         let sharegroups = route_page_html("/sharegroups");
         for value in [
             "Grant Matrix",
+            "data-slskr-native-preview-title",
             "Token revoke",
             "Grant audit trail",
             "Create Share Grant",
@@ -10274,6 +10390,7 @@ mod tests {
         for value in [
             "Shared Manifest",
             "file-level access preview",
+            "data-slskr-native-preview-title",
             "Backfill selected collection",
             "Leave share",
         ] {

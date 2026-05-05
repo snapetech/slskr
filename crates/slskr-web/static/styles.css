@@ -1449,6 +1449,43 @@ body {
   margin: 0;
 }
 
+.slskr-native-preview-card {
+  background: #081011;
+  border: 1px solid #2b504d;
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+}
+
+.slskr-native-preview-card [data-slskr-native-preview-count] {
+  color: #8dd7c8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.slskr-native-preview-card strong {
+  color: #f4efe7;
+  overflow-wrap: anywhere;
+}
+
+.slskr-native-preview-card em {
+  color: #c6d0ca;
+  font-size: 12px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.slskr-native-preview-card button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 10px;
+  width: fit-content;
+}
+
 .slskr-native-thread-grid {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
