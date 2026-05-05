@@ -29,6 +29,8 @@ Completed across the main Rust routes:
 - messaging, collections, share groups, shared-with-me, and browse workspaces
   now surface selected-row preview cards so selection changes expose the next
   likely action before opening the inspector
+- upload, contact, Solid, shared-access, share-group, and system native buttons
+  now resolve to route actions or explicit local workspace acknowledgements
 
 ## Route Gaps
 

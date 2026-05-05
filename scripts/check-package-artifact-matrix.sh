@@ -27,7 +27,7 @@ for target in \
   fi
 done
 
-for expected in 'SHA256SUMS.txt' 'sha256sum' 'verify-release-artifacts.sh' 'cargo package'; do
+for expected in 'SHA256SUMS.txt' 'sha256sum' 'verify-release-artifacts.sh' 'cargo package' 'verify-cargo-package-contents.sh'; do
   if ! rg -n -F "$expected" .github/workflows scripts >/dev/null; then
     printf 'package artifact matrix check failed: expected packaging token missing: %s\n' "$expected" >&2
     status=1
@@ -47,6 +47,11 @@ done
 
 if ! rg -n '^\| BUG-012 .* \| Verified \|$' "$ledger" >/dev/null; then
   printf 'package artifact matrix check failed: BUG-012 must stay verified in council ledger\n' >&2
+  status=1
+fi
+
+if ! rg -n '^\| BUG-013 .* \| Verified \|$' "$ledger" >/dev/null; then
+  printf 'package artifact matrix check failed: BUG-013 must stay verified in council ledger\n' >&2
   status=1
 fi
 

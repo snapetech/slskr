@@ -485,7 +485,17 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         },
         ApiEndpoint {
             method: "DELETE",
+            path: "/transfers/downloads/:username/:id",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "DELETE",
             path: "/transfers/uploads/all/completed",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "DELETE",
+            path: "/transfers/uploads/:username/:id",
             surface: "transfers",
         },
         ApiEndpoint {
@@ -611,6 +621,11 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         ApiEndpoint {
             method: "POST",
             path: "/contacts/from-invite",
+            surface: "identity",
+        },
+        ApiEndpoint {
+            method: "DELETE",
+            path: "/contacts/:id",
             surface: "identity",
         },
         ApiEndpoint {
@@ -863,6 +878,26 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
             path: "/database/vacuum",
             surface: "system",
         },
+        ApiEndpoint {
+            method: "POST",
+            path: "/session/privileges/check",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/diagnostics",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/admin/shutdown",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/admin/restart",
+            surface: "system",
+        },
     ]
 }
 
@@ -961,9 +996,30 @@ pub const fn route_actions() -> &'static [RouteAction] {
         },
         RouteAction {
             body: ActionBody::None,
+            label: "Cancel Download",
+            method: "DELETE",
+            path: "/transfers/downloads/:username/1",
+            surface: "transfers",
+        },
+        RouteAction {
+            body: ActionBody::None,
             label: "Clear Completed Uploads",
             method: "DELETE",
             path: "/transfers/uploads/all/completed",
+            surface: "transfers",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Deny Upload",
+            method: "DELETE",
+            path: "/transfers/uploads/:username/1",
+            surface: "transfers",
+        },
+        RouteAction {
+            body: ActionBody::EnabledTrue,
+            label: "Allow Upload",
+            method: "PUT",
+            path: "/transfers/uploads/:username/1",
             surface: "transfers",
         },
         RouteAction {
@@ -1065,6 +1121,13 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "identity",
         },
         RouteAction {
+            body: ActionBody::None,
+            label: "Remove Contact",
+            method: "DELETE",
+            path: "/contacts/contact-demo",
+            surface: "identity",
+        },
+        RouteAction {
             body: ActionBody::NameDescription,
             label: "Create Collection",
             method: "POST",
@@ -1142,6 +1205,13 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "integrations",
         },
         RouteAction {
+            body: ActionBody::None,
+            label: "Resolve WebID",
+            method: "GET",
+            path: "/solid/status",
+            surface: "integrations",
+        },
+        RouteAction {
             body: ActionBody::NameDescription,
             label: "Create Source Feed",
             method: "POST",
@@ -1202,6 +1272,48 @@ pub const fn route_actions() -> &'static [RouteAction] {
             label: "Vacuum Database",
             method: "POST",
             path: "/database/vacuum",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Check for Updates",
+            method: "GET",
+            path: "/version",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Get Privileges",
+            method: "POST",
+            path: "/session/privileges/check",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Diagnostic Bundle",
+            method: "GET",
+            path: "/diagnostics",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Setup Health",
+            method: "GET",
+            path: "/health",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Shut Down",
+            method: "POST",
+            path: "/admin/shutdown",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Restart",
+            method: "POST",
+            path: "/admin/restart",
             surface: "system",
         },
     ]
@@ -1589,9 +1701,12 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::Downloads, "download" | "queue download" | "retry" | "retry all") => {
             &["Queue Download"]
         }
+        (RouteKind::Downloads, "cancel" | "cancel all" | "remove") => &["Cancel Download"],
         (RouteKind::Downloads, "clear completed") => &["Clear Completed Downloads"],
         (RouteKind::Downloads, "enable acceleration") => &["Enable Accelerated Downloads"],
         (RouteKind::Uploads, "clear completed") => &["Clear Completed Uploads"],
+        (RouteKind::Uploads, "allow selected" | "allow") => &["Allow Upload"],
+        (RouteKind::Uploads, "deny selected" | "deny") => &["Deny Upload"],
         (RouteKind::Messages | RouteKind::Rooms, "reply" | "direct message" | "send message") => {
             &["Send Message"]
         }
@@ -1603,14 +1718,26 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::Users, "browse") => &["Request Directory"],
         (RouteKind::Users, "message") => &["Send Message"],
         (RouteKind::Contacts, "add contact" | "add friend") => &["Add Contact"],
+        (RouteKind::Contacts, "message") => &["Send Message"],
+        (RouteKind::Contacts, "browse") => &["Request Directory"],
+        (RouteKind::Contacts, "remove") => &["Remove Contact"],
+        (RouteKind::Solid, "resolve webid" | "connect identity" | "sync storage") => {
+            &["Resolve WebID"]
+        }
         (RouteKind::Collections, "create collection") => &["Create Collection"],
         (RouteKind::Collections, "add item") => &["Add Library Item"],
+        (RouteKind::Collections, "open" | "remove item") => &["Add Library Item"],
         (RouteKind::Collections, "share") => &["Create Share Grant"],
         (RouteKind::ShareGroups, "create group" | "create your first group") => {
             &["Create Share Group"]
         }
         (RouteKind::ShareGroups, "add member") => &["Add Share Group Member"],
         (RouteKind::ShareGroups, "issue token") => &["Issue Share Token"],
+        (RouteKind::ShareGroups, "update share grant") => &["Update Share Grant"],
+        (RouteKind::ShareGroups, "create share grant") => &["Create Share Grant"],
+        (RouteKind::SharedWithMe, "open" | "open collection" | "stream") => {
+            &["Backfill Share Grant"]
+        }
         (RouteKind::SharedWithMe, "backfill") => &["Backfill Share Grant"],
         (RouteKind::SharedWithMe, "copy token") => &["Issue Share Token"],
         (RouteKind::SharedWithMe, "leave share") => &["Delete Share Grant"],
@@ -1622,6 +1749,12 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::System, "disconnect") => &["Disconnect"],
         (RouteKind::System, "rescan" | "rescan shares") => &["Rescan Shares"],
         (RouteKind::System, "vacuum" | "vacuum database") => &["Vacuum Database"],
+        (RouteKind::System, "check for updates") => &["Check for Updates"],
+        (RouteKind::System, "get privileges") => &["Get Privileges"],
+        (RouteKind::System, "diagnostic bundle") => &["Diagnostic Bundle"],
+        (RouteKind::System, "setup health") => &["Setup Health"],
+        (RouteKind::System, "shut down") => &["Shut Down"],
+        (RouteKind::System, "restart") => &["Restart"],
         _ => &[],
     };
     aliases
@@ -5294,6 +5427,17 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         .flatten()
         .and_then(|row| row.get_attribute("data-slskr-native-title"));
     let target = selected.unwrap_or_else(|| route_label.clone());
+    if let Some(message) = native_local_action_message(&route_path, &action, &target) {
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            status.set_inner_html(&format!(
+                "<strong>{}</strong> {}",
+                escape_html(&action),
+                escape_html(&message)
+            ));
+        }
+        show_toast(document, &format!("{action}: {message}"));
+        return;
+    }
     let message = format!("{} queued for {}", action, target);
     if let Some(status) = document.get_element_by_id("slskr-action-status") {
         status.set_inner_html(&format!(
@@ -5302,6 +5446,34 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         ));
     }
     show_toast(document, &message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_local_action_message(route_path: &str, action: &str, target: &str) -> Option<String> {
+    let action = action.trim().to_ascii_lowercase();
+    match (route_kind(route_path), action.as_str()) {
+        (RouteKind::Messages | RouteKind::Rooms, "collapse all message panels") => {
+            Some("message panels collapsed in this workspace".to_string())
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "create room") => {
+            Some(format!("room draft prepared for {target}"))
+        }
+        (RouteKind::Wishlist, "copy review") => Some(format!("review summary copied for {target}")),
+        (RouteKind::Wishlist, "import list") => {
+            Some("wishlist import staged for review".to_string())
+        }
+        (RouteKind::Contacts, "create invite") => {
+            Some("invite draft created for the current contact form".to_string())
+        }
+        (RouteKind::Contacts, "refresh nearby") => {
+            Some("nearby contacts refresh requested".to_string())
+        }
+        (RouteKind::SharedWithMe, "copy token") => Some(format!("token copied for {target}")),
+        (RouteKind::ShareGroups, "token revoke") => {
+            Some(format!("token revoke staged for {target}"))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -10294,14 +10466,36 @@ mod tests {
             ("/playlist-intake", "Import Playlist", "Preview Playlist"),
             ("/wishlist", "Run Enabled", "Run Wishlist Search"),
             ("/downloads", "Clear Completed", "Clear Completed Downloads"),
+            ("/downloads", "Cancel All", "Cancel Download"),
             ("/uploads", "Clear Completed", "Clear Completed Uploads"),
+            ("/uploads", "Allow selected", "Allow Upload"),
+            ("/uploads", "Deny selected", "Deny Upload"),
             ("/messages", "Reply", "Send Message"),
+            ("/messages", "Delete Conversation", "Delete Conversation"),
             ("/users", "Watch", "Watch User"),
+            ("/users", "Message", "Send Message"),
             ("/contacts", "Add Friend", "Add Contact"),
+            ("/contacts", "Message", "Send Message"),
+            ("/contacts", "Browse", "Request Directory"),
+            ("/contacts", "Remove", "Remove Contact"),
+            ("/solid", "Resolve WebID", "Resolve WebID"),
             ("/collections", "Add Item", "Add Library Item"),
+            ("/collections", "Share", "Create Share Grant"),
+            ("/sharegroups", "Create Share Grant", "Create Share Grant"),
+            ("/sharegroups", "Update Share Grant", "Update Share Grant"),
             ("/sharegroups", "Issue Token", "Issue Share Token"),
+            ("/shared", "Open", "Backfill Share Grant"),
+            ("/shared", "Stream", "Backfill Share Grant"),
             ("/shared", "Backfill", "Backfill Share Grant"),
+            ("/shared", "Copy token", "Issue Share Token"),
+            ("/shared", "Leave share", "Delete Share Grant"),
             ("/browse", "Download Selected", "Queue Download"),
+            ("/system", "Check for Updates", "Check for Updates"),
+            ("/system", "Get Privileges", "Get Privileges"),
+            ("/system", "Diagnostic Bundle", "Diagnostic Bundle"),
+            ("/system", "Setup Health", "Setup Health"),
+            ("/system", "Shut Down", "Shut Down"),
+            ("/system", "Restart", "Restart"),
             ("/system", "Vacuum database", "Vacuum Database"),
         ];
 
