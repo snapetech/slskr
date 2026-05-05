@@ -97,6 +97,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Secret scanning gate | Local `.env`, `web/.env.local`, and `.secrets/` are ignored, but tracked files lacked a reproducible committed-secret guard. | Fixed by adding `scripts/check-secret-scanning.sh` to verify ignored local secret paths and scan tracked files for private-key blocks and high-entropy secret-like assignments. |
 | Medium | Python client | Python client had no lint/test/dependency gate beyond compile/import coverage. | Fixed by adding `scripts/check-python-client-quality.sh`, pytest smoke tests for the client helpers, and SDK-gate execution of dev install, pytest, import, and `pip check`. |
 | Medium | Audit tooling availability | Local audit attempts showed optional cargo subcommands were absent and dependency inventory was not gate-provisioned. | Fixed by adding `scripts/check-audit-tooling.sh` with reproducible `cargo metadata --format-version 1 --no-deps` and `cargo tree -d` checks plus audit-tool registry coverage. |
+| Low | Transfer event growth | Transfer event history appended indefinitely and was recreated only when absent. | Fixed by rotating oversized `transfer-events.tsv` files at a 16 MiB byte cap, recreating the header, preserving the prior file as `.old`, and adding regression/gate coverage. |
+| Low | Docs drift | General docs still contained stale `http_api_*` config names, mutable `slskr:latest` image guidance, and obsolete WebSocket unsupported text. | Fixed by updating the docs and adding `scripts/check-docs-freshness.sh` to block those stale patterns and wildcard CORS examples from returning. |
 
 ## Open Burn-Down
 
@@ -106,11 +108,9 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Compatibility smoke | slskd API compatibility smoke is opt-in because it needs external Python package install and live-style behavior (`scripts/run-release-gate.sh:55`). | Keep opt-in locally, but run it in scheduled CI with explicit secrets or hermetic fixtures. |
 | Medium | Rust dependency hygiene | `cargo tree -d` shows duplicate `getrandom`, `rand`, `rand_chacha`, `rand_core`, `hashbrown`, and `thiserror` families in the release graph. | Review after dependency updates and consolidate where semver compatibility allows to reduce binary size and dependency review surface. |
 | Medium | GitHub Actions supply chain | CI/release workflows use mutable action tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `softprops/action-gh-release@v2` (`.github/workflows/release.yml:44`, `.github/workflows/release.yml:175`). | Pin third-party and first-party actions to reviewed commit SHAs, automate update PRs, and document the trust policy. |
-| Low | Transfer event growth | Transfer event history appends indefinitely and is recreated only when the file is absent (`crates/slskr/src/main.rs:13978`, `crates/slskr/src/main.rs:14039`). | Rotate or compact transfer event logs according to the configured transfer history limit or a byte cap. |
 | Low | Rust module hygiene | `#![allow(dead_code)]` appears at crate/module level in multiple Rust modules (`crates/slskr/src/main.rs:1`, `crates/slskr/src/webhooks.rs:1`, `crates/slskr/src/routing.rs:1`). | Remove broad allowances and gate intentionally unused compatibility helpers behind tests/features. |
 | Low | Deprecated npm transitive deps | Web install warns on deprecated `lodash.get`, old core-js, and Babel proposal packages. | Upgrade or replace transitive owners where practical. |
 | Low | Dependency modernization | `npm outdated` shows major-version drift across web/dashboard/client-ts, including React 19, SignalR 10, date-fns 4, recharts 3, Jest 30, and TypeScript 6. | Plan compatibility upgrades separately from security fixes, with UI and generated-client regression coverage. |
-| Low | Docs drift | Current docs still contain stale `localhost:8080`, `http_api_*`, `slskr:latest`, and wildcard CORS examples outside the deployment guide (`docs/http-api.md:658`, `docs/INTEGRATION_GUIDE.md:229`, `docs/http-api-features.md:272`). | Update or archive stale docs and add a grep-based docs freshness check. |
 
 ## Scans Run
 
@@ -127,6 +127,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `scripts/check-secret-scanning.sh`
 - `scripts/check-python-client-quality.sh`
 - `scripts/check-audit-tooling.sh`
+- `scripts/check-transfer-event-growth.sh`
+- `scripts/check-docs-freshness.sh`
 - `cargo outdated --workspace` was attempted but blocked because `cargo-outdated` is not installed in this environment.
 - `cargo +stable udeps --workspace --all-targets` was attempted but blocked because `cargo-udeps` is not installed in this environment.
 - `npm --prefix web outdated --json`

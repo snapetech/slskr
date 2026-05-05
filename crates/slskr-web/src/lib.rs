@@ -4145,6 +4145,9 @@ fn native_tabs_html(kind: RouteKind) -> String {
 }
 
 fn native_tab_panel_html(kind: RouteKind, label: &str) -> String {
+    if kind == RouteKind::System {
+        return native_system_tab_panel_html(label);
+    }
     let detail = native_tab_detail(kind, label);
     let controls = native_tab_controls(kind, label)
         .iter()
@@ -4176,6 +4179,442 @@ fn native_tab_panel_html(kind: RouteKind, label: &str) -> String {
         fields,
         facts,
     )
+}
+
+fn native_system_tab_panel_html(label: &str) -> String {
+    let detail = native_tab_detail(RouteKind::System, label);
+    let controls = native_tab_controls(RouteKind::System, label)
+        .iter()
+        .map(|control| format!(r#"<button type="button">{}</button>"#, escape_html(control)))
+        .collect::<Vec<_>>()
+        .join("");
+    let fields = native_tab_fields(RouteKind::System, label)
+        .iter()
+        .map(|(field, placeholder)| {
+            format!(
+                r#"<label><span>{}</span><input type="text" aria-label="{}" placeholder="{}"></label>"#,
+                escape_html(field),
+                escape_html(field),
+                escape_html(placeholder)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let rows = native_system_tab_rows(label)
+        .iter()
+        .map(|(area, state, detail, action)| {
+            format!(
+                r#"<tr tabindex="0"><td><strong>{}</strong></td><td>{}</td><td>{}</td><td><button type="button">{}</button></td></tr>"#,
+                escape_html(area),
+                escape_html(state),
+                escape_html(detail),
+                escape_html(action)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let facts = native_tab_facts(RouteKind::System, label)
+        .iter()
+        .map(|fact| format!(r#"<span>{}</span>"#, escape_html(fact)))
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<header><div><h4>{label}</h4><p>{detail}</p></div><div class="slskr-native-panel-actions">{controls}</div></header><div class="slskr-native-panel-fields">{fields}</div><div class="slskr-native-panel-facts">{facts}</div><div class="slskr-native-table-wrap"><table class="slskr-native-table slskr-system-panel-table"><thead><tr><th>Area</th><th>State</th><th>Detail</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>"#,
+        label = escape_html(label),
+        detail = escape_html(detail),
+        controls = controls,
+        fields = fields,
+        facts = facts,
+        rows = rows,
+    )
+}
+
+fn native_system_tab_rows(
+    label: &str,
+) -> &'static [(&'static str, &'static str, &'static str, &'static str)] {
+    match label {
+        "Info" => &[
+            (
+                "Daemon",
+                "running",
+                "version and build channel",
+                "Check for Updates",
+            ),
+            (
+                "Session",
+                "pending",
+                "account, privileges, and uptime",
+                "Get Privileges",
+            ),
+            (
+                "Diagnostics",
+                "ready",
+                "support bundle and health summary",
+                "Diagnostic Bundle",
+            ),
+        ],
+        "Network" => &[
+            (
+                "Soulseek server",
+                "disconnected",
+                "connect, disconnect, reconnect",
+                "Connect",
+            ),
+            (
+                "Listening port",
+                "unknown",
+                "port mapping and reachability",
+                "Refresh",
+            ),
+            (
+                "Privileges",
+                "unknown",
+                "privilege expiry and purchase status",
+                "Get Privileges",
+            ),
+        ],
+        "Mesh" => &[
+            (
+                "Federation",
+                "observing",
+                "mesh peers and evidence policy",
+                "Refresh",
+            ),
+            (
+                "Conflict queue",
+                "empty",
+                "remote claims and merge decisions",
+                "Review Selection",
+            ),
+            (
+                "Relay health",
+                "pending",
+                "bridge latency and retry window",
+                "Diagnostic Bundle",
+            ),
+        ],
+        "Bridge" => &[
+            ("Gateway", "idle", "external bridge listener", "Refresh"),
+            (
+                "Relay",
+                "not linked",
+                "remote relay credentials",
+                "Setup Health",
+            ),
+            (
+                "Sync cursor",
+                "pending",
+                "last successful bridge sync",
+                "Run Selected",
+            ),
+        ],
+        "MediaCore" => &[
+            (
+                "Routing",
+                "ready",
+                "stream routes and player handoff",
+                "Refresh",
+            ),
+            (
+                "Validation",
+                "enabled",
+                "file metadata and format checks",
+                "Run Selected",
+            ),
+            (
+                "Content tools",
+                "available",
+                "transcode, fingerprint, repair",
+                "Diagnostic Bundle",
+            ),
+        ],
+        "Security Policies" => &[
+            (
+                "Admin policy",
+                "enforced",
+                "dangerous actions require confirmation",
+                "Review Selection",
+            ),
+            (
+                "Quarantine",
+                "enabled",
+                "approval, rejection, and evidence retention",
+                "Approve",
+            ),
+            (
+                "Outbound webhooks",
+                "guarded",
+                "allowlist and secret handling",
+                "Setup Health",
+            ),
+        ],
+        "Experience" => &[
+            (
+                "Theme",
+                "saved locally",
+                "density, contrast, and shell preferences",
+                "Save",
+            ),
+            (
+                "Player",
+                "compact",
+                "bottom player reserve and radio seed mode",
+                "Reset",
+            ),
+            (
+                "Notifications",
+                "quiet",
+                "toast and event notification defaults",
+                "Save",
+            ),
+        ],
+        "Integrations" => &[
+            (
+                "Lidarr",
+                "not configured",
+                "metadata and import automation",
+                "Setup Health",
+            ),
+            (
+                "FTP",
+                "not configured",
+                "remote drop and library import",
+                "Setup Health",
+            ),
+            (
+                "ListenBrainz",
+                "not linked",
+                "scrobble and feedback sync",
+                "Setup Health",
+            ),
+        ],
+        "Options" => &[
+            ("Config", "loaded", "daemon options and overrides", "Save"),
+            (
+                "Debug",
+                "off",
+                "developer diagnostics stay collapsed",
+                "Reset",
+            ),
+            (
+                "Automation bounds",
+                "default",
+                "limits for unattended jobs",
+                "Save",
+            ),
+        ],
+        "Shares" => &[
+            (
+                "Roots",
+                "pending",
+                "shared folders and exclusions",
+                "Rescan Shares",
+            ),
+            (
+                "Scan progress",
+                "idle",
+                "last scan, changed files, failures",
+                "Refresh",
+            ),
+            (
+                "Contents",
+                "indexed",
+                "share counts and locked files",
+                "Review Selection",
+            ),
+        ],
+        "Jobs" => &[
+            (
+                "Queued",
+                "0",
+                "scheduled work waiting to run",
+                "Run Selected",
+            ),
+            ("Running", "0", "active backend jobs", "Cancel Selected"),
+            (
+                "History",
+                "pending",
+                "recent completions and failures",
+                "Refresh",
+            ),
+        ],
+        "Automations" => &[
+            (
+                "Recipes",
+                "available",
+                "library health, replacements, cleanup",
+                "Run Selected",
+            ),
+            (
+                "Approvals",
+                "required",
+                "bounded unattended actions",
+                "Review Selection",
+            ),
+            (
+                "Dry run",
+                "enabled",
+                "preview before mutation",
+                "Copy Action Plan",
+            ),
+        ],
+        "Source Providers" => &[
+            (
+                "Search",
+                "ready",
+                "provider search and fallback order",
+                "Refresh",
+            ),
+            (
+                "Metadata",
+                "pending",
+                "MusicBrainz and provider enrichment",
+                "Run Selected",
+            ),
+            (
+                "Verification",
+                "manual",
+                "confidence and match warnings",
+                "Review Selection",
+            ),
+        ],
+        "Swarm Analytics" => &[
+            (
+                "Peers",
+                "sampling",
+                "availability and quality signals",
+                "Refresh",
+            ),
+            (
+                "Availability",
+                "unknown",
+                "result recurrence and queue health",
+                "Run Selected",
+            ),
+            (
+                "Quality",
+                "pending",
+                "bitrate, format, and duplicate signals",
+                "Copy Action Plan",
+            ),
+        ],
+        "Library Health" => &[
+            (
+                "Issues",
+                "review",
+                "missing, corrupt, duplicate, and low-quality files",
+                "Run Replacement Searches",
+            ),
+            (
+                "Replacements",
+                "staged",
+                "candidate searches for bad files",
+                "Copy Action Plan",
+            ),
+            (
+                "Reports",
+                "ready",
+                "operator review packets",
+                "Diagnostic Bundle",
+            ),
+        ],
+        "Quarantine Jury" => &[
+            ("Pending", "0", "files awaiting decision", "Approve"),
+            ("Rejected", "0", "blocked items and reasons", "Reject"),
+            (
+                "Evidence",
+                "retained",
+                "packet copied for review",
+                "Copy Packet",
+            ),
+        ],
+        "Files" => &[
+            ("Index", "ready", "library records and paths", "Refresh"),
+            (
+                "Fingerprints",
+                "pending",
+                "hashes and acoustic IDs",
+                "Run Selected",
+            ),
+            (
+                "Records",
+                "filterable",
+                "open file detail and repair context",
+                "Review Selection",
+            ),
+        ],
+        "Data" => &[
+            (
+                "Database",
+                "ready",
+                "stats, size, and vacuum state",
+                "Vacuum Database",
+            ),
+            (
+                "Storage",
+                "bounded",
+                "cache and archive cleanup",
+                "Run Selected",
+            ),
+            (
+                "Backups",
+                "manual",
+                "operator export and restore checks",
+                "Diagnostic Bundle",
+            ),
+        ],
+        "Events" => &[
+            ("Stream", "live", "filterable operator events", "Refresh"),
+            (
+                "Acknowledgements",
+                "pending",
+                "review and clear handled events",
+                "Clear Filter",
+            ),
+            (
+                "Severity",
+                "warn+",
+                "level and source filters",
+                "Review Selection",
+            ),
+        ],
+        "Logs" => &[
+            ("Level", "info", "filter by level and source", "Refresh"),
+            (
+                "Search",
+                "ready",
+                "text filter across recent logs",
+                "Clear Filter",
+            ),
+            (
+                "Export",
+                "available",
+                "include logs in diagnostic bundle",
+                "Diagnostic Bundle",
+            ),
+        ],
+        "Metrics" => &[
+            (
+                "Transfers",
+                "summarized",
+                "speed, slots, and failure rate",
+                "Refresh",
+            ),
+            (
+                "API",
+                "summarized",
+                "requests, errors, and latency",
+                "Diagnostic Bundle",
+            ),
+            (
+                "Raw metrics",
+                "developer-only",
+                "hidden outside Developer drawer",
+                "Review Selection",
+            ),
+        ],
+        _ => &[("Status", "pending", "operator workflow", "Review Selection")],
+    }
 }
 
 fn native_tab_controls(kind: RouteKind, label: &str) -> &'static [&'static str] {
@@ -4512,7 +4951,7 @@ fn route_native_workspace_html(
             ),
         ),
         RouteKind::System => format!(
-            r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-tabs"><span>Info</span><span>Network</span><span>Options</span><span>Shares</span><span>Jobs</span><span>Automations</span><span>Logs</span><span>Metrics</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3>{preview}<button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
+            r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-operator-bands"><span>Connection</span><span>Shares</span><span>Database</span><span>Events</span><span>Preferences</span><span>Automation</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3>{preview}<button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
             route_table = route_table,
             preview = native_selection_preview_html(
                 "No system item selected",
@@ -10963,6 +11402,11 @@ mod tests {
             "Security Policies",
             "Library Health",
             "Quarantine Jury",
+            "slskr-system-panel-table",
+            "Outbound webhooks",
+            "ListenBrainz",
+            "Raw metrics",
+            "developer-only",
             "Run Replacement Searches",
             "Vacuum Database",
             "Proxy trust",

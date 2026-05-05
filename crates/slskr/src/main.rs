@@ -124,6 +124,7 @@ const STORAGE_CAPABILITIES: &[&str] = &[
 ];
 
 const MAX_TRANSFER_STATE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_TRANSFER_EVENTS_BYTES: u64 = 16 * 1024 * 1024;
 
 fn same_origin_cors_headers(headers: &RequestSecurityHeaders, fallback_host: &str) -> String {
     let Some(origin) = headers.origin.as_deref() else {
@@ -14235,6 +14236,24 @@ fn write_transfer_events_header(path: &Path) -> Result<(), String> {
     .map_err(|error| format!("transfer events header write failed: {error}"))
 }
 
+fn rotate_transfer_events_if_needed(path: &Path) -> Result<(), String> {
+    let Ok(metadata) = fs::metadata(path) else {
+        return Ok(());
+    };
+    if metadata.len() <= MAX_TRANSFER_EVENTS_BYTES {
+        return Ok(());
+    }
+
+    let rotated_path = path.with_extension("tsv.old");
+    if rotated_path.exists() {
+        fs::remove_file(&rotated_path)
+            .map_err(|error| format!("transfer event rotation cleanup failed: {error}"))?;
+    }
+    fs::rename(path, &rotated_path)
+        .map_err(|error| format!("transfer event rotation failed: {error}"))?;
+    write_transfer_events_header(path)
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct TransferStateFile {
     version: u32,
@@ -14322,6 +14341,8 @@ fn write_file_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result
 
 fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), String> {
     use std::io::Write;
+
+    rotate_transfer_events_if_needed(path)?;
 
     let mut file = fs::OpenOptions::new()
         .create(true)
@@ -19536,6 +19557,54 @@ mod tests {
 
         let error = super::load_transfer_state(&state_path, 100).expect_err("oversized state");
         assert!(error.contains("transfer state file is too large"));
+
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn transfer_event_append_rotates_oversized_event_file() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-transfer-events-size-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&state_dir).expect("state dir");
+        let events_path = super::transfer_events_path(&state_dir);
+        std::fs::write(
+            &events_path,
+            vec![b' '; (super::MAX_TRANSFER_EVENTS_BYTES as usize) + 1],
+        )
+        .expect("oversized transfer events");
+
+        let entry = super::TransferEntry {
+            id: 7,
+            direction: 0,
+            token: 9,
+            peer_username: Some("friend".to_owned()),
+            filename: "Remote/Song.flac".to_owned(),
+            local_path: None,
+            size: Some(100),
+            bytes_transferred: 25,
+            status: "in_progress".to_owned(),
+            reason: None,
+            requested_at: 11,
+            updated_at: 12,
+        };
+        super::append_transfer_event(&events_path, &entry).expect("append rotated event");
+
+        let body = std::fs::read_to_string(&events_path).expect("events body");
+        assert!(body.starts_with("slskr-transfer-events-v2\n"));
+        assert!(body.contains("7\t0\t9\t100\t25\tin_progress\t\tRemote/Song.flac\n"));
+        assert!(events_path.with_extension("tsv.old").exists());
+        assert!(
+            std::fs::metadata(&events_path)
+                .expect("events metadata")
+                .len()
+                < 1024
+        );
 
         let _ = std::fs::remove_dir_all(state_dir);
     }

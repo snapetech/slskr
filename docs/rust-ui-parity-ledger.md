@@ -39,6 +39,10 @@ Completed across the main Rust routes:
 - native row and bulk actions now prefer selected row data for files, users,
   contacts, collections, share groups, and share grants before falling back to
   generic form inputs
+- System tabs now render route-specific operator tables across Info, Network,
+  Mesh, Bridge, MediaCore, Security, Experience, Integrations, Options, Shares,
+  Jobs, Automations, Providers, Analytics, Library Health, Quarantine, Files,
+  Data, Events, Logs, and Metrics instead of generic placeholder facts
 
 ## Route Gaps
 

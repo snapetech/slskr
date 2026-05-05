@@ -654,7 +654,10 @@ GET /api/messages?limit=20&offset=0
 
 ## WebSocket Support
 
-WebSocket connections are not currently supported. Use polling with `/api/events` for real-time event updates.
+WebSocket event streaming is available at `/api/events/ws`. Browser clients
+authenticate with the `slskr.api-token.<percent-encoded-token>` subprotocol;
+non-browser clients may also use the normal bearer authorization path. Polling
+with `/api/events` remains available for compatibility clients.
 
 ## Performance Considerations
 
@@ -673,9 +676,11 @@ WebSocket connections are not currently supported. Use polling with `/api/events
 
 2. Configure your `slskr.config.toml`:
    ```toml
-   http_api_host = "0.0.0.0"
-   http_api_port = 8080
-   http_api_bearer_token = "your-secret-token"
+   [app]
+   http_bind = "127.0.0.1:5030"
+
+   [auth]
+   api_token = "replace-with-a-random-token"
    ```
 
 3. Start the server:

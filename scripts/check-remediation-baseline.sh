@@ -13,6 +13,7 @@ GATES=(
   scripts/check-webhook-outbound-policy.sh
   scripts/check-rate-limit-proxy-policy.sh
   scripts/check-storage-listing-pressure.sh
+  scripts/check-transfer-event-growth.sh
   scripts/check-workflow-release-policy.sh
   scripts/check-package-artifact-matrix.sh
   scripts/check-release-version-metadata.sh
@@ -22,6 +23,7 @@ GATES=(
   scripts/check-audit-tooling.sh
   scripts/check-dev-tooling.sh
   scripts/check-openapi-docs-drift.sh
+  scripts/check-docs-freshness.sh
   scripts/check-shell-script-hygiene.sh
   scripts/check-kubernetes-public-posture.sh
   scripts/check-compatibility-noop-documentation.sh

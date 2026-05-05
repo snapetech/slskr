@@ -219,14 +219,14 @@ cargo run --release
 cd dashboard && npm run dev  # http://localhost:5173
 
 # Terminal 3: CLI Tool
-slskr-admin --api-url http://localhost:8080 server health
+slskr-admin --api-url http://127.0.0.1:5030 server health
 ```
 
 ### Production
 
 ```bash
 # Build Docker image
-docker build -t slskr:latest .
+docker build -t ghcr.io/your-org/slskr:dev-local .
 
 # Run with Kubernetes
 kubectl apply -f k8s/deployment.yaml
@@ -235,33 +235,33 @@ kubectl apply -f k8s/deployment.yaml
 # Forward to port 3000 and navigate to http://localhost:3000
 
 # Verify health
-curl http://localhost:8080/api/health
+curl http://127.0.0.1:5030/api/health
 ```
 
 ## 9. Testing the Integration
 
 ```bash
 # Test API health
-curl http://localhost:8080/api/health
+curl http://127.0.0.1:5030/api/health
 
 # Test API keys (requires auth)
-curl -H "Authorization: Bearer <key>" http://localhost:8080/api/admin/api-keys
+curl -H "Authorization: Bearer <key>" http://127.0.0.1:5030/api/admin/api-keys
 
 # Test webhooks
-curl -X POST http://localhost:8080/api/admin/webhooks \
+curl -X POST http://127.0.0.1:5030/api/admin/webhooks \
   -H "Content-Type: application/json" \
   -d '{"url": "http://example.com/hook", "events": ["search.created"]}'
 
 # Test database stats
-curl http://localhost:8080/api/admin/database/stats
+curl http://127.0.0.1:5030/api/admin/database/stats
 
 # Test GraphQL
-curl -X POST http://localhost:8080/api/graphql \
+curl -X POST http://127.0.0.1:5030/api/graphql \
   -H "Content-Type: application/json" \
   -d '{"query": "{ health { status } }"}'
 
 # Test tracing
-curl -i http://localhost:8080/api/health
+curl -i http://127.0.0.1:5030/api/health
 # Response should include: X-Correlation-ID header
 ```
 
@@ -270,7 +270,7 @@ curl -i http://localhost:8080/api/health
 ### Prometheus Metrics
 
 ```bash
-curl http://localhost:8080/api/metrics
+curl http://127.0.0.1:5030/api/metrics
 ```
 
 ### Request Tracing
