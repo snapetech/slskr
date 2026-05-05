@@ -2744,7 +2744,7 @@ pub fn route_page_html(path: &str) -> String {
 }
 
 fn player_footer_html() -> String {
-    r#"<footer class="slskr-player" data-slskr-player><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button></section><section><strong>Transfers</strong><span id="slskr-player-transfers">0 down / 0 up</span><span id="slskr-player-party">Listening party idle</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
+    r#"<footer class="slskr-player" data-slskr-player data-slskr-player-rating-key=""><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button></section><section class="slskr-player-rating" aria-label="Player rating"><strong>Rating</strong><div id="slskr-player-rating-controls"><button type="button" data-slskr-player-rating="1">1</button><button type="button" data-slskr-player-rating="2">2</button><button type="button" data-slskr-player-rating="3">3</button><button type="button" data-slskr-player-rating="4">4</button><button type="button" data-slskr-player-rating="5">5</button></div><span id="slskr-player-rating-status">Not rated</span></section><section><strong>Transfers</strong><span id="slskr-player-transfers">0 down / 0 up</span><span id="slskr-player-party">Listening party idle</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -3130,6 +3130,53 @@ fn mount_global_shortcuts(
                 wasm_bindgen_futures::spawn_local(async move {
                     let _ = refresh_route_data(&window).await;
                 });
+            } else if matches!(key.as_str(), "1" | "2" | "3" | "4" | "5") {
+                event.prevent_default();
+                let rating = key.parse::<u32>().unwrap_or_default();
+                let key = document
+                    .query_selector("[data-slskr-player]")
+                    .ok()
+                    .flatten()
+                    .and_then(|player| player.get_attribute("data-slskr-player-rating-key"))
+                    .unwrap_or_default();
+                if key.is_empty() {
+                    set_player_status(&document, "No track selected");
+                    return;
+                }
+                let current = read_player_rating(&window, &key);
+                let next = if current == rating { 0 } else { rating };
+                write_player_rating(&window, &key, next);
+                update_player_rating_controls(&window, &document, &key);
+                set_player_status(&document, player_rating_summary(next));
+            } else if key.eq_ignore_ascii_case("v") {
+                event.prevent_default();
+                let window = window.clone();
+                let document = document.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let result = fetch_text_with_method(
+                        &window,
+                        &endpoint_url("/player/external-visualizer/launch"),
+                        "POST",
+                        None,
+                    )
+                    .await;
+                    match result {
+                        Ok(body) => set_player_status(&document, &compact_preview(&body)),
+                        Err(error) => {
+                            let message = error
+                                .as_string()
+                                .unwrap_or_else(|| "visualizer request failed".to_string());
+                            set_player_status(&document, &message);
+                        }
+                    }
+                    let _ = refresh_player_status(&window).await;
+                });
+            } else if key.eq_ignore_ascii_case("k") || key == " " {
+                event.prevent_default();
+                let window = window.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = refresh_player_status(&window).await;
+                });
             }
         },
     ));
@@ -3205,6 +3252,130 @@ fn set_live_status(document: &web_sys::Document, message: &str) {
     }
 }
 
+pub fn player_rating_key(track: &serde_json::Value) -> String {
+    if let Some(content_id) = track
+        .get("contentId")
+        .or_else(|| track.get("content_id"))
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+    {
+        return format!("content:{content_id}");
+    }
+    if let Some(stream_url) = track
+        .get("streamUrl")
+        .or_else(|| track.get("stream_url"))
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+    {
+        return format!("stream:{stream_url}");
+    }
+    let parts = ["artist", "album", "title", "fileName", "filename"]
+        .iter()
+        .filter_map(|key| {
+            track
+                .get(*key)
+                .map(json_scalar_preview)
+                .map(|value| value.trim().to_lowercase())
+                .filter(|value| !value.is_empty())
+        })
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("meta:{}", parts.join("|"))
+    }
+}
+
+pub fn player_rating_summary(rating: u32) -> &'static str {
+    match rating {
+        1 | 2 => "Discovery caution",
+        3 => "Neutral rating",
+        4 | 5 => "Discovery boost",
+        _ => "Not rated",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn player_ratings_storage(window: &web_sys::Window) -> Option<web_sys::Storage> {
+    window.local_storage().ok().flatten()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_player_rating(window: &web_sys::Window, key: &str) -> u32 {
+    if key.is_empty() {
+        return 0;
+    }
+    player_ratings_storage(window)
+        .and_then(|storage| storage.get_item("slskr.player.ratings").ok().flatten())
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+        .and_then(|value| value.get(key).and_then(|rating| rating.as_u64()))
+        .and_then(|rating| u32::try_from(rating).ok())
+        .filter(|rating| (1..=5).contains(rating))
+        .unwrap_or_default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn write_player_rating(window: &web_sys::Window, key: &str, rating: u32) {
+    if key.is_empty() {
+        return;
+    }
+    let Some(storage) = player_ratings_storage(window) else {
+        return;
+    };
+    let mut ratings = storage
+        .get_item("slskr.player.ratings")
+        .ok()
+        .flatten()
+        .and_then(|body| {
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&body).ok()
+        })
+        .unwrap_or_default();
+    if (1..=5).contains(&rating) {
+        ratings.insert(key.to_string(), serde_json::Value::from(rating));
+    } else {
+        ratings.remove(key);
+    }
+    let _ = storage.set_item(
+        "slskr.player.ratings",
+        &serde_json::Value::Object(ratings).to_string(),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_player_rating_controls(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+    rating_key: &str,
+) {
+    let rating = read_player_rating(window, rating_key);
+    if let Ok(Some(player)) = document.query_selector("[data-slskr-player]") {
+        let _ = player.set_attribute("data-slskr-player-rating-key", rating_key);
+    }
+    if let Ok(buttons) = document.query_selector_all("[data-slskr-player-rating]") {
+        for index in 0..buttons.length() {
+            let Some(node) = buttons.item(index) else {
+                continue;
+            };
+            let Ok(button) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let value = button
+                .get_attribute("data-slskr-player-rating")
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or_default();
+            let class = if value <= rating && rating > 0 {
+                "is-active"
+            } else {
+                ""
+            };
+            let _ = button.set_attribute("class", class);
+        }
+    }
+    if let Some(status) = document.get_element_by_id("slskr-player-rating-status") {
+        status.set_text_content(Some(player_rating_summary(rating)));
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn mount_player_controls(
     window: &web_sys::Window,
@@ -3264,6 +3435,41 @@ fn mount_player_controls(
                     }
                     let _ = refresh_player_status(&window).await;
                 });
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    let rating_buttons = document.query_selector_all("[data-slskr-player-rating]")?;
+    for index in 0..rating_buttons.length() {
+        let Some(node) = rating_buttons.item(index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let value = button
+            .get_attribute("data-slskr-player-rating")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_default();
+        let window = window.clone();
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                let key = document
+                    .query_selector("[data-slskr-player]")
+                    .ok()
+                    .flatten()
+                    .and_then(|player| player.get_attribute("data-slskr-player-rating-key"))
+                    .unwrap_or_default();
+                if key.is_empty() {
+                    set_player_status(&document, "No track selected");
+                    return;
+                }
+                let current = read_player_rating(&window, &key);
+                let next = if current == value { 0 } else { value };
+                write_player_rating(&window, &key, next);
+                update_player_rating_controls(&window, &document, &key);
+                set_player_status(&document, player_rating_summary(next));
             },
         ));
         button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
@@ -3741,12 +3947,27 @@ async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> 
 
     if let Ok(body) = fetch_text(window, &endpoint_url("/nowplaying")).await {
         let (title, detail) = player_now_playing_text(&body);
+        let rating_key = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .map(|value| {
+                value
+                    .get("now_playing")
+                    .and_then(|entry| entry.as_array())
+                    .and_then(|items| items.first())
+                    .or_else(|| value.get("current"))
+                    .or_else(|| value.get("track"))
+                    .unwrap_or(&value)
+                    .clone()
+            })
+            .map(|track| player_rating_key(&track))
+            .unwrap_or_default();
         if let Some(element) = document.get_element_by_id("slskr-player-now") {
             element.set_text_content(Some(&title));
         }
         if let Some(element) = document.get_element_by_id("slskr-player-now-detail") {
             element.set_text_content(Some(&detail));
         }
+        update_player_rating_controls(window, &document, &rating_key);
     }
 
     if let Ok(body) = fetch_text(window, &endpoint_url("/transfers/speeds")).await {
@@ -3894,6 +4115,8 @@ mod tests {
         assert!(html.contains("data-slskr-player-action=\"refresh\""));
         assert!(html.contains("data-slskr-player-action=\"clear\""));
         assert!(html.contains("data-slskr-player-action=\"visualizer\""));
+        assert!(html.contains("data-slskr-player-rating=\"5\""));
+        assert!(html.contains("slskr-player-rating-status"));
         assert!(html.contains("slskr-player-now"));
         assert!(html.contains("slskr-player-transfers"));
         assert!(html.contains("/api/v0/searches"));
@@ -3921,6 +4144,19 @@ mod tests {
             player_visualizer_text(r#"{"status":"configured","configured":true}"#),
             "configured"
         );
+        let track = serde_json::json!({
+            "artist": "Archive Artist",
+            "album": "Open Sessions",
+            "title": "Public Domain Theme"
+        });
+        assert_eq!(
+            player_rating_key(&track),
+            "meta:archive artist|open sessions|public domain theme"
+        );
+        assert_eq!(player_rating_summary(1), "Discovery caution");
+        assert_eq!(player_rating_summary(3), "Neutral rating");
+        assert_eq!(player_rating_summary(5), "Discovery boost");
+        assert_eq!(player_rating_summary(0), "Not rated");
     }
 
     #[test]

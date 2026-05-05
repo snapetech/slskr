@@ -701,7 +701,7 @@ body {
   bottom: 0;
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 0.9fr) minmax(0, 0.9fr);
+  grid-template-columns: minmax(0, 1.2fr) auto minmax(150px, 0.55fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
   left: 0;
   min-height: 58px;
   padding: 6px 16px;
@@ -724,13 +724,35 @@ body {
 }
 
 .slskr-player > section:last-child,
-.slskr-player > section:nth-child(3) {
+.slskr-player > section:nth-child(4) {
   text-align: right;
 }
 
 .slskr-player-controls {
   display: flex;
   gap: 8px;
+}
+
+.slskr-player-rating {
+  text-align: center;
+}
+
+#slskr-player-rating-controls {
+  display: flex;
+  gap: 3px;
+  justify-content: center;
+}
+
+#slskr-player-rating-controls button {
+  min-height: 24px;
+  min-width: 26px;
+  padding: 0;
+}
+
+#slskr-player-rating-controls button.is-active {
+  background: #ffd166;
+  border-color: #ffd166;
+  color: #17120d;
 }
 
 .slskr-route-page header h2 {
