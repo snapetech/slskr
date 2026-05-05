@@ -4,6 +4,7 @@ members = [
     "crates/slskr-client",
     "crates/slskr-cli",
     "crates/slskr-protocol",
+    "crates/slskr-web",
 ]
 resolver = "2"
 

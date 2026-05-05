@@ -1518,6 +1518,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "slskr-web"
+version = "0.0.0"
+dependencies = [
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

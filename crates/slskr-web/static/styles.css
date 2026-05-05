@@ -1,0 +1,114 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #080b0c;
+  color: #f4efe7;
+}
+
+body {
+  margin: 0;
+}
+
+.slskr-shell {
+  min-height: 100vh;
+  background: #080b0c;
+}
+
+.slskr-nav {
+  align-items: center;
+  background: #1b1512;
+  border-bottom: 1px solid #5f4229;
+  display: flex;
+  gap: 2px;
+  min-height: 58px;
+  overflow-x: auto;
+  padding: 0 12px;
+}
+
+.slskr-nav-item {
+  align-items: center;
+  color: #f4efe7;
+  display: inline-flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 4px;
+  min-width: 78px;
+  padding: 8px 10px;
+  text-decoration: none;
+}
+
+.slskr-nav-item:hover {
+  background: #33261f;
+}
+
+.slskr-nav-icon {
+  color: #ffd166;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.slskr-main {
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 24px;
+}
+
+.slskr-hero {
+  border: 1px solid #5f4229;
+  padding: 24px;
+}
+
+.slskr-hero h1 {
+  font-size: 38px;
+  font-weight: 700;
+  margin: 4px 0 8px;
+}
+
+.slskr-hero p {
+  color: #cdbfab;
+  margin: 0;
+}
+
+.slskr-kicker {
+  color: #ffd166;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.slskr-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 18px;
+}
+
+.slskr-panel {
+  background: #131617;
+  border: 1px solid #34403f;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  justify-content: space-between;
+  min-height: 136px;
+  padding: 18px;
+}
+
+.slskr-panel h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.slskr-panel p {
+  color: #c6d0ca;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.slskr-panel code {
+  color: #9fd8ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}

@@ -71,7 +71,7 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
 | --- | --- | --- |
 | Daemon | `slskr serve`, bundled UI/API, session lifecycle, listener state, reconnect policy | [docs/app-surface.md](./docs/app-surface.md), [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) |
 | Protocol runtime | Login, keepalive, server commands, peer init, peer messages, distributed messages, transfer sockets, obfuscation | [crates/slskr-client](./crates/slskr-client), [crates/slskr-protocol](./crates/slskr-protocol) |
-| Web UI | Search, transfers, rooms, messages, browse, users, contacts, system, player, collections, integrations | [web/README.md](./web/README.md), [web/src/components](./web/src/components) |
+| Web UI | Search, transfers, rooms, messages, browse, users, contacts, system, player, collections, integrations | [web/README.md](./web/README.md), [web/src/components](./web/src/components), [docs/rust-web-ui.md](./docs/rust-web-ui.md) |
 | HTTP API | Versioned `/api/v0/*` endpoints, unversioned compatibility routes, auth, telemetry, metrics | [docs/http-api.md](./docs/http-api.md), [docs/openapi.json](./docs/openapi.json) |
 | Events | Polling event log and `/api/events/ws` WebSocket stream | [docs/app-surface.md](./docs/app-surface.md) |
 | Shares | Share root scanning, virtual catalog, rescan endpoint, filtered file APIs | [docs/app-surface.md](./docs/app-surface.md) |
@@ -88,6 +88,7 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
 - `crates/slskr-client`: async runtime for server sessions, peer connections, listeners, searches, browsing, social/user operations, transfers, stream handling, peer cache, distributed tree state, and live probes.
 - `crates/slskr-protocol`: protocol message types, binary codecs, frame parsing, primitives, peer/server/distributed/init messages, obfuscation helpers, and wire-format tests.
 - `crates/slskr-cli`: internal command runner used by smoke tests and interop probes while the public binary remains `slskr`.
+- `crates/slskr-web`: Rust/WASM migration target for porting the browser UI one route at a time.
 - `web`: React/Vite web UI served by the daemon and exercised by unit, integration, and Playwright tests.
 - `client-ts`, `client-python`, `client-go`: generated or maintained API clients and examples for automation.
 - `docs`, `examples`, `scripts`, and `k8s`: operator references, smoke automation, public posture checks, fixture policy, and deployment manifests.
@@ -450,7 +451,8 @@ The expected release shape is one binary, one config file, one state directory, 
 │   ├── slskr/            # daemon, API, web serving, config, storage, telemetry
 │   ├── slskr-client/     # async session, peer, search, browse, transfer runtime
 │   ├── slskr-cli/        # smoke/probe command implementation
-│   └── slskr-protocol/   # protocol messages, codecs, frames, obfuscation
+│   ├── slskr-protocol/   # protocol messages, codecs, frames, obfuscation
+│   └── slskr-web/        # Rust/WASM web UI migration target
 ├── web/                  # React/Vite web UI
 ├── client-ts/            # TypeScript client
 ├── client-python/        # Python client
@@ -470,6 +472,7 @@ The expected release shape is one binary, one config file, one state directory, 
 - [OpenAPI JSON](./docs/openapi.json)
 - [Install notes](./docs/install.md)
 - [Config example](./docs/slskr.config.example.toml)
+- [Rust web UI migration](./docs/rust-web-ui.md)
 - [Client libraries](./docs/CLIENT_LIBRARIES.md)
 - [Live interop matrix](./docs/live-interop-test-matrix.md)
 - [Open commons fixtures](./docs/open-commons-fixtures.md)

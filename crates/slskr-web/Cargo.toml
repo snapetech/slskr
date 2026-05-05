@@ -1,0 +1,27 @@
+[package]
+name = "slskr-web"
+version = "0.0.0"
+description = "Rust WASM web UI migration target for slskr"
+keywords = ["slsk", "soulseek", "web", "wasm", "rust"]
+categories = ["wasm", "web-programming"]
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Element",
+    "HtmlElement",
+    "Node",
+    "Window",
+] }
+
+[lints]
+workspace = true
