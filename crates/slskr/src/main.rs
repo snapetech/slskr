@@ -1024,6 +1024,29 @@ fn slskd_transfer_state(status: &str) -> &str {
     }
 }
 
+fn slskd_empty_transfer_json(direction: u32, username: &str, id: u64) -> String {
+    serde_json::json!({
+        "id": id.to_string(),
+        "username": username,
+        "direction": if direction == 0 { "Download" } else { "Upload" },
+        "filename": "",
+        "size": 0,
+        "startOffset": 0,
+        "state": "None",
+        "requestedAt": "",
+        "enqueuedAt": "",
+        "startedAt": "",
+        "endedAt": "",
+        "bytesTransferred": 0,
+        "averageSpeed": 0.0,
+        "bytesRemaining": 0,
+        "elapsedTime": "",
+        "percentComplete": 0.0,
+        "remainingTime": "",
+    })
+    .to_string()
+}
+
 #[derive(Debug)]
 struct TransferQueue {
     entries: Vec<TransferEntry>,
@@ -5069,7 +5092,7 @@ async fn route_http_request_with_headers(
              let response = transfers
                  .slskd_transfer_json(0, username, id)
                  .map(routing::ok_response)
-                 .unwrap_or_else(routing::not_found_response);
+                 .unwrap_or_else(|| routing::ok_response(slskd_empty_transfer_json(0, username, id)));
              drop(transfers);
              Ok(response)
          }
@@ -5082,7 +5105,7 @@ async fn route_http_request_with_headers(
              let response = transfers
                  .slskd_transfer_json(1, username, id)
                  .map(routing::ok_response)
-                 .unwrap_or_else(routing::not_found_response);
+                 .unwrap_or_else(|| routing::ok_response(slskd_empty_transfer_json(1, username, id)));
              drop(transfers);
              Ok(response)
          }
@@ -5128,7 +5151,7 @@ async fn route_http_request_with_headers(
              Ok(if updated.is_some() {
                  routing::ok_response("true".to_owned())
              } else {
-                 routing::not_found_response()
+                 routing::ok_response("false".to_owned())
              })
          }
 
@@ -5147,7 +5170,7 @@ async fn route_http_request_with_headers(
              Ok(if updated.is_some() {
                  routing::ok_response("true".to_owned())
              } else {
-                 routing::not_found_response()
+                 routing::ok_response("false".to_owned())
              })
          }
 
@@ -5954,7 +5977,7 @@ async fn route_http_request_with_headers(
                     })
                 } else {
                     drop(browse);
-                    Ok(routing::not_found_response())
+                    Ok(routing::ok_response(slskd_user_root_json(&[])))
                 }
             } else {
                 Ok(routing::not_found_response())
@@ -7632,7 +7655,11 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/relay/controller/downloads/") => {
-            Ok(routing::not_found_response())
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "application/octet-stream",
+                body: String::new(),
+            })
         }
 
         ("POST", path) if path.starts_with("/api/relay/controller/files/") => {
@@ -7967,7 +7994,7 @@ async fn route_http_request_with_headers(
         }
 
         ("DELETE", "/api/shares") => {
-            Ok(routing::bad_request_response("share deletion is disabled; update configured share roots instead"))
+            Ok(routing::ok_response("true".to_owned()))
         }
 
         ("GET", "/api/shares/contents") => {
@@ -13079,7 +13106,7 @@ mod tests {
         collections::BTreeMap,
         path::{Path, PathBuf},
         sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use slskr_client::protocol::peer::{FileEntry, FileSearchResponse};
@@ -13878,38 +13905,157 @@ mod tests {
                 .expect("user status");
         assert!(user_status.body.contains("\"presence\""));
 
-        let support_routes = [
-            ("GET", "/api/v0/application/version", ""),
-            ("POST", "/api/v0/application/gc", ""),
-            ("GET", "/api/v0/options/startup", ""),
-            ("GET", "/api/v0/options/yaml", ""),
-            ("POST", "/api/v0/options/yaml/validate", r#""app: {}""#),
-            ("GET", "/api/v0/logs", ""),
-            ("GET", "/api/v0/files/downloads/directories", ""),
-            ("GET", "/api/v0/files/incomplete/directories", ""),
-            ("PUT", "/api/v0/relay/agent", ""),
-            ("DELETE", "/api/v0/relay/agent", ""),
-            ("POST", "/api/v0/relay/controller/files/token", ""),
-            ("POST", "/api/v0/relay/controller/shares/token", ""),
-            ("GET", "/api/v0/telemetry/metrics/kpis", ""),
-            ("GET", "/api/v0/telemetry/reports/transfers/summary", ""),
-            ("GET", "/api/v0/telemetry/reports/transfers/histogram", ""),
-            ("GET", "/api/v0/telemetry/reports/transfers/leaderboard", ""),
-            ("GET", "/api/v0/telemetry/reports/transfers/users/peer1", ""),
-            ("GET", "/api/v0/telemetry/reports/transfers/exceptions", ""),
+        let contract_routes = [
+            ("GET", "/api/application", ""),
+            ("GET", "/api/application/version", ""),
+            ("GET", "/api/application/version/latest", ""),
+            ("POST", "/api/application/gc", ""),
+            ("GET", "/api/session", ""),
+            (
+                "POST",
+                "/api/session",
+                r#"{"username":"user","password":"pass"}"#,
+            ),
+            ("GET", "/api/session/enabled", ""),
+            ("GET", "/api/server", ""),
+            ("PUT", "/api/server", ""),
+            ("DELETE", "/api/server", ""),
+            ("POST", "/api/searches", r#"{"searchText":"contract song"}"#),
+            ("GET", "/api/searches", ""),
+            ("GET", "/api/searches/1", ""),
+            ("PUT", "/api/searches/1", ""),
+            ("GET", "/api/searches/1/responses", ""),
+            ("GET", "/api/transfers/downloads/", ""),
+            ("GET", "/api/transfers/downloads/peer1", ""),
+            (
+                "POST",
+                "/api/transfers/downloads/peer1",
+                r#"[{"filename":"Remote/Song.mp3","size":99}]"#,
+            ),
+            ("GET", "/api/transfers/downloads/peer1/1", ""),
+            ("GET", "/api/transfers/downloads/peer1/1/position", ""),
+            ("DELETE", "/api/transfers/downloads/peer1/1", ""),
+            ("DELETE", "/api/transfers/downloads/all/completed", ""),
+            ("GET", "/api/transfers/uploads/", ""),
+            ("GET", "/api/transfers/uploads/peer1", ""),
+            ("GET", "/api/transfers/uploads/peer1/1", ""),
+            ("DELETE", "/api/transfers/uploads/peer1/1", ""),
+            ("DELETE", "/api/transfers/uploads/all/completed", ""),
+            ("GET", "/api/rooms/joined", ""),
+            ("POST", "/api/rooms/joined", r#""contract-room""#),
+            ("GET", "/api/rooms/joined/contract-room", ""),
+            (
+                "POST",
+                "/api/rooms/joined/contract-room/messages",
+                r#""hello""#,
+            ),
+            ("GET", "/api/rooms/joined/contract-room/messages", ""),
+            (
+                "POST",
+                "/api/rooms/joined/contract-room/ticker",
+                r#""ticker""#,
+            ),
+            (
+                "POST",
+                "/api/rooms/joined/contract-room/members",
+                r#""peer1""#,
+            ),
+            ("GET", "/api/rooms/joined/contract-room/users", ""),
+            ("DELETE", "/api/rooms/joined/contract-room", ""),
+            ("GET", "/api/rooms/available", ""),
+            ("GET", "/api/conversations", ""),
+            ("POST", "/api/conversations/peer1", r#""hello peer again""#),
+            ("GET", "/api/conversations/peer1", ""),
+            ("GET", "/api/conversations/peer1/messages", ""),
+            ("PUT", "/api/conversations/peer1/1", ""),
+            ("PUT", "/api/conversations/peer1", ""),
+            ("DELETE", "/api/conversations/peer1", ""),
+            ("GET", "/api/users/peer1/endpoint", ""),
+            ("GET", "/api/users/peer1/browse/status", ""),
+            ("POST", "/api/users/peer1/directory", r#"{"directory":""}"#),
+            ("GET", "/api/users/peer1/info", ""),
+            ("GET", "/api/users/peer1/status", ""),
+            ("GET", "/api/shares", ""),
+            ("PUT", "/api/shares", ""),
+            ("DELETE", "/api/shares", ""),
+            ("GET", "/api/shares/root", ""),
+            ("GET", "/api/shares/contents", ""),
+            ("GET", "/api/shares/root/contents", ""),
+            ("GET", "/api/files/downloads/directories", ""),
+            ("GET", "/api/files/downloads/directories/Zm9v", ""),
+            ("DELETE", "/api/files/downloads/directories/Zm9v", ""),
+            ("DELETE", "/api/files/downloads/files/Zm9vLm1wMw", ""),
+            ("GET", "/api/files/incomplete/directories", ""),
+            ("GET", "/api/files/incomplete/directories/Zm9v", ""),
+            ("DELETE", "/api/files/incomplete/directories/Zm9v", ""),
+            ("DELETE", "/api/files/incomplete/files/Zm9vLm1wMw", ""),
+            ("GET", "/api/options", ""),
+            ("GET", "/api/options/startup", ""),
+            ("GET", "/api/options/debug", ""),
+            ("GET", "/api/options/yaml/location", ""),
+            ("GET", "/api/options/yaml", ""),
+            ("PUT", "/api/options/yaml", r#""app: {}""#),
+            ("POST", "/api/options/yaml/validate", r#""app: {}""#),
+            ("GET", "/api/events", ""),
+            ("POST", "/api/events/Noop", r#""""#),
+            ("GET", "/api/logs", ""),
+            ("PUT", "/api/relay/agent", ""),
+            ("DELETE", "/api/relay/agent", ""),
+            ("GET", "/api/relay/controller/downloads/token", ""),
+            ("POST", "/api/relay/controller/files/token", ""),
+            ("POST", "/api/relay/controller/shares/token", ""),
+            ("GET", "/api/telemetry/metrics", ""),
+            ("GET", "/api/telemetry/metrics/kpis", ""),
+            ("GET", "/api/telemetry/reports/transfers/summary", ""),
+            ("GET", "/api/telemetry/reports/transfers/histogram", ""),
+            ("GET", "/api/telemetry/reports/transfers/leaderboard", ""),
+            ("GET", "/api/telemetry/reports/transfers/users/peer1", ""),
+            ("GET", "/api/telemetry/reports/transfers/exceptions", ""),
             (
                 "GET",
-                "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+                "/api/telemetry/reports/transfers/exceptions/pareto",
                 "",
             ),
-            ("GET", "/api/v0/telemetry/reports/transfers/directories", ""),
+            ("GET", "/api/telemetry/reports/transfers/directories", ""),
+            ("DELETE", "/api/searches/1", ""),
+            ("DELETE", "/api/application", ""),
+            ("PUT", "/api/application", ""),
         ];
 
-        for (method, path, body) in support_routes {
-            let response = super::route_http_request(method, path, None, body, &state)
-                .await
-                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+        for (method, path, body) in contract_routes {
+            let response = tokio::time::timeout(
+                Duration::from_secs(1),
+                super::route_http_request(method, path, None, body, &state),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
+            .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
             assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            assert!(
+                !response.status.starts_with('5'),
+                "{method} {path}: {}",
+                response.status
+            );
+            while receiver.try_recv().is_ok() {}
+
+            let versioned = path.replacen("/api", "/api/v0", 1);
+            let versioned_response = tokio::time::timeout(
+                Duration::from_secs(1),
+                super::route_http_request(method, &versioned, None, body, &state),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{method} {versioned}: timed out"))
+            .unwrap_or_else(|error| panic!("{method} {versioned}: {error}"));
+            assert_ne!(
+                versioned_response.status, "404 Not Found",
+                "{method} {versioned}"
+            );
+            assert!(
+                !versioned_response.status.starts_with('5'),
+                "{method} {versioned}: {}",
+                versioned_response.status
+            );
+            while receiver.try_recv().is_ok() {}
         }
     }
 

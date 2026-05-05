@@ -19,7 +19,8 @@ major API-backed surfaces: application state, session control, search, wishlist,
 transfers, messages, rooms, browse, identity, collections, integrations, and
 system status. The shell owns route page rendering, active nav state, History
 API navigation, and browser-side Rust probes against health, version,
-application, and server endpoints.
+application, and server endpoints. Each route page also renders route-scoped
+live GET probes for its mapped API surface.
 
 ## Build
 

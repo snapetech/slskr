@@ -747,6 +747,48 @@ pub fn route_endpoints(surface: &str) -> Vec<ApiEndpoint> {
         .collect()
 }
 
+fn route_param_value(path: &str, fallback: &str) -> String {
+    let value = path
+        .trim_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or(fallback);
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+    {
+        value.to_owned()
+    } else {
+        fallback.to_owned()
+    }
+}
+
+pub fn concrete_endpoint_path(route_path: &str, endpoint: ApiEndpoint) -> String {
+    let search_id = route_param_value(route_path, "1");
+    endpoint_url(endpoint.path)
+        .replace(":id", &search_id)
+        .replace(":username", "peer1")
+}
+
+pub fn route_probe_pending_html(path: &str) -> String {
+    let Some(page) = route_page(path) else {
+        return String::new();
+    };
+    route_endpoints(page.surface)
+        .iter()
+        .filter(|endpoint| endpoint.method == "GET")
+        .map(|endpoint| {
+            let path = concrete_endpoint_path(path, *endpoint);
+            format!(
+                r#"<li><strong>GET</strong><code>{path}</code><span class="slskr-probe-pending">pending</span></li>"#,
+                path = escape_html(&path)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 pub fn route_page_html(path: &str) -> String {
     let Some(page) = route_page(path) else {
         return route_page_html("/searches");
@@ -777,13 +819,14 @@ pub fn route_page_html(path: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
         description = escape_html(page.description),
         routes = route_inventory,
         endpoints = endpoints,
+        route_data = route_probe_pending_html(path),
     )
 }
 
@@ -949,6 +992,10 @@ fn render_current_route(
             element.remove_attribute("aria-current")?;
         }
     }
+    let window_for_data = window.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = refresh_route_data(&window_for_data).await;
+    });
     Ok(())
 }
 
@@ -973,6 +1020,41 @@ async fn refresh_runtime_status() -> Result<(), JsValue> {
                     .as_string()
                     .unwrap_or_else(|| "request failed".to_string());
                 runtime_probe_result_html(&[(probe.label, &path, Err(message.as_str()))])
+            }
+        };
+        rendered.push_str(&row);
+        status.set_inner_html(&rendered);
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("document is unavailable"))?;
+    let Some(status) = document.get_element_by_id("slskr-route-data") else {
+        return Ok(());
+    };
+    let path = window.location().pathname()?;
+    let Some(page) = route_page(&path) else {
+        return Ok(());
+    };
+
+    let mut rendered = String::new();
+    for endpoint in route_endpoints(page.surface)
+        .into_iter()
+        .filter(|endpoint| endpoint.method == "GET")
+    {
+        let url = concrete_endpoint_path(&path, endpoint);
+        let row = match fetch_text(window, &url).await {
+            Ok(body) => runtime_probe_result_html(&[(endpoint.method, &url, Ok(body.as_str()))]),
+            Err(error) => {
+                let message = error
+                    .as_string()
+                    .unwrap_or_else(|| "request failed".to_string());
+                runtime_probe_result_html(&[(endpoint.method, &url, Err(message.as_str()))])
             }
         };
         rendered.push_str(&row);
@@ -1080,6 +1162,28 @@ mod tests {
         assert!(html.contains("Downloads"));
         assert!(html.contains("/api/v0/transfers/downloads"));
         assert!(html.contains("data-route=\"/downloads\""));
+        assert!(html.contains("slskr-route-data"));
+        assert!(html.contains("Live Route Data"));
+    }
+
+    #[test]
+    fn route_probe_urls_use_concrete_paths() {
+        let endpoint = ApiEndpoint {
+            method: "GET",
+            path: "/searches/:id/responses",
+            surface: "search",
+        };
+        assert_eq!(
+            concrete_endpoint_path("/searches/42", endpoint),
+            "/api/v0/searches/42/responses"
+        );
+        assert_eq!(
+            concrete_endpoint_path("/searches/<script>", endpoint),
+            "/api/v0/searches/1/responses"
+        );
+        let pending = route_probe_pending_html("/messages");
+        assert!(pending.contains("/api/v0/conversations"));
+        assert!(pending.contains("/api/v0/conversations/peer1"));
     }
 
     #[test]

@@ -217,6 +217,37 @@ body {
   padding: 8px 10px;
 }
 
+.slskr-route-live {
+  border-top: 1px solid #263130;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.slskr-route-live h3 {
+  color: #f4efe7;
+  font-size: 14px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.slskr-route-live ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-route-live li {
+  background: #111516;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 220px 1fr;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
 .slskr-runtime {
   border-color: #5f4229;
 }
@@ -242,7 +273,8 @@ body {
 }
 
 @media (max-width: 760px) {
-  .slskr-runtime li {
+  .slskr-runtime li,
+  .slskr-route-live li {
     align-items: start;
     grid-template-columns: 1fr;
   }
