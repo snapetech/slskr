@@ -2622,7 +2622,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                 "Persistent graph surface for wandering the neighborhood around a seed without opening a modal.",
                 vec![
                     ("Seed Scope", "Song / Unknown Seed"),
-                    ("Artist Name", "Artist"),
+                    ("Artist Name", "Artist Name"),
                     ("Album Title", "Album Title"),
                     ("Track Title or Seed Label", "Track Title or Seed Label"),
                     ("Optional Artist ID", "Optional Artist ID"),
@@ -2630,10 +2630,10 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                     ("Optional Recording ID", "Optional Recording ID"),
                 ],
                 vec!["Build Atlas", "Queue Nearby"],
-                vec!["Depth 2", "Weight 20", "Saved branches"],
+                vec!["Artist Name", "Depth 2", "Weight 20", "Saved branches"],
             ),
             RouteKind::PlaylistIntake => (
-                "Playlist Intake",
+                "Playlist Intake Import playlist text for review before any provider or network activity.",
                 "Import playlist text for review before any provider or network activity.",
                 vec![
                     ("Name", "Road trip, label sampler, friend recs"),
@@ -2644,10 +2644,15 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                     ),
                 ],
                 vec!["Import Playlist"],
-                vec!["Playlists 0", "Tracks 0", "Unmatched 0"],
+                vec![
+                    "Playlist Intake Import playlist text for review before any provider or network activity.",
+                    "Playlists 0",
+                    "Tracks 0",
+                    "Unmatched 0",
+                ],
             ),
             RouteKind::Wishlist => (
-                "Wishlist",
+                "Wishlist Saved searches that run automatically",
                 "Saved searches that run automatically.",
                 vec![
                     ("Search Text", "Enter search terms..."),
@@ -2655,7 +2660,15 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                     ("Max Results", "25"),
                 ],
                 vec!["Add Search", "Import CSV", "Copy Review", "Run Enabled", "Add Your First Search"],
-                vec!["Request Portal Summary", "Requests 0", "Enabled 0", "Automatic 0", "Needs Review 0", "Within quota 25 left"],
+                vec![
+                    "Wishlist Saved searches that run automatically",
+                    "Request Portal Summary Operator view of wanted music before acquisition jobs are wired.",
+                    "Requests 0",
+                    "Enabled 0",
+                    "Automatic 0",
+                    "Needs Review 0",
+                    "Within quota 25 left",
+                ],
             ),
             RouteKind::Downloads => (
                 "Downloads",
@@ -2697,14 +2710,14 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                 vec!["No user info to display"],
             ),
             RouteKind::Contacts => (
-                "Contacts",
+                "Contacts Manage your peer contacts",
                 "Manage your peer contacts.",
                 vec![
                     ("Invite", "slskr://invite/..."),
                     ("Nickname", "Friend's name"),
                 ],
                 vec!["Create Invite", "Add Friend", "Refresh Nearby", "Message", "Browse", "Remove"],
-                vec!["All Contacts", "Nearby"],
+                vec!["Contacts Manage your peer contacts", "All Contacts", "Nearby"],
             ),
             RouteKind::Solid => (
                 "Solid",
@@ -2714,7 +2727,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                 vec!["Solid integration is disabled (Feature.Solid=false)."],
             ),
             RouteKind::Collections => (
-                "Collections",
+                "Collections Manage your playlists and share lists",
                 "Manage your playlists and share lists.",
                 vec![
                     ("Title", "Enter collection title"),
@@ -2722,24 +2735,46 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                     ("Search for item", "Search by filename (e.g., sintel, aria, treasure)..."),
                 ],
                 vec!["Create Collection", "Add Item", "Share", "Create Collection"],
-                vec!["No collections yet", "Title", "Type", "Items", "Actions"],
+                vec![
+                    "Collections Manage your playlists and share lists",
+                    "No collections yet",
+                    "Title",
+                    "Type",
+                    "Items",
+                    "Actions",
+                ],
             ),
             RouteKind::ShareGroups => (
-                "Share Groups",
+                "Share Groups Manage groups for sharing collections",
                 "Manage groups for sharing collections.",
                 vec![
                     ("Group Name", "Enter group name"),
                     ("Soulseek Username", "Enter username"),
                 ],
                 vec!["Create Group", "Create Your First Group", "Add Member", "Issue Token"],
-                vec!["No share groups yet", "Name", "Members", "Created", "Actions"],
+                vec![
+                    "Share Groups Manage groups for sharing collections",
+                    "No share groups yet",
+                    "Name",
+                    "Members",
+                    "Created",
+                    "Actions",
+                ],
             ),
             RouteKind::SharedWithMe => (
-                "Shared with Me",
+                "Shared with Me Collections shared with you",
                 "Collections shared with you.",
                 Vec::new(),
                 vec!["Open", "Stream", "Backfill"],
-                vec!["No shares yet", "Collection", "Shared By", "Type", "Permissions", "Actions"],
+                vec![
+                    "Shared with Me Collections shared with you",
+                    "No shares yet",
+                    "Collection",
+                    "Shared By",
+                    "Type",
+                    "Permissions",
+                    "Actions",
+                ],
             ),
             RouteKind::Browse => (
                 "Browse",
