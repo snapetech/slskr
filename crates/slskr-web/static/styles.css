@@ -9,6 +9,7 @@
 
 body {
   margin: 0;
+  padding-bottom: 66px;
 }
 
 .slskr-shell {
@@ -56,8 +57,66 @@ body {
 
 .slskr-main {
   margin: 0 auto;
-  max-width: 1180px;
-  padding: 24px;
+  max-width: 1480px;
+  padding: 16px 22px 24px;
+}
+
+.slskr-appbar {
+  align-items: center;
+  background: #101314;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 1fr) minmax(420px, 1.4fr);
+  margin-bottom: 16px;
+  padding: 12px 16px;
+}
+
+.slskr-appbar strong {
+  color: #f4efe7;
+  display: block;
+  font-size: 20px;
+}
+
+.slskr-appbar span {
+  color: #c6d0ca;
+  font-size: 13px;
+}
+
+.slskr-appbar ul {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-appbar li {
+  background: #0f1112;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 2px;
+  min-height: 42px;
+  padding: 7px 8px;
+}
+
+.slskr-appbar li strong {
+  color: #ffd166;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.slskr-appbar li code {
+  display: none;
+}
+
+.slskr-appbar li span {
+  color: #f4efe7;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .slskr-hero {
@@ -172,8 +231,208 @@ body {
 .slskr-route-page {
   background: #101314;
   border: 1px solid #5f4229;
-  margin-top: 18px;
+  margin-top: 0;
   padding: 18px;
+}
+
+.slskr-page-header {
+  align-items: start;
+  border-bottom: 1px solid #263130;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.slskr-page-chip {
+  background: #1b1512;
+  border: 1px solid #5f4229;
+  color: #ffd166;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+
+.slskr-toolbar {
+  align-items: center;
+  background: #0f1112;
+  border: 1px solid #34403f;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+}
+
+.slskr-toolbar input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 34px;
+  min-width: 220px;
+  padding: 0 10px;
+}
+
+.slskr-toolbar button,
+.slskr-player button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.slskr-toolbar button:first-of-type {
+  background: #ffd166;
+  border-color: #ffd166;
+  color: #17120d;
+}
+
+.slskr-functional-layout {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(340px, 430px) 1fr;
+}
+
+.slskr-work-area {
+  display: grid;
+  gap: 10px;
+}
+
+.slskr-work-area > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.slskr-work-area h3 {
+  font-size: 14px;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.slskr-work-area span {
+  color: #9ba8a1;
+  font-size: 12px;
+}
+
+.slskr-page-data {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.slskr-data-card {
+  background: #111516;
+  border: 1px solid #34403f;
+  display: grid;
+  gap: 10px;
+  min-height: 158px;
+  padding: 12px;
+}
+
+.slskr-data-card header {
+  border-bottom: 1px solid #263130;
+  padding-bottom: 8px;
+}
+
+.slskr-data-card h3 {
+  font-size: 14px;
+  margin: 0 0 5px;
+}
+
+.slskr-data-card code {
+  color: #9fd8ff;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.slskr-record-list,
+.slskr-field-list {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.slskr-record-list li,
+.slskr-field-list li {
+  align-items: center;
+  background: #0f1112;
+  border: 1px solid #263130;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 30px;
+  padding: 7px 8px;
+}
+
+.slskr-record-list strong,
+.slskr-field-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slskr-record-list span,
+.slskr-field-list span,
+.slskr-empty-state {
+  color: #9ba8a1;
+  font-size: 12px;
+}
+
+.slskr-diagnostics {
+  border-top: 1px solid #263130;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.slskr-diagnostics summary {
+  color: #ffd166;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.slskr-player {
+  align-items: center;
+  background: #1b1512;
+  border-top: 1px solid #5f4229;
+  bottom: 0;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr auto 1fr;
+  left: 0;
+  min-height: 58px;
+  padding: 6px 16px;
+  position: fixed;
+  right: 0;
+  z-index: 20;
+}
+
+.slskr-player strong,
+.slskr-player span {
+  display: block;
+}
+
+.slskr-player span {
+  color: #c6d0ca;
+  font-size: 12px;
+}
+
+.slskr-player > div:last-child {
+  text-align: right;
+}
+
+.slskr-player-controls {
+  display: flex;
+  gap: 8px;
 }
 
 .slskr-route-page header h2 {
@@ -356,9 +615,9 @@ body {
 }
 
 .slskr-route-actions {
-  border-top: 1px solid #263130;
-  margin-top: 16px;
-  padding-top: 16px;
+  border: 1px solid #34403f;
+  margin-top: 0;
+  padding: 12px;
 }
 
 .slskr-route-actions h3 {
@@ -377,12 +636,12 @@ body {
 }
 
 .slskr-route-actions li {
-  align-items: center;
+  align-items: stretch;
   background: #111516;
   border: 1px solid #263130;
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr minmax(160px, 240px) auto;
+  grid-template-columns: 1fr;
   min-height: 38px;
   padding: 8px 10px;
 }
@@ -400,6 +659,7 @@ body {
   color: #f4efe7;
   min-height: 32px;
   padding: 0 9px;
+  width: auto;
 }
 
 .slskr-action-button {
@@ -472,6 +732,20 @@ body {
 }
 
 @media (max-width: 760px) {
+  .slskr-appbar,
+  .slskr-functional-layout,
+  .slskr-player {
+    grid-template-columns: 1fr;
+  }
+
+  .slskr-player {
+    position: static;
+  }
+
+  body {
+    padding-bottom: 0;
+  }
+
   .slskr-route-actions li,
   .slskr-runtime li,
   .slskr-route-live li {

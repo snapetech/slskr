@@ -1503,7 +1503,12 @@ pub fn concrete_endpoint_path(route_path: &str, endpoint: ApiEndpoint) -> String
 }
 
 pub fn concrete_action_path(route_path: &str, action: RouteAction) -> String {
-    let search_id = route_param_value(route_path, "1");
+    let search_id =
+        if action.path.contains(":id") && !normalize_route_path(route_path).contains(":id") {
+            "1".to_string()
+        } else {
+            route_param_value(route_path, "1")
+        };
     endpoint_url(action.path)
         .replace(":id", &search_id)
         .replace(":username", "peer1")
@@ -2126,6 +2131,207 @@ pub fn route_probe_pending_html(path: &str) -> String {
         .join("")
 }
 
+fn endpoint_title(path: &str) -> String {
+    path.trim_start_matches('/')
+        .replace(['/', '-', '_'], " ")
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn json_display_array(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    if let Some(items) = value.as_array() {
+        return Some(items);
+    }
+    for key in [
+        "entries",
+        "items",
+        "records",
+        "results",
+        "responses",
+        "runs",
+        "providers",
+        "jobs",
+        "events",
+        "logs",
+        "shares",
+        "users",
+        "collections",
+        "groups",
+        "grants",
+        "directories",
+        "messages",
+        "rooms",
+        "files",
+    ] {
+        if let Some(items) = value.get(key).and_then(|entry| entry.as_array()) {
+            return Some(items);
+        }
+    }
+    None
+}
+
+fn json_scalar_preview(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::String(value) => value.clone(),
+        _ => compact_preview(&value.to_string()),
+    }
+}
+
+fn json_object_fields(value: &serde_json::Value) -> Vec<(&str, String)> {
+    value
+        .as_object()
+        .map(|object| {
+            object
+                .iter()
+                .filter_map(|(key, value)| match value {
+                    serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
+                    _ => Some((key.as_str(), json_scalar_preview(value))),
+                })
+                .take(8)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn data_card_pending_html(endpoint: ApiEndpoint) -> String {
+    format!(
+        r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>{method} {path}</code></header><div class="slskr-empty-state">Loading</div></article>"#,
+        title = escape_html(&endpoint_title(endpoint.path)),
+        method = escape_html(endpoint.method),
+        path = escape_html(&endpoint_url(endpoint.path)),
+    )
+}
+
+fn data_card_result_html(response: &EndpointBody) -> String {
+    let title = endpoint_title(response.endpoint.path);
+    let url = endpoint_url(response.endpoint.path);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&response.body) else {
+        return format!(
+            r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>GET {url}</code></header><pre>{body}</pre></article>"#,
+            title = escape_html(&title),
+            url = escape_html(&url),
+            body = escape_html(&compact_preview(&response.body)),
+        );
+    };
+
+    if let Some(items) = json_display_array(&value) {
+        if items.is_empty() {
+            return format!(
+                r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>GET {url}</code></header><div class="slskr-empty-state">No records</div></article>"#,
+                title = escape_html(&title),
+                url = escape_html(&url),
+            );
+        }
+        let rows = items
+            .iter()
+            .take(8)
+            .map(|item| {
+                let label = item
+                    .get("name")
+                    .or_else(|| item.get("username"))
+                    .or_else(|| item.get("query"))
+                    .or_else(|| item.get("title"))
+                    .or_else(|| item.get("filename"))
+                    .or_else(|| item.get("id"))
+                    .map(json_scalar_preview)
+                    .unwrap_or_else(|| compact_preview(&item.to_string()));
+                let detail = item
+                    .get("status")
+                    .or_else(|| item.get("state"))
+                    .or_else(|| item.get("kind"))
+                    .or_else(|| item.get("message"))
+                    .or_else(|| item.get("path"))
+                    .map(json_scalar_preview)
+                    .unwrap_or_else(|| format!("{} fields", json_object_fields(item).len()));
+                format!(
+                    r#"<li><strong>{label}</strong><span>{detail}</span></li>"#,
+                    label = escape_html(&label),
+                    detail = escape_html(&detail),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        return format!(
+            r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>GET {url}</code></header><ul class="slskr-record-list">{rows}</ul></article>"#,
+            title = escape_html(&title),
+            url = escape_html(&url),
+            rows = rows,
+        );
+    }
+
+    let fields = json_object_fields(&value)
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                r#"<li><strong>{key}</strong><span>{value}</span></li>"#,
+                key = escape_html(key),
+                value = escape_html(value),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<article class="slskr-data-card"><header><h3>{title}</h3><code>GET {url}</code></header><ul class="slskr-field-list">{fields}</ul></article>"#,
+        title = escape_html(&title),
+        url = escape_html(&url),
+        fields = fields,
+    )
+}
+
+pub fn route_workspace_pending_html(path: &str) -> String {
+    let Some(page) = route_page(path) else {
+        return String::new();
+    };
+    route_endpoints(page.surface)
+        .iter()
+        .filter(|endpoint| endpoint.method == "GET")
+        .map(|endpoint| data_card_pending_html(*endpoint))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+pub fn route_workspace_result_html(path: &str, responses: &[EndpointBody]) -> String {
+    if responses.is_empty() {
+        return route_workspace_pending_html(path);
+    }
+    responses
+        .iter()
+        .map(data_card_result_html)
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+#[allow(dead_code)]
+fn route_toolbar_html(path: &str) -> String {
+    let Some(page) = route_page(path) else {
+        return String::new();
+    };
+    match page.surface {
+        "search" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Search text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Stop</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Clear</button></form>"#.to_string(),
+        "transfers" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="Remote/Song.mp3" aria-label="Filename"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Queue file</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Clear downloads</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Clear uploads</button></form>"#.to_string(),
+        "messages" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="hello" aria-label="Message"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Send</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Acknowledge</button></form>"#.to_string(),
+        "rooms" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="contract-room" aria-label="Room"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Join</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Send</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Leave</button></form>"#.to_string(),
+        "browse" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" aria-label="Directory" placeholder="Directory"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Request directory</button></form>"#.to_string(),
+        "identity" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Watch</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Add contact</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Note</button></form>"#.to_string(),
+        "collections" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="Rust Web Demo" aria-label="Name"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Create collection</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Create group</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Share</button></form>"#.to_string(),
+        "integrations" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="Public Domain Jazz - Demo Track" aria-label="Playlist text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Preview playlist</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Discovery graph</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Queue job</button></form>"#.to_string(),
+        "system" => r#"<div class="slskr-toolbar"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Connect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Disconnect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Rescan shares</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Vacuum database</button></div>"#.to_string(),
+        "wishlist" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Wishlist text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Add</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Run search</button></form>"#.to_string(),
+        _ => String::new(),
+    }
+}
+
 pub fn route_page_html(path: &str) -> String {
     let Some(page) = route_page(path) else {
         return route_page_html("/searches");
@@ -2156,17 +2362,17 @@ pub fn route_page_html(path: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></header><div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-surface-matrix"><h3>Bulk Surface Coverage</h3><ul>{surface_matrix}</ul></div><div class="slskr-bulk-workbench"><h3>Bulk Route Workbench</h3>{workbench}</div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-actions"><h3>Actions</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></div><div class="slskr-route-live"><h3>Live Route Data</h3><ul id="slskr-route-data">{route_data}</ul></div></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-chip">{surface} workspace</div></header>{toolbar}<div class="slskr-route-summary"><h3>Summary</h3><ul id="slskr-route-summary">{summary}</ul></div><div class="slskr-functional-layout"><aside class="slskr-route-actions"><h3>Commands</h3><ul id="slskr-route-actions">{actions}</ul><p id="slskr-action-status" aria-live="polite"></p></aside><section class="slskr-work-area"><header><h3>Live Data</h3><span>Updates from daemon APIs</span></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div></section></div><details class="slskr-diagnostics"><summary>Route diagnostics</summary><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
         description = escape_html(page.description),
+        toolbar = route_toolbar_html(path),
         summary = route_summary_pending_html(path),
-        surface_matrix = surface_matrix_html(),
-        workbench = bulk_workbench_html(),
         routes = route_inventory,
         endpoints = endpoints,
         actions = route_actions_html(path),
+        page_data = route_workspace_pending_html(path),
         route_data = route_probe_pending_html(path),
     )
 }
@@ -2185,52 +2391,10 @@ pub fn shell_html() -> String {
         .collect::<Vec<_>>()
         .join("");
 
-    let sections = app_sections()
-        .iter()
-        .map(|section| {
-            format!(
-                r#"<section class="slskr-panel" id="{id}"><div><h2>{title}</h2><p>{description}</p></div><code>{endpoint}</code></section>"#,
-                id = section.title.to_ascii_lowercase(),
-                title = section.title,
-                description = section.description,
-                endpoint = endpoint_url(section.endpoint)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-
-    let routes = ui_routes()
-        .iter()
-        .map(|route| {
-            format!(
-                r#"<li><code>{path}</code><span>{title}</span></li>"#,
-                path = route.path,
-                title = route.title
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-
-    let endpoints = api_endpoints()
-        .iter()
-        .map(|endpoint| {
-            format!(
-                r#"<li><strong>{method}</strong><code>{path}</code><span>{surface}</span></li>"#,
-                method = endpoint.method,
-                path = endpoint_url(endpoint.path),
-                surface = endpoint.surface
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-hero"><p class="slskr-kicker">Rust web migration target</p><h1>slskr</h1><p>Native Rust/WASM app shell for porting the existing browser UI in bulk.</p><code>{report}</code></header><section id="slskr-route-view">{route_page}</section><section class="slskr-contract slskr-runtime"><h2>Runtime Status</h2><ul id="slskr-runtime-status">{runtime}</ul></section><section class="slskr-contract slskr-surface-matrix"><h2>Bulk Surface Coverage</h2><ul>{surface_matrix}</ul></section><section class="slskr-contract slskr-bulk-workbench"><h2>Bulk Endpoint Workbench</h2>{workbench}</section><div class="slskr-grid">{sections}</div><section class="slskr-contract"><h2>Route Parity</h2><ul>{routes}</ul></section><section class="slskr-contract"><h2>API Contracts</h2><ul>{endpoints}</ul></section></main></div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main><footer class="slskr-player"><div><strong>Now Playing</strong><span>Queue idle</span></div><div class="slskr-player-controls"><button type="button">Prev</button><button type="button">Play</button><button type="button">Next</button></div><div><strong>Transfers</strong><span>0 down / 0 up</span></div></footer></div>"#,
         route_page = route_page_html("/searches"),
         runtime = runtime_probe_pending_html(),
-        surface_matrix = surface_matrix_html(),
-        workbench = bulk_workbench_html(),
-        report = compatibility_report()
     )
 }
 
@@ -2324,6 +2488,7 @@ fn render_current_route(
         view.set_inner_html(&route_page_html(&path));
     }
     mount_route_actions(window, document)?;
+    mount_toolbar_actions(window, document)?;
     for item in nav_items() {
         let selector = format!(r#".slskr-nav-item[href="{}"]"#, item.href);
         let Some(element) = document.query_selector(&selector)? else {
@@ -2340,6 +2505,76 @@ fn render_current_route(
     wasm_bindgen_futures::spawn_local(async move {
         let _ = refresh_route_data(&window_for_data).await;
     });
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_toolbar_actions(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let buttons = document.query_selector_all(".slskr-toolbar-command")?;
+    for index in 0..buttons.length() {
+        let Some(node) = buttons.item(index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let Some(action_index) = button
+            .get_attribute("data-slskr-toolbar-action")
+            .and_then(|value| value.parse::<usize>().ok())
+        else {
+            continue;
+        };
+        let window = window.clone();
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                let value = document
+                    .query_selector(".slskr-toolbar-input")
+                    .ok()
+                    .flatten()
+                    .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    .map(|input| input.value())
+                    .unwrap_or_default();
+                let route_path = window.location().pathname().unwrap_or_default();
+                let Some(action) = route_action_at(&route_path, action_index) else {
+                    return;
+                };
+                let body = action_body_from_value(action.body, &value);
+                let window = window.clone();
+                let document = document.clone();
+                let method = action.method.to_string();
+                let path = concrete_action_path(&route_path, action);
+                wasm_bindgen_futures::spawn_local(async move {
+                    let result =
+                        fetch_text_with_method(&window, &path, &method, body.as_deref()).await;
+                    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+                        match result {
+                            Ok(response) => status.set_inner_html(&format!(
+                                "<strong>{}</strong> {}",
+                                escape_html(&method),
+                                escape_html(&compact_preview(&response))
+                            )),
+                            Err(error) => {
+                                let message = error
+                                    .as_string()
+                                    .unwrap_or_else(|| "request failed".to_string());
+                                status.set_inner_html(&format!(
+                                    "<strong>{}</strong> {}",
+                                    escape_html(&method),
+                                    escape_html(&message)
+                                ));
+                            }
+                        }
+                    }
+                    let _ = refresh_route_data(&window).await;
+                });
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
     Ok(())
 }
 
@@ -2455,6 +2690,7 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         return Ok(());
     };
     let summary = document.get_element_by_id("slskr-route-summary");
+    let page_data = document.get_element_by_id("slskr-page-data");
     let path = window.location().pathname()?;
     let Some(page) = route_page(&path) else {
         return Ok(());
@@ -2486,6 +2722,9 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         status.set_inner_html(&rendered);
         if let Some(summary) = summary.as_ref() {
             summary.set_inner_html(&route_summary_result_html(&path, &responses));
+        }
+        if let Some(page_data) = page_data.as_ref() {
+            page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
         }
     }
 
@@ -2548,7 +2787,8 @@ mod tests {
         for item in nav_items() {
             assert!(html.contains(item.label), "missing {}", item.label);
         }
-        assert!(html.contains("Rust/WASM"));
+        assert!(html.contains("Search, transfers, messages"));
+        assert!(html.contains("slskr-player"));
         assert!(html.contains("/api/v0/searches"));
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
@@ -2625,13 +2865,25 @@ mod tests {
         assert!(html.contains("/api/v0/transfers/downloads"));
         assert!(html.contains("data-route=\"/downloads\""));
         assert!(html.contains("slskr-route-data"));
-        assert!(html.contains("Live Route Data"));
+        assert!(html.contains("Live Data"));
         assert!(html.contains("slskr-route-actions"));
         assert!(html.contains("slskr-route-summary"));
         assert!(html.contains("Summary"));
-        assert!(html.contains("Bulk Surface Coverage"));
-        assert!(html.contains("Bulk Route Workbench"));
+        assert!(html.contains("slskr-page-data"));
+        assert!(html.contains("Route diagnostics"));
         assert!(html.contains("Clear Completed Downloads"));
+    }
+
+    #[test]
+    fn shell_prioritizes_functional_webui_over_migration_inventory() {
+        let html = shell_html();
+        assert!(html.contains("slskr-appbar"));
+        assert!(html.contains("Now Playing"));
+        assert!(html.contains("Queue idle"));
+        assert!(html.contains("slskr-page-data"));
+        assert!(!html.contains("Rust web migration target"));
+        assert!(!html.contains("Rust/WASM"));
+        assert!(!html.contains("Bulk Endpoint Workbench"));
     }
 
     #[test]
@@ -2775,6 +3027,10 @@ mod tests {
         );
         assert_eq!(
             concrete_action_path("/searches/<script>", endpoint),
+            "/api/v0/searches/1"
+        );
+        assert_eq!(
+            concrete_action_path("/searches", endpoint),
             "/api/v0/searches/1"
         );
         let html = route_actions_html("/searches/<script>");
