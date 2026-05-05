@@ -1631,6 +1631,64 @@ body {
   padding: 10px 12px;
 }
 
+.slskr-modal-backdrop {
+  align-items: center;
+  background: rgba(3, 8, 9, 0.72);
+  display: grid;
+  inset: 0;
+  justify-items: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 40;
+}
+
+.slskr-modal {
+  background: #101819;
+  border: 1px solid #8dd7c8;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.42);
+  display: grid;
+  gap: 12px;
+  max-width: 460px;
+  padding: 16px;
+  width: min(100%, 460px);
+}
+
+.slskr-modal h3,
+.slskr-modal p {
+  margin: 0;
+}
+
+.slskr-modal h3 {
+  color: #f4efe7;
+  font-size: 17px;
+}
+
+.slskr-modal p {
+  color: #c6d0ca;
+  line-height: 1.45;
+}
+
+.slskr-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.slskr-modal-actions button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.slskr-modal-actions [data-slskr-confirm-run] {
+  background: #5e332f;
+  border-color: #d98173;
+}
+
 .slskr-native-stat {
   background: #0f1112;
   border: 1px solid #34403f;

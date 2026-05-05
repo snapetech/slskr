@@ -51,8 +51,12 @@ The release workflow builds these native runner variants:
 Trigger it manually with `workflow_dispatch`, or push a tag named:
 
 ```text
-release-<version>
+release-v<semver>
 ```
+
+Tag-triggered releases intentionally use the `release-v<semver>` convention,
+for example `release-v1.2.3` or `release-v1.2.3-rc.1`. Plain `v*` tags and
+loose `release-*` tags are not release triggers.
 
 For a tag build, the workflow creates a GitHub Release and uploads all archives
 plus `SHA256SUMS.txt`, `slskr-cyclonedx.json`, and

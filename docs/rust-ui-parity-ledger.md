@@ -31,6 +31,8 @@ Completed across the main Rust routes:
   likely action before opening the inspector
 - upload, contact, Solid, shared-access, share-group, and system native buttons
   now resolve to route actions or explicit local workspace acknowledgements
+- destructive native actions now use an in-app confirmation dialog so cancel,
+  delete, deny, restart, shutdown, and vacuum flows stay inside the Rust shell
 
 ## Route Gaps
 

@@ -39,8 +39,29 @@ if rg -n 'go install "github.com/rhysd/actionlint/cmd/actionlint@latest"|go inst
   status=1
 fi
 
-if ! rg -n -F "release-*" .github/workflows/release.yml >/dev/null; then
-  printf 'workflow release policy check failed: release tag trigger was not found\n' >&2
+if ! rg -n -F "release-v*" .github/workflows/release.yml >/dev/null; then
+  printf 'workflow release policy check failed: release-v tag trigger was not found\n' >&2
+  status=1
+fi
+
+for expected in \
+  'tag_pattern=' \
+  'release-v<semver>' \
+  "startsWith(github.ref, 'refs/tags/release-v')" \
+  'version="${GITHUB_REF_NAME#release-}"'; do
+  if ! rg -n -F "$expected" .github/workflows/release.yml >/dev/null; then
+    printf 'workflow release policy check failed: release tag policy token missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+if ! rg -n -F 'release-v<semver>' docs/release.md >/dev/null; then
+  printf 'workflow release policy check failed: release docs must document release-v<semver>\n' >&2
+  status=1
+fi
+
+if rg -n -F "'release-*'" .github/workflows/release.yml >/dev/null; then
+  printf 'workflow release policy check failed: broad release-* tag trigger must not return\n' >&2
   status=1
 fi
 

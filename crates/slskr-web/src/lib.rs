@@ -5577,18 +5577,109 @@ fn run_native_route_action(
     button: &web_sys::Element,
     action: RouteAction,
 ) {
+    if native_action_requires_confirmation(action) {
+        show_native_confirm_modal(document, button, action);
+        return;
+    }
+    execute_native_route_action(document, button, action);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_action_requires_confirmation(action: RouteAction) -> bool {
+    action.method == "DELETE"
+        || matches!(
+            action.label,
+            "Cancel Download" | "Deny Upload" | "Shut Down" | "Restart" | "Vacuum Database"
+        )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn show_native_confirm_modal(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    action: RouteAction,
+) {
+    if let Some(existing) = document.get_element_by_id("slskr-native-confirm-modal") {
+        existing.remove();
+    }
+    let Ok(backdrop) = document.create_element("div") else {
+        execute_native_route_action(document, button, action);
+        return;
+    };
+    backdrop.set_id("slskr-native-confirm-modal");
+    backdrop.set_class_name("slskr-modal-backdrop");
+    let _ = backdrop.set_attribute("role", "presentation");
+
+    let title = format!("Confirm {}", action.label);
+    let target = document_selected_native_row_title(document)
+        .unwrap_or_else(|| "the selected workflow item".to_string());
+    backdrop.set_inner_html(&format!(
+        r#"<section class="slskr-modal" role="dialog" aria-modal="true" aria-labelledby="slskr-confirm-title"><header><h3 id="slskr-confirm-title">{title}</h3></header><p>{message}</p><div class="slskr-modal-actions"><button type="button" data-slskr-confirm-cancel>Cancel</button><button type="button" data-slskr-confirm-run>Confirm</button></div></section>"#,
+        title = escape_html(&title),
+        message = escape_html(&format!(
+            "{} will run against {}. Review the selected row before continuing.",
+            action.label, target
+        )),
+    ));
+    let Some(body) = document.body() else {
+        execute_native_route_action(document, button, action);
+        return;
+    };
+    let _ = body.append_child(&backdrop);
+
+    if let Ok(Some(cancel)) = backdrop.query_selector("[data-slskr-confirm-cancel]") {
+        let document_for_cancel = document.clone();
+        let backdrop_for_cancel = backdrop.clone();
+        let label = action.label.to_string();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                backdrop_for_cancel.remove();
+                if let Some(status) = document_for_cancel.get_element_by_id("slskr-action-status") {
+                    status.set_inner_html(&format!(
+                        "<strong>{}</strong> cancelled",
+                        escape_html(&label)
+                    ));
+                }
+                show_toast(&document_for_cancel, &format!("{label} cancelled"));
+            },
+        ));
+        let _ = cancel.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref());
+        callback.forget();
+    }
+
+    if let Ok(Some(confirm)) = backdrop.query_selector("[data-slskr-confirm-run]") {
+        let document_for_confirm = document.clone();
+        let button_for_confirm = button.clone();
+        let backdrop_for_confirm = backdrop.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                backdrop_for_confirm.remove();
+                execute_native_route_action(&document_for_confirm, &button_for_confirm, action);
+            },
+        ));
+        let _ =
+            confirm.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref());
+        callback.forget();
+    }
+
+    if let Ok(Some(confirm)) = backdrop.query_selector("[data-slskr-confirm-run]") {
+        if let Some(element) = confirm.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = element.focus();
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn execute_native_route_action(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    action: RouteAction,
+) {
     let Some(window) = document.default_view() else {
         return;
     };
-    if action.method == "DELETE" {
-        let confirmed = window
-            .confirm_with_message(&format!("Run {}?", action.label))
-            .unwrap_or(false);
-        if !confirmed {
-            show_toast(document, "Action cancelled");
-            return;
-        }
-    }
     let route_path = window
         .location()
         .pathname()
@@ -10916,6 +11007,24 @@ mod tests {
                     "{path} row action toolbar should contain {label}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn native_shell_contains_in_app_confirmation_modal_styles() {
+        let html = route_page_html("/downloads");
+        assert!(html.contains("Cancel"));
+        assert!(html.contains("Remove"));
+        let css = include_str!("../static/styles.css");
+        for value in [
+            "slskr-modal-backdrop",
+            "slskr-modal",
+            "data-slskr-confirm-run",
+        ] {
+            assert!(
+                css.contains(value),
+                "confirmation modal CSS should contain {value}"
+            );
         }
     }
 

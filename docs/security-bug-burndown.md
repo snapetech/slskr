@@ -92,12 +92,12 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | High | CSP | Static and generic responses used broad inline script/style allowances, and the Rust WASM shell used an inline module bootstrap. | Fixed by adding strict or nonce-backed generic CSP, moving the Rust WASM bootstrap to a static module, rejecting broad inline allowances for static web assets, and scoping `wasm-unsafe-eval` only to Rust WASM builds. |
 | Medium | Release provenance | Release assets were attested, but no SBOM or dependency manifest was attached to releases. | Fixed by generating CycloneDX and dependency JSON manifests from checked-in package metadata, checksumming them, publishing them, and including them in release attestations. |
 | Medium | Cargo package verification | `cargo package --workspace` full verification is blocked by unpublished internal crates in Cargo's temporary registry. | Fixed by adding unpacked `.crate` content verification that checks tracked package inputs and builds a temporary workspace from packaged sources after `cargo package --workspace --no-verify`. |
+| Medium | Release tag policy | Release workflow accepted broad `release-*` tags while docs did not define the exact release tag convention. | Fixed by standardizing on `release-v<semver>`, validating tag pushes in the workflow, and enforcing the convention in release-policy checks and docs. |
 
 ## Open Burn-Down
 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
-| Medium | Release tag policy | Release workflow triggers on `release-*`, not semantic `v*` tags (`.github/workflows/release.yml:10`). | Decide final tag convention and enforce it in release workflow and docs. |
 | Medium | Release version metadata | Workspace crates are all versioned `0.0.0` while release artifacts derive a separate version label from tags or workflow input (`crates/slskr/Cargo.toml:3`, `.github/workflows/release.yml:26`). | Align crate/package metadata with the release version or document that crates are intentionally unpublished/internal; add a release check that artifact names, binary version, and crate metadata agree. |
 | Medium | Secret scanning gate | Local `.env`, `web/.env.local`, and `.secrets/` are ignored, but CI/release has no `gitleaks`, `detect-secrets`, or equivalent secret-scanning guard. | Add a pinned secret scan to CI and release gate with allowlisted placeholders for `k8s/secrets.example.yaml` and docs. |
 | Medium | OpenAPI drift | API parity work changes response shapes faster than `docs/openapi.json` and docs can track. | Add generated OpenAPI/doc drift checks to CI and fail when checked-in docs differ. |
