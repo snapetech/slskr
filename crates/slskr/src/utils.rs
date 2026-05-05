@@ -104,7 +104,13 @@ pub fn origin_host(value: &str) -> Option<&str> {
     without_scheme
         .split(['/', '?', '#'])
         .next()
-        .filter(|host| !host.is_empty())
+        .map(str::trim)
+        .filter(|host| {
+            !host.is_empty()
+                && !host
+                    .bytes()
+                    .any(|byte| matches!(byte, b'\r' | b'\n' | 0x00..=0x1f | 0x7f))
+        })
 }
 
 pub fn same_origin_host(left: &str, right: &str) -> bool {
@@ -123,11 +129,21 @@ pub fn request_origin_matches_host(headers: &RequestSecurityHeaders, fallback_ho
 }
 
 fn normalize_origin_host(value: &str) -> String {
-    value
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_ascii_lowercase()
+    let value = value.trim();
+    if let Some((host, port)) = bracketed_ipv6_authority(value) {
+        return format!("[{}]:{}", host.to_ascii_lowercase(), port);
+    }
+    value.to_ascii_lowercase()
+}
+
+fn bracketed_ipv6_authority(value: &str) -> Option<(&str, &str)> {
+    let rest = value.strip_prefix('[')?;
+    let (host, after_host) = rest.split_once(']')?;
+    let port = after_host.strip_prefix(':')?;
+    if host.is_empty() || port.is_empty() || port.contains(':') {
+        return None;
+    }
+    Some((host, port))
 }
 
 pub fn is_authorized(
@@ -684,8 +700,9 @@ pub fn generate_etag(body: &str) -> String {
 /// Generate CORS headers for API responses
 pub fn cors_headers(origin: Option<&str>, allowed_origins: &[&str]) -> String {
     let origin = match origin {
-        Some(o) if allowed_origins.contains(&"*") => o,
-        Some(o) if allowed_origins.contains(&o) => o,
+        Some(o) if !valid_header_value(o) => return String::new(),
+        Some(o) if allowed_origins.contains(&"*") => o.trim(),
+        Some(o) if allowed_origins.contains(&o) => o.trim(),
         Some(_) => return String::new(), // Origin not allowed
         None => return String::new(),    // No origin header
     };
@@ -698,6 +715,12 @@ pub fn cors_headers(origin: Option<&str>, allowed_origins: &[&str]) -> String {
          Access-Control-Max-Age: 86400\r\n",
         origin
     )
+}
+
+fn valid_header_value(value: &str) -> bool {
+    !value
+        .bytes()
+        .any(|byte| matches!(byte, b'\r' | b'\n' | 0x00..=0x1f | 0x7f))
 }
 
 /// Check if request is OPTIONS preflight

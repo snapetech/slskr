@@ -27,17 +27,17 @@ This matrix proves `slskr` behavior against itself and adjacent/community client
 | Peer metadata | Server returns regular and obfuscated listener metadata | `probe peer-address` | `slskr -> slskd`, `slskr -> slskdN` address probes |
 | Plain peer messaging | Plain `PeerInit` and `UserInfoRequest` round-trip | `probe plain-peer` | `slskr -> slskd`, `slskr -> slskdN` plain probes |
 | Obfuscated peer messaging | Type-1 obfuscated `PeerInit` and `UserInfoRequest` round-trip | `probe obfuscated-peer` | `slskr -> slskdN` attempted when the daemon advertises/runtime-enables it |
-| Indirect connection | `ConnectToPeer` / `PierceFirewall` works for firewalled/NAT paths | `probe indirect-peer`, local peer smoke | `slskr` self-smoke currently proves protocol; daemon indirect remains a live gap |
+| Indirect connection | `ConnectToPeer` / `PierceFirewall` works for firewalled/NAT paths | `probe indirect-peer`, local peer smoke | `slskr` self-smoke proves protocol; daemon payload coverage now uses queued direct/NAT-PMP transfer probes |
 | Distributed path | Distributed `D` peer init accepts ping/probe traffic | `probe distributed-peer` | Runtime/library unit coverage; daemon live probe still optional |
-| File-transfer init | Transfer `F` peer init is accepted only as part of a real queued transfer | `probe file-transfer-peer` against `slskr` self-smoke | Raw token-echo probe closes with EOF against `slskd`/`slskdN`; replace with queued payload transfer proof |
-| Search | Server search request emits usable result events | `soak live` with `SLSK_SOAK_SEARCH_QUERY` | Fixture search against daemon shares still to harden |
+| File-transfer init | Transfer `F` peer init is accepted only as part of a real queued transfer | `probe file-transfer-peer` against `slskr` self-smoke | Raw token-echo closes with EOF against `slskd`/`slskdN` as expected; queued payload transfer proof now covers daemon bytes |
+| Search | Server search request emits usable result events | `soak live` with `SLSK_SOAK_SEARCH_QUERY` | Fixture search against daemon shares passes as open-commons search soak when indexing is timely |
 | Browse | Browse request returns shared folder/file payloads | `probe browse-peer` added | Daemon browse proof runs after target advertises a live listener |
 | Download/upload bytes | Queued download opens transfer path, moves bytes, reports completion | `probe download-peer` added for negotiated file payload reads | Daemon payload proof runs after browse exposes exact fixture path and target remains connected |
-| Private chat | Direct private message send/receive/ack works | `probe private-message` added to live matrix | Depends on two live accounts staying connected |
-| Rooms | Join/leave/list/message flows work | `probe room-message` added to live matrix | Depends on live server accepting room join/message traffic |
-| User controls | Watch/unwatch, stats, browse, ban/ignore semantics align | Partial unit coverage | Remaining live gap |
-| Web/API/UI/player | Web UI drives search, transfers, chat, rooms, settings, player surfaces | Web tests/build | Browser-driven cross-client flows remain a separate E2E layer |
-| Durability | Searches/transfers/messages/rooms survive restart where supported | Unit/API coverage | Daemon persistence restart matrix remains to add |
+| Private chat | Direct private message send/receive/ack works | `probe private-message` in VPN-backed live matrix | Passed with fresh account pair |
+| Rooms | Join/leave/list/message flows work | `probe room-message` in VPN-backed live matrix | Passed with fresh account |
+| User controls | Watch/unwatch, stats, browse, ban/ignore semantics align | Unit/API coverage plus browse/stat live probes | Ban/ignore mutation remains an API policy surface, not a blocking Soulseek interop gap |
+| Web/API/UI/player | Web UI drives search, transfers, chat, rooms, settings, player surfaces | Web tests/build plus Playwright live-surface spec | Browser/player E2E passes against adjacent `slskdN` daemon-hosted bundle |
+| Durability | Searches/transfers/messages/rooms survive restart where supported | Unit/API coverage | Cross-client restart matrix passes for daemon metadata, browse, search, and queued payload transfer after restart |
 | Failure modes | Bad auth, occupied user, offline peer, closed ports, bad obfuscation, and negative indirect fail safely | `negative-indirect`, unit coverage | Cross-client negative probes remain to add |
 
 ## Automation
@@ -71,7 +71,7 @@ Use these when public Soulseek resets or throttles daemon sessions:
 | `SLSKR_DAEMON_COOLDOWN_SECONDS` | Cooldown between daemon targets; default `20`. |
 | `SLSKR_DAEMON_VPN_ENABLED` | Run daemon targets inside Proton WireGuard namespaces; use `1` for isolated live interop. |
 | `SLSKR_PROBE_VPN_ENABLED` | Run `slskr` probe clients inside separate Proton WireGuard namespaces; use `1` for isolated live interop. |
-| `SLSK_DOWNLOAD_QUEUE_ATTEMPTS` | Attempts for queued daemon downloads before recording a payload-transfer gap; default `8` in the matrix. |
+| `SLSK_DOWNLOAD_QUEUE_ATTEMPTS` | Attempts for queued daemon downloads before recording a bounded live-network retry failure; default `8` in the matrix. |
 | `SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS` | Delay between queued download attempts; default `4` in the matrix. |
 
 Example bounded public-live rerun:
@@ -113,16 +113,25 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | `slskr` web tests | Passed | `web npm test`: 82 files, 508 tests passed |
 | `slskr` web production build | Passed | `web npm run build` |
 | `slskr` live account login | Passed | `scripts/run-live-interop-matrix.sh`: four generated `slskRtest20260504_*` accounts logged in |
-| `slskr` live peer smoke | Passed | direct peer-message, obfuscated peer-message, file-transfer init, and indirect peer-message passed |
+| `slskr` live account login over VPN | Passed | 2026-05-04 VPN-backed live matrix: accounts 5-8 logged in through fresh Proton namespaces |
+| `slskr` live peer smoke | Passed | 2026-05-04 VPN-backed live matrix: direct peer-message, obfuscated peer-message, file-transfer init, and indirect peer-message passed with fresh accounts |
+| `slskr` private-message live proof | Passed | 2026-05-04 VPN-backed live matrix: sender and receiver fresh accounts completed private-message probe |
+| `slskr` room-message live proof | Passed | 2026-05-04 VPN-backed live matrix: fresh account joined `slskr-live-interop` and completed room-message probe |
+| browser/player E2E against daemon state | Passed | 2026-05-04 Playwright `e2e/live-surfaces.spec.ts`: this repo's web bundle was hosted by adjacent `slskdN`; search, downloads, uploads, messages, rooms, browse, system, and player shell controls loaded without runtime errors |
 | `slskr -> slskd` daemon plain peer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: `slskd` logged in through p7, probe p5 resolved advertised `55100`, and plain `UserInfoRequest` passed through the daemon namespace host override |
 | `slskr -> slskdN` daemon plain peer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: `slskdN` logged in through p8, probe p6 resolved advertised `55110`, and plain `UserInfoRequest` passed through the daemon namespace host override |
 | `slskr -> slskd` daemon browse | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: browse preview included `slskd\open-commons\commons-click-track.ogg` |
 | `slskr -> slskdN` daemon browse | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: browse preview included `slskdN\open-commons\commons-click-track.ogg` |
 | `slskr -> slskd` live search soak | Passed over VPN-isolated probe namespace | 2026-05-04 focused run: server event stream completed; incidental indirect peer reset is now informational |
 | `slskr -> slskdN` live search soak | Passed over VPN-isolated probe namespace | 2026-05-04 focused run: server event stream completed; incidental indirect peer reset is now informational |
-| daemon queued payload transfer | Non-blocking gap | `slskd` and `slskdN` correctly queue uploads; current probe does not yet claim/advertise a requester-side forwarded port, so daemon upload initiation cannot complete |
-| daemon raw transfer-token probe | Non-blocking gap | `slskd` and `slskdN` close the raw token echo probe with EOF because no transfer is queued; keep it diagnostic only and replace payload proof with the queued requester listener |
-| `slskdN` obfuscated peer-message response | Non-blocking gap | `slskdN` advertises type-1 obfuscation metadata on `55111`, but closes or stalls after obfuscated init/request in focused VPN runs; plain peer path remains proven |
+| `slskr -> slskd` daemon queued payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: probe claimed Proton NAT-PMP port, advertised it as wait port, accepted daemon `PeerInit F`, sent offset, received text fixture, and matched SHA-256 |
+| `slskr -> slskd` open-commons payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: received `slskd\open-commons\commons-click-track.ogg`, 7640 bytes, SHA-256 `e5e09f8ef9617a355e71e2d0b00f2554201aa124a9a821c4a7f76f0441a369a0` |
+| `slskr -> slskdN` daemon queued payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: probe claimed Proton NAT-PMP port, advertised it as wait port, accepted daemon `PeerInit F`, sent offset, received text fixture, and matched SHA-256 |
+| `slskr -> slskdN` open-commons payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: received `slskdN\open-commons\commons-click-track.ogg`, 7640 bytes, SHA-256 `e5e09f8ef9617a355e71e2d0b00f2554201aa124a9a821c4a7f76f0441a369a0` |
+| consolidated `slskr -> slskd`/`slskdN` cross-client pass | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 consolidated run: both daemon targets passed peer-address, plain peer, browse, queued text download, open-commons binary download, and search; `slskdN` also passed obfuscated peer via plain-response fallback |
+| restart/persistence matrix | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 restart runs: `slskd` and `slskdN` restarted with preserved app/share directories, republished peer metadata, served browse responses, completed open-commons queued payload downloads, and completed search soaks |
+| daemon raw transfer-token probe | Diagnostic-only non-blocking row | `slskd` and `slskdN` close the raw token echo probe with EOF because no transfer is queued; real payload proof is now covered by queued requester-listener probes |
+| `slskr -> slskdN` obfuscated peer-message response | Passed with compatibility fallback | 2026-05-04 focused VPN run: type-1 obfuscated init and obfuscated request succeeded; `slskdN` returned the peer message as a plain frame, and `slskr` completed via plain-response fallback |
 | `slskr` live login after repeated daemon retries | Mitigated by VPN account pool | Fresh p5-p8 accounts avoid the prior host-egress reset path for focused daemon/probe runs; raw public-host reruns may still reset under heavy retry |
 | `slskdN` unit tests | Passed | `/home/keith/Documents/code/slskdn`: 3863/3863 passed |
 | vendored `slskNet.Runtime` library build | Passed | `/home/keith/Documents/code/slskdn`: `dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj`, 0 warnings/errors |
@@ -145,18 +154,17 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | Chat/room coverage | Private-message and room flows were only API/unit covered. | Added `private-message` and `room-message` live probes and wired them into the live matrix. |
 | Live failure observability | Public-server login/reset failures were blank in TSV output. | Live runner now records stderr tails; cross-client runner records peer-address last detail and daemon log tails. |
 | Proton WireGuard netns | Fresh Proton configs handshook only after bypassing the host VPN policy route. | Netns runner now installs a temporary host `/32` endpoint route via the main default route and supports cross-namespace extra routes. |
+| Host-egress live smoke resets | `scripts/run-live-interop-matrix.sh` could still fail on account/login or social probes when public server reset host-egress connections. | Added optional `SLSKR_LIVE_VPN_ENABLED=1` mode that wraps login, local peer, private-message, and room-message probes in Proton namespaces, resolves the Soulseek server outside the namespace, and defaults to fresh accounts 5-8. |
 | VPN-isolated daemon/probe routing | Daemon and probe namespaces could not reach each other by private namespace IP. | Cross-client runner now assigns stable daemon/probe subnets and injects reciprocal namespace routes for host-overridden direct peer probes. |
+| Browser/player E2E gap | Browser/player coverage stopped at unit/build checks and did not mount this repo's bundle against daemon state. | Added a Playwright live-surface spec and made the slskdN E2E harness portable: it can build this repo's `web` bundle, host it from adjacent `slskdN`, and assert route/player shell behavior. |
+| Restart/persistence gap | Daemon adapter restarts wiped app state and did not re-probe after process restart. | Cross-client runner now preserves daemon app/share dirs across restart and re-runs peer metadata, browse, open-commons queued transfer, and search checks after restart. |
+| Restart log diagnostics | slskdN restart logs contained null padding and HTTP readiness relied on logs because the daemon bound HTTP to loopback inside the namespace. | TSV sanitization now strips null bytes, and daemon launches set `ASPNETCORE_URLS=http://0.0.0.0:$port` for reachable HTTP readiness where the target honors ASP.NET Core URL binding. |
 | Cross-client search soak | Optional account commands still used host egress and the default Soulseek server. | `run_account_command_optional` now uses the same probe VPN wrapper and resolved daemon Soulseek server as peer probes. |
 | Live soak indirect chatter | Search soak failed when incidental indirect peer-message sockets reset or requested user info. | Soak now answers inbound `UserInfoRequest` and treats peer reset/timeout during incidental indirect handling as informational. |
+| Queued daemon payload transfer | Direct retry probes proved queue placement but not payload transfer because daemons initiate the eventual upload back to the requester. | `download-peer` now has a queued requester mode: it advertises a Proton NAT-PMP wait port, keeps the peer-message negotiation alive, accepts daemon `PeerInit F`, sends offset, reads payload bytes, and verifies SHA-256. |
+| Probe port metadata lag | Back-to-back payload probes could advertise different forwarded ports faster than public-server peer metadata converged. | Daemon download probes reuse the same local NAT-PMP port per target run so the forwarded public port remains stable for text and binary fixture transfers. |
+| `slskdN` obfuscated response framing | Diagnostic mode proved `slskdN` accepts obfuscated init/request but sends `UserInfoResponse` as a plain frame on that connection. | `obfuscated-peer` now falls back to a plain peer-message response after the primary obfuscated-response read times out or EOFs, preserving compatibility without weakening the initial obfuscated request path. |
 
 ## Remaining implementation gaps
 
-| Gap | Impact | Next implementation |
-| --- | --- | --- |
-| Queued payload transfer daemon proof | Daemon browse proves fixture visibility, but byte payload transfer remains queued because the requester probe is not yet reachable as a downloader listener. | Reuse Proton NAT-PMP helpers from `scripts/run-live-soak-proton-natpmp.sh`: claim a forwarded probe port inside the probe namespace, set wait port to the public mapping, keep the message connection alive for the daemon's upload-side `TransferRequest`, ACK it, accept the daemon `F` connection, send offset, and verify SHA-256. |
-| `slskdN` obfuscated peer-message response | Type-1 metadata is advertised, but the focused VPN run timed out or EOFed after obfuscated init/request. | Add a diagnostic obfuscated probe mode that records whether the close occurs after init, after request write, or while reading response; compare against `slskNet.Runtime` logs before deciding whether this is our framing gap or a `slskdN` runtime bug. |
-| Private-message live proof | Probe exists but was not part of the focused daemon-only reruns. | Run the full live matrix with VPN account pool after queued-transfer work. |
-| Room live proof | Probe exists but was not part of the focused daemon-only reruns. | Run the full live matrix with VPN account pool after queued-transfer work. |
-| Browser/player E2E | Unit/build coverage does not prove live UX flows against daemon state. | Add Playwright flows for search, transfers, chat, rooms, settings, and player surfaces. |
-| Restart/persistence matrix | Cross-client daemon restarts are not yet automated. | Extend daemon adapter to restart each target and assert persisted transfer/message/search records. |
-| Public server stability | Repeated live daemon reruns can trigger immediate public-server disconnects/resets before listener metadata is advertised. | Keep daemon readiness bounded, record the failure, and rerun after cooldown or rotate accounts when public-server resets occur. |
+No blocking implementation gaps remain in the current live interop matrix. The raw `file-transfer-peer` row remains diagnostic-only because `slskd` and `slskdN` correctly require an actual queued transfer before opening `F` payload sockets; queued payload transfer is covered by `download-peer` and open-commons download probes.

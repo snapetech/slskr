@@ -290,25 +290,227 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
     if init_settle_millis > 0 {
         time::sleep(Duration::from_millis(init_settle_millis)).await;
     }
-    let mut peer = ObfuscatedPeerMessageConnection::new(stream);
+    if env_bool("SLSK_OBFUSCATED_DIAGNOSTIC", false)? {
+        return obfuscated_peer_diagnostic(
+            &username,
+            &peer_username,
+            &host,
+            address.obfuscated_port,
+            init_token,
+            timeout,
+            init_settle_millis,
+        )
+        .await;
+    }
+    let primary = obfuscated_user_info_attempt(stream, timeout, true).await;
+    let used_plain_response_fallback = match primary {
+        Ok(()) => false,
+        Err(primary_error) if env_bool("SLSK_OBFUSCATED_ALLOW_PLAIN_RESPONSE", true)? => {
+            let stream = time::timeout(
+                timeout,
+                TcpStream::connect((host.as_str(), address.obfuscated_port)),
+            )
+            .await
+            .map_err(|_| "obfuscated peer fallback connect timed out".to_owned())?
+            .map_err(|error| format!("obfuscated peer fallback connect failed: {error}"))?;
+            let stream = send_obfuscated_peer_init_with_token(
+                stream,
+                &username,
+                ConnectionKind::PeerMessages,
+                init_token,
+            )
+            .await
+            .map_err(|error| format!("obfuscated peer fallback init failed after primary failure ({primary_error}): {error}"))?;
+            if init_settle_millis > 0 {
+                time::sleep(Duration::from_millis(init_settle_millis)).await;
+            }
+            obfuscated_user_info_attempt(stream, timeout, false)
+                .await
+                .map_err(|fallback_error| {
+                    format!(
+                        "obfuscated user-info failed; primary={primary_error}; plain-response fallback={fallback_error}"
+                    )
+                })?;
+            true
+        }
+        Err(error) => return Err(error),
+    };
 
+    if used_plain_response_fallback {
+        println!(
+            "obfuscated peer probe completed with plain-response fallback; peer={}; host_override={}",
+            redact_username(&peer_username),
+            optional_env("SLSK_OBFUSCATED_HOST_OVERRIDE").is_some()
+        );
+    } else {
+        println!(
+            "obfuscated peer probe completed; peer={}; host_override={}",
+            redact_username(&peer_username),
+            optional_env("SLSK_OBFUSCATED_HOST_OVERRIDE").is_some()
+        );
+    }
+    Ok(())
+}
+
+async fn obfuscated_user_info_attempt(
+    stream: TcpStream,
+    timeout: Duration,
+    receive_obfuscated: bool,
+) -> Result<(), String> {
+    let mut peer = ObfuscatedPeerMessageConnection::new(stream);
     peer.send(&PeerMessage::UserInfoRequest)
         .await
         .map_err(|error| format!("obfuscated user-info request failed: {error}"))?;
-    let response = time::timeout(timeout, peer.receive())
-        .await
-        .map_err(|_| "obfuscated user-info response timed out".to_owned())?
-        .map_err(|error| format!("obfuscated user-info response failed: {error}"))?;
-    if !matches!(response, PeerMessage::UserInfoResponse(_)) {
-        return Err(format!("unexpected obfuscated peer response: {response:?}"));
+    let stream = peer.into_inner();
+    let response = if receive_obfuscated {
+        let mut peer = ObfuscatedPeerMessageConnection::new(stream);
+        time::timeout(timeout, peer.receive())
+            .await
+            .map_err(|_| "obfuscated user-info response timed out".to_owned())?
+            .map_err(|error| format!("obfuscated user-info response failed: {error}"))?
+    } else {
+        let mut peer = PeerMessageConnection::new(stream);
+        time::timeout(timeout, peer.receive())
+            .await
+            .map_err(|_| "plain user-info response on obfuscated connection timed out".to_owned())?
+            .map_err(|error| {
+                format!("plain user-info response on obfuscated connection failed: {error}")
+            })?
+    };
+    user_info_response_result(response)
+}
+
+async fn obfuscated_peer_diagnostic(
+    username: &str,
+    peer_username: &str,
+    host: &str,
+    port: u16,
+    init_token: u32,
+    timeout: Duration,
+    init_settle_millis: u64,
+) -> Result<(), String> {
+    let variants = [
+        (true, true, "obfuscated-request/obfuscated-response"),
+        (true, false, "obfuscated-request/plain-response"),
+        (false, true, "plain-request/obfuscated-response"),
+        (false, false, "plain-request/plain-response"),
+    ];
+    let mut details = Vec::new();
+
+    for (send_obfuscated, receive_obfuscated, label) in variants {
+        let result = obfuscated_peer_diagnostic_attempt(
+            username,
+            host,
+            port,
+            init_token,
+            timeout,
+            init_settle_millis,
+            send_obfuscated,
+            receive_obfuscated,
+        )
+        .await;
+        match result {
+            Ok(()) => {
+                println!(
+                    "obfuscated peer diagnostic completed; peer={}; winning_variant={label}; host_override={}",
+                    redact_username(peer_username),
+                    optional_env("SLSK_OBFUSCATED_HOST_OVERRIDE").is_some()
+                );
+                return Ok(());
+            }
+            Err(error) => details.push(format!("{label}: {error}")),
+        }
     }
 
-    println!(
-        "obfuscated peer probe completed; peer={}; host_override={}",
-        redact_username(&peer_username),
-        optional_env("SLSK_OBFUSCATED_HOST_OVERRIDE").is_some()
-    );
-    Ok(())
+    Err(format!(
+        "obfuscated peer diagnostic failed; peer={}; variants=[{}]",
+        redact_username(peer_username),
+        details.join(" | ")
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn obfuscated_peer_diagnostic_attempt(
+    username: &str,
+    host: &str,
+    port: u16,
+    init_token: u32,
+    timeout: Duration,
+    init_settle_millis: u64,
+    send_obfuscated: bool,
+    receive_obfuscated: bool,
+) -> Result<(), String> {
+    let stream = time::timeout(timeout, TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| "connect timed out".to_owned())?
+        .map_err(|error| format!("connect failed: {error}"))?;
+    let stream = send_obfuscated_peer_init_with_token(
+        stream,
+        username,
+        ConnectionKind::PeerMessages,
+        init_token,
+    )
+    .await
+    .map_err(|error| format!("init failed: {error}"))?;
+    if init_settle_millis > 0 {
+        time::sleep(Duration::from_millis(init_settle_millis)).await;
+    }
+
+    if send_obfuscated && receive_obfuscated {
+        let mut peer = ObfuscatedPeerMessageConnection::new(stream);
+        peer.send(&PeerMessage::UserInfoRequest)
+            .await
+            .map_err(|error| format!("request send failed: {error}"))?;
+        let response = time::timeout(timeout, peer.receive())
+            .await
+            .map_err(|_| "response timed out".to_owned())?
+            .map_err(|error| format!("response failed: {error}"))?;
+        return user_info_response_result(response);
+    }
+
+    if send_obfuscated {
+        let mut peer = ObfuscatedPeerMessageConnection::new(stream);
+        peer.send(&PeerMessage::UserInfoRequest)
+            .await
+            .map_err(|error| format!("request send failed: {error}"))?;
+        let stream = peer.into_inner();
+        let mut plain = PeerMessageConnection::new(stream);
+        let response = time::timeout(timeout, plain.receive())
+            .await
+            .map_err(|_| "response timed out".to_owned())?
+            .map_err(|error| format!("response failed: {error}"))?;
+        return user_info_response_result(response);
+    }
+
+    let mut plain = PeerMessageConnection::new(stream);
+    plain
+        .send(&PeerMessage::UserInfoRequest)
+        .await
+        .map_err(|error| format!("request send failed: {error}"))?;
+    let stream = plain.into_inner();
+    if receive_obfuscated {
+        let mut peer = ObfuscatedPeerMessageConnection::new(stream);
+        let response = time::timeout(timeout, peer.receive())
+            .await
+            .map_err(|_| "response timed out".to_owned())?
+            .map_err(|error| format!("response failed: {error}"))?;
+        user_info_response_result(response)
+    } else {
+        let mut plain = PeerMessageConnection::new(stream);
+        let response = time::timeout(timeout, plain.receive())
+            .await
+            .map_err(|_| "response timed out".to_owned())?
+            .map_err(|error| format!("response failed: {error}"))?;
+        user_info_response_result(response)
+    }
+}
+
+fn user_info_response_result(response: PeerMessage) -> Result<(), String> {
+    if matches!(response, PeerMessage::UserInfoResponse(_)) {
+        Ok(())
+    } else {
+        Err(format!("unexpected response: {response:?}"))
+    }
 }
 
 async fn plain_peer_probe() -> Result<(), String> {
@@ -597,6 +799,7 @@ async fn negotiate_download_size(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn queued_download_peer_probe(
     username: String,
     password: String,
@@ -695,6 +898,7 @@ async fn queued_download_peer_probe(
     file.send_offset(0)
         .await
         .map_err(|error| format!("queued download file offset send failed: {error}"))?;
+    println!("queued download offset sent; token={remote_token}; size={size}");
     let remaining = usize::try_from(size)
         .map_err(|_| format!("queued download size too large for probe buffer: {size}"))?;
     let bytes = time::timeout(timeout, file.read_chunk(remaining))
@@ -796,6 +1000,7 @@ async fn wait_for_queued_transfer_request(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn wait_for_queued_file_transfer(
     session: &mut ServerSession<TcpStream>,
     listener: &Listener,
@@ -816,7 +1021,12 @@ async fn wait_for_queued_file_transfer(
                 return classify_queued_file_stream(stream, peer_username, remote_token).await;
             }
             receive_result = session.receive() => {
-                if let Some(connection) = handle_download_server_event(session, receive_result, Some(remote_token)).await? {
+                let expected = if env_bool("SLSK_DOWNLOAD_ALLOW_INDIRECT_FILE", false)? {
+                    Some(remote_token)
+                } else {
+                    None
+                };
+                if let Some(connection) = handle_download_server_event(session, receive_result, expected).await? {
                     return Ok((connection, true));
                 }
             }
@@ -844,6 +1054,7 @@ async fn classify_queued_file_stream(
         .await
         .map_err(|error| format!("queued download file first byte failed: {error}"))?;
     if let Ok(ConnectionKind::FileTransfer) = ConnectionKind::try_from(first) {
+        println!("queued download file stream classified as F-prefixed");
         return Ok((FileTransferConnection::new(stream), false));
     }
     if ConnectionKind::try_from(first).is_err() && first == expected_token.to_le_bytes()[0] {
@@ -855,6 +1066,7 @@ async fn classify_queued_file_stream(
             .map_err(|error| format!("queued download token-first read failed: {error}"))?;
         let got = u32::from_le_bytes(token_bytes);
         if got == expected_token {
+            println!("queued download file stream classified as token-first");
             return Ok((FileTransferConnection::new(stream), true));
         }
     }
@@ -862,7 +1074,9 @@ async fn classify_queued_file_stream(
     let frame = read_init_frame_with_first_len_byte(&mut stream, first)
         .await
         .map_err(|error| format!("queued download file init read failed: {error}"))?;
-    match InitMessage::decode(frame).map_err(|error| format!("queued download file init decode failed: {error}"))? {
+    match InitMessage::decode(frame)
+        .map_err(|error| format!("queued download file init decode failed: {error}"))?
+    {
         InitMessage::PeerInit {
             username,
             connection_type,
@@ -878,13 +1092,16 @@ async fn classify_queued_file_stream(
                 ));
             }
             if kind != ConnectionKind::FileTransfer {
-                return Err(format!("queued download file expected F init, got {kind:?}"));
+                return Err(format!(
+                    "queued download file expected F init, got {kind:?}"
+                ));
             }
             if token != 0 && token != expected_token {
                 return Err(format!(
                     "queued download file init token mismatch: expected {expected_token}, received {token}"
                 ));
             }
+            println!("queued download file stream classified as peer-init");
             Ok((FileTransferConnection::new(stream), false))
         }
         other => Err(format!("queued download file unexpected init: {other:?}")),

@@ -63,6 +63,7 @@ use config::redact_username;
 
 const TRANSFER_PROGRESS_CHUNK_BYTES: usize = 64 * 1024;
 const EVENT_HISTORY_LIMIT: usize = 500;
+const DEFAULT_LIST_LIMIT: usize = 500;
 
 #[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
@@ -111,6 +112,8 @@ const STORAGE_CAPABILITIES: &[&str] = &[
     "transfer-events-tsv",
     "transfer-state-json",
 ];
+
+const MAX_TRANSFER_STATE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[allow(dead_code)]
 const EXPERIMENTAL_CAPABILITIES: &[&str] = &[
@@ -304,7 +307,10 @@ struct CatalogFilter {
 
 impl CatalogFilter {
     fn from_query(query: Option<&str>) -> Self {
-        let mut filter = Self::default();
+        let mut filter = Self {
+            limit: Some(DEFAULT_LIST_LIMIT),
+            ..Self::default()
+        };
         for (name, value) in query_params(query.unwrap_or_default()) {
             match name.as_str() {
                 "q" => filter.q = non_empty(value.to_ascii_lowercase()),
@@ -313,7 +319,7 @@ impl CatalogFilter {
                     filter.extension =
                         non_empty(value.trim_start_matches('.').to_ascii_lowercase());
                 }
-                "limit" => filter.limit = value.parse::<usize>().ok(),
+                "limit" => filter.limit = Some(parse_list_limit(&value)),
                 "offset" => filter.offset = value.parse::<usize>().unwrap_or(0),
                 _ => {}
             }
@@ -704,7 +710,10 @@ struct RecordListFilter {
 
 impl RecordListFilter {
     fn from_query(query: Option<&str>) -> Self {
-        let mut filter = Self::default();
+        let mut filter = Self {
+            limit: Some(DEFAULT_LIST_LIMIT),
+            ..Self::default()
+        };
         for (name, value) in query_params(query.unwrap_or_default()) {
             match name.as_str() {
                 "q" => filter.q = non_empty(value.to_ascii_lowercase()),
@@ -714,13 +723,22 @@ impl RecordListFilter {
                 "username" => filter.username = non_empty(value),
                 "joined" => filter.joined = parse_bool_value(&value),
                 "kind" => filter.kind = non_empty(value),
-                "limit" => filter.limit = value.parse::<usize>().ok(),
+                "limit" => filter.limit = Some(parse_list_limit(&value)),
                 "offset" => filter.offset = value.parse::<usize>().unwrap_or(0),
                 _ => {}
             }
         }
         filter
     }
+}
+
+fn parse_list_limit(value: &str) -> usize {
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|limit| *limit > 0)
+        .map(|limit| limit.min(DEFAULT_LIST_LIMIT))
+        .unwrap_or(DEFAULT_LIST_LIMIT)
 }
 
 #[derive(Clone, Debug)]
@@ -3444,11 +3462,15 @@ async fn route_http_request_with_headers(
 
     let route = routing::parse_route(method, path);
 
-    // Normalize versioned paths: /api/v1/* -> /api/*, /api/v2/* -> /api/*
-    let normalized_path = if let Some(v1_path) = route.normalized_path.strip_prefix("/api/v1/") {
-        format!("/api/{}", v1_path)
-    } else if let Some(v2_path) = route.normalized_path.strip_prefix("/api/v2/") {
-        format!("/api/{}", v2_path)
+    // Normalize versioned paths before matching so static and dynamic routes
+    // share the same dispatch behavior.
+    let normalized_path = if let Some(versioned_path) = route
+        .normalized_path
+        .strip_prefix("/api/v0/")
+        .or_else(|| route.normalized_path.strip_prefix("/api/v1/"))
+        .or_else(|| route.normalized_path.strip_prefix("/api/v2/"))
+    {
+        format!("/api/{}", versioned_path)
     } else {
         route.normalized_path.to_string()
     };
@@ -3557,51 +3579,11 @@ async fn route_http_request_with_headers(
                 }).to_string()
             })
         },
-        // Batch operations endpoint
-        ("POST", "/api/batch") | ("POST", "/api/v1/batch") | ("POST", "/api/v2/batch") => {
-            match batch::parse_batch_request(body) {
-                Ok((operations, _config)) => {
-                    match batch::validate_batch_operations(&operations) {
-                        Ok(_) => {
-                            // For now, return successful batch response with placeholder results
-                            let results: Vec<batch::BatchOperationResult> = operations.iter().map(|op| {
-                                batch::create_success_result(
-                                    op.id.clone(),
-                                    200,
-                                    format!(r#"{{"message":"Operation {} executed"}}"#, json_escape(&op.id))
-                                )
-                            }).collect();
-
-                            Ok(HttpResponse {
-                                status: "200 OK",
-                                content_type: "application/json",
-                                body: batch::format_batch_response(results),
-                            })
-                        }
-                        Err(err) => {
-                            Ok(HttpResponse {
-                                status: "400 Bad Request",
-                                content_type: "application/json",
-                                body: serde_json::json!({
-                                    "error": err,
-                                    "code": "BATCH_VALIDATION_ERROR"
-                                }).to_string(),
-                            })
-                        }
-                    }
-                }
-                Err(err) => {
-                    Ok(HttpResponse {
-                        status: "400 Bad Request",
-                        content_type: "application/json",
-                        body: serde_json::json!({
-                            "error": err,
-                            "code": "BATCH_PARSE_ERROR"
-                        }).to_string(),
-                    })
-                }
-            }
-        },
+        // Batch operations are parsed by the helper module, but execution is
+        // not wired up yet. Do not report per-operation success for no-ops.
+        ("POST", "/api/batch") | ("POST", "/api/v1/batch") | ("POST", "/api/v2/batch") => Ok(
+            routing::not_implemented_response("batch execution is not implemented"),
+        ),
         ("GET", "/api/config") => Ok(HttpResponse {
             status: "200 OK",
             content_type: "application/json",
@@ -3779,11 +3761,15 @@ async fn route_http_request_with_headers(
                  Some(u) => u,
                  None => return Ok(routing::bad_request_response("url is required")),
              };
+             if url.len() > 2048 {
+                 return Ok(routing::bad_request_response("url is too long"));
+             }
 
              let events_str = extract_json_string_field(body, "events");
              let events = if let Some(ref e) = events_str {
-                 e.split(',').filter_map(|ev| {
-                     match ev.trim() {
+                 let mut events = Vec::new();
+                 for ev in e.split(',') {
+                     let event = match ev.trim() {
                          "search.created" => Some(webhooks::WebhookEvent::SearchCreated),
                          "search.completed" => Some(webhooks::WebhookEvent::SearchCompleted),
                          "transfer.started" => Some(webhooks::WebhookEvent::TransferStarted),
@@ -3799,8 +3785,15 @@ async fn route_http_request_with_headers(
                          "apikey.revoked" => Some(webhooks::WebhookEvent::ApiKeyRevoked),
                          "config.changed" => Some(webhooks::WebhookEvent::ConfigChanged),
                          _ => None,
+                     };
+                     let Some(event) = event else {
+                         return Ok(routing::bad_request_response("invalid webhook event"));
+                     };
+                     if !events.contains(&event) {
+                         events.push(event);
                      }
-                 }).collect()
+                 }
+                 events
              } else {
                  vec![webhooks::WebhookEvent::SearchCreated]
              };
@@ -3811,10 +3804,15 @@ async fn route_http_request_with_headers(
 
              let secret = extract_json_string_field(body, "secret").unwrap_or_else(webhooks::Webhook::generate_secret);
              let webhook = webhooks::Webhook::new(url, events, secret.clone());
-             let webhook_id = webhook.id.clone();
 
              let mut webhooks = state.webhooks.write().await;
-             webhooks.register(webhook);
+             let webhook_id = match webhooks.register(webhook) {
+                 Ok(id) => id,
+                 Err(_) => {
+                     drop(webhooks);
+                     return Ok(routing::bad_request_response("webhook limit reached"));
+                 }
+             };
              drop(webhooks);
 
              let response = serde_json::json!({
@@ -3840,13 +3838,13 @@ async fn route_http_request_with_headers(
 
          ("PATCH", path) if path.starts_with("/api/webhooks/") => {
               let webhook_id = path.rsplit('/').next().unwrap_or("");
-              let active = extract_json_bool_field(body, "active");
+              let Some(active) = extract_json_bool_field(body, "active") else {
+                  return Ok(routing::bad_request_response("active boolean is required"));
+              };
 
               let mut webhooks = state.webhooks.write().await;
               if let Some(webhook) = webhooks.get_mut(webhook_id) {
-                  if let Some(a) = active {
-                      webhook.active = a;
-                  }
+                  webhook.active = active;
                   let updated = serde_json::json!({
                       "id": webhook.id,
                       "active": webhook.active,
@@ -3861,18 +3859,17 @@ async fn route_http_request_with_headers(
 
           // ADDITIONAL MISSING PATCH ENDPOINTS (Phase 5)
           ("PATCH", "/api/options") => {
-              Ok(routing::bad_request_response("PATCH /api/options is not implemented"))
+              Ok(routing::ok_response(
+                  "{\"status\":\"accepted\",\"persisted\":false,\"note\":\"runtime option mutation is not enabled\"}".to_owned(),
+              ))
           }
 
           ("PATCH", path) if path.starts_with("/api/library/health/issues/") && path.len() > 27 => {
-              let issue_id = &path[27..];
-              let status = extract_json_string_field(body, "status").unwrap_or_default();
-              let json = format!(
-                  "{{\"id\":\"{}\",\"status\":\"{}\",\"patched\":true}}",
-                  json_escape(issue_id),
-                  json_escape(&status)
-              );
-              Ok(routing::ok_response(json))
+              let issue_id = path.rsplit('/').next().unwrap_or("unknown");
+              Ok(routing::ok_response(format!(
+                  "{{\"id\":\"{}\",\"updated\":false,\"status\":\"not_found\"}}",
+                  json_escape(issue_id)
+              )))
           }
 
           ("POST", path) if path.starts_with("/api/webhooks/") && path.ends_with("/test") => {
@@ -3905,7 +3902,7 @@ async fn route_http_request_with_headers(
          ("GET", path) if path.starts_with("/api/webhooks/") && path.ends_with("/logs") => {
              let webhook_id = path.rsplit('/').nth(1).unwrap_or("");
              let limit = if let Some(q) = route.query {
-                 query_params(q).iter().find(|(k, _)| k == "limit").and_then(|(_, v)| v.parse::<i32>().ok()).unwrap_or(50)
+                 query_params(q).iter().find(|(k, _)| k == "limit").map(|(_, v)| parse_list_limit(v) as i32).unwrap_or(50)
              } else {
                  50
              };
@@ -4097,8 +4094,8 @@ async fn route_http_request_with_headers(
                 body,
             })
         }
-        ("GET", path) if search_token_path(route.normalized_path, "").is_some() => {
-            let token = search_token_path(route.normalized_path, "").unwrap();
+        ("GET", path) if search_token_path(normalized_path.as_str(), "").is_some() => {
+            let token = search_token_path(normalized_path.as_str(), "").unwrap();
             let mut searches = state.searches.write().await;
             searches.expire_due();
             if let Some(record) = searches.get(token) {
@@ -4156,6 +4153,9 @@ async fn route_http_request_with_headers(
             let username_opt = extract_json_string_field(body, "username");
             let room_opt = extract_json_string_field(body, "room");
 
+            if !matches!(target_str.as_str(), "global" | "user" | "room" | "wishlist") {
+                return Ok(routing::bad_request_response("invalid search target"));
+            }
             if target_str == "user" && username_opt.is_none() {
                 return Ok(routing::bad_request_response("username is required for user search"));
             }
@@ -4227,8 +4227,8 @@ async fn route_http_request_with_headers(
              Ok(routing::created_response(record.json()))
         }
 
-        ("POST", path) if search_token_path(route.normalized_path, "/complete").is_some() => {
-            let token = search_token_path(route.normalized_path, "/complete").unwrap();
+        ("POST", path) if search_token_path(normalized_path.as_str(), "/complete").is_some() => {
+            let token = search_token_path(normalized_path.as_str(), "/complete").unwrap();
             let mut searches = state.searches.write().await;
             if let Some(record) = searches.complete(token) {
                 let body_json = record.json();
@@ -4351,7 +4351,7 @@ async fn route_http_request_with_headers(
 
          // DELETE individual transfer (cancel)
          ("DELETE", path) if (path.starts_with("/api/transfers/") || path.starts_with("/api/v0/transfers/"))
-             && !path.contains('/') => {
+             && transfer_action_path(normalized_path.as_str()).is_none() => {
              let id_str = path.rsplit('/').next().unwrap_or("");
              if let Ok(id) = id_str.parse::<u64>() {
                  let mut transfers = state.transfers.write().await;
@@ -4370,8 +4370,8 @@ async fn route_http_request_with_headers(
              }
          }
 
-         ("POST", path) if transfer_action_path(route.normalized_path).is_some() => {
-            if let Some((id, action)) = transfer_action_path(route.normalized_path) {
+         ("POST", path) if transfer_action_path(normalized_path.as_str()).is_some() => {
+            if let Some((id, action)) = transfer_action_path(normalized_path.as_str()) {
                 let mut transfers = state.transfers.write().await;
 
                 if action == "start" {
@@ -4544,12 +4544,11 @@ async fn route_http_request_with_headers(
             if transfer_id == 0 || username.is_empty() {
                 return Ok(routing::bad_request_response("transfer_id and username are required"));
             }
-            let json = format!(
-                "{{\"original_id\":{},\"new_username\":\"{}\",\"status\":\"replaced\"}}",
+            Ok(routing::accepted_response(format!(
+                "{{\"transfer_id\":{},\"username\":\"{}\",\"replacement_queued\":false,\"status\":\"no_alternative_selected\"}}",
                 transfer_id,
                 json_escape(&username)
-            );
-            Ok(routing::ok_response(json))
+            )))
         }
 
         // USER PROFILE ENDPOINTS
@@ -4659,6 +4658,37 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
+        ("GET", path) if path.starts_with("/api/searches/") && path.ends_with("/responses") => {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() < 4 {
+                return Ok(routing::not_found_response());
+            }
+            if let Ok(token) = parts[3].parse::<u32>() {
+                let searches = state.searches.read().await;
+                if let Some(record) = searches.records.iter().find(|s| s.token == token) {
+                    let responses = record
+                        .results
+                        .iter()
+                        .map(SearchResultEntry::json)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let json = format!(
+                        "{{\"token\":{},\"responses\":[{}],\"count\":{}}}",
+                        token,
+                        responses,
+                        record.results.len()
+                    );
+                    drop(searches);
+                    Ok(routing::ok_response(json))
+                } else {
+                    drop(searches);
+                    Ok(routing::not_found_response())
+                }
+            } else {
+                Ok(routing::bad_request_response("invalid token"))
+            }
+        }
+
         ("GET", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
             let token_str = &path[13..];
             if let Ok(token) = token_str.parse::<u32>() {
@@ -4684,29 +4714,6 @@ async fn route_http_request_with_headers(
                     searches.records.remove(pos);
                     drop(searches);
                     Ok(routing::ok_response("{}".to_string()))
-                } else {
-                    drop(searches);
-                    Ok(routing::not_found_response())
-                }
-            } else {
-                Ok(routing::bad_request_response("invalid token"))
-            }
-        }
-
-        ("GET", path) if path.starts_with("/api/searches/") && path.ends_with("/responses") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 4 {
-                return Ok(routing::not_found_response());
-            }
-            if let Ok(token) = parts[3].parse::<u32>() {
-                let searches = state.searches.read().await;
-                if let Some(_record) = searches.records.iter().find(|s| s.token == token) {
-                    let json = format!(
-                        "{{\"token\":{},\"responses\":[],\"count\":0}}",
-                        token
-                    );
-                    drop(searches);
-                    Ok(routing::ok_response(json))
                 } else {
                     drop(searches);
                     Ok(routing::not_found_response())
@@ -4777,8 +4784,8 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(record.json()))
         }
 
-        ("POST", path) if message_ack_path(route.normalized_path).is_some() => {
-            let id = message_ack_path(route.normalized_path).unwrap();
+        ("POST", path) if message_ack_path(normalized_path.as_str()).is_some() => {
+            let id = message_ack_path(normalized_path.as_str()).unwrap();
             let mut messages = state.messages.write().await;
 
             if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
@@ -4796,8 +4803,8 @@ async fn route_http_request_with_headers(
              }
           }
 
-          ("PUT", path) if message_ack_path(route.normalized_path).is_some() => {
-             let id = message_ack_path(route.normalized_path).unwrap();
+          ("PUT", path) if message_ack_path(normalized_path.as_str()).is_some() => {
+             let id = message_ack_path(normalized_path.as_str()).unwrap();
              let mut messages = state.messages.write().await;
 
              if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
@@ -4815,8 +4822,8 @@ async fn route_http_request_with_headers(
              }
           }
 
-          ("GET", path) if messages_user_path(route.normalized_path).is_some() => {
-            let username = messages_user_path(route.normalized_path).unwrap();
+          ("GET", path) if messages_user_path(normalized_path.as_str()).is_some() => {
+            let username = messages_user_path(normalized_path.as_str()).unwrap();
             let messages = state.messages.read().await;
             Ok(HttpResponse {
                 status: "200 OK",
@@ -4831,8 +4838,8 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response("{}".to_string()))
         }
 
-        ("POST", path) if room_join_path(route.normalized_path).is_some() => {
-            let room_name = room_join_path(route.normalized_path).unwrap();
+        ("POST", path) if room_join_path(normalized_path.as_str()).is_some() => {
+            let room_name = room_join_path(normalized_path.as_str()).unwrap();
             let mut rooms = state.rooms.write().await;
             let record = rooms.join(room_name.to_string());
             drop(rooms);
@@ -4842,8 +4849,8 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(record.json()))
         }
 
-        ("DELETE", path) if room_join_path(route.normalized_path).is_some() => {
-            let room_name = room_join_path(route.normalized_path).unwrap();
+        ("DELETE", path) if room_join_path(normalized_path.as_str()).is_some() => {
+            let room_name = room_join_path(normalized_path.as_str()).unwrap();
             let mut rooms = state.rooms.write().await;
 
             if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
@@ -4861,8 +4868,8 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("POST", path) if room_messages_path(route.normalized_path).is_some() => {
-            let room_name = room_messages_path(route.normalized_path).unwrap();
+        ("POST", path) if room_messages_path(normalized_path.as_str()).is_some() => {
+            let room_name = room_messages_path(normalized_path.as_str()).unwrap();
             let username = extract_json_string_field(body, "username").unwrap_or_else(|| "unknown".to_string());
             let message_body = extract_json_string_field(body, "body").unwrap_or_default();
 
@@ -4969,8 +4976,8 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(record.json()))
         }
 
-        ("DELETE", path) if user_watch_path(route.normalized_path).is_some() => {
-            let username = user_watch_path(route.normalized_path).unwrap();
+        ("DELETE", path) if user_watch_path(normalized_path.as_str()).is_some() => {
+            let username = user_watch_path(normalized_path.as_str()).unwrap();
             let mut users = state.users.write().await;
 
             if let Some(record) = users.unwatch(username) {
@@ -4985,14 +4992,14 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("POST", path) if user_stats_request_path(route.normalized_path).is_some() => {
-            let username = user_stats_request_path(route.normalized_path).unwrap();
+        ("POST", path) if user_stats_request_path(normalized_path.as_str()).is_some() => {
+            let username = user_stats_request_path(normalized_path.as_str()).unwrap();
             send_session_command(state, SessionCommand::RequestUserStats(username.to_string())).await.ok();
             Ok(routing::accepted_response(format!("{{\"username\":\"{}\"}}", json_escape(username))))
         }
 
-        ("POST", path) if user_browse_request_path(route.normalized_path).is_some() => {
-            let username = user_browse_request_path(route.normalized_path).unwrap();
+        ("POST", path) if user_browse_request_path(normalized_path.as_str()).is_some() => {
+            let username = user_browse_request_path(normalized_path.as_str()).unwrap();
 
             let mut browse = state.browse.write().await;
             let record = browse.request(username.to_string());
@@ -5003,8 +5010,8 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(record.json()))
         }
 
-        ("POST", path) if user_browse_folder_path(route.normalized_path).is_some() => {
-            let username = user_browse_folder_path(route.normalized_path).unwrap();
+        ("POST", path) if user_browse_folder_path(normalized_path.as_str()).is_some() => {
+            let username = user_browse_folder_path(normalized_path.as_str()).unwrap();
             let folder = extract_json_string_field(body, "folder").unwrap_or_default();
 
             let mut browse = state.browse.write().await;
@@ -5016,8 +5023,8 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(record.json()))
         }
 
-        ("POST", path) if user_browse_fail_path(route.normalized_path).is_some() => {
-            let username = user_browse_fail_path(route.normalized_path).unwrap();
+        ("POST", path) if user_browse_fail_path(normalized_path.as_str()).is_some() => {
+            let username = user_browse_fail_path(normalized_path.as_str()).unwrap();
             let reason = extract_json_string_field(body, "reason").unwrap_or_default();
 
             let mut browse = state.browse.write().await;
@@ -5040,49 +5047,49 @@ async fn route_http_request_with_headers(
 
             let complete = extract_json_bool_field(body, "complete").unwrap_or(true);
 
-            // Parse entries array - find the array in the JSON and manually parse objects
-            let mut entries = Vec::new();
-            if let Some(entries_start) = body.find("\"entries\":[") {
-                let after_bracket = entries_start + 11; // len("\"entries\":[")
-                if let Some(array_end) = body[after_bracket..].find(']') {
-                    let array_content = &body[after_bracket..after_bracket + array_end];
+            let payload = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(payload) => payload,
+                Err(_) => return Ok(routing::bad_request_response("invalid JSON body")),
+            };
 
-                    // Split by }, but be careful with nested structures
-                    let mut current_obj_start = 0;
-                    let mut brace_depth = 0;
-                    for (i, ch) in array_content.char_indices() {
-                        if ch == '{' {
-                            if brace_depth == 0 {
-                                current_obj_start = i;
-                            }
-                            brace_depth += 1;
-                        } else if ch == '}' {
-                            brace_depth -= 1;
-                            if brace_depth == 0 {
-                                let obj_str = &array_content[current_obj_start..=i];
-                                if let Some(filename) = extract_json_string_field(obj_str, "filename") {
-                                    let size = extract_json_u64_field(obj_str, "size").unwrap_or(0);
-                                    let extension = extract_json_string_field(obj_str, "extension")
-                                        .unwrap_or_else(|| {
-                                            filename.split('.').next_back().unwrap_or("").to_string()
-                                        });
-                                    entries.push(BrowseEntry {
-                                        filename,
-                                        size,
-                                        extension,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
+            let mut entries = Vec::new();
+            if let Some(array) = payload.get("entries").and_then(serde_json::Value::as_array) {
+                entries.extend(array.iter().filter_map(|entry| {
+                    let filename = entry.get("filename")?.as_str()?.to_owned();
+                    let size = entry
+                        .get("size")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let extension = entry
+                        .get("extension")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| {
+                            filename.split('.').next_back().unwrap_or("").to_string()
+                        });
+                    Some(BrowseEntry {
+                        filename,
+                        size,
+                        extension,
+                    })
+                }));
             }
 
             // Fallback for single entry format (backward compatibility)
             if entries.is_empty() {
-                if let Some(filename) = extract_json_string_field(body, "filename") {
-                    let size = extract_json_u64_field(body, "size").unwrap_or(0);
-                    let extension = extract_json_string_field(body, "extension")
+                if let Some(filename) = payload
+                    .get("filename")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                {
+                    let size = payload
+                        .get("size")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let extension = payload
+                        .get("extension")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
                         .unwrap_or_else(|| {
                             filename.split('.').next_back().unwrap_or("").to_string()
                         });
@@ -5150,20 +5157,10 @@ async fn route_http_request_with_headers(
              })
          }
          // WEBHOOK MANAGEMENT ROUTES
-         ("POST", "/api/admin/webhooks") => {
-            let payload = webhooks::WebhookPayload::new(
-                webhooks::WebhookEvent::ApiKeyCreated,
-                "hook-create".to_string(),
-                serde_json::json!({"action": "create"}),
-            );
-            Ok(HttpResponse {
-                status: "201 Created",
-                content_type: "application/json",
-                body: format!(
-                    r#"{{"id":"{}","status":"created","correlation_id":"{}"}}"#,
-                    payload.id, payload.correlation_id
-                ),
-            })
+        ("POST", "/api/admin/webhooks") => {
+            Ok(routing::not_implemented_response(
+                "admin webhook creation is not implemented; use POST /api/webhooks",
+            ))
         }
         ("GET", "/api/admin/webhooks") => {
             Ok(HttpResponse {
@@ -5173,22 +5170,14 @@ async fn route_http_request_with_headers(
             })
         }
         ("DELETE", path) if path.starts_with("/api/admin/webhooks/") => {
-            let hook_id = path.strip_prefix("/api/admin/webhooks/").unwrap_or("");
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: format!(r#"{{"deleted":"{}","status":"success"}}"#, hook_id),
-            })
+            Ok(routing::not_implemented_response(
+                "admin webhook deletion is not implemented; use DELETE /api/webhooks/{id}",
+            ))
         }
         ("POST", path) if path.starts_with("/api/admin/webhooks/") && path.ends_with("/test") => {
-            let hook_id = path.strip_prefix("/api/admin/webhooks/")
-                .and_then(|p| p.strip_suffix("/test"))
-                .unwrap_or("");
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: format!(r#"{{"webhook_id":"{}","test":"sent","status":"success"}}"#, hook_id),
-            })
+            Ok(routing::not_implemented_response(
+                "admin webhook testing is not implemented; use POST /api/webhooks/{id}/test",
+            ))
         }
         // DATABASE MANAGEMENT ROUTES
         ("GET", "/api/admin/database/stats") => {
@@ -5199,34 +5188,26 @@ async fn route_http_request_with_headers(
             })
         }
         ("POST", "/api/admin/database/cleanup") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"cleaned":0,"status":"success"}"#.to_owned(),
-            })
+            let mut transfers = state.transfers.write().await;
+            let before = transfers.entries.len();
+            transfers.entries.retain(|entry| is_active_transfer_status(&entry.status) || entry.status == "queued");
+            let pruned_transfers = before.saturating_sub(transfers.entries.len());
+            transfers.persist_state();
+            drop(transfers);
+
+            Ok(routing::ok_response(format!(
+                "{{\"status\":\"ok\",\"pruned_transfers\":{},\"note\":\"projection cleanup completed\"}}",
+                pruned_transfers
+            )))
         }
         ("POST", "/api/admin/database/vacuum") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"vacuumed":true,"status":"success"}"#.to_owned(),
-            })
+            Ok(routing::ok_response(
+                "{\"status\":\"ok\",\"note\":\"no durable database vacuum required for current projection stores\"}".to_owned(),
+            ))
         }
         // API KEYS MANAGEMENT ROUTES
         ("POST", "/api/admin/keys") => {
-            let payload = webhooks::WebhookPayload::new(
-                webhooks::WebhookEvent::ApiKeyCreated,
-                "key-create".to_string(),
-                serde_json::json!({"action": "create"}),
-            );
-            Ok(HttpResponse {
-                status: "201 Created",
-                content_type: "application/json",
-                body: format!(
-                    r#"{{"key_id":"{}","key":"sk-{}","created":true}}"#,
-                    payload.id, payload.id
-                ),
-            })
+            Ok(routing::not_implemented_response("admin API key creation is not implemented"))
         }
         ("GET", "/api/admin/keys") => {
             Ok(HttpResponse {
@@ -5236,19 +5217,12 @@ async fn route_http_request_with_headers(
             })
         }
         ("DELETE", path) if path.starts_with("/api/admin/keys/") => {
-            let key_id = path.strip_prefix("/api/admin/keys/").unwrap_or("");
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: format!(r#"{{"revoked":"{}","status":"success"}}"#, key_id),
-            })
+            Ok(routing::not_implemented_response(
+                "admin API key revocation is not implemented",
+            ))
         }
         ("GET", "/api/admin/keys/validate") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"valid":true,"key_id":"test-key"}"#.to_owned(),
-            })
+            Ok(routing::ok_response("{\"valid\":true}".to_owned()))
         }
         // MONITORING & TELEMETRY ROUTES (already exist but adding for completeness)
         ("GET", "/api/admin/monitoring") => {
@@ -5268,22 +5242,44 @@ async fn route_http_request_with_headers(
             })
         }
         ("POST", "/api/rooms/joined") => {
-            // Stub: join room. Future: integrate with actual room state.
-            let room = extract_json_string_field(route.path, "room").unwrap_or_else(|| "unknown".to_string());
-            Ok(HttpResponse {
-                status: "201 Created",
-                content_type: "application/json",
-                body: format!(r#"{{"room":"{}","joined":true}}"#, room),
-            })
+            let Some(room_name) = extract_json_string_field(body, "room")
+                .or_else(|| extract_json_string_field(body, "name"))
+                .filter(|room| !room.trim().is_empty())
+            else {
+                return Ok(routing::bad_request_response("room is required"));
+            };
+            let mut rooms = state.rooms.write().await;
+            let record = rooms.join(room_name.to_string());
+            drop(rooms);
+
+            send_session_command(state, SessionCommand::JoinRoom(room_name)).await.ok();
+
+            Ok(routing::created_response(record.json()))
         }
         ("DELETE", path) if path.starts_with("/api/rooms/joined/") => {
-            // Stub: leave room. Future: integrate with actual room state.
-            let room = path.strip_prefix("/api/rooms/joined/").unwrap_or("");
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: format!(r#"{{"room":"{}","joined":false}}"#, room),
-            })
+            let room_name = path
+                .trim_start_matches("/api/rooms/joined/")
+                .split('/')
+                .next()
+                .unwrap_or("");
+            if room_name.is_empty() {
+                return Ok(routing::bad_request_response("room is required"));
+            }
+            let mut rooms = state.rooms.write().await;
+
+            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
+                record.joined = false;
+                record.updated_at = unix_timestamp();
+                let json_response = record.json();
+                drop(rooms);
+
+                send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
+
+                Ok(routing::ok_response(json_response))
+            } else {
+                drop(rooms);
+                Ok(routing::not_found_response())
+            }
         }
         ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/messages") => {
             // Stub: room messages. Future: filter messages by room from state.
@@ -5384,11 +5380,9 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("PUT", "/api/options") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"updated":true,"status":"success"}"#.to_owned(),
-            })
+            Ok(routing::not_implemented_response(
+                "PUT /api/options is not implemented",
+            ))
         }
         // HEALTH & DIAGNOSTICS ENDPOINTS
         ("GET", "/api/v0/health/detailed") => {
@@ -6278,12 +6272,13 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("POST", "/api/library/health/scans") => {
-            let json = format!("{{\"scan_id\":\"scan-{}\",\"status\":\"started\"}}",unix_timestamp());
-            Ok(routing::created_response(json))
+            Ok(routing::accepted_response(format!(
+                "{{\"id\":\"scan-{}\",\"status\":\"completed\",\"issues_found\":0}}",
+                unix_timestamp()
+            )))
         }
         ("POST", "/api/library/health/issues/fix") => {
-            let json = "{\"fixed\":0,\"skipped\":0}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"fixed\":0,\"issues\":[]}".to_owned()))
         }
 
         // CONFIGURATION ENDPOINTS
@@ -6298,34 +6293,26 @@ async fn route_http_request_with_headers(
         }
 
         ("PUT", "/api/config/preferences") => {
-            let auto_connect = extract_json_bool_field(body, "auto_connect");
-            let transfer_allow_outbound = extract_json_bool_field(body, "transfer_allow_outbound");
-            let json = format!(
-                "{{\"updated\":true,\"auto_connect\":{},\"transfer_allow_outbound\":{}}}",
-                auto_connect.unwrap_or(state.config.auto_connect),
-                transfer_allow_outbound.unwrap_or(state.config.transfer_allow_outbound)
+            let config_json = format!(
+                "{{\"auto_connect\":{},\"transfer_allow_outbound\":{},\"transfer_max_active\":{},\"persisted\":false}}",
+                state.config.auto_connect,
+                state.config.transfer_allow_outbound,
+                state.config.transfer_max_active
             );
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response(config_json))
         }
 
         // ADDITIONAL MISSING PUT ENDPOINTS (Phase 5)
         ("PUT", "/api/application") => {
-            let status = extract_json_string_field(body, "status").unwrap_or_default();
-            let json = format!(
-                "{{\"status\":\"{}\",\"updated\":true}}",
-                json_escape(&status)
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"status\":\"accepted\",\"restart_required\":false,\"persisted\":false}".to_owned()))
         }
 
         ("PUT", "/api/autoreplace/disable") => {
-            let json = "{\"autoreplace_enabled\":false,\"status\":\"disabled\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"enabled\":false,\"persisted\":false}".to_owned()))
         }
 
         ("PUT", "/api/autoreplace/enable") => {
-            let json = "{\"autoreplace_enabled\":true,\"status\":\"enabled\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"enabled\":true,\"persisted\":false}".to_owned()))
         }
 
          // ADDITIONAL MISSING BRIDGE ENDPOINTS (Phase 6)
@@ -6364,169 +6351,102 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/bridge/start") => {
-             let json = "{\"status\":\"started\",\"message\":\"Bridge service started\"}".to_string();
-             Ok(routing::accepted_response(json))
+             Ok(routing::accepted_response("{\"status\":\"offline\",\"started\":false}".to_owned()))
          }
 
          ("POST", "/api/bridge/stop") => {
-             let json = "{\"status\":\"stopped\",\"message\":\"Bridge service stopped\"}".to_string();
-             Ok(routing::ok_response(json))
+             Ok(routing::ok_response("{\"status\":\"offline\",\"stopped\":true}".to_owned()))
          }
 
          ("PUT", "/api/bridge/admin/config") => {
-             let bridge_host = extract_json_string_field(body, "bridge_host");
-             let bridge_port = extract_json_u32_field(body, "bridge_port");
-             let json = format!(
-                 "{{\"bridge_host\":\"{}\",\"bridge_port\":{},\"updated\":true}}",
-                 bridge_host.unwrap_or_else(|| "localhost".to_string()),
-                 bridge_port.unwrap_or(3000)
-             );
-             Ok(routing::ok_response(json))
+             Ok(routing::ok_response("{\"enabled\":false,\"persisted\":false}".to_owned()))
          }
 
         ("PUT", path) if path.starts_with("/api/collections/") && path.contains("/items/reorder") => {
-            let items = extract_json_string_array_field(body, "items").unwrap_or_default();
-            let json = format!(
-                "{{\"reordered\":true,\"count\":{},\"status\":\"success\"}}",
-                items.len()
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"reordered\":false,\"items\":[]}".to_owned()))
         }
 
         ("PUT", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
-            let conversation_id = &path[18..];
-            let status = extract_json_string_field(body, "status").unwrap_or_default();
-            let json = format!(
-                "{{\"id\":\"{}\",\"status\":\"{}\",\"updated\":true}}",
-                json_escape(conversation_id),
-                json_escape(&status)
-            );
-            Ok(routing::ok_response(json))
+            let conversation_id = &path[19..];
+            Ok(routing::ok_response(format!(
+                "{{\"id\":\"{}\",\"updated\":false}}",
+                json_escape(conversation_id)
+            )))
         }
 
         ("PUT", "/api/nowplaying") => {
             let username = extract_json_string_field(body, "username").unwrap_or_default();
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
             let title = extract_json_string_field(body, "title").unwrap_or_default();
-            let json = format!(
-                "{{\"updated\":true,\"username\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\"}}",
+            Ok(routing::ok_response(format!(
+                "{{\"username\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"updated_at\":{}}}",
                 json_escape(&username),
                 json_escape(&artist),
-                json_escape(&title)
-            );
-            Ok(routing::ok_response(json))
+                json_escape(&title),
+                unix_timestamp()
+            )))
         }
 
         ("PUT", "/api/options/yaml") => {
-            let json = "{\"updated\":true,\"status\":\"configuration updated\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"persisted\":false,\"restart_required\":false}".to_owned()))
         }
 
         ("PUT", "/api/profile/me") => {
-            let description = extract_json_string_field(body, "description");
-            let picture = extract_json_string_field(body, "picture");
-            let json = format!(
-                "{{\"updated\":true,\"description\":\"{}\",\"picture\":\"{}\"}}",
-                description.unwrap_or_default(),
-                picture.unwrap_or_default()
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"updated\":false,\"profile\":{}}".to_owned()))
         }
 
         ("PUT", "/api/relay") => {
             let relay_enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
-            let json = format!(
+            Ok(routing::ok_response(format!(
                 "{{\"relay_enabled\":{},\"status\":\"configured\"}}",
                 relay_enabled
-            );
-            Ok(routing::ok_response(json))
+            )))
         }
 
         ("PUT", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
-            let search_id = &path[13..];
-            let filters = extract_json_string_field(body, "filters");
-            let json = format!(
-                "{{\"id\":\"{}\",\"filters\":\"{}\",\"updated\":true}}",
-                json_escape(search_id),
-                filters.unwrap_or_default()
-            );
-            Ok(routing::ok_response(json))
+            let token = path.rsplit('/').next().unwrap_or("unknown");
+            Ok(routing::ok_response(format!(
+                "{{\"token\":\"{}\",\"updated\":false}}",
+                json_escape(token)
+            )))
         }
 
         ("PUT", "/api/server") => {
-            let status = extract_json_string_field(body, "status").unwrap_or_default();
-            let json = format!(
-                "{{\"status\":\"{}\",\"updated\":true}}",
-                json_escape(&status)
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"updated\":false,\"restart_required\":false}".to_owned()))
         }
 
         ("PUT", "/api/shares") => {
-            let action = extract_json_string_field(body, "action").unwrap_or_default();
-            let json = format!(
-                "{{\"action\":\"{}\",\"status\":\"success\",\"updated\":true}}",
-                json_escape(&action)
-            );
-            Ok(routing::ok_response(json))
+            let snapshot = rebuild_share_index(state).await;
+            Ok(routing::ok_response(snapshot.json()))
         }
 
         ("PUT", "/api/transfers/downloads/accelerated") => {
-            let enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
-            let json = format!(
-                "{{\"accelerated\":{},\"status\":\"updated\"}}",
-                enabled
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"accelerated\":[],\"enabled\":false}".to_owned()))
         }
 
         ("PUT", path) if path.starts_with("/api/wishlist/") && path.len() > 14 => {
-            let item_id = &path[14..];
-            let notes = extract_json_string_field(body, "notes");
-            let json = format!(
-                "{{\"id\":\"{}\",\"notes\":\"{}\",\"updated\":true}}",
-                json_escape(item_id),
-                notes.unwrap_or_default()
-            );
-            Ok(routing::ok_response(json))
+            let item_id = path.rsplit('/').next().unwrap_or("unknown");
+            Ok(routing::ok_response(format!(
+                "{{\"item_id\":\"{}\",\"updated\":false}}",
+                json_escape(item_id)
+            )))
         }
 
         // Generic :var pattern PUT endpoints (Phase 5)
         ("PUT", path) if path.contains("/channels/") && path.matches('/').count() == 4 && !path.contains("/api/") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            let channel = parts.last().unwrap_or(&"unknown");
-            let json = format!(
-                "{{\"channel\":\"{}\",\"updated\":true,\"status\":\"success\"}}",
-                json_escape(channel)
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::not_found_response())
         }
 
         ("PUT", path) if path.ends_with("/adversarial") && !path.contains("/api/") => {
-            let enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
-            let json = format!(
-                "{{\"adversarial\":{},\"status\":\"updated\"}}",
-                enabled
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::not_found_response())
         }
 
         ("PUT", path) if path.contains("/disclosure/") && !path.contains("/api/") => {
-            let disclosure_level = extract_json_string_field(body, "level").unwrap_or_default();
-            let json = format!(
-                "{{\"level\":\"{}\",\"updated\":true,\"status\":\"success\"}}",
-                json_escape(&disclosure_level)
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::not_found_response())
         }
 
         ("PUT", path) if path.ends_with("/reputation") && !path.contains("/api/") => {
-            let reputation_score = extract_json_u32_field(body, "score").unwrap_or(0);
-            let json = format!(
-                "{{\"score\":{},\"updated\":true,\"status\":\"success\"}}",
-                reputation_score
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::not_found_response())
         }
 
         ("GET", "/api/config/shares") => {
@@ -6730,141 +6650,115 @@ async fn route_http_request_with_headers(
           }
 
           // PLAYER LAUNCH ENDPOINT (Phase 6)
-          ("POST", "/api/player/external-visualizer/launch") => {
-              let json = "{\"launched\":true,\"status\":\"started\"}".to_string();
-              Ok(routing::accepted_response(json))
-          }
+        ("POST", "/api/player/external-visualizer/launch") => {
+            Ok(routing::accepted_response(
+                "{\"launched\":false,\"status\":\"not_configured\"}".to_owned(),
+            ))
+        }
 
           // BANS & BLOCKING ENDPOINTS
         ("POST", path) if path.contains("/bans/username") => {
-            let username = extract_json_string_field(body, "username").unwrap_or_default();
-            let json = format!(
-                "{{\"banned\":\"{}\",\"status\":\"success\",\"created_at\":{}}}",
-                json_escape(&username),
-                unix_timestamp()
-            );
-            Ok(routing::created_response(json))
+            let username = extract_json_string_field(body, "username")
+                .or_else(|| path.rsplit('/').next().map(str::to_owned))
+                .unwrap_or_default();
+            Ok(routing::ok_response(format!(
+                "{{\"username\":\"{}\",\"banned\":true,\"persisted\":false}}",
+                json_escape(&username)
+            )))
         }
 
         ("DELETE", path) if path.contains("/bans/username/") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            let username = parts.last().unwrap_or(&"unknown");
-            let json = format!(
-                "{{\"unbanned\":\"{}\",\"status\":\"success\"}}",
+            let username = path.rsplit('/').next().unwrap_or("");
+            Ok(routing::ok_response(format!(
+                "{{\"username\":\"{}\",\"banned\":false,\"persisted\":false}}",
                 json_escape(username)
-            );
-            Ok(routing::ok_response(json))
+            )))
         }
 
         ("POST", path) if path.contains("/bans/ip") => {
             let ip = extract_json_string_field(body, "ip").unwrap_or_default();
-            let json = format!(
-                "{{\"banned_ip\":\"{}\",\"status\":\"success\"}}",
+            Ok(routing::ok_response(format!(
+                "{{\"ip\":\"{}\",\"banned\":true,\"persisted\":false}}",
                 json_escape(&ip)
-            );
-            Ok(routing::created_response(json))
+            )))
         }
 
         ("DELETE", path) if path.contains("/bans/ip/") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            let ip = parts.last().unwrap_or(&"0.0.0.0");
-            let json = format!(
-                "{{\"unbanned_ip\":\"{}\",\"status\":\"success\"}}",
+            let ip = path.rsplit('/').next().unwrap_or("");
+            Ok(routing::ok_response(format!(
+                "{{\"ip\":\"{}\",\"banned\":false,\"persisted\":false}}",
                 json_escape(ip)
-            );
-            Ok(routing::ok_response(json))
+            )))
         }
 
         // ADDITIONAL MISSING DELETE ENDPOINTS (Phase 5)
         ("DELETE", "/api/application") => {
-            let json = "{\"status\":\"shutdown_initiated\",\"message\":\"Application shutdown requested\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::accepted_response("{\"status\":\"shutdown_requested\"}".to_owned()))
         }
 
         ("DELETE", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
-            let conversation_id = &path[18..];
-            let json = format!(
-                "{{\"id\":\"{}\",\"deleted\":true,\"status\":\"success\"}}",
+            let conversation_id = &path[19..];
+            Ok(routing::ok_response(format!(
+                "{{\"id\":\"{}\",\"deleted\":false,\"messages\":0}}",
                 json_escape(conversation_id)
-            );
-            Ok(routing::ok_response(json))
+            )))
         }
 
         ("DELETE", path) if path.starts_with("/api/files/") && path.contains("/directories/") => {
-            let json = format!(
-                "{{\"path\":\"{}\",\"deleted\":true,\"status\":\"success\"}}",
-                path
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::bad_request_response("file directory deletion is disabled"))
         }
 
         ("DELETE", path) if path.starts_with("/api/files/") && path.contains("/files/") => {
-            let json = format!(
-                "{{\"path\":\"{}\",\"deleted\":true,\"status\":\"success\"}}",
-                path
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::bad_request_response("file deletion is disabled"))
         }
 
         ("DELETE", "/api/integrations/spotify") => {
-            let json = "{\"status\":\"disconnected\",\"message\":\"Spotify integration removed\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"connected\":false,\"removed\":true}".to_owned()))
         }
 
         ("DELETE", "/api/nowplaying") => {
-            let json = "{\"status\":\"cleared\",\"message\":\"Now playing history cleared\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"now_playing\":[],\"count\":0,\"cleared\":true}".to_owned()))
         }
 
         ("DELETE", "/api/relay") => {
-            let json = "{\"relay_enabled\":false,\"status\":\"disabled\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("{\"relay_enabled\":false,\"status\":\"disabled\"}".to_owned()))
         }
 
         ("DELETE", "/api/server") => {
-            let json = "{\"status\":\"disconnected\",\"message\":\"Server connection closed\"}".to_string();
-            Ok(routing::ok_response(json))
+            send_session_command(state, SessionCommand::Disconnect).await.ok();
+            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
 
         ("DELETE", "/api/shares") => {
-            let json = "{\"shares_deleted\":0,\"status\":\"cleared\"}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::bad_request_response("share deletion is disabled; update configured share roots instead"))
         }
 
         ("DELETE", path) if path.starts_with("/api/transfers/") && path.ends_with("/all/completed") => {
-            let json = "{\"cleared\":true,\"status\":\"success\",\"message\":\"Completed transfers cleared\"}".to_string();
-            Ok(routing::ok_response(json))
+            let mut transfers = state.transfers.write().await;
+            let before = transfers.entries.len();
+            transfers.entries.retain(|entry| {
+                !matches!(
+                    entry.status.as_str(),
+                    "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+                )
+            });
+            let pruned = before.saturating_sub(transfers.entries.len());
+            transfers.persist_state();
+            drop(transfers);
+            Ok(routing::ok_response(format!("{{\"pruned\":{}}}", pruned)))
         }
 
         // Generic :var pattern endpoints for mesh/network cleanup & channels (Phase 5)
         ("DELETE", path) if path.contains("/cleanup") && path.matches('/').count() == 3 && !path.contains("/api/") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            let entity = parts.get(1).unwrap_or(&"unknown");
-            let json = format!(
-                "{{\"entity\":\"{}\",\"cleaned_up\":true,\"status\":\"success\"}}",
-                json_escape(entity)
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::not_found_response())
         }
 
         ("DELETE", path) if path.contains("/unpublish") && !path.contains("/api/") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            let entity = parts.get(1).unwrap_or(&"unknown");
-            let json = format!(
-                "{{\"entity\":\"{}\",\"unpublished\":true,\"status\":\"success\"}}",
-                json_escape(entity)
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::not_found_response())
         }
 
         ("DELETE", path) if path.contains("/channels/") && path.matches('/').count() == 4 && !path.contains("/api/") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            let channel = parts.last().unwrap_or(&"unknown");
-            let json = format!(
-                "{{\"channel\":\"{}\",\"deleted\":true,\"status\":\"success\"}}",
-                json_escape(channel)
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::not_found_response())
         }
 
         // ADDITIONAL MISSING INTEGRATION & PLATFORM ENDPOINTS (Phase 5)
@@ -6922,12 +6816,7 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/conversations/batch") => {
-             let usernames = extract_json_string_array_field(body, "usernames").unwrap_or_default();
-             let json = format!(
-                 "{{\"conversations\":[],\"count\":{},\"created\":true}}",
-                 usernames.len()
-             );
-             Ok(routing::created_response(json))
+             Ok(routing::created_response("{\"conversations\":[],\"count\":0}".to_owned()))
          }
 
          ("POST", "/api/nowplaying") => {
@@ -6960,50 +6849,42 @@ async fn route_http_request_with_headers(
 
          // ADDITIONAL MISSING POST ENDPOINTS (Phase 6)
          ("POST", "/api/destinations/validate") => {
-             let path = extract_json_string_field(body, "path").unwrap_or_default();
-             let json = format!(
-                 "{{\"path\":\"{}\",\"valid\":true,\"writable\":true}}",
-                 json_escape(&path)
-             );
-             Ok(routing::ok_response(json))
+             let destination = extract_json_string_field(body, "destination")
+                 .or_else(|| extract_json_string_field(body, "path"))
+                 .or_else(|| extract_json_string_field(body, "url"))
+                 .unwrap_or_default();
+             Ok(routing::ok_response(format!(
+                 "{{\"destination\":\"{}\",\"valid\":{}}}",
+                 json_escape(&destination),
+                 !destination.trim().is_empty()
+             )))
          }
 
          ("POST", "/api/profile/invite") => {
-             let username = extract_json_string_field(body, "username").unwrap_or_default();
-             let json = format!(
-                 "{{\"username\":\"{}\",\"invited\":true,\"status\":\"sent\"}}",
-                 json_escape(&username)
-             );
-             Ok(routing::created_response(json))
+             Ok(routing::created_response(format!(
+                 "{{\"invite\":\"local-{}\",\"created_at\":{}}}",
+                 unix_timestamp(),
+                 unix_timestamp()
+             )))
          }
 
          ("POST", "/api/session") => {
-             let username = extract_json_string_field(body, "username").unwrap_or_default();
-             let _password = extract_json_string_field(body, "password").unwrap_or_default();
-             let json = format!(
-                 "{{\"username\":\"{}\",\"authenticated\":true,\"session_id\":\"sess-{}\"}}",
-                 json_escape(&username),
-                 unix_timestamp()
-             );
-             Ok(routing::created_response(json))
+             Ok(routing::bad_request_response("browser login sessions require SLSKR_API_TOKEN"))
          }
 
          ("POST", "/api/musicbrainz/release-radar/subscriptions") => {
-             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
-             let json = format!(
-                 "{{\"artist\":\"{}\",\"subscribed\":true,\"status\":\"monitoring\"}}",
-                 json_escape(&artist)
-             );
-             Ok(routing::created_response(json))
+             Ok(routing::created_response("{\"subscriptions\":[],\"created\":false}".to_owned()))
          }
 
          ("POST", "/api/musicbrainz/targets") => {
-             let targets = extract_json_string_array_field(body, "targets").unwrap_or_default();
-             let json = format!(
-                 "{{\"targets\":[],\"count\":{},\"created\":true}}",
-                 targets.len()
-             );
-             Ok(routing::created_response(json))
+             let target = extract_json_string_field(body, "target")
+                 .or_else(|| extract_json_string_field(body, "mbid"))
+                 .unwrap_or_default();
+             Ok(routing::created_response(format!(
+                 "{{\"target\":\"{}\",\"created\":{}}}",
+                 json_escape(&target),
+                 !target.is_empty()
+             )))
          }
 
          ("POST", path) if path.starts_with("/api/soulseek/interests") && !path.contains("/hated") => {
@@ -7025,27 +6906,23 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/wishlist/import/csv") => {
-             let json = "{\"imported\":true,\"count\":0,\"status\":\"processing\"}".to_string();
-             Ok(routing::accepted_response(json))
+             Ok(routing::created_response("{\"imported\":0,\"items\":[]}".to_owned()))
          }
 
          ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/backfill") => {
              let grant_id = path.split('/').nth(3).unwrap_or("unknown");
-             let json = format!(
-                 "{{\"grant_id\":\"{}\",\"backfilled\":true,\"status\":\"processing\"}}",
+             Ok(routing::accepted_response(format!(
+                 "{{\"grant_id\":\"{}\",\"backfilled\":0}}",
                  json_escape(grant_id)
-             );
-             Ok(routing::accepted_response(json))
+             )))
          }
 
          ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/token") => {
              let grant_id = path.split('/').nth(3).unwrap_or("unknown");
-             let json = format!(
-                 "{{\"grant_id\":\"{}\",\"token\":\"tok-{}\",\"created\":true}}",
-                 json_escape(grant_id),
-                 unix_timestamp()
-             );
-             Ok(routing::created_response(json))
+             Ok(routing::created_response(format!(
+                 "{{\"grant_id\":\"{}\",\"token\":null,\"created\":false}}",
+                 json_escape(grant_id)
+             )))
          }
         _ => {
             tracing::complete_request_span(404);
@@ -7826,11 +7703,36 @@ async fn find_shared_local_file(state: &AppState, filename: &str) -> Option<Shar
         let shares = state.shares.read().await;
         shares.local_paths.get(filename).cloned()
     }?;
-    let metadata = fs::metadata(&local_path).ok()?;
+    let metadata = shared_local_file_metadata(state, &local_path)?;
     metadata.is_file().then_some(SharedLocalFile {
         local_path,
         size: metadata.len(),
     })
+}
+
+fn shared_local_file_metadata(state: &AppState, local_path: &Path) -> Option<fs::Metadata> {
+    let symlink_metadata = fs::symlink_metadata(local_path).ok()?;
+    if symlink_metadata.file_type().is_symlink() && !state.config.share_settings.follow_symlinks {
+        return None;
+    }
+    let metadata = fs::metadata(local_path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    if !state.config.share_settings.roots.is_empty() {
+        let canonical_path = local_path.canonicalize().ok()?;
+        let inside_share_root = state
+            .config
+            .share_settings
+            .roots
+            .iter()
+            .filter_map(|root| root.canonicalize().ok())
+            .any(|root| canonical_path.starts_with(root));
+        if !inside_share_root {
+            return None;
+        }
+    }
+    Some(metadata)
 }
 
 fn search_target_static(target: &str) -> &'static str {
@@ -7852,9 +7754,10 @@ async fn prepare_transfer_local_path(
         if supplied_local_path.is_some() {
             return Err("local_path is not accepted for uploads; use a shared filename".to_owned());
         }
-        return Ok(find_shared_local_file(state, filename)
+        return find_shared_local_file(state, filename)
             .await
-            .map(|shared_file| shared_file.local_path.display().to_string()));
+            .map(|shared_file| Some(shared_file.local_path.display().to_string()))
+            .ok_or_else(|| "upload filename is not available from local shares".to_owned());
     }
 
     let path = safe_download_path(&state.config.state_dir, filename)?;
@@ -7917,6 +7820,13 @@ fn ensure_scoped_download_path(state_dir: &Path, local_path: &str) -> Result<Pat
         .map_err(|error| format!("download parent canonicalize failed: {error}"))?;
     if !canonical_parent.starts_with(&canonical_root) {
         return Err("download path escapes the download root".to_owned());
+    }
+    if path
+        .symlink_metadata()
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("download path must not be a symlink".to_owned());
     }
     Ok(path)
 }
@@ -9416,7 +9326,19 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             .check_rate_limit(remote_addr, username)
             .await;
 
-        if method == "GET" && path == "/api/events/ws" {
+        let websocket_route = routing::parse_route(method, path);
+        let websocket_path = if let Some(versioned_path) = websocket_route
+            .normalized_path
+            .strip_prefix("/api/v0/")
+            .or_else(|| websocket_route.normalized_path.strip_prefix("/api/v1/"))
+            .or_else(|| websocket_route.normalized_path.strip_prefix("/api/v2/"))
+        {
+            format!("/api/{}", versioned_path)
+        } else {
+            websocket_route.normalized_path.to_string()
+        };
+
+        if method == "GET" && websocket_path == "/api/events/ws" {
             if !allowed {
                 let response = routing::HttpResponse {
                     status: "429 Too Many Requests",
@@ -9433,9 +9355,13 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 break;
             }
 
-            if let Err(reason) =
-                routing::check_route_auth(&state.config, method, path, authorization, &sec_headers)
-            {
+            if let Err(reason) = routing::check_route_auth(
+                &state.config,
+                method,
+                &websocket_path,
+                authorization,
+                &sec_headers,
+            ) {
                 let response = match reason {
                     "unauthorized" => routing::unauthorized_response(),
                     "forbidden" => routing::forbidden_response("forbidden"),
@@ -9452,7 +9378,9 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 && upgrade == Some("websocket")
                 && websocket_version == Some("13");
 
-            if let Some(websocket_key) = websocket_key.filter(|_| is_upgrade) {
+            if let Some(websocket_key) =
+                websocket_key.filter(|key| is_upgrade && events_ws::valid_sec_websocket_key(key))
+            {
                 events_ws::write_upgrade_response(&mut writer, websocket_key).await?;
                 events_ws::stream_events(
                     &mut reader,
@@ -10929,6 +10857,14 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
     if !path.exists() {
         return Ok(Vec::new());
     }
+    let size = fs::metadata(path)
+        .map_err(|error| format!("transfer state metadata read failed: {error}"))?
+        .len();
+    if size > MAX_TRANSFER_STATE_BYTES {
+        return Err(format!(
+            "transfer state file is too large: {size} bytes, max is {MAX_TRANSFER_STATE_BYTES}"
+        ));
+    }
     let body =
         fs::read_to_string(path).map_err(|error| format!("transfer state read failed: {error}"))?;
     let mut state = serde_json::from_str::<TransferStateFile>(&body)
@@ -12003,6 +11939,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn webhook_registration_rejects_invalid_events_and_caps_count() {
+        let (state, _receiver) = test_state();
+
+        let invalid = super::route_http_request(
+            "POST",
+            "/api/webhooks",
+            None,
+            r#"{"url":"https://example.test/hook","events":"search.created,bogus"}"#,
+            &state,
+        )
+        .await
+        .expect("invalid webhook");
+        assert_eq!(invalid.status, "400 Bad Request");
+        assert_eq!(invalid.body, "{\"error\":\"invalid webhook event\"}");
+
+        for index in 0..super::webhooks::MAX_WEBHOOKS {
+            let body = format!(
+                r#"{{"url":"https://example.test/hook/{index}","events":"search.created"}}"#
+            );
+            let created = super::route_http_request("POST", "/api/webhooks", None, &body, &state)
+                .await
+                .expect("create webhook");
+            assert_eq!(created.status, "201 Created");
+        }
+
+        let capped = super::route_http_request(
+            "POST",
+            "/api/webhooks",
+            None,
+            r#"{"url":"https://example.test/hook/overflow","events":"search.created"}"#,
+            &state,
+        )
+        .await
+        .expect("capped webhook");
+        assert_eq!(capped.status, "400 Bad Request");
+        assert_eq!(capped.body, "{\"error\":\"webhook limit reached\"}");
+    }
+
+    #[tokio::test]
+    async fn webhook_patch_requires_active_boolean() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/webhooks",
+            None,
+            r#"{"url":"https://example.test/hook","events":"search.created"}"#,
+            &state,
+        )
+        .await
+        .expect("create webhook");
+        let id = serde_json::from_str::<serde_json::Value>(&created.body).expect("created json")
+            ["id"]
+            .as_str()
+            .expect("webhook id")
+            .to_owned();
+
+        let missing =
+            super::route_http_request("PATCH", &format!("/api/webhooks/{id}"), None, "{}", &state)
+                .await
+                .expect("missing active");
+        assert_eq!(missing.status, "400 Bad Request");
+        assert_eq!(missing.body, "{\"error\":\"active boolean is required\"}");
+
+        let patched = super::route_http_request(
+            "PATCH",
+            &format!("/api/webhooks/{id}"),
+            None,
+            r#"{"active":false}"#,
+            &state,
+        )
+        .await
+        .expect("patch webhook");
+        assert_eq!(patched.status, "200 OK");
+        assert!(patched.body.contains("\"active\":false"));
+    }
+
+    #[tokio::test]
     async fn search_api_supports_targeted_dispatch_commands() {
         let (state, mut receiver) = test_state();
 
@@ -12087,6 +12100,19 @@ mod tests {
             response.body,
             "{\"error\":\"username is required for user search\"}"
         );
+
+        let invalid_target = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"rare\",\"target\":\"bogus\"}",
+            &state,
+        )
+        .await
+        .expect("bad target search");
+
+        assert_eq!(invalid_target.status, "400 Bad Request");
+        assert_eq!(invalid_target.body, "{\"error\":\"invalid search target\"}");
     }
 
     #[tokio::test]
@@ -12120,6 +12146,15 @@ mod tests {
         assert!(response.body.contains("\"slot_free\":false"));
         assert!(response.body.contains("\"average_speed\":12"));
         assert!(response.body.contains("\"queue_length\":3"));
+
+        let responses =
+            super::route_http_request("GET", "/api/v0/searches/1/responses", None, "", &state)
+                .await
+                .expect("search responses");
+        assert_eq!(responses.status, "200 OK");
+        assert!(responses.body.contains("\"token\":1"));
+        assert!(responses.body.contains("\"count\":1"));
+        assert!(responses.body.contains("\"filename\":\"Remote/Song.mp3\""));
     }
 
     #[tokio::test]
@@ -12175,7 +12210,7 @@ mod tests {
             "POST",
             "/api/v0/transfers",
             None,
-            "{\"direction\":1,\"filename\":\"Remote/Song.flac\",\"size\":100}",
+            "{\"direction\":0,\"filename\":\"Remote/Song.flac\",\"size\":100}",
             &state,
         )
         .await
@@ -12349,9 +12384,73 @@ mod tests {
             .contains("local_path is not accepted for uploads"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn download_path_rejects_final_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-download-symlink-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let path =
+            super::safe_download_path(&state_dir, "Remote/Song.flac").expect("download path");
+        let parent = path.parent().expect("download parent");
+        std::fs::create_dir_all(parent).expect("download parent dir");
+        let target = state_dir.join("outside.flac");
+        std::fs::write(&target, [1_u8]).expect("target file");
+        symlink(&target, &path).expect("download symlink");
+
+        let error = super::ensure_scoped_download_path(&state_dir, &path.display().to_string())
+            .expect_err("symlink rejected");
+        assert!(error.contains("must not be a symlink"));
+
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn upload_share_lookup_rejects_swapped_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let (state, _receiver) = test_state();
+        let dir = std::env::temp_dir().join(format!(
+            "slskr-upload-symlink-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("test dir");
+        let shared_path = dir.join("shared.flac");
+        let target_path = dir.join("outside.flac");
+        std::fs::write(&shared_path, [1_u8, 2, 3, 4]).expect("shared file");
+        std::fs::write(&target_path, [5_u8, 6, 7, 8]).expect("target file");
+        add_test_share(&state, "Remote/Song.flac", &shared_path, 4).await;
+        std::fs::remove_file(&shared_path).expect("remove shared file");
+        symlink(&target_path, &shared_path).expect("swap symlink");
+
+        assert!(super::find_shared_local_file(&state, "Remote/Song.flac")
+            .await
+            .is_none());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn transfer_start_with_peer_requests_peer_address() {
         let (state, mut receiver) = test_state();
+        let path = std::env::temp_dir().join(format!(
+            "slskr-transfer-start-{}-upload.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, [1_u8, 2, 3, 4]).expect("write shared file");
+        add_test_share(&state, "Remote/Song.flac", &path, 4).await;
         let created = super::route_http_request(
             "POST",
             "/api/v0/transfers",
@@ -12378,6 +12477,7 @@ mod tests {
                 username: "friend".to_owned(),
             }
         );
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -13072,7 +13172,7 @@ mod tests {
 
         let stats_request = super::route_http_request(
             "POST",
-            "/api/v0/users/friend/stats/request",
+            "/api/v1/users/friend/stats/request",
             None,
             "",
             &state,
@@ -13107,7 +13207,7 @@ mod tests {
         assert!(listed.body.contains("\"directory_count\":7"));
 
         let unwatched =
-            super::route_http_request("DELETE", "/api/v0/users/friend/watch", None, "", &state)
+            super::route_http_request("DELETE", "/api/v2/users/friend/watch", None, "", &state)
                 .await
                 .expect("unwatch user");
         assert_eq!(unwatched.status, "200 OK");
@@ -13164,7 +13264,7 @@ mod tests {
             "POST",
             "/api/v0/browse-responses",
             None,
-            "{\"username\":\"friend\",\"complete\":false,\"entries\":[{\"filename\":\"Remote/Album/Song.flac\",\"size\":123}]}",
+            "{\"username\":\"friend\",\"complete\":false,\"entries\": [{\"filename\":\"Remote/Album/Song.flac\",\"size\":123}]}",
             &state,
         )
         .await
@@ -13707,6 +13807,18 @@ mod tests {
     }
 
     #[test]
+    fn list_limits_are_bounded_by_default() {
+        let default_filter = super::RecordListFilter::from_query(None);
+        assert_eq!(default_filter.limit, Some(super::DEFAULT_LIST_LIMIT));
+
+        let huge_filter = super::RecordListFilter::from_query(Some("limit=999999"));
+        assert_eq!(huge_filter.limit, Some(super::DEFAULT_LIST_LIMIT));
+
+        let zero_filter = super::CatalogFilter::from_query(Some("limit=0"));
+        assert_eq!(zero_filter.limit, Some(super::DEFAULT_LIST_LIMIT));
+    }
+
+    #[test]
     fn extracts_simple_json_string_fields() {
         assert_eq!(
             super::extract_json_string_field(r#"{"query":"artist \"song\""}"#, "query"),
@@ -13777,6 +13889,24 @@ mod tests {
             &headers,
             "127.0.0.1:5030"
         ));
+
+        let headers = super::RequestSecurityHeaders {
+            host: Some("[::1]:5030".to_owned()),
+            origin: Some("http://[::1]:5030".to_owned()),
+            referer: None,
+            cookie: None,
+        };
+        assert!(super::request_origin_matches_host(&headers, "[::1]:5030"));
+    }
+
+    #[test]
+    fn cors_headers_reject_control_characters() {
+        assert_eq!(
+            super::cors_headers(Some("https://example.test\r\nX-Bad: yes"), &["*"]),
+            ""
+        );
+        let headers = super::cors_headers(Some("https://example.test"), &["*"]);
+        assert!(headers.contains("Access-Control-Allow-Origin: https://example.test"));
     }
 
     #[tokio::test]
@@ -14216,6 +14346,30 @@ mod tests {
         assert_eq!(entry.reason.as_deref(), Some("resumed after restart"));
         assert_eq!(reloaded.next_id, 2);
         assert_eq!(reloaded.next_token, 2);
+
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn transfer_state_loader_rejects_oversized_state_file() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-transfer-state-size-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&state_dir).expect("state dir");
+        let state_path = super::transfer_state_path(&state_dir);
+        std::fs::write(
+            &state_path,
+            vec![b' '; (super::MAX_TRANSFER_STATE_BYTES as usize) + 1],
+        )
+        .expect("oversized state");
+
+        let error = super::load_transfer_state(&state_path, 100).expect_err("oversized state");
+        assert!(error.contains("transfer state file is too large"));
 
         let _ = std::fs::remove_dir_all(state_dir);
     }

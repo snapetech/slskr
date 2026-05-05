@@ -87,9 +87,22 @@ async function runCommand(
   cwd: string,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const resolvedCommand =
+      command === 'npm' && process.env.npm_execpath
+        ? process.execPath
+        : command;
+    const resolvedArgs =
+      command === 'npm' && process.env.npm_execpath
+        ? [process.env.npm_execpath, ...args]
+        : args;
+    const child = spawn(resolvedCommand, resolvedArgs, {
       cwd,
-      env: process.env,
+      env: {
+        ...process.env,
+        PATH:
+          process.env.PATH ||
+          '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+      },
       stdio: 'inherit',
     });
 
@@ -99,7 +112,9 @@ async function runCommand(
         resolve();
       } else {
         reject(
-          new Error(`${command} ${args.join(' ')} exited with code ${code}`),
+          new Error(
+            `${command} ${args.join(' ')} exited with code ${code}`,
+          ),
         );
       }
     });
@@ -186,15 +201,38 @@ export class SlskdnNode {
    * Get the repository root directory.
    */
   private getRepoRoot(): string {
-    // process.cwd() is src/web/e2e/ when running tests, so go up 3 levels
-    // But we need to be more robust - use __dirname if available, or calculate from cwd
-    if (typeof __dirname !== 'undefined') {
-      // Running as compiled JS
-      return path.join(__dirname, '..', '..', '..', '..');
-    } else {
-      // Running as TS - process.cwd() is src/web/e2e/
-      return path.resolve(process.cwd(), '..', '..', '..');
+    const configured =
+      process.env.SLSKDN_E2E_REPO_ROOT || process.env.SLSKR_SLSKDN_REPO;
+    if (configured) {
+      return path.resolve(configured);
     }
+
+    const currentRepo = path.resolve(process.cwd(), '..');
+    const adjacentSlskdn = path.resolve(currentRepo, '..', 'slskdn');
+    return adjacentSlskdn;
+  }
+
+  private async getWebRoot(repoRoot: string): Promise<string> {
+    const configured = process.env.SLSKR_E2E_WEB_ROOT;
+    const candidates = [
+      configured ? path.resolve(configured) : null,
+      process.cwd(),
+      path.join(repoRoot, 'src', 'web'),
+      path.join(repoRoot, 'web'),
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    for (const candidate of candidates) {
+      try {
+        await fs.access(path.join(candidate, 'package.json'));
+        return candidate;
+      } catch {
+        // Try the next layout.
+      }
+    }
+
+    throw new Error(
+      `Web root not found. Tried: ${candidates.join(', ')}`,
+    );
   }
 
   private async getTargetFramework(repoRoot: string): Promise<string> {
@@ -252,7 +290,8 @@ export class SlskdnNode {
   }
 
   private async syncWebUi(repoRoot: string): Promise<void> {
-    const webBuildPath = path.join(repoRoot, 'src', 'web', 'build');
+    const webRoot = await this.getWebRoot(repoRoot);
+    const webBuildPath = path.join(webRoot, 'build');
 
     try {
       await fs.access(webBuildPath);
@@ -264,7 +303,7 @@ export class SlskdnNode {
       await fs.access(webBuildPath);
     } catch {
       throw new Error(
-        'Web build not found at src/web/build. Run `npm run build` first.',
+        `Web build not found at ${webBuildPath}. Run npm run build first.`,
       );
     }
 
@@ -287,7 +326,7 @@ export class SlskdnNode {
     if (!SlskdnNode.webBuildPromise) {
       SlskdnNode.webBuildPromise = (async () => {
         try {
-          const webRoot = path.join(repoRoot, 'src', 'web');
+          const webRoot = await this.getWebRoot(repoRoot);
           const nodeModulesPath = path.join(webRoot, 'node_modules');
 
           try {

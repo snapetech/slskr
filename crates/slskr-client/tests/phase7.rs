@@ -3,8 +3,10 @@ use slskr_client::{
     filters::ExcludedPhraseFilter,
     share_payload::{
         compress_zlib_payload, decompress_peer_share_payload, decompress_zlib_payload,
+        decompress_zlib_payload_with_limit,
     },
     social::{PrivateMessageInbox, RoomState, UserWatchState},
+    ClientError,
 };
 use slskr_protocol::{
     distributed::DistributedMessage,
@@ -32,6 +34,14 @@ fn zlib_share_payload_helpers_round_trip_peer_payloads() {
         raw
     );
     assert!(decompress_peer_share_payload(&PeerMessage::GetShareFileList).is_none());
+}
+
+#[test]
+fn zlib_share_payload_decompression_is_bounded() {
+    let raw = vec![b'x'; 1024];
+    let compressed = compress_zlib_payload(&raw).unwrap();
+    let error = decompress_zlib_payload_with_limit(&compressed, 128).unwrap_err();
+    assert!(matches!(error, ClientError::PayloadTooLarge { max: 128 }));
 }
 
 #[test]

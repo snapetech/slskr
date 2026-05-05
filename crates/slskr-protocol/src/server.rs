@@ -1366,7 +1366,7 @@ fn encode_targeted_search_request(
 
 fn decode_string_vec(reader: &mut Reader<'_>) -> Result<Vec<String>, DecodeError> {
     let count = reader.read_u32_le()? as usize;
-    let mut values = Vec::with_capacity(count);
+    let mut values = Vec::new();
     for _ in 0..count {
         values.push(reader.read_string()?);
     }
@@ -1436,7 +1436,7 @@ fn encode_room_entries(writer: &mut Writer, entries: &[RoomListEntry]) -> Result
 
 fn decode_possible_parents(reader: &mut Reader<'_>) -> Result<Vec<PossibleParent>, DecodeError> {
     let count = reader.read_u32_le()? as usize;
-    let mut parents = Vec::with_capacity(count);
+    let mut parents = Vec::new();
     for _ in 0..count {
         parents.push(PossibleParent {
             username: reader.read_string()?,

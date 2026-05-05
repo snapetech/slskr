@@ -130,3 +130,11 @@ pub fn conflict_response(message: &str) -> HttpResponse {
         body: format!("{{\"error\":\"{}\"}}", crate::config::json_escape(message)),
     }
 }
+
+pub fn not_implemented_response(message: &str) -> HttpResponse {
+    HttpResponse {
+        status: "501 Not Implemented",
+        content_type: "application/json",
+        body: format!("{{\"error\":\"{}\"}}", crate::config::json_escape(message)),
+    }
+}

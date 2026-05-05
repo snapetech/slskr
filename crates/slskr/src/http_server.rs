@@ -142,8 +142,14 @@ pub async fn read_http_request<R: AsyncBufRead + Unpin>(
     let method = parts[0].to_string();
     let request_target = parts[1];
     let http_version = parts[2];
+    if !is_http_token(&method) {
+        return Err("invalid HTTP method".into());
+    }
     if !matches!(http_version, "HTTP/1.0" | "HTTP/1.1") {
         return Err("unsupported HTTP version".into());
+    }
+    if !(request_target.starts_with('/') || request_target == "*") {
+        return Err("unsupported request target".into());
     }
 
     // Split path and query
@@ -183,43 +189,53 @@ pub async fn read_http_request<R: AsyncBufRead + Unpin>(
             break;
         }
 
-        if let Some(colon_idx) = header_line.find(':') {
-            let name = header_line[..colon_idx].trim().to_lowercase();
-            let value = header_line[colon_idx + 1..].trim();
+        if header_line.starts_with([' ', '\t']) {
+            return Err("obsolete folded headers are not supported".to_string());
+        }
+        let Some(colon_idx) = header_line.find(':') else {
+            return Err("malformed HTTP header".to_string());
+        };
+        let name = header_line[..colon_idx].trim().to_lowercase();
+        let value = header_line[colon_idx + 1..].trim();
+        if !is_http_token(&name) {
+            return Err("invalid HTTP header name".to_string());
+        }
+        if value.chars().any(|ch| ch.is_control() && ch != '\t') {
+            return Err("invalid HTTP header value".to_string());
+        }
 
-            match name.as_str() {
-                "host" => headers.host = Some(value.to_string()),
-                "origin" => headers.origin = Some(value.to_string()),
-                "referer" => headers.referer = Some(value.to_string()),
-                "cookie" => headers.cookie = Some(value.to_string()),
-                "content-type" => headers.content_type = Some(value.to_string()),
-                "content-length" => {
-                    if saw_content_length {
-                        return Err("duplicate Content-Length header".to_string());
-                    }
-                    if value.starts_with(['+', '-']) || value.contains(',') {
-                        return Err("invalid Content-Length header".to_string());
-                    }
-                    content_length = value
-                        .parse()
-                        .map_err(|_| "invalid Content-Length header".to_string())?;
-                    headers.content_length = Some(content_length);
-                    saw_content_length = true;
+        match name.as_str() {
+            "host" => headers.host = Some(value.to_string()),
+            "origin" => headers.origin = Some(value.to_string()),
+            "referer" => headers.referer = Some(value.to_string()),
+            "cookie" => headers.cookie = Some(value.to_string()),
+            "content-type" => headers.content_type = Some(value.to_string()),
+            "content-length" => {
+                if saw_content_length {
+                    return Err("duplicate Content-Length header".to_string());
                 }
-                "transfer-encoding" => {
-                    headers.transfer_encoding = Some(value.to_lowercase());
-                    saw_transfer_encoding = true;
+                if value.starts_with(['+', '-']) || value.contains(',') {
+                    return Err("invalid Content-Length header".to_string());
                 }
-                "authorization" => headers.authorization = Some(value.to_string()),
-                "upgrade" => headers.upgrade = Some(value.to_lowercase()),
-                "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
-                "sec-websocket-version" => {
-                    headers.sec_websocket_version = Some(value.to_string());
-                }
-                "connection" => headers.connection = value.to_lowercase(),
-                "user-agent" => headers.user_agent = Some(value.to_string()),
-                _ => {}
+                content_length = value
+                    .parse()
+                    .map_err(|_| "invalid Content-Length header".to_string())?;
+                headers.content_length = Some(content_length);
+                saw_content_length = true;
             }
+            "transfer-encoding" => {
+                headers.transfer_encoding = Some(value.to_lowercase());
+                saw_transfer_encoding = true;
+            }
+            "authorization" => headers.authorization = Some(value.to_string()),
+            "upgrade" => headers.upgrade = Some(value.to_lowercase()),
+            "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
+            "sec-websocket-version" => {
+                headers.sec_websocket_version = Some(value.to_string());
+            }
+            "connection" => headers.connection = value.to_lowercase(),
+            "user-agent" => headers.user_agent = Some(value.to_string()),
+            _ => {}
         }
     }
 
@@ -272,6 +288,32 @@ fn header_has_token(value: &str, token: &str) -> bool {
     value
         .split(',')
         .any(|part| part.trim().eq_ignore_ascii_case(token))
+}
+
+fn is_http_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+                    | b'0'..=b'9'
+                    | b'A'..=b'Z'
+                    | b'a'..=b'z'
+            )
+        })
 }
 
 async fn read_limited_line<R: AsyncBufRead + Unpin>(
@@ -553,6 +595,45 @@ mod tests {
         let mut reader = BufReader::new(server);
         let err = read_http_request(&mut reader).await.unwrap_err();
         assert!(err.contains("HTTP version"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_absolute_request_target_rejected() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET http://example.test/api/health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut reader = BufReader::new(server);
+        let err = read_http_request(&mut reader).await.unwrap_err();
+        assert!(err.contains("request target"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_malformed_header_rejected() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost localhost\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut reader = BufReader::new(server);
+        let err = read_http_request(&mut reader).await.unwrap_err();
+        assert!(err.contains("malformed HTTP header"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_folded_header_rejected() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n Content-Length: 5\r\n\r\nhello")
+            .await
+            .unwrap();
+
+        let mut reader = BufReader::new(server);
+        let err = read_http_request(&mut reader).await.unwrap_err();
+        assert!(err.contains("folded headers"), "{err}");
     }
 
     #[tokio::test]

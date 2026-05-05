@@ -82,6 +82,20 @@ navSystem: 'nav-system',
 
   navUploads: 'nav-uploads',
 
+  playerCollapse: 'player-collapse',
+
+  playerExpand: 'player-expand',
+
+  playerOpenQueue: 'player-open-queue',
+
+  playerToggleEq: 'player-toggle-eq',
+
+  playerToggleMute: 'player-toggle-mute',
+
+  playerTogglePlayback: 'player-toggle-playback',
+
+  playerVisualTile: 'player-visual-tile',
+
   collectionItems: 'collection-items',
 
   navUsers: 'nav-users',

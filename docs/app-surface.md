@@ -139,7 +139,7 @@ Initial configuration sources:
 - `SLSKR_API_TOKEN` for HTTP API auth. If set, protected API routes accept either `Authorization: Bearer <token>` or the dashboard's same-site `slskr.session` cookie.
 - `SLSKR_API_RATE_LIMIT_ANONYMOUS` and `SLSKR_API_RATE_LIMIT_AUTHENTICATED` tune per-window HTTP API request limits; defaults are `1000` and `5000`.
 - `SLSKR_AUTH_DISABLED` to explicitly disable HTTP API auth. Loopback-only binds default to disabled when no token is configured; non-loopback binds require a token unless this is set.
-- `SLSKR_PERSISTENCE_ENABLED` enables the default-off SQLite persistence path. Search create/list hydration is wired; transfer/message/room persistence remains incomplete.
+- `SLSKR_PERSISTENCE_ENABLED` enables the default-off SQLite persistence path. Search create/list hydration is wired; transfer projection state is also restart-safe through `transfer-state.json`. Message and room projection persistence remain event/projection work items.
 - `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold
 - gitignored `.secrets/` files for local lab credentials
 - OpenBao paths documented under `../k3s/slskr/README.md`
@@ -177,15 +177,15 @@ Target distribution shape:
 - replace the current TSV share cache with the durable app database once the database choice is made
 - finish `/api/v0/searches` parity beyond the current public-network dispatch, local share-backed projection, peer-response projection, and external response ingestion
 - finish `/api/v0/users` browse parity beyond direct/indirect peer `GetShareFileList`/`FolderContentsRequest` execution, peer-address command hook, cache projection, failed/partial-state projection, and flattened browse-result ingestion
-- finish `/api/v0/messages` and `/api/v0/rooms` parity beyond the current server command/event projection
+- finish durable `/api/v0/messages` and `/api/v0/rooms` persistence beyond the current server command/event projection
 - expand `/api/v0/files/:root` beyond flat virtual files if folder/directory views become necessary
 - expand `/api/v0/stats` from projection counts into durable health metrics once the database/event-log layout lands
 - expand `/api/v0/metrics` with durable counters and process/runtime gauges once the database/event-log layout lands
 - expand `/api/v0/telemetry` with process/runtime, database, and long-running task health once those subsystems land
 - expand event coverage and topic mapping for `/api/events/ws` as the web UI moves more views to live updates
-- broaden `/api/v0/transfers` real transfer execution with richer production policy; current implementation has reloadable projection state in `transfer-state.json`, restart-safe queued resume records for interrupted active transfers, local-path file metadata execution, configurable max-active transfer policy, inbound/outbound transfer allow switches, peer-message transfer negotiation, direct plain/obfuscated `F` streaming/resume, chunked progress events, requester-side indirect `F` fallback, and inbound shared-file serving over direct or pierced `F` sockets
+- broaden `/api/v0/transfers` real transfer execution with richer production policy; current implementation has reloadable projection state in `transfer-state.json`, restart-safe queued resume records for interrupted active transfers, local-path file metadata execution, configurable max-active transfer policy, inbound/outbound transfer allow switches, peer-message transfer negotiation, direct plain/obfuscated `F` streaming/resume, chunked progress events, requester-side indirect `F` fallback, inbound shared-file serving over direct or pierced `F` sockets, and live queued payload proof against adjacent daemons
 - add durable config and state
 - expand API route tests as new `/api/v0/*` resources land
-- add web UI build strategy
+- keep the Playwright/slskdN harness build strategy current as repo layouts move
 - migrate scripts fully to `slskr` commands
 - remove or hide the legacy `slskr-cli` binary before public release

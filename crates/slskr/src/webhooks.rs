@@ -12,6 +12,10 @@ use std::fmt;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
+const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
+pub const MAX_WEBHOOKS: usize = 64;
+
 /// Webhook event types
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -239,10 +243,13 @@ impl WebhookManager {
     }
 
     /// Register webhook
-    pub fn register(&mut self, webhook: Webhook) -> String {
+    pub fn register(&mut self, webhook: Webhook) -> Result<String, ()> {
+        if self.webhooks.len() >= MAX_WEBHOOKS {
+            return Err(());
+        }
         let id = webhook.id.clone();
         self.webhooks.insert(id.clone(), webhook);
-        id
+        Ok(id)
     }
 
     /// Unregister webhook
@@ -365,21 +372,26 @@ impl WebhookDispatcher {
         }
         let client = client_builder.build()?;
 
+        let timeout = timeout_secs.clamp(WEBHOOK_MIN_TIMEOUT_SECONDS, WEBHOOK_MAX_TIMEOUT_SECONDS);
         let response = client
             .post(url)
             .header("X-Webhook-Signature", sig.as_header())
             .header("X-Webhook-Event", "webhook")
             .header("Content-Type", "application/json")
             .body(payload.to_string())
-            .timeout(std::time::Duration::from_secs(timeout_secs as u64))
+            .timeout(std::time::Duration::from_secs(timeout as u64))
             .send()
             .await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("webhook delivery failed with status {status}").into());
+        }
 
         // Log successful delivery
         eprintln!(
             "[WEBHOOK] Delivered to: {} (status: {}, payload: {} bytes)",
             sanitized_webhook_url_for_log(url),
-            response.status(),
+            status,
             payload.len()
         );
 
@@ -596,7 +608,7 @@ mod tests {
         );
 
         let id = webhook.id.clone();
-        manager.register(webhook);
+        manager.register(webhook).expect("register webhook");
 
         assert!(manager.get(&id).is_some());
         assert_eq!(manager.list().len(), 1);

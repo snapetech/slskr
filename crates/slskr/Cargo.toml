@@ -17,10 +17,11 @@ slskr-client = { version = "0.0.0", path = "../slskr-client" }
 slskr-cli = { version = "0.0.0", path = "../slskr-cli" }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time", "signal"] }
 toml = "0.8"
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }
+sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio", "chrono", "uuid"] }
+sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled", "chrono", "uuid"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
@@ -28,6 +29,7 @@ rand = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio-tungstenite = "0.21"
+base64 = "0.22"
 
 [dev-dependencies]
 futures-util = "0.3"

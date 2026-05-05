@@ -45,6 +45,8 @@ pub enum ClientError {
     },
     #[error("frame length {length} exceeds configured maximum {max}")]
     FrameTooLarge { length: usize, max: usize },
+    #[error("decompressed payload length exceeds configured maximum {max}")]
+    PayloadTooLarge { max: usize },
 }
 
 impl ClientError {

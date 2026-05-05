@@ -8,8 +8,17 @@ use tokio::{
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 
 use crate::{EventRecord, EventStore};
+use base64::{engine::general_purpose::STANDARD, Engine};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const WEBSOCKET_KEY_DECODED_LEN: usize = 16;
+
+pub fn valid_sec_websocket_key(sec_websocket_key: &str) -> bool {
+    let Ok(decoded) = STANDARD.decode(sec_websocket_key.as_bytes()) else {
+        return false;
+    };
+    decoded.len() == WEBSOCKET_KEY_DECODED_LEN
+}
 
 pub async fn write_upgrade_response<W>(
     writer: &mut W,
@@ -254,6 +263,13 @@ mod tests {
 
     use super::*;
     use crate::{http_server, EventStore};
+
+    #[test]
+    fn websocket_key_must_be_base64_nonce() {
+        assert!(valid_sec_websocket_key("dGhlIHNhbXBsZSBub25jZQ=="));
+        assert!(!valid_sec_websocket_key("not-a-websocket-key"));
+        assert!(!valid_sec_websocket_key("c2hvcnQ="));
+    }
 
     #[tokio::test]
     async fn websocket_client_receives_broadcast_event() {

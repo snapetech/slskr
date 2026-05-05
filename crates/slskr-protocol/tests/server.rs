@@ -369,6 +369,13 @@ fn private_message_and_error_messages_round_trip() {
 }
 
 #[test]
+fn possible_parents_rejects_untrusted_count_without_preallocating() {
+    let frame = MessageFrame::new(ServerCode::PossibleParents.as_u32(), u32::MAX.to_le_bytes());
+    let decoded = ServerMessage::decode(frame, Direction::ServerToClient);
+    assert!(decoded.is_err());
+}
+
+#[test]
 fn unknown_server_codes_preserve_payload() {
     let frame = MessageFrame::new(4, [1, 2, 3]);
 

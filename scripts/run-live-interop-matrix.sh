@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 env_file="${SLSKR_LIVE_ENV_FILE:-$repo_root/.env}"
 extra_env_file="${SLSKR_LIVE_EXTRA_ENV_FILE:-$repo_root/.secrets/generated-soulseek-accounts.env}"
+pool_file="${SLSKR_PROTON_CREDENTIAL_POOL_FILE:-$repo_root/.secrets/proton-credential-pool.env}"
 output_dir="${SLSKR_INTEROP_OUTPUT_DIR:-$repo_root/target/live-interop}"
 mkdir -p "$output_dir"
 
@@ -17,7 +18,29 @@ source "$env_file"
 if [[ -f "$extra_env_file" ]]; then
   source "$extra_env_file"
 fi
+if [[ -f "$pool_file" ]]; then
+  source "$pool_file"
+fi
 set +a
+
+live_vpn_enabled="${SLSKR_LIVE_VPN_ENABLED:-0}"
+live_slsk_address="${SLSKR_LIVE_SLSK_ADDRESS:-}"
+live_slsk_port="${SLSKR_LIVE_SLSK_PORT:-2271}"
+private_message_sender_index="${SLSKR_PRIVATE_MESSAGE_SENDER_INDEX:-5}"
+private_message_receiver_index="${SLSKR_PRIVATE_MESSAGE_RECEIVER_INDEX:-6}"
+room_message_account_index="${SLSKR_ROOM_MESSAGE_ACCOUNT_INDEX:-6}"
+local_peer_a_index="${SLSKR_LOCAL_PEER_A_INDEX:-5}"
+local_peer_b_index="${SLSKR_LOCAL_PEER_B_INDEX:-6}"
+if [[ -n "${SLSKR_LIVE_LOGIN_INDEXES:-}" ]]; then
+  live_login_indexes="$SLSKR_LIVE_LOGIN_INDEXES"
+elif [[ "$live_vpn_enabled" == "1" ]]; then
+  live_login_indexes="5 6 7 8"
+else
+  live_login_indexes="1 2 3 4"
+fi
+if [[ -z "$live_slsk_address" ]]; then
+  live_slsk_address="$(getent ahostsv4 vps.slsknet.org | awk 'NR == 1 { print $1 }' || true)"
+fi
 
 require_var() {
   local name="$1"
@@ -37,6 +60,53 @@ run_sanitized() {
   local stderr_file="$2"
   shift 2
   "$@" >"$stdout_file" 2>"$stderr_file"
+}
+
+resolve_proton_config() {
+  local label="$1"
+  local var_name="SLSKR_PROTON_CONFIG_${label}"
+  local path="${!var_name:-}"
+  if [[ -z "$path" ]]; then
+    echo "unknown Proton config label: $label" >&2
+    return 1
+  fi
+  if [[ "$path" != /* ]]; then
+    path="$repo_root/$path"
+  fi
+  if [[ ! -f "$path" ]]; then
+    echo "missing Proton config for label $label" >&2
+    return 1
+  fi
+  printf '%s' "$path"
+}
+
+run_live_command() {
+  local index="$1"
+  shift
+  local command=(env CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}")
+  if [[ -n "$live_slsk_address" ]]; then
+    command+=(SLSK_SERVER="$live_slsk_address:$live_slsk_port")
+  fi
+  command+=("$@")
+
+  if [[ "$live_vpn_enabled" == "1" ]]; then
+    local label_var="SLSKR_LIVE_VPN_LABEL_${index}"
+    local label="${!label_var:-p${index}}"
+    local config
+    config="$(resolve_proton_config "$label")" || return 1
+    command=(
+      env
+      SLSKR_NETNS_HOST_IP="${SLSKR_LIVE_NETNS_HOST_PREFIX:-10.246}.${index}.1"
+      SLSKR_NETNS_IP="${SLSKR_LIVE_NETNS_HOST_PREFIX:-10.246}.${index}.2"
+      SLSKR_NETNS_SUBNET="${SLSKR_LIVE_NETNS_HOST_PREFIX:-10.246}.${index}.0/24"
+      "$repo_root/scripts/run-in-proton-wg-netns.sh"
+      "lv${index}"
+      "$config"
+      "${command[@]}"
+    )
+  fi
+
+  "${command[@]}"
 }
 
 summarize_output() {
@@ -62,7 +132,7 @@ run_account_login() {
   stderr_file="$(mktemp)"
 
   set +e
-  run_sanitized "$stdout_file" "$stderr_file" env SLSK_USERNAME="$username" SLSK_PASSWORD="$password" cargo run -q -p slskr -- login smoke
+  run_sanitized "$stdout_file" "$stderr_file" run_live_command "$index" env SLSK_USERNAME="$username" SLSK_PASSWORD="$password" cargo run -q -p slskr -- login smoke
   status=$?
   set -e
 
@@ -77,7 +147,7 @@ run_account_login() {
   fi
 }
 
-for i in 1 2 3 4; do
+for i in $live_login_indexes; do
   run_account_login "$i"
 done
 
@@ -85,8 +155,18 @@ pair_log="$output_dir/slskr-local-peer-smoke.tsv"
 printf 'timestamp\tcheck\tstatus\tdetail\n' >"$pair_log"
 pair_stdout="$(mktemp)"
 pair_stderr="$(mktemp)"
+local_peer_a_user_var="SLSKR_TEST_${local_peer_a_index}_USERNAME"
+local_peer_a_pass_var="SLSKR_TEST_${local_peer_a_index}_PASSWORD"
+local_peer_b_user_var="SLSKR_TEST_${local_peer_b_index}_USERNAME"
+local_peer_b_pass_var="SLSKR_TEST_${local_peer_b_index}_PASSWORD"
 set +e
-run_sanitized "$pair_stdout" "$pair_stderr" env SLSKR_INDIRECT_HOST_OVERRIDE="${SLSKR_INDIRECT_HOST_OVERRIDE:-127.0.0.1}" cargo run -q -p slskr -- smoke local-peer
+run_sanitized "$pair_stdout" "$pair_stderr" run_live_command "$local_peer_a_index" env \
+  SLSKR_A_USERNAME="${!local_peer_a_user_var}" \
+  SLSKR_A_PASSWORD="${!local_peer_a_pass_var}" \
+  SLSKR_B_USERNAME="${!local_peer_b_user_var}" \
+  SLSKR_B_PASSWORD="${!local_peer_b_pass_var}" \
+  SLSKR_INDIRECT_HOST_OVERRIDE="${SLSKR_INDIRECT_HOST_OVERRIDE:-127.0.0.1}" \
+  cargo run -q -p slskr -- smoke local-peer
 pair_status=$?
 set -e
 pair_detail="$(summarize_output "$pair_stdout" "$pair_stderr")"
@@ -100,14 +180,18 @@ fi
 
 social_log="$output_dir/slskr-social-smoke.tsv"
 printf 'timestamp\tcheck\tstatus\tdetail\n' >"$social_log"
+private_sender_user_var="SLSKR_TEST_${private_message_sender_index}_USERNAME"
+private_sender_pass_var="SLSKR_TEST_${private_message_sender_index}_PASSWORD"
+private_receiver_user_var="SLSKR_TEST_${private_message_receiver_index}_USERNAME"
+private_receiver_pass_var="SLSKR_TEST_${private_message_receiver_index}_PASSWORD"
 social_stdout="$(mktemp)"
 social_stderr="$(mktemp)"
 set +e
-run_sanitized "$social_stdout" "$social_stderr" env \
-  SLSK_USERNAME="$SLSKR_TEST_1_USERNAME" \
-  SLSK_PASSWORD="$SLSKR_TEST_1_PASSWORD" \
-  SLSK_MESSAGE_USERNAME="$SLSKR_TEST_2_USERNAME" \
-  SLSK_MESSAGE_PASSWORD="$SLSKR_TEST_2_PASSWORD" \
+run_sanitized "$social_stdout" "$social_stderr" run_live_command "$private_message_sender_index" env \
+  SLSK_USERNAME="${!private_sender_user_var}" \
+  SLSK_PASSWORD="${!private_sender_pass_var}" \
+  SLSK_MESSAGE_USERNAME="${!private_receiver_user_var}" \
+  SLSK_MESSAGE_PASSWORD="${!private_receiver_pass_var}" \
   cargo run -q -p slskr -- probe private-message
 social_status=$?
 set -e
@@ -122,10 +206,12 @@ fi
 
 room_stdout="$(mktemp)"
 room_stderr="$(mktemp)"
+room_user_var="SLSKR_TEST_${room_message_account_index}_USERNAME"
+room_pass_var="SLSKR_TEST_${room_message_account_index}_PASSWORD"
 set +e
-run_sanitized "$room_stdout" "$room_stderr" env \
-  SLSK_USERNAME="$SLSKR_TEST_1_USERNAME" \
-  SLSK_PASSWORD="$SLSKR_TEST_1_PASSWORD" \
+run_sanitized "$room_stdout" "$room_stderr" run_live_command "$room_message_account_index" env \
+  SLSK_USERNAME="${!room_user_var}" \
+  SLSK_PASSWORD="${!room_pass_var}" \
   cargo run -q -p slskr -- probe room-message
 room_status=$?
 set -e
