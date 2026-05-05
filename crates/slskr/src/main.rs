@@ -7115,26 +7115,12 @@ fn capabilities_negotiate_response(body: &str) -> HttpResponse {
         }
     }
 
-    let accepted_json = accepted
-        .iter()
-        .map(|s| format!("\"{}\"", s))
-        .collect::<Vec<_>>()
-        .join(",");
-    let unsupported_json = unsupported
-        .iter()
-        .map(|s| format!("\"{}\"", s))
-        .collect::<Vec<_>>()
-        .join(",");
-    let server_caps_json = server_capabilities
-        .iter()
-        .map(|s| format!("\"{}\"", s))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    let response_body = format!(
-        "{{\"accepted\":[{}],\"unsupported\":[{}],\"server_capabilities\":[{}]}}",
-        accepted_json, unsupported_json, server_caps_json
-    );
+    let response_body = serde_json::json!({
+        "accepted": accepted,
+        "unsupported": unsupported,
+        "server_capabilities": server_capabilities,
+    })
+    .to_string();
 
     HttpResponse {
         status: "200 OK",
@@ -8763,10 +8749,10 @@ async fn upload_file_transfer_with_connection(
             return Err("local file exceeds expected transfer size".to_owned());
         }
     }
-    let bytes = fs::read(&shared_file.local_path)
-        .map_err(|error| format!("local file read failed: {error}"))?;
-    let size = u64::try_from(bytes.len()).map_err(|_| "local file is too large".to_owned())?;
-    let offset = upload_file_with_progress(state, transfer, connection, &bytes, size).await?;
+    let size = metadata.len();
+    let mut file = fs::File::open(&shared_file.local_path)
+        .map_err(|error| format!("local file open failed: {error}"))?;
+    let offset = upload_file_with_progress(state, transfer, connection, &mut file, size).await?;
     Ok((size.saturating_sub(offset), size))
 }
 
@@ -8774,9 +8760,11 @@ async fn upload_file_with_progress(
     state: &AppState,
     transfer: &TransferEntry,
     connection: &mut slskr_client::file_transfer::FileTransferConnection<TcpStream>,
-    bytes: &[u8],
+    file: &mut fs::File,
     size: u64,
 ) -> Result<u64, String> {
+    use std::io::{Read, Seek, SeekFrom};
+
     time::timeout(
         state.config.peer_response_timeout,
         connection.send_token(transfer.token),
@@ -8793,14 +8781,24 @@ async fn upload_file_with_progress(
     .map_err(|error| format!("file upload offset receive failed: {error}"))?;
     let start = usize::try_from(offset)
         .map_err(|_| format!("transfer offset {offset} exceeds local file size {size}"))?;
-    if start > bytes.len() {
+    if u64::try_from(start).unwrap_or(u64::MAX) > size {
         return Err(format!(
             "transfer offset {offset} exceeds local file size {size}"
         ));
     }
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|error| format!("local file seek failed: {error}"))?;
 
     let mut sent = 0_u64;
-    for chunk in bytes[start..].chunks(TRANSFER_PROGRESS_CHUNK_BYTES) {
+    let mut buffer = vec![0_u8; TRANSFER_PROGRESS_CHUNK_BYTES];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("local file read failed: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
         time::timeout(
             state.config.peer_response_timeout,
             connection.write_chunk(chunk),
@@ -9428,6 +9426,12 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 let _ = http_server::write_http_response(&mut writer, &response, false, "").await;
                 break;
             }
+            let fallback_host = state.config.http_bind.to_string();
+            if !request_origin_matches_host(&sec_headers, &fallback_host) {
+                let response = routing::forbidden_response("websocket origin rejected");
+                let _ = http_server::write_http_response(&mut writer, &response, false, "").await;
+                break;
+            }
 
             if let Err(reason) =
                 routing::check_route_auth(&state.config, method, path, authorization, &sec_headers)
@@ -9444,7 +9448,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             let websocket_key = req.headers.sec_websocket_key.as_deref();
             let websocket_version = req.headers.sec_websocket_version.as_deref();
             let upgrade = req.headers.upgrade.as_deref();
-            let is_upgrade = req.headers.connection.contains("upgrade")
+            let is_upgrade = req.headers.connection_has_token("upgrade")
                 && upgrade == Some("websocket")
                 && websocket_version == Some("13");
 
@@ -13738,6 +13742,41 @@ mod tests {
             super::extract_json_bool_field(r#"{"slot_free":false}"#, "slot_free"),
             Some(false)
         );
+    }
+
+    #[test]
+    fn capabilities_negotiation_escapes_unsupported_values() {
+        let response = super::capabilities_negotiate_response(
+            r#"{"capabilities":["shares","a\",\"x\":\"y"]}"#,
+        );
+        let parsed = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(parsed["accepted"], serde_json::json!(["shares"]));
+        assert_eq!(parsed["unsupported"], serde_json::json!(["a\",\"x\":\"y"]));
+    }
+
+    #[test]
+    fn websocket_origin_must_match_host_when_present() {
+        let headers = super::RequestSecurityHeaders {
+            host: Some("127.0.0.1:5030".to_owned()),
+            origin: Some("https://evil.example".to_owned()),
+            referer: None,
+            cookie: None,
+        };
+        assert!(!super::request_origin_matches_host(
+            &headers,
+            "127.0.0.1:5030"
+        ));
+
+        let headers = super::RequestSecurityHeaders {
+            host: Some("127.0.0.1:5030".to_owned()),
+            origin: Some("http://127.0.0.1:5030".to_owned()),
+            referer: None,
+            cookie: None,
+        };
+        assert!(super::request_origin_matches_host(
+            &headers,
+            "127.0.0.1:5030"
+        ));
     }
 
     #[tokio::test]

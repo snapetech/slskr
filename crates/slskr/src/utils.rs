@@ -111,6 +111,17 @@ pub fn same_origin_host(left: &str, right: &str) -> bool {
     normalize_origin_host(left) == normalize_origin_host(right)
 }
 
+pub fn request_origin_matches_host(headers: &RequestSecurityHeaders, fallback_host: &str) -> bool {
+    let Some(origin) = headers.origin.as_deref() else {
+        return true;
+    };
+    let Some(origin_host) = origin_host(origin) else {
+        return false;
+    };
+    let expected_host = headers.host.as_deref().unwrap_or(fallback_host);
+    same_origin_host(origin_host, expected_host)
+}
+
 fn normalize_origin_host(value: &str) -> String {
     value
         .trim()

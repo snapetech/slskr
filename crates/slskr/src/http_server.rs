@@ -48,6 +48,10 @@ pub struct HttpHeaders {
 }
 
 impl HttpHeaders {
+    pub fn connection_has_token(&self, token: &str) -> bool {
+        header_has_token(&self.connection, token)
+    }
+
     /// Parse headers from raw HTTP header lines
     #[allow(dead_code)]
     pub fn from_lines(lines: &[&str]) -> Self {
@@ -131,12 +135,16 @@ pub async fn read_http_request<R: AsyncBufRead + Unpin>(
     };
 
     let parts: Vec<&str> = request_line.split_whitespace().collect();
-    if parts.len() < 2 {
+    if parts.len() != 3 {
         return Err("Invalid request line".into());
     }
 
     let method = parts[0].to_string();
     let request_target = parts[1];
+    let http_version = parts[2];
+    if !matches!(http_version, "HTTP/1.0" | "HTTP/1.1") {
+        return Err("unsupported HTTP version".into());
+    }
 
     // Split path and query
     let (path, query) = if let Some(qmark) = request_target.find('?') {
@@ -242,8 +250,11 @@ pub async fn read_http_request<R: AsyncBufRead + Unpin>(
         Vec::new()
     };
 
-    // HTTP/1.1 defaults to keep-alive unless client sends "close"
-    let keep_alive = !headers.connection.contains("close");
+    let keep_alive = if http_version == "HTTP/1.1" {
+        !headers.connection_has_token("close")
+    } else {
+        headers.connection_has_token("keep-alive")
+    };
 
     Ok(Some((
         HttpRequest {
@@ -255,6 +266,12 @@ pub async fn read_http_request<R: AsyncBufRead + Unpin>(
         },
         keep_alive,
     )))
+}
+
+fn header_has_token(value: &str, token: &str) -> bool {
+    value
+        .split(',')
+        .any(|part| part.trim().eq_ignore_ascii_case(token))
 }
 
 async fn read_limited_line<R: AsyncBufRead + Unpin>(
@@ -329,6 +346,15 @@ pub async fn write_http_response<W: AsyncWrite + Unpin>(
         .await
         .map_err(e)?;
     writer.write_all(b"\r\n").await.map_err(e)?;
+    writer
+        .write_all(
+            b"X-Content-Type-Options: nosniff\r\n\
+Referrer-Policy: no-referrer\r\n\
+Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:\r\n\
+Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
+        )
+        .await
+        .map_err(e)?;
     writer
         .write_all(connection_header.as_bytes())
         .await
@@ -520,6 +546,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_invalid_http_version_rejected() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client.write_all(b"GET / FOO\r\n\r\n").await.unwrap();
+
+        let mut reader = BufReader::new(server);
+        let err = read_http_request(&mut reader).await.unwrap_err();
+        assert!(err.contains("HTTP version"), "{err}");
+    }
+
+    #[tokio::test]
     async fn test_connection_close_disables_keep_alive() {
         let (mut client, server) = tokio::io::duplex(4096);
         client
@@ -530,6 +566,19 @@ mod tests {
         let mut reader = BufReader::new(server);
         let (_req, keep_alive) = read_http_request(&mut reader).await.unwrap().unwrap();
         assert!(!keep_alive);
+    }
+
+    #[tokio::test]
+    async fn test_connection_header_uses_tokens() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: closer\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut reader = BufReader::new(server);
+        let (_req, keep_alive) = read_http_request(&mut reader).await.unwrap().unwrap();
+        assert!(keep_alive);
     }
 
     // ── write_http_response ───────────────────────────────────────────────────
@@ -552,6 +601,9 @@ mod tests {
         server.read_to_string(&mut raw).await.unwrap();
         assert!(raw.starts_with("HTTP/1.1 200 OK\r\n"));
         assert!(raw.contains("Content-Type: application/json\r\n"));
+        assert!(raw.contains("X-Content-Type-Options: nosniff\r\n"));
+        assert!(raw.contains("Referrer-Policy: no-referrer\r\n"));
+        assert!(raw.contains("Content-Security-Policy: "));
         assert!(raw.contains(&format!("Content-Length: {}\r\n", response.body.len())));
         assert!(raw.contains("Connection: keep-alive\r\n"));
         assert!(raw.ends_with(&response.body));

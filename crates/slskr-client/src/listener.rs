@@ -59,6 +59,10 @@ impl Listener {
         Ok((demux_incoming(stream).await?, address))
     }
 
+    pub async fn accept_raw(&self) -> Result<(TcpStream, SocketAddr), ClientError> {
+        Ok(self.inner.accept().await?)
+    }
+
     pub async fn accept_obfuscated(
         &self,
     ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {

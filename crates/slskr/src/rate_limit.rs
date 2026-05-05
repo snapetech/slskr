@@ -47,6 +47,7 @@ pub struct RateLimiter {
 }
 
 const MAX_USER_WINDOWS: usize = 16_384;
+const MAX_IP_WINDOWS: usize = 16_384;
 
 impl RateLimiter {
     /// Create new rate limiter
@@ -114,6 +115,10 @@ impl RateLimiter {
 
         let now = Instant::now();
         let mut windows = self.ip_windows.write().await;
+        windows.retain(|_, window| now < window.reset_at);
+        if !windows.contains_key(&key) && windows.len() >= MAX_IP_WINDOWS {
+            return false;
+        }
 
         let window = windows.entry(key).or_insert_with(|| RequestWindow {
             count: 0,
@@ -423,6 +428,36 @@ mod tests {
 
         assert!(!limiter.check_rate_limit(addr1, None).await);
         assert!(!limiter.check_rate_limit(addr2, None).await);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_ip_window_cap() {
+        let config = RateLimitConfig {
+            max_requests_anonymous: 10,
+            window_seconds: 60,
+            enabled: true,
+            ..Default::default()
+        };
+        let limiter = RateLimiter::new(config);
+
+        for index in 0..MAX_IP_WINDOWS {
+            let addr = Some(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(
+                    10,
+                    ((index >> 16) & 0xff) as u8,
+                    ((index >> 8) & 0xff) as u8,
+                    (index & 0xff) as u8,
+                )),
+                8080,
+            ));
+            assert!(limiter.check_rate_limit(addr, None).await);
+        }
+
+        let over_cap = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(11, 0, 0, 1)),
+            8080,
+        ));
+        assert!(!limiter.check_rate_limit(over_cap, None).await);
     }
 
     #[tokio::test]

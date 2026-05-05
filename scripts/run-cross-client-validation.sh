@@ -187,6 +187,31 @@ run_probe_optional() {
   return 0
 }
 
+run_download_probe_optional() {
+  local scope="$1" check="$2" expected="$3" actor_index="$4" peer_user="$5" host="$6" filename="$7" expected_text="$8" sha256="$9" private_port="${10:-2240}"
+  local command=(
+    env
+    SLSK_DOWNLOAD_HOST_OVERRIDE="$host"
+    SLSK_DOWNLOAD_FILENAME="$filename"
+    SLSK_DOWNLOAD_SHA256="$sha256"
+    SLSK_DOWNLOAD_QUEUE_ATTEMPTS="${SLSK_DOWNLOAD_QUEUE_ATTEMPTS:-8}"
+    SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS="${SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS:-4}"
+  )
+  if [[ -n "$expected_text" ]]; then
+    command+=(SLSK_DOWNLOAD_EXPECTED="$expected_text")
+  fi
+  if [[ "${SLSKR_DOWNLOAD_NATPMP_ENABLED:-$probe_vpn_enabled}" == "1" ]]; then
+    command+=(
+      SLSK_DOWNLOAD_LISTENER_BIND="0.0.0.0:$private_port"
+      SLSKR_NATPMP_PRIVATE_PORT="$private_port"
+      SLSKR_NATPMP_PUBLIC_PORT_ENV=SLSK_DOWNLOAD_ADVERTISED_PORT
+      "$repo_root/scripts/run-proton-natpmp-command.sh"
+    )
+  fi
+  command+=(cargo run -q -p slskr -- probe download-peer)
+  run_probe_optional "$scope" "$check" "$expected" "$actor_index" "$peer_user" "${command[@]}"
+}
+
 run_account_command_optional() {
   local scope="$1" check="$2" expected="$3" actor_index="$4"
   shift 4
@@ -293,7 +318,7 @@ run_commons_download_probe_optional() {
   fi
 
   run_probe_optional "$scope" open-commons-browse "open commons browse proof failed; text fixture browse remains the blocking proof" "$actor_index" "$peer_user" env SLSK_BROWSE_HOST_OVERRIDE="$host" SLSK_BROWSE_EXPECTED=commons-click-track.ogg cargo run -q -p slskr -- probe browse-peer
-  run_probe_optional "$scope" open-commons-download "open commons payload download failed; text fixture transfer remains the blocking proof" "$actor_index" "$peer_user" env SLSK_DOWNLOAD_HOST_OVERRIDE="$host" SLSK_DOWNLOAD_FILENAME="${daemon_name}\\open-commons\\commons-click-track.ogg" SLSK_DOWNLOAD_SHA256=e5e09f8ef9617a355e71e2d0b00f2554201aa124a9a821c4a7f76f0441a369a0 SLSK_DOWNLOAD_QUEUE_ATTEMPTS="${SLSK_DOWNLOAD_QUEUE_ATTEMPTS:-8}" SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS="${SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS:-4}" cargo run -q -p slskr -- probe download-peer
+  run_download_probe_optional "$scope" open-commons-download "open commons payload download failed; text fixture transfer remains the blocking proof" "$actor_index" "$peer_user" "$host" "${daemon_name}\\open-commons\\commons-click-track.ogg" "" e5e09f8ef9617a355e71e2d0b00f2554201aa124a9a821c4a7f76f0441a369a0 2241
   run_account_command_optional "$scope" open-commons-search "public search indexing can lag or suppress fresh daemon shares" "$actor_index" env SLSK_SOAK_LISTENER_BIND=127.0.0.1:0 SLSK_SOAK_SEARCH_QUERY=commons-click-track.ogg SLSK_SOAK_SECONDS=15 cargo run -q -p slskr -- soak live
 }
 
@@ -464,7 +489,7 @@ if [[ "$run_daemons" == "1" ]]; then
     if wait_for_peer slskr-to-slskd "$slskd_probe_account_index" "${!slskd_user_var}"; then
       run_probe_optional slskr-to-slskd plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskd_probe_account_index" "${!slskd_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskd_host" cargo run -q -p slskr -- probe plain-peer
       run_probe_optional slskr-to-slskd browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskd_probe_account_index" "${!slskd_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskd_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskd.txt cargo run -q -p slskr -- probe browse-peer
-      run_probe_optional slskr-to-slskd download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskd_probe_account_index" "${!slskd_user_var}" env SLSK_DOWNLOAD_HOST_OVERRIDE="$slskd_host" SLSK_DOWNLOAD_FILENAME='slskd\slskr-interop-slskd.txt' SLSK_DOWNLOAD_EXPECTED='slskr interop fixture slskd' SLSK_DOWNLOAD_SHA256=a06260a33bda3cf8cb147107c2d09723b4d59fc6a40d1ac9177424614f4f2202 SLSK_DOWNLOAD_QUEUE_ATTEMPTS="${SLSK_DOWNLOAD_QUEUE_ATTEMPTS:-8}" SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS="${SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS:-4}" cargo run -q -p slskr -- probe download-peer
+      run_download_probe_optional slskr-to-slskd download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskd_probe_account_index" "${!slskd_user_var}" "$slskd_host" 'slskd\slskr-interop-slskd.txt' 'slskr interop fixture slskd' a06260a33bda3cf8cb147107c2d09723b4d59fc6a40d1ac9177424614f4f2202 2240
       run_commons_download_probe_optional slskr-to-slskd "$slskd_probe_account_index" "${!slskd_user_var}" slskd
       run_probe_optional slskr-to-slskd file-transfer-peer "raw transfer token echo requires a queued transfer on slskd; covered as a remaining payload-transfer gap" "$slskd_probe_account_index" "${!slskd_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskd_host" cargo run -q -p slskr -- probe file-transfer-peer
     else
@@ -485,7 +510,7 @@ if [[ "$run_daemons" == "1" ]]; then
     if wait_for_peer slskr-to-slskdN "$slskdn_probe_account_index" "${!slskdn_user_var}"; then
       run_probe_optional slskr-to-slskdN plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskdn_host" cargo run -q -p slskr -- probe plain-peer
       run_probe_optional slskr-to-slskdN browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskdn_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskdN.txt cargo run -q -p slskr -- probe browse-peer
-      run_probe_optional slskr-to-slskdN download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_DOWNLOAD_HOST_OVERRIDE="$slskdn_host" SLSK_DOWNLOAD_FILENAME='slskdN\slskr-interop-slskdN.txt' SLSK_DOWNLOAD_EXPECTED='slskr interop fixture slskdN' SLSK_DOWNLOAD_SHA256=98be10759b80d65a17fa825c5459338fbd319c338280f7aff65b9cc4bba859a9 SLSK_DOWNLOAD_QUEUE_ATTEMPTS="${SLSK_DOWNLOAD_QUEUE_ATTEMPTS:-8}" SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS="${SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS:-4}" cargo run -q -p slskr -- probe download-peer
+      run_download_probe_optional slskr-to-slskdN download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskdn_probe_account_index" "${!slskdn_user_var}" "$slskdn_host" 'slskdN\slskr-interop-slskdN.txt' 'slskr interop fixture slskdN' 98be10759b80d65a17fa825c5459338fbd319c338280f7aff65b9cc4bba859a9 2242
       run_commons_download_probe_optional slskr-to-slskdN "$slskdn_probe_account_index" "${!slskdn_user_var}" slskdN
       run_probe_optional slskr-to-slskdN file-transfer-peer "raw transfer token echo requires a queued transfer on slskdN; covered as a remaining payload-transfer gap" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskdn_host" cargo run -q -p slskr -- probe file-transfer-peer
       run_probe_optional slskr-to-slskdN obfuscated-peer "obfuscated peer probe is only mandatory when the target advertises an active obfuscated listener" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_OBFUSCATED_PEER_USERNAME="${!slskdn_user_var}" SLSK_OBFUSCATED_HOST_OVERRIDE="$slskdn_host" cargo run -q -p slskr -- probe obfuscated-peer

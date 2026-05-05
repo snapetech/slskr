@@ -1,6 +1,7 @@
 use sha2::{Digest, Sha256};
 use slskr_client::protocol::{
     distributed::DistributedMessage,
+    init::InitMessage,
     peer::{FileEntry, PeerMessage, TransferRequest, TransferResponse, UserInfo},
     server::{ConnectToPeerResponse, SearchRequest, ServerMessage},
     Writer, ROTATED_OBFUSCATION_TYPE,
@@ -8,6 +9,7 @@ use slskr_client::protocol::{
 use slskr_client::{
     connection::ConnectionKind,
     file_transfer::FileTransferConnection,
+    io::read_init_frame_with_first_len_byte,
     listener::{IncomingConnection, Listener},
     peer_connect::{
         send_obfuscated_peer_init, send_obfuscated_peer_init_with_token, send_peer_init,
@@ -434,6 +436,20 @@ async fn download_peer_probe() -> Result<(), String> {
     let timeout = Duration::from_secs(env_u64("SLSK_DOWNLOAD_PROBE_TIMEOUT_SECONDS", 30)?);
     let token = env_u32("SLSK_DOWNLOAD_TOKEN", 0x51ab_4001)?;
 
+    if optional_env("SLSK_DOWNLOAD_LISTENER_BIND").is_some() {
+        return queued_download_peer_probe(
+            username,
+            password,
+            peer_username,
+            filename,
+            expected,
+            server_address,
+            timeout,
+            token,
+        )
+        .await;
+    }
+
     let address = resolve_peer_address(
         &username,
         &password,
@@ -579,6 +595,381 @@ async fn negotiate_download_size(
         "download did not become available; filename={filename}; last={}",
         last_rejection.unwrap_or_else(|| "none".to_owned())
     ))
+}
+
+async fn queued_download_peer_probe(
+    username: String,
+    password: String,
+    peer_username: String,
+    filename: String,
+    expected: Option<String>,
+    server_address: String,
+    timeout: Duration,
+    token: u32,
+) -> Result<(), String> {
+    let listener_bind = required_env_any(&["SLSK_DOWNLOAD_LISTENER_BIND"])?;
+    let listener = Listener::bind(listener_bind.as_str())
+        .await
+        .map_err(|error| format!("download listener bind failed: {error}"))?;
+    let local_address = listener
+        .local_addr()
+        .map_err(|error| format!("download listener address failed: {error}"))?;
+    let advertised_port = env_u16("SLSK_DOWNLOAD_ADVERTISED_PORT", local_address.port())?;
+
+    let mut session = login_probe_session(&server_address, username.clone(), password).await?;
+    session
+        .set_wait_port(u32::from(advertised_port))
+        .await
+        .map_err(|error| format!("download wait-port update failed: {error}"))?;
+    session
+        .send_server_message(ServerMessage::GetPeerAddressRequest {
+            username: peer_username.clone(),
+        })
+        .await
+        .map_err(|error| format!("download peer-address request failed: {error}"))?;
+    let address = wait_for_peer_address_response(&mut session, timeout).await?;
+    let port = peer_regular_port(&address)?;
+    let host =
+        optional_env("SLSK_DOWNLOAD_HOST_OVERRIDE").unwrap_or_else(|| address.ip.to_string());
+
+    let mut peer = connect_plain_peer_messages(&username, &host, port, timeout).await?;
+    peer.send(&PeerMessage::QueueUpload {
+        filename: filename.clone(),
+    })
+    .await
+    .map_err(|error| format!("queued download queue-upload send failed: {error}"))?;
+    peer.send(&PeerMessage::PlaceInQueueRequest {
+        filename: filename.clone(),
+    })
+    .await
+    .map_err(|error| format!("queued download place-in-queue send failed: {error}"))?;
+    peer.send(&PeerMessage::TransferRequest(TransferRequest {
+        direction: 0,
+        token,
+        filename: filename.clone(),
+        size: None,
+    }))
+    .await
+    .map_err(|error| format!("queued download transfer request failed: {error}"))?;
+
+    let (remote_token, size, mut peer) = wait_for_queued_transfer_request(
+        &mut session,
+        &listener,
+        peer,
+        &peer_username,
+        &filename,
+        token,
+        timeout,
+    )
+    .await?;
+
+    peer.send(&PeerMessage::TransferResponse(TransferResponse::Allowed {
+        token: remote_token,
+        size: Some(size),
+    }))
+    .await
+    .map_err(|error| format!("queued download transfer response send failed: {error}"))?;
+
+    let (mut file, token_already_received) = wait_for_queued_file_transfer(
+        &mut session,
+        &listener,
+        &peer_username,
+        &host,
+        port,
+        &username,
+        remote_token,
+        timeout,
+    )
+    .await?;
+    if !token_already_received {
+        let got_token = time::timeout(timeout, file.receive_token())
+            .await
+            .map_err(|_| "queued download file token timed out".to_owned())?
+            .map_err(|error| format!("queued download file token failed: {error}"))?;
+        if got_token != remote_token {
+            return Err(format!(
+                "queued download file token mismatch: expected {remote_token}, received {got_token}"
+            ));
+        }
+    }
+    file.send_offset(0)
+        .await
+        .map_err(|error| format!("queued download file offset send failed: {error}"))?;
+    let remaining = usize::try_from(size)
+        .map_err(|_| format!("queued download size too large for probe buffer: {size}"))?;
+    let bytes = time::timeout(timeout, file.read_chunk(remaining))
+        .await
+        .map_err(|_| "queued download file payload timed out".to_owned())?
+        .map_err(|error| format!("queued download file payload failed: {error}"))?;
+    if let Some(expected) = expected.as_deref() {
+        let text = String::from_utf8_lossy(&bytes);
+        if !text.contains(expected) {
+            return Err(format!(
+                "queued download payload mismatch; expected={expected}; payload={}",
+                sanitize_inline_detail(&text)
+            ));
+        }
+    }
+    let sha256 = hex_lower(&Sha256::digest(&bytes));
+    if let Some(expected_sha256) = optional_env("SLSK_DOWNLOAD_SHA256") {
+        if !sha256.eq_ignore_ascii_case(&expected_sha256) {
+            return Err(format!(
+                "queued download sha256 mismatch; expected={expected_sha256}; actual={sha256}"
+            ));
+        }
+    }
+    println!(
+        "queued download peer probe completed; peer={}; filename={}; bytes={}; sha256={}; advertised_port={advertised_port}",
+        redact_username(&peer_username),
+        filename,
+        bytes.len(),
+        sha256
+    );
+    Ok(())
+}
+
+async fn wait_for_queued_transfer_request(
+    session: &mut ServerSession<TcpStream>,
+    listener: &Listener,
+    mut peer: PeerMessageConnection<TcpStream>,
+    peer_username: &str,
+    filename: &str,
+    request_token: u32,
+    timeout: Duration,
+) -> Result<(u32, u64, PeerMessageConnection<TcpStream>), String> {
+    let deadline = Instant::now() + timeout;
+    let mut queued_seen = false;
+
+    while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        tokio::select! {
+            peer_result = peer.receive() => {
+                match peer_result.map_err(|error| format!("queued download peer receive failed: {error}"))? {
+                    PeerMessage::TransferRequest(TransferRequest { direction: 1, token, filename: got_filename, size })
+                        if got_filename == filename =>
+                    {
+                        let size = size.ok_or_else(|| "queued transfer request did not include size".to_owned())?;
+                        return Ok((token, size, peer));
+                    }
+                    PeerMessage::TransferResponse(TransferResponse::Allowed { token: got, size }) if got == request_token => {
+                        let size = size.ok_or_else(|| "download transfer response did not include size".to_owned())?;
+                        return Ok((got, size, peer));
+                    }
+                    PeerMessage::TransferResponse(TransferResponse::Rejected { token: got, reason }) if got == request_token => {
+                        if reason.eq_ignore_ascii_case("queued") || reason.to_ascii_lowercase().contains("queue") {
+                            queued_seen = true;
+                        } else {
+                            return Err(format!("queued download rejected; token={got}; reason={reason}; filename={filename}"));
+                        }
+                    }
+                    PeerMessage::PlaceInQueueResponse { filename: got_filename, place } if got_filename == filename => {
+                        queued_seen = true;
+                        println!("queued download place={place}; filename={filename}");
+                    }
+                    other => {
+                        println!("queued download ignored peer message: {other:?}");
+                    }
+                }
+            }
+            accept_result = listener.accept() => {
+                let (incoming, _) = accept_result.map_err(|error| format!("queued download listener accept failed: {error}"))?;
+                let mut inbound = incoming_peer_messages(incoming, peer_username, "queued download")?;
+                match inbound.receive().await.map_err(|error| format!("queued download inbound receive failed: {error}"))? {
+                    PeerMessage::TransferRequest(TransferRequest { direction: 1, token, filename: got_filename, size })
+                        if got_filename == filename =>
+                    {
+                        let size = size.ok_or_else(|| "queued inbound transfer request did not include size".to_owned())?;
+                        return Ok((token, size, inbound));
+                    }
+                    other => return Err(format!("queued download unexpected inbound message: {other:?}")),
+                }
+            }
+            receive_result = session.receive() => {
+                handle_download_server_event(session, receive_result, None).await?;
+            }
+            _ = time::sleep(remaining) => break,
+        }
+    }
+
+    Err(format!(
+        "timed out waiting for queued transfer request; filename={filename}; queued_seen={queued_seen}"
+    ))
+}
+
+async fn wait_for_queued_file_transfer(
+    session: &mut ServerSession<TcpStream>,
+    listener: &Listener,
+    peer_username: &str,
+    host: &str,
+    port: u16,
+    username: &str,
+    remote_token: u32,
+    timeout: Duration,
+) -> Result<(FileTransferConnection<TcpStream>, bool), String> {
+    let deadline = Instant::now() + timeout;
+
+    while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        tokio::select! {
+            accept_result = listener.accept_raw() => {
+                let (stream, _) = accept_result.map_err(|error| format!("queued download file accept failed: {error}"))?;
+                return classify_queued_file_stream(stream, peer_username, remote_token).await;
+            }
+            receive_result = session.receive() => {
+                if let Some(connection) = handle_download_server_event(session, receive_result, Some(remote_token)).await? {
+                    return Ok((connection, true));
+                }
+            }
+            _ = time::sleep(remaining) => break,
+        }
+    }
+
+    let mut second_chance = connect_plain_file_transfer(username, host, port, timeout).await?;
+    second_chance
+        .send_token(remote_token)
+        .await
+        .map_err(|error| format!("queued download second-chance token send failed: {error}"))?;
+    Ok((second_chance, true))
+}
+
+async fn classify_queued_file_stream(
+    mut stream: TcpStream,
+    expected_username: &str,
+    expected_token: u32,
+) -> Result<(FileTransferConnection<TcpStream>, bool), String> {
+    use tokio::io::AsyncReadExt;
+
+    let first = stream
+        .read_u8()
+        .await
+        .map_err(|error| format!("queued download file first byte failed: {error}"))?;
+    if let Ok(ConnectionKind::FileTransfer) = ConnectionKind::try_from(first) {
+        return Ok((FileTransferConnection::new(stream), false));
+    }
+    if ConnectionKind::try_from(first).is_err() && first == expected_token.to_le_bytes()[0] {
+        let mut token_bytes = [0_u8; 4];
+        token_bytes[0] = first;
+        stream
+            .read_exact(&mut token_bytes[1..])
+            .await
+            .map_err(|error| format!("queued download token-first read failed: {error}"))?;
+        let got = u32::from_le_bytes(token_bytes);
+        if got == expected_token {
+            return Ok((FileTransferConnection::new(stream), true));
+        }
+    }
+
+    let frame = read_init_frame_with_first_len_byte(&mut stream, first)
+        .await
+        .map_err(|error| format!("queued download file init read failed: {error}"))?;
+    match InitMessage::decode(frame).map_err(|error| format!("queued download file init decode failed: {error}"))? {
+        InitMessage::PeerInit {
+            username,
+            connection_type,
+            token,
+        } => {
+            let kind = ConnectionKind::try_from_connection_type(&connection_type)
+                .map_err(|error| format!("queued download file init kind failed: {error}"))?;
+            if username != expected_username {
+                return Err(format!(
+                    "queued download file username mismatch: expected={}, received={}",
+                    redact_username(expected_username),
+                    redact_username(&username)
+                ));
+            }
+            if kind != ConnectionKind::FileTransfer {
+                return Err(format!("queued download file expected F init, got {kind:?}"));
+            }
+            if token != 0 && token != expected_token {
+                return Err(format!(
+                    "queued download file init token mismatch: expected {expected_token}, received {token}"
+                ));
+            }
+            Ok((FileTransferConnection::new(stream), false))
+        }
+        other => Err(format!("queued download file unexpected init: {other:?}")),
+    }
+}
+
+async fn handle_download_server_event(
+    session: &mut ServerSession<TcpStream>,
+    receive_result: Result<ServerMessage, slskr_client::ClientError>,
+    expected_transfer_token: Option<u32>,
+) -> Result<Option<FileTransferConnection<TcpStream>>, String> {
+    match receive_result {
+        Ok(ServerMessage::MessageUserResponse(private_message)) => {
+            session
+                .send_server_message(ServerMessage::MessageAcked {
+                    id: private_message.id,
+                })
+                .await
+                .map_err(|error| format!("queued download message ack failed: {error}"))?;
+            Ok(None)
+        }
+        Ok(ServerMessage::ConnectToPeerResponse(response))
+            if expected_transfer_token.is_some()
+                && response.connection_type == ConnectionKind::FileTransfer.as_str() =>
+        {
+            let token = expected_transfer_token.expect("checked above");
+            let port = u16::try_from(response.port).map_err(|_| {
+                format!(
+                    "queued download indirect response advertised invalid port: {}",
+                    response.port
+                )
+            })?;
+            let host = optional_env("SLSK_DOWNLOAD_INDIRECT_HOST_OVERRIDE")
+                .unwrap_or_else(|| response.ip.to_string());
+            let stream = time::timeout(
+                Duration::from_secs(env_u64("SLSK_DOWNLOAD_INDIRECT_TIMEOUT_SECONDS", 20)?),
+                TcpStream::connect((host.as_str(), port)),
+            )
+            .await
+            .map_err(|_| "queued download indirect connect timed out".to_owned())?
+            .map_err(|error| format!("queued download indirect connect failed: {error}"))?;
+            let stream = send_pierce_firewall(stream, response.token)
+                .await
+                .map_err(|error| format!("queued download indirect pierce failed: {error}"))?;
+            let mut file = FileTransferConnection::new(stream);
+            file.send_token(token)
+                .await
+                .map_err(|error| format!("queued download indirect token send failed: {error}"))?;
+            Ok(Some(file))
+        }
+        Ok(ServerMessage::CantConnectToPeerRequest { token, username }) => {
+            println!(
+                "queued download observed cant-connect request token={token}; peer={}",
+                redact_username(&username)
+            );
+            Ok(None)
+        }
+        Ok(ServerMessage::CantConnectToPeerResponse { token }) => {
+            println!("queued download observed cant-connect response token={token}");
+            Ok(None)
+        }
+        Ok(ServerMessage::Relogged) => Err("account was logged in elsewhere".to_owned()),
+        Ok(_) => Ok(None),
+        Err(error) => Err(format!("queued download server receive failed: {error}")),
+    }
+}
+
+fn incoming_peer_messages(
+    incoming: IncomingConnection<TcpStream>,
+    expected_username: &str,
+    label: &str,
+) -> Result<PeerMessageConnection<TcpStream>, String> {
+    match incoming {
+        IncomingConnection::PeerInit {
+            username,
+            kind: ConnectionKind::PeerMessages,
+            stream,
+            ..
+        } if username == expected_username => Ok(PeerMessageConnection::new(stream)),
+        IncomingConnection::PeerMessages(connection) => Ok(connection),
+        other => Err(format!(
+            "{label} expected peer-message inbound, got {}",
+            incoming_connection_name(&other)
+        )),
+    }
 }
 
 async fn private_message_probe() -> Result<(), String> {
