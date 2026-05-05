@@ -169,7 +169,8 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec cp {} release/ \;
-          (cd release && find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          scripts/generate-release-manifests.sh release "${{ needs.version.outputs.version }}"
+          (cd release && find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.json' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
           ls -lh release
       - name: Attest release assets
         uses: actions/attest-build-provenance@v3
@@ -177,6 +178,7 @@ jobs:
           subject-path: |
             release/*.tar.gz
             release/*.zip
+            release/*.json
             release/*.sha256
             release/SHA256SUMS.txt
       - name: Create release notes

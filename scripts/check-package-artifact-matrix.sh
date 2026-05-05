@@ -34,6 +34,22 @@ for expected in 'SHA256SUMS.txt' 'sha256sum' 'verify-release-artifacts.sh' 'carg
   fi
 done
 
+for expected in \
+  'scripts/generate-release-manifests.sh' \
+  'slskr-cyclonedx.json' \
+  'slskr-dependency-manifest.json' \
+  'release/*.json'; do
+  if ! rg -n -F "$expected" .github/workflows scripts docs >/dev/null; then
+    printf 'package artifact matrix check failed: expected SBOM token missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+if ! rg -n '^\| BUG-012 .* \| Verified \|$' "$ledger" >/dev/null; then
+  printf 'package artifact matrix check failed: BUG-012 must stay verified in council ledger\n' >&2
+  status=1
+fi
+
 if ! rg -n 'version = "0\.0\.0"' crates/*/Cargo.toml >/dev/null; then
   printf 'package artifact matrix check warning: crate versions no longer show 0.0.0; update BUG-015 status if release metadata is aligned\n'
 fi

@@ -3950,8 +3950,14 @@ fn route_native_workspace_html(
     let route_table = native_route_table_html(kind, rows);
     let html = match kind {
         RouteKind::Search => format!(
-            r#"<div class="slskr-native-grid search-native"><section class="slskr-native-main"><h3>Searches</h3><div class="slskr-native-command-row"><input aria-label="Search text" placeholder="Search" value="public domain jazz"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button">Search</button><button type="button">Stop</button><button type="button">Clear</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Search Detail</h3><p>Select a search to inspect files, peers, queue, warnings, duplicate groups, and download preview.</p>{stats}</aside></div>"#,
+            r#"<div class="slskr-native-grid search-native"><section class="slskr-native-main"><h3>Searches</h3><div class="slskr-native-command-row"><input aria-label="Search text" placeholder="Search" value="public domain jazz"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button">Search</button><button type="button">Stop</button><button type="button">Clear</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Search Detail</h3><p>Select a search to inspect files, peers, queue, warnings, duplicate groups, and download preview.</p>{preview}{stats}</aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No search selected",
+                "Choose a query or file result to inspect peers, score, queue state, and download actions.",
+                "Waiting",
+                "Download",
+            ),
             stats = [
                 native_stat_html("Result review", "ready"),
                 native_stat_html("Duplicate folding", "on"),
@@ -3960,12 +3966,24 @@ fn route_native_workspace_html(
             .join(""),
         ),
         RouteKind::DiscoveryGraph => format!(
-            r#"<div class="slskr-native-grid discovery-graph-native"><section class="slskr-native-main"><h3>Discovery Graph Atlas</h3><div class="slskr-native-command-row"><input aria-label="Artist Name" placeholder="Artist Name"><input aria-label="Album Title" placeholder="Album Title"><input aria-label="Track Title or Seed Label" placeholder="Track Title or Seed Label"><button type="button">Build Atlas</button><button type="button">Queue Nearby</button></div><div class="slskr-native-graph"><span>Artist</span><span>Album</span><span>Track</span><span>Query</span></div></section><aside class="slskr-native-side"><h3>Recommendations</h3>{route_table}</aside></div>"#,
+            r#"<div class="slskr-native-grid discovery-graph-native"><section class="slskr-native-main"><h3>Discovery Graph Atlas</h3><div class="slskr-native-command-row"><input aria-label="Artist Name" placeholder="Artist Name"><input aria-label="Album Title" placeholder="Album Title"><input aria-label="Track Title or Seed Label" placeholder="Track Title or Seed Label"><button type="button">Build Atlas</button><button type="button">Queue Nearby</button></div><div class="slskr-native-graph"><span>Artist</span><span>Album</span><span>Track</span><span>Query</span></div>{preview}</section><aside class="slskr-native-side"><h3>Recommendations</h3>{route_table}</aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No graph node selected",
+                "Select a seed, recommendation, or next-search row to inspect graph context.",
+                "Waiting",
+                "Queue Nearby",
+            ),
         ),
         RouteKind::PlaylistIntake => format!(
-            r#"<div class="slskr-native-grid playlist-intake-native"><section class="slskr-native-main"><h3>Playlist Intake</h3><div class="slskr-native-command-row"><input aria-label="Playlist name" placeholder="Road trip, label sampler, friend recs"><input aria-label="Playlist source" placeholder="Local file name or provider URL"><button type="button">Import Playlist</button></div><textarea aria-label="Playlist rows" placeholder="Artist - Title, one row per track, or simple CSV artist,title"></textarea>{route_table}</section><aside class="slskr-native-side"><h3>Import validation</h3>{stats}</aside></div>"#,
+            r#"<div class="slskr-native-grid playlist-intake-native"><section class="slskr-native-main"><h3>Playlist Intake</h3><div class="slskr-native-command-row"><input aria-label="Playlist name" placeholder="Road trip, label sampler, friend recs"><input aria-label="Playlist source" placeholder="Local file name or provider URL"><button type="button">Import Playlist</button></div><textarea aria-label="Playlist rows" placeholder="Artist - Title, one row per track, or simple CSV artist,title"></textarea>{route_table}</section><aside class="slskr-native-side"><h3>Import validation</h3>{preview}{stats}</aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No playlist row selected",
+                "Select a parsed row to review validation, classification, and acquisition planning.",
+                "Waiting",
+                "Import Playlist",
+            ),
             stats = [
                 native_stat_html("Playlists", "0"),
                 native_stat_html("Tracks", "0"),
@@ -3974,8 +3992,14 @@ fn route_native_workspace_html(
             .join(""),
         ),
         RouteKind::Wishlist => format!(
-            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{stats}<button type="button">Copy Review</button></aside></div>"#,
+            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{preview}{stats}<button type="button">Copy Review</button></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No wishlist item selected",
+                "Choose a wanted search to run it, review matches, or send it to the discovery inbox.",
+                "Waiting",
+                "Run Enabled",
+            ),
             stats = [
                 native_stat_html("Requests", "0"),
                 native_stat_html("Enabled", "0"),
@@ -4003,11 +4027,17 @@ fn route_native_workspace_html(
             };
             let table = native_table_html(&["Filename", "Peer", "Progress", "Action"], rows, empty);
             format!(
-                r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{stats}</aside></div>"#,
+                r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{preview}{stats}</aside></div>"#,
                 title = title,
                 primary = primary,
                 secondary = secondary,
                 table = table,
+                preview = native_selection_preview_html(
+                    &format!("No {} selected", title.to_lowercase()),
+                    "Choose a transfer to inspect peer, speed, progress, ETA, and retry or cancel actions.",
+                    "Waiting",
+                    primary,
+                ),
                 stats = [
                     native_stat_html("Active", "0"),
                     native_stat_html("Queued", "0"),
@@ -4027,16 +4057,34 @@ fn route_native_workspace_html(
             ),
         ),
         RouteKind::Users => format!(
-            r#"<div class="slskr-native-grid users-native"><section class="slskr-native-main"><h3>Users</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Search for User</button><button type="button">Clear Selected User</button><button type="button">Browse</button><button type="button">Message</button></div>{route_table}</section><aside class="slskr-native-side"><h3>User Detail</h3><p>No user info to display</p><button type="button">Save note</button><button type="button">Watch</button></aside></div>"#,
+            r#"<div class="slskr-native-grid users-native"><section class="slskr-native-main"><h3>Users</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Search for User</button><button type="button">Clear Selected User</button><button type="button">Browse</button><button type="button">Message</button></div>{route_table}</section><aside class="slskr-native-side"><h3>User Detail</h3><p>No user info to display</p>{preview}<button type="button">Save note</button><button type="button">Watch</button></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No user selected",
+                "Select a user to inspect status, privileges, browse, message, watch, or edit notes.",
+                "Waiting",
+                "Message",
+            ),
         ),
         RouteKind::Contacts => format!(
-            r#"<div class="slskr-native-grid contacts-native"><section class="slskr-native-main"><h3>Contacts</h3><div class="slskr-native-command-row"><input aria-label="Invite" placeholder="slskr://invite/..."><input aria-label="Nickname" placeholder="Friend's name"><button type="button">Create Invite</button><button type="button">Add Friend</button><button type="button">Refresh Nearby</button></div>{route_table}</section><aside class="slskr-native-side"><h3>All Contacts</h3><button type="button">Message</button><button type="button">Browse</button><button type="button">Remove</button></aside></div>"#,
+            r#"<div class="slskr-native-grid contacts-native"><section class="slskr-native-main"><h3>Contacts</h3><div class="slskr-native-command-row"><input aria-label="Invite" placeholder="slskr://invite/..."><input aria-label="Nickname" placeholder="Friend's name"><button type="button">Create Invite</button><button type="button">Add Friend</button><button type="button">Refresh Nearby</button></div>{route_table}</section><aside class="slskr-native-side"><h3>All Contacts</h3>{preview}<button type="button">Message</button><button type="button">Browse</button><button type="button">Remove</button></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No contact selected",
+                "Select a contact, nearby peer, or invite to message, browse, watch, or remove.",
+                "Waiting",
+                "Message",
+            ),
         ),
         RouteKind::Solid => format!(
-            r#"<div class="slskr-native-grid solid-native"><section class="slskr-native-main" data-testid="solid-root"><h3>Solid</h3><p>Solid integration is disabled (Feature.Solid=false).</p><div class="slskr-native-command-row"><input data-testid="solid-webid-input" aria-label="WebID" placeholder="https://example.com/profile/card#me"><button data-testid="solid-resolve-webid" type="button">Resolve WebID</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Identity Document</h3><pre>{{}}</pre></aside></div>"#,
+            r#"<div class="slskr-native-grid solid-native"><section class="slskr-native-main" data-testid="solid-root"><h3>Solid</h3><p>Solid integration is disabled (Feature.Solid=false).</p><div class="slskr-native-command-row"><input data-testid="solid-webid-input" aria-label="WebID" placeholder="https://example.com/profile/card#me"><button data-testid="solid-resolve-webid" type="button">Resolve WebID</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Identity Document</h3>{preview}<pre>{{}}</pre></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No Solid resource selected",
+                "Select an identity, storage, session, or sync row to inspect setup status.",
+                "Waiting",
+                "Resolve WebID",
+            ),
         ),
         RouteKind::Collections => format!(
             r#"<div class="slskr-native-grid collections-native"><section class="slskr-native-main"><h3>Collections</h3><div class="slskr-native-command-row"><input aria-label="Title" placeholder="Enter collection title"><input aria-label="Description" placeholder="Optional description"><button type="button">Create Collection</button></div><div class="slskr-native-command-row"><input aria-label="Search for item" placeholder="Search by filename (e.g., sintel, aria, treasure)..."><button type="button">Add Item</button><button type="button">Share</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Item Picker</h4><p>Search library items, preview candidate metadata, and add selected tracks.</p>{preview}<div class="slskr-native-mini-list"><span>Filename match</span><span>Artist/title match</span><span>Already in collection warning</span></div></aside></div></section><aside class="slskr-native-side"><h3>Collection Detail</h3>{stats}<div class="slskr-native-mini-list"><span>Items table</span><span>Remove item</span><span>Audience picker</span><span>Stream/download policies</span></div></aside></div>"#,
@@ -4085,8 +4133,14 @@ fn route_native_workspace_html(
             ),
         ),
         RouteKind::System => format!(
-            r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-tabs"><span>Info</span><span>Network</span><span>Options</span><span>Shares</span><span>Jobs</span><span>Automations</span><span>Logs</span><span>Metrics</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3><button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
+            r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-tabs"><span>Info</span><span>Network</span><span>Options</span><span>Shares</span><span>Jobs</span><span>Automations</span><span>Logs</span><span>Metrics</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3>{preview}<button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
             route_table = route_table,
+            preview = native_selection_preview_html(
+                "No system item selected",
+                "Select a status, share, database, event, or metric row before running operator actions.",
+                "Waiting",
+                "Diagnostic Bundle",
+            ),
         ),
     };
     format!(
@@ -10327,6 +10381,126 @@ mod tests {
 
     #[test]
     fn native_primary_workspaces_include_react_like_structures() {
+        for path in [
+            "/searches",
+            "/discovery-graph",
+            "/playlist-intake",
+            "/wishlist",
+            "/downloads",
+            "/uploads",
+            "/messages",
+            "/users",
+            "/contacts",
+            "/solid",
+            "/collections",
+            "/sharegroups",
+            "/shared",
+            "/browse",
+            "/system",
+        ] {
+            let page = route_page_html(path);
+            assert!(
+                page.contains("data-slskr-native-preview-title"),
+                "{path} should expose a row-driven native preview title"
+            );
+            assert!(
+                page.contains("data-slskr-native-preview-count"),
+                "{path} should expose a row-driven native preview count"
+            );
+        }
+
+        let search = route_page_html("/searches");
+        for value in ["Search Detail", "No search selected", "Duplicate folding"] {
+            assert!(
+                search.contains(value),
+                "search workspace should contain {value}"
+            );
+        }
+
+        let discovery = route_page_html("/discovery-graph");
+        for value in [
+            "Discovery Graph Atlas",
+            "No graph node selected",
+            "Queue Nearby",
+        ] {
+            assert!(
+                discovery.contains(value),
+                "discovery workspace should contain {value}"
+            );
+        }
+
+        let playlist = route_page_html("/playlist-intake");
+        for value in [
+            "Import validation",
+            "No playlist row selected",
+            "Import Playlist",
+        ] {
+            assert!(
+                playlist.contains(value),
+                "playlist workspace should contain {value}"
+            );
+        }
+
+        let wishlist = route_page_html("/wishlist");
+        for value in [
+            "Request Portal Summary",
+            "No wishlist item selected",
+            "Run Enabled",
+        ] {
+            assert!(
+                wishlist.contains(value),
+                "wishlist workspace should contain {value}"
+            );
+        }
+
+        let downloads = route_page_html("/downloads");
+        for value in ["Transfer Group", "No downloads selected", "Retry All"] {
+            assert!(
+                downloads.contains(value),
+                "downloads workspace should contain {value}"
+            );
+        }
+
+        let users = route_page_html("/users");
+        for value in ["User Detail", "No user selected", "Save note"] {
+            assert!(
+                users.contains(value),
+                "users workspace should contain {value}"
+            );
+        }
+
+        let contacts = route_page_html("/contacts");
+        for value in ["All Contacts", "No contact selected", "Refresh Nearby"] {
+            assert!(
+                contacts.contains(value),
+                "contacts workspace should contain {value}"
+            );
+        }
+
+        let solid = route_page_html("/solid");
+        for value in [
+            "Identity Document",
+            "No Solid resource selected",
+            "Resolve WebID",
+        ] {
+            assert!(
+                solid.contains(value),
+                "solid workspace should contain {value}"
+            );
+        }
+
+        let system = route_page_html("/system");
+        for value in [
+            "Operator Actions",
+            "No system item selected",
+            "Diagnostic Bundle",
+        ] {
+            assert!(
+                system.contains(value),
+                "system workspace should contain {value}"
+            );
+        }
+
         let messages = route_page_html("/messages");
         for value in [
             "Thread Workspace",

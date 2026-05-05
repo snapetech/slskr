@@ -26,6 +26,9 @@ Completed across the main Rust routes:
 - primary native workspaces now show richer route structures for messaging,
   browse breadcrumbs/tree, collection item picking, share grants, and shared
   access manifests
+- messaging, collections, share groups, shared-with-me, and browse workspaces
+  now surface selected-row preview cards so selection changes expose the next
+  likely action before opening the inspector
 
 ## Route Gaps
 

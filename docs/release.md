@@ -55,4 +55,6 @@ release-<version>
 ```
 
 For a tag build, the workflow creates a GitHub Release and uploads all archives
-plus `SHA256SUMS.txt`.
+plus `SHA256SUMS.txt`, `slskr-cyclonedx.json`, and
+`slskr-dependency-manifest.json`. The JSON manifests are included in the
+release checksum file and build-provenance attestation subjects.
