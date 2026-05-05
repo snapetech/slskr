@@ -1287,7 +1287,7 @@ class App extends Component {
               <AppContext.Provider
                 // Note: Context value object recreated on each render (class component limitation)
                 // Deferred: Optimize with useMemo when converting to functional component
-                // See memory-bank/triage-todo-fixme.md (defer section) for details
+                // Deferred until this class component is converted to hooks.
                 // eslint-disable-next-line react/jsx-no-constructed-context-values
                 value={{ options: applicationOptions, state: applicationState }}
               >

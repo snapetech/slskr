@@ -1,7 +1,7 @@
 [package]
 name = "slskr"
 version = "0.0.0"
-description = "Self-hosted Rust Soulseek app with daemon, API, web UI, and live transfer automation"
+description = "Self-hosted Rust app for the Soulseek network with daemon, web UI, HTTP API, transfers, search, and observability"
 keywords = ["slsk", "soulseek", "client", "server", "rust"]
 categories = ["command-line-utilities", "network-programming"]
 edition.workspace = true
