@@ -24,16 +24,21 @@ pub fn valid_sec_websocket_key(sec_websocket_key: &str) -> bool {
 pub async fn write_upgrade_response<W>(
     writer: &mut W,
     sec_websocket_key: &str,
+    sec_websocket_protocol: Option<&str>,
 ) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
     let accept_key = derive_accept_key(sec_websocket_key.as_bytes());
+    let protocol_header = sec_websocket_protocol
+        .map(|protocol| format!("Sec-WebSocket-Protocol: {protocol}\r\n"))
+        .unwrap_or_default();
     let response = format!(
         "HTTP/1.1 101 Switching Protocols\r\n\
          Upgrade: websocket\r\n\
          Connection: Upgrade\r\n\
          Sec-WebSocket-Accept: {accept_key}\r\n\
+         {protocol_header}\
          \r\n"
     );
     writer
@@ -292,6 +297,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upgrade_response_echoes_accepted_subprotocol() {
+        let key = "dGhlIHNhbXBsZSBub25jZQ==";
+        let mut writer = Vec::new();
+        write_upgrade_response(&mut writer, key, Some("slskr.api-token.route%2Dtoken"))
+            .await
+            .unwrap();
+        let response = String::from_utf8(writer).unwrap();
+        assert!(response.contains("HTTP/1.1 101 Switching Protocols\r\n"));
+        assert!(response.contains("Sec-WebSocket-Protocol: slskr.api-token.route%2Dtoken\r\n"));
+    }
+
+    #[tokio::test]
     async fn websocket_client_receives_broadcast_event() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -311,7 +328,9 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let key = request.headers.sec_websocket_key.as_deref().unwrap();
-            write_upgrade_response(&mut writer, key).await.unwrap();
+            write_upgrade_response(&mut writer, key, None)
+                .await
+                .unwrap();
             let _ = ready_tx.send(());
             let _ = stream_events(reader, &mut writer, &server_events, server_event_rx).await;
         });

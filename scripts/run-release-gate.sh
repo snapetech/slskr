@@ -37,8 +37,7 @@ run_optional_step shellcheck "Shell lint" shellcheck \
   -e SC1090,SC2016,SC2030,SC2031,SC2034,SC2206 \
   scripts/*.sh
 run_optional_step actionlint "GitHub workflow lint" actionlint
-run_optional_step semgrep "Semgrep security scan" semgrep scan --config auto --error
-run_optional_step trivy "Trivy filesystem scan" trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed .
+run_step "Security scans" scripts/run-security-scans.sh
 run_step "Rust formatting" cargo fmt --all --check
 run_step "Rust clippy" cargo clippy --workspace --all-targets -- -D warnings
 run_step "Rust wasm web check" cargo check -p slskr-web --target wasm32-unknown-unknown

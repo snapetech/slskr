@@ -2,6 +2,8 @@
  * WebSocket client for real-time event streaming
  */
 import { Event, EventType } from './types';
+export declare const websocketAuthProtocolPrefix = "slskr.api-token.";
+export declare function websocketAuthProtocols(token: string): string[];
 export type EventListener = (event: Event) => void;
 export type ConnectionListener = (connected: boolean) => void;
 export type ErrorListener = (error: Error) => void;

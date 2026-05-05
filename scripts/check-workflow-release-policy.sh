@@ -14,12 +14,25 @@ for id in BUG-002 BUG-012 BUG-014 BUG-016 BUG-023; do
   fi
 done
 
-for expected in 'ACTIONLINT_VERSION: v' 'concurrency:' 'attest-build-provenance@' 'attestations: write' 'id-token: write'; do
+for expected in \
+  'ACTIONLINT_VERSION: v' \
+  'SLSKR_SECURITY_SCANS_REQUIRED:' \
+  'SLSKR_SEMGREP_IMAGE: semgrep/semgrep:' \
+  'SLSKR_TRIVY_IMAGE: aquasec/trivy:' \
+  'concurrency:' \
+  'attest-build-provenance@' \
+  'attestations: write' \
+  'id-token: write'; do
   if ! rg -n -F "$expected" .github/workflows >/dev/null; then
     printf 'workflow release policy check failed: expected workflow hardening token missing: %s\n' "$expected" >&2
     status=1
   fi
 done
+
+if ! rg -n -F 'scripts/run-security-scans.sh' .github/workflows scripts/run-release-gate.sh >/dev/null; then
+  printf 'workflow release policy check failed: required security scan runner is not wired into CI/release gates\n' >&2
+  status=1
+fi
 
 if rg -n 'go install "github.com/rhysd/actionlint/cmd/actionlint@latest"|go install github.com/rhysd/actionlint/cmd/actionlint@latest' .github/workflows; then
   printf 'workflow release policy check failed: actionlint install must stay pinned\n' >&2

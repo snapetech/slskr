@@ -4,6 +4,13 @@
 
 import { Event, EventType, WebSocketMessage } from './types';
 
+export const websocketAuthProtocolPrefix = 'slskr.api-token.';
+
+export function websocketAuthProtocols(token: string): string[] {
+  const normalized = token.trim();
+  return normalized ? [`${websocketAuthProtocolPrefix}${encodeURIComponent(normalized)}`] : [];
+}
+
 export type EventListener = (event: Event) => void;
 export type ConnectionListener = (connected: boolean) => void;
 export type ErrorListener = (error: Error) => void;
@@ -35,7 +42,7 @@ export class WebSocketClient {
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url);
+        this.ws = new WebSocket(this.url, websocketAuthProtocols(this.token));
 
         this.ws.onopen = () => {
           this.reconnectAttempts = 0;

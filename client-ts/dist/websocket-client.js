@@ -3,7 +3,13 @@
  * WebSocket client for real-time event streaming
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WebSocketClient = void 0;
+exports.WebSocketClient = exports.websocketAuthProtocolPrefix = void 0;
+exports.websocketAuthProtocols = websocketAuthProtocols;
+exports.websocketAuthProtocolPrefix = 'slskr.api-token.';
+function websocketAuthProtocols(token) {
+    const normalized = token.trim();
+    return normalized ? [`${exports.websocketAuthProtocolPrefix}${encodeURIComponent(normalized)}`] : [];
+}
 class WebSocketClient {
     constructor(baseUrl, token) {
         this.ws = null;
@@ -26,7 +32,7 @@ class WebSocketClient {
     async connect() {
         return new Promise((resolve, reject) => {
             try {
-                this.ws = new WebSocket(this.url);
+                this.ws = new WebSocket(this.url, websocketAuthProtocols(this.token));
                 this.ws.onopen = () => {
                     this.reconnectAttempts = 0;
                     this.notifyConnectionListeners(true);

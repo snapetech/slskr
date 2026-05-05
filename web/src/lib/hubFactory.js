@@ -1,4 +1,5 @@
 import { rootUrl } from '../config';
+import { getToken, isPassthroughEnabled } from './token';
 
 const RECONNECT_DELAYS_MS = [
   0, 100, 250, 500, 1_000, 2_000, 3_000, 5_000, 5_000, 5_000, 5_000, 5_000,
@@ -42,6 +43,16 @@ const eventFeedUrl = () => {
   const url = new URL(`${rootUrl || ''}/api/events/ws`, window.location.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
+};
+
+export const websocketAuthProtocolPrefix = 'slskr.api-token.';
+
+export const eventFeedProtocols = () => {
+  const token = getToken()?.trim();
+  if (!token || isPassthroughEnabled()) {
+    return [];
+  }
+  return [`${websocketAuthProtocolPrefix}${encodeURIComponent(token)}`];
 };
 
 class WebSocketHubConnection {
@@ -95,7 +106,7 @@ class WebSocketHubConnection {
 
   connect() {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(eventFeedUrl());
+      const socket = new WebSocket(eventFeedUrl(), eventFeedProtocols());
       this.socket = socket;
 
       socket.onopen = () => {

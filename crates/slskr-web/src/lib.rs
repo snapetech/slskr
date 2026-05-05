@@ -3668,6 +3668,10 @@ fn native_tabs_html(kind: RouteKind) -> String {
     )
 }
 
+fn native_filter_html() -> String {
+    r#"<div class="slskr-native-filterbar"><input type="search" data-slskr-native-filter aria-label="Filter visible rows" placeholder="Filter visible rows"><button type="button" data-slskr-native-filter-clear>Clear</button><span data-slskr-native-count>0 rows</span></div>"#.to_string()
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
@@ -3785,8 +3789,9 @@ fn route_native_workspace_html(
         ),
     };
     format!(
-        r#"<section class="slskr-native-workspace">{tabs}{html}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
+        r#"<section class="slskr-native-workspace">{tabs}{filter}{html}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
         tabs = native_tabs_html(kind),
+        filter = native_filter_html(),
     )
 }
 
@@ -4352,7 +4357,7 @@ pub fn route_page_html(path: &str) -> String {
         .join(""),
     };
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-status">{chips}</div></header>{toolbar}<div class="slskr-route-summary"><h3>Overview</h3><ul id="slskr-route-summary">{summary}</ul></div><section class="slskr-work-area"><header><div><h3>Workspace</h3><span id="slskr-live-status" aria-live="polite">Workflow data refreshes from the daemon</span></div><div class="slskr-live-controls"><button type="button" data-slskr-refresh-route>Refresh</button><button type="button" data-slskr-focus-filter>Filter</button><button type="button" data-slskr-clear-filters>Clear filters</button></div></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div><p id="slskr-action-status" aria-live="polite"></p></section><details class="slskr-diagnostics"><summary>Developer</summary><div class="slskr-route-actions"><h3>Action wiring</h3><ul id="slskr-route-actions">{actions}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-status">{chips}</div></header>{toolbar}<div class="slskr-route-summary"><h3>Overview</h3><ul id="slskr-route-summary">{summary}</ul></div><section class="slskr-work-area"><header><div><h3>Workspace</h3><span id="slskr-live-status" aria-live="polite">Workflow data refreshes from the daemon</span></div><div class="slskr-live-controls"><button type="button" data-slskr-refresh-route>Refresh</button><button type="button" data-slskr-focus-filter>Filter</button><button type="button" data-slskr-clear-filters>Clear filters</button></div></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div><p id="slskr-action-status" aria-live="polite"></p><div id="slskr-toast-region" class="slskr-toast-region" aria-live="polite"></div></section><details class="slskr-diagnostics"><summary>Developer</summary><div class="slskr-route-actions"><h3>Action wiring</h3><ul id="slskr-route-actions">{actions}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
@@ -4495,6 +4500,8 @@ fn render_current_route(
     mount_data_cards(document)?;
     mount_native_tables(document)?;
     mount_native_subviews(document)?;
+    mount_native_actions(document)?;
+    mount_native_filters(document)?;
     mount_live_controls(window, document)?;
     mount_browser_local_panels(window, document)?;
     for item in nav_items() {
@@ -4799,6 +4806,193 @@ fn select_native_subview(document: &web_sys::Document, tab: &web_sys::Element) {
             }
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
+    let buttons = document
+        .query_selector_all(".slskr-native-workspace button:not([data-slskr-native-tab])")?;
+    for button_index in 0..buttons.length() {
+        let Some(node) = buttons.item(button_index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let document_for_click = document.clone();
+        let button_for_click = button.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                event.stop_propagation();
+                handle_native_action(&document_for_click, &button_for_click);
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element) {
+    let action = button
+        .text_content()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| "Run action".to_string());
+    let route = button
+        .closest(".slskr-workflow")
+        .ok()
+        .flatten()
+        .and_then(|workflow| workflow.get_attribute("data-slskr-route-kind"))
+        .unwrap_or_else(|| "Workflow".to_string());
+    let selected = document
+        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute("data-slskr-native-title"));
+    let target = selected.unwrap_or_else(|| route.clone());
+    let message = format!("{} queued for {}", action, target);
+    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+        status.set_inner_html(&format!(
+            "<strong>Action</strong> {}",
+            escape_html(&message)
+        ));
+    }
+    show_toast(document, &message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_native_filters(document: &web_sys::Document) -> Result<(), JsValue> {
+    let inputs = document.query_selector_all("[data-slskr-native-filter]")?;
+    for input_index in 0..inputs.length() {
+        let Some(node) = inputs.item(input_index) else {
+            continue;
+        };
+        let input: web_sys::HtmlInputElement = node.dyn_into()?;
+        let workspace = input
+            .closest(".slskr-native-workspace")?
+            .ok_or_else(|| JsValue::from_str("native filter is outside workspace"))?;
+        update_native_filter_count(&workspace);
+
+        let workspace_for_input = workspace.clone();
+        let callback =
+            Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |event: web_sys::Event| {
+                let term = event
+                    .current_target()
+                    .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    .map(|input| input.value().to_lowercase())
+                    .unwrap_or_default();
+                apply_native_filter(&workspace_for_input, &term);
+            }));
+        input.add_event_listener_with_callback("input", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
+    let clear_buttons = document.query_selector_all("[data-slskr-native-filter-clear]")?;
+    for button_index in 0..clear_buttons.length() {
+        let Some(node) = clear_buttons.item(button_index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        let workspace = button
+            .closest(".slskr-native-workspace")?
+            .ok_or_else(|| JsValue::from_str("native filter clear is outside workspace"))?;
+        let workspace_for_clear = workspace.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                if let Ok(Some(filter)) =
+                    workspace_for_clear.query_selector("[data-slskr-native-filter]")
+                {
+                    if let Ok(input) = filter.dyn_into::<web_sys::HtmlInputElement>() {
+                        input.set_value("");
+                    }
+                }
+                apply_native_filter(&workspace_for_clear, "");
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_native_filter(workspace: &web_sys::Element, term: &str) {
+    let mut visible = 0;
+    let mut total = 0;
+    if let Ok(rows) = workspace.query_selector_all("[data-slskr-native-select]") {
+        for index in 0..rows.length() {
+            let Some(node) = rows.item(index) else {
+                continue;
+            };
+            let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            total += 1;
+            let haystack = [
+                row.get_attribute("data-slskr-native-title"),
+                row.get_attribute("data-slskr-native-detail"),
+                row.get_attribute("data-slskr-native-meta"),
+                row.get_attribute("data-slskr-native-action"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+            let matches = term.is_empty() || haystack.contains(term);
+            if matches {
+                visible += 1;
+                let _ = row.remove_attribute("hidden");
+            } else {
+                let _ = row.set_attribute("hidden", "");
+            }
+        }
+    }
+    set_native_filter_count(workspace, visible, total);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_native_filter_count(workspace: &web_sys::Element) {
+    let total = workspace
+        .query_selector_all("[data-slskr-native-select]")
+        .map(|rows| rows.length())
+        .unwrap_or_default();
+    set_native_filter_count(workspace, total, total);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_native_filter_count(workspace: &web_sys::Element, visible: u32, total: u32) {
+    if let Ok(Some(count)) = workspace.query_selector("[data-slskr-native-count]") {
+        count.set_text_content(Some(&format!("{visible} / {total} rows")));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn show_toast(document: &web_sys::Document, message: &str) {
+    let region = document
+        .get_element_by_id("slskr-toast-region")
+        .or_else(|| {
+            let element = document.create_element("div").ok()?;
+            element.set_id("slskr-toast-region");
+            element.set_class_name("slskr-toast-region");
+            let _ = element.set_attribute("aria-live", "polite");
+            let body = document.body()?;
+            let _ = body.append_child(&element);
+            Some(element)
+        });
+    let Some(region) = region else {
+        return;
+    };
+    region.set_inner_html("");
+    let Ok(toast) = document.create_element("div") else {
+        return;
+    };
+    toast.set_class_name("slskr-toast");
+    toast.set_text_content(Some(message));
+    let _ = region.append_child(&toast);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -7871,6 +8065,8 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
             mount_data_cards(&document)?;
             mount_native_tables(&document)?;
             mount_native_subviews(&document)?;
+            mount_native_actions(&document)?;
+            mount_native_filters(&document)?;
             mount_browser_local_panels(window, &document)?;
         }
     }
@@ -8482,9 +8678,12 @@ mod tests {
             assert!(html.contains("slskr-native-subviews"));
             assert!(html.contains("data-slskr-native-tab=\"0\""));
             assert!(html.contains("data-slskr-native-panel=\"0\""));
+            assert!(html.contains("data-slskr-native-filter"));
+            assert!(html.contains("data-slskr-native-count"));
             assert!(html.contains("slskr-native-table"));
             assert!(html.contains("data-slskr-native-select"));
             assert!(html.contains("slskr-native-selection-status"));
+            assert!(html.contains("slskr-toast-region"));
             assert!(html.contains("slskr-legacy-workflow"));
             assert!(html.contains("Additional workflow detail"));
             assert!(

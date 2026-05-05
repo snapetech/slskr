@@ -1091,6 +1091,40 @@ body {
   margin: 0;
 }
 
+.slskr-native-filterbar {
+  align-items: center;
+  background: #101819;
+  border: 1px solid #263130;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+}
+
+.slskr-native-filterbar input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  flex: 1 1 220px;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.slskr-native-filterbar button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.slskr-native-filterbar span {
+  color: #8dd7c8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .slskr-native-grid {
   display: grid;
   gap: 14px;
@@ -1291,6 +1325,20 @@ body {
   cursor: pointer;
   min-height: 30px;
   padding: 0 10px;
+}
+
+.slskr-toast-region {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.slskr-toast {
+  background: #172321;
+  border: 1px solid #8dd7c8;
+  color: #f4efe7;
+  font-size: 13px;
+  padding: 10px 12px;
 }
 
 .slskr-native-stat {

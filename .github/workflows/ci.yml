@@ -2,6 +2,9 @@ name: CI
 
 env:
   ACTIONLINT_VERSION: v1.7.7
+  SLSKR_SECURITY_SCANS_REQUIRED: '1'
+  SLSKR_SEMGREP_IMAGE: semgrep/semgrep:1.70.0
+  SLSKR_TRIVY_IMAGE: aquasec/trivy:0.50.1
 
 on:
   pull_request:
@@ -48,6 +51,7 @@ jobs:
       - run: cargo check -p slskr-web --target wasm32-unknown-unknown
       - run: cargo test --workspace
       - run: cargo audit
+      - run: scripts/run-security-scans.sh
       - run: scripts/check-client-sdk-gates.sh
       - run: npm --prefix web ci
       - run: npm --prefix web audit --audit-level=moderate

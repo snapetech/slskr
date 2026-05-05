@@ -43,6 +43,7 @@ pub struct HttpHeaders {
     pub x_api_key: Option<String>,
     pub upgrade: Option<String>,
     pub sec_websocket_key: Option<String>,
+    pub sec_websocket_protocol: Option<String>,
     pub sec_websocket_version: Option<String>,
     pub connection: String, // "keep-alive" or "close"
     pub user_agent: Option<String>,
@@ -80,6 +81,9 @@ impl HttpHeaders {
                     "x-api-key" => headers.x_api_key = Some(value.to_string()),
                     "upgrade" => headers.upgrade = Some(value.to_lowercase()),
                     "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
+                    "sec-websocket-protocol" => {
+                        headers.sec_websocket_protocol = Some(value.to_string());
+                    }
                     "sec-websocket-version" => {
                         headers.sec_websocket_version = Some(value.to_string());
                     }
@@ -452,6 +456,7 @@ mod tests {
             "Authorization: Bearer token123",
             "X-API-Key: key123",
             "Connection: keep-alive",
+            "Sec-WebSocket-Protocol: slskr.api-token.route%2Dtoken",
         ];
         let headers = HttpHeaders::from_lines(&lines);
         assert_eq!(headers.origin, Some("http://localhost:3000".to_string()));
@@ -460,6 +465,10 @@ mod tests {
         assert_eq!(headers.authorization, Some("Bearer token123".to_string()));
         assert_eq!(headers.x_api_key, Some("key123".to_string()));
         assert_eq!(headers.connection, "keep-alive");
+        assert_eq!(
+            headers.sec_websocket_protocol,
+            Some("slskr.api-token.route%2Dtoken".to_string())
+        );
     }
 
     // ── read_http_request (async, over in-memory duplex stream) ──────────────

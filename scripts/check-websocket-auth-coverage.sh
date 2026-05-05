@@ -24,16 +24,23 @@ if ! rg -n 'GET", "/api/events/ws"|websocket_path == "/api/events/ws"' crates/sl
 fi
 
 if rg -n 'new WebSocket\(this\.url\)' client-ts/src/websocket-client.ts >/dev/null; then
-  printf 'client-ts browser WebSocket auth remains accepted-open in BUG-003\n'
-elif ! rg -n 'Sec-WebSocket-Protocol|ticket|events/ws.*token|event.*ticket' client-ts/src web/src crates/slskr/src >/dev/null; then
-  printf 'websocket auth coverage check failed: client-ts gap changed without visible replacement auth path\n' >&2
+  printf 'websocket auth coverage check failed: client-ts event feed still opens without auth subprotocols\n' >&2
+  status=1
+elif ! rg -n 'websocketAuthProtocols|slskr\.api-token\.' client-ts/src/websocket-client.ts >/dev/null; then
+  printf 'websocket auth coverage check failed: client-ts event feed lacks browser-safe auth subprotocol construction\n' >&2
   status=1
 fi
 
 if rg -n 'new WebSocket\(eventFeedUrl\(\)\)' web/src/lib/hubFactory.js >/dev/null; then
-  printf 'React web event-feed auth remains accepted-open in BUG-004\n'
-elif ! rg -n 'Sec-WebSocket-Protocol|ticket|events/ws.*token|event.*ticket' web/src crates/slskr/src >/dev/null; then
-  printf 'websocket auth coverage check failed: React event-feed gap changed without visible replacement auth path\n' >&2
+  printf 'websocket auth coverage check failed: React web event feed still opens without auth subprotocols\n' >&2
+  status=1
+elif ! rg -n 'eventFeedProtocols|slskr\.api-token\.' web/src/lib/hubFactory.js web/src/lib/hubFactory.test.js >/dev/null; then
+  printf 'websocket auth coverage check failed: React event feed lacks browser-safe auth subprotocol coverage\n' >&2
+  status=1
+fi
+
+if ! rg -n 'sec_websocket_protocol|websocket_protocol_authorization|Sec-WebSocket-Protocol' crates/slskr/src/main.rs crates/slskr/src/http_server.rs crates/slskr/src/events_ws.rs >/dev/null; then
+  printf 'websocket auth coverage check failed: server does not parse and echo websocket auth subprotocols\n' >&2
   status=1
 fi
 

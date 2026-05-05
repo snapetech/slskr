@@ -60,6 +60,7 @@ use tokio::{
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
+const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
@@ -9382,6 +9383,22 @@ fn rate_limit_user_key(authorization: Option<&str>, cookie: Option<&str>) -> Str
     format!("auth:{}", hex::encode(&digest[..16]))
 }
 
+fn websocket_auth_protocol<'a>(protocol_header: Option<&'a str>) -> Option<&'a str> {
+    protocol_header?.split(',').map(str::trim).find(|protocol| {
+        let Some(encoded) = protocol.strip_prefix(WEBSOCKET_AUTH_PROTOCOL_PREFIX) else {
+            return false;
+        };
+        let token = percent_decode(encoded);
+        !token.is_empty() && !token.contains('\r') && !token.contains('\n')
+    })
+}
+
+fn websocket_protocol_authorization(protocol_header: Option<&str>) -> Option<String> {
+    let protocol = websocket_auth_protocol(protocol_header)?;
+    let token = percent_decode(protocol.strip_prefix(WEBSOCKET_AUTH_PROTOCOL_PREFIX)?);
+    Some(format!("Bearer {token}"))
+}
+
 fn slskd_transfer_user_path<'a>(path: &'a str, direction: &str) -> Option<&'a str> {
     let prefix = format!("/api/transfers/{direction}/");
     path.strip_prefix(&prefix)
@@ -12449,11 +12466,30 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             }
         };
         let api_key_authorization;
+        let websocket_route = routing::parse_route(method, path);
+        let websocket_path = if let Some(versioned_path) = websocket_route
+            .normalized_path
+            .strip_prefix("/api/v0/")
+            .or_else(|| websocket_route.normalized_path.strip_prefix("/api/v1/"))
+            .or_else(|| websocket_route.normalized_path.strip_prefix("/api/v2/"))
+        {
+            format!("/api/{}", versioned_path)
+        } else {
+            websocket_route.normalized_path.to_string()
+        };
+        let websocket_protocol_authorization = (method == "GET"
+            && websocket_path == "/api/events/ws")
+            .then(|| {
+                websocket_protocol_authorization(req.headers.sec_websocket_protocol.as_deref())
+            })
+            .flatten();
         let authorization = if let Some(authorization) = req.headers.authorization.as_deref() {
             Some(authorization)
         } else if let Some(api_key) = req.headers.x_api_key.as_deref() {
             api_key_authorization = format!("ApiKey {api_key}");
             Some(api_key_authorization.as_str())
+        } else if let Some(authorization) = websocket_protocol_authorization.as_deref() {
+            Some(authorization)
         } else {
             None
         };
@@ -12470,18 +12506,6 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             .rate_limiter
             .check_rate_limit(remote_addr, username)
             .await;
-
-        let websocket_route = routing::parse_route(method, path);
-        let websocket_path = if let Some(versioned_path) = websocket_route
-            .normalized_path
-            .strip_prefix("/api/v0/")
-            .or_else(|| websocket_route.normalized_path.strip_prefix("/api/v1/"))
-            .or_else(|| websocket_route.normalized_path.strip_prefix("/api/v2/"))
-        {
-            format!("/api/{}", versioned_path)
-        } else {
-            websocket_route.normalized_path.to_string()
-        };
 
         if method == "GET" && websocket_path == "/api/events/ws" {
             if !allowed {
@@ -12526,7 +12550,10 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             if let Some(websocket_key) =
                 websocket_key.filter(|key| is_upgrade && events_ws::valid_sec_websocket_key(key))
             {
-                events_ws::write_upgrade_response(&mut writer, websocket_key).await?;
+                let accepted_protocol =
+                    websocket_auth_protocol(req.headers.sec_websocket_protocol.as_deref());
+                events_ws::write_upgrade_response(&mut writer, websocket_key, accepted_protocol)
+                    .await?;
                 events_ws::stream_events(
                     reader,
                     &mut writer,
@@ -18353,6 +18380,57 @@ mod tests {
             cookie: None,
         };
         assert!(super::request_origin_matches_host(&headers, "[::1]:5030"));
+    }
+
+    #[test]
+    fn websocket_auth_subprotocol_builds_bearer_authorization() {
+        let header = "chat, slskr.api-token.route%2Dtoken%2Fwith%20space";
+        assert_eq!(
+            super::websocket_auth_protocol(Some(header)),
+            Some("slskr.api-token.route%2Dtoken%2Fwith%20space")
+        );
+        assert_eq!(
+            super::websocket_protocol_authorization(Some(header)).as_deref(),
+            Some("Bearer route-token/with space")
+        );
+        assert_eq!(super::websocket_auth_protocol(Some("chat")), None);
+        assert_eq!(
+            super::websocket_protocol_authorization(Some("slskr.api-token.")),
+            None
+        );
+    }
+
+    #[test]
+    fn websocket_subprotocol_authorizes_event_feed_route() {
+        let env = MapEnv::default()
+            .with(
+                "SLSKR_STATE_DIR",
+                &std::env::temp_dir().display().to_string(),
+            )
+            .with("SLSKR_API_TOKEN", "route-token");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("auth config");
+        let headers = super::RequestSecurityHeaders {
+            host: Some("127.0.0.1:5030".to_string()),
+            origin: Some("http://127.0.0.1:5030".to_string()),
+            referer: None,
+            cookie: None,
+        };
+        let auth = super::websocket_protocol_authorization(Some("slskr.api-token.route%2Dtoken"));
+
+        assert_eq!(auth.as_deref(), Some("Bearer route-token"));
+        assert!(super::routing::check_route_auth(
+            &config,
+            "GET",
+            "/api/events/ws",
+            auth.as_deref(),
+            &headers,
+        )
+        .is_ok());
+        assert_eq!(
+            super::routing::check_route_auth(&config, "GET", "/api/events/ws", None, &headers,),
+            Err("unauthorized")
+        );
     }
 
     #[test]
