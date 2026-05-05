@@ -93,18 +93,18 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Release provenance | Release assets were attested, but no SBOM or dependency manifest was attached to releases. | Fixed by generating CycloneDX and dependency JSON manifests from checked-in package metadata, checksumming them, publishing them, and including them in release attestations. |
 | Medium | Cargo package verification | `cargo package --workspace` full verification is blocked by unpublished internal crates in Cargo's temporary registry. | Fixed by adding unpacked `.crate` content verification that checks tracked package inputs and builds a temporary workspace from packaged sources after `cargo package --workspace --no-verify`. |
 | Medium | Release tag policy | Release workflow accepted broad `release-*` tags while docs did not define the exact release tag convention. | Fixed by standardizing on `release-v<semver>`, validating tag pushes in the workflow, and enforcing the convention in release-policy checks and docs. |
+| Medium | Release version metadata | Workspace crates are intentionally internal/unpublished at `0.0.0` while release artifacts derive a separate version label from tags or workflow input. | Fixed by documenting the crate-version policy, requiring `release-v<semver>` / `SLSKR_RELEASE_VERSION` as the artifact version source, and adding `scripts/check-release-version-metadata.sh`. |
+| Medium | Secret scanning gate | Local `.env`, `web/.env.local`, and `.secrets/` are ignored, but tracked files lacked a reproducible committed-secret guard. | Fixed by adding `scripts/check-secret-scanning.sh` to verify ignored local secret paths and scan tracked files for private-key blocks and high-entropy secret-like assignments. |
+| Medium | Python client | Python client had no lint/test/dependency gate beyond compile/import coverage. | Fixed by adding `scripts/check-python-client-quality.sh`, pytest smoke tests for the client helpers, and SDK-gate execution of dev install, pytest, import, and `pip check`. |
+| Medium | Audit tooling availability | Local audit attempts showed optional cargo subcommands were absent and dependency inventory was not gate-provisioned. | Fixed by adding `scripts/check-audit-tooling.sh` with reproducible `cargo metadata --format-version 1 --no-deps` and `cargo tree -d` checks plus audit-tool registry coverage. |
 
 ## Open Burn-Down
 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
-| Medium | Release version metadata | Workspace crates are all versioned `0.0.0` while release artifacts derive a separate version label from tags or workflow input (`crates/slskr/Cargo.toml:3`, `.github/workflows/release.yml:26`). | Align crate/package metadata with the release version or document that crates are intentionally unpublished/internal; add a release check that artifact names, binary version, and crate metadata agree. |
-| Medium | Secret scanning gate | Local `.env`, `web/.env.local`, and `.secrets/` are ignored, but CI/release has no `gitleaks`, `detect-secrets`, or equivalent secret-scanning guard. | Add a pinned secret scan to CI and release gate with allowlisted placeholders for `k8s/secrets.example.yaml` and docs. |
 | Medium | OpenAPI drift | API parity work changes response shapes faster than `docs/openapi.json` and docs can track. | Add generated OpenAPI/doc drift checks to CI and fail when checked-in docs differ. |
 | Medium | Compatibility smoke | slskd API compatibility smoke is opt-in because it needs external Python package install and live-style behavior (`scripts/run-release-gate.sh:55`). | Keep opt-in locally, but run it in scheduled CI with explicit secrets or hermetic fixtures. |
-| Medium | Python client | Python client has no lint/type/test/audit gate, only compile coverage was run locally. | Add `ruff`, pyright or mypy, pytest smoke tests, and dependency audit. |
 | Medium | Rust dependency hygiene | `cargo tree -d` shows duplicate `getrandom`, `rand`, `rand_chacha`, `rand_core`, `hashbrown`, and `thiserror` families in the release graph. | Review after dependency updates and consolidate where semver compatibility allows to reduce binary size and dependency review surface. |
-| Medium | Audit tooling availability | Local audit attempts showed `cargo outdated` and `cargo udeps` are not installed, and the release gate does not provision them. | Add pinned installation or replace with CI-native dependency freshness and unused-dependency tooling such as `cargo-deny`/`cargo-machete`/scheduled outdated reports. |
 | Medium | GitHub Actions supply chain | CI/release workflows use mutable action tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `softprops/action-gh-release@v2` (`.github/workflows/release.yml:44`, `.github/workflows/release.yml:175`). | Pin third-party and first-party actions to reviewed commit SHAs, automate update PRs, and document the trust policy. |
 | Low | Transfer event growth | Transfer event history appends indefinitely and is recreated only when the file is absent (`crates/slskr/src/main.rs:13978`, `crates/slskr/src/main.rs:14039`). | Rotate or compact transfer event logs according to the configured transfer history limit or a byte cap. |
 | Low | Rust module hygiene | `#![allow(dead_code)]` appears at crate/module level in multiple Rust modules (`crates/slskr/src/main.rs:1`, `crates/slskr/src/webhooks.rs:1`, `crates/slskr/src/routing.rs:1`). | Remove broad allowances and gate intentionally unused compatibility helpers behind tests/features. |
@@ -123,6 +123,10 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `npm --prefix client-ts audit --audit-level=moderate`
 - `cargo metadata --format-version 1 --no-deps`
 - `cargo tree -d`
+- `scripts/check-release-version-metadata.sh`
+- `scripts/check-secret-scanning.sh`
+- `scripts/check-python-client-quality.sh`
+- `scripts/check-audit-tooling.sh`
 - `cargo outdated --workspace` was attempted but blocked because `cargo-outdated` is not installed in this environment.
 - `cargo +stable udeps --workspace --all-targets` was attempted but blocked because `cargo-udeps` is not installed in this environment.
 - `npm --prefix web outdated --json`

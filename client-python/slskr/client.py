@@ -4,6 +4,7 @@ Main HTTP API client for slskr
 
 import asyncio
 import json
+import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlencode
 import aiohttp
@@ -11,6 +12,8 @@ import aiohttp
 from .exceptions import ApiError, NetworkError, TimeoutError
 from .batch import BatchClient
 from .websocket import WebSocketClient
+
+logger = logging.getLogger(__name__)
 
 
 class SlskrClient:
@@ -281,13 +284,13 @@ class SlskrClient:
                 timeout=timeout,
             ) as response:
                 if self.debug:
-                    print(f"[slskr] {method} {url} {response.status}")
+                    logger.debug("[slskr] %s %s %s", method, url, response.status)
 
                 if response.status >= 400:
                     error_data = {}
                     try:
                         error_data = await response.json()
-                    except:
+                    except Exception:
                         pass
 
                     raise ApiError(

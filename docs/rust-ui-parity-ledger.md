@@ -36,6 +36,9 @@ Completed across the main Rust routes:
 - native live-response parsing now handles dotted and indexed payload paths,
   array counts, string numeric/bool values, nested browse entries, and richer
   transfer progress details
+- native row and bulk actions now prefer selected row data for files, users,
+  contacts, collections, share groups, and share grants before falling back to
+  generic form inputs
 
 ## Route Gaps
 

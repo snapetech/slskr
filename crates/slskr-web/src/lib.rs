@@ -1781,10 +1781,26 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             r#"{{"content_id":"rust-web-demo","artist":"Public Domain","title":"{}","kind":"Audio"}}"#,
             escape_json_string(value)
         )),
-        ActionBody::DownloadFiles => Some(format!(
-            r#"[{{"filename":"{}","size":99}}]"#,
-            escape_json_string(value)
-        )),
+        ActionBody::DownloadFiles => {
+            let files = value
+                .lines()
+                .flat_map(|line| line.split('|'))
+                .map(str::trim)
+                .filter(|filename| !filename.is_empty())
+                .map(|filename| {
+                    format!(
+                        r#"{{"filename":"{}","size":99}}"#,
+                        escape_json_string(filename)
+                    )
+                })
+                .collect::<Vec<_>>();
+            let files = if files.is_empty() {
+                vec![r#"{"filename":"Remote/Song.mp3","size":99}"#.to_string()]
+            } else {
+                files
+            };
+            Some(format!("[{}]", files.join(",")))
+        }
         ActionBody::EnabledFalse => Some(r#"{"enabled":false}"#.to_string()),
         ActionBody::EnabledTrue => Some(r#"{"enabled":true}"#.to_string()),
         ActionBody::FeedPreview => Some(format!(
@@ -3796,7 +3812,13 @@ fn native_row_action_buttons_html(kind: RouteKind, primary_action: &str) -> Stri
                 true
             }
         })
-        .map(|label| format!(r#"<button type="button">{}</button>"#, escape_html(label)))
+        .map(|label| {
+            format!(
+                r#"<button type="button" data-slskr-native-row-action="{}">{}</button>"#,
+                escape_html(label),
+                escape_html(label)
+            )
+        })
         .collect::<Vec<_>>()
         .join("")
 }
@@ -5868,6 +5890,29 @@ fn native_action_value(
     body: ActionBody,
 ) -> String {
     if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
+        if matches!(body, ActionBody::DownloadFiles) {
+            if let Some(value) = selected_native_row_titles(&workspace) {
+                return value;
+            }
+            if let Some(value) = button_native_row_title(button) {
+                return value;
+            }
+        }
+        if matches!(
+            body,
+            ActionBody::CollectionItem
+                | ActionBody::SearchText
+                | ActionBody::ShareGrant
+                | ActionBody::ShareGroupMember
+                | ActionBody::Username
+        ) {
+            if let Some(value) = button_native_row_target(button) {
+                return value;
+            }
+            if let Some(value) = selected_native_row_target(&workspace) {
+                return value;
+            }
+        }
         for selector in native_action_value_selectors(body) {
             if let Some(value) = first_workspace_value(&workspace, selector) {
                 return value;
@@ -5967,6 +6012,15 @@ fn native_action_target(
         return None;
     }
     let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
+    if let Some(value) = button_native_row_target(button).filter(|value| safe_route_segment(value))
+    {
+        return Some(value);
+    }
+    if let Some(value) =
+        selected_native_row_target(&workspace).filter(|value| safe_route_segment(value))
+    {
+        return Some(value);
+    }
     let selectors: &[&str] = if action.path.contains(":roomName") {
         &[
             r#"input[aria-label="Search rooms"]"#,
@@ -5989,14 +6043,7 @@ fn native_action_target(
             return Some(value);
         }
     }
-    selected_native_row_detail(&workspace)
-        .or_else(|| selected_native_row_title(&workspace))
-        .or_else(|| document_selected_native_row_title(document))
-        .filter(|value| {
-            value
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
-        })
+    document_selected_native_row_title(document).filter(|value| safe_route_segment(value))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -6028,6 +6075,66 @@ fn selected_native_row_title(workspace: &web_sys::Element) -> Option<String> {
         .flatten()
         .and_then(|row| row.get_attribute("data-slskr-native-title"))
         .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn selected_native_row_titles(workspace: &web_sys::Element) -> Option<String> {
+    let rows = workspace
+        .query_selector_all("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()?;
+    let mut values = Vec::new();
+    for index in 0..rows.length() {
+        let Some(node) = rows.item(index) else {
+            continue;
+        };
+        let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        if let Some(value) = row
+            .get_attribute("data-slskr-native-title")
+            .filter(|value| !value.trim().is_empty())
+        {
+            values.push(value);
+        }
+    }
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.join("\n"))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn selected_native_row_target(workspace: &web_sys::Element) -> Option<String> {
+    selected_native_row_detail(workspace)
+        .filter(|value| safe_route_segment(value))
+        .or_else(|| selected_native_row_title(workspace).filter(|value| safe_route_segment(value)))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn button_native_row_title(button: &web_sys::Element) -> Option<String> {
+    button
+        .closest("[data-slskr-native-select]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute("data-slskr-native-title"))
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn button_native_row_target(button: &web_sys::Element) -> Option<String> {
+    button
+        .closest("[data-slskr-native-select]")
+        .ok()
+        .flatten()
+        .and_then(|row| {
+            row.get_attribute("data-slskr-native-detail")
+                .filter(|value| safe_route_segment(value))
+                .or_else(|| {
+                    row.get_attribute("data-slskr-native-title")
+                        .filter(|value| safe_route_segment(value))
+                })
+        })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -11184,6 +11291,14 @@ mod tests {
             r#"[{"filename":"Remote/Track.flac","size":99}]"#
         );
         assert_eq!(
+            action_body_from_value(
+                ActionBody::DownloadFiles,
+                "Remote/Track.flac\nRemote/Other.mp3"
+            )
+            .unwrap(),
+            r#"[{"filename":"Remote/Track.flac","size":99},{"filename":"Remote/Other.mp3","size":99}]"#
+        );
+        assert_eq!(
             action_body_from_value(ActionBody::EnabledTrue, "ignored").unwrap(),
             r#"{"enabled":true}"#
         );
@@ -11213,6 +11328,14 @@ mod tests {
                 .contains("\"sourceText\":\"artist - song\"")
         );
         assert!(action_body_from_value(ActionBody::None, "ignored").is_none());
+    }
+
+    #[test]
+    fn native_row_actions_are_marked_for_selected_row_execution() {
+        let html = route_page_html("/browse");
+        assert!(html.contains(r#"data-slskr-native-row-action="Download Selected""#));
+        assert!(html.contains(r#"data-slskr-native-row-action="Open a New Browse Tab""#));
+        assert!(html.contains(r#"data-slskr-native-title="/Music/Open Sessions""#));
     }
 
     #[test]

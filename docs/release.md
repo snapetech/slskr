@@ -62,3 +62,11 @@ For a tag build, the workflow creates a GitHub Release and uploads all archives
 plus `SHA256SUMS.txt`, `slskr-cyclonedx.json`, and
 `slskr-dependency-manifest.json`. The JSON manifests are included in the
 release checksum file and build-provenance attestation subjects.
+
+The internal/unpublished Cargo crates intentionally remain at `0.0.0`. Binary
+and archive version metadata comes from the release workflow: tag builds derive
+the artifact version from `release-v<semver>`, while manual builds use the
+`SLSKR_RELEASE_VERSION` value passed to `scripts/build-release-archive.sh`.
+Archive roots are named `slskr-<version>-<target>` so the published package
+version remains tied to the release input even though the workspace crates are
+not published independently.
