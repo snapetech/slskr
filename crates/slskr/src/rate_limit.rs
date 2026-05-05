@@ -1,5 +1,4 @@
 //! Rate limiting middleware for HTTP API
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Database persistence layer for slskr
 ///
 /// SQLite-backed durable storage using sqlx for async operations.

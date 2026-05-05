@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! HTTP routing module: request dispatching and path extraction.
 
 use crate::utils::{

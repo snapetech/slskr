@@ -3784,8 +3784,10 @@ fn native_table_html(
             let actions = native_row_action_buttons_html(kind, action);
             let resource_id = native_row_resource_id(kind, primary, secondary, meta, index);
             let row_attrs = native_row_data_attrs(kind, primary, secondary, meta);
+            let action_summary =
+                native_row_action_summary(kind, primary, secondary, meta, action, &resource_id);
             format!(
-                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-resource-id="{resource_id}"{row_attrs} data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
+                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-resource-id="{resource_id}"{row_attrs} data-slskr-native-action-summary="{action_summary}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
@@ -3793,6 +3795,7 @@ fn native_table_html(
                 actions = actions,
                 resource_id = escape_html(&resource_id),
                 row_attrs = row_attrs,
+                action_summary = escape_html(&action_summary),
                 index = index,
             )
         })
@@ -3803,6 +3806,44 @@ fn native_table_html(
         headers = headers,
         rows = rows,
     )
+}
+
+fn native_row_action_summary(
+    kind: RouteKind,
+    primary: &str,
+    secondary: &str,
+    meta: &str,
+    action: &str,
+    resource_id: &str,
+) -> String {
+    let id = native_row_embedded_id(meta).unwrap_or(resource_id);
+    match kind {
+        RouteKind::Search | RouteKind::DiscoveryGraph if secondary.starts_with("search ") => {
+            format!("Open search {id} for {primary}")
+        }
+        RouteKind::Search | RouteKind::DiscoveryGraph => {
+            format!("Queue download from {secondary}: {primary}")
+        }
+        RouteKind::PlaylistIntake => format!("Review parsed row {primary} by {secondary}"),
+        RouteKind::Wishlist => format!("Run wishlist {id}: {primary}"),
+        RouteKind::Downloads => format!("Cancel download {id} from {secondary}: {primary}"),
+        RouteKind::Uploads => format!("Review upload {id} for {secondary}: {primary}"),
+        RouteKind::Messages | RouteKind::Rooms => format!("Reply to {primary}: {secondary}"),
+        RouteKind::Users => format!("Open user {primary} for browse, message, watch, or note"),
+        RouteKind::Contacts => format!("Manage contact {primary} mapped to {secondary}"),
+        RouteKind::Solid => format!("Inspect Solid identity {primary} with storage {secondary}"),
+        RouteKind::Collections => format!("Open collection {id}: {primary}"),
+        RouteKind::ShareGroups => format!("Manage share group {id}: {primary}"),
+        RouteKind::SharedWithMe => format!("Open inbound grant {id} from {secondary}: {primary}"),
+        RouteKind::Browse => {
+            if secondary == "folder" {
+                format!("Open folder {primary}")
+            } else {
+                format!("Queue browsed file {primary}")
+            }
+        }
+        RouteKind::System => format!("Run {action} for system area {primary}"),
+    }
 }
 
 fn native_row_data_attrs(kind: RouteKind, primary: &str, secondary: &str, meta: &str) -> String {
@@ -7491,7 +7532,7 @@ fn select_visible_native_rows(workspace: &web_sys::Element) {
             }
         }
     }
-    update_native_selection_summary(workspace, selected, "selected");
+    update_native_selection_summary(workspace, selected, "selected", first_selected.as_ref());
     if let Some(row) = first_selected.as_ref() {
         update_native_inspector(workspace, selected, Some(row));
         update_native_selection_preview(workspace, selected, Some(row));
@@ -7519,18 +7560,27 @@ fn clear_native_selection(workspace: &web_sys::Element) {
             }
         }
     }
-    update_native_selection_summary(workspace, 0, "selected");
+    update_native_selection_summary(workspace, 0, "selected", None);
     update_native_inspector(workspace, 0, None);
     update_native_selection_preview(workspace, 0, None);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn update_native_selection_summary(workspace: &web_sys::Element, selected: u32, label: &str) {
+fn update_native_selection_summary(
+    workspace: &web_sys::Element,
+    selected: u32,
+    label: &str,
+    row: Option<&web_sys::Element>,
+) {
     let Some(document) = workspace.owner_document() else {
         return;
     };
     let message = if selected == 0 {
         "No rows selected".to_string()
+    } else if selected == 1 {
+        row.and_then(|row| row.get_attribute("data-slskr-native-action-summary"))
+            .or_else(|| row.and_then(|row| row.get_attribute("data-slskr-native-title")))
+            .unwrap_or_else(|| "1 row selected".to_string())
     } else {
         format!("{selected} visible rows {label}")
     };
@@ -7575,7 +7625,8 @@ fn update_native_inspector(
             }
         });
     let detail = row
-        .and_then(|row| row.get_attribute("data-slskr-native-detail"))
+        .and_then(|row| row.get_attribute("data-slskr-native-action-summary"))
+        .or_else(|| row.and_then(|row| row.get_attribute("data-slskr-native-detail")))
         .unwrap_or_else(|| {
             if selected == 0 {
                 "Use the table to choose an item.".to_string()
@@ -7622,7 +7673,8 @@ fn update_native_selection_preview(
             }
         });
     let detail = row
-        .and_then(|row| row.get_attribute("data-slskr-native-detail"))
+        .and_then(|row| row.get_attribute("data-slskr-native-action-summary"))
+        .or_else(|| row.and_then(|row| row.get_attribute("data-slskr-native-detail")))
         .unwrap_or_else(|| {
             if selected == 0 {
                 "Choose a row to review actions.".to_string()
@@ -7914,7 +7966,8 @@ fn select_native_row(document: &web_sys::Document, row: &web_sys::Element) {
         .get_attribute("data-slskr-native-title")
         .unwrap_or_else(|| "Selected row".to_string());
     let detail = row
-        .get_attribute("data-slskr-native-detail")
+        .get_attribute("data-slskr-native-action-summary")
+        .or_else(|| row.get_attribute("data-slskr-native-detail"))
         .unwrap_or_default();
     let meta = row
         .get_attribute("data-slskr-native-meta")
@@ -12518,6 +12571,9 @@ mod tests {
         assert!(downloads
             .contains(r#"data-slskr-native-transfer-state="Queued / 50% / 0 B/s / id=77""#));
         assert!(downloads.contains(r#"data-slskr-native-transfer-id="77""#));
+        assert!(downloads.contains(
+            r#"data-slskr-native-action-summary="Cancel download 77 from peer2: Remote/Song.mp3""#
+        ));
 
         let contacts = route_workspace_result_html(
             "/contacts",
@@ -12555,6 +12611,8 @@ mod tests {
             }],
         );
         assert!(live_wishlist.contains(r#"data-slskr-native-wishlist-id="wish-7""#));
+        assert!(live_wishlist
+            .contains(r#"data-slskr-native-action-summary="Run wishlist wish-7: rare live set""#));
 
         let sharing = route_page_html("/sharegroups");
         assert!(sharing.contains("data-slskr-native-share-group"));

@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 mod batch;
 mod config;
 mod events_ws;

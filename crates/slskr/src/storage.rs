@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Storage module: file I/O, caching, and persistence operations.
 
 use std::fs;

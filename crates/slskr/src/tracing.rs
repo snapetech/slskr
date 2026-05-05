@@ -1,4 +1,4 @@
-#![allow(dead_code, clippy::inherent_to_string_shadow_display)]
+#![allow(clippy::inherent_to_string_shadow_display)]
 /// Request tracing and correlation ID support
 ///
 /// Implements distributed request tracing with correlation IDs,

@@ -62,6 +62,9 @@ Completed across the main Rust routes:
   selected item IDs. Wishlist runs, transfer cancel/allow/deny, contact remove,
   share-group member edits, and share-grant update/token/backfill/delete actions
   can use live row IDs instead of hardcoded demo IDs when API rows provide them.
+- Selected rows now carry route-specific action summaries, and the Rust runtime
+  uses those summaries in the selection status, inspector, and preview cards so
+  users see the concrete operation target before firing row actions.
 
 ## Route Gaps
 

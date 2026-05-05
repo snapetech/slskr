@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 /// Webhook support with HMAC-SHA256 request signing

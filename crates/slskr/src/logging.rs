@@ -1,5 +1,4 @@
 //! Structured logging for HTTP API requests and responses.
-#![allow(dead_code)]
 
 use std::time::Instant;
 

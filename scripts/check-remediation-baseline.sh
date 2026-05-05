@@ -16,11 +16,13 @@ GATES=(
   scripts/check-transfer-event-growth.sh
   scripts/check-workflow-release-policy.sh
   scripts/check-package-artifact-matrix.sh
+  scripts/check-rust-dependency-hygiene.sh
   scripts/check-release-version-metadata.sh
   scripts/check-secret-scanning.sh
   scripts/check-python-client-quality.sh
   scripts/check-client-sdk-gates.sh
   scripts/check-audit-tooling.sh
+  scripts/check-rust-module-hygiene.sh
   scripts/check-dev-tooling.sh
   scripts/check-openapi-docs-drift.sh
   scripts/check-docs-freshness.sh
