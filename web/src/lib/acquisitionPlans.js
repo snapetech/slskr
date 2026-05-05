@@ -2,7 +2,7 @@ import { getAcquisitionProfile } from './acquisitionProfiles';
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 import { v4 as uuidv4 } from 'uuid';
 
-export const acquisitionPlanStorageKey = 'slskdn.acquisitionPlans.items';
+export const acquisitionPlanStorageKey = 'slskr.acquisitionPlans.items';
 
 export const acquisitionPlanStates = [
   'Planned',

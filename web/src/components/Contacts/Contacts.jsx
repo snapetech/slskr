@@ -523,11 +523,11 @@ class AddFriendForm extends Component {
       try {
         const codes = await detector.detect(bitmap);
         const inviteLink = codes.find((code) =>
-          code.rawValue?.startsWith('slskdn://invite/'),
+          code.rawValue?.startsWith('slskr://invite/'),
         )?.rawValue;
 
         if (!inviteLink) {
-          throw new Error('No slskdN invite QR code was found in that image.');
+          throw new Error('No slskR invite QR code was found in that image.');
         }
 
         this.setState({ inviteLink, scanError: null });
@@ -557,7 +557,7 @@ class AddFriendForm extends Component {
           <input
             data-testid="contacts-add-invite-input"
             onChange={(e) => this.setState({ inviteLink: e.target.value })}
-            placeholder="slskdn://invite/..."
+            placeholder="slskr://invite/..."
             style={{ padding: '0.5em', width: '100%' }}
             type="text"
             value={this.state.inviteLink}

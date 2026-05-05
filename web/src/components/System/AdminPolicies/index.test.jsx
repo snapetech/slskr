@@ -32,7 +32,7 @@ describe('AdminPolicies', () => {
         webhooks: {
           notify: {
             call: {
-              url: 'https://hooks.example/slskdn',
+              url: 'https://hooks.example/slskr',
             },
             on: ['DownloadFileComplete'],
             retry: {
@@ -90,7 +90,7 @@ describe('AdminPolicies', () => {
       target: { value: 'ops' },
     });
     fireEvent.change(screen.getByLabelText('Webhook target URL'), {
-      target: { value: 'https://hooks.example/slskdn' },
+      target: { value: 'https://hooks.example/slskr' },
     });
     fireEvent.change(screen.getByLabelText('Webhook event names'), {
       target: { value: 'DownloadFileComplete\nPrivateMessageReceived' },
@@ -124,7 +124,7 @@ describe('AdminPolicies', () => {
       'PrivateMessageReceived',
     ]);
     expect(saved.integrations.webhooks.ops.call.url).toBe(
-      'https://hooks.example/slskdn',
+      'https://hooks.example/slskr',
     );
     expect(saved.integrations.webhooks.ops.call.ignore_certificate_errors).toBe(
       true,

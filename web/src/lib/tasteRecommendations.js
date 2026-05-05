@@ -1,5 +1,5 @@
-// <copyright file="tasteRecommendations.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="tasteRecommendations.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import api from './api';

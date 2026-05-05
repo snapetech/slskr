@@ -10,8 +10,8 @@ test.describe('search', () => {
   test.beforeAll(async () => {
     if (shouldLaunchNodes()) {
       harness = new MultiPeerHarness();
-      await harness.startNode('A', 'test-data/slskdn-test-fixtures/music', {
-        noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+      await harness.startNode('A', 'test-data/slskr-test-fixtures/music', {
+        noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
       });
     }
   });
@@ -40,14 +40,14 @@ test.describe('search', () => {
       .first();
     await expect(searchInput).toBeVisible({ timeout: 10_000 });
 
-    // When SLSKDN_TEST_NO_CONNECT=true the input is disabled; assert and pass
+    // When SLSKR_TEST_NO_CONNECT=true the input is disabled; assert and pass
     const isEnabled = await searchInput.isEnabled().catch(() => false);
     if (!isEnabled) {
       await expect(searchInput).toBeDisabled();
       return;
     }
 
-    // Music fixture is test-data/slskdn-test-fixtures/music/open_goldberg/ (cover.jpg)
+    // Music fixture is test-data/slskr-test-fixtures/music/open_goldberg/ (cover.jpg)
     await searchInput.fill('cover');
 
     // Wait for search request/response (POST /api/v0/searches or compatibility search)
@@ -107,7 +107,7 @@ test.describe('search', () => {
     await expect(page.locator('body')).toBeVisible({ timeout: 3_000 });
 
     // If no_connect is enabled, verify graceful handling
-    if (process.env.SLSKDN_TEST_NO_CONNECT === 'true') {
+    if (process.env.SLSKR_TEST_NO_CONNECT === 'true') {
       // Check connection status if it exists
       const connectionStatus = page.getByTestId(T.connectionStatus);
       if ((await connectionStatus.count()) > 0) {

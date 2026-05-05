@@ -1,6 +1,6 @@
 # E2E Test Suite
 
-This directory contains end-to-end tests for slskdn using Playwright.
+This directory contains end-to-end tests for slskr using Playwright.
 
 ## Test Structure
 
@@ -43,7 +43,11 @@ This is better tested at the API level where we can:
 
 ### `search.spec.ts` / `library.spec.ts`
 
-Search and library tests may skip individual flows when the harness is pointed at a daemon configuration with those surfaces disabled. In the normal slskR/slskdN harness, these pages are expected to load and exercise their API-backed flows.
+Some tests may skip if UI features are not available:
+- Search page may not exist if feature is disabled
+- Browse navigation may not be available if library browsing is not implemented
+
+These are graceful skips that allow tests to pass when features are intentionally disabled or not yet implemented.
 
 ## Running Tests
 
@@ -57,7 +61,7 @@ npm run test:e2e
 
 ### CI Environment
 
-Tests run with `SLSKDN_TEST_NO_CONNECT=true` to disable Soulseek connections for deterministic testing.
+Tests run with `SLSKR_TEST_NO_CONNECT=true` to disable Soulseek connections for deterministic testing.
 
 ```bash
 npm run test:e2e:ci
@@ -65,7 +69,7 @@ npm run test:e2e:ci
 
 ## Test Harness
 
-The `MultiPeerHarness` manages multiple slskdn instances for cross-node testing:
+The `MultiPeerHarness` manages multiple slskr instances for cross-node testing:
 - Launches nodes on different ports
 - Manages test fixtures (music, books, etc.)
 - Handles cleanup on test completion
@@ -78,17 +82,17 @@ E2E tests require real fixture files to be present before running. The harness w
 
 ### Required Fixtures
 
-Fixtures must be in `test-data/slskdn-test-fixtures/` with a valid `meta/manifest.json`:
+Fixtures must be in `test-data/slskr-test-fixtures/` with a valid `meta/manifest.json`:
 
 - `book/treasure_island_pg120.txt` (text file)
-- Additional audio/video files (see `test-data/slskdn-test-fixtures/meta/fetch_media.sh`)
+- Additional audio/video files (see `test-data/slskr-test-fixtures/meta/fetch_media.sh`)
 
 ### Generating Manifest
 
 After downloading fixtures, generate the manifest:
 
 ```bash
-cd test-data/slskdn-test-fixtures/meta
+cd test-data/slskr-test-fixtures/meta
 node generate-manifest.js
 ```
 
@@ -107,6 +111,6 @@ The harness validates fixtures on startup:
 - Checks fixtures root directory exists
 - Validates manifest.json exists and is valid
 - Verifies all required files exist
-- Optional checksum validation (set `SLSKDN_VALIDATE_FIXTURE_CHECKSUMS=1`)
+- Optional checksum validation (set `SLSKR_VALIDATE_FIXTURE_CHECKSUMS=1`)
 
 If validation fails, tests abort immediately with clear error messages.

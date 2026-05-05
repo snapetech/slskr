@@ -318,7 +318,7 @@ class PortForwarding extends Component {
                             {forwarding.serviceName && (
                               <div
                                 style={{
-                                  color: 'var(--slskd-color-subtle, #666)',
+                                  color: 'var(--slskr-color-subtle, #666)',
                                   fontSize: '0.8em',
                                   marginTop: '4px',
                                 }}
@@ -332,7 +332,7 @@ class PortForwarding extends Component {
                         <Table.Cell>
                           <code
                             style={{
-                              backgroundColor: 'var(--slskd-color-inset, #f8f9fa)',
+                              backgroundColor: 'var(--slskr-color-inset, #f8f9fa)',
                               borderRadius: '4px',
                               padding: '4px 8px',
                             }}
@@ -366,7 +366,7 @@ class PortForwarding extends Component {
                               KB
                             </span>
                           ) : (
-                            <span style={{ color: 'var(--slskd-color-subtle, #999)' }}>0 KB</span>
+                            <span style={{ color: 'var(--slskr-color-subtle, #999)' }}>0 KB</span>
                           )}
                         </Table.Cell>
                         <Table.Cell>
@@ -434,8 +434,8 @@ class PortForwarding extends Component {
               <p>Ports in range 1024-65535 that are currently available:</p>
               <div
                 style={{
-                  backgroundColor: 'var(--slskd-color-inset, #f8f9fa)',
-                  border: '1px solid var(--slskd-tertiary-border-color, #dee2e6)',
+                  backgroundColor: 'var(--slskr-color-inset, #f8f9fa)',
+                  border: '1px solid var(--slskr-tertiary-border-color, #dee2e6)',
                   borderRadius: '4px',
                   fontFamily: 'monospace',
                   fontSize: '12px',
@@ -448,14 +448,14 @@ class PortForwarding extends Component {
                   <div>
                     {availablePorts.slice(0, 50).join(', ')}
                     {availablePorts.length > 50 && (
-                      <div style={{ color: 'var(--slskd-color-subtle, #666)', marginTop: '10px' }}>
+                      <div style={{ color: 'var(--slskr-color-subtle, #666)', marginTop: '10px' }}>
                         ... and {availablePorts.length - 50} more ports
                         available
                       </div>
                     )}
                   </div>
                 ) : (
-                  <em style={{ color: 'var(--slskd-color-subtle, #999)' }}>
+                  <em style={{ color: 'var(--slskr-color-subtle, #999)' }}>
                     No ports available or still loading...
                   </em>
                 )}
@@ -579,7 +579,7 @@ class PortForwarding extends Component {
             <Icon name="exchange" />
             Port Forwarding
           </Header>
-          <p style={{ color: 'var(--slskd-color-subtle, #666)', fontSize: '1.1em' }}>
+          <p style={{ color: 'var(--slskr-color-subtle, #666)', fontSize: '1.1em' }}>
             Forward local ports to remote services through secure VPN tunnels.
             Access internal databases, APIs, and services as if they were
             running locally.
@@ -653,7 +653,7 @@ class PortForwarding extends Component {
                 {selectedPodDetail && (
                   <div
                     style={{
-                      backgroundColor: 'var(--slskd-color-inset, #f8f9fa)',
+                      backgroundColor: 'var(--slskr-color-inset, #f8f9fa)',
                       borderRadius: '4px',
                       marginTop: '10px',
                       padding: '10px',

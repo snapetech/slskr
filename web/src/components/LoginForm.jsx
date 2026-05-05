@@ -1,5 +1,5 @@
 import Footer from './Shared/Footer';
-import Logos from './Shared/Logo';
+import { urlBase } from '../config';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
@@ -37,10 +37,6 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
   const usernameInput = useRef();
   const [state, setState] = useState(initialState);
   const [ready, setReady] = useState(false);
-  const logo = useMemo(
-    () => Logos[Math.floor(Math.random() * Logos.length)],
-    [],
-  );
   const httpsUrl = useMemo(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -81,15 +77,20 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
           <Header
             as="h2"
             style={{
-              fontFamily: 'monospace',
-              fontSize: 'inherit',
-              letterSpacing: -1,
-              lineHeight: 1.1,
-              whiteSpace: 'pre',
+              marginBottom: '1.25rem',
             }}
             textAlign="center"
           >
-            {logo}
+            <img
+              alt="slskR"
+              src={`${urlBase}/slskr-logo.png`}
+              style={{
+                display: 'inline-block',
+                height: 'auto',
+                maxWidth: '320px',
+                width: '80%',
+              }}
+            />
           </Header>
           <Form size="large">
             <Segment raised>

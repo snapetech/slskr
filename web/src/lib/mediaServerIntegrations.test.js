@@ -97,7 +97,7 @@ describe('mediaServerIntegrations', () => {
       }),
     );
 
-    expect(report).toContain('slskdN media-server sync review');
+    expect(report).toContain('slskR media-server sync review');
     expect(report).toContain('Adapter: Navidrome');
     expect(report).toContain('PENDING: Base URL configured');
     expect(report).toContain('PENDING: Path mapping ready');
@@ -158,7 +158,7 @@ describe('mediaServerIntegrations', () => {
     ).toContain('User mapping is required.');
 
     const report = formatMediaServerExecutionContractReport(contract);
-    expect(report).toContain('slskdN media-server execution contract');
+    expect(report).toContain('slskR media-server execution contract');
     expect(report).toContain('BLOCKED: User mapping configured');
     expect(report).toContain('ENABLED / BLOCKED: Scrobble and rating export');
   });

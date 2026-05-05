@@ -1,5 +1,5 @@
-// <copyright file="Searches.test.jsx" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="Searches.test.jsx" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import Searches from './Searches';
@@ -117,7 +117,7 @@ describe('Searches', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand SongID' }));
 
     expect(screen.getByTestId('songid-panel')).toBeInTheDocument();
-    expect(localStorage.getItem('slskdn.search.section.songid')).toBe('open');
+    expect(localStorage.getItem('slskr.search.section.songid')).toBe('open');
   });
 
   it('shows and persists the selected acquisition profile', async () => {
@@ -129,7 +129,7 @@ describe('Searches', () => {
     fireEvent.click(screen.getByTestId('acquisition-profile-select'));
     fireEvent.click(screen.getByText('Conservative Network'));
 
-    expect(localStorage.getItem('slskdn.acquisitionProfile')).toBe(
+    expect(localStorage.getItem('slskr.acquisitionProfile')).toBe(
       'conservative-network',
     );
     expect(
@@ -151,7 +151,7 @@ describe('Searches', () => {
   });
 
   it('uses stored collapsed state for primary search sections', async () => {
-    localStorage.setItem('slskdn.search.section.search', 'closed');
+    localStorage.setItem('slskr.search.section.search', 'closed');
 
     await renderSearches({ waitForInput: false });
 

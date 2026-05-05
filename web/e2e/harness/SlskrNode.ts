@@ -87,22 +87,9 @@ async function runCommand(
   cwd: string,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const resolvedCommand =
-      command === 'npm' && process.env.npm_execpath
-        ? process.execPath
-        : command;
-    const resolvedArgs =
-      command === 'npm' && process.env.npm_execpath
-        ? [process.env.npm_execpath, ...args]
-        : args;
-    const child = spawn(resolvedCommand, resolvedArgs, {
+    const child = spawn(command, args, {
       cwd,
-      env: {
-        ...process.env,
-        PATH:
-          process.env.PATH ||
-          '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-      },
+      env: process.env,
       stdio: 'inherit',
     });
 
@@ -112,9 +99,7 @@ async function runCommand(
         resolve();
       } else {
         reject(
-          new Error(
-            `${command} ${args.join(' ')} exited with code ${code}`,
-          ),
+          new Error(`${command} ${args.join(' ')} exited with code ${code}`),
         );
       }
     });
@@ -171,14 +156,14 @@ async function getListenSummaryForPid(pid: number): Promise<string> {
 }
 
 /**
- * Manages a single slskdn test node (real process).
+ * Manages a single slskr test node (real process).
  * Each node gets:
  * - Isolated app directory
  * - Unique API port
  * - Fixture share directory
  * - Optional flags (no_connect for CI determinism)
  */
-export class SlskdnNode {
+export class SlskrNode {
   private static webBuildPromise: Promise<void> | null = null;
 
   private process: ChildProcess | null = null;
@@ -201,42 +186,19 @@ export class SlskdnNode {
    * Get the repository root directory.
    */
   private getRepoRoot(): string {
-    const configured =
-      process.env.SLSKDN_E2E_REPO_ROOT || process.env.SLSKR_SLSKDN_REPO;
-    if (configured) {
-      return path.resolve(configured);
+    // process.cwd() is src/web/e2e/ when running tests, so go up 3 levels
+    // But we need to be more robust - use __dirname if available, or calculate from cwd
+    if (typeof __dirname !== 'undefined') {
+      // Running as compiled JS
+      return path.join(__dirname, '..', '..', '..', '..');
+    } else {
+      // Running as TS - process.cwd() is src/web/e2e/
+      return path.resolve(process.cwd(), '..', '..', '..');
     }
-
-    const currentRepo = path.resolve(process.cwd(), '..');
-    const adjacentSlskdn = path.resolve(currentRepo, '..', 'slskdn');
-    return adjacentSlskdn;
-  }
-
-  private async getWebRoot(repoRoot: string): Promise<string> {
-    const configured = process.env.SLSKR_E2E_WEB_ROOT;
-    const candidates = [
-      configured ? path.resolve(configured) : null,
-      process.cwd(),
-      path.join(repoRoot, 'src', 'web'),
-      path.join(repoRoot, 'web'),
-    ].filter((candidate): candidate is string => Boolean(candidate));
-
-    for (const candidate of candidates) {
-      try {
-        await fs.access(path.join(candidate, 'package.json'));
-        return candidate;
-      } catch {
-        // Try the next layout.
-      }
-    }
-
-    throw new Error(
-      `Web root not found. Tried: ${candidates.join(', ')}`,
-    );
   }
 
   private async getTargetFramework(repoRoot: string): Promise<string> {
-    const projectPath = path.join(repoRoot, 'src', 'slskd', 'slskd.csproj');
+    const projectPath = path.join(repoRoot, 'src', 'slskr', 'slskr.csproj');
     const projectXml = await fs.readFile(projectPath, 'utf8');
     const match = projectXml.match(
       /<TargetFramework>([^<]+)<\/TargetFramework>/,
@@ -254,21 +216,21 @@ export class SlskdnNode {
     const configuredPath = path.join(
       repoRoot,
       'src',
-      'slskd',
+      'slskr',
       'bin',
       'Release',
       targetFramework,
     );
 
     try {
-      await fs.access(path.join(configuredPath, 'slskd.dll'));
+      await fs.access(path.join(configuredPath, 'slskr.dll'));
       return configuredPath;
     } catch {
       // Keep the harness resilient if the project moves to TargetFrameworks or
       // the build output is restored from cache under a different framework.
     }
 
-    const releasePath = path.join(repoRoot, 'src', 'slskd', 'bin', 'Release');
+    const releasePath = path.join(repoRoot, 'src', 'slskr', 'bin', 'Release');
     const entries = await fs
       .readdir(releasePath, { withFileTypes: true })
       .catch(() => []);
@@ -279,7 +241,7 @@ export class SlskdnNode {
 
       const candidate = path.join(releasePath, entry.name);
       try {
-        await fs.access(path.join(candidate, 'slskd.dll'));
+        await fs.access(path.join(candidate, 'slskr.dll'));
         return candidate;
       } catch {
         // Try the next framework directory.
@@ -290,8 +252,7 @@ export class SlskdnNode {
   }
 
   private async syncWebUi(repoRoot: string): Promise<void> {
-    const webRoot = await this.getWebRoot(repoRoot);
-    const webBuildPath = path.join(webRoot, 'build');
+    const webBuildPath = path.join(repoRoot, 'src', 'web', 'build');
 
     try {
       await fs.access(webBuildPath);
@@ -303,11 +264,11 @@ export class SlskdnNode {
       await fs.access(webBuildPath);
     } catch {
       throw new Error(
-        `Web build not found at ${webBuildPath}. Run npm run build first.`,
+        'Web build not found at src/web/build. Run `npm run build` first.',
       );
     }
 
-    const sourceWwwroot = path.join(repoRoot, 'src', 'slskd', 'wwwroot');
+    const sourceWwwroot = path.join(repoRoot, 'src', 'slskr', 'wwwroot');
     await replaceDirectoryContents(webBuildPath, sourceWwwroot);
 
     const builtAppBaseDir = await this.getBuiltAppBaseDir(repoRoot);
@@ -318,15 +279,15 @@ export class SlskdnNode {
         path.join(builtAppBaseDir, 'wwwroot'),
       );
     } catch {
-      // No built Release app yet; fallback launch will copy from src/slskd/wwwroot.
+      // No built Release app yet; fallback launch will copy from src/slskr/wwwroot.
     }
   }
 
   private async ensureWebBuild(repoRoot: string): Promise<void> {
-    if (!SlskdnNode.webBuildPromise) {
-      SlskdnNode.webBuildPromise = (async () => {
+    if (!SlskrNode.webBuildPromise) {
+      SlskrNode.webBuildPromise = (async () => {
         try {
-          const webRoot = await this.getWebRoot(repoRoot);
+          const webRoot = path.join(repoRoot, 'src', 'web');
           const nodeModulesPath = path.join(webRoot, 'node_modules');
 
           try {
@@ -338,25 +299,25 @@ export class SlskdnNode {
           await runCommand('npm', ['run', 'build'], webRoot);
         } catch (error) {
           // Allow a retry if the first attempt fails.
-          SlskdnNode.webBuildPromise = null;
+          SlskrNode.webBuildPromise = null;
           throw error;
         }
       })();
     }
 
-    await SlskdnNode.webBuildPromise;
+    await SlskrNode.webBuildPromise;
   }
 
   /**
-   * Start the slskdn node process.
+   * Start the slskr node process.
    */
   async start(): Promise<void> {
     const repoRoot = this.getRepoRoot();
     await this.syncWebUi(repoRoot);
 
     // Enforce test fixtures exist and validate checksums (fail fast if missing/corrupt)
-    // The shareDir is like 'test-data/slskdn-test-fixtures/music'
-    // We need to check the parent directory 'test-data/slskdn-test-fixtures'
+    // The shareDir is like 'test-data/slskr-test-fixtures/music'
+    // We need to check the parent directory 'test-data/slskr-test-fixtures'
     const shareDirectoriesForValidation = Array.isArray(this.config.shareDir)
       ? this.config.shareDir
       : [this.config.shareDir];
@@ -378,7 +339,7 @@ export class SlskdnNode {
         throw new Error(
           `E2E fixtures directory not found: ${fixturesRoot}\n` +
             'Run: ./scripts/fetch-test-fixtures.sh\n' +
-            'Or: cd test-data/slskdn-test-fixtures/meta && node generate-manifest.js',
+            'Or: cd test-data/slskr-test-fixtures/meta && node generate-manifest.js',
         );
       }
     }
@@ -401,9 +362,9 @@ export class SlskdnNode {
 
     // Create isolated app directory
     if (!this.config.appDir) {
-      if (process.env.SLSKDN_TEST_KEEP_ARTIFACTS === '1') {
+      if (process.env.SLSKR_TEST_KEEP_ARTIFACTS === '1') {
         const baseDir =
-          process.env.SLSKDN_TEST_ARTIFACTS_DIR ||
+          process.env.SLSKR_TEST_ARTIFACTS_DIR ||
           path.join(repoRoot, 'test-artifacts', 'e2e');
         this.appDir = path.join(
           baseDir,
@@ -411,7 +372,7 @@ export class SlskdnNode {
         );
         await fs.mkdir(this.appDir, { recursive: true });
       } else {
-        this.appDir = await fs.mkdtemp(path.join('/tmp', 'slskdn-test-'));
+        this.appDir = await fs.mkdtemp(path.join('/tmp', 'slskr-test-'));
       }
     } else {
       this.appDir = this.config.appDir;
@@ -424,7 +385,7 @@ export class SlskdnNode {
     await fs.mkdir(path.join(this.appDir, 'config'), { recursive: true });
 
     // Write minimal config (YAML format)
-    // Convert shareDir(s) to absolute paths (slskdn requires absolute paths)
+    // Convert shareDir(s) to absolute paths (slskr requires absolute paths)
     const shareDirectories = Array.isArray(this.config.shareDir)
       ? this.config.shareDir
       : [this.config.shareDir];
@@ -442,12 +403,12 @@ export class SlskdnNode {
       username: this.config.nodeName,
     };
 
-    const configPath = path.join(this.appDir, 'config', 'slskd.yml');
+    const configPath = path.join(this.appDir, 'config', 'slskr.yml');
 
     const webContentPath = 'wwwroot';
 
-    // Note: YAML provider automatically prefixes with "slskd:" namespace, so DON'T wrap under slskd: here
-    // If we wrap it, we'd get slskd:slskd:web:port instead of slskd:web:port
+    // Note: YAML provider automatically prefixes with "slskr:" namespace, so DON'T wrap under slskr: here
+    // If we wrap it, we'd get slskr:slskr:web:port instead of slskr:web:port
     const sharesYaml =
       shareDirectoriesAbsolute.length > 0
         ? `shares:
@@ -509,15 +470,15 @@ mesh:
   peerDescriptorRefresh:
     enableIpChangeDetection: false
 flags:
-  no_connect: ${this.config.flags?.noConnect ?? process.env.SLSKDN_TEST_NO_CONNECT === 'true'}
+  no_connect: ${this.config.flags?.noConnect ?? process.env.SLSKR_TEST_NO_CONNECT === 'true'}
 `;
 
     await fs.writeFile(configPath, configYaml, 'utf8');
 
-    // Launch slskdn process
-    const projectPath = path.join(repoRoot, 'src', 'slskd', 'slskd.csproj');
+    // Launch slskr process
+    const projectPath = path.join(repoRoot, 'src', 'slskr', 'slskr.csproj');
     const builtAppBaseDir = await this.getBuiltAppBaseDir(repoRoot);
-    const builtDllPath = path.join(builtAppBaseDir, 'slskd.dll');
+    const builtDllPath = path.join(builtAppBaseDir, 'slskr.dll');
 
     // Verify project exists
     try {
@@ -572,10 +533,10 @@ flags:
         ...process.env,
         ASPNETCORE_ENVIRONMENT: 'Development',
         ASPNETCORE_URLS: `http://127.0.0.1:${this.apiPort}`,
-        SLSKDN_E2E_CONCURRENT_START: '1',
-        SLSKDN_E2E_SERVER_PROBE: '1',
-        SLSKDN_E2E_SHARE_ANNOUNCE: '1',
-        SLSKDN_E2E_SKIP_BRIDGE_PROXY: '1',
+        SLSKR_E2E_CONCURRENT_START: '1',
+        SLSKR_E2E_SERVER_PROBE: '1',
+        SLSKR_E2E_SHARE_ANNOUNCE: '1',
+        SLSKR_E2E_SKIP_BRIDGE_PROXY: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -617,7 +578,7 @@ flags:
 
     // Handle process errors
     this.process.on('error', (error) => {
-      throw new Error(`Failed to start slskdn process: ${error.message}`);
+      throw new Error(`Failed to start slskr process: ${error.message}`);
     });
 
     // Check if process exits early
@@ -625,7 +586,7 @@ flags:
       const elapsed = Date.now() - nodeStartTime;
       const timestamp = new Date().toISOString();
       if (code !== null && code !== 0) {
-        const errorMessage = `slskdn process exited with code ${code}${signal ? ` (signal: ${signal})` : ''} after ${elapsed}ms.\nSTDOUT (last 500 chars):\n${stdout.slice(-500)}\nSTDERR (last 500 chars):\n${stderr.slice(-500)}`;
+        const errorMessage = `slskr process exited with code ${code}${signal ? ` (signal: ${signal})` : ''} after ${elapsed}ms.\nSTDOUT (last 500 chars):\n${stdout.slice(-500)}\nSTDERR (last 500 chars):\n${stderr.slice(-500)}`;
         // Always log process exit errors
         console.error(
           `[${timestamp}] [${this.config.nodeName}] [+${elapsed}ms] ${errorMessage}`,
@@ -707,7 +668,7 @@ flags:
       // Check if process died
       if (this.process.exitCode !== null) {
         if (this.process.exitCode !== 0) {
-          const errorMessage = `slskdn process exited early with code ${this.process.exitCode}.\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`;
+          const errorMessage = `slskr process exited early with code ${this.process.exitCode}.\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`;
           throw new Error(errorMessage);
         } else {
           // Process exited with 0, which is unexpected but might be OK
@@ -871,7 +832,7 @@ flags:
           } catch (error) {
             // File might have been deleted between readdir and stat
             console.warn(
-              `[SlskdnNode] Failed to stat file ${entry.name}: ${error}`,
+              `[SlskrNode] Failed to stat file ${entry.name}: ${error}`,
             );
           }
         }
@@ -881,7 +842,7 @@ flags:
       // Downloads directory might not exist yet (ENOENT) - that's OK
       if (error_.code !== 'ENOENT') {
         console.error(
-          `[SlskdnNode] Error reading downloads directory ${downloadsDir}: ${error_.message}`,
+          `[SlskrNode] Error reading downloads directory ${downloadsDir}: ${error_.message}`,
         );
         throw error;
       }
@@ -989,7 +950,7 @@ flags:
     }
 
     // Cleanup app directory unless KEEP_ARTIFACTS is set
-    if (this.appDir && process.env.SLSKDN_TEST_KEEP_ARTIFACTS !== '1') {
+    if (this.appDir && process.env.SLSKR_TEST_KEEP_ARTIFACTS !== '1') {
       try {
         await fs.rm(this.appDir, { force: true, recursive: true });
       } catch {

@@ -97,14 +97,14 @@ const SearchDetail = ({
   const [hideNoFreeSlots, setHideNoFreeSlots] = useState(false);
   const [foldResults, setFoldResults] = useState(false);
   const [foldDuplicateResults, setFoldDuplicateResults] = useState(
-    getLocalStorageItem('slskd-search-fold-duplicate-results', 'true') !==
+    getLocalStorageItem('slskr-search-fold-duplicate-results', 'true') !==
       'false',
   );
   const [resultFilters, setResultFilters] = useState(
-    getLocalStorageItem('slskd-default-search-filter', ''),
+    getLocalStorageItem('slskr-default-search-filter', ''),
   );
   const [pageSize, setPageSize] = useState(
-    Number.parseInt(getLocalStorageItem('slskd-search-page-size', '25'), 10),
+    Number.parseInt(getLocalStorageItem('slskr-search-page-size', '25'), 10),
   );
   const [displayCount, setDisplayCount] = useState(pageSize);
   const [userStats, setUserStats] = useState({});
@@ -133,13 +133,13 @@ const SearchDetail = ({
   }, [fetchUserNotes]);
 
   const [hasSavedDefault, setHasSavedDefault] = useState(
-    Boolean(getLocalStorageItem('slskd-default-search-filter')),
+    Boolean(getLocalStorageItem('slskr-default-search-filter')),
   );
 
   // Sync hasSavedDefault across tabs/searches when localStorage changes
   useEffect(() => {
     const handleStorageChange = (event) => {
-      if (event.key === 'slskd-default-search-filter') {
+      if (event.key === 'slskr-default-search-filter') {
         setHasSavedDefault(Boolean(event.newValue));
       }
     };
@@ -309,7 +309,7 @@ const SearchDetail = ({
 
   const handlePageSizeChange = (newSize) => {
     setPageSize(newSize);
-    setLocalStorageItem('slskd-search-page-size', newSize);
+    setLocalStorageItem('slskr-search-page-size', newSize);
     // If we're showing less than the new page size, expand to fill it
     if (displayCount < newSize) {
       setDisplayCount(newSize);
@@ -320,7 +320,7 @@ const SearchDetail = ({
     const nextValue = !foldDuplicateResults;
     setFoldDuplicateResults(nextValue);
     setLocalStorageItem(
-      'slskd-search-fold-duplicate-results',
+      'slskr-search-fold-duplicate-results',
       String(nextValue),
     );
   };
@@ -427,13 +427,13 @@ const SearchDetail = ({
   };
 
   const saveAsDefault = () => {
-    setLocalStorageItem('slskd-default-search-filter', resultFilters);
+    setLocalStorageItem('slskr-default-search-filter', resultFilters);
     setHasSavedDefault(true);
     toast.success('Search filters saved as default');
   };
 
   const clearSavedDefault = () => {
-    removeLocalStorageItem('slskd-default-search-filter');
+    removeLocalStorageItem('slskr-default-search-filter');
     setHasSavedDefault(false);
     toast.info('Saved default filter cleared');
   };

@@ -1,5 +1,5 @@
-// <copyright file="discoveryInboxReview.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="discoveryInboxReview.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 const normalize = (value = '') => value.toLowerCase();

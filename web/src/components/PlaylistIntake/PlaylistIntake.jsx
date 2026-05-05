@@ -6,7 +6,7 @@ import {
   buildPlaylistCollectionItems,
   buildPlaylistCompletionSummary,
   buildPlaylistIntakeSummary,
-  buildSlskdPlaylistPreview,
+  buildSlskrPlaylistPreview,
   clearPlaylistTagOrganizationApproval,
   coverArtPolicies,
   formatPlaylistTagOrganizationReport,
@@ -58,10 +58,10 @@ const PlaylistIntake = () => {
     setContent('');
   };
 
-  const previewSlskdPlaylist = (playlist) => {
+  const previewSlskrPlaylist = (playlist) => {
     setPlaylistPreviews((current) => ({
       ...current,
-      [playlist.id]: buildSlskdPlaylistPreview(playlist),
+      [playlist.id]: buildSlskrPlaylistPreview(playlist),
     }));
   };
 
@@ -130,7 +130,7 @@ const PlaylistIntake = () => {
     setItems(updatePlaylistIntakeTrackState(playlist.id, track.id, state));
   };
 
-  const createSlskdPlaylist = async (playlist) => {
+  const createSlskrPlaylist = async (playlist) => {
     const itemsToCreate = buildPlaylistCollectionItems(playlist);
     if (itemsToCreate.length === 0) {
       setStatus(`No matched rows are ready for ${playlist.name}`);
@@ -294,13 +294,13 @@ const PlaylistIntake = () => {
                   </div>
                   <div className="playlist-intake-actions">
                     <Popup
-                      content="Preview the matched rows that will be used for a slskdN playlist Collection."
+                      content="Preview the matched rows that will be used for a slskR playlist Collection."
                       position="top center"
                       trigger={
                         <Button
-                          aria-label={`Preview slskdN playlist for ${playlist.name}`}
+                          aria-label={`Preview slskR playlist for ${playlist.name}`}
                           icon
-                          onClick={() => previewSlskdPlaylist(playlist)}
+                          onClick={() => previewSlskrPlaylist(playlist)}
                           size="small"
                           type="button"
                         >
@@ -310,14 +310,14 @@ const PlaylistIntake = () => {
                       }
                     />
                     <Popup
-                      content="Create a slskdN Playlist collection from matched rows. This writes local collection metadata only and does not search, browse, or download."
+                      content="Create a slskR Playlist collection from matched rows. This writes local collection metadata only and does not search, browse, or download."
                       position="top center"
                       trigger={
                         <Button
-                          aria-label={`Create slskdN playlist for ${playlist.name}`}
+                          aria-label={`Create slskR playlist for ${playlist.name}`}
                           icon
                           loading={busyPlaylistId === playlist.id}
-                          onClick={() => createSlskdPlaylist(playlist)}
+                          onClick={() => createSlskrPlaylist(playlist)}
                           size="small"
                           type="button"
                         >

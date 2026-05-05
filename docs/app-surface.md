@@ -195,6 +195,6 @@ Target distribution shape:
 - broaden `/api/v0/transfers` real transfer execution with richer production policy; current implementation has reloadable projection state in `transfer-state.json`, restart-safe queued resume records for interrupted active transfers, local-path file metadata execution, configurable max-active transfer policy, inbound/outbound transfer allow switches, peer-message transfer negotiation, direct plain/obfuscated `F` streaming/resume, chunked progress events, requester-side indirect `F` fallback, inbound shared-file serving over direct or pierced `F` sockets, and live queued payload proof against adjacent daemons
 - add durable config and state
 - expand API route tests as new `/api/v0/*` resources land
-- keep the Playwright/slskdN harness build strategy current as repo layouts move
+- keep the Playwright/slskr harness build strategy current as repo layouts move
 - migrate scripts fully to `slskr` commands
 - remove or hide the legacy `slskr-cli` binary before public release

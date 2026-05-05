@@ -72,7 +72,7 @@ describe('PlaylistIntake', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Preview slskdN playlist for Mirror queue',
+        name: 'Preview slskR playlist for Mirror queue',
       }),
     );
     expect(
@@ -102,7 +102,7 @@ describe('PlaylistIntake', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Create slskdN playlist for Provider mirror',
+        name: 'Create slskR playlist for Provider mirror',
       }),
     );
 

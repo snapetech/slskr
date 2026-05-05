@@ -129,12 +129,12 @@ const Security = () => {
           detected. Check the <strong>Mesh</strong> tab to verify connectivity.
         </p>
         <Button
-          icon="refresh"
           loading={refreshing}
           onClick={fetchData}
           primary
           size="small"
         >
+          <Icon name="refresh" />
           Refresh Status
         </Button>
       </Message>

@@ -45,7 +45,7 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
 
   const loadSavedBranches = () => {
     try {
-      const raw = getLocalStorageItem('slskdn.discoveryGraph.savedBranches');
+      const raw = getLocalStorageItem('slskr.discoveryGraph.savedBranches');
       const parsed = raw ? JSON.parse(raw) : [];
       setSavedBranches(Array.isArray(parsed) ? parsed : []);
     } catch (error) {

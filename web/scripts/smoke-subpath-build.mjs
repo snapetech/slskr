@@ -6,8 +6,8 @@ import { fileURLToPath } from 'url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const buildDir = path.resolve(scriptDir, '..', 'build');
 const indexPath = path.join(buildDir, 'index.html');
-const mountPath = '/slskd/';
-const deepLinkPath = '/slskd/system/info';
+const mountPath = '/slskr/';
+const deepLinkPath = '/slskr/system/info';
 
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -34,7 +34,7 @@ function getContentType(filePath) {
 function normalizeRequestPath(requestUrl) {
   const pathname = new URL(requestUrl, 'http://127.0.0.1').pathname;
 
-  if (pathname === '/slskd') {
+  if (pathname === '/slskr') {
     return mountPath;
   }
 
@@ -147,7 +147,7 @@ server.listen(0, '127.0.0.1', async () => {
       }
     }
 
-    console.log('Verified built web output loads correctly from a deep link under /slskd/ with relative assets and a mounted base href.');
+    console.log('Verified built web output loads correctly from a deep link under /slskr/ with relative assets and a mounted base href.');
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {

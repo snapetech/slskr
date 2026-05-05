@@ -1,4 +1,4 @@
-const CACHE_NAME = 'slskdn-shell-v2';
+const CACHE_NAME = 'slskr-shell-v2';
 const APP_SHELL_ASSETS = ['./manifest.json', './logo192.png', './logo512.png'];
 
 self.addEventListener('install', (event) => {

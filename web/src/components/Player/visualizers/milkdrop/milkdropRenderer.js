@@ -1241,7 +1241,7 @@ export const createMilkdropRenderer = ({ canvas, preset, textureAssets = {} }) =
   gl.useProgram(program);
 
   return {
-    name: 'slskdN MilkDrop WebGL',
+    name: 'slskR MilkDrop WebGL',
     dispose: () => {
       feedbackTargets.forEach((target) => {
         gl.deleteFramebuffer(target.framebuffer);

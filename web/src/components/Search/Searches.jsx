@@ -413,7 +413,7 @@ const Searches = ({ server } = {}) => {
   return (
     <>
       <CollapsibleSection
-        storageKey="slskdn.search.section.search"
+        storageKey="slskr.search.section.search"
         title="Search"
       >
         <Segment className="search-segment">
@@ -562,35 +562,35 @@ const Searches = ({ server } = {}) => {
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.songid"
+        storageKey="slskr.search.section.songid"
         title="SongID"
       >
         <SongIDPanel disabled={!normalizedServer.isConnected} />
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.musicbrainz"
+        storageKey="slskr.search.section.musicbrainz"
         title="MusicBrainz Lookup"
       >
         <MusicBrainzLookup disabled={!normalizedServer.isConnected} />
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.discographyCoverage"
+        storageKey="slskr.search.section.discographyCoverage"
         title="Discography Concierge"
       >
         <DiscographyCoveragePanel disabled={!normalizedServer.isConnected} />
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.artistReleaseRadar"
+        storageKey="slskr.search.section.artistReleaseRadar"
         title="Artist Release Radar"
       >
         <ArtistReleaseRadarPanel disabled={!normalizedServer.isConnected} />
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.soulseekDiscovery"
+        storageKey="slskr.search.section.soulseekDiscovery"
         title="Soulseek Discovery"
       >
         <SoulseekDiscoveryPanel
@@ -600,28 +600,28 @@ const Searches = ({ server } = {}) => {
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.federatedTaste"
+        storageKey="slskr.search.section.federatedTaste"
         title="Federated Taste"
       >
         <FederatedTasteRecommendationsPanel disabled={!normalizedServer.isConnected} />
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.discoveryGraphAtlas"
+        storageKey="slskr.search.section.discoveryGraphAtlas"
         title="Discovery Graph Atlas"
       >
         <DiscoveryGraphAtlasPanel disabled={!normalizedServer.isConnected} />
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen={false}
-        storageKey="slskdn.search.section.albumCompletion"
+        storageKey="slskr.search.section.albumCompletion"
         title="Album Completion"
       >
         <AlbumCompletionPanel disabled={!normalizedServer.isConnected} />
       </CollapsibleSection>
       <CollapsibleSection
         defaultOpen
-        storageKey="slskdn.search.section.searchResults"
+        storageKey="slskr.search.section.searchResults"
         title="Search Results"
       >
         {Object.keys(searches).length === 0 ? (

@@ -1,5 +1,5 @@
-// <copyright file="soulseekDiscovery.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="soulseekDiscovery.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import api from './api';
@@ -25,6 +25,24 @@ export const getUserInterests = ({ username }) =>
   api.get(`/soulseek/users/${encodeURIComponent(username)}/interests`);
 
 export const getSimilarUsers = () => api.get('/soulseek/users/similar');
+
+export const getMeshRendezvousStatus = () =>
+  api.get('/soulseek/mesh-rendezvous/status');
+
+export const addMeshRendezvousInterest = () =>
+  api.post('/soulseek/mesh-rendezvous/interest');
+
+export const removeMeshRendezvousInterest = () =>
+  api.delete('/soulseek/mesh-rendezvous/interest');
+
+export const getMeshRendezvousUsers = () =>
+  api.get('/soulseek/mesh-rendezvous/users');
+
+export const discoverMeshRendezvous = () =>
+  api.get('/soulseek/mesh-rendezvous/discover');
+
+export const getPeerCapabilities = () =>
+  api.get('/soulseek/peer-capabilities');
 
 export const getItemRecommendations = ({ item }) =>
   api.get(`/soulseek/items/${encodeURIComponent(item)}/recommendations`);

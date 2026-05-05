@@ -24,7 +24,7 @@ export const getUserDownloadStats = async () => {
 };
 
 // Blocked users management (localStorage-based)
-const BLOCKED_USERS_KEY = 'slskdn_blocked_users';
+const BLOCKED_USERS_KEY = 'slskr_blocked_users';
 
 export const getBlockedUsers = () => {
   try {

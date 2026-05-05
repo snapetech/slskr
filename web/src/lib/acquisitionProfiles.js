@@ -1,4 +1,4 @@
-const storageKey = 'slskdn.acquisitionProfile';
+const storageKey = 'slskr.acquisitionProfile';
 
 export const acquisitionProfiles = [
   {

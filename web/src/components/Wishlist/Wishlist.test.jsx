@@ -89,7 +89,7 @@ describe('Wishlist', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskdN Wishlist request review'),
+        expect.stringContaining('slskR Wishlist request review'),
       );
     });
   });

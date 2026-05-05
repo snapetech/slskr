@@ -21,7 +21,7 @@
 }
 
 :root.dark .transfer-button {
-  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+  color: var(--slskr-accent-primary-hover, #eadfff) !important;
 }
 
 .transfer-card {

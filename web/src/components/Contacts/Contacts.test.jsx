@@ -33,7 +33,7 @@ describe('Contacts', () => {
     identityAPI.createInvite.mockResolvedValue({
       data: {
         friendCode: 'FRIEND-1234',
-        inviteLink: 'slskdn://invite/test-invite',
+        inviteLink: 'slskr://invite/test-invite',
       },
     });
     QRCode.toDataURL.mockResolvedValue('data:image/png;base64,inviteqr');
@@ -51,14 +51,14 @@ describe('Contacts', () => {
     fireEvent.click(await screen.findByText('Create Invite'));
 
     expect(await screen.findByTestId('contacts-invite-output')).toHaveValue(
-      'slskdn://invite/test-invite',
+      'slskr://invite/test-invite',
     );
     expect(screen.getByTestId('contacts-invite-qr')).toHaveAttribute(
       'src',
       'data:image/png;base64,inviteqr',
     );
     expect(QRCode.toDataURL).toHaveBeenCalledWith(
-      'slskdn://invite/test-invite',
+      'slskr://invite/test-invite',
       {
         errorCorrectionLevel: 'M',
         margin: 2,
@@ -71,7 +71,7 @@ describe('Contacts', () => {
     const close = vi.fn();
     const detect = vi.fn().mockResolvedValue([
       {
-        rawValue: 'slskdn://invite/scanned',
+        rawValue: 'slskr://invite/scanned',
       },
     ]);
 
@@ -91,7 +91,7 @@ describe('Contacts', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('contacts-add-invite-input')).toHaveValue(
-        'slskdn://invite/scanned',
+        'slskr://invite/scanned',
       );
     });
 

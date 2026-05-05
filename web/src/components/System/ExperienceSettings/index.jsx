@@ -11,7 +11,7 @@ import {
   Segment,
 } from 'semantic-ui-react';
 
-const storageKey = 'slskdn:experience-preferences:v1';
+const storageKey = 'slskr:experience-preferences:v1';
 
 const defaults = {
   discoveryApprovalFilter: 'all',
@@ -93,7 +93,7 @@ const readStoredPreferences = () => {
 
 const buildReport = (form) =>
   [
-    'slskdN experience preferences',
+    'slskR experience preferences',
     `Search: ranking=${form.searchRankingProfile}, condition=${form.searchPreferredCondition}, duplicate_folding=${form.searchDuplicateFolding}, previews=${form.searchActionPreviewDensity}`,
     `Discovery: provider=${form.discoveryProviderFilter || 'all'}, approval=${form.discoveryApprovalFilter}, confidence>=${form.discoveryConfidenceFloor}, stale_days=${form.discoveryStaleDays}, explanations=${form.discoveryExplanationDetail}`,
     `Player: queue_auto_fill=${form.playerQueueAutoFill}, radio_seed=${form.playerRadioSeedMode}, ratings=${form.playerShowRatings}, history=${form.playerCaptureHistory}, scrobble=${form.playerScrobbleMode}, visualizer=${form.playerDefaultVisualizer}, shortcuts=${form.playerKeyboardShortcuts}`,
@@ -358,7 +358,7 @@ const ExperienceSettings = () => {
           }
         />
         <Popup
-          content="Reset these browser-local preference choices to the slskdN defaults."
+          content="Reset these browser-local preference choices to the slskR defaults."
           trigger={
             <Button
               icon

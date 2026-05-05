@@ -29,7 +29,7 @@ import {
   Sidebar,
 } from 'semantic-ui-react';
 
-const SLSKR_RELEASES_URL = 'https://github.com/snapetech/slskR/releases';
+const SLSKR_RELEASES_URL = 'https://github.com/snapetech/slskr/releases';
 const NETWORK_ENDPOINT_NOTICE_STORAGE_KEY =
   'slskr.networkEndpoints.v2.dismissedSignature';
 const NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY =
@@ -39,7 +39,6 @@ const LEGACY_NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY =
 const LEGACY_VPN_PORT_NOTICE_STORAGE_KEY =
   'slskr.vpnForwardedPorts.dismissedSignature';
 const ROOM_ACTIVITY_SEEN_STORAGE_KEY = 'slskr.rooms.lastSeenActivity';
-const LEGACY_ROOM_ACTIVITY_SEEN_STORAGE_KEY = 'slskdn.rooms.lastSeenActivity';
 const NAV_ACTIVITY_POLL_INTERVAL_MS = 10_000;
 
 const Browse = lazy(() => import('./Browse/Browse'));
@@ -74,13 +73,28 @@ const normalizeTheme = (theme) => {
     return theme;
   }
 
-  return 'slskdn';
+  return 'slskr';
 };
 
 const getSemanticTheme = (theme) => (theme === 'light' ? 'light' : 'dark');
 
 const normalizePortForwardProtocol = (proto) =>
   `${proto || ''}`.trim().toUpperCase();
+
+const getOption = (source, ...keys) => {
+  for (const key of keys) {
+    if (source && Object.prototype.hasOwnProperty.call(source, key)) {
+      return source[key];
+    }
+  }
+
+  return undefined;
+};
+
+const toConfiguredPort = (value, fallback) => {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 ? port : fallback;
+};
 
 const getVpnPortForwards = (vpn = {}) => {
   if (Array.isArray(vpn.portForwards) && vpn.portForwards.length > 0) {
@@ -200,22 +214,7 @@ const storeDismissedVpnPortNotice = (signature, portForwards) => {
 
 const getStoredRoomActivity = () => {
   try {
-    const activity =
-      JSON.parse(getLocalStorageItem(ROOM_ACTIVITY_SEEN_STORAGE_KEY, '{}')) ||
-      {};
-    if (Object.keys(activity).length > 0) {
-      return activity;
-    }
-  } catch {
-    // Fall through to the slskdN key used before the slskR web state rename.
-  }
-
-  try {
-    return (
-      JSON.parse(
-        getLocalStorageItem(LEGACY_ROOM_ACTIVITY_SEEN_STORAGE_KEY, '{}'),
-      ) || {}
-    );
+    return JSON.parse(getLocalStorageItem(ROOM_ACTIVITY_SEEN_STORAGE_KEY, '{}')) || {};
   } catch {
     return {};
   }
@@ -239,7 +238,7 @@ const setNavigationHeightVariable = (element) => {
   const bottom = Math.ceil(element.getBoundingClientRect().bottom);
   if (bottom > 0) {
     document.documentElement.style.setProperty(
-      '--slskdn-nav-height',
+      '--slskr-nav-height',
       `${bottom}px`,
     );
   }
@@ -268,7 +267,7 @@ const LEGACY_INGRESS_PORTS = [
   },
   {
     config: 'dht.overlay_port + dht.dht_port + overlay.quic_listen_port',
-    label: 'slskdN mesh, DHT rendezvous, and QUIC overlay',
+    label: 'slskR mesh, DHT rendezvous, and QUIC overlay',
     port: 50305,
     proto: 'TCP/UDP',
   },
@@ -292,20 +291,54 @@ const LEGACY_INGRESS_PORTS = [
   },
 ];
 
-const CURRENT_INGRESS_PORTS = [
-  {
+const buildCurrentIngressPorts = (options = {}) => {
+  const soulseek = getOption(options, 'soulseek', 'Soulseek') || {};
+  const dht = getOption(options, 'dht', 'dhtRendezvous', 'DhtRendezvous') || {};
+  const soulseekListenPort = toConfiguredPort(
+    getOption(soulseek, 'listenPort', 'listen_port', 'ListenPort'),
+    50300,
+  );
+  const dhtOverlayPort = toConfiguredPort(
+    getOption(dht, 'overlayPort', 'overlay_port', 'OverlayPort'),
+    50305,
+  );
+  const dhtPort = toConfiguredPort(
+    getOption(dht, 'dhtPort', 'dht_port', 'DhtPort'),
+    50305,
+  );
+  const ports = [{
     config: 'soulseek.listen_port',
     label: 'Soulseek peer/file transfers',
-    port: 50300,
+    port: soulseekListenPort,
     proto: 'TCP',
-  },
-  {
-    config: 'dht.overlay_port + dht.dht_port',
-    label: 'slskdN mesh overlay and DHT rendezvous',
-    port: 50305,
-    proto: 'TCP/UDP',
-  },
-];
+  }];
+
+  if (dhtOverlayPort === dhtPort) {
+    ports.push({
+      config: 'dht.overlay_port + dht.dht_port',
+      label: 'slskR mesh overlay and DHT rendezvous',
+      port: dhtOverlayPort,
+      proto: 'TCP/UDP',
+    });
+  } else {
+    ports.push(
+      {
+        config: 'dht.overlay_port',
+        label: 'slskR mesh overlay',
+        port: dhtOverlayPort,
+        proto: 'TCP',
+      },
+      {
+        config: 'dht.dht_port',
+        label: 'DHT rendezvous',
+        port: dhtPort,
+        proto: 'UDP',
+      },
+    );
+  }
+
+  return ports;
+};
 
 const IngressPortList = ({ expectedPorts, title }) => {
   if (!expectedPorts?.length) {
@@ -335,7 +368,7 @@ const IngressPortList = ({ expectedPorts, title }) => {
   );
 };
 
-const VpnPortChangeNotice = ({ onDismiss, portForwards }) => {
+const VpnPortChangeNotice = ({ onDismiss, options, portForwards }) => {
   if (!portForwards.length) {
     return null;
   }
@@ -348,17 +381,17 @@ const VpnPortChangeNotice = ({ onDismiss, portForwards }) => {
       <div className="network-endpoint-change-notice-body">
         <Icon name="exchange" />
         <div className="network-endpoint-change-notice-copy">
-          <strong>slskdN ingress ports were reduced.</strong>
+          <strong>slskR ingress ports were reduced.</strong>
           <span>
             Older builds needed five public forwards. Current builds need two:
-            Soulseek peer/file transfers and the slskdN mesh/DHT/QUIC overlay.
+            Soulseek peer/file transfers and the slskR mesh/DHT/QUIC overlay.
           </span>
           <IngressPortList
             expectedPorts={LEGACY_INGRESS_PORTS}
             title="Used to need"
           />
           <IngressPortList
-            expectedPorts={CURRENT_INGRESS_PORTS}
+            expectedPorts={buildCurrentIngressPorts(options)}
             title="Need now"
           />
         </div>
@@ -739,7 +772,7 @@ class App extends Component {
 
         if (error?.message === 'HubConnectionTimeout') {
           console.warn(
-            'Event feed timed out during background startup; allowing the UI to continue while WebSocket reconnects.',
+            'Hub connection timed out during background startup; allowing the UI to continue while SignalR retries.',
           );
           return;
         }
@@ -821,13 +854,13 @@ class App extends Component {
   };
 
   getSavedTheme = () => {
-    const savedTheme = getLocalStorageItem('slskd-theme');
+    const savedTheme = getLocalStorageItem('slskr-theme');
     return savedTheme == null ? null : normalizeTheme(savedTheme);
   };
 
   setTheme = (theme) => {
     const nextTheme = normalizeTheme(theme);
-    setLocalStorageItem('slskd-theme', nextTheme);
+    setLocalStorageItem('slskr-theme', nextTheme);
     this.setState({ theme: nextTheme, themeMenuOpen: false });
   };
 
@@ -886,7 +919,7 @@ class App extends Component {
       login,
       navActivity,
       retriesExhausted,
-      theme = normalizeTheme(this.getSavedTheme() || 'slskdn'),
+      theme = normalizeTheme(this.getSavedTheme() || 'slskr'),
       themeMenuOpen,
     } = this.state;
     const semanticTheme = getSemanticTheme(theme);
@@ -927,7 +960,7 @@ class App extends Component {
           <ErrorSegment
             caption={
               <>
-                <span>Lost connection to slskdN</span>
+                <span>Lost connection to slskR</span>
                 <br />
                 <span>
                   {retriesExhausted ? 'Refresh to reconnect' : 'Retrying...'}
@@ -951,13 +984,13 @@ class App extends Component {
     }
 
     const isAgent = mode === 'Agent';
-    document.title = 'slskdN';
+    document.title = 'slskR';
 
     document.documentElement.classList.remove(
       'classic-dark',
       'dark',
       'light',
-      'slskdn',
+      'slskr',
     );
     document.documentElement.classList.add(theme);
     if (semanticTheme === 'dark') {
@@ -977,7 +1010,7 @@ class App extends Component {
             }}
           >
             <Icon name="attention" />
-            Lost connection to slskdN. {retriesExhausted ? 'Refresh to reconnect.' : 'Retrying...'}
+            Lost connection to slskR. {retriesExhausted ? 'Refresh to reconnect.' : 'Retrying...'}
           </Segment>
         )}
         <PlayerProvider>
@@ -1247,6 +1280,7 @@ class App extends Component {
                   onDismiss={() =>
                     this.dismissVpnPortNotice(vpnPortSignature, vpnPortForwards)
                   }
+                  options={applicationOptions}
                   portForwards={vpnPortForwards}
                 />
               )}

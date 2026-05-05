@@ -35,27 +35,27 @@ test.describe('multi-peer sharing', () => {
       await harness.startNode(
         'A',
         [
-          'test-data/slskdn-test-fixtures/movie',
-          'test-data/slskdn-test-fixtures/book',
+          'test-data/slskr-test-fixtures/movie',
+          'test-data/slskr-test-fixtures/book',
         ],
         {
-          noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+          noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
         },
       );
       // Node B: shares music/ + tv/
       await harness.startNode(
         'B',
         [
-          'test-data/slskdn-test-fixtures/music',
-          'test-data/slskdn-test-fixtures/tv',
+          'test-data/slskr-test-fixtures/music',
+          'test-data/slskr-test-fixtures/tv',
         ],
         {
-          noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+          noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
         },
       );
       // Node C: recipient-only (no shares)
       await harness.startNode('C', [], {
-        noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+        noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
       });
     }
   });
@@ -838,7 +838,7 @@ test.describe('multi-peer sharing', () => {
 
       const existingItems = await existingItemsRes.json();
       if (!Array.isArray(existingItems) || existingItems.length === 0) {
-        // Deterministic fixture: test-data/slskdn-test-fixtures/book/treasure_island_pg120.txt
+        // Deterministic fixture: test-data/slskr-test-fixtures/book/treasure_island_pg120.txt
         // Use the library endpoint so the share repository has a matching ContentId.
         const libraryRes = await request.get(
           `${nodeA.baseUrl}/api/v0/library/items?query=treasure_island_pg120.txt&limit=1`,
@@ -962,8 +962,8 @@ test.describe('multi-peer sharing', () => {
     const streamUrl = await pageC.evaluate(
       async ({ expectedTitle, expectedOwnerBaseUrl }) => {
         const token =
-          sessionStorage.getItem('slskd-token') ||
-          localStorage.getItem('slskd-token');
+          sessionStorage.getItem('slskr-token') ||
+          localStorage.getItem('slskr-token');
         if (!token) return null;
 
         const sharesRes = await fetch('/api/v0/share-grants', {

@@ -1,5 +1,5 @@
-// <copyright file="index.test.jsx" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="index.test.jsx" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import AutomationCenter from './index';
@@ -165,7 +165,7 @@ describe('AutomationCenter', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskdN automation review history'),
+        expect.stringContaining('slskR automation review history'),
       );
     });
   });
@@ -249,7 +249,7 @@ describe('AutomationCenter', () => {
     const report = formatAutomationRunHistoryReport(history);
 
     expect(history).toHaveLength(2);
-    expect(report).toContain('slskdN automation review history');
+    expect(report).toContain('slskR automation review history');
     expect(report).toContain('Local Diagnostics');
     expect(report).toContain('Executed: no');
     expect(report).toContain('Wishlist Retry');

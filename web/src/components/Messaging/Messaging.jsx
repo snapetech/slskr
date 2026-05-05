@@ -27,7 +27,7 @@ import {
   Segment,
 } from 'semantic-ui-react';
 
-const STORAGE_KEY = 'slskd-messaging-workspace';
+const STORAGE_KEY = 'slskr-messaging-workspace';
 const GOLD_STAR_CLUB_POD_ID = 'pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0';
 
 let panelCounter = 0;

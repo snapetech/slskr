@@ -178,12 +178,12 @@ describe('App', () => {
     fireEvent.click(await screen.findByText('Light'));
 
     await waitFor(() => {
-      expect(localStorage.getItem('slskd-theme')).toBe('light');
+      expect(localStorage.getItem('slskr-theme')).toBe('light');
       expect(document.documentElement).toHaveClass('light');
     });
   });
 
-  it('keeps the browser tab title focused on slskdN branding', async () => {
+  it('keeps the browser tab title focused on slskR branding', async () => {
     render(
       <MemoryRouter>
         <App />
@@ -194,7 +194,7 @@ describe('App', () => {
       expect(screen.getByText('Searches')).toBeInTheDocument();
     });
 
-    expect(document.title).toBe('slskdN');
+    expect(document.title).toBe('slskR');
   });
 
   it('shows chat activity in the header when conversations have unread messages', async () => {
@@ -217,7 +217,7 @@ describe('App', () => {
 
   it('shows room activity in the header when joined rooms have newer incoming messages', async () => {
     localStorage.setItem(
-      'slskdn.rooms.lastSeenActivity',
+      'slskr.rooms.lastSeenActivity',
       JSON.stringify({ chill: Date.parse('2026-04-30T00:00:00Z') }),
     );
     getJoinedRooms.mockResolvedValue(['chill']);
@@ -278,10 +278,10 @@ describe('App', () => {
     expect(
       await screen.findByTestId('vpn-port-change-notice'),
     ).toBeInTheDocument();
-    expect(screen.getByText('slskdN ingress ports were reduced.')).toBeInTheDocument();
+    expect(screen.getByText('slskR ingress ports were reduced.')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Older builds needed five public forwards. Current builds need two: Soulseek peer/file transfers and the slskdN mesh/DHT/QUIC overlay.',
+        'Older builds needed five public forwards. Current builds need two: Soulseek peer/file transfers and the slskR mesh/DHT/QUIC overlay.',
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByText('Soulseek peer/file transfers')).toHaveLength(2);
@@ -289,8 +289,8 @@ describe('App', () => {
     expect(screen.getByText('Need now')).toBeInTheDocument();
     expect(screen.getAllByText('TCP 50300')).toHaveLength(2);
     expect(screen.getAllByText('TCP/UDP 50305')).toHaveLength(2);
-    expect(screen.getByText('slskdN mesh overlay and DHT rendezvous')).toBeInTheDocument();
-    expect(screen.getByText('slskdN mesh, DHT rendezvous, and QUIC overlay')).toBeInTheDocument();
+    expect(screen.getByText('slskR mesh overlay and DHT rendezvous')).toBeInTheDocument();
+    expect(screen.getByText('slskR mesh, DHT rendezvous, and QUIC overlay')).toBeInTheDocument();
     expect(screen.getByText('legacy mesh UDP overlay')).toBeInTheDocument();
     expect(screen.getByText('UDP 50400')).toBeInTheDocument();
     expect(screen.queryByText('TCP 50301')).not.toBeInTheDocument();
@@ -305,5 +305,69 @@ describe('App', () => {
         screen.queryByTestId('vpn-port-change-notice'),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it('uses configured ingress ports in the network endpoint notice', async () => {
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Searches')).toBeInTheDocument();
+    });
+
+    hubHandlers.options({
+      dht: {
+        dhtPort: 62010,
+        overlayPort: 62000,
+      },
+      soulseek: {
+        listenPort: 61000,
+      },
+    });
+    hubHandlers.state({
+      server: { isConnected: true },
+      vpn: {
+        isReady: true,
+        portForwards: [
+          {
+            localPort: 61000,
+            proto: 'tcp',
+            publicIPAddress: '203.0.113.10',
+            publicPort: 61000,
+            slot: 0,
+            targetPort: 61000,
+          },
+          {
+            localPort: 62000,
+            proto: 'tcp',
+            publicIPAddress: '203.0.113.20',
+            publicPort: 62000,
+            slot: 1,
+            targetPort: 62000,
+          },
+          {
+            localPort: 62010,
+            proto: 'udp',
+            publicIPAddress: '203.0.113.20',
+            publicPort: 62010,
+            slot: 2,
+            targetPort: 62010,
+          },
+        ],
+      },
+    });
+
+    expect(
+      await screen.findByTestId('vpn-port-change-notice'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('TCP 61000')).toBeInTheDocument();
+    expect(screen.getByText('slskR mesh overlay')).toBeInTheDocument();
+    expect(screen.getByText('TCP 62000')).toBeInTheDocument();
+    expect(screen.getByText('DHT rendezvous')).toBeInTheDocument();
+    expect(screen.getByText('UDP 62010')).toBeInTheDocument();
+    expect(screen.getAllByText('TCP/UDP 50305')).toHaveLength(1);
   });
 });

@@ -37,34 +37,34 @@ for i in $(seq 1 "${SLSKR_TEST_ACCOUNT_COUNT:-4}"); do
   require_var "SLSKR_TEST_${i}_PASSWORD"
 done
 
-slskd_repo="${SLSKR_SLSKD_REPO:-$code_root/slskd}"
-slskdn_repo="${SLSKR_SLSKDN_REPO:-$code_root/slskdn}"
+slskr_repo="${SLSKR_SLSKR_REPO:-$code_root/slskr}"
+slskr_repo="${SLSKR_SLSKR_REPO:-$code_root/slskr}"
 soulseek_net_repo="${SLSKR_SOULSEEK_NET_REPO:-$code_root/Soulseek.NET}"
 runtime_repo="${SLSKR_RUNTIME_REPO:-$code_root/slskNet.Runtime}"
 run_daemons="${SLSKR_RUN_ADJACENT_DAEMONS:-1}"
 skip_adjacent_tests="${SLSKR_SKIP_ADJACENT_TESTS:-0}"
 commons_fixture_dir="${SLSKR_COMMONS_FIXTURE_DIR:-$repo_root/target/open-commons-fixtures}"
 use_commons_fixtures="${SLSKR_USE_OPEN_COMMONS_FIXTURES:-1}"
-slskd_account_index="${SLSKR_SLSKD_ACCOUNT_INDEX:-3}"
-slskdn_account_index="${SLSKR_SLSKDN_ACCOUNT_INDEX:-4}"
-slskd_probe_account_index="${SLSKR_SLSKD_PROBE_ACCOUNT_INDEX:-1}"
-slskdn_probe_account_index="${SLSKR_SLSKDN_PROBE_ACCOUNT_INDEX:-2}"
+slskr_account_index="${SLSKR_SLSKR_ACCOUNT_INDEX:-3}"
+slskr_account_index="${SLSKR_SLSKR_ACCOUNT_INDEX:-4}"
+slskr_probe_account_index="${SLSKR_SLSKR_PROBE_ACCOUNT_INDEX:-1}"
+slskr_probe_account_index="${SLSKR_SLSKR_PROBE_ACCOUNT_INDEX:-2}"
 daemon_cooldown_seconds="${SLSKR_DAEMON_COOLDOWN_SECONDS:-20}"
 daemon_slsk_address="${SLSKR_DAEMON_SLSK_ADDRESS:-}"
 daemon_slsk_port="${SLSKR_DAEMON_SLSK_PORT:-2271}"
 daemon_vpn_enabled="${SLSKR_DAEMON_VPN_ENABLED:-0}"
 probe_vpn_enabled="${SLSKR_PROBE_VPN_ENABLED:-0}"
 restart_matrix_enabled="${SLSKR_RESTART_MATRIX_ENABLED:-1}"
-slskd_vpn_label="${SLSKR_SLSKD_VPN_LABEL:-p7}"
-slskdn_vpn_label="${SLSKR_SLSKDN_VPN_LABEL:-p8}"
-slskd_probe_vpn_label="${SLSKR_SLSKD_PROBE_VPN_LABEL:-p5}"
-slskdn_probe_vpn_label="${SLSKR_SLSKDN_PROBE_VPN_LABEL:-p6}"
-slskd_ns_host_ip="${SLSKR_SLSKD_NETNS_HOST_IP:-10.240.0.1}"
-slskd_ns_ip="${SLSKR_SLSKD_NETNS_IP:-10.240.0.2}"
-slskd_ns_subnet="${SLSKR_SLSKD_NETNS_SUBNET:-10.240.0.0/24}"
-slskdn_ns_host_ip="${SLSKR_SLSKDN_NETNS_HOST_IP:-10.241.0.1}"
-slskdn_ns_ip="${SLSKR_SLSKDN_NETNS_IP:-10.241.0.2}"
-slskdn_ns_subnet="${SLSKR_SLSKDN_NETNS_SUBNET:-10.241.0.0/24}"
+slskr_vpn_label="${SLSKR_SLSKR_VPN_LABEL:-p7}"
+slskr_vpn_label="${SLSKR_SLSKR_VPN_LABEL:-p8}"
+slskr_probe_vpn_label="${SLSKR_SLSKR_PROBE_VPN_LABEL:-p5}"
+slskr_probe_vpn_label="${SLSKR_SLSKR_PROBE_VPN_LABEL:-p6}"
+slskr_ns_host_ip="${SLSKR_SLSKR_NETNS_HOST_IP:-10.240.0.1}"
+slskr_ns_ip="${SLSKR_SLSKR_NETNS_IP:-10.240.0.2}"
+slskr_ns_subnet="${SLSKR_SLSKR_NETNS_SUBNET:-10.240.0.0/24}"
+slskr_ns_host_ip="${SLSKR_SLSKR_NETNS_HOST_IP:-10.241.0.1}"
+slskr_ns_ip="${SLSKR_SLSKR_NETNS_IP:-10.241.0.2}"
+slskr_ns_subnet="${SLSKR_SLSKR_NETNS_SUBNET:-10.241.0.0/24}"
 
 log_file="$output_dir/cross-client-validation.tsv"
 printf 'timestamp\tscope\tcheck\tstatus\tdetail\n' >"$log_file"
@@ -74,7 +74,7 @@ if [[ -z "$daemon_slsk_address" ]]; then
 fi
 
 sanitize_detail() {
-  tr '\000\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//; s/password=[^ ]+/password=<redacted>/Ig; s/SLSK_PASSWORD=[^ ]+/SLSK_PASSWORD=<redacted>/g; s/SLSKD_SLSK_PASSWORD=[^ ]+/SLSKD_SLSK_PASSWORD=<redacted>/g'
+  tr '\000\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//; s/password=[^ ]+/password=<redacted>/Ig; s/SLSK_PASSWORD=[^ ]+/SLSK_PASSWORD=<redacted>/g; s/SLSKR_SLSK_PASSWORD=[^ ]+/SLSKR_SLSK_PASSWORD=<redacted>/g'
 }
 
 record() {
@@ -132,10 +132,10 @@ resolve_proton_config() {
 
 probe_netns_args() {
   local scope="$1"
-  if [[ "$scope" == *slskdN* ]]; then
-    printf '%s\n' "$slskdn_probe_vpn_label" "${SLSKR_SLSKDN_PROBE_NETNS_HOST_IP:-10.243.0.1}" "${SLSKR_SLSKDN_PROBE_NETNS_IP:-10.243.0.2}" "${SLSKR_SLSKDN_PROBE_NETNS_SUBNET:-10.243.0.0/24}" "probe-slskdn" "$slskdn_ns_subnet"
+  if [[ "$scope" == *slskr* ]]; then
+    printf '%s\n' "$slskr_probe_vpn_label" "${SLSKR_SLSKR_PROBE_NETNS_HOST_IP:-10.243.0.1}" "${SLSKR_SLSKR_PROBE_NETNS_IP:-10.243.0.2}" "${SLSKR_SLSKR_PROBE_NETNS_SUBNET:-10.243.0.0/24}" "probe-slskr" "$slskr_ns_subnet"
   else
-    printf '%s\n' "$slskd_probe_vpn_label" "${SLSKR_SLSKD_PROBE_NETNS_HOST_IP:-10.242.0.1}" "${SLSKR_SLSKD_PROBE_NETNS_IP:-10.242.0.2}" "${SLSKR_SLSKD_PROBE_NETNS_SUBNET:-10.242.0.0/24}" "probe-slskd" "$slskd_ns_subnet"
+    printf '%s\n' "$slskr_probe_vpn_label" "${SLSKR_SLSKR_PROBE_NETNS_HOST_IP:-10.242.0.1}" "${SLSKR_SLSKR_PROBE_NETNS_IP:-10.242.0.2}" "${SLSKR_SLSKR_PROBE_NETNS_SUBNET:-10.242.0.0/24}" "probe-slskr" "$slskr_ns_subnet"
   fi
 }
 
@@ -312,10 +312,10 @@ run_commons_download_probe_optional() {
   fi
 
   local host="127.0.0.1"
-  if [[ "$daemon_vpn_enabled" == "1" && "$scope" == *slskdN* ]]; then
-    host="$slskdn_ns_ip"
+  if [[ "$daemon_vpn_enabled" == "1" && "$scope" == *slskr* ]]; then
+    host="$slskr_ns_ip"
   elif [[ "$daemon_vpn_enabled" == "1" ]]; then
-    host="$slskd_ns_ip"
+    host="$slskr_ns_ip"
   fi
 
   run_probe_optional "$scope" open-commons-browse "open commons browse proof failed; text fixture browse remains the blocking proof" "$actor_index" "$peer_user" env SLSK_BROWSE_HOST_OVERRIDE="$host" SLSK_BROWSE_EXPECTED=commons-click-track.ogg cargo run -q -p slskr -- probe browse-peer
@@ -329,7 +329,7 @@ start_daemon() {
   dotnet_path="$(command -v dotnet)"
   local app_dir="$output_dir/$name-app"
   local share_dir="$output_dir/fixtures/$name"
-  local config_file="$app_dir/slskd.yml"
+  local config_file="$app_dir/slskr.yml"
   if [[ "$preserve_app_dir" != "1" ]]; then
     rm -rf "$app_dir"
   fi
@@ -358,24 +358,24 @@ soulseek:
 CFG
   local daemon_env=(env \
     ASPNETCORE_URLS="http://0.0.0.0:$http_port" \
-    SLSKD_APP_DIR="$app_dir" \
-    SLSKD_CONFIG="$config_file" \
-    SLSKD_HTTP_PORT="$http_port" \
-    SLSKD_NO_HTTPS=true \
-    SLSKD_SLSK_USERNAME="${!user_var}" \
-    SLSKD_SLSK_PASSWORD="${!pass_var}" \
+    SLSKR_APP_DIR="$app_dir" \
+    SLSKR_CONFIG="$config_file" \
+    SLSKR_HTTP_PORT="$http_port" \
+    SLSKR_NO_HTTPS=true \
+    SLSKR_SLSK_USERNAME="${!user_var}" \
+    SLSKR_SLSK_PASSWORD="${!pass_var}" \
     SLSK_ADDRESS="$daemon_slsk_address" \
     SLSK_PORT="$daemon_slsk_port" \
-    SLSKD_SLSK_ADDRESS="$daemon_slsk_address" \
-    SLSKD_SLSK_PORT="$daemon_slsk_port" \
-    SLSKD_SLSK_LISTEN_IP_ADDRESS=0.0.0.0 \
-    SLSKD_SLSK_LISTEN_PORT="$listen_port" \
-    "$dotnet_path" run --project src/slskd/slskd.csproj --no-launch-profile)
+    SLSKR_SLSK_ADDRESS="$daemon_slsk_address" \
+    SLSKR_SLSK_PORT="$daemon_slsk_port" \
+    SLSKR_SLSK_LISTEN_IP_ADDRESS=0.0.0.0 \
+    SLSKR_SLSK_LISTEN_PORT="$listen_port" \
+    "$dotnet_path" run --project src/slskr/slskr.csproj --no-launch-profile)
   if [[ "$daemon_vpn_enabled" == "1" ]]; then
     local config namespace extra_routes
     config="$(resolve_proton_config "$vpn_label")" || return 1
     namespace="$(printf 'd-%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-' | cut -c1-10)"
-    extra_routes="${SLSKR_SLSKD_PROBE_NETNS_SUBNET:-10.242.0.0/24} ${SLSKR_SLSKDN_PROBE_NETNS_SUBNET:-10.243.0.0/24}"
+    extra_routes="${SLSKR_SLSKR_PROBE_NETNS_SUBNET:-10.242.0.0/24} ${SLSKR_SLSKR_PROBE_NETNS_SUBNET:-10.243.0.0/24}"
     (cd "$repo" && env SLSKR_NETNS_HOST_IP="$host_ip" SLSKR_NETNS_IP="$ns_ip" SLSKR_NETNS_SUBNET="$subnet" SLSKR_NETNS_EXTRA_ROUTES="$extra_routes" "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "${daemon_env[@]}") >"$output_dir/$name.stdout.log" 2>"$output_dir/$name.stderr.log" &
   else
     (cd "$repo" && "${daemon_env[@]}") >"$output_dir/$name.stdout.log" 2>"$output_dir/$name.stderr.log" &
@@ -485,18 +485,18 @@ fi
 if [[ "$skip_adjacent_tests" != "1" ]]; then
   run_logged_optional slskr live-matrix "public Soulseek login/reset instability; local fixture peer smoke remains the blocking peer proof" "$repo_root" scripts/run-live-interop-matrix.sh
 
-  if [[ -d "$slskd_repo" ]]; then
-    run_logged slskd unit-tests "$slskd_repo" dotnet test tests/slskd.Tests.Unit/slskd.Tests.Unit.csproj
+  if [[ -d "$slskr_repo" ]]; then
+    run_logged slskr unit-tests "$slskr_repo" dotnet test tests/slskr.Tests.Unit/slskr.Tests.Unit.csproj
   else
-    record slskd checkout missing "not found at $slskd_repo"
+    record slskr checkout missing "not found at $slskr_repo"
   fi
 
-  if [[ -d "$slskdn_repo" ]]; then
-    run_logged slskdN unit-tests "$slskdn_repo" dotnet test tests/slskd.Tests.Unit/slskd.Tests.Unit.csproj --no-restore
-    run_logged slskdN vendored-runtime-build "$slskdn_repo" dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj --no-restore
-    run_logged slskdN vendored-runtime-tests "$slskdn_repo" dotnet test vendor/slskNet.Runtime/tests/Soulseek.Tests.Unit/Soulseek.Tests.Unit.csproj --no-restore
+  if [[ -d "$slskr_repo" ]]; then
+    run_logged slskr unit-tests "$slskr_repo" dotnet test tests/slskr.Tests.Unit/slskr.Tests.Unit.csproj --no-restore
+    run_logged slskr vendored-runtime-build "$slskr_repo" dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj --no-restore
+    run_logged slskr vendored-runtime-tests "$slskr_repo" dotnet test vendor/slskNet.Runtime/tests/Soulseek.Tests.Unit/Soulseek.Tests.Unit.csproj --no-restore
   else
-    record slskdN checkout missing "not found at $slskdn_repo"
+    record slskr checkout missing "not found at $slskr_repo"
   fi
 
   if [[ -d "$soulseek_net_repo" ]]; then
@@ -515,48 +515,48 @@ else
 fi
 
 if [[ "$run_daemons" == "1" ]]; then
-  if [[ -d "$slskd_repo" ]]; then
-    slskd_host="127.0.0.1"
+  if [[ -d "$slskr_repo" ]]; then
+    slskr_host="127.0.0.1"
     if [[ "$daemon_vpn_enabled" == "1" ]]; then
-      slskd_host="$slskd_ns_ip"
+      slskr_host="$slskr_ns_ip"
     fi
-    slskd_pid="$(start_daemon slskd  "$slskd_repo"  "$slskd_account_index" 55130 55100 "$slskd_vpn_label" "$slskd_ns_host_ip" "$slskd_ns_ip" "$slskd_ns_subnet")"
-    cleanup_pids+=("$slskd_pid")
-    wait_for_daemon_preflight slskr-to-slskd slskd "$slskd_host" 55130 || true
-    slskd_user_var="SLSKR_TEST_${slskd_account_index}_USERNAME"
-    if wait_for_peer slskr-to-slskd "$slskd_probe_account_index" "${!slskd_user_var}"; then
-      run_probe_optional slskr-to-slskd plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskd_probe_account_index" "${!slskd_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskd_host" cargo run -q -p slskr -- probe plain-peer
-      run_probe_optional slskr-to-slskd browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskd_probe_account_index" "${!slskd_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskd_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskd.txt cargo run -q -p slskr -- probe browse-peer
-      run_download_probe_optional slskr-to-slskd download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskd_probe_account_index" "${!slskd_user_var}" "$slskd_host" 'slskd\slskr-interop-slskd.txt' 'slskr interop fixture slskd' a06260a33bda3cf8cb147107c2d09723b4d59fc6a40d1ac9177424614f4f2202 2240
-      run_commons_download_probe_optional slskr-to-slskd "$slskd_probe_account_index" "${!slskd_user_var}" slskd
-      run_probe_optional slskr-to-slskd file-transfer-peer "raw transfer token echo requires a queued transfer on slskd; real payload transfer is covered by queued download probes" "$slskd_probe_account_index" "${!slskd_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskd_host" cargo run -q -p slskr -- probe file-transfer-peer
-      run_restart_matrix_for_daemon slskr-to-slskd slskd "$slskd_repo" "$slskd_account_index" "$slskd_probe_account_index" 55130 55100 "$slskd_vpn_label" "$slskd_ns_host_ip" "$slskd_ns_ip" "$slskd_ns_subnet" "$slskd_host" slskd slskd_pid
+    slskr_pid="$(start_daemon slskr  "$slskr_repo"  "$slskr_account_index" 55130 55100 "$slskr_vpn_label" "$slskr_ns_host_ip" "$slskr_ns_ip" "$slskr_ns_subnet")"
+    cleanup_pids+=("$slskr_pid")
+    wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55130 || true
+    slskr_user_var="SLSKR_TEST_${slskr_account_index}_USERNAME"
+    if wait_for_peer slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}"; then
+      run_probe_optional slskr-to-slskr plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe plain-peer
+      run_probe_optional slskr-to-slskr browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskr_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskr.txt cargo run -q -p slskr -- probe browse-peer
+      run_download_probe_optional slskr-to-slskr download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskr_probe_account_index" "${!slskr_user_var}" "$slskr_host" 'slskr\slskr-interop-slskr.txt' 'slskr interop fixture slskr' a06260a33bda3cf8cb147107c2d09723b4d59fc6a40d1ac9177424614f4f2202 2240
+      run_commons_download_probe_optional slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}" slskr
+      run_probe_optional slskr-to-slskr file-transfer-peer "raw transfer token echo requires a queued transfer on slskr; real payload transfer is covered by queued download probes" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe file-transfer-peer
+      run_restart_matrix_for_daemon slskr-to-slskr slskr "$slskr_repo" "$slskr_account_index" "$slskr_probe_account_index" 55130 55100 "$slskr_vpn_label" "$slskr_ns_host_ip" "$slskr_ns_ip" "$slskr_ns_subnet" "$slskr_host" slskr slskr_pid
     else
-      record_daemon_tail slskr-to-slskd slskd
-      record slskr-to-slskd daemon-probes skipped "target did not reach advertised-listener readiness"
+      record_daemon_tail slskr-to-slskr slskr
+      record slskr-to-slskr daemon-probes skipped "target did not reach advertised-listener readiness"
     fi
     sleep "$daemon_cooldown_seconds"
   fi
-  if [[ -d "$slskdn_repo" ]]; then
-    slskdn_host="127.0.0.1"
+  if [[ -d "$slskr_repo" ]]; then
+    slskr_host="127.0.0.1"
     if [[ "$daemon_vpn_enabled" == "1" ]]; then
-      slskdn_host="$slskdn_ns_ip"
+      slskr_host="$slskr_ns_ip"
     fi
-    slskdn_pid="$(start_daemon slskdN "$slskdn_repo" "$slskdn_account_index" 55131 55110 "$slskdn_vpn_label" "$slskdn_ns_host_ip" "$slskdn_ns_ip" "$slskdn_ns_subnet")"
-    cleanup_pids+=("$slskdn_pid")
-    wait_for_daemon_preflight slskr-to-slskdN slskdN "$slskdn_host" 55131 || true
-    slskdn_user_var="SLSKR_TEST_${slskdn_account_index}_USERNAME"
-    if wait_for_peer slskr-to-slskdN "$slskdn_probe_account_index" "${!slskdn_user_var}"; then
-      run_probe_optional slskr-to-slskdN plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskdn_host" cargo run -q -p slskr -- probe plain-peer
-      run_probe_optional slskr-to-slskdN browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskdn_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskdN.txt cargo run -q -p slskr -- probe browse-peer
-      run_download_probe_optional slskr-to-slskdN download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskdn_probe_account_index" "${!slskdn_user_var}" "$slskdn_host" 'slskdN\slskr-interop-slskdN.txt' 'slskr interop fixture slskdN' 98be10759b80d65a17fa825c5459338fbd319c338280f7aff65b9cc4bba859a9 2240
-      run_commons_download_probe_optional slskr-to-slskdN "$slskdn_probe_account_index" "${!slskdn_user_var}" slskdN
-      run_probe_optional slskr-to-slskdN file-transfer-peer "raw transfer token echo requires a queued transfer on slskdN; real payload transfer is covered by queued download probes" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskdn_host" cargo run -q -p slskr -- probe file-transfer-peer
-      run_probe_optional slskr-to-slskdN obfuscated-peer "obfuscated peer probe is only mandatory when the target advertises an active obfuscated listener" "$slskdn_probe_account_index" "${!slskdn_user_var}" env SLSK_OBFUSCATED_PEER_USERNAME="${!slskdn_user_var}" SLSK_OBFUSCATED_HOST_OVERRIDE="$slskdn_host" cargo run -q -p slskr -- probe obfuscated-peer
-      run_restart_matrix_for_daemon slskr-to-slskdN slskdN "$slskdn_repo" "$slskdn_account_index" "$slskdn_probe_account_index" 55131 55110 "$slskdn_vpn_label" "$slskdn_ns_host_ip" "$slskdn_ns_ip" "$slskdn_ns_subnet" "$slskdn_host" slskdN slskdn_pid
+    slskr_pid="$(start_daemon slskr "$slskr_repo" "$slskr_account_index" 55131 55110 "$slskr_vpn_label" "$slskr_ns_host_ip" "$slskr_ns_ip" "$slskr_ns_subnet")"
+    cleanup_pids+=("$slskr_pid")
+    wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55131 || true
+    slskr_user_var="SLSKR_TEST_${slskr_account_index}_USERNAME"
+    if wait_for_peer slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}"; then
+      run_probe_optional slskr-to-slskr plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe plain-peer
+      run_probe_optional slskr-to-slskr browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskr_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskr.txt cargo run -q -p slskr -- probe browse-peer
+      run_download_probe_optional slskr-to-slskr download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskr_probe_account_index" "${!slskr_user_var}" "$slskr_host" 'slskr\slskr-interop-slskr.txt' 'slskr interop fixture slskr' 98be10759b80d65a17fa825c5459338fbd319c338280f7aff65b9cc4bba859a9 2240
+      run_commons_download_probe_optional slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}" slskr
+      run_probe_optional slskr-to-slskr file-transfer-peer "raw transfer token echo requires a queued transfer on slskr; real payload transfer is covered by queued download probes" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe file-transfer-peer
+      run_probe_optional slskr-to-slskr obfuscated-peer "obfuscated peer probe is only mandatory when the target advertises an active obfuscated listener" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_OBFUSCATED_PEER_USERNAME="${!slskr_user_var}" SLSK_OBFUSCATED_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe obfuscated-peer
+      run_restart_matrix_for_daemon slskr-to-slskr slskr "$slskr_repo" "$slskr_account_index" "$slskr_probe_account_index" 55131 55110 "$slskr_vpn_label" "$slskr_ns_host_ip" "$slskr_ns_ip" "$slskr_ns_subnet" "$slskr_host" slskr slskr_pid
     else
-      record_daemon_tail slskr-to-slskdN slskdN
-      record slskr-to-slskdN daemon-probes skipped "target did not reach advertised-listener readiness"
+      record_daemon_tail slskr-to-slskr slskr
+      record slskr-to-slskr daemon-probes skipped "target did not reach advertised-listener readiness"
     fi
   fi
 fi

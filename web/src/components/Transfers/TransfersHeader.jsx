@@ -173,7 +173,7 @@ const TransfersHeader = ({
         </ShrinkableDropdownButton>
         <Nbsp />
         <Popup
-          content="Allow slow or stalled downloads to use verified alternate sources. Soulseek peers use sequential failover; true multipart chunking is reserved for trusted slskdN mesh peers."
+          content="Allow slow or stalled downloads to use verified alternate sources. Soulseek peers use sequential failover; true multipart chunking is reserved for trusted slskR mesh peers."
           position="bottom right"
           trigger={
             <Checkbox

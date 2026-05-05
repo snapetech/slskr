@@ -5,9 +5,12 @@ export const getSpotifyStatus = async () =>
 
 export const startSpotifyAuthorization = async () => {
   const data = (await api.post('/integrations/spotify/authorize')).data;
-  if (data?.authorization_url) {
-    window.location.assign(data.authorization_url);
+  const authorizationUrl = data?.authorizationUrl || data?.authorization_url;
+
+  if (authorizationUrl) {
+    window.location.assign(authorizationUrl);
   }
+
   return data;
 };
 

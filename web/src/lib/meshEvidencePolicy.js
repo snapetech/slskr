@@ -4,7 +4,7 @@ import {
   setLocalStorageItem,
 } from './storage';
 
-export const meshEvidencePolicyStorageKey = 'slskdn.meshEvidencePolicy';
+export const meshEvidencePolicyStorageKey = 'slskr.meshEvidencePolicy';
 
 export const inboundTrustTiers = [
   {
@@ -261,7 +261,7 @@ export const parseMeshEvidenceReviewInput = (value) => {
 
 export const formatMeshEvidenceReviewReport = (review) => {
   const lines = [
-    'slskdN mesh evidence review',
+    'slskR mesh evidence review',
     `Total: ${review.summary.total}`,
     `Accepted: ${review.summary.accepted}`,
     `Rejected: ${review.summary.rejected}`,

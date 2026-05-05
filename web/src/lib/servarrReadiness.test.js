@@ -66,7 +66,7 @@ describe('servarrReadiness', () => {
       }),
     );
 
-    expect(report).toContain('slskdN Servarr compatibility review');
+    expect(report).toContain('slskR Servarr compatibility review');
     expect(report).toContain('Wanted pull: not ready');
     expect(report).toContain('Completed import: not ready');
     expect(report).toContain('Enable completed import review');

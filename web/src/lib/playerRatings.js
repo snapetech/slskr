@@ -3,7 +3,7 @@ import {
   setLocalStorageItem,
 } from './storage';
 
-export const playerRatingsStorageKey = 'slskdn.player.ratings';
+export const playerRatingsStorageKey = 'slskr.player.ratings';
 
 const normalizeText = (value = '') => String(value).trim().toLowerCase();
 

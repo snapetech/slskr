@@ -10,8 +10,8 @@ test.describe('smoke/auth', () => {
   test.beforeAll(async () => {
     if (shouldLaunchNodes()) {
       harness = new MultiPeerHarness();
-      await harness.startNode('A', 'test-data/slskdn-test-fixtures/music', {
-        noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+      await harness.startNode('A', 'test-data/slskr-test-fixtures/music', {
+        noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
       });
     }
   });
@@ -74,8 +74,8 @@ test.describe('smoke/auth', () => {
       waitUntil: 'networkidle',
     });
     await page.evaluate(() => {
-      sessionStorage.removeItem('slskd-token');
-      localStorage.removeItem('slskd-token');
+      sessionStorage.removeItem('slskr-token');
+      localStorage.removeItem('slskr-token');
     });
 
     // Navigate to protected route - wait for page to fully load
@@ -211,8 +211,8 @@ test.describe('smoke/auth', () => {
       // Check if token was cleared
       const tokenAfterLogout = await page.evaluate(() => {
         return (
-          sessionStorage.getItem('slskd-token') ||
-          localStorage.getItem('slskd-token')
+          sessionStorage.getItem('slskr-token') ||
+          localStorage.getItem('slskr-token')
         );
       });
 

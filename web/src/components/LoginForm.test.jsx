@@ -13,13 +13,13 @@ describe('LoginForm', () => {
   });
 
   it('builds an HTTPS hint when the page is loaded over HTTP', () => {
-    expect(getHttpsHintUrl(new URL('http://slskdn.local:5030/'))).toBe(
-      'https://slskdn.local:5031',
+    expect(getHttpsHintUrl(new URL('http://slskr.local:5030/'))).toBe(
+      'https://slskr.local:5031',
     );
   });
 
   it('returns no HTTPS hint when the page is already loaded over HTTPS', () => {
-    expect(getHttpsHintUrl(new URL('https://slskdn.local:5031/'))).toBeNull();
+    expect(getHttpsHintUrl(new URL('https://slskr.local:5031/'))).toBeNull();
   });
 
   it('renders the HTTPS hint in the login form when served over HTTP', () => {

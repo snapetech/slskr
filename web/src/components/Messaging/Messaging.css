@@ -213,14 +213,14 @@
 .messaging-window-body .chat-input.ui.segment,
 .messaging-window-body .room-input.ui.segment,
 .pod-message-session-composer.ui.segment {
-  border-top: 1px solid var(--slskd-tertiary-border-color, rgba(34, 36, 38, 0.15)) !important;
+  border-top: 1px solid var(--slskr-tertiary-border-color, rgba(34, 36, 38, 0.15)) !important;
   padding: 8px !important;
 }
 
 .messaging-window-body .chat-input .ui.input > input,
 .messaging-window-body .room-input .ui.input > input,
 .pod-message-session-input.ui.input > input {
-  border: 1px solid var(--slskd-tertiary-border-color, rgba(34, 36, 38, 0.2)) !important;
+  border: 1px solid var(--slskr-tertiary-border-color, rgba(34, 36, 38, 0.2)) !important;
   border-radius: 4px 0 0 4px !important;
   min-height: 42px;
   padding: 0 12px !important;
@@ -289,13 +289,13 @@
 :root.dark .messaging-sidebar.ui.segment,
 :root.dark .messaging-toolbar.ui.segment,
 :root.dark .messaging-window.ui.card {
-  background: var(--slskd-color-inset, #08070d) !important;
-  border-color: var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
-  color: var(--slskd-color, #f4eefc) !important;
+  background: var(--slskr-color-inset, #08070d) !important;
+  border-color: var(--slskr-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
+  color: var(--slskr-color, #f4eefc) !important;
 }
 
 :root.dark .messaging-window > .content.messaging-window-title {
-  border-color: var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
+  border-color: var(--slskr-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
 }
 
 :root.dark .messaging-window-body .chat-input .ui.input > input,
@@ -303,7 +303,7 @@
 :root.dark .pod-message-session-input.ui.input > input {
   background: #0a0907 !important;
   border-color: rgba(169, 122, 52, 0.44) !important;
-  color: var(--slskd-color, #efe7dc) !important;
+  color: var(--slskr-color, #efe7dc) !important;
 }
 
 :root.dark .messaging-window-body .chat-input.ui.segment,

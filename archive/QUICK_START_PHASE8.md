@@ -79,7 +79,7 @@ client.post(url)
     .await?;
 ```
 
-### 3. Test Interop with slskd (2-3 hours) 🎯
+### 3. Test Interop with slskr (2-3 hours) 🎯
 Validate protocol compliance
 
 **Commands:**
@@ -88,8 +88,8 @@ Validate protocol compliance
 cargo build --release
 ./target/release/slskr serve
 
-# Terminal 2: Start slskd (if available)
-slskd --config /tmp/slskd.json
+# Terminal 2: Start slskr (if available)
+slskr --config /tmp/slskr.json
 
 # Terminal 3: Run tests
 scripts/run-live-soak-proton-natpmp.sh
@@ -333,7 +333,7 @@ git diff HEAD~1 HEAD
 
 ### Should Have ⏳
 - [ ] Webhook events wired
-- [ ] Interop testing with slskd
+- [ ] Interop testing with slskr
 - [ ] 24-hour soak test passing
 - [ ] Performance benchmarks documented
 

@@ -4,8 +4,8 @@ import {
   setLocalStorageItem,
 } from './storage';
 
-const storageKey = 'slskdn.automationRecipeState';
-const inputStorageKey = 'slskdn.automationRecipeInputs';
+const storageKey = 'slskr.automationRecipeState';
+const inputStorageKey = 'slskr.automationRecipeInputs';
 const executableRecipeIds = new Set(['wishlist-retry', 'library-health-scan']);
 
 export const automationRecipes = [
@@ -197,7 +197,7 @@ export const formatAutomationRunHistoryReport = (
   history = buildAutomationRunHistory(),
 ) => {
   const lines = [
-    'slskdN automation review history',
+    'slskR automation review history',
     `Entries: ${history.length}`,
     '',
   ];

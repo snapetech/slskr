@@ -1,4 +1,5 @@
 import './Footer.css';
+import * as application from '../../lib/application';
 import * as mesh from '../../lib/mesh';
 import * as session from '../../lib/session';
 import * as slskrAPI from '../../lib/slskr';
@@ -8,8 +9,7 @@ import { urlBase } from '../../config';
 import React, { Component } from 'react';
 import { Icon } from 'semantic-ui-react';
 
-const GITHUB_BASE = 'https://github.com/snapetech/slskdn';
-const SLSKD_GITHUB = 'https://github.com/slskd/slskd';
+const GITHUB_BASE = 'https://github.com/snapetech/slskR';
 
 const formatSpeed = (bytesPerSec) => {
   if (!bytesPerSec || bytesPerSec === 0) return { unit: 'B', value: '0' };
@@ -46,7 +46,7 @@ const setFooterHeightVariable = (element) => {
   const height = Math.ceil(element.getBoundingClientRect().height);
   if (height > 0) {
     document.documentElement.style.setProperty(
-      '--slskdn-footer-height',
+      '--slskr-footer-height',
       `${height}px`,
     );
   }
@@ -56,8 +56,9 @@ class Footer extends Component {
   constructor(props) {
     super(props);
     this.state = {
+      buildInfo: null,
       interval: null,
-      slskdnStats: null,
+      slskrStats: null,
       speeds: null,
       stats: null,
     };
@@ -77,6 +78,8 @@ class Footer extends Component {
       );
       this.footerResizeObserver.observe(this.footerRef.current);
     }
+
+    this.fetchBuildInfo();
 
     if (session.isLoggedIn()) {
       this.fetchStats();
@@ -113,14 +116,14 @@ class Footer extends Component {
     }
 
     try {
-      const [transportStats, slskdnStats] = await Promise.allSettled([
+      const [transportStats, slskrStats] = await Promise.allSettled([
         mesh.getStats(),
-        slskrAPI.getSlskdnStats(),
+        slskrAPI.getSlskrStats(),
       ]);
 
       this.setState({
-        slskdnStats:
-          slskdnStats.status === 'fulfilled' ? slskdnStats.value : null,
+        slskrStats:
+          slskrStats.status === 'fulfilled' ? slskrStats.value : null,
         stats:
           transportStats.status === 'fulfilled' ? transportStats.value : null,
       });
@@ -144,15 +147,30 @@ class Footer extends Component {
     }
   };
 
+  fetchBuildInfo = async () => {
+    try {
+      const buildInfo = await application.getBuild({ checkForUpdates: true });
+      this.setState({ buildInfo });
+    } catch (error) {
+      console.debug('Failed to fetch build info:', error);
+    }
+  };
+
   render() {
     const year = new Date().getFullYear();
-    const { slskdnStats, speeds, stats } = this.state;
+    const { buildInfo, slskrStats, speeds, stats } = this.state;
     const isLoggedIn = session.isLoggedIn();
-    const dht = slskdnStats?.dht || {};
-    const hashDb = slskdnStats?.hashDb || {};
-    const meshStats = slskdnStats?.mesh || {};
-    const swarmJobs = Array.isArray(slskdnStats?.swarmJobs)
-      ? slskdnStats.swarmJobs
+    const currentBuild = buildInfo?.current || buildInfo?.full || 'unknown';
+    const fullBuild = buildInfo?.full || currentBuild;
+    const latestBuild = buildInfo?.latest || '';
+    const latestTag = buildInfo?.latestTag || latestBuild;
+    const latestUrl = buildInfo?.latestUrl || `${GITHUB_BASE}/releases`;
+    const isUpdateAvailable = buildInfo?.isUpdateAvailable === true;
+    const dht = slskrStats?.dht || {};
+    const hashDb = slskrStats?.hashDb || {};
+    const meshStats = slskrStats?.mesh || {};
+    const swarmJobs = Array.isArray(slskrStats?.swarmJobs)
+      ? slskrStats.swarmJobs
       : [];
     const dhtNodes = Number(dht.dhtNodeCount) || Number(stats?.dht) || 0;
     const discoveredPeers = Number(dht.discoveredPeerCount) || 0;
@@ -162,9 +180,9 @@ class Footer extends Component {
     const seqId =
       Number(hashDb.currentSeqId) || Number(meshStats.localSeqId) || 0;
     const isSyncing = Boolean(meshStats.isSyncing);
-    const backfillActive = Boolean(slskdnStats?.backfill?.isActive);
+    const backfillActive = Boolean(slskrStats?.backfill?.isActive);
     const activeSwarms = swarmJobs.length;
-    const karma = Number.parseInt(getLocalStorageItem('slskdn-karma', '0'), 10);
+    const karma = Number.parseInt(getLocalStorageItem('slskr-karma', '0'), 10);
     const totalSpeed = isLoggedIn && speeds ? formatSpeed(speeds.total) : null;
     const soulseekSpeed =
       isLoggedIn && speeds ? formatSpeed(speeds.soulseek) : null;
@@ -183,18 +201,34 @@ class Footer extends Component {
         : 'NAT: Login to see stats';
     const networkTooltip = isLoggedIn
       ? `DHT peers: ${displayedDhtPeers}; DHT nodes: ${dhtNodes}; mesh peers: ${meshPeers}; hashes: ${hashCount}; seq: ${seqId}`
-      : 'Login to see slskdN network stats';
+      : 'Login to see slskR network stats';
 
     return (
       <footer
-        className="slskdn-footer"
+        className="slskr-footer"
         ref={this.footerRef}
       >
-        <div className="slskdn-footer-content">
-          <div className="slskdn-footer-left">
-            <div className="slskdn-footer-brand">
+        <div className="slskr-footer-content">
+          <div className="slskr-footer-left">
+            <div className="slskr-footer-brand">
               <a
-                className="slskdn-footer-sponsor"
+                className="slskr-footer-github"
+                href={GITHUB_BASE}
+                rel="noopener noreferrer"
+                target="_blank"
+                title="Open slskR on GitHub"
+              >
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  src={`${urlBase}/slskr-mark.png`}
+                />
+                <Icon name="github" />
+                <span>GitHub</span>
+              </a>
+
+              <a
+                className="slskr-footer-sponsor"
                 href="https://github.com/sponsors/snapetech"
                 rel="noopener noreferrer"
                 target="_blank"
@@ -203,37 +237,48 @@ class Footer extends Component {
                 <Icon name="heart" /> Donate
               </a>
 
-              <span className="slskdn-footer-copyright">
+              <span className="slskr-footer-copyright">
                 © {year}{' '}
                 <a
                   href={GITHUB_BASE}
                   rel="noopener noreferrer"
                   target="_blank"
-                  title="slskdN project"
+                  title="slskR project"
                 >
-                  slskdN
-                </a>
-                <span className="slskdn-footer-note">unofficial fork of</span>
-                <a
-                  href={SLSKD_GITHUB}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                  title="slskd upstream project"
-                >
-                  slskd
+                  slskR
                 </a>
               </span>
+              <a
+                className={`slskr-footer-build ${isUpdateAvailable ? 'update-available' : ''}`}
+                href={isUpdateAvailable ? latestUrl : `${GITHUB_BASE}/releases`}
+                rel="noopener noreferrer"
+                target="_blank"
+                title={
+                  isUpdateAvailable
+                    ? `Running ${fullBuild}; GitHub has ${latestTag || latestBuild}`
+                    : `Running ${fullBuild}`
+                }
+              >
+                <Icon name={isUpdateAvailable ? 'bullhorn' : 'code branch'} />
+                <span className="slskr-footer-build-label">Build</span>
+                <code>{currentBuild}</code>
+                {isUpdateAvailable && (
+                  <span className="slskr-footer-update-label">
+                    update {latestBuild}
+                  </span>
+                )}
+              </a>
             </div>
           </div>
 
-          <div className="slskdn-footer-center">
+          <div className="slskr-footer-center">
             <div
-              className={`slskdn-footer-speeds ${isLoggedIn && speeds ? 'active' : ''}`}
+              className={`slskr-footer-speeds ${isLoggedIn && speeds ? 'active' : ''}`}
               aria-label="Transfer speeds"
             >
-              <span className="slskdn-footer-group-label">Speed</span>
+              <span className="slskr-footer-group-label">Speed</span>
               <span
-                className="slskdn-footer-speed-item"
+                className="slskr-footer-speed-item"
                 title={
                   isLoggedIn
                     ? 'Total transfer speed (upload + download)'
@@ -247,7 +292,7 @@ class Footer extends Component {
                 <span className="speed-unit">{totalSpeed ? totalSpeed.unit : 'B'}</span>
               </span>
               <span
-                className="slskdn-footer-speed-item"
+                className="slskr-footer-speed-item"
                 title={
                   isLoggedIn
                     ? 'Soulseek network speed'
@@ -263,7 +308,7 @@ class Footer extends Component {
                 </span>
               </span>
               <span
-                className="slskdn-footer-speed-item"
+                className="slskr-footer-speed-item"
                 title={
                   isLoggedIn
                     ? 'Mesh network speed'
@@ -279,28 +324,28 @@ class Footer extends Component {
             </div>
           </div>
 
-          <div className="slskdn-footer-right">
+          <div className="slskr-footer-right">
             <a
-              className={`slskdn-footer-network ${isLoggedIn && slskdnStats ? 'active' : ''}`}
+              className={`slskr-footer-network ${isLoggedIn && slskrStats ? 'active' : ''}`}
               href={`${urlBase}/system/network`}
               title={networkTooltip}
             >
-              <span className="slskdn-footer-group-label">Network</span>
-              <span className="slskdn-footer-network-item">
+              <span className="slskr-footer-group-label">Network</span>
+              <span className="slskr-footer-network-item">
                 <Icon
                   color={displayedDhtPeers > 0 ? 'green' : 'grey'}
                   name="rss"
                 />
                 {formatCount(displayedDhtPeers)} dht
               </span>
-              <span className="slskdn-footer-network-item">
+              <span className="slskr-footer-network-item">
                 <Icon
                   color={meshPeers > 0 ? 'green' : 'grey'}
                   name="sitemap"
                 />
                 {formatCount(meshPeers)} mesh
               </span>
-              <span className="slskdn-footer-network-item">
+              <span className="slskr-footer-network-item">
                 <Icon
                   color={hashCount > 0 ? 'blue' : 'grey'}
                   name="database"
@@ -308,7 +353,7 @@ class Footer extends Component {
                 {formatCount(hashCount)} hashes
               </span>
               <span
-                className={`slskdn-footer-network-item ${isSyncing ? 'syncing' : ''}`}
+                className={`slskr-footer-network-item ${isSyncing ? 'syncing' : ''}`}
               >
                 <Icon
                   color={isSyncing ? 'yellow' : 'grey'}
@@ -318,13 +363,13 @@ class Footer extends Component {
                 seq:{seqId}
               </span>
               {activeSwarms > 0 && (
-                <span className="slskdn-footer-network-item active">
+                <span className="slskr-footer-network-item active">
                   <Icon name="bolt" />
                   {activeSwarms} swarm{activeSwarms === 1 ? '' : 's'}
                 </span>
               )}
               {backfillActive && (
-                <span className="slskdn-footer-network-item active">
+                <span className="slskr-footer-network-item active">
                   <Icon
                     loading
                     name="clock"
@@ -332,7 +377,7 @@ class Footer extends Component {
                   backfill
                 </span>
               )}
-              <span className="slskdn-footer-network-item">
+              <span className="slskr-footer-network-item">
                 <Icon name="trophy" />
                 {karma > 0 ? '+' : ''}
                 {karma}
@@ -340,14 +385,14 @@ class Footer extends Component {
             </a>
 
             <div
-              className="slskdn-footer-stats"
+              className="slskr-footer-stats"
               aria-label="Transport health"
             >
               <Icon
                 className={
                   isDhtConnected
-                    ? 'slskdn-footer-stat-icon connected'
-                    : 'slskdn-footer-stat-icon'
+                    ? 'slskr-footer-stat-icon connected'
+                    : 'slskr-footer-stat-icon'
                 }
                 name="sitemap"
                 title={
@@ -359,8 +404,8 @@ class Footer extends Component {
               <Icon
                 className={
                   isNatResolved
-                    ? 'slskdn-footer-stat-icon connected'
-                    : 'slskdn-footer-stat-icon'
+                    ? 'slskr-footer-stat-icon connected'
+                    : 'slskr-footer-stat-icon'
                 }
                 name="shield alternate"
                 title={natTooltip}
@@ -368,8 +413,8 @@ class Footer extends Component {
               <Icon
                 className={
                   isOverlayConnected
-                    ? 'slskdn-footer-stat-icon connected'
-                    : 'slskdn-footer-stat-icon'
+                    ? 'slskr-footer-stat-icon connected'
+                    : 'slskr-footer-stat-icon'
                 }
                 name="globe"
                 title={

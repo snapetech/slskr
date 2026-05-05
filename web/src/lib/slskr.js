@@ -1,14 +1,16 @@
 import api from './api';
 
-// Helper to safely call optional API endpoints.
+// Helper to safely call API endpoints that may not exist yet
 const safeGet = async (endpoint, fallback = null) => {
   try {
     const response = await api.get(endpoint);
     return response.data;
   } catch (error) {
-    // Return fallback for optional or temporarily unavailable daemon surfaces.
+    // Return fallback for 404s or other errors - endpoint may not be implemented
     if (error?.response?.status === 404) {
-      console.debug(`Optional endpoint ${endpoint} is unavailable`);
+      console.debug(
+        `Endpoint ${endpoint} not found (expected during development)`,
+      );
     }
 
     return fallback;
@@ -114,7 +116,7 @@ export const getDhtStatus = async () => {
 
 // Combined stats fetch for dashboard
 // eslint-disable-next-line complexity
-export const getSlskdnStats = async () => {
+export const getSlskrStats = async () => {
   try {
     const [capabilities, hashDatabase, mesh, backfill, swarmJobs, dht] =
       await Promise.allSettled([
@@ -180,7 +182,7 @@ export const getSlskdnStats = async () => {
       swarmJobs: swarmJobs.status === 'fulfilled' ? swarmJobs.value : [],
     };
   } catch (error) {
-    console.error('Failed to fetch slskdn stats:', error);
+    console.error('Failed to fetch slskr stats:', error);
     return {
       backfill: { isActive: false },
       capabilities: null,

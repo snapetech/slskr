@@ -1,17 +1,17 @@
 :root {
-  --slskd-chat-color: #0e6eb8;
-  --slskd-self-message-background-color: rgba(0, 0, 0, 0.03);
-  --slskd-chat-message-background: rgba(255, 255, 255, 0.9);
-  --slskd-chat-input-background: rgba(255, 255, 255, 0.96);
+  --slskr-chat-color: #0e6eb8;
+  --slskr-self-message-background-color: rgba(0, 0, 0, 0.03);
+  --slskr-chat-message-background: rgba(255, 255, 255, 0.9);
+  --slskr-chat-input-background: rgba(255, 255, 255, 0.96);
 }
 
 :root.dark {
-  --slskd-chat-color: var(--slskdn-accent-primary-hover, #eadfff);
-  --slskd-self-message-background-color: var(--slskdn-accent-primary-muted, rgba(199, 167, 255, 0.22));
-  --slskd-chat-message-background:
+  --slskr-chat-color: var(--slskr-accent-primary-hover, #eadfff);
+  --slskr-self-message-background-color: var(--slskr-accent-primary-muted, rgba(199, 167, 255, 0.22));
+  --slskr-chat-message-background:
     radial-gradient(circle at 12% 0%, rgba(199, 167, 255, 0.13), transparent 30%),
     #09080f;
-  --slskd-chat-input-background:
+  --slskr-chat-input-background:
     linear-gradient(180deg, rgba(96, 199, 217, 0.11), rgba(96, 199, 217, 0.03)),
     #10141a;
 }
@@ -28,19 +28,19 @@
 }
 
 :root.dark .chat > .segments {
-  box-shadow: var(--slskdn-surface-shadow, 0 18px 46px rgba(0, 0, 0, 0.34)) !important;
+  box-shadow: var(--slskr-surface-shadow, 0 18px 46px rgba(0, 0, 0, 0.34)) !important;
 }
 
 :root.dark .chat-active-card.ui.card {
   background: #141118 !important;
-  border-color: var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
-  color: var(--slskd-color, #f4eefc) !important;
+  border-color: var(--slskr-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
+  color: var(--slskr-color, #f4eefc) !important;
 }
 
 :root.dark .chat-active-card.ui.card > .content > .header,
 :root.dark .chat-active-card .user-card-username,
 :root.dark .chat-message-name .user-card-username {
-  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+  color: var(--slskr-accent-primary-hover, #eadfff) !important;
 }
 
 .chats {
@@ -97,27 +97,27 @@
 }
 
 :root.dark .conversation-menu.ui.menu {
-  background: var(--slskd-color-inset, #08070d) !important;
-  border-color: var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
+  background: var(--slskr-color-inset, #08070d) !important;
+  border-color: var(--slskr-tertiary-border-color, rgba(214, 196, 255, 0.24)) !important;
 }
 
 :root.dark .chats .ui.secondary.inverted.menu {
   background: #09080f !important;
-  border: 1px solid var(--slskd-tertiary-border-color, rgba(214, 196, 255, 0.24));
+  border: 1px solid var(--slskr-tertiary-border-color, rgba(214, 196, 255, 0.24));
   border-radius: 7px;
-  box-shadow: var(--slskdn-surface-shadow-soft, 0 8px 24px rgba(0, 0, 0, 0.28));
+  box-shadow: var(--slskr-surface-shadow-soft, 0 8px 24px rgba(0, 0, 0, 0.28));
   margin-bottom: 12px;
   padding: 6px;
 }
 
 :root.dark .chats .ui.secondary.inverted.menu .item {
   border-radius: 5px;
-  color: var(--slskd-color-subtle, #c8bad8) !important;
+  color: var(--slskr-color-subtle, #c8bad8) !important;
 }
 
 :root.dark .chats .ui.secondary.inverted.menu .active.item {
-  background: var(--slskdn-accent-primary-muted, rgba(199, 167, 255, 0.22)) !important;
-  color: var(--slskdn-accent-primary-hover, #eadfff) !important;
+  background: var(--slskr-accent-primary-muted, rgba(199, 167, 255, 0.22)) !important;
+  color: var(--slskr-accent-primary-hover, #eadfff) !important;
 }
 
 .conversation-menu > .menu-item {
@@ -145,9 +145,9 @@
 }
 
 :root.dark .chat-history.ui.segment {
-  background: var(--slskd-chat-message-background) !important;
+  background: var(--slskr-chat-message-background) !important;
   border-color: rgba(199, 167, 255, 0.24) !important;
-  color: var(--slskd-color, #f4eefc) !important;
+  color: var(--slskr-color, #f4eefc) !important;
 }
 
 .chat-history > .list {
@@ -161,12 +161,12 @@
 
 .chat-message-name {
   font-weight: bold;
-  color: var(--slskd-chat-color);
+  color: var(--slskr-chat-color);
 }
 
 .chat-message-time {
   float:right;
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.58));
   font-size: smaller;
   font-variant: small-caps;
   font-style: italic;
@@ -174,9 +174,9 @@
 }
 
 .chat-message-self {
-  color: var(--slskd-chat-color);
-  background-color: var(--slskd-self-message-background-color);
-  border-left: 3px solid var(--slskdn-accent-primary, #c7a7ff);
+  color: var(--slskr-chat-color);
+  background-color: var(--slskr-self-message-background-color);
+  border-left: 3px solid var(--slskr-accent-primary, #c7a7ff);
   padding-left: 0.45rem;
 }
 
@@ -185,7 +185,7 @@
 }
 
 .chat-input.ui.segment {
-  background: var(--slskd-chat-input-background) !important;
+  background: var(--slskr-chat-input-background) !important;
 }
 
 :root.dark .chat-input.ui.segment {
@@ -194,7 +194,7 @@
 
 :root.dark .chat-input .ui.input > input,
 :root.dark .chat-history .ui.list .content {
-  color: var(--slskd-color, #f4eefc) !important;
+  color: var(--slskr-color, #f4eefc) !important;
 }
 
 .chat-message-button {

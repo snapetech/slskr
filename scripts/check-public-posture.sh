@@ -2,7 +2,7 @@
 set -euo pipefail
 
 patterns=(
-  "fork of "
+  "fork"" of "
   "drop-in replacement"
   "replacement distribution"
   "based on "

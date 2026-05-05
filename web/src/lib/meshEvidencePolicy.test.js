@@ -146,7 +146,7 @@ describe('meshEvidencePolicy', () => {
     );
 
     expect(entries).toHaveLength(1);
-    expect(report).toContain('slskdN mesh evidence review');
+    expect(report).toContain('slskR mesh evidence review');
     expect(report).toContain('[REJECT] fakeLosslessWarning fixture');
     expect(report).toContain('inbound mesh evidence disabled');
   });

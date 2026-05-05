@@ -3,7 +3,7 @@ import {
   setLocalStorageItem,
 } from './storage';
 
-export const listeningHistoryStorageKey = 'slskdn.listening.history';
+export const listeningHistoryStorageKey = 'slskr.listening.history';
 
 const maxHistoryEntries = 500;
 

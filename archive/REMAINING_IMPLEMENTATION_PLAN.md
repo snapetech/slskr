@@ -272,14 +272,14 @@ Checklist:
 
 ## Integration Testing Strategy
 
-### Test Type-1 Obfuscation with slskd
+### Test Type-1 Obfuscation with slskr
 **Command:**
 ```bash
 # Terminal 1: Start slskR
 cargo run -p slskr -- serve
 
-# Terminal 2: Start slskd (third-party client)
-slskd --config /tmp/slskd-config.json
+# Terminal 2: Start slskr (third-party client)
+slskr --config /tmp/slskr-config.json
 
 # Terminal 3: Run interop tests
 scripts/run-live-soak-proton-natpmp.sh  # Or custom test script
@@ -303,7 +303,7 @@ scripts/run-live-soak-proton-natpmp.sh  # Or custom test script
 - [x] Database schema complete and indexed
 - [ ] All critical API gaps filled (PUT, database endpoints)
 - [ ] Webhook dispatch working
-- [ ] Type-1 obfuscation interop verified with slskd
+- [ ] Type-1 obfuscation interop verified with slskr
 - [ ] 24-hour stability soak test passing
 - [ ] Health check and diagnostics endpoints
 - [ ] GraphQL endpoint wired (or documentation of planned approach)
@@ -332,7 +332,7 @@ scripts/run-live-soak-proton-natpmp.sh  # Or custom test script
 1. **API Completeness:** 100% of documented endpoints implemented
 2. **Test Coverage:** All existing tests pass + new endpoint tests
 3. **Performance:** 24-hour soak test with <1% error rate
-4. **Compatibility:** Full interop with slskd/slskdN clients
+4. **Compatibility:** Full interop with slskr/slskr clients
 5. **Reliability:** No memory leaks, graceful error handling
 6. **Documentation:** All endpoints documented with examples
 
@@ -343,6 +343,6 @@ scripts/run-live-soak-proton-natpmp.sh  # Or custom test script
 1. **Commit current state** (SQLite implementation + tests)
 2. **Implement Priority 1 endpoints** (PUT, database, transfer detail)
 3. **Wire webhook dispatch** (high impact feature)
-4. **Run integration tests** with slskd
+4. **Run integration tests** with slskr
 5. **Complete Phase 8 validation** and begin public release prep
 

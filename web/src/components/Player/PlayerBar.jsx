@@ -65,16 +65,16 @@ import {
   TextArea,
 } from 'semantic-ui-react';
 
-const localMuteStorageKey = 'slskdn.player.localMuted';
-const collapsedStorageKey = 'slskdn.player.collapsed';
-const visualizerStorageKey = 'slskdn.player.visualizerEnabled';
-const visualizerEngineStorageKey = 'slskdn.player.visualizerEngine';
-const eqPanelStorageKey = 'slskdn.player.eqPanelOpen';
-const lyricsStorageKey = 'slskdn.player.lyricsOpen';
-const karaokeStorageKey = 'slskdn.player.karaokeEnabled';
-const crossfadeStorageKey = 'slskdn.player.crossfadeEnabled';
-const visualTileStorageKey = 'slskdn.player.visualTileMode';
-const analyzerModeStorageKey = 'slskdn.player.analyzerMode';
+const localMuteStorageKey = 'slskr.player.localMuted';
+const collapsedStorageKey = 'slskr.player.collapsed';
+const visualizerStorageKey = 'slskr.player.visualizerEnabled';
+const visualizerEngineStorageKey = 'slskr.player.visualizerEngine';
+const eqPanelStorageKey = 'slskr.player.eqPanelOpen';
+const lyricsStorageKey = 'slskr.player.lyricsOpen';
+const karaokeStorageKey = 'slskr.player.karaokeEnabled';
+const crossfadeStorageKey = 'slskr.player.crossfadeEnabled';
+const visualTileStorageKey = 'slskr.player.visualTileMode';
+const analyzerModeStorageKey = 'slskr.player.analyzerMode';
 const playerBrowserPageSize = 80;
 
 const readStoredBoolean = (key) => {
@@ -111,7 +111,7 @@ const setPlayerHeightVariable = (element) => {
   const height = Math.ceil(element.getBoundingClientRect().height);
   if (height > 0) {
     document.documentElement.style.setProperty(
-      '--slskdn-player-reserved-height',
+      '--slskr-player-reserved-height',
       `${height}px`,
     );
   }
@@ -120,10 +120,10 @@ const setPlayerHeightVariable = (element) => {
 const getExternalVisualizerStatusText = (status, loading) => {
   if (loading) return 'Checking external visualizer launcher...';
   if (!status) return 'Status unavailable.';
-  if (!status.enabled) return 'Disabled in slskd.yml.';
+  if (!status.enabled) return 'Disabled in slskr.yml.';
   if (!status.configured) return 'No launcher path configured.';
   if (!status.available) return 'Configured launcher path was not found.';
-  return 'Ready to launch on the slskdN host.';
+  return 'Ready to launch on the slskR host.';
 };
 
 const getExternalVisualizerError = (error) => {
@@ -1517,7 +1517,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
         }
       />
       <Popup
-        content="Browse shared and downloaded local audio that slskdN can stream in this browser."
+        content="Browse shared and downloaded local audio that slskR can stream in this browser."
         trigger={
           <Button
             aria-label="Open local audio file browser"
@@ -1873,7 +1873,7 @@ const PlayerVisualTile = ({
   };
   const tileRef = useRef(null);
   const [visualizerRevision, setVisualizerRevision] = useState(0);
-  const title = current?.title || current?.fileName || 'slskdN';
+  const title = current?.title || current?.fileName || 'slskR';
   const artist = current?.artist || '';
   const initials = (artist || title)
     .split(/\s+/)
@@ -2956,7 +2956,7 @@ const PlayerBar = () => {
             ) : null}
             <div className="player-external-visualizer-actions">
               <Popup
-                content="Start the configured external visualizer on the slskdN host. Use this for MilkDrop3 or another local visualizer that captures system audio."
+                content="Start the configured external visualizer on the slskR host. Use this for MilkDrop3 or another local visualizer that captures system audio."
                 trigger={
                   <Button
                     data-testid="player-launch-external-visualizer"

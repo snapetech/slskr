@@ -27,7 +27,7 @@ describe('LyricsPane', () => {
       <LyricsPane
         audioElement={document.createElement('audio')}
         current={{
-          artist: 'slskdN',
+          artist: 'slskR',
           fileName: 'Example Artist - Example Song.ogg',
           title: 'Example Artist - Example Song.ogg',
         }}
@@ -89,7 +89,7 @@ describe('LyricsPane', () => {
       <LyricsPane
         audioElement={document.createElement('audio')}
         current={{
-          artist: 'slskdN',
+          artist: 'slskR',
           fileName: 'Sample2-public-domain-bansuri.ogg',
           title: 'Sample2-public-domain-bansuri.ogg',
         }}

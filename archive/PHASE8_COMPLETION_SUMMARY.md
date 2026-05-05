@@ -243,7 +243,7 @@ impl WebhookDispatcher {
 ### In Progress ⏳
 - [ ] Webhook event wiring to application lifecycle
 - [ ] GraphQL query engine integration
-- [ ] Real network interop testing (slskd)
+- [ ] Real network interop testing (slskr)
 - [ ] 24-hour soak test validation
 - [ ] Performance optimization
 
@@ -280,12 +280,12 @@ if transfer.status == "succeeded" {
 **Why:** Currently logs to stderr; needs actual HTTP
 **How:** Add reqwest to dependencies, implement send_webhook
 
-### 3. Test Type-1 Obfuscation with slskd (2-3 Hours)
+### 3. Test Type-1 Obfuscation with slskr (2-3 Hours)
 **What:** Run interop tests against third-party client
 **Why:** Ensure protocol compliance
 **Commands:**
 ```bash
-slskd --config /tmp/slskd.json &
+slskr --config /tmp/slskr.json &
 cargo run -p slskr -- serve &
 scripts/run-live-soak-proton-natpmp.sh
 ```

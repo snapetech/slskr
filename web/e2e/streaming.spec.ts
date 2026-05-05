@@ -29,11 +29,11 @@ test.describe('streaming', () => {
   test.beforeAll(async () => {
     if (shouldLaunchNodes()) {
       harness = new MultiPeerHarness();
-      await harness.startNode('A', 'test-data/slskdn-test-fixtures/movie', {
-        noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+      await harness.startNode('A', 'test-data/slskr-test-fixtures/movie', {
+        noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
       });
-      await harness.startNode('B', 'test-data/slskdn-test-fixtures/book', {
-        noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+      await harness.startNode('B', 'test-data/slskr-test-fixtures/book', {
+        noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
       });
     }
   });
@@ -221,8 +221,8 @@ test.describe('streaming', () => {
         streamUrl = await pageB.evaluate(
           async ({ expectedTitle, expectedOwnerBaseUrl }) => {
             const token =
-              sessionStorage.getItem('slskd-token') ||
-              localStorage.getItem('slskd-token');
+              sessionStorage.getItem('slskr-token') ||
+              localStorage.getItem('slskr-token');
             if (!token) return null;
 
             const sharesRes = await fetch('/api/v0/share-grants', {
@@ -452,8 +452,8 @@ test.describe('streaming', () => {
           streamUrl = await pageB.evaluate(
             async ({ expectedTitle, expectedOwnerBaseUrl }) => {
               const token =
-                sessionStorage.getItem('slskd-token') ||
-                localStorage.getItem('slskd-token');
+                sessionStorage.getItem('slskr-token') ||
+                localStorage.getItem('slskr-token');
               if (!token) return null;
 
               const sharesRes = await fetch('/api/v0/share-grants', {

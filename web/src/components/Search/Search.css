@@ -76,7 +76,7 @@
 
 .search-acquisition-profile-strip {
   align-items: center;
-  border-top: 1px solid var(--slskd-border-color, rgba(34, 36, 38, 0.15));
+  border-top: 1px solid var(--slskr-border-color, rgba(34, 36, 38, 0.15));
   display: grid;
   gap: 0.65rem;
   grid-template-columns: auto minmax(210px, 280px) 1fr;
@@ -99,7 +99,7 @@
 
 .search-acquisition-profile-option-summary,
 .search-acquisition-profile-summary {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.55));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.55));
   font-size: 0.86rem;
   line-height: 1.25;
 }
@@ -210,7 +210,7 @@
 }
 
 .search-album-candidate-review {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.58));
   display: flex;
   flex-wrap: wrap;
   font-size: 0.88rem;
@@ -226,7 +226,7 @@
 }
 
 .search-album-candidate-paths {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.55));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.55));
   font-size: 0.86rem;
   margin-top: 0.35rem;
   overflow-wrap: anywhere;
@@ -302,7 +302,7 @@
 }
 
 :root.dark .album-completion-meta {
-  color: var(--slskd-color-subtle, #c8bad8);
+  color: var(--slskr-color-subtle, #c8bad8);
 }
 
 .album-missing-tracks {
@@ -437,10 +437,10 @@
 }
 
 .discovery-graph-range > span {
-  background: var(--slskd-tertiary-background, rgba(0, 0, 0, 0.08));
-  border: 1px solid var(--slskd-tertiary-border-color, rgba(34, 36, 38, 0.12));
+  background: var(--slskr-tertiary-background, rgba(0, 0, 0, 0.08));
+  border: 1px solid var(--slskr-tertiary-border-color, rgba(34, 36, 38, 0.12));
   border-radius: 4px;
-  color: var(--slskd-color, inherit);
+  color: var(--slskr-color, inherit);
   flex: 0 0 74px;
   font-size: 11px;
   font-weight: 700;
@@ -489,8 +489,8 @@
 }
 
 .discovery-graph-sparse-note {
-  border-left: 3px solid var(--slskdn-accent-warm, #d7a16b);
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.68));
+  border-left: 3px solid var(--slskr-accent-warm, #d7a16b);
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.68));
   margin: 0 0 0.75rem;
   padding-left: 0.75rem;
 }
@@ -500,19 +500,19 @@
 :root.dark .songid-result-summary.ui.segment,
 :root.dark .discovery-graph-atlas-panel.ui.segment,
 :root.dark .discovery-graph-empty-state.ui.secondary.segment {
-  background: var(--slskd-secondary-background) !important;
-  border: 1px solid var(--slskd-tertiary-border-color) !important;
-  color: var(--slskd-color) !important;
+  background: var(--slskr-secondary-background) !important;
+  border: 1px solid var(--slskr-tertiary-border-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .songid-result-panel.ui.secondary.segment,
 :root.dark .discovery-graph-atlas-card.ui.secondary.segment {
   background:
     linear-gradient(180deg, rgba(199, 167, 255, 0.07), rgba(199, 167, 255, 0)),
-    var(--slskd-overlay-background) !important;
-  border: 1px solid var(--slskd-tertiary-border-color) !important;
-  box-shadow: var(--slskdn-surface-shadow-soft, 0 8px 24px rgba(0, 0, 0, 0.28)) !important;
-  color: var(--slskd-color) !important;
+    var(--slskr-overlay-background) !important;
+  border: 1px solid var(--slskr-tertiary-border-color) !important;
+  box-shadow: var(--slskr-surface-shadow-soft, 0 8px 24px rgba(0, 0, 0, 0.28)) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .songid-panel .ui.header,
@@ -521,44 +521,44 @@
 :root.dark .discovery-graph-atlas-panel .header,
 :root.dark .discovery-graph-atlas-card .ui.header,
 :root.dark .discovery-graph-atlas-card .header {
-  color: var(--slskd-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .songid-panel .ui.progress .label,
 :root.dark .discovery-graph-atlas-panel .ui.form .field > label,
 :root.dark .discovery-graph-atlas-panel .ui.progress .label {
-  color: var(--slskd-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .songid-panel .ui.input > input,
 :root.dark .discovery-graph-atlas-panel .ui.input > input,
 :root.dark .discovery-graph-atlas-panel .ui.selection.dropdown {
-  background: var(--slskd-color-inset) !important;
-  border-color: var(--slskd-tertiary-border-color) !important;
-  color: var(--slskd-color) !important;
+  background: var(--slskr-color-inset) !important;
+  border-color: var(--slskr-tertiary-border-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .songid-panel .ui.input > input::placeholder,
 :root.dark .discovery-graph-atlas-panel .ui.input > input::placeholder,
 :root.dark .discovery-graph-atlas-panel .ui.selection.dropdown .default.text {
-  color: var(--slskd-color-subtle) !important;
+  color: var(--slskr-color-subtle) !important;
 }
 
 :root.dark .discovery-graph-atlas-panel .ui.selection.dropdown > .text,
 :root.dark .discovery-graph-atlas-panel .ui.selection.dropdown > .dropdown.icon {
-  color: var(--slskd-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .songid-panel .ui.labeled.input > .label,
 :root.dark .discovery-graph-atlas-panel .ui.labeled.input > .label {
-  background: var(--slskd-tertiary-background) !important;
-  border-color: var(--slskd-tertiary-border-color) !important;
-  color: var(--slskd-color) !important;
+  background: var(--slskr-tertiary-background) !important;
+  border-color: var(--slskr-tertiary-border-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .songid-panel .description,
 :root.dark .discovery-graph-atlas-panel .description {
-  color: var(--slskd-color-subtle) !important;
+  color: var(--slskr-color-subtle) !important;
 }
 
 :root.dark .discovery-graph-canvas-shell {
@@ -568,5 +568,5 @@
     rgba(36, 36, 43, 0.92) 48%,
     rgba(9, 10, 12, 0.98) 100%
   );
-  border: 1px solid var(--slskd-tertiary-border-color);
+  border: 1px solid var(--slskr-tertiary-border-color);
 }

@@ -1,5 +1,5 @@
-// <copyright file="SoulseekDiscoveryPanel.jsx" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="SoulseekDiscoveryPanel.jsx" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import * as soulseekDiscovery from '../../lib/soulseekDiscovery';

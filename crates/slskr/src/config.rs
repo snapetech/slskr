@@ -308,10 +308,7 @@ pub struct SpotifyIntegrationSettings {
 }
 
 impl SpotifyIntegrationSettings {
-    fn from_layers<E: ConfigEnv>(
-        file_config: SpotifyFileConfig,
-        env: &E,
-    ) -> Result<Self, String> {
+    fn from_layers<E: ConfigEnv>(file_config: SpotifyFileConfig, env: &E) -> Result<Self, String> {
         Ok(Self {
             enabled: env_bool_layer(
                 env,
@@ -332,12 +329,18 @@ impl SpotifyIntegrationSettings {
             scopes: env
                 .var("SLSKR_SPOTIFY_SCOPES")
                 .or(file_config.scopes)
-                .unwrap_or_else(|| "playlist-read-private playlist-read-collaborative user-library-read".to_owned()),
+                .unwrap_or_else(|| {
+                    "playlist-read-private playlist-read-collaborative user-library-read".to_owned()
+                }),
         })
     }
 
     pub fn configured(&self) -> bool {
-        self.enabled && self.client_id.as_deref().is_some_and(|value| !value.trim().is_empty())
+        self.enabled
+            && self
+                .client_id
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
     }
 
     pub fn sanitized_json(&self) -> String {
@@ -362,10 +365,7 @@ pub struct LidarrIntegrationSettings {
 }
 
 impl LidarrIntegrationSettings {
-    fn from_layers<E: ConfigEnv>(
-        file_config: LidarrFileConfig,
-        env: &E,
-    ) -> Result<Self, String> {
+    fn from_layers<E: ConfigEnv>(file_config: LidarrFileConfig, env: &E) -> Result<Self, String> {
         Ok(Self {
             enabled: env_bool_layer(
                 env,
@@ -385,8 +385,14 @@ impl LidarrIntegrationSettings {
 
     pub fn configured(&self) -> bool {
         self.enabled
-            && self.url.as_deref().is_some_and(|value| !value.trim().is_empty())
-            && self.api_key.as_deref().is_some_and(|value| !value.trim().is_empty())
+            && self
+                .url
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            && self
+                .api_key
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
     }
 
     pub fn sanitized_json(&self) -> String {
@@ -408,10 +414,7 @@ pub struct BridgeIntegrationSettings {
 }
 
 impl BridgeIntegrationSettings {
-    fn from_layers<E: ConfigEnv>(
-        file_config: BridgeFileConfig,
-        env: &E,
-    ) -> Result<Self, String> {
+    fn from_layers<E: ConfigEnv>(file_config: BridgeFileConfig, env: &E) -> Result<Self, String> {
         Ok(Self {
             enabled: env_bool_layer(
                 env,
@@ -454,7 +457,9 @@ impl ExternalVisualizerSettings {
     }
 
     pub fn configured(&self) -> bool {
-        self.command.as_deref().is_some_and(|value| !value.trim().is_empty())
+        self.command
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
     }
 
     pub fn sanitized_json(&self) -> String {

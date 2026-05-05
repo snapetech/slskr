@@ -1,12 +1,12 @@
-// <copyright file="playlistIntake.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="playlistIntake.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 import { scoreMetadataCandidate } from './metadataMatcher';
 import { v4 as uuidv4 } from 'uuid';
 
-export const playlistIntakeStorageKey = 'slskdn.playlistIntake.items';
+export const playlistIntakeStorageKey = 'slskr.playlistIntake.items';
 export const playlistRefreshCadences = ['Manual review', 'Daily', 'Weekly', 'Monthly'];
 
 export const organizationPathTemplates = [
@@ -517,7 +517,7 @@ export const buildPlaylistDiscoverySeeds = (playlist) =>
     .filter((track) => track.state !== 'Rejected')
     .map((track) => buildPlaylistDiscoverySeed(playlist, track));
 
-export const buildSlskdPlaylistPreview = (playlist) => {
+export const buildSlskrPlaylistPreview = (playlist) => {
   const completion = buildPlaylistCompletionSummary(playlist);
   const tracks = playlist.tracks.filter((track) => track.state === 'Matched');
   const lines = tracks.map(
@@ -742,11 +742,11 @@ export const formatPlaylistTagOrganizationReport = (
   plan = playlist.organizationPlan,
 ) => {
   if (!plan) {
-    return `slskdN tag and organization dry run\nPlaylist: ${playlist.name}\nNo dry-run plan has been prepared.`;
+    return `slskR tag and organization dry run\nPlaylist: ${playlist.name}\nNo dry-run plan has been prepared.`;
   }
 
   const lines = [
-    'slskdN tag and organization dry run',
+    'slskR tag and organization dry run',
     `Playlist: ${playlist.name}`,
     `Generated: ${plan.generatedAt}`,
     `Album title: ${plan.options.albumTitle}`,

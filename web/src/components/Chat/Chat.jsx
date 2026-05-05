@@ -20,7 +20,7 @@ let tabCounter = 0;
 // Load tabs from localStorage
 const loadTabsFromStorage = () => {
   try {
-    const saved = getLocalStorageItem('slskd-chat-tabs');
+    const saved = getLocalStorageItem('slskr-chat-tabs');
 
     if (saved) {
       const parsed = JSON.parse(saved);
@@ -38,7 +38,7 @@ const loadTabsFromStorage = () => {
 // Save tabs to localStorage
 const saveTabsToStorage = (tabsToSave) => {
   setLocalStorageItem(
-    'slskd-chat-tabs',
+    'slskr-chat-tabs',
     JSON.stringify({ tabCounter, tabs: tabsToSave }),
   );
 };

@@ -4,11 +4,16 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 
-const { getSlskdnStats, getStats, getSpeeds, isLoggedIn } = vi.hoisted(() => ({
-  getSlskdnStats: vi.fn(),
+const { getBuild, getSlskrStats, getStats, getSpeeds, isLoggedIn } = vi.hoisted(() => ({
+  getBuild: vi.fn(),
+  getSlskrStats: vi.fn(),
   getSpeeds: vi.fn(),
   getStats: vi.fn(),
   isLoggedIn: vi.fn(),
+}));
+
+vi.mock('../../lib/application', () => ({
+  getBuild,
 }));
 
 vi.mock('../../lib/mesh', () => ({
@@ -20,7 +25,7 @@ vi.mock('../../lib/session', () => ({
 }));
 
 vi.mock('../../lib/slskr', () => ({
-  getSlskdnStats,
+  getSlskrStats,
 }));
 
 vi.mock('../../lib/transfers', () => ({
@@ -35,7 +40,7 @@ describe('Footer', () => {
       natType: 'FullCone',
       overlay: 3,
     });
-    getSlskdnStats.mockResolvedValue({
+    getSlskrStats.mockResolvedValue({
       backfill: { isActive: true },
       dht: { discoveredPeerCount: 23, dhtNodeCount: 12 },
       hashDb: { currentSeqId: 14638, totalEntries: 7_300 },
@@ -47,7 +52,15 @@ describe('Footer', () => {
       soulseek: 4_096,
       total: 6_144,
     });
-    localStorage.setItem('slskdn-karma', '2');
+    getBuild.mockResolvedValue({
+      current: '0.0.0-slskr.manual.test',
+      full: '0.0.0-slskr.manual.test (0.0.0-slskr.manual.test)',
+      isUpdateAvailable: false,
+      latest: '0.0.0-slskr.manual.test',
+      latestTag: '0.0.0-slskr.manual.test',
+      latestUrl: 'https://github.com/snapetech/slskr/releases/tag/test',
+    });
+    localStorage.setItem('slskr-karma', '2');
   });
 
   afterEach(() => {
@@ -55,7 +68,7 @@ describe('Footer', () => {
     localStorage.clear();
   });
 
-  it('renders slskdN network stats in the footer', async () => {
+  it('renders slskR network stats in the footer', async () => {
     render(<Footer />);
 
     await waitFor(() => {
@@ -68,5 +81,26 @@ describe('Footer', () => {
     expect(screen.getByText('1 swarm')).toBeInTheDocument();
     expect(screen.getByText('backfill')).toBeInTheDocument();
     expect(screen.getByText('+2')).toBeInTheDocument();
+  });
+
+  it('renders build info and checks for updates when logged out', async () => {
+    isLoggedIn.mockReturnValue(false);
+    getBuild.mockResolvedValue({
+      current: '0.0.0-slskr.manual.local',
+      full: '0.0.0-slskr.manual.local (0.0.0-slskr.manual.local)',
+      isUpdateAvailable: true,
+      latest: '2026050500-slskr.221',
+      latestTag: 'build-main-2026050500-slskr.221',
+      latestUrl: 'https://github.com/snapetech/slskr/releases/tag/build-main-2026050500-slskr.221',
+    });
+
+    render(<Footer />);
+
+    expect(await screen.findByText('0.0.0-slskr.manual.local')).toBeInTheDocument();
+    expect(screen.getByText('update 2026050500-slskr.221')).toBeInTheDocument();
+    expect(getBuild).toHaveBeenCalledWith({ checkForUpdates: true });
+    expect(getStats).not.toHaveBeenCalled();
+    expect(getSlskrStats).not.toHaveBeenCalled();
+    expect(getSpeeds).not.toHaveBeenCalled();
   });
 });

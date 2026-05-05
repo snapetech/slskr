@@ -251,11 +251,11 @@ describe('PlayerBar', () => {
     expect(audio.getAttribute('src')).toContain(
       '/api/v0/streams/sha256%3Atest',
     );
-    expect(window.localStorage.getItem('slskdn.player.localMuted')).toBe('true');
+    expect(window.localStorage.getItem('slskr.player.localMuted')).toBe('true');
   });
 
   it('restores the local mute preference for the PWA/browser session', () => {
-    window.localStorage.setItem('slskdn.player.localMuted', 'true');
+    window.localStorage.setItem('slskr.player.localMuted', 'true');
 
     renderPlayer();
     fireEvent.click(screen.getByText('Play fixture'));
@@ -318,53 +318,53 @@ describe('PlayerBar', () => {
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('butterchurn'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('butterchurn'));
     expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument();
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('native-webgl2'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2'));
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('native-webgpu'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgpu'));
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('spectrum'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('spectrum'));
     expect(within(tile).getByLabelText('Spectrum analyzer')).toBeInTheDocument();
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('scope'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('scope'));
     expect(within(tile).getByLabelText('Oscilloscope')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('player-visual-tile-mode-butterchurn'));
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('butterchurn'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('butterchurn'));
   });
 
   it('shows tile-level visualizer maximize controls even while analyzer bars are active', async () => {
     renderPlayer();
-    window.localStorage.setItem('slskdn.player.visualizerEngine', 'native-webgl2');
+    window.localStorage.setItem('slskr.player.visualizerEngine', 'native-webgl2');
 
     fireEvent.click(screen.getByTestId('player-visual-tile-mode-spectrum'));
 
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('spectrum'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('spectrum'));
 
     fireEvent.click(screen.getByTestId('player-visual-tile-mode-butterchurn'));
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('butterchurn'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('butterchurn'));
 
     fireEvent.click(screen.getByTestId('player-visual-tile-mode-spectrum'));
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('spectrum'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('spectrum'));
 
     fireEvent.click(screen.getByTestId('player-visual-tile-fullwindow'));
 
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskdn.player.visualTileMode')).toBe('native-webgl2');
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2');
     });
     expect(document.querySelector('.player-visualizer-fullwindow')).toBeInTheDocument();
   });
@@ -397,13 +397,13 @@ describe('PlayerBar', () => {
     expect(screen.getByTestId('player-listenbrainz-save-state')).toHaveTextContent(
       'saved automatically',
     );
-    expect(window.localStorage.getItem('slskdn.listenbrainz.token')).toBe('token-1');
+    expect(window.localStorage.getItem('slskr.listenbrainz.token')).toBe('token-1');
     expect(screen.getByTestId('player-close-integrations')).toHaveTextContent('Done');
 
     fireEvent.click(screen.getByTestId('player-clear-listenbrainz-token'));
 
     expect(tokenInput).toHaveValue('');
-    expect(window.localStorage.getItem('slskdn.listenbrainz.token')).toBeNull();
+    expect(window.localStorage.getItem('slskr.listenbrainz.token')).toBeNull();
   });
 
   it('shows and launches the configured external visualizer', async () => {
@@ -412,7 +412,7 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('player-open-integrations'));
 
     expect(
-      await screen.findByText('Ready to launch on the slskdN host.'),
+      await screen.findByText('Ready to launch on the slskR host.'),
     ).toBeInTheDocument();
     expect(screen.getByText('/opt/MilkDrop3/MilkDrop 3.exe')).toBeInTheDocument();
 
@@ -447,10 +447,10 @@ describe('PlayerBar', () => {
     expect(screen.getByTestId('player-rating-controls')).toHaveTextContent(
       'Discovery boost',
     );
-    expect(window.localStorage.getItem('slskdn.player.ratings')).toContain(
+    expect(window.localStorage.getItem('slskr.player.ratings')).toContain(
       '"content:sha256:test":5',
     );
-    expect(window.localStorage.getItem('slskdn.discovery.shelf')).toContain(
+    expect(window.localStorage.getItem('slskr.discovery.shelf')).toContain(
       '"action":"promote-preview"',
     );
 
@@ -518,23 +518,23 @@ describe('PlayerBar', () => {
 
     expect(await screen.findByText('Smart Radio Seed')).toBeInTheDocument();
     expect(screen.getByTestId('player-radio-seed')).toHaveTextContent(
-      'slskdN - Local stream',
+      'slskR - Local stream',
     );
     expect(screen.getByText('Similar track seed')).toBeInTheDocument();
-    expect(screen.getByText('slskdN Local stream')).toBeInTheDocument();
+    expect(screen.getByText('slskR Local stream')).toBeInTheDocument();
     expect(screen.getByText('Album neighborhood')).toBeInTheDocument();
-    expect(screen.getByText('slskdN Fixture Album')).toBeInTheDocument();
+    expect(screen.getByText('slskR Fixture Album')).toBeInTheDocument();
     expect(screen.getByText('Artist and genre seed')).toBeInTheDocument();
-    expect(screen.getByText('slskdN Fixture Genre')).toBeInTheDocument();
+    expect(screen.getByText('slskR Fixture Genre')).toBeInTheDocument();
     expect(searches.createBatch).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('player-radio-start-searches'));
     await waitFor(() => {
       expect(searches.createBatch).toHaveBeenCalledWith({
         queries: [
-          'slskdN Local stream',
-          'slskdN Fixture Album',
-          'slskdN Fixture Genre',
+          'slskR Local stream',
+          'slskR Fixture Album',
+          'slskR Fixture Genre',
         ],
       });
     });
@@ -546,7 +546,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({
           autoDownload: false,
           enabled: true,
-          searchText: 'slskdN Local stream',
+          searchText: 'slskR Local stream',
         }),
       );
     });
@@ -587,7 +587,7 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('player-search-similar-candidates'));
     await waitFor(() => {
       expect(searches.createBatch).toHaveBeenCalledWith({
-        queries: ['slskdN Second stream', 'slskdN Local stream'],
+        queries: ['slskR Second stream', 'slskR Local stream'],
       });
     });
     expect(screen.getByText('Started 3 similar-track searches.')).toBeInTheDocument();
@@ -598,7 +598,7 @@ describe('PlayerBar', () => {
         expect.objectContaining({
           autoDownload: false,
           enabled: true,
-          searchText: 'slskdN Second stream',
+          searchText: 'slskR Second stream',
         }),
       );
     });
@@ -640,7 +640,7 @@ describe('PlayerBar', () => {
     expect(screen.getByText('Top Artists')).toBeInTheDocument();
     expect(screen.getByText('Top Genres')).toBeInTheDocument();
     expect(screen.getByText('Recommendation Seeds')).toBeInTheDocument();
-    expect(screen.getAllByText('slskdN').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('slskR').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Fixture Genre').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Local stream').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('player-stats-search-seed-Fixture Genre')).toBeInTheDocument();
@@ -669,7 +669,7 @@ describe('PlayerBar', () => {
     });
     expect(screen.getByText(/Added .* listening seeds to Wishlist/)).toBeInTheDocument();
 
-    window.localStorage.setItem('slskdn.listenbrainz.token', 'token-1');
+    window.localStorage.setItem('slskr.listenbrainz.token', 'token-1');
     fireEvent.click(screen.getByTestId('player-listening-history-scrobble-recent'));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(

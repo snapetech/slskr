@@ -16,7 +16,7 @@
 
 :root.dark .user-card-username,
 html.dark .user-card-username {
-  color: var(--slskdn-accent-primary-hover, #eadfff);
+  color: var(--slskr-accent-primary-hover, #eadfff);
 }
 
 .user-card-stats {

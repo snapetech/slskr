@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom';
+import * as federationDiagnostics from '../../../lib/federationDiagnostics';
 import * as lidarr from '../../../lib/lidarr';
 import * as optionsApi from '../../../lib/options';
 import Integrations from './index';
@@ -13,6 +14,10 @@ vi.mock('../../../lib/lidarr', () => ({
   syncWanted: vi.fn(),
 }));
 
+vi.mock('../../../lib/federationDiagnostics', () => ({
+  getDiagnostics: vi.fn(),
+}));
+
 vi.mock('../../../lib/options', () => ({
   applyOverlay: vi.fn(),
   getYaml: vi.fn(),
@@ -25,6 +30,31 @@ describe('Integrations', () => {
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    federationDiagnostics.getDiagnostics.mockResolvedValue({
+      data: {
+        federation: {
+          baseUrlConfigured: false,
+          domainConfigured: true,
+          enabled: true,
+          exposure: 'Public',
+          verifySignatures: false,
+        },
+        mesh: {
+          selfPeerIdConfigured: true,
+          soulseekRendezvousEnabled: false,
+        },
+        pods: {
+          joinSignatureMode: 'Off',
+          messageSignatureMode: 'Warn',
+        },
+        publishing: {
+          defaultVisibility: 'public',
+          enabled: true,
+          publishableDomains: ['music'],
+        },
+        warnings: ['Public federation is enabled while HTTP signature verification is disabled.'],
       },
     });
   });
@@ -71,6 +101,21 @@ describe('Integrations', () => {
     expect(screen.queryByText('secret-key')).not.toBeInTheDocument();
   });
 
+  it('shows read-only federation and pod diagnostics', async () => {
+    render(<Integrations />);
+
+    expect(await screen.findByText('Federation and Pod Diagnostics')).toBeInTheDocument();
+    expect(screen.getByText('Exposure: Public')).toBeInTheDocument();
+    expect(screen.getByText('HTTP Signatures Off')).toBeInTheDocument();
+    expect(screen.getByText('Pod join signatures')).toBeInTheDocument();
+    expect(screen.getByText('Off')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Public federation is enabled while HTTP signature verification is disabled.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('runs Lidarr admin actions', async () => {
     lidarr.getStatus.mockResolvedValue({
       appName: 'Lidarr',
@@ -111,7 +156,7 @@ describe('Integrations', () => {
       target: { value: 'http://media.example.invalid' },
     });
     fireEvent.click(screen.getByLabelText('Media server token configured'));
-    fireEvent.change(screen.getByLabelText('slskdN local file path'), {
+    fireEvent.change(screen.getByLabelText('slskR local file path'), {
       target: { value: '/downloads/complete/Artist/Album/track.flac' },
     });
     fireEvent.change(screen.getByLabelText('Media server file path'), {
@@ -153,7 +198,7 @@ describe('Integrations', () => {
     );
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskdN media-server execution contract'),
+        expect.stringContaining('slskR media-server execution contract'),
       );
     });
   });
@@ -194,7 +239,7 @@ describe('Integrations', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskdN Servarr compatibility review'),
+        expect.stringContaining('slskR Servarr compatibility review'),
       );
     });
     expect(lidarr.getStatus).not.toHaveBeenCalled();
@@ -276,7 +321,7 @@ describe('Integrations', () => {
       target: { value: 'https://api.acoustid.org/v2' },
     });
     fireEvent.change(screen.getByLabelText('MusicBrainz user agent'), {
-      target: { value: 'slskdN-test/1.0' },
+      target: { value: 'slskR-test/1.0' },
     });
     fireEvent.click(screen.getByLabelText('Enable Lidarr integration settings'));
     fireEvent.change(screen.getByLabelText('Lidarr base URL setting'), {
@@ -300,7 +345,7 @@ describe('Integrations', () => {
     expect(yaml).toContain('ffmpeg_path: /usr/bin/ffmpeg');
     expect(yaml).toContain('acoustid');
     expect(yaml).toContain('musicbrainz');
-    expect(yaml).toContain('user_agent: slskdN-test/1.0');
+    expect(yaml).toContain('user_agent: slskR-test/1.0');
     expect(yaml).toContain('lidarr');
     expect(yaml).toContain('url: http://lidarr.local:8686');
     expect(yaml).toContain('sync_wanted_to_wishlist: true');
@@ -426,13 +471,13 @@ describe('Integrations', () => {
           integration: {
             ntfy: {
               enabled: false,
-              notificationPrefix: 'slskdN',
+              notificationPrefix: 'slskR',
             },
             pushbullet: {
               accessToken: '*****',
               cooldownTime: 900000,
               enabled: false,
-              notificationPrefix: 'From slskdN:',
+              notificationPrefix: 'From slskR:',
               retryAttempts: 3,
             },
             pushover: {
@@ -453,7 +498,7 @@ describe('Integrations', () => {
     fireEvent.click(screen.getByLabelText('Enable Pushbullet notifications'));
     fireEvent.click(screen.getByLabelText('Enable Ntfy notifications'));
     fireEvent.change(screen.getByLabelText('Ntfy topic URL'), {
-      target: { value: 'https://ntfy.sh/slskdn' },
+      target: { value: 'https://ntfy.sh/slskr' },
     });
     fireEvent.click(screen.getAllByText('Apply Runtime')[0]);
 
@@ -462,22 +507,22 @@ describe('Integrations', () => {
         integration: {
           ntfy: {
             enabled: true,
-            notificationPrefix: 'slskdN',
+            notificationPrefix: 'slskR',
             notifyOnPrivateMessage: true,
             notifyOnRoomMention: true,
-            url: 'https://ntfy.sh/slskdn',
+            url: 'https://ntfy.sh/slskr',
           },
           pushbullet: {
             cooldownTime: 900000,
             enabled: true,
-            notificationPrefix: 'From slskdN:',
+            notificationPrefix: 'From slskR:',
             notifyOnPrivateMessage: true,
             notifyOnRoomMention: true,
             retryAttempts: 3,
           },
           pushover: {
             enabled: false,
-            notificationPrefix: 'slskdN',
+            notificationPrefix: 'slskR',
             notifyOnPrivateMessage: true,
             notifyOnRoomMention: true,
           },
@@ -561,7 +606,7 @@ describe('Integrations', () => {
       target: { value: 'ftp.example.net' },
     });
     fireEvent.change(screen.getByLabelText('FTP username'), {
-      target: { value: 'slskdn' },
+      target: { value: 'slskr' },
     });
     fireEvent.change(screen.getByLabelText('FTP password'), {
       target: { value: 'ftp-secret' },
@@ -585,7 +630,7 @@ describe('Integrations', () => {
             port: 21,
             remotePath: '/incoming',
             retryAttempts: 3,
-            username: 'slskdn',
+            username: 'slskr',
           },
         },
       });

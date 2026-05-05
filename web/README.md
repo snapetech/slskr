@@ -1,1 +1,1 @@
-# slskdN Web UI
+# slskR Web UI

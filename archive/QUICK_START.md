@@ -118,7 +118,7 @@ Missing:      276
 - Solid federation
 - And many more...
 
-See `WEBUI_PORT_TEST_REPORT.md` for detailed breakdown.
+See `docs/app-surface.md` for the current surface breakdown.
 
 ---
 
@@ -247,7 +247,7 @@ slskR/
 │   ├── main.rs                       # HTTP routing & handlers (10.5k lines)
 │   ├── build.rs                      # Build script (tracks webui changes)
 │   └── ...
-├── web/                              # React webui (copied from slskdn)
+├── web/                              # React webui
 │   ├── src/
 │   │   ├── components/App.jsx        # Main app (rebranded)
 │   │   ├── lib/                      # API wrappers (90+ modules)
@@ -258,11 +258,10 @@ slskR/
 │   ├── vite.config.js                # Dev server config (proxy at :5030)
 │   └── index.html
 ├── docs/
-│   ├── webui-port-plan.md            # Architecture & roadmap
-│   └── webui-endpoints.txt           # Canonical 291-endpoint list
+│   ├── app-surface.md                # Architecture & surface map
+│   └── webui-endpoints.txt           # Canonical endpoint list
 ├── scripts/
 │   └── diff-webui-endpoints.sh       # Coverage measurement tool
-├── WEBUI_PORT_TEST_REPORT.md         # Detailed test results
 └── QUICK_START.md                    # This file
 ```
 
@@ -285,8 +284,7 @@ slskR/
 
 ## Documentation
 
-- **Full roadmap**: `docs/webui-port-plan.md`
-- **Test results**: `WEBUI_PORT_TEST_REPORT.md`
+- **Full roadmap**: `docs/app-surface.md`
 - **API reference**: `docs/openapi.json` (auto-generated)
 - **Architecture notes**: `docs/app-surface.md`
 
@@ -294,7 +292,7 @@ slskR/
 
 ## Next Phase (Phase 2)
 
-See `WEBUI_PORT_TEST_REPORT.md` §"Next Steps" for:
+See `docs/app-surface.md` for:
 - How to prioritize which endpoints to implement
 - When to refactor the router
 - How to add SignalR hub support
@@ -307,6 +305,6 @@ See `WEBUI_PORT_TEST_REPORT.md` §"Next Steps" for:
 ## Support
 
 For issues or questions:
-1. Check `WEBUI_PORT_TEST_REPORT.md` Troubleshooting section
+1. Check `docs/app-surface.md`
 2. Look at recent commits: `git log --oneline | head -10`
-3. Review `docs/webui-port-plan.md` for design context
+3. Review recent commits for design context

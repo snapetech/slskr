@@ -1,7 +1,7 @@
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 import { v4 as uuidv4 } from 'uuid';
 
-export const discoveryInboxStorageKey = 'slskdn.discoveryInbox.items';
+export const discoveryInboxStorageKey = 'slskr.discoveryInbox.items';
 
 export const discoveryInboxStates = [
   'Suggested',

@@ -1,5 +1,5 @@
-// <copyright file="index.test.jsx" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="index.test.jsx" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import SourceProviders from '.';
@@ -80,7 +80,7 @@ describe('SourceProviders', () => {
         {
           active: false,
           capabilities: ['search'],
-          description: 'Already indexed or shared files on this slskdN node.',
+          description: 'Already indexed or shared files on this slskR node.',
           disabledReason: 'VirtualSoulfind v2 acquisition planning is disabled.',
           domain: 'Music',
           id: 'LocalLibrary',

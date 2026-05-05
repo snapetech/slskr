@@ -1,5 +1,5 @@
-// <copyright file="realmSubjectIndexes.test.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="realmSubjectIndexes.test.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import {
@@ -60,7 +60,7 @@ describe('realmSubjectIndexes', () => {
       report,
     });
 
-    expect(formatted).toContain('slskdN realm subject-index conflict review');
+    expect(formatted).toContain('slskR realm subject-index conflict review');
     expect(formatted).toContain('Realm: realm-a');
     expect(formatted).toContain('ACTIVE realm-a:index-a:r1: mbid-a');
     expect(formatted).toContain('DISABLED realm-a:index-b:r2: mbid-b');

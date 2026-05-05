@@ -21,7 +21,7 @@ let tabCounter = 0;
 // Load tabs from localStorage
 const loadTabsFromStorage = () => {
   try {
-    const saved = getLocalStorageItem('slskd-room-tabs');
+    const saved = getLocalStorageItem('slskr-room-tabs');
 
     if (saved) {
       const parsed = JSON.parse(saved);
@@ -39,7 +39,7 @@ const loadTabsFromStorage = () => {
 // Save tabs to localStorage
 const saveTabsToStorage = (tabsToSave) => {
   setLocalStorageItem(
-    'slskd-room-tabs',
+    'slskr-room-tabs',
     JSON.stringify({ tabCounter, tabs: tabsToSave }),
   );
 };

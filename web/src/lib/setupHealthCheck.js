@@ -308,7 +308,7 @@ export const buildSetupHealthChecks = ({ options = {}, state = {} } = {}) => {
 
 export const formatSetupHealthReport = (summary) => {
   const lines = [
-    'slskdN setup health check',
+    'slskR setup health check',
     `Readiness: ${summary.readiness}`,
     `Score: ${summary.score}/100`,
     `Pass: ${summary.totals.pass}  Warn: ${summary.totals.warn}  Fail: ${summary.totals.fail}`,

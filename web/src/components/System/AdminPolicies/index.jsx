@@ -605,7 +605,7 @@ const AdminPolicies = ({ options = {} }) => {
                   disabled={!remoteConfiguration || saving}
                   label="Webhook URL"
                   onChange={(_, { value }) => update('webhookUrl', value)}
-                  placeholder="https://example.invalid/slskdn-hook"
+                  placeholder="https://example.invalid/slskr-hook"
                   value={form.webhookUrl}
                 />
                 <Form.Input
@@ -663,7 +663,7 @@ const AdminPolicies = ({ options = {} }) => {
                   disabled={!remoteConfiguration || saving}
                   label="Script Command"
                   onChange={(_, { value }) => update('scriptCommand', value)}
-                  placeholder="/usr/local/bin/slskdn-hook"
+                  placeholder="/usr/local/bin/slskr-hook"
                   value={form.scriptCommand}
                 />
               </Form.Group>

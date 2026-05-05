@@ -26,7 +26,7 @@ function getFullFixturesPath(
 }
 
 export function hasDownloadedMediaFixtures(
-  fixturesDir: string = 'test-data/slskdn-test-fixtures',
+  fixturesDir: string = 'test-data/slskr-test-fixtures',
   cwd: string = process.cwd(),
 ): boolean {
   const fullFixturesPath = getFullFixturesPath(fixturesDir, cwd);
@@ -41,11 +41,11 @@ export function hasDownloadedMediaFixtures(
  *
  * Checks if fixture directories exist and have content.
  * If media files are missing, attempts to fetch them (optional).
- * @param fixturesDir Path to test-data/slskdn-test-fixtures
+ * @param fixturesDir Path to test-data/slskr-test-fixtures
  * @param fetchIfMissing If true, run fetch script if media files are missing
  */
 export async function ensureFixtures(
-  fixturesDir: string = 'test-data/slskdn-test-fixtures',
+  fixturesDir: string = 'test-data/slskr-test-fixtures',
   fetchIfMissing: boolean = false,
 ): Promise<void> {
   const repoRoot = getRepoRootFromCwd();

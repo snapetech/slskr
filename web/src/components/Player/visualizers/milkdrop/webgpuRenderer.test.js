@@ -495,7 +495,7 @@ describe('native MilkDrop WebGPU renderer', () => {
     });
     renderer.dispose();
 
-    expect(renderer.name).toBe('slskdN MilkDrop WebGPU');
+    expect(renderer.name).toBe('slskR MilkDrop WebGPU');
     expect(context.configure).toHaveBeenCalledWith(expect.objectContaining({
       device,
       format: 'bgra8unorm',

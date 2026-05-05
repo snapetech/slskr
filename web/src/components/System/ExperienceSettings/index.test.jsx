@@ -4,7 +4,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const storageKey = 'slskdn:experience-preferences:v1';
+const storageKey = 'slskr:experience-preferences:v1';
 
 describe('ExperienceSettings', () => {
   beforeEach(() => {
@@ -50,7 +50,7 @@ describe('ExperienceSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy Report' }));
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('slskdN experience preferences'),
+      expect.stringContaining('slskR experience preferences'),
     );
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining('Messages:'),

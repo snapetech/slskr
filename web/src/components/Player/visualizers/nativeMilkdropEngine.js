@@ -16,9 +16,9 @@ import {
 
 const nativePresets = [
   {
-    name: 'slskdN native grid smoke',
+    name: 'slskR native grid smoke',
     source: `
-      name=slskdN native grid smoke
+      name=slskR native grid smoke
       decay=0.91
       wave_r=0.12
       wave_g=0.64
@@ -67,9 +67,9 @@ const nativePresets = [
     `,
   },
   {
-    name: 'slskdN native waveform smoke',
+    name: 'slskR native waveform smoke',
     source: `
-      name=slskdN native waveform smoke
+      name=slskR native waveform smoke
       decay=0.88
       wave_r=0.85
       wave_g=0.34
@@ -697,10 +697,10 @@ export const createNativeMilkdropEngine = async ({
   };
 
   const getEngineName = () => {
-    if (activeRendererBackend === 'webgpu') return 'slskdN MilkDrop WebGPU';
+    if (activeRendererBackend === 'webgpu') return 'slskR MilkDrop WebGPU';
     return requestedRendererBackend === 'webgpu'
-      ? 'slskdN MilkDrop WebGL2 fallback'
-      : 'slskdN MilkDrop WebGL2';
+      ? 'slskR MilkDrop WebGL2 fallback'
+      : 'slskR MilkDrop WebGL2';
   };
 
   const getEffectiveWebGpuStatus = () => (

@@ -1,6 +1,6 @@
 const urlBase = (window.urlBase === '/' ? '' : window.urlBase) || '';
 const developmentPort =
-  window.port ?? (import.meta.env.VITE_SLSKD_PORT || 5_030);
+  window.port ?? (import.meta.env.VITE_SLSKR_PORT || 5_030);
 const rootUrl =
   import.meta.env.PROD
     ? urlBase
@@ -8,11 +8,11 @@ const rootUrl =
       ? `http://localhost:${developmentPort}${urlBase}`
       : urlBase;
 const apiBaseUrl = `${rootUrl}/api/v0`;
-const tokenKey = 'slskd-token';
+const tokenKey = 'slskr-token';
 const tokenPassthroughValue = 'n/a';
-const activeChatKey = 'slskd-active-chat';
-const activeRoomKey = 'slskd-active-room';
-const activeUserInfoKey = 'slskd-active-user';
+const activeChatKey = 'slskr-active-chat';
+const activeRoomKey = 'slskr-active-room';
+const activeUserInfoKey = 'slskr-active-user';
 
 export {
   activeChatKey,

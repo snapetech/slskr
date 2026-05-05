@@ -15,7 +15,7 @@ const loadServiceWorker = () => {
     URL,
     caches: {
       delete: vi.fn().mockResolvedValue(true),
-      keys: vi.fn().mockResolvedValue(['slskdn-shell-v1']),
+      keys: vi.fn().mockResolvedValue(['slskr-shell-v1']),
       match: vi.fn().mockResolvedValue(undefined),
       open: vi.fn().mockResolvedValue(cache),
     },
@@ -51,7 +51,7 @@ describe('service worker caching', () => {
 
     await pending;
 
-    expect(context.caches.open).toHaveBeenCalledWith('slskdn-shell-v2');
+    expect(context.caches.open).toHaveBeenCalledWith('slskr-shell-v2');
     expect(cache.addAll).toHaveBeenCalledWith([
       './manifest.json',
       './logo192.png',

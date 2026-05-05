@@ -3,7 +3,7 @@ import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import React, { useEffect, useState } from 'react';
 import { Button, Dropdown, Icon, Popup } from 'semantic-ui-react';
 
-const storageKey = 'slskdn.player.equalizer';
+const storageKey = 'slskr.player.equalizer';
 
 const presets = {
   Flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],

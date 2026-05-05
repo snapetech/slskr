@@ -1,5 +1,5 @@
-// <copyright file="index.jsx" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="index.jsx" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import * as quarantineJuryApi from '../../../lib/quarantineJury';

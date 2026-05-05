@@ -1,5 +1,5 @@
-// <copyright file="watchlists.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="watchlists.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
@@ -10,7 +10,7 @@ import {
 } from './acquisitionProfiles';
 import { v4 as uuidv4 } from 'uuid';
 
-export const watchlistStorageKey = 'slskdn.watchlists.items';
+export const watchlistStorageKey = 'slskr.watchlists.items';
 
 const allowedKinds = ['Artist', 'Label', 'Playlist', 'Collection'];
 const allowedReleaseTypes = [

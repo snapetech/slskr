@@ -1,3 +1,4 @@
+import * as federationDiagnostics from '../../../lib/federationDiagnostics';
 import * as lidarr from '../../../lib/lidarr';
 import * as optionsApi from '../../../lib/options';
 import * as YAML from 'yaml';
@@ -154,7 +155,7 @@ const buildNotificationForm = (options = {}) => {
       getOption(ntfy, 'notifyOnPrivateMessage', 'NotifyOnPrivateMessage') ?? true,
     ntfyNotifyOnRoomMention:
       getOption(ntfy, 'notifyOnRoomMention', 'NotifyOnRoomMention') ?? true,
-    ntfyPrefix: getOption(ntfy, 'notificationPrefix', 'NotificationPrefix') || 'slskdN',
+    ntfyPrefix: getOption(ntfy, 'notificationPrefix', 'NotificationPrefix') || 'slskR',
     ntfyUrl: getOption(ntfy, 'url', 'Url') || '',
     pushbulletAccessToken: '',
     pushbulletAccessTokenConfigured: isConfigured(
@@ -174,7 +175,7 @@ const buildNotificationForm = (options = {}) => {
       getOption(pushbullet, 'notifyOnRoomMention', 'NotifyOnRoomMention') ?? true,
     pushbulletPrefix:
       getOption(pushbullet, 'notificationPrefix', 'NotificationPrefix') ||
-      'From slskdN:',
+      'From slskR:',
     pushbulletRetryAttempts: String(
       getOption(pushbullet, 'retryAttempts', 'RetryAttempts') ?? 3,
     ),
@@ -188,7 +189,7 @@ const buildNotificationForm = (options = {}) => {
     pushoverNotifyOnRoomMention:
       getOption(pushover, 'notifyOnRoomMention', 'NotifyOnRoomMention') ?? true,
     pushoverPrefix:
-      getOption(pushover, 'notificationPrefix', 'NotificationPrefix') || 'slskdN',
+      getOption(pushover, 'notificationPrefix', 'NotificationPrefix') || 'slskR',
     pushoverToken: '',
     pushoverTokenConfigured: isConfigured(getOption(pushover, 'token', 'Token')),
     pushoverUserKey: '',
@@ -1431,7 +1432,7 @@ const MetadataSettingsPanel = ({ options }) => {
             </Form.Group>
             <Form.Group grouped>
               <Popup
-                content="Sync Lidarr wanted albums into slskdN Wishlist review items."
+                content="Sync Lidarr wanted albums into slskR Wishlist review items."
                 trigger={
                   <Checkbox
                     aria-label="Enable Lidarr wanted sync setting"
@@ -1459,7 +1460,7 @@ const MetadataSettingsPanel = ({ options }) => {
                 }
               />
               <Popup
-                content="Allow completed slskdN download directories to be sent to Lidarr manual import."
+                content="Allow completed slskR download directories to be sent to Lidarr manual import."
                 trigger={
                   <Checkbox
                     aria-label="Enable Lidarr completed import setting"
@@ -2011,8 +2012,8 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
   const inferredSpotifyRedirectUri =
     form.spotifyRedirectUri.trim() ||
     (typeof window !== 'undefined'
-      ? `${window.location.origin}/api/integrations/spotify/callback`
-      : '/api/integrations/spotify/callback');
+      ? `${window.location.origin}/api/v0/integrations/spotify/callback`
+      : '/api/v0/integrations/spotify/callback');
 
   const buildOverlay = () => {
     const spotifyPatch = {
@@ -2226,11 +2227,9 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
               info
               size="small"
             >
-              <Message.Header>One-click Spotify authorization</Message.Header>
-              Register this exact Redirect URI in the Spotify developer
-              dashboard: <code>{inferredSpotifyRedirectUri}</code>. The callback
-              is served on the same slskR WebUI/API port and protected by a
-              short-lived, single-use OAuth state token.
+              <Message.Header>Spotify authorization redirect URI</Message.Header>
+              Register this Redirect URI in the Spotify developer dashboard:{' '}
+              <code>{inferredSpotifyRedirectUri}</code>
             </Message>
             <Popup
               content="Turns on Spotify source-feed imports and account connection. Private liked/saved/followed feeds still require a connected Spotify account or bearer token."
@@ -2577,15 +2576,6 @@ const LidarrPanel = ({ options }) => {
         <Card.Meta>Wanted-album sync and completed-download import bridge.</Card.Meta>
       </Card.Content>
       <Card.Content>
-        <Message
-          info
-          size="small"
-        >
-          <Message.Header>No OAuth clickthrough for Lidarr</Message.Header>
-          Lidarr uses a local URL and API key. The closest safe one-click flow is
-          to save the URL/API key, then use Check Status, Load Wanted, or Sync
-          Wanted from this panel.
-        </Message>
         <div className="integration-status-row">
           {boolLabel(enabled)}
           {boolLabel(
@@ -2667,7 +2657,7 @@ const LidarrPanel = ({ options }) => {
             }
           />
           <Popup
-            content="Preview Lidarr wanted albums that can be synced into slskdN Wishlist."
+            content="Preview Lidarr wanted albums that can be synced into slskR Wishlist."
             trigger={
               <Button
                 icon
@@ -2685,7 +2675,7 @@ const LidarrPanel = ({ options }) => {
             }
           />
           <Popup
-            content="Create or refresh slskdN Wishlist entries from Lidarr wanted albums."
+            content="Create or refresh slskR Wishlist entries from Lidarr wanted albums."
             trigger={
               <Button
                 icon
@@ -2763,7 +2753,7 @@ const LidarrPanel = ({ options }) => {
             }}
             fluid
             onChange={(_, { value }) => setImportDirectory(value)}
-            placeholder="Completed download directory visible to slskdN..."
+            placeholder="Completed download directory visible to slskR..."
             value={importDirectory}
           />
           {importResult && (
@@ -2927,7 +2917,7 @@ const MediaServerPanel = () => {
         <Segment className="integration-manual-import">
           <Header as="h4">Path Diagnostics</Header>
           <p>
-            Check whether a completed file path reported by slskdN maps to the
+            Check whether a completed file path reported by slskR maps to the
             path a media server can scan.
           </p>
           <div className="media-server-path-grid">
@@ -2947,9 +2937,9 @@ const MediaServerPanel = () => {
               toggle
             />
             <Input
-              aria-label="slskdN local file path"
+              aria-label="slskR local file path"
               fluid
-              label="slskdN path"
+              label="slskR path"
               onChange={(_, { value }) => setLocalPath(value)}
               placeholder="/downloads/complete/Artist/Album/track.flac"
               value={localPath}
@@ -3398,6 +3388,142 @@ const ServarrReadinessPanel = ({ options }) => {
   );
 };
 
+const FederationDiagnosticsPanel = () => {
+  const [diagnostics, setDiagnostics] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadDiagnostics = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await federationDiagnostics.getDiagnostics();
+        if (mounted) {
+          setDiagnostics(response.data || {});
+        }
+      } catch (error_) {
+        if (mounted) {
+          setError(error_);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadDiagnostics();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const federation = diagnostics?.federation || {};
+  const publishing = diagnostics?.publishing || {};
+  const pods = diagnostics?.pods || {};
+  const mesh = diagnostics?.mesh || {};
+  const warnings = diagnostics?.warnings || [];
+
+  return (
+    <Card fluid>
+      <Card.Content>
+        <Card.Header>
+          <Icon name="share alternate" />
+          Federation and Pod Diagnostics
+        </Card.Header>
+        <Card.Meta>
+          Read-only posture for ActivityPub, pod signing, and mesh-adjacent
+          publishing.
+        </Card.Meta>
+      </Card.Content>
+      <Card.Content>
+        {error && (
+          <Message
+            negative
+            size="small"
+          >
+            Federation diagnostics could not be loaded.
+          </Message>
+        )}
+        <div className="integration-status-row">
+          {boolLabel(federation.enabled, 'Federation On', 'Federation Off')}
+          <Label>
+            <Icon name="privacy" />
+            Exposure: {valueOrDash(federation.exposure)}
+          </Label>
+          {boolLabel(publishing.enabled, 'Publishing On', 'Publishing Off')}
+          {boolLabel(
+            federation.verifySignatures,
+            'HTTP Signatures On',
+            'HTTP Signatures Off',
+          )}
+        </div>
+        <Table
+          compact
+          definition
+          size="small"
+        >
+          <Table.Body>
+            <Table.Row>
+              <Table.Cell>Domain configured</Table.Cell>
+              <Table.Cell>{federation.domainConfigured ? 'Yes' : 'No'}</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Base URL configured</Table.Cell>
+              <Table.Cell>{federation.baseUrlConfigured ? 'Yes' : 'No'}</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Publishable domains</Table.Cell>
+              <Table.Cell>{publishing.publishableDomains?.join(', ') || '-'}</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Publishing visibility</Table.Cell>
+              <Table.Cell>{valueOrDash(publishing.defaultVisibility)}</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Pod join signatures</Table.Cell>
+              <Table.Cell>{valueOrDash(pods.joinSignatureMode)}</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Pod message signatures</Table.Cell>
+              <Table.Cell>{valueOrDash(pods.messageSignatureMode)}</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Mesh self peer ID</Table.Cell>
+              <Table.Cell>{mesh.selfPeerIdConfigured ? 'Configured' : 'Missing'}</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Soulseek rendezvous</Table.Cell>
+              <Table.Cell>{mesh.soulseekRendezvousEnabled ? 'Enabled' : 'Disabled'}</Table.Cell>
+            </Table.Row>
+          </Table.Body>
+        </Table>
+        {warnings.length > 0 && (
+          <Message
+            size="small"
+            warning
+          >
+            <Message.Header>Federation posture warnings</Message.Header>
+            <Message.List items={warnings} />
+          </Message>
+        )}
+        {!loading && warnings.length === 0 && diagnostics && (
+          <Message
+            positive
+            size="small"
+          >
+            No federation or pod signing posture warnings were reported.
+          </Message>
+        )}
+      </Card.Content>
+    </Card>
+  );
+};
+
 const Integrations = ({ options = {}, state = {} }) => (
   <div className="integrations-admin">
     <Segment>
@@ -3421,6 +3547,7 @@ const Integrations = ({ options = {}, state = {} }) => (
     <FtpIntegrationPanel options={options} />
     <ServarrReadinessPanel options={options} />
     <MediaServerPanel />
+    <FederationDiagnosticsPanel />
   </div>
 );
 

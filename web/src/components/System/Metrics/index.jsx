@@ -40,12 +40,12 @@ const KPI_GROUPS = [
     title: 'Transfers',
     icon: 'exchange',
     metrics: [
-      { key: 'slskd_uploads_total', label: 'Uploads Total', format: formatNumber },
-      { key: 'slskd_downloads_total', label: 'Downloads Total', format: formatNumber },
-      { key: 'slskd_uploads_active', label: 'Uploads Active', format: formatNumber },
-      { key: 'slskd_downloads_active', label: 'Downloads Active', format: formatNumber },
-      { key: 'slskd_uploads_queued', label: 'Uploads Queued', format: formatNumber },
-      { key: 'slskd_downloads_queued', label: 'Downloads Queued', format: formatNumber },
+      { key: 'slskr_uploads_total', label: 'Uploads Total', format: formatNumber },
+      { key: 'slskr_downloads_total', label: 'Downloads Total', format: formatNumber },
+      { key: 'slskr_uploads_active', label: 'Uploads Active', format: formatNumber },
+      { key: 'slskr_downloads_active', label: 'Downloads Active', format: formatNumber },
+      { key: 'slskr_uploads_queued', label: 'Uploads Queued', format: formatNumber },
+      { key: 'slskr_downloads_queued', label: 'Downloads Queued', format: formatNumber },
     ],
   },
   {
@@ -53,9 +53,9 @@ const KPI_GROUPS = [
     title: 'Search',
     icon: 'search',
     metrics: [
-      { key: 'slskd_searches_incoming_requests_total', label: 'Incoming Requests', format: formatNumber },
-      { key: 'slskd_searches_incoming_requests_dropped_total', label: 'Dropped Requests', format: formatNumber },
-      { key: 'slskd_searches_outgoing_total', label: 'Outgoing Searches', format: formatNumber },
+      { key: 'slskr_searches_incoming_requests_total', label: 'Incoming Requests', format: formatNumber },
+      { key: 'slskr_searches_incoming_requests_dropped_total', label: 'Dropped Requests', format: formatNumber },
+      { key: 'slskr_searches_outgoing_total', label: 'Outgoing Searches', format: formatNumber },
     ],
   },
   {
@@ -108,18 +108,18 @@ const MetricGroup = ({ group, metrics }) => {
   );
 };
 
-const SlskdMetricsTable = ({ metrics }) => {
-  const slskdMetrics = Object.entries(metrics)
-    .filter(([key]) => key.startsWith('slskd_'))
+const SlskrMetricsTable = ({ metrics }) => {
+  const slskrMetrics = Object.entries(metrics)
+    .filter(([key]) => key.startsWith('slskr_'))
     .sort(([a], [b]) => a.localeCompare(b));
 
-  if (slskdMetrics.length === 0) return null;
+  if (slskrMetrics.length === 0) return null;
 
   return (
     <Segment>
       <Header size="small">
         <Icon name="table" />
-        All slskdN Metrics
+        All slskR Metrics
       </Header>
       <Table
         compact
@@ -135,7 +135,7 @@ const SlskdMetricsTable = ({ metrics }) => {
           </Table.Row>
         </Table.Header>
         <Table.Body>
-          {slskdMetrics.map(([key, metric]) => (
+          {slskrMetrics.map(([key, metric]) => (
             <Table.Row key={key}>
               <Table.Cell>
                 <code style={{ fontSize: '0.85em' }}>{key}</code>
@@ -213,7 +213,7 @@ const Metrics = () => {
 
       <Divider />
 
-      <SlskdMetricsTable metrics={metrics} />
+      <SlskrMetricsTable metrics={metrics} />
     </div>
   );
 };

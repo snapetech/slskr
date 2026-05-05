@@ -10,8 +10,8 @@ test.describe('core pages', () => {
   test.beforeAll(async () => {
     if (shouldLaunchNodes()) {
       harness = new MultiPeerHarness();
-      await harness.startNode('A', 'test-data/slskdn-test-fixtures/music', {
-        noConnect: process.env.SLSKDN_TEST_NO_CONNECT === 'true',
+      await harness.startNode('A', 'test-data/slskr-test-fixtures/music', {
+        noConnect: process.env.SLSKR_TEST_NO_CONNECT === 'true',
       });
     }
   });

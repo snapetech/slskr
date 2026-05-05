@@ -1,11 +1,11 @@
-import { NodeConfig, SlskdnNode } from './SlskdnNode';
+import { NodeConfig, SlskrNode } from './SlskrNode';
 
 /**
- * Manages multiple slskdn test nodes for multi-peer scenarios.
+ * Manages multiple slskr test nodes for multi-peer scenarios.
  * Handles lifecycle (start/stop) and provides access to nodes.
  */
 export class MultiPeerHarness {
-  private nodes: Map<string, SlskdnNode> = new Map();
+  private nodes: Map<string, SlskrNode> = new Map();
 
   /**
    * Start a new test node.
@@ -17,7 +17,7 @@ export class MultiPeerHarness {
     name: string,
     shareDir: string | string[],
     flags?: { noConnect?: boolean },
-  ): Promise<SlskdnNode> {
+  ): Promise<SlskrNode> {
     if (this.nodes.has(name)) {
       throw new Error(`Node ${name} already exists`);
     }
@@ -27,7 +27,7 @@ export class MultiPeerHarness {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
 
-    const node = new SlskdnNode({
+    const node = new SlskrNode({
       flags,
       nodeName: name,
       shareDir,
@@ -41,7 +41,7 @@ export class MultiPeerHarness {
   /**
    * Get a node by name.
    */
-  getNode(name: string): SlskdnNode {
+  getNode(name: string): SlskrNode {
     const node = this.nodes.get(name);
     if (!node) {
       throw new Error(`Node ${name} not found`);

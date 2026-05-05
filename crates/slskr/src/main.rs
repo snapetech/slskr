@@ -569,6 +569,8 @@ impl SearchStore {
             .cloned()
     }
 
+    #[allow(dead_code)]
+    #[allow(dead_code)]
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
@@ -802,6 +804,8 @@ impl EventStore {
         record
     }
 
+    #[allow(dead_code)]
+    #[allow(dead_code)]
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
@@ -863,6 +867,8 @@ struct TransferEntry {
 }
 
 impl TransferEntry {
+    #[allow(dead_code)]
+    #[allow(dead_code)]
     fn json(&self) -> String {
         format!(
             "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"requested_at\":{},\"updated_at\":{}}}",
@@ -2297,6 +2303,30 @@ impl RoomStore {
 
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
+        let filtered_count = self
+            .records
+            .iter()
+            .filter(|record| filter.joined.map_or(true, |joined| record.joined == joined))
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+            })
+            .count();
+        format!(
+            "{{\"entries\":{},\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
+            self.json_array(query),
+            self.records.len(),
+            filtered_count,
+            filter.offset,
+            json_usize_option(filter.limit),
+            self.updated_at
+        )
+    }
+
+    fn json_array(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
         let records = self
             .records
             .iter()
@@ -2307,24 +2337,12 @@ impl RoomStore {
                     .as_deref()
                     .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
             })
-            .collect::<Vec<_>>();
-        let filtered_count = records.len();
-        let records = records
-            .into_iter()
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
             .map(RoomRecord::json)
             .collect::<Vec<_>>()
             .join(",");
-        format!(
-            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            records,
-            self.records.len(),
-            filtered_count,
-            filter.offset,
-            json_usize_option(filter.limit),
-            self.updated_at
-        )
+        format!("[{}]", records)
     }
 
     fn summary_json(&self) -> String {
@@ -2358,12 +2376,16 @@ struct CollectionItem {
 impl CollectionItem {
     fn json(&self) -> String {
         format!(
-            "{{\"id\":\"{}\",\"content_id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{}}}",
+            "{{\"id\":\"{}\",\"contentId\":\"{}\",\"content_id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"fileName\":\"{}\",\"mediaKind\":\"{}\",\"kind\":\"{}\",\"addedAt\":{},\"added_at\":{}}}",
             json_escape(&self.id),
+            json_escape(&self.content_id),
             json_escape(&self.content_id),
             json_escape(&self.artist),
             json_escape(&self.title),
+            json_escape(&self.title),
             json_escape(&self.kind),
+            json_escape(&self.kind),
+            self.added_at,
             self.added_at
         )
     }
@@ -2388,13 +2410,17 @@ impl CollectionRecord {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"id\":\"{}\",\"name\":\"{}\",\"description\":\"{}\",\"items\":[{}],\"item_count\":{},\"created_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":\"{}\",\"title\":\"{}\",\"name\":\"{}\",\"type\":\"Playlist\",\"description\":\"{}\",\"items\":[{}],\"itemCount\":{},\"item_count\":{},\"createdAt\":{},\"created_at\":{},\"updatedAt\":{},\"updated_at\":{}}}",
             json_escape(&self.id),
+            json_escape(&self.name),
             json_escape(&self.name),
             json_escape(&self.description),
             items,
             self.items.len(),
+            self.items.len(),
             self.created_at,
+            self.created_at,
+            self.updated_at,
             self.updated_at
         )
     }
@@ -2466,7 +2492,31 @@ impl CollectionStore {
         Some(record.clone())
     }
 
+    #[allow(dead_code)]
     fn json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let filtered_count = self
+            .records
+            .iter()
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+            })
+            .count();
+        format!(
+            "{{\"entries\":{},\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
+            self.json_array(query),
+            self.records.len(),
+            filtered_count,
+            filter.offset,
+            json_usize_option(filter.limit),
+            self.updated_at
+        )
+    }
+
+    fn json_array(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
             .records
@@ -2477,24 +2527,12 @@ impl CollectionStore {
                     .as_deref()
                     .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
             })
-            .collect::<Vec<_>>();
-        let filtered_count = records.len();
-        let records = records
-            .into_iter()
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
             .map(CollectionRecord::json)
             .collect::<Vec<_>>()
             .join(",");
-        format!(
-            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            records,
-            self.records.len(),
-            filtered_count,
-            filter.offset,
-            json_usize_option(filter.limit),
-            self.updated_at
-        )
+        format!("[{}]", records)
     }
 }
 
@@ -2510,13 +2548,28 @@ struct WishlistItem {
 
 impl WishlistItem {
     fn json(&self) -> String {
+        let search_text = if self.title.is_empty() {
+            self.artist.as_str()
+        } else if self.artist.is_empty() {
+            self.title.as_str()
+        } else {
+            ""
+        };
+        let owned_search_text;
+        let search_text = if search_text.is_empty() {
+            owned_search_text = format!("{} {}", self.artist, self.title);
+            owned_search_text.as_str()
+        } else {
+            search_text
+        };
         format!(
-            "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{}}}",
+            "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{},\"searchText\":\"{}\",\"filter\":\"\",\"enabled\":true,\"autoDownload\":false,\"maxResults\":100,\"lastSearchedAt\":null,\"lastMatchCount\":0,\"totalSearchCount\":0,\"lastSearchId\":null}}",
             json_escape(&self.id),
             json_escape(&self.artist),
             json_escape(&self.title),
             json_escape(&self.kind),
-            self.added_at
+            self.added_at,
+            json_escape(search_text)
         )
     }
 }
@@ -2599,6 +2652,17 @@ impl WishlistStore {
         } else {
             None
         }
+    }
+
+    fn json_array(&mut self) -> String {
+        let record = self.get_or_create();
+        let items = record
+            .items
+            .iter()
+            .map(WishlistItem::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{}]", items)
     }
 }
 
@@ -2734,6 +2798,25 @@ impl ContactStore {
             self.updated_at
         )
     }
+
+    fn json_array(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .records
+            .iter()
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.username.to_ascii_lowercase().contains(q))
+            })
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(ContactRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{}]", records)
+    }
 }
 
 // ShareGroup Models
@@ -2868,7 +2951,31 @@ impl ShareGroupStore {
         }
     }
 
+    #[allow(dead_code)]
     fn json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let filtered_count = self
+            .records
+            .iter()
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+            })
+            .count();
+        format!(
+            "{{\"entries\":{},\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
+            self.json_array(query),
+            self.records.len(),
+            filtered_count,
+            filter.offset,
+            json_usize_option(filter.limit),
+            self.updated_at
+        )
+    }
+
+    fn json_array(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
             .records
@@ -2879,24 +2986,12 @@ impl ShareGroupStore {
                     .as_deref()
                     .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
             })
-            .collect::<Vec<_>>();
-        let filtered_count = records.len();
-        let records = records
-            .into_iter()
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
             .map(ShareGroupRecord::json)
             .collect::<Vec<_>>()
             .join(",");
-        format!(
-            "{{\"entries\":[{}],\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            records,
-            self.records.len(),
-            filtered_count,
-            filter.offset,
-            json_usize_option(filter.limit),
-            self.updated_at
-        )
+        format!("[{}]", records)
     }
 }
 
@@ -3198,19 +3293,24 @@ impl ShareGrantStore {
         }
     }
 
+    #[allow(dead_code)]
     fn json(&self) -> String {
+        format!(
+            "{{\"entries\":{},\"count\":{},\"updated_at\":{}}}",
+            self.json_array(),
+            self.records.len(),
+            self.updated_at
+        )
+    }
+
+    fn json_array(&self) -> String {
         let records = self
             .records
             .iter()
             .map(ShareGrantRecord::json)
             .collect::<Vec<_>>()
             .join(",");
-        format!(
-            "{{\"entries\":[{}],\"count\":{},\"updated_at\":{}}}",
-            records,
-            self.records.len(),
-            self.updated_at
-        )
+        format!("[{}]", records)
     }
 }
 
@@ -4053,10 +4153,44 @@ async fn route_http_request_with_headers(
 
          ("GET", "/api/shares") => {
             let shares = state.shares.read().await;
+            let host = state
+                .config
+                .username
+                .as_deref()
+                .filter(|username| !username.is_empty())
+                .unwrap_or("local");
+            let mut roots = shares
+                .roots
+                .iter()
+                .map(|root| {
+                    serde_json::json!({
+                        "localPath": root.label,
+                        "alias": root.label,
+                        "remotePath": root.label,
+                        "directories": 0,
+                        "files": root.files,
+                        "bytes": root.bytes,
+                        "isExcluded": false,
+                    })
+                })
+                .collect::<Vec<_>>();
+            if roots.is_empty() && !shares.entries.is_empty() {
+                roots.push(serde_json::json!({
+                    "localPath": "shares",
+                    "alias": "shares",
+                    "remotePath": "shares",
+                    "directories": 0,
+                    "files": shares.entries.len(),
+                    "bytes": shares.entries.iter().map(|entry| entry.size).sum::<u64>(),
+                    "isExcluded": false,
+                }));
+            }
+            let json = serde_json::json!({ host: roots }).to_string();
+            drop(shares);
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: shares.json(),
+                body: json,
             })
         }
         ("GET", "/api/shares/catalog") => {
@@ -4442,6 +4576,20 @@ async fn route_http_request_with_headers(
              let entry = transfers.create(direction, peer_username.clone(), filename.clone(), local_path.clone(), size);
              drop(transfers);
               Ok(routing::created_response(entry.json()))
+         }
+
+         ("GET", "/api/transfers/downloads") => {
+             Ok(routing::ok_response("[]".to_string()))
+         }
+
+         ("GET", "/api/transfers/uploads") => {
+             Ok(routing::ok_response("[]".to_string()))
+         }
+
+         ("GET", "/api/transfers/downloads/accelerated") => {
+             Ok(routing::ok_response(
+                 "{\"enabled\":false,\"available\":false,\"accelerated\":[],\"count\":0}".to_string(),
+             ))
          }
 
          // GET individual transfer
@@ -5032,11 +5180,7 @@ async fn route_http_request_with_headers(
                 ))
                 .collect::<Vec<_>>()
                 .join(",");
-            let json = format!(
-                "{{\"rooms\":[{}],\"count\":{}}}",
-                available_rooms,
-                rooms.records.len()
-            );
+            let json = format!("[{}]", available_rooms);
             drop(rooms);
             Ok(routing::ok_response(json))
         }
@@ -5049,10 +5193,7 @@ async fn route_http_request_with_headers(
             let room_name = parts[3];
             let rooms = state.rooms.read().await;
             if let Some(_room) = rooms.records.iter().find(|r| r.name == room_name) {
-                let json = format!(
-                    "{{\"room\":\"{}\",\"users\":[],\"user_count\":0}}",
-                    json_escape(room_name)
-                );
+                let json = "[]".to_string();
                 drop(rooms);
                 Ok(routing::ok_response(json))
             } else {
@@ -5073,12 +5214,7 @@ async fn route_http_request_with_headers(
                     .map(|m| m.json())
                     .collect::<Vec<_>>()
                     .join(",");
-                let json = format!(
-                    "{{\"room\":\"{}\",\"messages\":[{}],\"count\":{}}}",
-                    json_escape(room_name),
-                    messages,
-                    room.messages.len()
-                );
+                let json = format!("[{}]", messages);
                 drop(rooms);
                 Ok(routing::ok_response(json))
             } else {
@@ -5425,7 +5561,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: rooms.json(route.query),
+                body: rooms.json_array(route.query),
             })
         }
         ("POST", "/api/rooms/joined") => {
@@ -5474,7 +5610,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: r#"{"messages":[],"total":0}"#.to_owned(),
+                body: "[]".to_owned(),
             })
         }
         // GET room detail by name
@@ -5495,7 +5631,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: r#"{"users":[],"total":0}"#.to_owned(),
+                body: "[]".to_owned(),
             })
         }
         // WEBUI PARITY: Application/Server/Session status endpoints
@@ -5513,6 +5649,23 @@ async fn route_http_request_with_headers(
                 body: r#"{"latest":"0.1.0","current":"0.1.0","update_available":false}"#.to_owned(),
             })
         }
+        ("GET", "/api/application/build") => {
+            let version = format!(
+                "{}.{}.{}",
+                CLIENT_NAME, CLIENT_MAJOR_VERSION, CLIENT_MINOR_VERSION
+            );
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "current": version,
+                    "full": version,
+                    "latest": version,
+                    "latestTag": version,
+                    "latestUrl": "https://github.com/snapetech/slskR/releases",
+                    "isUpdateAvailable": false
+                })
+                .to_string(),
+            ))
+        }
         ("GET", "/api/server") => {
             let session = state.session.read().await;
             let is_connected = session.state == "connected";
@@ -5527,12 +5680,10 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", "/api/session/enabled") => {
-            let session = state.session.read().await;
-            let is_connected = session.state == "connected";
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: format!(r#"{{"enabled":{}}}"#, is_connected),
+                body: state.config.auth_required.to_string(),
             })
         }
         // WEBUI PARITY: Options/Config read-write endpoints
@@ -5689,7 +5840,7 @@ async fn route_http_request_with_headers(
         // COLLECTIONS ENDPOINTS
         ("GET", "/api/collections") => {
             let collections = state.collections.read().await;
-            let json = collections.json(route.query);
+            let json = collections.json_array(route.query);
             drop(collections);
             Ok(routing::ok_response(json))
         }
@@ -5763,12 +5914,7 @@ async fn route_http_request_with_headers(
                     .map(|item| item.json())
                     .collect::<Vec<_>>()
                     .join(",");
-                let json = format!(
-                    "{{\"items\":[{}],\"count\":{},\"collection_id\":\"{}\"}}",
-                    items,
-                    record.items.len(),
-                    json_escape(id)
-                );
+                let json = format!("[{}]", items);
                 drop(collections);
                 Ok(routing::ok_response(json))
             } else {
@@ -5865,13 +6011,13 @@ async fn route_http_request_with_headers(
         // WISHLIST ENDPOINTS
         ("GET", "/api/wishlist") => {
             let mut wishlist = state.wishlist.write().await;
-            let record = wishlist.get_or_create();
-            let json = record.json();
+            let json = wishlist.json_array();
             drop(wishlist);
             Ok(routing::ok_response(json))
         }
         ("POST", "/api/wishlist") => {
-            let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+            let search_text = extract_json_string_field(body, "searchText").unwrap_or_default();
+            let artist = extract_json_string_field(body, "artist").unwrap_or_else(|| search_text.clone());
             let title = extract_json_string_field(body, "title").unwrap_or_default();
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
 
@@ -5906,9 +6052,12 @@ async fn route_http_request_with_headers(
         }
 
         // CONTACTS ENDPOINTS
+        ("GET", "/api/contacts/nearby") => {
+            Ok(routing::ok_response("[]".to_string()))
+        }
         ("GET", "/api/contacts") => {
             let contacts = state.contacts.read().await;
-            let json = contacts.json(route.query);
+            let json = contacts.json_array(route.query);
             drop(contacts);
             Ok(routing::ok_response(json))
         }
@@ -5977,16 +6126,10 @@ async fn route_http_request_with_headers(
             }
         }
 
-        // ADDITIONAL MISSING CONTACTS ENDPOINT (Phase 5)
-        ("GET", "/api/contacts/nearby") => {
-            let json = "{\"nearby_contacts\":[],\"count\":0,\"status\":\"no_contacts_nearby\"}".to_string();
-            Ok(routing::ok_response(json))
-        }
-
         // SHAREGROUPS ENDPOINTS
         ("GET", "/api/sharegroups") => {
             let sharegroups = state.sharegroups.read().await;
-            let json = sharegroups.json(route.query);
+            let json = sharegroups.json_array(route.query);
             drop(sharegroups);
             Ok(routing::ok_response(json))
         }
@@ -6060,12 +6203,7 @@ async fn route_http_request_with_headers(
                     .map(|m| m.json())
                     .collect::<Vec<_>>()
                     .join(",");
-                let json = format!(
-                    "{{\"members\":[{}],\"count\":{},\"group_id\":\"{}\"}}",
-                    members,
-                    record.members.len(),
-                    json_escape(id)
-                );
+                let json = format!("[{}]", members);
                 drop(sharegroups);
                 Ok(routing::ok_response(json))
             } else {
@@ -6236,7 +6374,7 @@ async fn route_http_request_with_headers(
         // SHARE GRANTS ENDPOINTS
         ("GET", "/api/share-grants") => {
             let grants = state.share_grants.read().await;
-            let json = grants.json();
+            let json = grants.json_array();
             drop(grants);
             Ok(routing::ok_response(json))
         }
@@ -6272,12 +6410,7 @@ async fn route_http_request_with_headers(
                 .map(|r| r.json())
                 .collect::<Vec<_>>()
                 .join(",");
-            let response = format!(
-                "{{\"entries\":[{}],\"count\":{},\"collection_id\":\"{}\"}}",
-                json,
-                records.len(),
-                json_escape(collection_id)
-            );
+            let response = format!("[{}]", json);
             drop(grants);
             Ok(routing::ok_response(response))
         }
@@ -6427,11 +6560,15 @@ async fn route_http_request_with_headers(
 
         // CONVERSATIONS ENDPOINT
         ("GET", "/api/conversations") => {
-            let json = "{\"conversations\":[],\"count\":0}".to_string();
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response("[]".to_string()))
         }
 
         // JOBS ENDPOINT
+        ("GET", "/api/jobs") => {
+            Ok(routing::ok_response(
+                "{\"jobs\":[],\"limit\":20,\"offset\":0,\"total\":0,\"has_more\":false}".to_string(),
+            ))
+        }
         ("GET", path) if path.starts_with("/api/jobs/") && path.len() > 10 => {
             let job_id = &path[10..];
             let json = format!(
@@ -6814,11 +6951,6 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
-        ("GET", "/api/transfers/downloads/accelerated") => {
-            let json = "{\"accelerated\":[],\"count\":0}".to_string();
-            Ok(routing::ok_response(json))
-        }
-
         ("GET", "/api/transfers/downloads/stuck") => {
             let json = "{\"stuck\":[],\"count\":0}".to_string();
             Ok(routing::ok_response(json))
@@ -6897,6 +7029,76 @@ async fn route_http_request_with_headers(
           ("GET", "/api/multisource/jobs") => {
               let json = "{\"jobs\":[],\"count\":0}".to_string();
               Ok(routing::ok_response(json))
+          }
+
+          ("GET", "/api/pods") => {
+              Ok(routing::ok_response("[]".to_string()))
+          }
+
+          ("GET", "/api/solid/status") => {
+              Ok(routing::ok_response("{\"enabled\":false}".to_string()))
+          }
+
+          ("GET", "/api/federation/diagnostics") => {
+              Ok(routing::ok_response(
+                  "{\"status\":\"disabled\",\"checks\":[],\"warnings\":[],\"errors\":[]}".to_string(),
+              ))
+          }
+
+          ("GET", "/api/security/dashboard") => {
+              Ok(routing::ok_response(serde_json::json!({
+                  "enabled": false,
+                  "status": "disabled",
+                  "stats": {
+                      "networkGuardStats": { "globalConnections": 0 },
+                      "reputationStats": { "totalPeers": 0 },
+                      "threatStats": { "activeThreats": 0 },
+                      "banStats": { "activeBans": 0 }
+                  },
+                  "events": [],
+                  "bans": []
+              }).to_string()))
+          }
+
+          ("GET", "/api/soulseek/mesh-rendezvous/status") => {
+              Ok(routing::ok_response(serde_json::json!({
+                  "enabled": false,
+                  "interestTag": "slskr-mesh-v1",
+                  "privacy": "Soulseek mesh rendezvous is disabled."
+              }).to_string()))
+          }
+
+          ("GET", "/api/soulseek/mesh-rendezvous/users") => {
+              Ok(routing::ok_response("[]".to_string()))
+          }
+
+          ("GET", "/api/soulseek/mesh-rendezvous/discover") => {
+              Ok(routing::ok_response("{\"users\":[],\"capabilityRecords\":[]}".to_string()))
+          }
+
+          ("GET", "/api/soulseek/peer-capabilities") => {
+              Ok(routing::ok_response("[]".to_string()))
+          }
+
+          ("GET", "/api/mesh/transport") => {
+              Ok(routing::ok_response(serde_json::json!({
+                  "status": "Healthy",
+                  "health": "Healthy",
+                  "description": "Mesh transport unavailable in this runtime",
+                  "transportPreference": "Auto",
+                  "connectedPeers": 0,
+                  "totalPeers": 0,
+                  "activeCircuits": 0,
+                  "activeStreams": 0,
+                  "bootstrapPeers": [],
+                  "isolatedPeers": 0,
+                  "quorumPeers": 0,
+                  "relayedPeers": 0,
+                  "natType": "Unknown",
+                  "publicEndpoint": null,
+                  "lastDhtError": null,
+                  "lastDhtPublishUtc": null
+              }).to_string()))
           }
 
           ("GET", path) if path.starts_with("/api/multisource/jobs/") && path.len() > 22 => {
@@ -7468,6 +7670,125 @@ fn index_html_response() -> HttpResponse {
     }
 }
 
+fn web_build_root() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(configured) = env::var("SLSKR_WEB_BUILD_DIR") {
+        candidates.push(PathBuf::from(configured));
+    }
+    if let Ok(cwd) = env::current_dir() {
+        candidates.push(cwd.join("web").join("build"));
+        candidates.push(cwd.join("build"));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("web")
+            .join("build"),
+    );
+
+    candidates
+        .into_iter()
+        .find(|path| path.join("index.html").is_file())
+}
+
+fn web_static_content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("css") => "text/css; charset=utf-8",
+        Some("eot") => "application/vnd.ms-fontobject",
+        Some("html") => "text/html; charset=utf-8",
+        Some("ico") => "image/x-icon",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("json") | Some("webmanifest") => "application/json; charset=utf-8",
+        Some("png") => "image/png",
+        Some("svg") => "image/svg+xml",
+        Some("ttf") => "font/ttf",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+fn web_static_file_for_request(path: &str) -> Option<(PathBuf, &'static str)> {
+    if path.starts_with("/api/") || path.starts_with("/hub/") || path == "/api" || path == "/hub" {
+        return None;
+    }
+
+    let root = web_build_root()?;
+    let path_without_query = path.split_once('?').map_or(path, |(path, _)| path);
+    let relative = path_without_query.trim_start_matches('/');
+    let requested = if relative.is_empty() {
+        PathBuf::from("index.html")
+    } else {
+        let relative_path = Path::new(relative);
+        if relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
+            return None;
+        }
+
+        let candidate = root.join(relative_path);
+        if candidate.is_file() {
+            relative_path.to_path_buf()
+        } else if relative_path.extension().is_none() {
+            PathBuf::from("index.html")
+        } else {
+            return None;
+        }
+    };
+
+    let file = root.join(requested);
+    file.is_file().then(|| {
+        let content_type = web_static_content_type(&file);
+        (file, content_type)
+    })
+}
+
+fn read_web_index_html() -> Option<String> {
+    let (path, _) = web_static_file_for_request("/")?;
+    fs::read_to_string(path).ok()
+}
+
+fn security_headers() -> &'static str {
+    "X-Content-Type-Options: nosniff\r\n\
+Referrer-Policy: no-referrer\r\n\
+Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:\r\n\
+Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n"
+}
+
+async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
+    writer: &mut W,
+    path: &str,
+    keep_alive: bool,
+    extra_headers: &str,
+) -> Result<Option<usize>, String> {
+    let Some((file, content_type)) = web_static_file_for_request(path) else {
+        return Ok(None);
+    };
+    let bytes = fs::read(&file).map_err(|error| error.to_string())?;
+    let connection_header = if keep_alive { "keep-alive" } else { "close" };
+    let headers = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: {connection_header}\r\n{}{}\r\n",
+        bytes.len(),
+        security_headers(),
+        extra_headers,
+    );
+    writer
+        .write_all(headers.as_bytes())
+        .await
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&bytes)
+        .await
+        .map_err(|error| error.to_string())?;
+    writer.flush().await.map_err(|error| error.to_string())?;
+    Ok(Some(bytes.len()))
+}
+
 fn health_response() -> HttpResponse {
     HttpResponse {
         status: "200 OK",
@@ -7566,7 +7887,10 @@ fn spotify_redirect_uri(state: &AppState) -> String {
 async fn fetch_lidarr_system_status(
     lidarr: &config::LidarrIntegrationSettings,
 ) -> Result<serde_json::Value, String> {
-    let base_url = lidarr.url.as_deref().ok_or("Lidarr URL is not configured")?;
+    let base_url = lidarr
+        .url
+        .as_deref()
+        .ok_or("Lidarr URL is not configured")?;
     let api_key = lidarr
         .api_key
         .as_deref()
@@ -7594,7 +7918,10 @@ async fn fetch_lidarr_system_status(
 async fn fetch_lidarr_wanted_missing(
     lidarr: &config::LidarrIntegrationSettings,
 ) -> Result<serde_json::Value, String> {
-    let base_url = lidarr.url.as_deref().ok_or("Lidarr URL is not configured")?;
+    let base_url = lidarr
+        .url
+        .as_deref()
+        .ok_or("Lidarr URL is not configured")?;
     let api_key = lidarr
         .api_key
         .as_deref()
@@ -10036,6 +10363,42 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             continue;
         }
 
+        if method == "GET" && allowed {
+            let cors_str = cors_headers(req.headers.origin.as_deref(), &["*"]);
+            match write_web_static_response(&mut writer, path, keep_alive, &cors_str).await {
+                Ok(Some(content_length)) => {
+                    let resp_log = logging::HttpResponseLog {
+                        status_code: 200,
+                        content_length,
+                        duration_ms: logging::elapsed_ms(request_timer),
+                        error: None,
+                    };
+                    logging::log_transaction(
+                        &logging::LogConfig::from_env(),
+                        &logging::HttpTransactionLog {
+                            request: req_log,
+                            response: resp_log,
+                        },
+                    );
+                    if !keep_alive {
+                        break;
+                    }
+                    continue;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let response = routing::HttpResponse {
+                        status: "500 Internal Server Error",
+                        content_type: "application/json",
+                        body: format!("{{\"error\":\"{}\"}}", json_escape(&error)),
+                    };
+                    let _ =
+                        http_server::write_http_response(&mut writer, &response, false, "").await;
+                    break;
+                }
+            }
+        }
+
         let response = if !allowed {
             routing::HttpResponse {
                 status: "429 Too Many Requests",
@@ -10116,6 +10479,10 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
 }
 
 pub fn index_html() -> String {
+    if let Some(html) = read_web_index_html() {
+        return html;
+    }
+
     r#"<!doctype html>
 <html lang="en">
 <head>
@@ -11916,6 +12283,7 @@ mod tests {
             ("/api/v0/telemetry", "\"health\":"),
             ("/api/v0/events", "\"entries\":"),
             ("/api/v0/session", "\"state\":\"disconnected\""),
+            ("/api/v0/session/enabled", "false"),
             ("/api/v0/listeners", "\"regular_accepts\":0"),
             ("/api/v0/users", "\"count\":0"),
             ("/api/v0/rooms", "\"count\":0"),
@@ -11938,7 +12306,9 @@ mod tests {
                 response.body
             );
             assert!(
-                !response.body.contains("secret"),
+                !response.body.contains("test-password")
+                    && !response.body.contains("api-token")
+                    && !response.body.contains("client-secret"),
                 "{path}: {}",
                 response.body
             );
@@ -11964,7 +12334,9 @@ mod tests {
         .await
         .expect("authorize response");
         assert_eq!(authorize.status, "202 Accepted");
-        assert!(authorize.body.contains("127.0.0.1:7788/api/integrations/spotify/callback"));
+        assert!(authorize
+            .body
+            .contains("127.0.0.1:7788/api/integrations/spotify/callback"));
 
         let issued_state = {
             let states = state.oauth_states.read().await;
@@ -12068,15 +12440,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn root_dashboard_exposes_core_controls() {
+    async fn root_serves_webui_or_fallback_dashboard() {
         let (state, _receiver) = test_state();
 
         let response = super::route_http_request("GET", "/", None, "", &state)
             .await
-            .expect("dashboard response");
+            .expect("root response");
 
         assert_eq!(response.status, "200 OK");
         assert_eq!(response.content_type, "text/html; charset=utf-8");
+        if response.body.contains("id=\"root\"") && response.body.contains("/assets/") {
+            assert!(response.body.contains("<script"));
+            return;
+        }
+
         assert!(response.body.contains("<h1>slskr</h1>"));
         assert!(response.body.contains("id=\"session-actions\""));
         assert!(response

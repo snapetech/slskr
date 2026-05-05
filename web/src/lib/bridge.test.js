@@ -1,5 +1,5 @@
-// <copyright file="bridge.test.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="bridge.test.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import api from './api';

@@ -4,7 +4,7 @@ import {
 } from './storage';
 import { getPlayerRatingKey } from './playerRatings';
 
-export const discoveryShelfStorageKey = 'slskdn.discovery.shelf';
+export const discoveryShelfStorageKey = 'slskr.discovery.shelf';
 
 const maxShelfItems = 200;
 

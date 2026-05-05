@@ -14,5 +14,5 @@
 @tabularActiveColor: var(--smui-menu-active-item-text-color, @selectedTextColor);
 @tabularHoveredTextColor: var(--smui-menu-active-item-text-color, @hoveredTextColor);
 
-@solidBorderColor: var(--slskd-tertiary-border-color, #D4D4D5);
-@attachedBorder: @borderWidth solid var(--slskd-tertiary-border-color, #D4D4D5);
+@solidBorderColor: var(--slskr-tertiary-border-color, #D4D4D5);
+@attachedBorder: @borderWidth solid var(--slskr-tertiary-border-color, #D4D4D5);

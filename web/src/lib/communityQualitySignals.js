@@ -1,6 +1,6 @@
-export const communityQualitySignalStorageKey = 'slskdn.communityQualitySignals';
+export const communityQualitySignalStorageKey = 'slskr.communityQualitySignals';
 export const communityQualityOverrideStorageKey =
-  'slskdn.communityQualityOverrides';
+  'slskr.communityQualityOverrides';
 
 const positiveSignalTypes = new Set([
   'served-verified-content',

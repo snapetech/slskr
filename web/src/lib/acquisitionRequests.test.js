@@ -157,7 +157,7 @@ describe('acquisitionRequests', () => {
         state: 'Automatic',
       }),
     );
-    expect(report).toContain('slskdN Wishlist request review');
+    expect(report).toContain('slskR Wishlist request review');
     expect(report).toContain('[Automatic] rare album');
   });
 

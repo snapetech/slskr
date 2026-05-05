@@ -1,5 +1,5 @@
 {
-  "background_color": "#161311",
+  "background_color": "#050809",
   "display": "standalone",
   "icons": [
     {
@@ -13,8 +13,8 @@
       "type": "image/png"
     }
   ],
-  "name": "slskdN",
-  "short_name": "slskdN",
+  "name": "slskR",
+  "short_name": "slskR",
   "start_url": ".",
-  "theme_color": "#7650a8"
+  "theme_color": "#00b9a7"
 }

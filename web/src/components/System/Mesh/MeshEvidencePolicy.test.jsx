@@ -91,7 +91,7 @@ describe('MeshEvidencePolicy', () => {
     );
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('slskdN mesh evidence review'),
+      expect.stringContaining('slskR mesh evidence review'),
     );
   });
 });

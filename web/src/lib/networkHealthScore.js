@@ -73,7 +73,7 @@ export const buildNetworkHealthScore = ({
   if (meshCount === 0) {
     score -= 12;
     findings.push({
-      action: 'Search, download, or configure trusted peers so slskdN can discover mesh-capable nodes.',
+      action: 'Search, download, or configure trusted peers so slskR can discover mesh-capable nodes.',
       area: 'Mesh',
       severity: 'warn',
       summary: 'No connected mesh peers',
@@ -135,7 +135,7 @@ export const buildNetworkHealthScore = ({
 
 export const formatNetworkHealthReport = (health) => {
   const lines = [
-    'slskdN network health report',
+    'slskR network health report',
     `Score: ${health.score}/100`,
     `Status: ${health.label}`,
     `Mesh peers: ${health.inputs.meshCount}`,

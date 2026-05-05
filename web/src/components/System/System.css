@@ -69,8 +69,8 @@
 }
 
 .quarantine-jury-request.ui.card.active {
-  border-color: var(--slskdn-accent-purple, #a277ff);
-  box-shadow: 0 0 0 1px var(--slskdn-accent-purple, #a277ff);
+  border-color: var(--slskr-accent-purple, #a277ff);
+  box-shadow: 0 0 0 1px var(--slskr-accent-purple, #a277ff);
 }
 
 @media only screen and (max-width: 900px) {
@@ -106,7 +106,7 @@
 }
 
 .source-provider-disabled {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.55));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.55));
   margin-top: 6px;
 }
 
@@ -154,7 +154,7 @@
 }
 
 .automation-history-panel {
-  border-left: 4px solid var(--slskdn-accent-purple, #a277ff);
+  border-left: 4px solid var(--slskr-accent-purple, #a277ff);
   margin: 0 0 1rem;
   padding: 0.75rem 1rem;
 }
@@ -164,7 +164,7 @@
 }
 
 .automation-recipe-dry-run {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.55));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.55));
   font-size: 0.86rem;
   min-width: 0;
 }
@@ -205,7 +205,7 @@
 }
 
 .integration-muted-copy {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.55));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.55));
   font-size: 0.88rem;
   line-height: 1.35;
   margin-top: 4px;
@@ -228,7 +228,7 @@
 }
 
 .media-server-sync-preview.ui.segment {
-  border-left: 4px solid var(--slskdn-accent-purple, #a277ff);
+  border-left: 4px solid var(--slskr-accent-purple, #a277ff);
   margin-top: 14px !important;
 }
 
@@ -275,7 +275,7 @@
 }
 
 .network-health-panel.ui.segment {
-  border-left: 4px solid var(--slskdn-accent-purple, #a277ff);
+  border-left: 4px solid var(--slskr-accent-purple, #a277ff);
 }
 
 .network-health-head {
@@ -393,9 +393,9 @@
 }
 
 .setup-health-card {
-  background: var(--slskd-card-background, #fff);
-  border: 1px solid var(--slskd-border-color, rgba(34, 36, 38, 0.15));
-  border-left: 4px solid var(--slskdn-accent-purple, #a277ff);
+  background: var(--slskr-card-background, #fff);
+  border: 1px solid var(--slskr-border-color, rgba(34, 36, 38, 0.15));
+  border-left: 4px solid var(--slskr-accent-purple, #a277ff);
   border-radius: 8px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
   min-width: 0;
@@ -407,7 +407,7 @@
 }
 
 .setup-health-card-warn {
-  border-left-color: var(--slskdn-accent-warm, #f0b35a);
+  border-left-color: var(--slskr-accent-warm, #f0b35a);
 }
 
 .setup-health-card-fail {
@@ -426,13 +426,13 @@
 }
 
 .setup-health-card-summary {
-  color: var(--slskd-color, rgba(0, 0, 0, 0.87));
+  color: var(--slskr-color, rgba(0, 0, 0, 0.87));
   font-weight: 700;
   margin: 10px 0 4px;
 }
 
 .setup-health-card-group {
-  color: var(--slskdn-accent-purple, #a277ff);
+  color: var(--slskr-accent-purple, #a277ff);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0;
@@ -442,27 +442,27 @@
 
 .setup-health-card-evidence,
 .setup-health-card-action {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.58));
   margin: 4px 0 0;
 }
 
 :root.dark .setup-health-card {
-  background: var(--slskd-card-background) !important;
-  border-color: var(--slskd-border-color) !important;
+  background: var(--slskr-card-background) !important;
+  border-color: var(--slskr-border-color) !important;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28) !important;
 }
 
 :root.dark .setup-health-card-summary {
-  color: var(--slskd-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .setup-health-card-evidence,
 :root.dark .setup-health-card-action {
-  color: var(--slskd-color-subtle) !important;
+  color: var(--slskr-color-subtle) !important;
 }
 
 :root.dark .setup-health-card-group {
-  color: var(--slskdn-accent-primary-hover) !important;
+  color: var(--slskr-accent-primary-hover) !important;
 }
 
 @media only screen and (max-width: 760px) {
@@ -509,28 +509,28 @@
 
 :root.dark .network-diagnostic-message.ui.info.message,
 :root.dark .network-diagnostic-message.ui.warning.message {
-  background: var(--slskd-overlay-background) !important;
-  border: 1px solid var(--slskdn-accent-warm-muted) !important;
+  background: var(--slskr-overlay-background) !important;
+  border: 1px solid var(--slskr-accent-warm-muted) !important;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18) inset !important;
-  color: var(--slskd-color) !important;
+  color: var(--slskr-color) !important;
 }
 
 :root.dark .network-diagnostic-message.ui.info.message .header,
 :root.dark .network-diagnostic-message.ui.warning.message .header {
-  color: var(--slskdn-accent-warm-hover) !important;
+  color: var(--slskr-accent-warm-hover) !important;
 }
 
 :root.dark .network-diagnostic-message.ui.info.message code,
 :root.dark .network-diagnostic-message.ui.warning.message code {
-  background: var(--slskd-color-inset);
-  color: var(--slskdn-accent-primary-hover);
+  background: var(--slskr-color-inset);
+  color: var(--slskr-accent-primary-hover);
 }
 
 :root.dark .network-dashboard .ui.header .sub.header,
 :root.dark .network-dashboard .ui.card .meta,
 :root.dark .network-dashboard .ui.card .description,
 :root.dark .network-dashboard .ui.segment .description {
-  color: var(--slskd-color-subtle) !important;
+  color: var(--slskr-color-subtle) !important;
 }
 
 .mesh-evidence-policy-header {
@@ -548,7 +548,7 @@
 }
 
 .mesh-evidence-policy-help {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.58));
   line-height: 1.4;
   margin-top: 0.75rem;
 }
@@ -582,8 +582,8 @@
 
 :root.dark .mesh-evidence-policy.ui.segment,
 :root.dark .mesh-evidence-policy .ui.segment {
-  background: var(--slskd-card-background) !important;
-  border-color: var(--slskd-border-color) !important;
+  background: var(--slskr-card-background) !important;
+  border-color: var(--slskr-border-color) !important;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24) !important;
 }
 

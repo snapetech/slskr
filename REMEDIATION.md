@@ -39,12 +39,12 @@ If you find yourself writing `FINAL_*.md`, `*_COMPLETION_*.md`, or
 ## 2. Intent (what the project is actually trying to be)
 
 Established from `README.md`, `PLAN.md`, `docs/app-surface.md`, and the legacy
-slskd parity notes:
+slskr parity notes:
 
 1. A real, independent Rust implementation of the Soulseek protocol.
    **— `slskr-protocol` and `slskr-client` deliver this.**
 2. One bundled app, `slskr`, that runs as a daemon with an HTTP API and a
-   bundled web UI, mirroring how slskd is shipped.
+   bundled web UI, mirroring how slskr is shipped.
    **— `slskr` (bin) delivers a hand-rolled HTTP server, but most of the
      "Phase 6/8/9/10/11/12" surface around it is decorative.**
 3. Probe-driven validation against live Soulseek (matrix runs, Proton NAT-PMP).

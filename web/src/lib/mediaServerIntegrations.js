@@ -40,7 +40,7 @@ export const buildMediaServerPathDiagnostic = ({
   if (!normalizedLocal || !normalizedServer) {
     return {
       color: 'grey',
-      message: 'Enter both paths to check whether slskdN and the media server agree.',
+      message: 'Enter both paths to check whether slskR and the media server agree.',
       status: 'Incomplete',
     };
   }
@@ -64,7 +64,7 @@ export const buildMediaServerPathDiagnostic = ({
       mappedPath: mapped,
       message:
         mapped === normalizedServer
-          ? 'Remote path mapping translates the slskdN path to the media-server path.'
+          ? 'Remote path mapping translates the slskR path to the media-server path.'
           : 'Remote path mapping applies, but the translated path does not match the media-server path.',
       status: mapped === normalizedServer ? 'Mapped' : 'Mapping Mismatch',
     };
@@ -260,7 +260,7 @@ export const buildMediaServerExecutionContract = ({
 
 export const formatMediaServerSyncReport = (preview) => {
   const lines = [
-    'slskdN media-server sync review',
+    'slskR media-server sync review',
     `Adapter: ${preview.adapter.label}`,
     `Status: ${preview.status}`,
     `Checks: ${preview.readyCount}/${preview.total}`,
@@ -285,7 +285,7 @@ export const formatMediaServerSyncReport = (preview) => {
 
 export const formatMediaServerExecutionContractReport = (contract) => {
   const lines = [
-    'slskdN media-server execution contract',
+    'slskR media-server execution contract',
     `Adapter: ${contract.adapter?.label || 'Unknown'}`,
     `Status: ${contract.status}`,
     `Checks: ${contract.readyCount}/${contract.total}`,

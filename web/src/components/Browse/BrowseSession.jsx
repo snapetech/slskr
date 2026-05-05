@@ -38,7 +38,7 @@ const initialState = {
 };
 
 const MAX_BROWSE_CACHE_ENTRIES = 50;
-const BROWSE_CACHE_PREFIX = 'slskd-browse-state-';
+const BROWSE_CACHE_PREFIX = 'slskr-browse-state-';
 
 // Cleanup old browse cache entries using LRU strategy
 const cleanupBrowseCache = () => {
@@ -236,7 +236,7 @@ class BrowseSession extends Component {
 
   getStorageKey = () => {
     const username = this.props.username || this.state.username || 'default';
-    return `slskd-browse-state-${username}`;
+    return `slskr-browse-state-${username}`;
   };
 
   saveState = () => {
@@ -267,7 +267,7 @@ class BrowseSession extends Component {
 
     if (username) {
       try {
-        const key = `slskd-browse-state-${username}`;
+        const key = `slskr-browse-state-${username}`;
         const savedState = JSON.parse(
           lzString.decompress(getLocalStorageItem(key, '') || ''),
         );
@@ -369,7 +369,7 @@ class BrowseSession extends Component {
     if (username) {
       // Clear the cached state for this user
       try {
-        removeLocalStorageItem(`slskd-browse-state-${username}`);
+        removeLocalStorageItem(`slskr-browse-state-${username}`);
       } catch {
         // ignore
       }

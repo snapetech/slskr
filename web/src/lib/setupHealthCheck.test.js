@@ -15,7 +15,7 @@ describe('setupHealthCheck', () => {
           authentication: {
             apiKey: 'fixture-api-key',
           },
-          urlBase: '/slskd',
+          urlBase: '/slskr',
         },
         shares: {
           directories: ['/fixture/music'],
@@ -80,7 +80,7 @@ describe('setupHealthCheck', () => {
     });
     const report = formatSetupHealthReport(summary);
 
-    expect(report).toContain('slskdN setup health check');
+    expect(report).toContain('slskR setup health check');
     expect(report).toContain('Score:');
     expect(report).toContain('Next steps:');
     expect(report).toContain('[FAIL] Network / Soulseek session: Not connected');

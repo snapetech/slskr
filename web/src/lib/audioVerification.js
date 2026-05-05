@@ -1,7 +1,7 @@
 import { fingerprintFile } from './fileFingerprint';
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 
-export const audioVerificationCacheStorageKey = 'slskdn.audioVerification.cache';
+export const audioVerificationCacheStorageKey = 'slskr.audioVerification.cache';
 
 export const audioVerificationProfiles = [
   {

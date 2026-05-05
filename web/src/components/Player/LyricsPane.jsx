@@ -31,7 +31,7 @@ const cleanTrackText = (value) =>
     .trim();
 
 const isPlaceholderArtist = (value) =>
-  !value || ['slskdn', 'unknown', 'local'].includes(value.trim().toLowerCase());
+  !value || ['slskr', 'unknown', 'local'].includes(value.trim().toLowerCase());
 
 const getLyricsLookup = (current) => {
   if (!current) return null;

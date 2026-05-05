@@ -1,6 +1,6 @@
 import { getLocalStorageItem, removeLocalStorageItem, setLocalStorageItem } from './storage';
 
-const tokenStorageKey = 'slskdn.listenbrainz.token';
+const tokenStorageKey = 'slskr.listenbrainz.token';
 
 export const getListenBrainzToken = () =>
   getLocalStorageItem(tokenStorageKey, '');
@@ -27,7 +27,7 @@ export const submitListen = async (listenType, track) => {
           listenType === 'single' ? Math.floor(Date.now() / 1000) : undefined,
         track_metadata: {
           additional_info: {
-            media_player: 'slskdN Web Player',
+            media_player: 'slskR Web Player',
             release_name: track.album || undefined,
           },
           artist_name: track.artist,
@@ -66,7 +66,7 @@ export const submitListeningHistory = async (entries = [], { limit = 10 } = {}) 
       listened_at: Math.floor(Date.parse(entry.playedAt) / 1000),
       track_metadata: {
         additional_info: {
-          media_player: 'slskdN Web Player',
+          media_player: 'slskR Web Player',
           release_name: entry.album || undefined,
         },
         artist_name: entry.artist,

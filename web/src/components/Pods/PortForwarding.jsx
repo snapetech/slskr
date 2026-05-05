@@ -409,7 +409,7 @@ class PortForwarding extends Component {
                         <Table.Cell>
                           {forwarding.podId}
                           {forwarding.serviceName && (
-                            <div style={{ color: 'var(--slskd-color-subtle, #666)', fontSize: '0.8em' }}>
+                            <div style={{ color: 'var(--slskr-color-subtle, #666)', fontSize: '0.8em' }}>
                               Service: {forwarding.serviceName}
                             </div>
                           )}
@@ -479,7 +479,7 @@ class PortForwarding extends Component {
               <p>Available ports for forwarding (1024-65535):</p>
               <div
                 style={{
-                  backgroundColor: 'var(--slskd-color-inset, #f8f9fa)',
+                  backgroundColor: 'var(--slskr-color-inset, #f8f9fa)',
                   borderRadius: '4px',
                   fontFamily: 'monospace',
                   fontSize: '12px',
@@ -664,7 +664,7 @@ class PortForwarding extends Component {
                   <Table.Row key={pod.podId}>
                     <Table.Cell>
                       <strong>{pod.name}</strong>
-                      <div style={{ color: 'var(--slskd-color-subtle, #666)', fontSize: '0.8em' }}>
+                      <div style={{ color: 'var(--slskr-color-subtle, #666)', fontSize: '0.8em' }}>
                         ID: {pod.podId}
                       </div>
                     </Table.Cell>
@@ -791,7 +791,7 @@ class PortForwarding extends Component {
                 {selectedPodDetail && (
                   <div
                     style={{
-                      color: 'var(--slskd-color-subtle, #666)',
+                      color: 'var(--slskr-color-subtle, #666)',
                       fontSize: '0.9em',
                       marginTop: '10px',
                     }}
@@ -821,7 +821,7 @@ class PortForwarding extends Component {
                   type="number"
                   value={createForm.localPort}
                 />
-                <small style={{ color: 'var(--slskd-color-subtle, #666)' }}>
+                <small style={{ color: 'var(--slskr-color-subtle, #666)' }}>
                   Port on your local machine (1024-65535)
                 </small>
               </Form.Field>
@@ -835,7 +835,7 @@ class PortForwarding extends Component {
                   placeholder="e.g., database.internal.company.com"
                   value={createForm.destinationHost}
                 />
-                <small style={{ color: 'var(--slskd-color-subtle, #666)' }}>
+                <small style={{ color: 'var(--slskr-color-subtle, #666)' }}>
                   Hostname or IP address of the remote service
                 </small>
               </Form.Field>
@@ -852,7 +852,7 @@ class PortForwarding extends Component {
                   type="number"
                   value={createForm.destinationPort}
                 />
-                <small style={{ color: 'var(--slskd-color-subtle, #666)' }}>
+                <small style={{ color: 'var(--slskr-color-subtle, #666)' }}>
                   Port number of the remote service
                 </small>
               </Form.Field>
@@ -866,7 +866,7 @@ class PortForwarding extends Component {
                   placeholder="e.g., postgres-db"
                   value={createForm.serviceName}
                 />
-                <small style={{ color: 'var(--slskd-color-subtle, #666)' }}>
+                <small style={{ color: 'var(--slskr-color-subtle, #666)' }}>
                   Named service registered in the pod (for better organization)
                 </small>
               </Form.Field>

@@ -135,7 +135,7 @@ describe('discoveryGraph helpers', () => {
       }),
     );
 
-    expect(report).toContain('slskdN Discovery Graph branch review');
+    expect(report).toContain('slskR Discovery Graph branch review');
     expect(report).toContain('Graph: Fixture Graph');
     expect(report).toContain('Pinned comparison: Pinned Artist');
     expect(report).toContain('- artist: 1');

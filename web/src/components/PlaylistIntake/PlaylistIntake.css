@@ -54,7 +54,7 @@
 
 .playlist-intake-meta,
 .playlist-intake-impact {
-  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.58));
+  color: var(--slskr-color-subtle, rgba(0, 0, 0, 0.58));
   line-height: 1.35;
   margin-top: 0.35rem;
 }
@@ -75,7 +75,7 @@
 }
 
 .playlist-intake-preview {
-  border: 1px solid var(--slskd-border-color, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--slskr-border-color, rgba(0, 0, 0, 0.12));
   border-radius: 6px;
   margin-top: 0.75rem;
   padding: 0.65rem;
@@ -97,7 +97,7 @@
 }
 
 .playlist-intake-organization-plan {
-  border: 1px solid var(--slskd-border-color, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--slskr-border-color, rgba(0, 0, 0, 0.12));
   border-radius: 6px;
   margin-top: 0.75rem;
   padding: 0.65rem;
@@ -111,7 +111,7 @@
 
 .playlist-intake-organization-row {
   align-items: center;
-  border: 1px solid var(--slskd-border-color, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--slskr-border-color, rgba(0, 0, 0, 0.12));
   border-radius: 6px;
   display: flex;
   gap: 0.75rem;
@@ -120,14 +120,14 @@
 }
 
 .playlist-intake-organization-approval {
-  border-left: 3px solid var(--slskdn-accent-purple, #a277ff);
+  border-left: 3px solid var(--slskr-accent-purple, #a277ff);
   margin-top: 0.75rem;
   padding-left: 0.65rem;
 }
 
 .playlist-intake-track {
   align-items: center;
-  border: 1px solid var(--slskd-border-color, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--slskr-border-color, rgba(0, 0, 0, 0.12));
   border-radius: 6px;
   display: flex;
   gap: 0.75rem;

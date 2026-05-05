@@ -1,5 +1,5 @@
-// <copyright file="RealmSubjectIndexConflicts.test.jsx" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="RealmSubjectIndexConflicts.test.jsx" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import RealmSubjectIndexConflicts from './RealmSubjectIndexConflicts';

@@ -1,10 +1,10 @@
-// <copyright file="albumDecisionRules.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="albumDecisionRules.js" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 
-const STORAGE_KEY = 'slskdn.albumDecisionRules';
+const STORAGE_KEY = 'slskr.albumDecisionRules';
 const MAX_RULES = 50;
 
 const normalizeText = (value = '') =>

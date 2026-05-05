@@ -246,13 +246,13 @@ export async function login(page: Page, node: NodeCfg) {
 
   // Poll for token to be stored (more efficient than fixed timeout)
   // The React app stores the token asynchronously after receiving the response
-  // The token key is 'slskd-token' (from config.js)
+  // The token key is 'slskr-token' (from config.js)
   let token: string | null = null;
   for (let index = 0; index < 10; index++) {
     token = await page.evaluate(() => {
       return (
-        sessionStorage.getItem('slskd-token') ||
-        localStorage.getItem('slskd-token')
+        sessionStorage.getItem('slskr-token') ||
+        localStorage.getItem('slskr-token')
       );
     });
     if (token) {
@@ -479,8 +479,8 @@ export async function waitForLibraryItem(
   while (Date.now() - start < timeoutMs) {
     const result = await page.evaluate(async (q) => {
       const token =
-        sessionStorage.getItem('slskd-token') ||
-        localStorage.getItem('slskd-token');
+        sessionStorage.getItem('slskr-token') ||
+        localStorage.getItem('slskr-token');
       if (!token) {
         return { ok: false, status: 401, text: 'missing token' };
       }
@@ -659,8 +659,8 @@ export async function verifySpaFallback(
 export async function getAuthToken(page: Page): Promise<string> {
   const token = await page.evaluate(() => {
     return (
-      sessionStorage.getItem('slskd-token') ||
-      localStorage.getItem('slskd-token') ||
+      sessionStorage.getItem('slskr-token') ||
+      localStorage.getItem('slskr-token') ||
       ''
     );
   });

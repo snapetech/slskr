@@ -10,7 +10,7 @@ import {
   buildPlaylistProviderRefreshContent,
   buildPlaylistRefreshDiff,
   buildPlaylistTagOrganizationPlan,
-  buildSlskdPlaylistPreview,
+  buildSlskrPlaylistPreview,
   clearPlaylistTagOrganizationApproval,
   formatPlaylistTagOrganizationReport,
   getDuePlaylistRefreshes,
@@ -183,7 +183,7 @@ describe('playlistIntake', () => {
     expect(seed.networkImpact).toMatch(/no provider fetch/i);
   });
 
-  it('builds bulk Discovery Inbox seeds and slskdN playlist previews without mutations', () => {
+  it('builds bulk Discovery Inbox seeds and slskR playlist previews without mutations', () => {
     const playlist = {
       id: 'playlist-2',
       name: 'Review set',
@@ -212,12 +212,12 @@ describe('playlistIntake', () => {
 
     expect(buildPlaylistDiscoverySeeds(playlist)).toHaveLength(2);
 
-    expect(buildSlskdPlaylistPreview(playlist)).toMatchObject({
+    expect(buildSlskrPlaylistPreview(playlist)).toMatchObject({
       lineCount: 1,
       name: 'Review set',
       text: '# Review set\n1. Stereolab - French Disko',
     });
-    expect(buildSlskdPlaylistPreview(playlist).networkImpact).toMatch(
+    expect(buildSlskrPlaylistPreview(playlist).networkImpact).toMatch(
       /writes a playlist Collection locally/i,
     );
   });
@@ -431,7 +431,7 @@ describe('playlistIntake', () => {
 
     const report = formatPlaylistTagOrganizationReport(playlist);
 
-    expect(report).toContain('slskdN tag and organization dry run');
+    expect(report).toContain('slskR tag and organization dry run');
     expect(report).toContain('Playlist: Snapshot queue');
     expect(report).toContain('Proposed: Stereolab | French Disko | Snapshot Album | 01');
     expect(report).toContain('No tag write');

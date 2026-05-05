@@ -1,5 +1,5 @@
-// <copyright file="index.test.jsx" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="index.test.jsx" company="slskR Team">
+// Copyright (c) slskR Team. All rights reserved.
 // </copyright>
 
 import * as slskrAPI from '../../../lib/slskr';
@@ -31,14 +31,14 @@ describe('Network', () => {
       },
     });
     window.localStorage.clear();
-    slskrAPI.getSlskdnStats.mockResolvedValue({
+    slskrAPI.getSlskrStats.mockResolvedValue({
       backfill: {
         completedToday: 0,
         discoveryRate: 0,
         isActive: false,
         pendingCount: 0,
       },
-      capabilities: { features: [], version: 'slskdn' },
+      capabilities: { features: [], version: 'slskr' },
       dht: {
         dhtNodeCount: 0,
         isEnabled: true,
@@ -81,20 +81,20 @@ describe('Network', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('slskdN network health report'),
+        expect.stringContaining('slskR network health report'),
       );
     });
   });
 
   it('explains zero-node DHT when LAN-only mode disables public bootstrap', async () => {
-    slskrAPI.getSlskdnStats.mockResolvedValueOnce({
+    slskrAPI.getSlskrStats.mockResolvedValueOnce({
       backfill: {
         completedToday: 0,
         discoveryRate: 0,
         isActive: false,
         pendingCount: 0,
       },
-      capabilities: { features: [], version: 'slskdn' },
+      capabilities: { features: [], version: 'slskr' },
       dht: {
         dhtNodeCount: 0,
         isEnabled: true,
@@ -139,12 +139,12 @@ describe('Network', () => {
     });
 
     expect(
-      window.localStorage.getItem('slskdn:ui:dht-public-exposure:consent-v1'),
+      window.localStorage.getItem('slskr:ui:dht-public-exposure:consent-v1'),
     ).toBe('acknowledged');
   });
 
   it('does not show the DHT exposure notice if already acknowledged', async () => {
-    window.localStorage.setItem('slskdn:ui:dht-public-exposure:consent-v1', 'acknowledged');
+    window.localStorage.setItem('slskr:ui:dht-public-exposure:consent-v1', 'acknowledged');
 
     render(<Network theme="light" />);
 
@@ -156,15 +156,15 @@ describe('Network', () => {
   });
 
   it('does not show connectivity diagnostics when DHT status has peers', async () => {
-    window.localStorage.setItem('slskdn:ui:dht-public-exposure:consent-v1', 'acknowledged');
-    slskrAPI.getSlskdnStats.mockResolvedValueOnce({
+    window.localStorage.setItem('slskr:ui:dht-public-exposure:consent-v1', 'acknowledged');
+    slskrAPI.getSlskrStats.mockResolvedValueOnce({
       backfill: {
         completedToday: 0,
         discoveryRate: 0,
         isActive: false,
         pendingCount: 0,
       },
-      capabilities: { features: [], version: 'slskdn' },
+      capabilities: { features: [], version: 'slskr' },
       dht: {
         activeMeshConnections: 1,
         dhtNodeCount: 155,
@@ -192,14 +192,14 @@ describe('Network', () => {
   });
 
   it('does not show the DHT exposure notice when DHT is LAN-only', async () => {
-    slskrAPI.getSlskdnStats.mockResolvedValueOnce({
+    slskrAPI.getSlskrStats.mockResolvedValueOnce({
       backfill: {
         completedToday: 0,
         discoveryRate: 0,
         isActive: false,
         pendingCount: 0,
       },
-      capabilities: { features: [], version: 'slskdn' },
+      capabilities: { features: [], version: 'slskr' },
       dht: {
         dhtNodeCount: 3,
         isEnabled: true,
@@ -222,14 +222,14 @@ describe('Network', () => {
   });
 
   it('does not show the DHT exposure notice when the backend reports lanOnly', async () => {
-    slskrAPI.getSlskdnStats.mockResolvedValueOnce({
+    slskrAPI.getSlskrStats.mockResolvedValueOnce({
       backfill: {
         completedToday: 0,
         discoveryRate: 0,
         isActive: false,
         pendingCount: 0,
       },
-      capabilities: { features: [], version: 'slskdn' },
+      capabilities: { features: [], version: 'slskr' },
       dht: {
         dhtNodeCount: 3,
         isEnabled: true,
