@@ -28,7 +28,7 @@ scripts/run-council-scan.sh
 | Protocol count/length candidates | Fixed | Re-run after new wire-count or chunk-read code is added; BUG-033 covers the accepted transfer chunk allocation bug. |
 | Protocol scalar emission candidates | Fixed | Re-run after new protocol scalar casts or length-prefix writers are added; BUG-034 covers accepted API-to-protocol narrowing bugs. |
 | Resolver/raw stream candidates | Fixed | Re-run after new direct socket, resolver, stream read/write, or raw connection lifecycle code is added; BUG-035 and BUG-036 cover accepted raw-stream bugs. |
-| Task/cancellation/lifecycle candidates | Unclassified | Classify spawn, timeout, interval, channel, cancellation, and shutdown candidates. |
+| Task/cancellation/lifecycle candidates | Fixed | Re-run after new spawn, timeout, interval, channel, cancellation, or shutdown code is added; BUG-037 and BUG-038 cover accepted TypeScript lifecycle bugs. |
 | Example Web API candidates | Unclassified | Classify docs/examples for stale auth, storage, WebSocket, CORS, and URL guidance. |
 
 ## Classification Legend
@@ -43,7 +43,7 @@ scripts/run-council-scan.sh
 
 ## Current Section Review
 
-Current section: `Resolver/raw stream candidates`
+Current section: `Task/cancellation/lifecycle candidates`
 
 Latest scanner counts:
 
@@ -54,7 +54,7 @@ Latest scanner counts:
 | Protocol scalar emission candidates | 30 |
 | Resolver/raw stream candidates | 220 |
 | Task/cancellation/lifecycle candidates | 236 |
-| Example Web API candidates | 281 |
+| Example Web API candidates | 283 |
 
 ### Constructor/mutable collection candidates
 
@@ -106,3 +106,16 @@ Latest scanner counts:
 | Webhook outbound URL resolver | Backend/API + Release/Ops | Existing Guard | Webhook URLs are validated/resolved before client construction, private/blocklisted addresses are rejected, and reqwest is configured with the resolved address and a delivery timeout. | `scripts/check-webhook-outbound-policy.sh`; webhook tests. |
 | Lidarr integration URL resolver | Backend/API + Docs/Config | Existing Guard | Integration base URLs reject private/reserved/public-suffix escapes and pin resolved addresses into the reqwest client with configured timeouts. | Integration resolver tests in `slskr`. |
 | Test/CLI/examples socket helpers | Tests/Tooling | False Positive | Remaining raw socket hits are contract tests, local smoke tests, CLI diagnostics, examples, README snippets, or generated/non-source artifacts excluded from scanner counts. | Keep out of production bug ledger unless promoted by a failing gate. |
+
+### Task/cancellation/lifecycle candidates
+
+| Candidate | Scope | Classification | Evidence | Follow-up |
+| --- | --- | --- | --- | --- |
+| TypeScript SDK request abort timer cleanup | Client SDKs | Fixed | BUG-037: request timers are now cleared in a `finally` block when `fetch` resolves or rejects, preventing timer buildup across failed requests/retries. | `client-ts/src/client.test.ts`; `npm test -- --runInBand`; SDK gate runs TS tests/build. |
+| TypeScript SDK explicit zero retry/timeout config | Client SDKs | Fixed | BUG-038: constructor defaults now use nullish coalescing so `retries: 0`, `timeout: 0`, and `retryDelay: 0` are honored instead of replaced by defaults. | `client-ts/src/client.test.ts`; `npm test -- --runInBand`; SDK gate runs TS tests/build. |
+| Daemon session manager task | Backend/API + Network Runtime | Existing Guard | Session commands use bounded `mpsc`, receive/readiness are wrapped in timeouts, reconnect uses configured delay, and the task exits when the command channel closes. | Session and API route tests. |
+| Daemon listener connection tasks | Network Runtime | Existing Guard | Listener accept loops update state, per-connection handling is split into tasks, and HTTP connections are capped by a semaphore. | Listener/client contract tests and remediation baseline. |
+| WebSocket event stream reader and heartbeat | Backend/API | Existing Guard | Client frame reads are capped, invalid frames close the stream, broadcast lag is replayed from bounded event history, and the reader task is aborted when the stream exits. | WebSocket event/auth tests. |
+| Webhook delivery tasks | Backend/API + Release/Ops | Existing Guard | Registered webhooks are capped, delivery concurrency is capped by semaphore, timeouts are clamped, redirects are disabled, and delivery pool saturation drops work instead of queueing unbounded requests. | Webhook tests and outbound policy gate. |
+| React/dashboard abort controllers | Frontend/API Handling | Existing Guard | Fetch hooks and player panes abort pending requests on cleanup and ignore abort errors. | Frontend test/build gates. |
+| CLI/tests/examples sleeps, spawns, and contract timeouts | Tests/Tooling | False Positive | Remaining lifecycle hits are bounded CLI diagnostics, local smoke tests, contract servers, examples, or README snippets. | Keep scoped to test/example review unless promoted by failing gates. |

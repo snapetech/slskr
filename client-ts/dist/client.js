@@ -9,10 +9,10 @@ class SlskrClient {
     constructor(config) {
         this.baseUrl = config.baseUrl.replace(/\/$/, '');
         this.token = config.token;
-        this.timeout = config.timeout || 30000;
-        this.retries = config.retries || 3;
-        this.retryDelay = config.retryDelay || 1000;
-        this.debug = config.debug || false;
+        this.timeout = config.timeout ?? 30000;
+        this.retries = config.retries ?? 3;
+        this.retryDelay = config.retryDelay ?? 1000;
+        this.debug = config.debug ?? false;
     }
     debugBody(body) {
         if (body === null || body === undefined) {
@@ -214,13 +214,18 @@ class SlskrClient {
             }
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-            const response = await fetch(url, {
-                method,
-                headers,
-                body: body ? JSON.stringify(body) : undefined,
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
+            let response;
+            try {
+                response = await fetch(url, {
+                    method,
+                    headers,
+                    body: body ? JSON.stringify(body) : undefined,
+                    signal: controller.signal,
+                });
+            }
+            finally {
+                clearTimeout(timeoutId);
+            }
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 throw new errors_1.ApiError(response.status, errorData.error || `HTTP ${response.status}`, errorData.details);

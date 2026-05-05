@@ -3789,7 +3789,7 @@ fn native_row_data_attrs(kind: RouteKind, primary: &str, secondary: &str, meta: 
         }
         RouteKind::Wishlist => {
             attrs.push(("data-slskr-native-search-text", primary));
-            attrs.push(("data-slskr-native-filter", secondary));
+            attrs.push(("data-slskr-native-search-filter", secondary));
             attrs.push(("data-slskr-native-row-state", meta));
         }
         RouteKind::Downloads | RouteKind::Uploads => {
@@ -7014,16 +7014,6 @@ fn selected_native_row_resource_id(workspace: &web_sys::Element) -> Option<Strin
         .ok()
         .flatten()
         .and_then(|row| row.get_attribute("data-slskr-native-resource-id"))
-        .filter(|value| !value.trim().is_empty())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn button_native_row_title(button: &web_sys::Element) -> Option<String> {
-    button
-        .closest("[data-slskr-native-select]")
-        .ok()
-        .flatten()
-        .and_then(|row| row.get_attribute("data-slskr-native-title"))
         .filter(|value| !value.trim().is_empty())
 }
 
@@ -12425,6 +12415,14 @@ mod tests {
         );
         assert!(contacts.contains(r#"data-slskr-native-contact="Nick""#));
         assert!(contacts.contains(r#"data-slskr-native-username="peer3""#));
+
+        let wishlist = route_page_html("/wishlist");
+        assert!(wishlist.contains("data-slskr-native-search-filter"));
+        assert_eq!(
+            wishlist.matches("data-slskr-native-filter ").count(),
+            1,
+            "only the filter input should use data-slskr-native-filter"
+        );
 
         let sharing = route_page_html("/sharegroups");
         assert!(sharing.contains("data-slskr-native-share-group"));

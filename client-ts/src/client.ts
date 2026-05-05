@@ -38,10 +38,10 @@ export class SlskrClient {
   constructor(config: ClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, '');
     this.token = config.token;
-    this.timeout = config.timeout || 30000;
-    this.retries = config.retries || 3;
-    this.retryDelay = config.retryDelay || 1000;
-    this.debug = config.debug || false;
+    this.timeout = config.timeout ?? 30000;
+    this.retries = config.retries ?? 3;
+    this.retryDelay = config.retryDelay ?? 1000;
+    this.debug = config.debug ?? false;
   }
 
   private debugBody(body: any): any {
@@ -316,14 +316,17 @@ export class SlskrClient {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({})) as {

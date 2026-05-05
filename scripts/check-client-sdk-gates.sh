@@ -71,7 +71,25 @@ PY
   "$venv_dir/bin/python" -m pip check
 }
 
+run_typescript_checks() {
+  section "TypeScript client lifecycle/build checks"
+  if ! command -v npm >/dev/null 2>&1; then
+    printf 'npm is not installed; cannot check TypeScript client.\n' >&2
+    exit 1
+  fi
+
+  (
+    cd client-ts
+    if [[ ! -d node_modules ]]; then
+      npm ci
+    fi
+    npm test -- --runInBand
+    npm run build
+  )
+}
+
 run_go_tests
 run_python_checks
+run_typescript_checks
 
 printf '\nClient SDK gates passed.\n'

@@ -105,6 +105,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Protocol scalar narrowing | API routes narrowed oversized JSON tokens/message IDs into protocol `u32` values with `as`. | Fixed by rejecting out-of-range search response tokens and message acknowledgement IDs before protocol command emission, with regression tests. |
 | Medium | Raw frame allocation | `read_raw_frame` allocated caller-supplied lengths without enforcing the SDK frame maximum. | Fixed by routing raw frame reads through `read_raw_frame_with_max`, rejecting oversized lengths before allocation, and adding regression coverage. |
 | Medium | SDK connect timeout | Public SDK connect helpers delegated directly to `TcpStream::connect`, leaving consumers without default bounded connect behavior. | Fixed by adding `DEFAULT_CONNECT_TIMEOUT`, timeout-backed defaults, and explicit timeout variants for server, peer-message, distributed, and file-transfer connects. |
+| Medium | TypeScript abort timer cleanup | TypeScript SDK request timers were cleared only after `fetch` resolved, so rejected requests could leave stale abort timers alive during retries. | Fixed by clearing timers in `finally`, adding a Jest regression, and adding TS test/build execution to the SDK gate. |
+| Medium | TypeScript zero config defaults | TypeScript SDK lifecycle settings used `||` defaults, so explicit zero values such as `retries: 0` were ignored. | Fixed by switching to nullish defaults and covering no-retry behavior in the TS lifecycle test. |
 
 ## Open Burn-Down
 
