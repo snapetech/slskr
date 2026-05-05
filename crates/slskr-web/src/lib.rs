@@ -2744,7 +2744,7 @@ pub fn route_page_html(path: &str) -> String {
 }
 
 fn player_footer_html() -> String {
-    r#"<footer class="slskr-player" data-slskr-player data-slskr-player-rating-key=""><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button></section><section class="slskr-player-rating" aria-label="Player rating"><strong>Rating</strong><div id="slskr-player-rating-controls"><button type="button" data-slskr-player-rating="1">1</button><button type="button" data-slskr-player-rating="2">2</button><button type="button" data-slskr-player-rating="3">3</button><button type="button" data-slskr-player-rating="4">4</button><button type="button" data-slskr-player-rating="5">5</button></div><span id="slskr-player-rating-status">Not rated</span></section><section><strong>Transfers</strong><span id="slskr-player-transfers">0 down / 0 up</span><span id="slskr-player-party">Listening party idle</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
+    r#"<footer class="slskr-player" data-slskr-player data-slskr-player-rating-key="" data-slskr-player-radio-query=""><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button><button type="button" data-slskr-player-action="radio">Radio</button></section><section class="slskr-player-rating" aria-label="Player rating"><strong>Rating</strong><div id="slskr-player-rating-controls"><button type="button" data-slskr-player-rating="1">1</button><button type="button" data-slskr-player-rating="2">2</button><button type="button" data-slskr-player-rating="3">3</button><button type="button" data-slskr-player-rating="4">4</button><button type="button" data-slskr-player-rating="5">5</button></div><span id="slskr-player-rating-status">Not rated</span></section><section><strong>Radio</strong><span id="slskr-player-radio">No track selected</span><span id="slskr-player-transfers">0 down / 0 up</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -3171,6 +3171,9 @@ fn mount_global_shortcuts(
                     }
                     let _ = refresh_player_status(&window).await;
                 });
+            } else if key.eq_ignore_ascii_case("q") {
+                event.prevent_default();
+                open_player_radio_search(&window, &document);
             } else if key.eq_ignore_ascii_case("k") || key == " " {
                 event.prevent_default();
                 let window = window.clone();
@@ -3295,6 +3298,404 @@ pub fn player_rating_summary(rating: u32) -> &'static str {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayerRadioQuery {
+    pub id: String,
+    pub query: String,
+    pub reason: &'static str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayerRadioPlan {
+    pub basis: Vec<String>,
+    pub primary_query: String,
+    pub queries: Vec<PlayerRadioQuery>,
+    pub ready: bool,
+    pub seed_label: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimilarQueueCandidate {
+    pub index: usize,
+    pub item: serde_json::Value,
+    pub score: u32,
+}
+
+fn json_track_field(track: &serde_json::Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| {
+            track
+                .get(*key)
+                .map(json_scalar_preview)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_default()
+}
+
+fn unique_nonempty(values: Vec<String>) -> Vec<String> {
+    values.into_iter().filter(|value| !value.is_empty()).fold(
+        Vec::<String>::new(),
+        |mut unique, value| {
+            if !unique.iter().any(|other| other == &value) {
+                unique.push(value);
+            }
+            unique
+        },
+    )
+}
+
+fn unique_nonempty_case_insensitive(values: Vec<String>) -> Vec<String> {
+    values.into_iter().filter(|value| !value.is_empty()).fold(
+        Vec::<String>::new(),
+        |mut unique, value| {
+            if !unique
+                .iter()
+                .any(|other| other.eq_ignore_ascii_case(&value))
+            {
+                unique.push(value);
+            }
+            unique
+        },
+    )
+}
+
+fn player_radio_tags(track: &serde_json::Value) -> Vec<String> {
+    for key in ["tags", "genres"] {
+        let values = track
+            .get(key)
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(json_scalar_preview)
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !values.is_empty() {
+            return values;
+        }
+    }
+    json_track_field(track, &["genre"])
+        .split('\n')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+pub fn build_player_radio_plan(track: Option<&serde_json::Value>) -> PlayerRadioPlan {
+    let Some(track) = track else {
+        return PlayerRadioPlan {
+            basis: Vec::new(),
+            primary_query: String::new(),
+            queries: Vec::new(),
+            ready: false,
+            seed_label: "No track selected".to_string(),
+        };
+    };
+
+    let artist = json_track_field(track, &["artist"]);
+    let title = json_track_field(track, &["title", "fileName", "filename"]);
+    let album = json_track_field(track, &["album"]);
+    let tags = unique_nonempty(player_radio_tags(track));
+    let track_query = unique_nonempty(vec![artist.clone(), title.clone()]).join(" ");
+    let album_query = unique_nonempty(vec![artist.clone(), album.clone()]).join(" ");
+    let genre_query = unique_nonempty(vec![
+        artist.clone(),
+        tags.first().cloned().unwrap_or_default(),
+    ])
+    .join(" ");
+    let artist_query = artist.clone();
+    let queries = unique_nonempty(vec![
+        track_query.clone(),
+        album_query.clone(),
+        genre_query.clone(),
+        artist_query,
+    ])
+    .into_iter()
+    .enumerate()
+    .map(|(index, query)| {
+        let reason = if query == track_query {
+            "Similar track seed"
+        } else if query == album_query {
+            "Album neighborhood"
+        } else if query == genre_query {
+            "Artist and genre seed"
+        } else {
+            "Artist radio seed"
+        };
+        PlayerRadioQuery {
+            id: format!("radio-query-{}", index + 1),
+            query,
+            reason,
+        }
+    })
+    .collect::<Vec<_>>();
+    let seed_label = unique_nonempty(vec![artist.clone(), title.clone()]).join(" - ");
+    PlayerRadioPlan {
+        basis: vec![
+            artist
+                .is_empty()
+                .then(String::new)
+                .unwrap_or_else(|| format!("Artist: {artist}")),
+            title
+                .is_empty()
+                .then(String::new)
+                .unwrap_or_else(|| format!("Track: {title}")),
+            album
+                .is_empty()
+                .then(String::new)
+                .unwrap_or_else(|| format!("Album: {album}")),
+            tags.is_empty().then(String::new).unwrap_or_else(|| {
+                format!(
+                    "Tags: {}",
+                    tags.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+                )
+            }),
+        ]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect(),
+        primary_query: queries
+            .first()
+            .map(|query| query.query.clone())
+            .unwrap_or_default(),
+        ready: !queries.is_empty(),
+        queries,
+        seed_label: if !seed_label.is_empty() {
+            seed_label
+        } else if !title.is_empty() {
+            title
+        } else if !artist.is_empty() {
+            artist
+        } else {
+            "Untitled seed".to_string()
+        },
+    }
+}
+
+fn percent_encode_query(value: &str) -> String {
+    value
+        .as_bytes()
+        .iter()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (*byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+pub fn build_player_radio_search_path(query: &str) -> String {
+    let normalized = query.trim();
+    if normalized.is_empty() {
+        "/searches".to_string()
+    } else {
+        format!("/searches?q={}", percent_encode_query(normalized))
+    }
+}
+
+pub fn player_radio_queries(plan: &PlayerRadioPlan, limit: usize) -> Vec<String> {
+    unique_nonempty_case_insensitive(
+        plan.queries
+            .iter()
+            .map(|item| item.query.clone())
+            .collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .take(limit)
+    .collect()
+}
+
+fn quote_if_needed(value: &str) -> String {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        String::new()
+    } else if normalized.chars().any(char::is_whitespace) {
+        format!("\"{normalized}\"")
+    } else {
+        normalized.to_string()
+    }
+}
+
+pub fn player_radio_copy_text(plan: &PlayerRadioPlan) -> String {
+    if !plan.ready {
+        return String::new();
+    }
+    let mut lines = vec![format!("Smart radio seed: {}", plan.seed_label)];
+    lines.extend(
+        plan.queries
+            .iter()
+            .map(|item| format!("{}: {}", item.reason, quote_if_needed(&item.query))),
+    );
+    lines.join("\n")
+}
+
+fn player_auto_queue_tags(item: &serde_json::Value) -> Vec<String> {
+    ["tags", "genres"]
+        .iter()
+        .flat_map(|key| {
+            item.get(*key)
+                .and_then(|value| value.as_array())
+                .cloned()
+                .unwrap_or_default()
+        })
+        .map(|value| json_scalar_preview(&value).trim().to_lowercase())
+        .chain(std::iter::once(
+            json_track_field(item, &["genre"]).to_lowercase(),
+        ))
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn player_title_tokens(item: &serde_json::Value) -> Vec<String> {
+    json_track_field(item, &["title", "fileName", "filename"])
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == ' ' {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .filter(|token| token.len() > 2)
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+pub fn player_similarity_score(current: &serde_json::Value, candidate: &serde_json::Value) -> u32 {
+    let mut score = 0;
+    let current_artist = json_track_field(current, &["artist"]).to_lowercase();
+    let candidate_artist = json_track_field(candidate, &["artist"]).to_lowercase();
+    if !current_artist.is_empty() && current_artist == candidate_artist {
+        score += 4;
+    }
+    let current_album = json_track_field(current, &["album"]).to_lowercase();
+    let candidate_album = json_track_field(candidate, &["album"]).to_lowercase();
+    if !current_album.is_empty() && current_album == candidate_album {
+        score += 3;
+    }
+
+    let current_tags = player_auto_queue_tags(current);
+    let shared_tags = player_auto_queue_tags(candidate)
+        .iter()
+        .filter(|tag| current_tags.iter().any(|current_tag| current_tag == *tag))
+        .count() as u32;
+    score += (shared_tags * 2).min(4);
+
+    let current_tokens = player_title_tokens(current);
+    let shared_title_tokens = player_title_tokens(candidate)
+        .iter()
+        .filter(|token| {
+            current_tokens
+                .iter()
+                .any(|current_token| current_token == *token)
+        })
+        .count() as u32;
+    score += shared_title_tokens.min(2);
+    score
+}
+
+pub fn build_similar_queue_candidates(
+    current: Option<&serde_json::Value>,
+    history: &[serde_json::Value],
+    queue: &[serde_json::Value],
+    limit: usize,
+) -> Vec<SimilarQueueCandidate> {
+    let Some(current) = current else {
+        return Vec::new();
+    };
+    let mut seen = queue
+        .iter()
+        .filter_map(|item| {
+            item.get("contentId")
+                .or_else(|| item.get("content_id"))
+                .map(json_scalar_preview)
+                .filter(|value| !value.is_empty())
+        })
+        .collect::<Vec<_>>();
+    let mut candidates = history
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            let content_id = item
+                .get("contentId")
+                .or_else(|| item.get("content_id"))
+                .map(json_scalar_preview)
+                .filter(|value| !value.is_empty())?;
+            if seen.iter().any(|seen_id| seen_id == &content_id) {
+                return None;
+            }
+            let score = player_similarity_score(current, item);
+            if score == 0 {
+                return None;
+            }
+            seen.push(content_id);
+            Some(SimilarQueueCandidate {
+                index,
+                item: item.clone(),
+                score,
+            })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.index.cmp(&right.index))
+    });
+    candidates.truncate(limit);
+    candidates
+}
+
+pub fn similar_queue_search_queries(
+    candidates: &[SimilarQueueCandidate],
+    limit: usize,
+) -> Vec<String> {
+    unique_nonempty_case_insensitive(
+        candidates
+            .iter()
+            .map(|candidate| {
+                unique_nonempty(vec![
+                    json_track_field(&candidate.item, &["artist"]),
+                    json_track_field(&candidate.item, &["title", "fileName", "filename"]),
+                ])
+                .join(" ")
+            })
+            .collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .take(limit)
+    .collect()
+}
+
+pub fn player_radio_query_from_now_playing_body(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| current_player_track(&value))
+        .map(|track| build_player_radio_plan(Some(&track)).primary_query)
+        .unwrap_or_default()
+}
+
+fn current_player_track(value: &serde_json::Value) -> Option<serde_json::Value> {
+    value
+        .get("now_playing")
+        .and_then(|entry| entry.as_array())
+        .and_then(|items| items.first())
+        .or_else(|| value.get("current"))
+        .or_else(|| value.get("track"))
+        .or(Some(value))
+        .cloned()
+}
+
 #[cfg(target_arch = "wasm32")]
 fn player_ratings_storage(window: &web_sys::Window) -> Option<web_sys::Storage> {
     window.local_storage().ok().flatten()
@@ -3377,6 +3778,47 @@ fn update_player_rating_controls(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn update_player_radio_controls(document: &web_sys::Document, query: &str) {
+    if let Ok(Some(player)) = document.query_selector("[data-slskr-player]") {
+        let _ = player.set_attribute("data-slskr-player-radio-query", query);
+    }
+    if let Some(status) = document.get_element_by_id("slskr-player-radio") {
+        status.set_text_content(Some(if query.is_empty() {
+            "No track selected"
+        } else {
+            query
+        }));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn open_player_radio_search(window: &web_sys::Window, document: &web_sys::Document) {
+    let query = document
+        .query_selector("[data-slskr-player]")
+        .ok()
+        .flatten()
+        .and_then(|player| player.get_attribute("data-slskr-player-radio-query"))
+        .unwrap_or_default();
+    if query.trim().is_empty() {
+        set_player_status(document, "No track selected");
+        return;
+    }
+    let path = build_player_radio_search_path(&query);
+    if let Ok(history) = window.history() {
+        let _ = history.push_state_with_url(&JsValue::NULL, "", Some(&path));
+    }
+    let _ = render_current_route(window, document);
+    if let Ok(Some(input)) = document.query_selector(".slskr-toolbar-input") {
+        if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+            input.set_value(&query);
+            let _ = input.focus();
+            let _ = input.select();
+        }
+    }
+    set_player_status(document, &format!("Smart radio search ready: {query}"));
+}
+
+#[cfg(target_arch = "wasm32")]
 fn mount_player_controls(
     window: &web_sys::Window,
     document: &web_sys::Document,
@@ -3400,6 +3842,10 @@ fn mount_player_controls(
                 let document = document.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     set_player_status(&document, "Player action running");
+                    if action == "radio" {
+                        open_player_radio_search(&window, &document);
+                        return;
+                    }
                     let result = match action.as_str() {
                         "clear" => {
                             fetch_text_with_method(
@@ -3947,19 +4393,13 @@ async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> 
 
     if let Ok(body) = fetch_text(window, &endpoint_url("/nowplaying")).await {
         let (title, detail) = player_now_playing_text(&body);
-        let rating_key = serde_json::from_str::<serde_json::Value>(&body)
+        let track = serde_json::from_str::<serde_json::Value>(&body)
             .ok()
-            .map(|value| {
-                value
-                    .get("now_playing")
-                    .and_then(|entry| entry.as_array())
-                    .and_then(|items| items.first())
-                    .or_else(|| value.get("current"))
-                    .or_else(|| value.get("track"))
-                    .unwrap_or(&value)
-                    .clone()
-            })
-            .map(|track| player_rating_key(&track))
+            .and_then(|value| current_player_track(&value));
+        let rating_key = track.as_ref().map(player_rating_key).unwrap_or_default();
+        let radio_query = track
+            .as_ref()
+            .map(|track| build_player_radio_plan(Some(track)).primary_query)
             .unwrap_or_default();
         if let Some(element) = document.get_element_by_id("slskr-player-now") {
             element.set_text_content(Some(&title));
@@ -3968,6 +4408,7 @@ async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> 
             element.set_text_content(Some(&detail));
         }
         update_player_rating_controls(window, &document, &rating_key);
+        update_player_radio_controls(&document, &radio_query);
     }
 
     if let Ok(body) = fetch_text(window, &endpoint_url("/transfers/speeds")).await {
@@ -4115,8 +4556,11 @@ mod tests {
         assert!(html.contains("data-slskr-player-action=\"refresh\""));
         assert!(html.contains("data-slskr-player-action=\"clear\""));
         assert!(html.contains("data-slskr-player-action=\"visualizer\""));
+        assert!(html.contains("data-slskr-player-action=\"radio\""));
+        assert!(html.contains("data-slskr-player-radio-query"));
         assert!(html.contains("data-slskr-player-rating=\"5\""));
         assert!(html.contains("slskr-player-rating-status"));
+        assert!(html.contains("slskr-player-radio"));
         assert!(html.contains("slskr-player-now"));
         assert!(html.contains("slskr-player-transfers"));
         assert!(html.contains("/api/v0/searches"));
@@ -4157,6 +4601,139 @@ mod tests {
         assert_eq!(player_rating_summary(3), "Neutral rating");
         assert_eq!(player_rating_summary(5), "Discovery boost");
         assert_eq!(player_rating_summary(0), "Not rated");
+        let radio_plan = build_player_radio_plan(Some(&track));
+        assert!(radio_plan.ready);
+        assert_eq!(
+            radio_plan.seed_label,
+            "Archive Artist - Public Domain Theme"
+        );
+        assert_eq!(
+            radio_plan.queries,
+            vec![
+                PlayerRadioQuery {
+                    id: "radio-query-1".to_string(),
+                    query: "Archive Artist Public Domain Theme".to_string(),
+                    reason: "Similar track seed",
+                },
+                PlayerRadioQuery {
+                    id: "radio-query-2".to_string(),
+                    query: "Archive Artist Open Sessions".to_string(),
+                    reason: "Album neighborhood",
+                },
+                PlayerRadioQuery {
+                    id: "radio-query-3".to_string(),
+                    query: "Archive Artist".to_string(),
+                    reason: "Artist and genre seed",
+                },
+            ]
+        );
+        assert_eq!(
+            build_player_radio_search_path(&radio_plan.primary_query),
+            "/searches?q=Archive%20Artist%20Public%20Domain%20Theme"
+        );
+        assert_eq!(
+            player_radio_queries(&radio_plan, 2),
+            vec![
+                "Archive Artist Public Domain Theme".to_string(),
+                "Archive Artist Open Sessions".to_string(),
+            ]
+        );
+        assert!(player_radio_copy_text(&radio_plan)
+            .contains("Similar track seed: \"Archive Artist Public Domain Theme\""));
+        assert_eq!(
+            player_radio_query_from_now_playing_body(
+                r#"{"track":{"artist":"Archive Artist","title":"Public Domain Theme"}}"#
+            ),
+            "Archive Artist Public Domain Theme"
+        );
+        assert_eq!(
+            build_player_radio_plan(None),
+            PlayerRadioPlan {
+                basis: Vec::new(),
+                primary_query: String::new(),
+                queries: Vec::new(),
+                ready: false,
+                seed_label: "No track selected".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rust_player_surface_builds_similar_queue_candidates() {
+        let current = serde_json::json!({
+            "album": "Fixture Album",
+            "artist": "Fixture Artist",
+            "contentId": "sha256:current",
+            "genre": "Fixture Genre",
+            "title": "Current Song"
+        });
+        let history = vec![
+            serde_json::json!({
+                "album": "Fixture Album",
+                "artist": "Fixture Artist",
+                "contentId": "sha256:album-match",
+                "title": "Album Match"
+            }),
+            serde_json::json!({
+                "artist": "Other Artist",
+                "contentId": "sha256:tag-match",
+                "tags": ["Fixture Genre"],
+                "title": "Tag Match"
+            }),
+            serde_json::json!({
+                "artist": "Other Artist",
+                "contentId": "sha256:miss",
+                "title": "Miss"
+            }),
+        ];
+        let queue = vec![serde_json::json!({"contentId": "sha256:current"})];
+        let candidates = build_similar_queue_candidates(Some(&current), &history, &queue, 5);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.item["contentId"].as_str().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["sha256:album-match", "sha256:tag-match"]
+        );
+        assert_eq!(
+            similar_queue_search_queries(&candidates, 3),
+            vec![
+                "Fixture Artist Album Match".to_string(),
+                "Other Artist Tag Match".to_string(),
+            ]
+        );
+
+        let duplicate_history = vec![
+            serde_json::json!({
+                "artist": "Fixture Artist",
+                "contentId": "sha256:queued",
+                "title": "Already Queued"
+            }),
+            serde_json::json!({
+                "artist": "Fixture Artist",
+                "contentId": "sha256:new",
+                "title": "New Candidate"
+            }),
+            serde_json::json!({
+                "artist": "Fixture Artist",
+                "contentId": "sha256:new",
+                "title": "Duplicate Candidate"
+            }),
+        ];
+        let duplicate_queue = vec![
+            serde_json::json!({"contentId": "sha256:current"}),
+            serde_json::json!({"contentId": "sha256:queued"}),
+        ];
+        let candidates =
+            build_similar_queue_candidates(Some(&current), &duplicate_history, &duplicate_queue, 5);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.item["contentId"].as_str().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec!["sha256:new"]
+        );
+        assert!(build_similar_queue_candidates(None, &history, &queue, 5).is_empty());
     }
 
     #[test]
