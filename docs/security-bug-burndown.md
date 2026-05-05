@@ -102,6 +102,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Council loop | The audit council could run broad scans but still promote only one small confirmed batch, leaving remaining candidate classes invisible and unclassified. | Fixed by adding `docs/dev/council-scan-inventory.md`, `scripts/run-council-scan.sh`, and `scripts/check-council-loop.sh`; BUG-031 now requires the remaining candidate classes and active section to stay visible. |
 | Medium | Python SDK mutable batch inputs | Batch operation and response constructors kept caller-owned mutable dict/list objects by reference. | Fixed by deep-copying batch request bodies, returning fresh serialized bodies, copying response lists, and adding mutation-isolation tests. |
 | Medium | Client transfer chunk allocation | The reusable client transfer helper could allocate a caller-supplied remaining length in one `Vec`. | Fixed by adding `DEFAULT_MAX_TRANSFER_CHUNK_LEN`, rejecting oversized chunk reads before allocation, and covering direct chunk and `receive_file_from` paths. |
+| Medium | Protocol scalar narrowing | API routes narrowed oversized JSON tokens/message IDs into protocol `u32` values with `as`. | Fixed by rejecting out-of-range search response tokens and message acknowledgement IDs before protocol command emission, with regression tests. |
 
 ## Open Burn-Down
 

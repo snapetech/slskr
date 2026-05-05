@@ -5141,7 +5141,12 @@ async fn route_http_request_with_headers(
 
         ("POST", "/api/search-responses") => {
             let token = match extract_json_u64_field(body, "token") {
-                Some(t) => t as u32,
+                Some(t) => match u32::try_from(t) {
+                    Ok(token) => token,
+                    Err(_) => {
+                        return Ok(routing::bad_request_response("token exceeds u32 range"));
+                    }
+                },
                 None => return Ok(routing::bad_request_response("token is required")),
             };
 
@@ -5843,6 +5848,9 @@ async fn route_http_request_with_headers(
             let Some(id) = message_ack_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
+            let Ok(protocol_id) = u32::try_from(id) else {
+                return Ok(routing::bad_request_response("message id exceeds u32 range"));
+            };
             let mut messages = state.messages.write().await;
 
             if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
@@ -5851,7 +5859,7 @@ async fn route_http_request_with_headers(
                 let json_response = record.json();
                 drop(messages);
 
-                send_session_command(state, SessionCommand::MessageAcked { id: id as u32 }).await.ok();
+                send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
 
                 Ok(routing::ok_response(json_response))
              } else {
@@ -5864,6 +5872,9 @@ async fn route_http_request_with_headers(
              let Some(id) = message_ack_path(normalized_path.as_str()) else {
                  return Ok(routing::not_found_response());
              };
+             let Ok(protocol_id) = u32::try_from(id) else {
+                 return Ok(routing::bad_request_response("message id exceeds u32 range"));
+             };
              let mut messages = state.messages.write().await;
 
              if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
@@ -5872,7 +5883,7 @@ async fn route_http_request_with_headers(
                  let json_response = record.json();
                  drop(messages);
 
-                 send_session_command(state, SessionCommand::MessageAcked { id: id as u32 }).await.ok();
+                 send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
 
                  Ok(routing::ok_response(json_response))
              } else {
@@ -16995,6 +17006,24 @@ mod tests {
         assert_eq!(response.body, "{\"error\":\"token is required\"}");
     }
 
+    #[tokio::test]
+    async fn search_response_api_rejects_oversized_protocol_token() {
+        let (state, _receiver) = test_state();
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            "{\"token\":4294967296,\"peer_username\":\"peer1\",\"filename\":\"Remote/Song.mp3\"}",
+            &state,
+        )
+        .await
+        .expect("oversized response token");
+
+        assert_eq!(response.status, "400 Bad Request");
+        assert_eq!(response.body, "{\"error\":\"token exceeds u32 range\"}");
+    }
+
     #[test]
     fn search_store_merges_peer_search_responses() {
         let mut store = super::SearchStore::new();
@@ -18467,6 +18496,16 @@ mod tests {
         assert_eq!(
             receiver.try_recv().expect("ack command"),
             super::SessionCommand::MessageAcked { id: 1 }
+        );
+
+        let oversized_ack =
+            super::route_http_request("POST", "/api/v0/messages/4294967296/ack", None, "", &state)
+                .await
+                .expect("oversized ack id");
+        assert_eq!(oversized_ack.status, "400 Bad Request");
+        assert_eq!(
+            oversized_ack.body,
+            "{\"error\":\"message id exceeds u32 range\"}"
         );
     }
 

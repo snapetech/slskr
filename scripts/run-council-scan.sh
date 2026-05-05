@@ -38,8 +38,11 @@ scan_rg 'Protocol count/length candidates' \
   -e 'for _ in 0\.\.(count|attribute_count|counts_len)' \
   crates/slskr-protocol crates/slskr-client crates/slskr/src
 scan_rg 'Protocol scalar emission candidates' \
-  -e 'write_u(8|16|32|64)|write_i(8|16|32|64)|write_string|as u(8|16|32|64)|\.len\(\) as' \
-  crates/slskr-protocol crates/slskr-client crates/slskr/src
+  -e 'as u(8|16|32|64)' \
+  -e '\.len\(\) as u(8|16|32|64)' \
+  -e 'write_len_prefixed_bytes' \
+  -e 'u32::try_from\([^)]*\.len\(\)' \
+  crates/slskr-protocol/src crates/slskr-client/src crates/slskr/src/events_ws.rs crates/slskr/src/storage.rs crates/slskr/src/main.rs
 scan_rg 'Resolver/raw stream candidates' \
   -e 'TcpStream|TcpListener|read_exact|read_to_end|read_buf|to_socket_addrs|resolve|connect\(' \
   crates client-go client-python client-ts

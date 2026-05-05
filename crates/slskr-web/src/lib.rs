@@ -4811,6 +4811,207 @@ fn native_selection_preview_html(title: &str, detail: &str, meta: &str, action: 
     )
 }
 
+fn native_editor_field_html(label: &str, control: &str) -> String {
+    format!(
+        r#"<label><span>{}</span>{}</label>"#,
+        escape_html(label),
+        control
+    )
+}
+
+fn native_editor_text_field_html(label: &str, placeholder: &str) -> String {
+    native_editor_field_html(
+        label,
+        &format!(
+            r#"<input aria-label="{}" placeholder="{}">"#,
+            escape_html(label),
+            escape_html(placeholder)
+        ),
+    )
+}
+
+fn native_editor_checkbox_html(label: &str) -> String {
+    native_editor_field_html(
+        label,
+        &format!(
+            r#"<span class="slskr-native-editor-check"><input type="checkbox" aria-label="{}"> {}</span>"#,
+            escape_html(label),
+            escape_html(label)
+        ),
+    )
+}
+
+fn native_editor_action_buttons(labels: &[&str]) -> String {
+    labels
+        .iter()
+        .map(|label| format!(r#"<button type="button">{}</button>"#, escape_html(label)))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn native_editor_state_items(items: &[&str]) -> String {
+    items
+        .iter()
+        .map(|item| format!(r#"<span>{}</span>"#, escape_html(item)))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn native_editor_modal_html(kind: RouteKind) -> String {
+    let Some((title, summary, fields, actions, state)) = (match kind {
+        RouteKind::Wishlist => Some((
+            "Wishlist Editor",
+            "Edit the wanted search, toggle automation, run it, or send the selected request into review.",
+            [
+                native_editor_text_field_html("Search Text", "wanted artist album"),
+                native_editor_text_field_html("Filter", "flac OR mp3"),
+                native_editor_text_field_html("Max Results", "25"),
+                native_editor_checkbox_html("Enabled"),
+                native_editor_checkbox_html("Auto-download"),
+            ]
+            .join(""),
+            native_editor_action_buttons(&["Add Search", "Run Enabled", "Copy Review"]),
+            native_editor_state_items(&[
+                "Discovery Inbox bridge",
+                "Quota preview",
+                "Review state",
+                "Last run and result count",
+            ]),
+        )),
+        RouteKind::Users => Some((
+            "User Note Editor",
+            "Update watched-user context before browsing, messaging, or saving notes.",
+            [
+                native_editor_text_field_html("Username", "peer1"),
+                native_editor_text_field_html("Display note", "trades live sets"),
+                native_editor_text_field_html("Privilege note", "trusted / queued"),
+                native_editor_checkbox_html("Watched"),
+            ]
+            .join(""),
+            native_editor_action_buttons(&["Search for User", "Message", "Browse", "Watch", "Save note"]),
+            native_editor_state_items(&[
+                "Online status",
+                "Privileges and stats",
+                "Browse/message handoff",
+            ]),
+        )),
+        RouteKind::Contacts => Some((
+            "Contact Editor",
+            "Create invites, classify nearby contacts, and maintain notes or groups without leaving Contacts.",
+            [
+                native_editor_text_field_html("Invite", "slskr://invite/..."),
+                native_editor_text_field_html("Nickname", "friend name"),
+                native_editor_text_field_html("Group", "trusted"),
+                native_editor_text_field_html("Note", "met in public-domain room"),
+            ]
+            .join(""),
+            native_editor_action_buttons(&["Create Invite", "Add Friend", "Message", "Browse", "Remove"]),
+            native_editor_state_items(&[
+                "Invite accept flow",
+                "Nearby contacts",
+                "Groups and notes",
+                "Context actions",
+            ]),
+        )),
+        RouteKind::Collections => Some((
+            "Collection Editor",
+            "Create a collection, pick library items, and prepare the sharing audience in one modal workflow.",
+            [
+                native_editor_text_field_html("Title", "Sunday radio archive"),
+                native_editor_text_field_html("Description", "public domain recordings"),
+                native_editor_text_field_html("Search for item", "filename, artist, title"),
+                native_editor_text_field_html("Audience", "share group or token"),
+            ]
+            .join(""),
+            native_editor_action_buttons(&["Create Collection", "Add Item", "Share", "Remove item"]),
+            native_editor_state_items(&[
+                "Library item picker",
+                "Already in collection warning",
+                "Audience picker",
+                "Stream/download policies",
+            ]),
+        )),
+        RouteKind::ShareGroups => Some((
+            "Share Grant Editor",
+            "Manage group members, tokens, permissions, and grant expiry from the selected share group.",
+            [
+                native_editor_text_field_html("Group Name", "crate-diggers"),
+                native_editor_text_field_html("Soulseek Username", "peer1"),
+                native_editor_text_field_html("Permissions", "read, stream, download"),
+                native_editor_text_field_html("Expires", "never"),
+            ]
+            .join(""),
+            native_editor_action_buttons(&[
+                "Add Member",
+                "Issue Token",
+                "Create Share Grant",
+                "Update Share Grant",
+            ]),
+            native_editor_state_items(&[
+                "Member picker",
+                "Token revoke",
+                "Permission matrix",
+                "Grant audit trail",
+            ]),
+        )),
+        RouteKind::SharedWithMe => Some((
+            "Inbound Access Editor",
+            "Inspect inbound tokens, owner context, available files, and leave or backfill shared content.",
+            [
+                native_editor_text_field_html("Token", "share token"),
+                native_editor_text_field_html("Owner", "peer1"),
+                native_editor_text_field_html("Collection", "shared collection"),
+                native_editor_text_field_html("Access", "stream/download"),
+            ]
+            .join(""),
+            native_editor_action_buttons(&["Open", "Stream", "Backfill", "Copy token", "Leave share"]),
+            native_editor_state_items(&[
+                "Owner context",
+                "Expiration",
+                "Access status",
+                "Manifest preview",
+            ]),
+        )),
+        RouteKind::System => Some((
+            "Settings Editor",
+            "Edit operator preferences, confirm maintenance actions, and keep raw metrics in Developer only.",
+            [
+                native_editor_text_field_html("Option key", "transfers.downloadSlots"),
+                native_editor_text_field_html("Value", "4"),
+                native_editor_text_field_html("Filter", "shares, logs, database"),
+                native_editor_checkbox_html("Dry run"),
+            ]
+            .join(""),
+            native_editor_action_buttons(&[
+                "Check for Updates",
+                "Rescan shares",
+                "Vacuum database",
+                "Diagnostic Bundle",
+            ]),
+            native_editor_state_items(&[
+                "Connection",
+                "Shares",
+                "Database/storage",
+                "Logs/events",
+                "Preferences",
+            ]),
+        )),
+        _ => None,
+    }) else {
+        return String::new();
+    };
+
+    format!(
+        r#"<aside class="slskr-native-editor" data-slskr-native-editor data-slskr-native-editor-route="{route}" aria-label="{title}"><header><div><h3>{title}</h3><p>{summary}</p></div><span>Draft</span></header><div class="slskr-native-editor-grid">{fields}</div><div class="slskr-native-editor-actions">{actions}</div><div class="slskr-native-editor-state">{state}</div></aside>"#,
+        route = format!("{kind:?}"),
+        title = escape_html(title),
+        summary = escape_html(summary),
+        fields = fields,
+        actions = actions,
+        state = state,
+    )
+}
+
 fn native_browse_workspace_html(route_table: &str) -> String {
     let preview = native_selection_preview_html(
         "No files selected",
@@ -5026,10 +5227,12 @@ fn route_native_workspace_html(
             ),
         ),
     };
+    let editor = native_editor_modal_html(kind);
     format!(
-        r#"<section class="slskr-native-workspace">{tabs}{filter}{html}{inspector}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
+        r#"<section class="slskr-native-workspace">{tabs}{filter}{html}{editor}{inspector}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
         tabs = native_tabs_html(kind),
         filter = native_filter_html(),
+        editor = editor,
         inspector = native_inspector_html(),
     )
 }
@@ -11816,6 +12019,91 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn native_editor_surfaces_cover_modal_workflows() {
+        let expectations = [
+            (
+                "/wishlist",
+                &[
+                    "data-slskr-native-editor",
+                    "Wishlist Editor",
+                    "Auto-download",
+                    "Discovery Inbox bridge",
+                ][..],
+            ),
+            (
+                "/users",
+                &[
+                    "data-slskr-native-editor",
+                    "User Note Editor",
+                    "Privileges and stats",
+                    "Save note",
+                ],
+            ),
+            (
+                "/contacts",
+                &[
+                    "data-slskr-native-editor",
+                    "Contact Editor",
+                    "Create Invite",
+                    "Groups and notes",
+                ],
+            ),
+            (
+                "/collections",
+                &[
+                    "data-slskr-native-editor",
+                    "Collection Editor",
+                    "Audience",
+                    "Remove item",
+                ],
+            ),
+            (
+                "/sharegroups",
+                &[
+                    "data-slskr-native-editor",
+                    "Share Grant Editor",
+                    "Permissions",
+                    "Issue Token",
+                ],
+            ),
+            (
+                "/shared",
+                &[
+                    "data-slskr-native-editor",
+                    "Inbound Access Editor",
+                    "Copy token",
+                    "Leave share",
+                ],
+            ),
+            (
+                "/system",
+                &[
+                    "data-slskr-native-editor",
+                    "Settings Editor",
+                    "Option key",
+                    "Diagnostic Bundle",
+                ],
+            ),
+        ];
+
+        for (path, labels) in expectations {
+            let html = route_page_html(path);
+            for label in labels {
+                assert!(
+                    html.contains(label),
+                    "{path} native editor should contain {label}"
+                );
+            }
+        }
+
+        let search = route_page_html("/searches");
+        assert!(
+            !search.contains("data-slskr-native-editor"),
+            "search should keep its planner in the route workspace instead of the editor modal surface"
+        );
     }
 
     #[test]
