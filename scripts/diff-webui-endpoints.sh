@@ -37,16 +37,29 @@ while IFS=' ' read -r method path; do
     
     # Normalize path for matching (remove query string, replace variables)
     norm_path=$(echo "$path" | sed -E 's/\?.*$//' | sed -E 's/:[a-z]+/:var/g' | sed -E 's/\$\{[^}]+\}/:var/g')
+    if [[ "$norm_path" == /* ]]; then
+        api_norm_path="/api$norm_path"
+    else
+        api_norm_path="/api/$norm_path"
+    fi
+    dynamic_prefix=""
+    api_dynamic_prefix=""
+    if [[ "$norm_path" == *":var"* ]]; then
+        dynamic_prefix="${norm_path%%:var*}"
+        api_dynamic_prefix="${api_norm_path%%:var*}"
+    fi
     
     # Try different patterns in main.rs
     if grep -q "\"$method\".*\"$path\"" "$MAIN_RS" || \
        grep -q "\"$method\".*\"$norm_path\"" "$MAIN_RS" || \
-       grep -q "\"$method\".*\"/api$norm_path\"" "$MAIN_RS" || \
+       grep -q "\"$method\".*\"$api_norm_path\"" "$MAIN_RS" || \
        grep -q "\"$method\".*\"/api/v0$norm_path\"" "$MAIN_RS" || \
        grep -q "starts_with.*\"$path\"" "$MAIN_RS" || \
        grep -q "ends_with.*\"$path\"" "$MAIN_RS" || \
-       grep -q "path == \"$path\"" "$MAIN_RS"; then
-        ((IMPLEMENTED++))
+       grep -q "path == \"$path\"" "$MAIN_RS" || \
+       { [[ -n "$api_dynamic_prefix" ]] && grep -q "starts_with.*\"$api_dynamic_prefix" "$MAIN_RS"; } || \
+       { [[ -n "$dynamic_prefix" ]] && grep -q "starts_with.*\"$dynamic_prefix" "$MAIN_RS"; }; then
+        ((++IMPLEMENTED))
         echo "✓ $method $path"
     else
         MISSING+=("$method $path")

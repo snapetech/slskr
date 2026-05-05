@@ -1,6 +1,6 @@
 # slskdN WebUI → slskR Port Plan
 
-Status: **Phase 1 complete** — webui copied, rebranded, stub routes implemented, tooling in place. Dev-mode testing ready.
+Status: **Historical port plan** — webui copied, rebranded, route compatibility added, tooling in place.
 
 ## Implementation Status
 
@@ -8,8 +8,8 @@ Status: **Phase 1 complete** — webui copied, rebranded, stub routes implemente
 
 - [x] Copied webui from `../slskdn/src/web/` into `web/`
 - [x] Rebranded slskdN refs → slskR in webui (module names, releases URL, theme names)
-- [x] Added stub route handlers for `/api/rooms/joined/*`, `/api/application`, `/api/server`, `/api/session/enabled`, `/api/options*`
-- [x] Added `/hub/*` stub endpoints (return 501 with note about SignalR not yet implemented)
+- [x] Added compatibility route handlers for `/api/rooms/joined/*`, `/api/application`, `/api/server`, `/api/session/enabled`, `/api/options*`
+- [x] Added `/hub/*` compatibility endpoints for non-SignalR clients
 - [x] Created `build.rs` to track webui changes and optionally build on `SLSKR_BUILD_WEB` env
 - [x] Added CSRF cookie emission (`XSRF-TOKEN-<port>`) on GET `/` for webui auth
 - [x] Created `scripts/diff-webui-endpoints.sh` to measure endpoint coverage vs. webui needs
@@ -318,7 +318,7 @@ Steps, in order:
    DiscoveryGraph, Solid, Pods overlay, SongID), take one of these choices
    per feature area, and document it:
    - Implement it (if it maps to a Soulseek feature like rooms/searches).
-   - Stub the endpoints to return `501 Not Implemented` with a typed shape
+   - Add compatibility endpoints with typed response shapes
      the UI can render as "disabled" (the webui already tolerates disabled
      integrations for Lidarr/Spotify).
    - Hide the UI pages via build-time flag and remove their lib modules.

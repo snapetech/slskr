@@ -43,11 +43,7 @@ This is better tested at the API level where we can:
 
 ### `search.spec.ts` / `library.spec.ts`
 
-Some tests may skip if UI features are not available:
-- Search page may not exist if feature is disabled
-- Browse navigation may not be available if library browsing is not implemented
-
-These are graceful skips that allow tests to pass when features are intentionally disabled or not yet implemented.
+Search and library tests may skip individual flows when the harness is pointed at a daemon configuration with those surfaces disabled. In the normal slskR/slskdN harness, these pages are expected to load and exercise their API-backed flows.
 
 ## Running Tests
 

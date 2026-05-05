@@ -36,6 +36,7 @@ pub struct AppConfig {
     pub api_rate_limit_anonymous: u32,
     pub api_rate_limit_authenticated: u32,
     pub persistence_enabled: bool,
+    pub integrations: IntegrationSettings,
 }
 
 impl AppConfig {
@@ -180,6 +181,7 @@ impl AppConfig {
             "SLSKR_PERSISTENCE_ENABLED",
             file_config.persistence.enabled.unwrap_or(false),
         )?;
+        let integrations = IntegrationSettings::from_layers(file_config.integrations, env)?;
 
         Ok(Self {
             config_file,
@@ -209,6 +211,7 @@ impl AppConfig {
             api_rate_limit_anonymous,
             api_rate_limit_authenticated,
             persistence_enabled,
+            integrations,
         })
     }
 
@@ -221,7 +224,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"persistence_enabled\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -253,7 +256,212 @@ impl AppConfig {
             self.transfer_allow_outbound,
             self.auth_required,
             self.api_token.is_some(),
-            self.persistence_enabled
+            self.persistence_enabled,
+            self.integrations.sanitized_json()
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct IntegrationSettings {
+    pub spotify: SpotifyIntegrationSettings,
+    pub lidarr: LidarrIntegrationSettings,
+    pub bridge: BridgeIntegrationSettings,
+    pub external_visualizer: ExternalVisualizerSettings,
+}
+
+impl IntegrationSettings {
+    pub fn from_layers<E: ConfigEnv>(
+        file_config: IntegrationsFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            spotify: SpotifyIntegrationSettings::from_layers(file_config.spotify, env)?,
+            lidarr: LidarrIntegrationSettings::from_layers(file_config.lidarr, env)?,
+            bridge: BridgeIntegrationSettings::from_layers(file_config.bridge, env)?,
+            external_visualizer: ExternalVisualizerSettings::from_layers(
+                file_config.external_visualizer,
+                env,
+            )?,
+        })
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"spotify\":{},\"lidarr\":{},\"bridge\":{},\"external_visualizer\":{}}}",
+            self.spotify.sanitized_json(),
+            self.lidarr.sanitized_json(),
+            self.bridge.sanitized_json(),
+            self.external_visualizer.sanitized_json()
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SpotifyIntegrationSettings {
+    pub enabled: bool,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub redirect_uri: Option<String>,
+    pub market: String,
+    pub scopes: String,
+}
+
+impl SpotifyIntegrationSettings {
+    fn from_layers<E: ConfigEnv>(
+        file_config: SpotifyFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            enabled: env_bool_layer(
+                env,
+                "SLSKR_SPOTIFY_ENABLED",
+                file_config.enabled.unwrap_or(false),
+            )?,
+            client_id: env.var("SLSKR_SPOTIFY_CLIENT_ID").or(file_config.client_id),
+            client_secret: env
+                .var("SLSKR_SPOTIFY_CLIENT_SECRET")
+                .or(file_config.client_secret),
+            redirect_uri: env
+                .var("SLSKR_SPOTIFY_REDIRECT_URI")
+                .or(file_config.redirect_uri),
+            market: env
+                .var("SLSKR_SPOTIFY_MARKET")
+                .or(file_config.market)
+                .unwrap_or_else(|| "US".to_owned()),
+            scopes: env
+                .var("SLSKR_SPOTIFY_SCOPES")
+                .or(file_config.scopes)
+                .unwrap_or_else(|| "playlist-read-private playlist-read-collaborative user-library-read".to_owned()),
+        })
+    }
+
+    pub fn configured(&self) -> bool {
+        self.enabled && self.client_id.as_deref().is_some_and(|value| !value.trim().is_empty())
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"client_id_configured\":{},\"client_secret_configured\":{},\"redirect_uri\":{},\"market\":\"{}\",\"scopes\":\"{}\"}}",
+            self.enabled,
+            self.client_id.is_some(),
+            self.client_secret.is_some(),
+            json_option(self.redirect_uri.as_deref()),
+            json_escape(&self.market),
+            json_escape(&self.scopes)
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LidarrIntegrationSettings {
+    pub enabled: bool,
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    pub timeout_seconds: u64,
+}
+
+impl LidarrIntegrationSettings {
+    fn from_layers<E: ConfigEnv>(
+        file_config: LidarrFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            enabled: env_bool_layer(
+                env,
+                "SLSKR_LIDARR_ENABLED",
+                file_config.enabled.unwrap_or(false),
+            )?,
+            url: env.var("SLSKR_LIDARR_URL").or(file_config.url),
+            api_key: env.var("SLSKR_LIDARR_API_KEY").or(file_config.api_key),
+            timeout_seconds: env_parse_layer(
+                env,
+                "SLSKR_LIDARR_TIMEOUT_SECONDS",
+                file_config.timeout_seconds,
+                20_u64,
+            )?,
+        })
+    }
+
+    pub fn configured(&self) -> bool {
+        self.enabled
+            && self.url.as_deref().is_some_and(|value| !value.trim().is_empty())
+            && self.api_key.as_deref().is_some_and(|value| !value.trim().is_empty())
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"url\":{},\"api_key_configured\":{},\"timeout_seconds\":{}}}",
+            self.enabled,
+            json_option(self.url.as_deref()),
+            self.api_key.is_some(),
+            self.timeout_seconds
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BridgeIntegrationSettings {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+}
+
+impl BridgeIntegrationSettings {
+    fn from_layers<E: ConfigEnv>(
+        file_config: BridgeFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            enabled: env_bool_layer(
+                env,
+                "SLSKR_BRIDGE_ENABLED",
+                file_config.enabled.unwrap_or(false),
+            )?,
+            host: env
+                .var("SLSKR_BRIDGE_HOST")
+                .or(file_config.host)
+                .unwrap_or_else(|| "localhost".to_owned()),
+            port: env_parse_layer(env, "SLSKR_BRIDGE_PORT", file_config.port, 3000_u16)?,
+        })
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"host\":\"{}\",\"port\":{}}}",
+            self.enabled,
+            json_escape(&self.host),
+            self.port
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ExternalVisualizerSettings {
+    pub command: Option<String>,
+}
+
+impl ExternalVisualizerSettings {
+    fn from_layers<E: ConfigEnv>(
+        file_config: ExternalVisualizerFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            command: env
+                .var("SLSKR_EXTERNAL_VISUALIZER_COMMAND")
+                .or(file_config.command),
+        })
+    }
+
+    pub fn configured(&self) -> bool {
+        self.command.as_deref().is_some_and(|value| !value.trim().is_empty())
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"configured\":{},\"command\":{}}}",
+            self.configured(),
+            json_option(self.command.as_deref())
         )
     }
 }
@@ -315,6 +523,7 @@ pub struct FileConfig {
     transfers: TransferFileConfig,
     auth: AuthFileConfig,
     persistence: PersistenceFileConfig,
+    integrations: IntegrationsFileConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -390,6 +599,49 @@ pub struct AuthFileConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct PersistenceFileConfig {
     enabled: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IntegrationsFileConfig {
+    spotify: SpotifyFileConfig,
+    lidarr: LidarrFileConfig,
+    bridge: BridgeFileConfig,
+    external_visualizer: ExternalVisualizerFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SpotifyFileConfig {
+    enabled: Option<bool>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    redirect_uri: Option<String>,
+    market: Option<String>,
+    scopes: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LidarrFileConfig {
+    enabled: Option<bool>,
+    url: Option<String>,
+    api_key: Option<String>,
+    timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BridgeFileConfig {
+    enabled: Option<bool>,
+    host: Option<String>,
+    port: Option<u16>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExternalVisualizerFileConfig {
+    command: Option<String>,
 }
 
 pub fn default_state_dir() -> PathBuf {

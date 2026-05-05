@@ -2008,6 +2008,11 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
       !form.lastFmApiKey.trim() &&
       'Last.fm needs an API key before loved/recent/top imports can run.',
   ].filter(Boolean);
+  const inferredSpotifyRedirectUri =
+    form.spotifyRedirectUri.trim() ||
+    (typeof window !== 'undefined'
+      ? `${window.location.origin}/api/integrations/spotify/callback`
+      : '/api/integrations/spotify/callback');
 
   const buildOverlay = () => {
     const spotifyPatch = {
@@ -2217,6 +2222,16 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
               <Icon name="spotify" />
               Spotify
             </Header>
+            <Message
+              info
+              size="small"
+            >
+              <Message.Header>One-click Spotify authorization</Message.Header>
+              Register this exact Redirect URI in the Spotify developer
+              dashboard: <code>{inferredSpotifyRedirectUri}</code>. The callback
+              is served on the same slskR WebUI/API port and protected by a
+              short-lived, single-use OAuth state token.
+            </Message>
             <Popup
               content="Turns on Spotify source-feed imports and account connection. Private liked/saved/followed feeds still require a connected Spotify account or bearer token."
               trigger={
@@ -2260,7 +2275,7 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
                 disabled={!remoteConfiguration || saving}
                 label="Redirect URI"
                 onChange={(_, { value }) => update('spotifyRedirectUri', value)}
-                placeholder="Infer from current host"
+                placeholder={inferredSpotifyRedirectUri}
                 value={form.spotifyRedirectUri}
               />
               <Form.Input
@@ -2562,6 +2577,15 @@ const LidarrPanel = ({ options }) => {
         <Card.Meta>Wanted-album sync and completed-download import bridge.</Card.Meta>
       </Card.Content>
       <Card.Content>
+        <Message
+          info
+          size="small"
+        >
+          <Message.Header>No OAuth clickthrough for Lidarr</Message.Header>
+          Lidarr uses a local URL and API key. The closest safe one-click flow is
+          to save the URL/API key, then use Check Status, Load Wanted, or Sync
+          Wanted from this panel.
+        </Message>
         <div className="integration-status-row">
           {boolLabel(enabled)}
           {boolLabel(

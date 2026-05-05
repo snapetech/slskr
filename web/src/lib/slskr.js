@@ -1,16 +1,14 @@
 import api from './api';
 
-// Helper to safely call API endpoints that may not exist yet
+// Helper to safely call optional API endpoints.
 const safeGet = async (endpoint, fallback = null) => {
   try {
     const response = await api.get(endpoint);
     return response.data;
   } catch (error) {
-    // Return fallback for 404s or other errors - endpoint may not be implemented
+    // Return fallback for optional or temporarily unavailable daemon surfaces.
     if (error?.response?.status === 404) {
-      console.debug(
-        `Endpoint ${endpoint} not found (expected during development)`,
-      );
+      console.debug(`Optional endpoint ${endpoint} is unavailable`);
     }
 
     return fallback;

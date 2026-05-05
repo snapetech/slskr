@@ -140,6 +140,9 @@ Initial configuration sources:
 - `SLSKR_API_RATE_LIMIT_ANONYMOUS` and `SLSKR_API_RATE_LIMIT_AUTHENTICATED` tune per-window HTTP API request limits; defaults are `1000` and `5000`.
 - `SLSKR_AUTH_DISABLED` to explicitly disable HTTP API auth. Loopback-only binds default to disabled when no token is configured; non-loopback binds require a token unless this is set.
 - `SLSKR_PERSISTENCE_ENABLED` enables the default-off SQLite persistence path. Search create/list hydration is wired; transfer projection state is also restart-safe through `transfer-state.json`. Message and room projection persistence remain event/projection work items.
+- Spotify integration uses the existing slskR HTTP/WebUI port for OAuth callback handling. Configure `SLSKR_SPOTIFY_ENABLED=true` and `SLSKR_SPOTIFY_CLIENT_ID`; if `SLSKR_SPOTIFY_REDIRECT_URI` is unset, the daemon advertises `http://127.0.0.1:<http-port>/api/integrations/spotify/callback` for loopback use. The callback requires a daemon-issued cryptographically random state value, expires pending state after 10 minutes, and rejects replayed, missing, or invalid state.
+- Lidarr does not provide an OAuth clickthrough surface. Configure `SLSKR_LIDARR_ENABLED=true`, `SLSKR_LIDARR_URL`, and `SLSKR_LIDARR_API_KEY`; the WebUI can then test status and run wanted/import actions using API-key authentication.
+- `SLSKR_EXTERNAL_VISUALIZER_COMMAND` configures the optional local visualizer launch command; the daemon reports configured/disabled state before attempting launch.
 - `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold
 - gitignored `.secrets/` files for local lab credentials
 - OpenBao paths documented under `../k3s/slskr/README.md`
@@ -160,6 +163,12 @@ Default `slskr serve` binds to loopback. Before exposing it outside localhost, a
 - reverse-proxy guidance
 
 Current behavior: bearer-token and same-site dashboard cookie auth are available for protected API routes. Auth is required automatically for non-loopback HTTP binds unless `SLSKR_AUTH_DISABLED=true` is set. When auth is enabled, unsafe API methods reject cross-site browser requests with foreign `Origin` or `Referer` headers. `GET /`, `GET /api/health`, `GET /api/version`, and `GET /api/v0/capabilities` remain public health/version/capability surfaces.
+
+## Third-Party Authorization UX
+
+Spotify is the only current integration in this group with a true OAuth clickthrough. slskR serves `/api/integrations/spotify/callback` on the same HTTP port as the WebUI/API, so operators do not need to expose a second listener. The WebUI shows the exact redirect URI to register in the Spotify developer dashboard. Authorization requests use a server-side state store with cryptographically random state, a 10-minute expiry, and single-use consumption before the callback is accepted.
+
+Lidarr uses local API-key authentication rather than OAuth. The WebUI therefore presents a configure/test/sync flow: save URL and API key, check system status, preview wanted albums, then sync wanted items or request manual import.
 
 ## Packaging
 

@@ -10,12 +10,15 @@ use std::process::Command;
 
 fn main() {
     // Track webui source changes
-    let web_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("web");
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let Some(repo_root) = manifest_dir.parent().and_then(|path| path.parent()) else {
+        eprintln!(
+            "Unable to resolve repository root from {}",
+            manifest_dir.display()
+        );
+        return;
+    };
+    let web_root = repo_root.join("web");
 
     if web_root.exists() {
         // Rebuild if any src file changes

@@ -191,7 +191,7 @@ pub fn format_batch_response(results: Vec<BatchOperationResult>) -> String {
         "count": results.len(),
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs()
     });
 

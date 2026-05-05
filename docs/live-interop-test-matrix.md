@@ -165,6 +165,6 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | Probe port metadata lag | Back-to-back payload probes could advertise different forwarded ports faster than public-server peer metadata converged. | Daemon download probes reuse the same local NAT-PMP port per target run so the forwarded public port remains stable for text and binary fixture transfers. |
 | `slskdN` obfuscated response framing | Diagnostic mode proved `slskdN` accepts obfuscated init/request but sends `UserInfoResponse` as a plain frame on that connection. | `obfuscated-peer` now falls back to a plain peer-message response after the primary obfuscated-response read times out or EOFs, preserving compatibility without weakening the initial obfuscated request path. |
 
-## Remaining implementation gaps
+## Current residual diagnostics
 
 No blocking implementation gaps remain in the current live interop matrix. The raw `file-transfer-peer` row remains diagnostic-only because `slskd` and `slskdN` correctly require an actual queued transfer before opening `F` payload sockets; queued payload transfer is covered by `download-peer` and open-commons download probes.

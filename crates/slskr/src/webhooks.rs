@@ -86,7 +86,7 @@ impl Webhook {
             active: true,
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs() as i64,
             last_triggered: None,
             retry_count: 0,
@@ -134,7 +134,7 @@ impl WebhookPayload {
             event: event.to_string(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs() as i64,
             correlation_id,
             data,

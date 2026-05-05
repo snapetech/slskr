@@ -86,7 +86,7 @@ impl LogConfig {
 pub fn format_timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap();
+        .unwrap_or_default();
     let secs = now.as_secs();
     let millis = now.subsec_millis();
     let datetime = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);

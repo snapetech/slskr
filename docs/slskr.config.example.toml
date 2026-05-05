@@ -49,5 +49,32 @@ rate_limit_anonymous = 1000
 rate_limit_authenticated = 5000
 
 [persistence]
-# Default off until transfer/message/room persistence paths are wired.
 enabled = false
+
+[integrations.spotify]
+# Spotify is the only current third-party surface here with a real OAuth clickthrough.
+# Configure a Spotify app client ID and redirect URI, then the WebUI can open the
+# returned authorization_url from /api/integrations/spotify/authorize.
+enabled = false
+# client_id = "spotify-app-client-id"
+# client_secret = "optional-server-side-secret"
+# redirect_uri = "http://127.0.0.1:5030/api/integrations/spotify/callback"
+market = "US"
+scopes = "playlist-read-private playlist-read-collaborative user-library-read"
+
+[integrations.lidarr]
+# Lidarr does not provide OAuth; closest one-click UX is URL/API-key setup plus
+# a Test/Sync button in the WebUI.
+enabled = false
+# url = "http://127.0.0.1:8686"
+# api_key = "lidarr-api-key"
+timeout_seconds = 20
+
+[integrations.bridge]
+enabled = false
+host = "localhost"
+port = 3000
+
+[integrations.external_visualizer]
+# Optional local command launched by the daemon.
+# command = "projectm"

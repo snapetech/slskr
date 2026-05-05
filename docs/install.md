@@ -44,7 +44,46 @@ Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to 
 
 Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep credentials and API tokens out of git; use a local ignored env file, service environment file, or secret manager.
 
-SQLite persistence is default-off while the remaining transfer/message/room paths are being wired. Enable the current search persistence proof path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; this creates `slskr.db` under the state directory.
+SQLite persistence is default-off. Enable the current durable search persistence path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; transfer projection restart state is maintained in the slskR state directory.
+
+## Third-Party Integrations
+
+### Spotify OAuth
+
+Spotify supports a browser clickthrough authorization flow. Configure:
+
+```toml
+[integrations.spotify]
+enabled = true
+client_id = "spotify-app-client-id"
+# Optional; PKCE/browser authorization does not require a client secret.
+# client_secret = "spotify-app-client-secret"
+# Optional override. If omitted, slskR uses the existing WebUI/API port:
+# redirect_uri = "http://127.0.0.1:5030/api/integrations/spotify/callback"
+```
+
+Register the exact redirect URI shown in the WebUI with the Spotify developer dashboard. slskR multiplexes the callback on the existing HTTP listener at `/api/integrations/spotify/callback`; no second callback service or port is required.
+
+Security behavior:
+
+- Authorization requests create a cryptographically random server-side state.
+- Pending OAuth state expires after 10 minutes.
+- State is single-use; replayed callbacks are rejected.
+- Callbacks missing state, using invalid state, or using expired state are rejected.
+- The callback response does not echo the authorization code.
+
+### Lidarr
+
+Lidarr does not provide OAuth. Configure its local URL and API key:
+
+```toml
+[integrations.lidarr]
+enabled = true
+url = "http://127.0.0.1:8686"
+api_key = "lidarr-api-key"
+```
+
+The WebUI exposes the closest safe flow: Check Status, Load Wanted, Sync Wanted, and Manual Import actions over Lidarr's API-key authentication.
 
 ## First Run
 

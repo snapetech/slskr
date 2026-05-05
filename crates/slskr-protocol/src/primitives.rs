@@ -53,23 +53,19 @@ impl<'a> Reader<'a> {
 
     pub fn read_u32_le(&mut self) -> Result<u32, DecodeError> {
         let bytes = self.read_exact("u32", 4)?;
-        Ok(u32::from_le_bytes(
-            bytes.try_into().expect("slice length is fixed"),
-        ))
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
     pub fn read_u16_le(&mut self) -> Result<u16, DecodeError> {
         let bytes = self.read_exact("u16", 2)?;
-        Ok(u16::from_le_bytes(
-            bytes.try_into().expect("slice length is fixed"),
-        ))
+        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
     }
 
     pub fn read_u64_le(&mut self) -> Result<u64, DecodeError> {
         let bytes = self.read_exact("u64", 8)?;
-        Ok(u64::from_le_bytes(
-            bytes.try_into().expect("slice length is fixed"),
-        ))
+        Ok(u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
     }
 
     pub fn read_ipv4(&mut self) -> Result<Ipv4Addr, DecodeError> {
