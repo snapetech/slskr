@@ -29,7 +29,7 @@ scripts/run-council-scan.sh
 | Protocol scalar emission candidates | Fixed | Re-run after new protocol scalar casts or length-prefix writers are added; BUG-034 covers accepted API-to-protocol narrowing bugs. |
 | Resolver/raw stream candidates | Fixed | Re-run after new direct socket, resolver, stream read/write, or raw connection lifecycle code is added; BUG-035 and BUG-036 cover accepted raw-stream bugs. |
 | Task/cancellation/lifecycle candidates | Fixed | Re-run after new spawn, timeout, interval, channel, cancellation, or shutdown code is added; BUG-037 and BUG-038 cover accepted TypeScript lifecycle bugs. |
-| Example Web API candidates | Unclassified | Classify docs/examples for stale auth, storage, WebSocket, CORS, and URL guidance. |
+| Example Web API candidates | Fixed | Re-run after docs/examples add API auth, storage, WebSocket, CORS, or URL guidance; BUG-039 covers accepted stale WebSocket auth examples. |
 
 ## Classification Legend
 
@@ -43,7 +43,7 @@ scripts/run-council-scan.sh
 
 ## Current Section Review
 
-Current section: `Task/cancellation/lifecycle candidates`
+Current section: `Example Web API candidates`
 
 Latest scanner counts:
 
@@ -54,7 +54,7 @@ Latest scanner counts:
 | Protocol scalar emission candidates | 30 |
 | Resolver/raw stream candidates | 220 |
 | Task/cancellation/lifecycle candidates | 236 |
-| Example Web API candidates | 283 |
+| Example Web API candidates | 289 |
 
 ### Constructor/mutable collection candidates
 
@@ -119,3 +119,16 @@ Latest scanner counts:
 | Webhook delivery tasks | Backend/API + Release/Ops | Existing Guard | Registered webhooks are capped, delivery concurrency is capped by semaphore, timeouts are clamped, redirects are disabled, and delivery pool saturation drops work instead of queueing unbounded requests. | Webhook tests and outbound policy gate. |
 | React/dashboard abort controllers | Frontend/API Handling | Existing Guard | Fetch hooks and player panes abort pending requests on cleanup and ignore abort errors. | Frontend test/build gates. |
 | CLI/tests/examples sleeps, spawns, and contract timeouts | Tests/Tooling | False Positive | Remaining lifecycle hits are bounded CLI diagnostics, local smoke tests, contract servers, examples, or README snippets. | Keep scoped to test/example review unless promoted by failing gates. |
+
+### Example Web API candidates
+
+| Candidate | Scope | Classification | Evidence | Follow-up |
+| --- | --- | --- | --- | --- |
+| `docs/http-api-features.md` raw browser WebSocket examples | Docs/Config + Frontend/API Handling | Fixed | BUG-039: raw browser examples now pass the `slskr.api-token.<encoded-token>` WebSocket subprotocol instead of omitting auth. | `scripts/check-websocket-auth-coverage.sh`; docs freshness/baseline. |
+| `docs/http-api-features.md` Node.js WebSocket example | Docs/Config + Client SDKs | Fixed | BUG-039: Node example now uses the supported WebSocket auth subprotocol array instead of an incompatible browser-style constructor object/header pattern. | `scripts/check-websocket-auth-coverage.sh`; docs freshness/baseline. |
+| `Authorization: Bearer` curl examples | Docs/Config | Existing Guard | Bearer auth remains a supported HTTP API auth mechanism and examples use placeholders or `SLSKR_API_TOKEN`, not hard-coded secrets. | Secret scanning and docs freshness gates. |
+| `Access-Control-Allow-Origin` warning | Docs/Config | Existing Guard | Deployment docs explicitly warn not to use wildcard CORS for authenticated browser deployments. | `scripts/check-docs-freshness.sh`. |
+| `localhost:8080` local examples | Docs/Config + Client SDKs | Existing Guard | Localhost URLs are local dev defaults in README, SDK examples, tests, and OpenAPI server metadata; deployment docs cover production binding/auth posture separately. | Kubernetes public posture and docs freshness gates. |
+| Browser `localStorage` hits | Frontend/API Handling | Existing Guard | Token storage regressions are covered by `scripts/check-browser-token-persistence.sh`; remaining production uses are non-secret UI preferences/caches or documented migration fallbacks, with token mentions in tests. | Browser token persistence gate. |
+| `_blank` links and `window.open` | Frontend/API Handling | Existing Guard | Links include `rel="noopener noreferrer"` and programmatic opens use `safeOpenBlank` with `noopener,noreferrer` plus `opener = null`. | `scripts/check-unsafe-blank-opens.sh`. |
+| SDK `WebSocketClient` examples | Client SDKs | Existing Guard | SDK examples route through `WebSocketClient`, whose implementation applies `websocketAuthProtocols(token)`. | TypeScript SDK build/test and WebSocket auth coverage gate. |

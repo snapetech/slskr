@@ -977,7 +977,7 @@ pub const fn route_actions() -> &'static [RouteAction] {
             body: ActionBody::None,
             label: "Run Wishlist Search",
             method: "POST",
-            path: "/wishlist/wish-demo/search",
+            path: "/wishlist/:id/search",
             surface: "wishlist",
         },
         RouteAction {
@@ -998,7 +998,7 @@ pub const fn route_actions() -> &'static [RouteAction] {
             body: ActionBody::None,
             label: "Cancel Download",
             method: "DELETE",
-            path: "/transfers/downloads/:username/1",
+            path: "/transfers/downloads/:username/:id",
             surface: "transfers",
         },
         RouteAction {
@@ -1012,14 +1012,14 @@ pub const fn route_actions() -> &'static [RouteAction] {
             body: ActionBody::None,
             label: "Deny Upload",
             method: "DELETE",
-            path: "/transfers/uploads/:username/1",
+            path: "/transfers/uploads/:username/:id",
             surface: "transfers",
         },
         RouteAction {
             body: ActionBody::EnabledTrue,
             label: "Allow Upload",
             method: "PUT",
-            path: "/transfers/uploads/:username/1",
+            path: "/transfers/uploads/:username/:id",
             surface: "transfers",
         },
         RouteAction {
@@ -1124,7 +1124,7 @@ pub const fn route_actions() -> &'static [RouteAction] {
             body: ActionBody::None,
             label: "Remove Contact",
             method: "DELETE",
-            path: "/contacts/contact-demo",
+            path: "/contacts/:id",
             surface: "identity",
         },
         RouteAction {
@@ -1145,7 +1145,7 @@ pub const fn route_actions() -> &'static [RouteAction] {
             body: ActionBody::ShareGroupMember,
             label: "Add Share Group Member",
             method: "POST",
-            path: "/sharegroups/group-demo/members",
+            path: "/sharegroups/:id/members",
             surface: "collections",
         },
         RouteAction {
@@ -1159,28 +1159,28 @@ pub const fn route_actions() -> &'static [RouteAction] {
             body: ActionBody::Permissions,
             label: "Update Share Grant",
             method: "PUT",
-            path: "/share-grants/grant-demo",
+            path: "/share-grants/:id",
             surface: "collections",
         },
         RouteAction {
             body: ActionBody::None,
             label: "Backfill Share Grant",
             method: "POST",
-            path: "/share-grants/grant-demo/backfill",
+            path: "/share-grants/:id/backfill",
             surface: "collections",
         },
         RouteAction {
             body: ActionBody::None,
             label: "Issue Share Token",
             method: "POST",
-            path: "/share-grants/grant-demo/token",
+            path: "/share-grants/:id/token",
             surface: "collections",
         },
         RouteAction {
             body: ActionBody::None,
             label: "Delete Share Grant",
             method: "DELETE",
-            path: "/share-grants/grant-demo",
+            path: "/share-grants/:id",
             surface: "collections",
         },
         RouteAction {
@@ -1643,7 +1643,18 @@ pub fn concrete_action_path_with_target(
     action: RouteAction,
     target: Option<&str>,
 ) -> String {
-    let selected_id = target.filter(|value| safe_route_segment(value));
+    concrete_action_path_with_target_and_id(route_path, action, target, None)
+}
+
+pub fn concrete_action_path_with_target_and_id(
+    route_path: &str,
+    action: RouteAction,
+    target: Option<&str>,
+    id: Option<&str>,
+) -> String {
+    let selected_id = id
+        .filter(|value| safe_route_segment(value))
+        .or_else(|| target.filter(|value| safe_route_segment(value)));
     let search_id = selected_id.unwrap_or_else(|| {
         if action.path.contains(":id") && !normalize_route_path(route_path).contains(":id") {
             "1"
@@ -3043,6 +3054,12 @@ fn format_transfer_progress(
     format!("{state} / {progress} / {speed}{eta}")
 }
 
+fn row_meta_with_id(meta: String, id: Option<&str>) -> String {
+    id.filter(|value| safe_route_segment(value.trim()))
+        .map(|id| format!("{meta} / id={}", id.trim()))
+        .unwrap_or(meta)
+}
+
 fn route_dynamic_rows(
     kind: RouteKind,
     responses: Option<&[EndpointBody]>,
@@ -3116,10 +3133,11 @@ fn route_dynamic_rows(
                 let enabled = value_bool(item, &["enabled"]).unwrap_or(false);
                 let auto =
                     value_bool(item, &["autoDownload", "autoDownloadEnabled"]).unwrap_or(false);
+                let id = value_text(item, &["id", "wishlistId", "searchId"]);
                 (
                     text,
                     filter,
-                    format!("enabled={enabled} / auto={auto}"),
+                    row_meta_with_id(format!("enabled={enabled} / auto={auto}"), id.as_deref()),
                     "Run".to_string(),
                 )
             })
@@ -3147,6 +3165,7 @@ fn route_dynamic_rows(
                         ],
                     );
                     if files.is_empty() {
+                        let id = value_text(item, &["id", "token", "transferId", "fileId"]);
                         vec![(
                             value_text(
                                 item,
@@ -3154,7 +3173,7 @@ fn route_dynamic_rows(
                             )
                             .unwrap_or_else(|| "Transfer".to_string()),
                             username,
-                            format_transfer_progress(item, None),
+                            row_meta_with_id(format_transfer_progress(item, None), id.as_deref()),
                             if kind == RouteKind::Downloads {
                                 "Cancel"
                             } else {
@@ -3166,6 +3185,10 @@ fn route_dynamic_rows(
                         files
                             .iter()
                             .map(|file| {
+                                let id = value_text(file, &["id", "token", "transferId", "fileId"])
+                                    .or_else(|| {
+                                        value_text(item, &["id", "token", "transferId", "fileId"])
+                                    });
                                 (
                                     value_text(
                                         file,
@@ -3174,7 +3197,10 @@ fn route_dynamic_rows(
                                     .unwrap_or_else(|| "Transfer".to_string()),
                                     value_text(file, &["username", "user", "peer"])
                                         .unwrap_or_else(|| username.clone()),
-                                    format_transfer_progress(file, Some(item)),
+                                    row_meta_with_id(
+                                        format_transfer_progress(file, Some(item)),
+                                        id.as_deref(),
+                                    ),
                                     if kind == RouteKind::Downloads {
                                         "Cancel"
                                     } else {
@@ -3275,7 +3301,13 @@ fn route_dynamic_rows(
                     value_text(item, &["type", "kind"]).unwrap_or_else(|| "Playlist".to_string());
                 let count = value_count(item, &["itemCount", "itemsCount", "items", "files"])
                     .unwrap_or_else(|| "0".to_string());
-                (title, kind, format!("{count} items"), "Open".to_string())
+                let id = value_text(item, &["id", "collectionId", "contentId"]);
+                (
+                    title,
+                    kind,
+                    row_meta_with_id(format!("{count} items"), id.as_deref()),
+                    "Open".to_string(),
+                )
             })
             .collect::<Vec<_>>(),
         RouteKind::ShareGroups => endpoint_array(responses, "/sharegroups")
@@ -3288,10 +3320,11 @@ fn route_dynamic_rows(
                     .unwrap_or_else(|| "0".to_string());
                 let created = value_text(item, &["createdAt", "created"])
                     .unwrap_or_else(|| "created pending".to_string());
+                let id = value_text(item, &["id", "groupId", "shareGroupId"]);
                 (
                     name,
                     format!("{members} members"),
-                    created,
+                    row_meta_with_id(created, id.as_deref()),
                     "Add Member".to_string(),
                 )
             })
@@ -3319,7 +3352,13 @@ fn route_dynamic_rows(
                     &["permissions", "access", "grant.permissions", "grant.access"],
                 )
                 .unwrap_or_else(|| "read".to_string());
-                (title, owner, permissions, "Open".to_string())
+                let id = value_text(item, &["id", "grant.id", "grantId", "shareGrantId"]);
+                (
+                    title,
+                    owner,
+                    row_meta_with_id(permissions, id.as_deref()),
+                    "Open".to_string(),
+                )
             })
             .collect::<Vec<_>>(),
         RouteKind::Browse => {
@@ -3768,6 +3807,9 @@ fn native_table_html(
 
 fn native_row_data_attrs(kind: RouteKind, primary: &str, secondary: &str, meta: &str) -> String {
     let mut attrs: Vec<(&str, &str)> = Vec::new();
+    if let Some(id) = native_row_embedded_id(meta) {
+        attrs.push(("data-slskr-native-item-id", id));
+    }
     match kind {
         RouteKind::Search | RouteKind::DiscoveryGraph => {
             if secondary.starts_with("search ") {
@@ -3791,11 +3833,17 @@ fn native_row_data_attrs(kind: RouteKind, primary: &str, secondary: &str, meta: 
             attrs.push(("data-slskr-native-search-text", primary));
             attrs.push(("data-slskr-native-search-filter", secondary));
             attrs.push(("data-slskr-native-row-state", meta));
+            if let Some(id) = native_row_embedded_id(meta) {
+                attrs.push(("data-slskr-native-wishlist-id", id));
+            }
         }
         RouteKind::Downloads | RouteKind::Uploads => {
             attrs.push(("data-slskr-native-filename", primary));
             attrs.push(("data-slskr-native-peer", secondary));
             attrs.push(("data-slskr-native-transfer-state", meta));
+            if let Some(id) = native_row_embedded_id(meta) {
+                attrs.push(("data-slskr-native-transfer-id", id));
+            }
         }
         RouteKind::Messages | RouteKind::Rooms => {
             attrs.push(("data-slskr-native-conversation", primary));
@@ -3822,16 +3870,25 @@ fn native_row_data_attrs(kind: RouteKind, primary: &str, secondary: &str, meta: 
             attrs.push(("data-slskr-native-collection", primary));
             attrs.push(("data-slskr-native-collection-kind", secondary));
             attrs.push(("data-slskr-native-row-state", meta));
+            if let Some(id) = native_row_embedded_id(meta) {
+                attrs.push(("data-slskr-native-collection-id", id));
+            }
         }
         RouteKind::ShareGroups => {
             attrs.push(("data-slskr-native-share-group", primary));
             attrs.push(("data-slskr-native-member-count", secondary));
             attrs.push(("data-slskr-native-row-state", meta));
+            if let Some(id) = native_row_embedded_id(meta) {
+                attrs.push(("data-slskr-native-share-group-id", id));
+            }
         }
         RouteKind::SharedWithMe => {
             attrs.push(("data-slskr-native-collection", primary));
             attrs.push(("data-slskr-native-owner", secondary));
             attrs.push(("data-slskr-native-permissions", meta));
+            if let Some(id) = native_row_embedded_id(meta) {
+                attrs.push(("data-slskr-native-grant-id", id));
+            }
         }
         RouteKind::Browse => {
             attrs.push(("data-slskr-native-path", primary));
@@ -3852,6 +3909,14 @@ fn native_row_data_attrs(kind: RouteKind, primary: &str, secondary: &str, meta: 
         .map(|(name, value)| format!(r#" {name}="{}""#, escape_html(value.trim())))
         .collect::<Vec<_>>()
         .join("")
+}
+
+fn native_row_embedded_id(meta: &str) -> Option<&str> {
+    meta.split("id=")
+        .nth(1)
+        .and_then(|tail| tail.split_whitespace().next())
+        .map(|value| value.trim_matches(|ch: char| matches!(ch, ',' | ';' | ')' | ']')))
+        .filter(|value| safe_route_segment(value))
 }
 
 fn native_row_resource_id(
@@ -6642,10 +6707,16 @@ fn execute_native_route_action(
         .unwrap_or_else(|_| "/searches".to_string());
     let value = native_action_value(document, button, action.body);
     let target = native_action_target(document, button, action);
+    let id = native_action_id(document, button, action);
     let body = action_body_from_value(action.body, &value);
     let method = action.method.to_string();
     let label = action.label.to_string();
-    let path = concrete_action_path_with_target(&route_path, action, target.as_deref());
+    let path = concrete_action_path_with_target_and_id(
+        &route_path,
+        action,
+        target.as_deref(),
+        id.as_deref(),
+    );
     if let Some(status) = document.get_element_by_id("slskr-action-status") {
         status.set_inner_html(&format!(
             "<strong>{}</strong> sending {}",
@@ -6896,6 +6967,51 @@ fn native_action_target(
                 .chars()
                 .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
         }) {
+            return Some(value);
+        }
+    }
+    document_selected_native_row_title(document).filter(|value| safe_route_segment(value))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_action_id(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    action: RouteAction,
+) -> Option<String> {
+    if !action.path.contains(":id") {
+        return None;
+    }
+    let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
+    for attr in [
+        "data-slskr-native-item-id",
+        "data-slskr-native-transfer-id",
+        "data-slskr-native-wishlist-id",
+        "data-slskr-native-grant-id",
+        "data-slskr-native-share-group-id",
+        "data-slskr-native-collection-id",
+        "data-slskr-native-search-id",
+    ] {
+        if let Some(value) =
+            button_native_row_attribute(button, attr).filter(|value| safe_route_segment(value))
+        {
+            return Some(value);
+        }
+        if let Some(value) = selected_native_row_attribute(&workspace, attr)
+            .filter(|value| safe_route_segment(value))
+        {
+            return Some(value);
+        }
+    }
+    if !action.path.contains(":username") && !action.path.contains(":roomName") {
+        if let Some(value) =
+            button_native_row_resource_id(button).filter(|value| safe_route_segment(value))
+        {
+            return Some(value);
+        }
+        if let Some(value) =
+            selected_native_row_resource_id(&workspace).filter(|value| safe_route_segment(value))
+        {
             return Some(value);
         }
     }
@@ -12870,7 +12986,7 @@ mod tests {
             ("DELETE", "/conversations/:username"),
             ("POST", "/users/:username/directory"),
             ("POST", "/wishlist"),
-            ("POST", "/wishlist/wish-demo/search"),
+            ("POST", "/wishlist/:id/search"),
             ("POST", "/contacts"),
             ("POST", "/contacts/from-discovery"),
             ("POST", "/contacts/from-invite"),
@@ -12878,12 +12994,12 @@ mod tests {
             ("POST", "/users/notes"),
             ("POST", "/collections"),
             ("POST", "/sharegroups"),
-            ("POST", "/sharegroups/group-demo/members"),
+            ("POST", "/sharegroups/:id/members"),
             ("POST", "/share-grants"),
-            ("PUT", "/share-grants/grant-demo"),
-            ("POST", "/share-grants/grant-demo/backfill"),
-            ("POST", "/share-grants/grant-demo/token"),
-            ("DELETE", "/share-grants/grant-demo"),
+            ("PUT", "/share-grants/:id"),
+            ("POST", "/share-grants/:id/backfill"),
+            ("POST", "/share-grants/:id/token"),
+            ("DELETE", "/share-grants/:id"),
             ("POST", "/library/items"),
             ("POST", "/source-feed-imports/preview"),
             ("POST", "/discovery-graph"),

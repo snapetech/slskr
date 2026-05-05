@@ -269,7 +269,9 @@ WebSocket sends JSON-formatted events:
 Subscribe to specific topics to reduce message volume:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/api/events/ws');
+const token = sessionStorage.getItem('slskr-token') ?? '';
+const protocols = token ? [`slskr.api-token.${encodeURIComponent(token)}`] : [];
+const ws = new WebSocket('ws://localhost:8080/api/events/ws', protocols);
 
 ws.onopen = () => {
   // Subscribe to only search events
@@ -290,11 +292,9 @@ ws.onmessage = (event) => {
 ```javascript
 const WebSocket = require('ws');
 
-const ws = new WebSocket('ws://localhost:8080/api/events/ws', {
-  headers: {
-    'Authorization': 'Bearer your-token'
-  }
-});
+const token = process.env.SLSKR_API_TOKEN || '';
+const protocols = token ? [`slskr.api-token.${encodeURIComponent(token)}`] : [];
+const ws = new WebSocket('ws://localhost:8080/api/events/ws', protocols);
 
 ws.on('open', () => {
   console.log('Connected to WebSocket');
@@ -552,7 +552,9 @@ await fetch('/api/batch', {
 setInterval(() => fetch('/api/transfers').then(...), 5000);
 
 // ✅ Good: WebSocket events
-const ws = new WebSocket('ws://localhost:8080/api/events/ws');
+const token = sessionStorage.getItem('slskr-token') ?? '';
+const protocols = token ? [`slskr.api-token.${encodeURIComponent(token)}`] : [];
+const ws = new WebSocket('ws://localhost:8080/api/events/ws', protocols);
 ws.onmessage = (evt) => {
   if (JSON.parse(evt.data).type === 'transfer.completed') {
     updateUI();
