@@ -1325,6 +1325,45 @@ body {
   overflow-wrap: anywhere;
 }
 
+.slskr-native-state-stack {
+  display: grid;
+  gap: 6px;
+  min-width: 170px;
+}
+
+.slskr-native-state-stack meter {
+  accent-color: #8dd7c8;
+  height: 8px;
+  width: 100%;
+}
+
+.slskr-native-state-stack label {
+  color: #c6d0ca;
+  font-size: 12px;
+}
+
+.slskr-native-state-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.slskr-native-state-controls span {
+  color: #8fa09a;
+  font-size: 11px;
+}
+
+.slskr-native-state-controls button,
+.slskr-native-state-stack button {
+  background: #162321;
+  border: 1px solid #2b504d;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
 .slskr-native-table button {
   background: #253734;
   border: 1px solid #3d5c55;

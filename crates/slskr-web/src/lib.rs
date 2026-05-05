@@ -3788,11 +3788,13 @@ fn native_table_html(
                 native_row_action_summary(kind, primary, secondary, meta, action, &resource_id);
             let detail_list = native_row_detail_list(kind, primary, secondary, meta, action);
             let action_menu = native_row_action_labels(kind, action).join(" | ");
+            let meta_cell = native_meta_cell_html(kind, meta, primary, secondary);
             format!(
-                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-resource-id="{resource_id}"{row_attrs} data-slskr-native-action-summary="{action_summary}" data-slskr-native-detail-list="{detail_list}" data-slskr-native-action-menu="{action_menu}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
+                r#"<tr tabindex="0" aria-keyshortcuts="Enter Space ArrowUp ArrowDown Home End" data-slskr-native-select data-slskr-native-index="{index}" data-slskr-native-resource-id="{resource_id}"{row_attrs} data-slskr-native-action-summary="{action_summary}" data-slskr-native-detail-list="{detail_list}" data-slskr-native-action-menu="{action_menu}" data-slskr-native-sort-0="{primary}" data-slskr-native-sort-1="{secondary}" data-slskr-native-sort-2="{meta}" data-slskr-native-sort-3="{action}" data-slskr-native-title="{primary}" data-slskr-native-detail="{secondary}" data-slskr-native-meta="{meta}" data-slskr-native-action="{action}"><td><label><input type="checkbox" aria-label="Select {primary}"><strong>{primary}</strong></label></td><td>{secondary}</td><td>{meta_cell}</td><td><div class="slskr-native-row-actions">{actions}</div></td></tr>"#,
                 primary = escape_html(primary),
                 secondary = escape_html(secondary),
                 meta = escape_html(meta),
+                meta_cell = meta_cell,
                 action = escape_html(action),
                 actions = actions,
                 resource_id = escape_html(&resource_id),
@@ -3810,6 +3812,75 @@ fn native_table_html(
         headers = headers,
         rows = rows,
     )
+}
+
+fn native_meta_cell_html(kind: RouteKind, meta: &str, primary: &str, secondary: &str) -> String {
+    match kind {
+        RouteKind::Downloads | RouteKind::Uploads => {
+            let progress = native_progress_percent(meta);
+            let state = meta.split('/').next().unwrap_or(meta).trim();
+            let eta = meta
+                .split("ETA")
+                .nth(1)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("pending");
+            format!(
+                r#"<div class="slskr-native-state-stack" data-slskr-transfer-state-control><span>{meta}</span><meter min="0" max="100" value="{progress}" aria-label="Transfer progress for {primary}">{progress}%</meter><div class="slskr-native-state-controls"><button type="button">Retry</button><button type="button">Cancel</button><span>{state}</span><span>ETA {eta}</span></div></div>"#,
+                meta = escape_html(meta),
+                progress = progress,
+                primary = escape_html(primary),
+                state = escape_html(state),
+                eta = escape_html(eta),
+            )
+        }
+        RouteKind::Wishlist => {
+            let enabled = meta.contains("enabled=true");
+            let auto = meta.contains("auto=true");
+            format!(
+                r#"<div class="slskr-native-state-stack" data-slskr-wishlist-row-controls><span>{meta}</span><label><input type="checkbox" aria-label="Enabled {primary}" {enabled}> Enabled</label><label><input type="checkbox" aria-label="Auto-download {primary}" {auto}> Auto-download</label></div>"#,
+                meta = escape_html(meta),
+                primary = escape_html(primary),
+                enabled = if enabled { "checked" } else { "" },
+                auto = if auto { "checked" } else { "" },
+            )
+        }
+        RouteKind::SharedWithMe => format!(
+            r#"<div class="slskr-native-state-stack" data-slskr-inbound-permission-controls><span>{meta}</span><div class="slskr-native-permission-grid"><span>{permissions}</span><span>{owner}</span><button type="button">Copy token</button><button type="button">Leave share</button></div></div>"#,
+            meta = escape_html(meta),
+            permissions = escape_html(meta),
+            owner = escape_html(secondary),
+        ),
+        RouteKind::ShareGroups => format!(
+            r#"<div class="slskr-native-state-stack" data-slskr-share-group-row-controls><span>{meta}</span><div class="slskr-native-permission-grid"><span>Members</span><span>Grants</span><button type="button">Issue Token</button><button type="button">Update Share Grant</button></div></div>"#,
+            meta = escape_html(meta),
+        ),
+        RouteKind::Browse => {
+            let action = if secondary == "folder" {
+                "Open folder"
+            } else {
+                "Queue file"
+            };
+            format!(
+                r#"<div class="slskr-native-state-stack" data-slskr-browse-entry-controls><span>{meta}</span><div class="slskr-native-state-controls"><span>{kind}</span><button type="button">{action}</button></div></div>"#,
+                meta = escape_html(meta),
+                kind = escape_html(secondary),
+                action = escape_html(action),
+            )
+        }
+        _ => escape_html(meta),
+    }
+}
+
+fn native_progress_percent(meta: &str) -> u32 {
+    meta.split('/')
+        .map(str::trim)
+        .find_map(|part| {
+            part.strip_suffix('%')
+                .and_then(|value| value.trim().parse::<u32>().ok())
+        })
+        .map(|value| value.min(100))
+        .unwrap_or(0)
 }
 
 fn native_row_detail_list(
@@ -12370,6 +12441,7 @@ mod tests {
                 "downloads workspace should contain {value}"
             );
         }
+        assert!(downloads.contains("data-slskr-transfer-state-control"));
 
         let users = route_page_html("/users");
         for value in ["User Detail", "No user selected", "Save note"] {
@@ -12756,6 +12828,8 @@ mod tests {
             r#"data-slskr-native-detail-list="File: Remote/Song.mp3 | Peer: peer2 | Download state: Queued / 50% / 0 B/s / id=77 | Next action: Cancel""#
         ));
         assert!(downloads.contains(r#"data-slskr-native-action-menu="Cancel | Retry | Remove""#));
+        assert!(downloads.contains(r#"<meter min="0" max="100" value="50""#));
+        assert!(downloads.contains("data-slskr-transfer-state-control"));
 
         let contacts = route_workspace_result_html(
             "/contacts",
@@ -12800,19 +12874,24 @@ mod tests {
         ));
         assert!(live_wishlist
             .contains(r#"data-slskr-native-action-menu="Run | Run Enabled | Copy Review""#));
+        assert!(live_wishlist.contains("data-slskr-wishlist-row-controls"));
+        assert!(live_wishlist.contains(r#"aria-label="Enabled rare live set" checked"#));
 
         let sharing = route_page_html("/sharegroups");
         assert!(sharing.contains("data-slskr-native-share-group"));
         assert!(sharing.contains("data-slskr-native-member-count"));
+        assert!(sharing.contains("data-slskr-share-group-row-controls"));
 
         let shared = route_page_html("/shared");
         assert!(shared.contains("data-slskr-native-owner"));
         assert!(shared.contains("data-slskr-native-permissions"));
+        assert!(shared.contains("data-slskr-inbound-permission-controls"));
 
         let browse = route_page_html("/browse");
         assert!(browse.contains("data-slskr-native-path"));
         assert!(browse.contains("data-slskr-native-entry-kind"));
         assert!(browse.contains("data-slskr-native-filename"));
+        assert!(browse.contains("data-slskr-browse-entry-controls"));
     }
 
     #[test]

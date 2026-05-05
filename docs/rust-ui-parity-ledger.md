@@ -71,6 +71,11 @@ Completed across the main Rust routes:
 - Selected rows now carry route-specific context action menus. The inspector
   swaps its generic buttons for the selected row's Search, transfer, message,
   user, browse, collection, share, and system actions.
+- Native tables now render route-specific row state controls for high-traffic
+  parity gaps: transfer rows show progress/ETA controls, wishlist rows expose
+  enabled and auto-download toggles, inbound shares show permission actions,
+  share groups expose grant/token controls, and browse rows distinguish folder
+  open from file queue actions.
 
 ## Route Gaps
 
