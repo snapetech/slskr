@@ -3816,6 +3816,21 @@ fn native_table_html(
 
 fn native_meta_cell_html(kind: RouteKind, meta: &str, primary: &str, secondary: &str) -> String {
     match kind {
+        RouteKind::Search | RouteKind::DiscoveryGraph => {
+            let free_slot = meta.contains("free slot");
+            let queue = meta
+                .split("queue")
+                .nth(1)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("pending");
+            format!(
+                r#"<div class="slskr-native-state-stack" data-slskr-search-result-controls><span>{meta}</span><div class="slskr-native-state-controls"><span>{slot}</span><span>Queue {queue}</span><button type="button">Expand Result</button><button type="button">Fold Duplicates</button></div><div class="slskr-native-ranking-chips"><span>Smart rank</span><span>Exact match</span><span>Duplicate review</span></div></div>"#,
+                meta = escape_html(meta),
+                slot = if free_slot { "Free slot" } else { "Queued" },
+                queue = escape_html(queue),
+            )
+        }
         RouteKind::Downloads | RouteKind::Uploads => {
             let progress = native_progress_percent(meta);
             let state = meta.split('/').next().unwrap_or(meta).trim();
@@ -5424,6 +5439,10 @@ fn native_messaging_workspace_html(route_table: &str) -> String {
     )
 }
 
+fn native_search_filter_panel_html() -> String {
+    r#"<section class="slskr-native-filter-modal" data-slskr-search-filter-modal><header><div><h4>Search Filters</h4><p>Format, bitrate, size, duration, queue, and duplicate controls stay visible beside results.</p></div><button type="button">Apply Filters</button></header><div class="slskr-native-filter-grid"><label><span>Include words</span><input aria-label="Include words" placeholder="remix instrumental"></label><label><span>Exclude words</span><input aria-label="Exclude words" placeholder="live demo"></label><label><span>Min bitrate</span><input aria-label="Min bitrate" placeholder="320"></label><label><span>Format</span><input aria-label="Format" placeholder="flac mp3 wav"></label><label><span>Min size</span><input aria-label="Min size" placeholder="1 MB"></label><label><span>Max size</span><input aria-label="Max size" placeholder="100 MB"></label><label><span>Min duration</span><input aria-label="Min duration" placeholder="3 min"></label><label><span>Max queue</span><input aria-label="Max queue" placeholder="8"></label></div><div class="slskr-native-filter-toggles"><label><input type="checkbox" aria-label="Fold duplicate results" checked> Fold duplicate results</label><label><input type="checkbox" aria-label="Prefer free upload slots" checked> Prefer free slots</label><label><input type="checkbox" aria-label="Hide locked files"> Hide locked files</label><select aria-label="Search ranking profile"><option>Smart ranking</option><option>Exact match first</option><option>Fastest peer first</option><option>Lossless first</option></select></div></section>"#.to_string()
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
@@ -5431,7 +5450,8 @@ fn route_native_workspace_html(
     let route_table = native_route_table_html(kind, rows);
     let html = match kind {
         RouteKind::Search => format!(
-            r#"<div class="slskr-native-grid search-native"><section class="slskr-native-main"><h3>Searches</h3><div class="slskr-native-command-row"><input aria-label="Search text" placeholder="Search" value="public domain jazz"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button">Search</button><button type="button">Stop</button><button type="button">Clear</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Search Detail</h3><p>Select a search to inspect files, peers, queue, warnings, duplicate groups, and download preview.</p>{preview}{stats}</aside></div>"#,
+            r#"<div class="slskr-native-grid search-native"><section class="slskr-native-main"><h3>Searches</h3><div class="slskr-native-command-row"><input aria-label="Search text" placeholder="Search" value="public domain jazz"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button">Search</button><button type="button">Stop</button><button type="button">Clear</button></div>{filter_panel}{route_table}</section><aside class="slskr-native-side"><h3>Search Detail</h3><p>Select a search to inspect files, peers, queue, warnings, duplicate groups, and download preview.</p>{preview}{stats}<div class="slskr-native-mini-list" data-slskr-search-expansion><span>Expanded directories</span><span>Locked file warnings</span><span>Folded duplicate sources</span><span>Ranking reasons</span></div></aside></div>"#,
+            filter_panel = native_search_filter_panel_html(),
             route_table = route_table,
             preview = native_selection_preview_html(
                 "No search selected",
@@ -12391,7 +12411,16 @@ mod tests {
         }
 
         let search = route_page_html("/searches");
-        for value in ["Search Detail", "No search selected", "Duplicate folding"] {
+        for value in [
+            "Search Detail",
+            "No search selected",
+            "Duplicate folding",
+            "data-slskr-search-filter-modal",
+            "Fold duplicate results",
+            "Search ranking profile",
+            "Hide locked files",
+            "data-slskr-search-expansion",
+        ] {
             assert!(
                 search.contains(value),
                 "search workspace should contain {value}"
@@ -12804,6 +12833,10 @@ mod tests {
         assert!(search.contains(r#"data-slskr-native-filename="Archive/Track.flac""#));
         assert!(search.contains(r#"data-slskr-native-peer="peer1""#));
         assert!(search.contains(r#"data-slskr-native-queue-state="free slot / queue 2""#));
+        assert!(search.contains("data-slskr-search-result-controls"));
+        assert!(search.contains("Expand Result"));
+        assert!(search.contains("Fold Duplicates"));
+        assert!(search.contains("Smart rank"));
 
         let downloads = route_workspace_result_html(
             "/downloads",

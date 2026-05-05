@@ -1364,6 +1364,55 @@ body {
   padding: 0 8px;
 }
 
+.slskr-native-ranking-chips,
+.slskr-native-filter-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.slskr-native-ranking-chips span,
+.slskr-native-filter-toggles label {
+  background: #101819;
+  border: 1px solid #243d3a;
+  color: #c6d0ca;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
+.slskr-native-filter-modal {
+  background: #0e1718;
+  border: 1px solid #2b504d;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.slskr-native-filter-modal header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.slskr-native-filter-modal h4,
+.slskr-native-filter-modal p {
+  margin: 0;
+}
+
+.slskr-native-filter-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.slskr-native-filter-grid label {
+  align-items: stretch;
+  display: grid;
+  gap: 4px;
+}
+
 .slskr-native-table button {
   background: #253734;
   border: 1px solid #3d5c55;

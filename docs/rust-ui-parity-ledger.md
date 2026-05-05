@@ -76,6 +76,10 @@ Completed across the main Rust routes:
   enabled and auto-download toggles, inbound shares show permission actions,
   share groups expose grant/token controls, and browse rows distinguish folder
   open from file queue actions.
+- Search now exposes the old filter-modal controls inline in the native Rust
+  workspace: include/exclude terms, format, bitrate, size, duration, queue,
+  duplicate folding, free-slot preference, locked-file filtering, ranking
+  profile, result expansion, and ranking/duplicate chips.
 
 ## Route Gaps
 
