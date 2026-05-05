@@ -43,6 +43,8 @@ pub struct HttpHeaders {
     pub transfer_encoding: Option<String>,
     pub authorization: Option<String>,
     pub x_api_key: Option<String>,
+    pub forwarded: Option<String>,
+    pub x_forwarded_for: Option<String>,
     pub upgrade: Option<String>,
     pub sec_websocket_key: Option<String>,
     pub sec_websocket_protocol: Option<String>,
@@ -81,6 +83,8 @@ impl HttpHeaders {
                     "transfer-encoding" => headers.transfer_encoding = Some(value.to_lowercase()),
                     "authorization" => headers.authorization = Some(value.to_string()),
                     "x-api-key" => headers.x_api_key = Some(value.to_string()),
+                    "forwarded" => headers.forwarded = Some(value.to_string()),
+                    "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
                     "upgrade" => headers.upgrade = Some(value.to_lowercase()),
                     "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
                     "sec-websocket-protocol" => {
@@ -237,8 +241,13 @@ pub async fn read_http_request<R: AsyncBufRead + Unpin>(
             }
             "authorization" => headers.authorization = Some(value.to_string()),
             "x-api-key" => headers.x_api_key = Some(value.to_string()),
+            "forwarded" => headers.forwarded = Some(value.to_string()),
+            "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
             "upgrade" => headers.upgrade = Some(value.to_lowercase()),
             "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
+            "sec-websocket-protocol" => {
+                headers.sec_websocket_protocol = Some(value.to_string());
+            }
             "sec-websocket-version" => {
                 headers.sec_websocket_version = Some(value.to_string());
             }
@@ -484,6 +493,8 @@ mod tests {
             "Content-Length: 256",
             "Authorization: Bearer token123",
             "X-API-Key: key123",
+            "Forwarded: for=198.51.100.24;proto=https",
+            "X-Forwarded-For: 198.51.100.24, 127.0.0.1",
             "Connection: keep-alive",
             "Sec-WebSocket-Protocol: slskr.api-token.route%2Dtoken",
         ];
@@ -493,6 +504,14 @@ mod tests {
         assert_eq!(headers.content_length, Some(256));
         assert_eq!(headers.authorization, Some("Bearer token123".to_string()));
         assert_eq!(headers.x_api_key, Some("key123".to_string()));
+        assert_eq!(
+            headers.forwarded,
+            Some("for=198.51.100.24;proto=https".to_string())
+        );
+        assert_eq!(
+            headers.x_forwarded_for,
+            Some("198.51.100.24, 127.0.0.1".to_string())
+        );
         assert_eq!(headers.connection, "keep-alive");
         assert_eq!(
             headers.sec_websocket_protocol,

@@ -11,6 +11,7 @@ GATES=(
   scripts/check-websocket-auth-coverage.sh
   scripts/check-csp-policy.sh
   scripts/check-webhook-outbound-policy.sh
+  scripts/check-rate-limit-proxy-policy.sh
   scripts/check-workflow-release-policy.sh
   scripts/check-package-artifact-matrix.sh
   scripts/check-client-sdk-gates.sh

@@ -46,11 +46,15 @@ server {
         proxy_pass http://127.0.0.1:5030;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Forwarded "for=$remote_addr;proto=$scheme;host=$host";
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
     }
 }
 ```
+
+Set `SLSKR_TRUSTED_PROXY_CIDRS` or `[auth].trusted_proxy_cidrs` to the proxy source CIDRs before relying on `Forwarded` or `X-Forwarded-For` for anonymous rate-limit keys. slskr ignores forwarded client IP headers from untrusted peers so direct clients cannot spoof another address.
 
 Do not add wildcard `Access-Control-Allow-Origin: *` for authenticated browser deployments. slskr emits same-origin CORS responses and rejects cross-site mutating API requests when auth is enabled.
 

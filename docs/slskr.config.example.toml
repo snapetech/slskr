@@ -48,6 +48,8 @@ api_token = "replace-with-a-random-token"
 cookie_auth_enabled = false
 rate_limit_anonymous = 1000
 rate_limit_authenticated = 5000
+# Trust forwarded client IP headers only from these proxy CIDRs.
+trusted_proxy_cidrs = ["127.0.0.1/32"]
 
 [persistence]
 enabled = false

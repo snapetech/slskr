@@ -9401,6 +9401,75 @@ fn rate_limit_user_key(authorization: Option<&str>, cookie: Option<&str>) -> Str
     format!("auth:{}", hex::encode(&digest[..16]))
 }
 
+fn rate_limit_remote_addr(
+    config: &AppConfig,
+    remote_addr: Option<SocketAddr>,
+    headers: &http_server::HttpHeaders,
+) -> Option<SocketAddr> {
+    let remote_addr = remote_addr?;
+    if !config
+        .trusted_proxy_cidrs
+        .iter()
+        .any(|cidr| cidr.contains(remote_addr.ip()))
+    {
+        return Some(remote_addr);
+    }
+
+    forwarded_client_ip(headers)
+        .map(|ip| SocketAddr::new(ip, 0))
+        .or(Some(remote_addr))
+}
+
+fn forwarded_client_ip(headers: &http_server::HttpHeaders) -> Option<IpAddr> {
+    headers
+        .forwarded
+        .as_deref()
+        .and_then(forwarded_header_client_ip)
+        .or_else(|| {
+            headers
+                .x_forwarded_for
+                .as_deref()
+                .and_then(x_forwarded_for_client_ip)
+        })
+}
+
+fn x_forwarded_for_client_ip(value: &str) -> Option<IpAddr> {
+    value.split(',').find_map(parse_forwarded_ip_token)
+}
+
+fn forwarded_header_client_ip(value: &str) -> Option<IpAddr> {
+    value
+        .split(',')
+        .flat_map(|entry| entry.split(';'))
+        .find_map(|part| {
+            let (name, value) = part.trim().split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("for")
+                .then_some(value)
+                .and_then(parse_forwarded_ip_token)
+        })
+}
+
+fn parse_forwarded_ip_token(value: &str) -> Option<IpAddr> {
+    let value = value.trim().trim_matches('"');
+    if value.eq_ignore_ascii_case("unknown") || value.starts_with('_') {
+        return None;
+    }
+    let without_brackets = value
+        .strip_prefix('[')
+        .and_then(|value| value.split_once(']').map(|(ip, _)| ip))
+        .unwrap_or(value);
+    if let Ok(ip) = without_brackets.parse::<IpAddr>() {
+        return Some(ip);
+    }
+    let host_part = without_brackets
+        .rsplit_once(':')
+        .filter(|(host, port)| !host.contains(':') && port.parse::<u16>().is_ok())
+        .map(|(host, _)| host)
+        .unwrap_or(without_brackets);
+    host_part.parse::<IpAddr>().ok()
+}
+
 fn websocket_auth_protocol(protocol_header: Option<&str>) -> Option<&str> {
     protocol_header?.split(',').map(str::trim).find(|protocol| {
         let Some(encoded) = protocol.strip_prefix(WEBSOCKET_AUTH_PROTOCOL_PREFIX) else {
@@ -12520,9 +12589,11 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         let rate_limit_user = authenticated_for_rate_limit
             .then(|| rate_limit_user_key(authorization, sec_headers.cookie.as_deref()));
         let username = rate_limit_user.as_deref();
+        let rate_limit_remote_addr =
+            rate_limit_remote_addr(&state.config, remote_addr, &req.headers);
         let allowed = state
             .rate_limiter
-            .check_rate_limit(remote_addr, username)
+            .check_rate_limit(rate_limit_remote_addr, username)
             .await;
 
         if method == "GET" && websocket_path == "/api/events/ws" {
@@ -12672,11 +12743,11 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         // Build extra headers
         let remaining = state
             .rate_limiter
-            .get_remaining(remote_addr, username)
+            .get_remaining(rate_limit_remote_addr, username)
             .await;
         let reset_secs = state
             .rate_limiter
-            .get_reset_time(remote_addr, username)
+            .get_reset_time(rate_limit_remote_addr, username)
             .await;
         let max_requests = if authenticated_for_rate_limit {
             state.config.api_rate_limit_authenticated
@@ -14389,6 +14460,7 @@ fn encode_file_entry(writer: &mut Writer, entry: &FileEntry) -> Result<(), Strin
 mod tests {
     use std::{
         collections::BTreeMap,
+        net::{IpAddr, SocketAddr},
         path::{Path, PathBuf},
         sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -14470,6 +14542,49 @@ mod tests {
         let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
         assert_eq!(json["status"], "ok");
         assert_eq!(json["warnings"][0], "auth_disabled_non_loopback");
+    }
+
+    #[test]
+    fn trusted_proxy_rate_limit_addr_uses_forwarded_headers_only_from_allowlist() {
+        let trusted_env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "127.0.0.1/32");
+        let trusted_config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &trusted_env)
+                .expect("trusted proxy config");
+        let untrusted_config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &MapEnv::default())
+                .expect("default config");
+        let proxy = Some("127.0.0.1:5000".parse::<SocketAddr>().unwrap());
+        let headers = super::http_server::HttpHeaders {
+            x_forwarded_for: Some("198.51.100.24, 127.0.0.1".to_owned()),
+            ..Default::default()
+        };
+
+        let trusted_addr = super::rate_limit_remote_addr(&trusted_config, proxy, &headers)
+            .expect("trusted forwarded address");
+        assert_eq!(
+            trusted_addr.ip(),
+            "198.51.100.24".parse::<IpAddr>().unwrap()
+        );
+
+        let untrusted_addr = super::rate_limit_remote_addr(&untrusted_config, proxy, &headers)
+            .expect("raw peer address");
+        assert_eq!(untrusted_addr.ip(), "127.0.0.1".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn trusted_proxy_rate_limit_addr_parses_forwarded_header_ipv6() {
+        let env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "::1/128");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("proxy config");
+        let proxy = Some("[::1]:5000".parse::<SocketAddr>().unwrap());
+        let headers = super::http_server::HttpHeaders {
+            forwarded: Some(r#"for="[2001:db8::42]:1234";proto=https"#.to_owned()),
+            ..Default::default()
+        };
+
+        let addr = super::rate_limit_remote_addr(&config, proxy, &headers)
+            .expect("trusted forwarded address");
+        assert_eq!(addr.ip(), "2001:db8::42".parse::<IpAddr>().unwrap());
     }
 
     fn test_state_with_env_parts(

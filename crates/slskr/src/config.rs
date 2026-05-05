@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     time::Duration,
 };
@@ -44,6 +44,7 @@ pub struct AppConfig {
     pub api_cookie_auth_enabled: bool,
     pub api_rate_limit_anonymous: u32,
     pub api_rate_limit_authenticated: u32,
+    pub trusted_proxy_cidrs: Vec<TrustedProxyCidr>,
     pub persistence_enabled: bool,
     pub integrations: IntegrationSettings,
 }
@@ -198,6 +199,10 @@ impl AppConfig {
             file_config.auth.rate_limit_authenticated,
             5000_u32,
         )?;
+        let trusted_proxy_cidrs = trusted_proxy_cidrs_from_layers(
+            env.var("SLSKR_TRUSTED_PROXY_CIDRS"),
+            file_config.auth.trusted_proxy_cidrs,
+        )?;
         let persistence_enabled = env_bool_layer(
             env,
             "SLSKR_PERSISTENCE_ENABLED",
@@ -234,6 +239,7 @@ impl AppConfig {
             api_cookie_auth_enabled,
             api_rate_limit_anonymous,
             api_rate_limit_authenticated,
+            trusted_proxy_cidrs,
             persistence_enabled,
             integrations,
         })
@@ -248,7 +254,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -282,9 +288,56 @@ impl AppConfig {
             self.auth_required,
             self.api_token.is_some(),
             self.api_cookie_auth_enabled,
+            self.trusted_proxy_cidrs.len(),
             self.persistence_enabled,
             self.integrations.sanitized_json()
         )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrustedProxyCidr {
+    network: IpAddr,
+    prefix: u8,
+}
+
+impl TrustedProxyCidr {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let (addr, prefix) = value
+            .split_once('/')
+            .ok_or_else(|| format!("trusted proxy CIDR {value:?} must include a prefix length"))?;
+        let network = addr.parse::<IpAddr>().map_err(|error| {
+            format!("trusted proxy CIDR {value:?} has invalid address: {error}")
+        })?;
+        let prefix = prefix
+            .parse::<u8>()
+            .map_err(|error| format!("trusted proxy CIDR {value:?} has invalid prefix: {error}"))?;
+        let max_prefix = match network {
+            IpAddr::V4(_) => 32,
+            IpAddr::V6(_) => 128,
+        };
+        if prefix > max_prefix {
+            return Err(format!(
+                "trusted proxy CIDR {value:?} prefix exceeds {max_prefix}"
+            ));
+        }
+        Ok(Self { network, prefix })
+    }
+
+    pub fn contains(&self, ip: IpAddr) -> bool {
+        match (self.network, ip) {
+            (IpAddr::V4(network), IpAddr::V4(ip)) => {
+                let network = u32::from(network);
+                let ip = u32::from(ip);
+                self.prefix == 0 || network >> (32 - self.prefix) == ip >> (32 - self.prefix)
+            }
+            (IpAddr::V6(network), IpAddr::V6(ip)) => {
+                let network = u128::from_be_bytes(network.octets());
+                let ip = u128::from_be_bytes(ip.octets());
+                self.prefix == 0 || network >> (128 - self.prefix) == ip >> (128 - self.prefix)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -636,6 +689,7 @@ pub struct AuthFileConfig {
     cookie_auth_enabled: Option<bool>,
     rate_limit_anonymous: Option<u32>,
     rate_limit_authenticated: Option<u32>,
+    trusted_proxy_cidrs: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -801,6 +855,25 @@ pub fn optional_env_any(env: &dyn ConfigEnv, names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| env.var(name))
 }
 
+fn trusted_proxy_cidrs_from_layers(
+    env_value: Option<String>,
+    file_value: Vec<String>,
+) -> Result<Vec<TrustedProxyCidr>, String> {
+    let values = match env_value {
+        Some(value) => value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>(),
+        None => file_value,
+    };
+    values
+        .into_iter()
+        .map(|value| TrustedProxyCidr::parse(&value))
+        .collect()
+}
+
 fn env_parse_layer<E, T>(
     env: &E,
     name: &str,
@@ -950,7 +1023,26 @@ fn extension_for(filename: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[derive(Default)]
+    struct MapEnv {
+        values: BTreeMap<String, String>,
+    }
+
+    impl MapEnv {
+        fn with(mut self, name: &str, value: &str) -> Self {
+            self.values.insert(name.to_owned(), value.to_owned());
+            self
+        }
+    }
+
+    impl super::ConfigEnv for MapEnv {
+        fn var(&self, name: &str) -> Option<String> {
+            self.values.get(name).cloned()
+        }
+    }
 
     #[test]
     fn config_file_reader_rejects_oversized_files() {
@@ -1036,5 +1128,34 @@ mod tests {
         assert!(super::config_contains_sensitive_values(
             &with_integration_secret
         ));
+    }
+
+    #[test]
+    fn trusted_proxy_cidrs_parse_from_env_and_file() {
+        let env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128");
+        let config = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+            .expect("trusted proxy env config");
+        assert_eq!(config.trusted_proxy_cidrs.len(), 2);
+        assert!(config.trusted_proxy_cidrs[0].contains("127.0.0.1".parse().unwrap()));
+        assert!(config.trusted_proxy_cidrs[1].contains("::1".parse().unwrap()));
+
+        let file_config = super::FileConfig {
+            auth: super::AuthFileConfig {
+                trusted_proxy_cidrs: vec!["10.0.0.0/8".to_owned()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let config = super::AppConfig::from_layers(None, file_config, &MapEnv::default())
+            .expect("trusted proxy file config");
+        assert!(config.trusted_proxy_cidrs[0].contains("10.1.2.3".parse().unwrap()));
+    }
+
+    #[test]
+    fn trusted_proxy_cidrs_reject_invalid_prefixes() {
+        let env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "127.0.0.1/33");
+        let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+            .expect_err("invalid trusted proxy prefix should fail");
+        assert!(error.contains("prefix exceeds"));
     }
 }

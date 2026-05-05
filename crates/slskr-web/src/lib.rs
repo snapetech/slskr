@@ -1540,6 +1540,79 @@ pub fn route_action_at(path: &str, index: usize) -> Option<RouteAction> {
     surface_actions(page.surface).get(index).copied()
 }
 
+pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAction> {
+    let label = label.trim();
+    if label.is_empty() {
+        return None;
+    }
+    let normalized = label.to_ascii_lowercase();
+    let aliases: &[&str] = match (route_kind(path), normalized.as_str()) {
+        (RouteKind::Search, "search" | "queue search" | "search and open results") => {
+            &["Start Search"]
+        }
+        (RouteKind::Search, "stop") => &["Stop Search"],
+        (RouteKind::Search, "clear") => &["Clear Searches"],
+        (RouteKind::Search, "download" | "queue selected") => &["Queue Download"],
+        (RouteKind::DiscoveryGraph, "build graph" | "build atlas" | "queue nearby") => {
+            &["Build Discovery Graph"]
+        }
+        (RouteKind::PlaylistIntake, "preview playlist" | "import playlist") => {
+            &["Preview Playlist"]
+        }
+        (RouteKind::PlaylistIntake, "queue plans") => &["Queue Discography Job"],
+        (RouteKind::Wishlist, "add wanted search" | "add search" | "add your first search") => {
+            &["Add Wishlist Item"]
+        }
+        (RouteKind::Wishlist, "run selected" | "run enabled" | "run") => &["Run Wishlist Search"],
+        (RouteKind::Downloads, "download" | "queue download" | "retry" | "retry all") => {
+            &["Queue Download"]
+        }
+        (RouteKind::Downloads, "clear completed") => &["Clear Completed Downloads"],
+        (RouteKind::Downloads, "enable acceleration") => &["Enable Accelerated Downloads"],
+        (RouteKind::Uploads, "clear completed") => &["Clear Completed Uploads"],
+        (RouteKind::Messages | RouteKind::Rooms, "reply" | "direct message" | "send message") => {
+            &["Send Message"]
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "acknowledge") => &["Acknowledge Conversation"],
+        (RouteKind::Messages | RouteKind::Rooms, "join" | "join room") => &["Join Room"],
+        (RouteKind::Messages | RouteKind::Rooms, "leave" | "leave room") => &["Leave Room"],
+        (RouteKind::Users, "watch") => &["Watch User"],
+        (RouteKind::Users, "save note") => &["Add User Note"],
+        (RouteKind::Users, "browse") => &["Request Directory"],
+        (RouteKind::Users, "message") => &["Send Message"],
+        (RouteKind::Contacts, "add contact" | "add friend") => &["Add Contact"],
+        (RouteKind::Collections, "create collection") => &["Create Collection"],
+        (RouteKind::Collections, "add item") => &["Add Library Item"],
+        (RouteKind::Collections, "share") => &["Create Share Grant"],
+        (RouteKind::ShareGroups, "create group" | "create your first group") => {
+            &["Create Share Group"]
+        }
+        (RouteKind::ShareGroups, "add member") => &["Add Share Group Member"],
+        (RouteKind::ShareGroups, "issue token") => &["Issue Share Token"],
+        (RouteKind::SharedWithMe, "backfill") => &["Backfill Share Grant"],
+        (RouteKind::SharedWithMe, "copy token") => &["Issue Share Token"],
+        (RouteKind::SharedWithMe, "leave share") => &["Delete Share Grant"],
+        (RouteKind::Browse, "browse" | "open a new browse tab" | "new tab") => {
+            &["Request Directory"]
+        }
+        (RouteKind::Browse, "download selected" | "download") => &["Queue Download"],
+        (RouteKind::System, "connect") => &["Connect"],
+        (RouteKind::System, "disconnect") => &["Disconnect"],
+        (RouteKind::System, "rescan" | "rescan shares") => &["Rescan Shares"],
+        (RouteKind::System, "vacuum" | "vacuum database") => &["Vacuum Database"],
+        _ => &[],
+    };
+    aliases
+        .iter()
+        .chain(std::iter::once(&label))
+        .find_map(|candidate| {
+            route_actions()
+                .iter()
+                .copied()
+                .find(|action| action.label.eq_ignore_ascii_case(candidate))
+        })
+}
+
 pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
     let value = value.trim();
     match body {
@@ -4931,18 +5004,26 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| "Run action".to_string());
-    let route = button
+    let route_label = button
         .closest(".slskr-workflow")
         .ok()
         .flatten()
         .and_then(|workflow| workflow.get_attribute("data-slskr-route-kind"))
         .unwrap_or_else(|| "Workflow".to_string());
+    let route_path = document
+        .default_view()
+        .and_then(|window| window.location().pathname().ok())
+        .unwrap_or_else(|| "/searches".to_string());
+    if let Some(route_action) = route_action_for_native_label(&route_path, &action) {
+        run_native_route_action(document, button, route_action);
+        return;
+    }
     let selected = document
         .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
         .ok()
         .flatten()
         .and_then(|row| row.get_attribute("data-slskr-native-title"));
-    let target = selected.unwrap_or_else(|| route.clone());
+    let target = selected.unwrap_or_else(|| route_label.clone());
     let message = format!("{} queued for {}", action, target);
     if let Some(status) = document.get_element_by_id("slskr-action-status") {
         status.set_inner_html(&format!(
@@ -4951,6 +5032,106 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         ));
     }
     show_toast(document, &message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn run_native_route_action(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    action: RouteAction,
+) {
+    let Some(window) = document.default_view() else {
+        return;
+    };
+    if action.method == "DELETE" {
+        let confirmed = window
+            .confirm_with_message(&format!("Run {}?", action.label))
+            .unwrap_or(false);
+        if !confirmed {
+            show_toast(document, "Action cancelled");
+            return;
+        }
+    }
+    let route_path = window
+        .location()
+        .pathname()
+        .unwrap_or_else(|_| "/searches".to_string());
+    let value = native_action_value(document, button);
+    let body = action_body_from_value(action.body, &value);
+    let method = action.method.to_string();
+    let label = action.label.to_string();
+    let path = concrete_action_path(&route_path, action);
+    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+        status.set_inner_html(&format!(
+            "<strong>{}</strong> sending {}",
+            escape_html(&label),
+            escape_html(&method)
+        ));
+    }
+    show_toast(document, &format!("{} sending", label));
+    let document = document.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = fetch_text_with_method(&window, &path, &method, body.as_deref()).await;
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            match result {
+                Ok(response) => status.set_inner_html(&format!(
+                    "<strong>{}</strong> {}",
+                    escape_html(&label),
+                    escape_html(&compact_preview(&response))
+                )),
+                Err(error) => {
+                    let message = error
+                        .as_string()
+                        .unwrap_or_else(|| "request failed".to_string());
+                    status.set_inner_html(&format!(
+                        "<strong>{}</strong> {}",
+                        escape_html(&label),
+                        escape_html(&message)
+                    ));
+                }
+            }
+        }
+        let _ = refresh_route_data(&window).await;
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_action_value(document: &web_sys::Document, button: &web_sys::Element) -> String {
+    if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
+        for selector in [
+            "input:not([type=checkbox]):not([type=radio])",
+            "textarea",
+            "select",
+        ] {
+            if let Ok(Some(element)) = workspace.query_selector(selector) {
+                if let Some(value) = form_control_value(&element) {
+                    if !value.trim().is_empty() {
+                        return value;
+                    }
+                }
+            }
+        }
+    }
+    document
+        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+        .ok()
+        .flatten()
+        .and_then(|row| row.get_attribute("data-slskr-native-title"))
+        .unwrap_or_else(|| "peer1".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn form_control_value(element: &web_sys::Element) -> Option<String> {
+    if let Some(input) = element.dyn_ref::<web_sys::HtmlInputElement>() {
+        return Some(input.value());
+    }
+    if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+        return Some(textarea.value());
+    }
+    if let Some(select) = element.dyn_ref::<web_sys::HtmlSelectElement>() {
+        return Some(select.value());
+    }
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -9585,6 +9766,32 @@ mod tests {
         assert!(integrations.contains("Build Discovery Graph"));
         assert!(integrations.contains("Track MusicBrainz Target"));
         assert!(integrations.contains("Create SongID Run"));
+    }
+
+    #[test]
+    fn native_workflow_labels_resolve_to_real_route_actions() {
+        let expectations = [
+            ("/searches", "Search", "Start Search"),
+            ("/discovery-graph", "Build Atlas", "Build Discovery Graph"),
+            ("/playlist-intake", "Import Playlist", "Preview Playlist"),
+            ("/wishlist", "Run Enabled", "Run Wishlist Search"),
+            ("/downloads", "Clear Completed", "Clear Completed Downloads"),
+            ("/uploads", "Clear Completed", "Clear Completed Uploads"),
+            ("/messages", "Reply", "Send Message"),
+            ("/users", "Watch", "Watch User"),
+            ("/contacts", "Add Friend", "Add Contact"),
+            ("/collections", "Add Item", "Add Library Item"),
+            ("/sharegroups", "Issue Token", "Issue Share Token"),
+            ("/shared", "Backfill", "Backfill Share Grant"),
+            ("/browse", "Download Selected", "Queue Download"),
+            ("/system", "Vacuum database", "Vacuum Database"),
+        ];
+
+        for (path, label, expected_action) in expectations {
+            let action = route_action_for_native_label(path, label)
+                .unwrap_or_else(|| panic!("{path} {label} should resolve"));
+            assert_eq!(action.label, expected_action);
+        }
     }
 
     #[test]
