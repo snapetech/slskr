@@ -1,5 +1,8 @@
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NavItem {
     pub href: &'static str,
@@ -26,6 +29,12 @@ pub struct ApiEndpoint {
     pub method: &'static str,
     pub path: &'static str,
     pub surface: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeProbe {
+    pub label: &'static str,
+    pub path: &'static str,
 }
 
 pub const fn api_base_path() -> &'static str {
@@ -449,17 +458,109 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
     ]
 }
 
+pub const fn runtime_probes() -> &'static [RuntimeProbe] {
+    &[
+        RuntimeProbe {
+            label: "Health",
+            path: "/health",
+        },
+        RuntimeProbe {
+            label: "Version",
+            path: "/version",
+        },
+        RuntimeProbe {
+            label: "Application",
+            path: "/application",
+        },
+        RuntimeProbe {
+            label: "Server",
+            path: "/server",
+        },
+    ]
+}
+
 pub fn endpoint_url(endpoint: &str) -> String {
     format!("{}{}", api_base_path(), endpoint)
 }
 
 pub fn compatibility_report() -> String {
     format!(
-        "{} UI routes, {} nav items, {} API contracts",
+        "{} UI routes, {} nav items, {} API contracts, {} runtime probes",
         ui_routes().len(),
         nav_items().len(),
-        api_endpoints().len()
+        api_endpoints().len(),
+        runtime_probes().len()
     )
+}
+
+fn escape_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn compact_preview(value: &str) -> String {
+    let trimmed = value.trim();
+    let mut preview = String::new();
+    for ch in trimmed.chars().take(180) {
+        if ch.is_control() {
+            preview.push(' ');
+        } else {
+            preview.push(ch);
+        }
+    }
+    if trimmed.chars().count() > 180 {
+        preview.push_str("...");
+    }
+    preview
+}
+
+pub fn runtime_probe_pending_html() -> String {
+    runtime_probes()
+        .iter()
+        .map(|probe| {
+            format!(
+                r#"<li><strong>{label}</strong><code>{path}</code><span class="slskr-probe-pending">pending</span></li>"#,
+                label = probe.label,
+                path = endpoint_url(probe.path)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+pub fn runtime_probe_result_html(results: &[(&str, &str, Result<&str, &str>)]) -> String {
+    results
+        .iter()
+        .map(|(label, path, result)| match result {
+            Ok(body) => {
+                let preview = escape_html(&compact_preview(body));
+                format!(
+                    r#"<li class="slskr-probe-ok"><strong>{label}</strong><code>{path}</code><span>{preview}</span></li>"#,
+                    label = escape_html(label),
+                    path = escape_html(path),
+                )
+            }
+            Err(error) => {
+                let message = escape_html(error);
+                format!(
+                    r#"<li class="slskr-probe-error"><strong>{label}</strong><code>{path}</code><span>{message}</span></li>"#,
+                    label = escape_html(label),
+                    path = escape_html(path),
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 pub fn shell_html() -> String {
@@ -516,7 +617,8 @@ pub fn shell_html() -> String {
         .join("");
 
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-hero"><p class="slskr-kicker">Rust web migration target</p><h1>slskr</h1><p>Native Rust/WASM app shell for porting the existing browser UI one route at a time.</p><code>{report}</code></header><div class="slskr-grid">{sections}</div><section class="slskr-contract"><h2>Route Parity</h2><ul>{routes}</ul></section><section class="slskr-contract"><h2>API Contracts</h2><ul>{endpoints}</ul></section></main></div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-hero"><p class="slskr-kicker">Rust web migration target</p><h1>slskr</h1><p>Native Rust/WASM app shell for porting the existing browser UI one route at a time.</p><code>{report}</code></header><section class="slskr-contract slskr-runtime"><h2>Runtime Status</h2><ul id="slskr-runtime-status">{runtime}</ul></section><div class="slskr-grid">{sections}</div><section class="slskr-contract"><h2>Route Parity</h2><ul>{routes}</ul></section><section class="slskr-contract"><h2>API Contracts</h2><ul>{endpoints}</ul></section></main></div>"#,
+        runtime = runtime_probe_pending_html(),
         report = compatibility_report()
     )
 }
@@ -532,6 +634,9 @@ pub fn start() -> Result<(), JsValue> {
         .get_element_by_id("root")
         .ok_or_else(|| JsValue::from_str("#root is missing"))?;
     root.set_inner_html(&shell_html());
+    wasm_bindgen_futures::spawn_local(async {
+        let _ = refresh_runtime_status().await;
+    });
     Ok(())
 }
 
@@ -549,6 +654,52 @@ pub fn render_shell_html() -> String {
 #[wasm_bindgen(js_name = compatibilityReport)]
 pub fn wasm_compatibility_report() -> String {
     compatibility_report()
+}
+
+#[wasm_bindgen(js_name = renderRuntimeProbePendingHtml)]
+pub fn wasm_runtime_probe_pending_html() -> String {
+    runtime_probe_pending_html()
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn refresh_runtime_status() -> Result<(), JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("window is unavailable"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("document is unavailable"))?;
+    let Some(status) = document.get_element_by_id("slskr-runtime-status") else {
+        return Ok(());
+    };
+
+    let mut rendered = String::new();
+    for probe in runtime_probes() {
+        let path = endpoint_url(probe.path);
+        let result = fetch_text(&window, &path).await;
+        let row = match result {
+            Ok(body) => runtime_probe_result_html(&[(probe.label, &path, Ok(body.as_str()))]),
+            Err(error) => {
+                let message = error
+                    .as_string()
+                    .unwrap_or_else(|| "request failed".to_string());
+                runtime_probe_result_html(&[(probe.label, &path, Err(message.as_str()))])
+            }
+        };
+        rendered.push_str(&row);
+        status.set_inner_html(&rendered);
+    }
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_text(window: &web_sys::Window, url: &str) -> Result<String, JsValue> {
+    let response_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url)).await?;
+    let response: web_sys::Response = response_value.dyn_into()?;
+    if !response.ok() {
+        return Err(JsValue::from_str(&format!("HTTP {}", response.status())));
+    }
+    let text = wasm_bindgen_futures::JsFuture::from(response.text()?).await?;
+    Ok(text.as_string().unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -572,6 +723,33 @@ mod tests {
         }
         assert!(html.contains("Rust/WASM"));
         assert!(html.contains("/api/v0/searches"));
+        assert!(html.contains("slskr-runtime-status"));
+        assert!(html.contains("/api/v0/health"));
+    }
+
+    #[test]
+    fn runtime_probe_html_escapes_api_values() {
+        let html = runtime_probe_result_html(&[(
+            "Probe",
+            "/api/v0/probe",
+            Ok(r#"<script>"bad"</script>"#),
+        )]);
+        assert!(html.contains("&lt;script&gt;&quot;bad&quot;&lt;/script&gt;"));
+        assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn runtime_probes_cover_public_and_session_status() {
+        let paths = runtime_probes()
+            .iter()
+            .map(|probe| probe.path)
+            .collect::<Vec<_>>();
+        for expected in ["/health", "/version", "/application", "/server"] {
+            assert!(
+                paths.contains(&expected),
+                "missing runtime probe {expected}"
+            );
+        }
     }
 
     #[test]

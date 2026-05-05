@@ -17,7 +17,9 @@ operator workflows.
 The first Rust shell covers the full current route/navigation inventory and the
 major API-backed surfaces: application state, session control, search, wishlist,
 transfers, messages, rooms, browse, identity, collections, integrations, and
-system status.
+system status. The shell also runs browser-side Rust probes against health,
+version, application, and server endpoints so the WASM bundle owns its first
+live API-backed UI state.
 
 ## Build
 

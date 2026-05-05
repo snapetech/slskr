@@ -8,6 +8,7 @@ migration a compiled Rust surface with:
 - a DOM-rendered shell
 - stable route/navigation metadata
 - API endpoint mapping through `/api/v0`
+- browser-side Rust runtime probes for health, version, application, and server state
 - route and API inventory tests that track the existing WebUI surface
 - native unit tests for shell and route contracts
 - a `wasm_bindgen` entry point for browser loading

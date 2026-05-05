@@ -1522,6 +1522,7 @@ name = "slskr-web"
 version = "0.0.0"
 dependencies = [
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

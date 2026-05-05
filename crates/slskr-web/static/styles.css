@@ -163,3 +163,34 @@ body {
   color: #c6d0ca;
   font-size: 12px;
 }
+
+.slskr-runtime {
+  border-color: #5f4229;
+}
+
+.slskr-runtime li {
+  grid-template-columns: 88px 180px 1fr;
+}
+
+.slskr-probe-pending {
+  color: #ffd166;
+}
+
+.slskr-probe-ok {
+  border-color: #28604f;
+}
+
+.slskr-probe-error {
+  border-color: #7a3a3a;
+}
+
+.slskr-probe-error span {
+  color: #ffb4a8;
+}
+
+@media (max-width: 760px) {
+  .slskr-runtime li {
+    align-items: start;
+    grid-template-columns: 1fr;
+  }
+}

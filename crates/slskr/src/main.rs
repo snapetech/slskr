@@ -627,8 +627,6 @@ impl SearchStore {
             .cloned()
     }
 
-    #[allow(dead_code)]
-    #[allow(dead_code)]
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
@@ -822,6 +820,18 @@ impl EventRecord {
             self.created_at
         )
     }
+
+    fn slskd_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id.to_string(),
+            "timestamp": self.created_at.to_string(),
+            "type": self.kind,
+            "data": serde_json::json!({
+                "resource": self.resource,
+                "detail": self.detail,
+            }).to_string(),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -905,6 +915,19 @@ impl EventStore {
             self.history_limit,
             self.next_id
         )
+    }
+
+    fn slskd_json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let entries = self
+            .records
+            .iter()
+            .rev()
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(EventRecord::slskd_json)
+            .collect::<Vec<_>>();
+        serde_json::Value::Array(entries).to_string()
     }
 }
 
@@ -1619,6 +1642,29 @@ impl UserRecord {
             self.updated_at
         )
     }
+
+    fn slskd_status_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "username": self.username,
+            "presence": self.status.as_deref().unwrap_or("Unknown"),
+            "isPrivileged": false,
+        })
+    }
+
+    fn slskd_info_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "description": "",
+            "hasFreeUploadSlot": true,
+            "hasPicture": false,
+            "picture": null,
+            "queueLength": 0,
+            "uploadSlots": 0,
+            "uploadSpeed": self.average_speed.unwrap_or(0),
+            "uploadCount": self.upload_count.unwrap_or(0),
+            "fileCount": self.file_count.unwrap_or(0),
+            "directoryCount": self.directory_count.unwrap_or(0),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -2160,6 +2206,18 @@ impl MessageRecord {
             self.updated_at
         )
     }
+
+    fn slskd_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "timestamp": self.created_at.to_string(),
+            "id": self.id,
+            "username": self.username,
+            "direction": if self.direction == "inbound" { "In" } else { "Out" },
+            "message": self.body,
+            "isAcknowledged": self.acknowledged,
+            "wasReplayed": false,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -2282,6 +2340,93 @@ impl MessageStore {
             self.updated_at
         )
     }
+
+    fn slskd_conversations_json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let mut grouped: BTreeMap<String, Vec<&MessageRecord>> = BTreeMap::new();
+        for record in &self.records {
+            if filter.q.as_deref().is_some_and(|q| {
+                !record.username.to_ascii_lowercase().contains(q)
+                    && !record.body.to_ascii_lowercase().contains(q)
+            }) {
+                continue;
+            }
+            grouped
+                .entry(record.username.clone())
+                .or_default()
+                .push(record);
+        }
+        let conversations = grouped
+            .into_iter()
+            .map(|(username, messages)| slskd_conversation_json(username, messages, true))
+            .collect::<Vec<_>>();
+        serde_json::Value::Array(conversations).to_string()
+    }
+
+    fn slskd_conversation_json(&self, username: &str, include_messages: bool) -> String {
+        let messages = self
+            .records
+            .iter()
+            .filter(|record| record.username == username)
+            .collect::<Vec<_>>();
+        slskd_conversation_json(username.to_owned(), messages, include_messages).to_string()
+    }
+
+    fn slskd_messages_json(&self, username: &str, unacknowledged_only: bool) -> String {
+        let messages = self
+            .records
+            .iter()
+            .filter(|record| record.username == username)
+            .filter(|record| !unacknowledged_only || !record.acknowledged)
+            .map(MessageRecord::slskd_json)
+            .collect::<Vec<_>>();
+        serde_json::Value::Array(messages).to_string()
+    }
+
+    fn ack_all_for_user(&mut self, username: &str) -> usize {
+        let now = unix_timestamp();
+        let mut updated = 0;
+        for record in self
+            .records
+            .iter_mut()
+            .filter(|record| record.username == username && !record.acknowledged)
+        {
+            record.acknowledged = true;
+            record.updated_at = now;
+            updated += 1;
+        }
+        if updated > 0 {
+            self.updated_at = now;
+        }
+        updated
+    }
+}
+
+fn slskd_conversation_json(
+    username: String,
+    messages: Vec<&MessageRecord>,
+    include_messages: bool,
+) -> serde_json::Value {
+    let unacknowledged = messages
+        .iter()
+        .filter(|message| !message.acknowledged)
+        .count();
+    let messages_json = include_messages.then(|| {
+        messages
+            .into_iter()
+            .map(MessageRecord::slskd_json)
+            .collect::<Vec<_>>()
+    });
+    let mut value = serde_json::json!({
+        "username": username,
+        "isActive": true,
+        "unAcknowledgedMessageCount": unacknowledged,
+        "hasUnAcknowledgedMessages": unacknowledged > 0,
+    });
+    if let Some(messages) = messages_json {
+        value["messages"] = serde_json::Value::Array(messages);
+    }
+    value
 }
 
 #[derive(Clone, Debug)]
@@ -2299,6 +2444,15 @@ impl RoomMessageRecord {
             json_escape(&self.body),
             self.created_at
         )
+    }
+
+    fn slskd_json(&self, room_name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "timestamp": self.created_at.to_string(),
+            "username": self.username,
+            "message": self.body,
+            "roomName": room_name,
+        })
     }
 }
 
@@ -2332,6 +2486,25 @@ impl RoomRecord {
             self.messages.len(),
             self.updated_at
         )
+    }
+
+    fn slskd_info_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "userCount": self.user_count.unwrap_or(0),
+            "isPrivate": self.kind != "public",
+            "isOwned": self.operated,
+            "isModerated": self.operated,
+        })
+    }
+
+    fn slskd_room_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "isPrivate": self.kind != "public",
+            "users": [],
+            "messages": self.messages.iter().map(|message| message.slskd_json(&self.name)).collect::<Vec<_>>(),
+        })
     }
 }
 
@@ -2510,6 +2683,16 @@ impl RoomStore {
             .collect::<Vec<_>>()
             .join(",");
         format!("[{}]", records)
+    }
+
+    fn slskd_available_json(&self) -> String {
+        serde_json::Value::Array(
+            self.records
+                .iter()
+                .map(RoomRecord::slskd_info_json)
+                .collect::<Vec<_>>(),
+        )
+        .to_string()
     }
 
     fn summary_json(&self) -> String {
@@ -3770,16 +3953,20 @@ async fn route_http_request_with_headers(
         ("GET", "/api/application/version/latest") => {
             Ok(routing::ok_response(slskd_version_json().to_string()))
         }
+        ("GET", "/api/application/version") => {
+            Ok(routing::ok_response(serde_json::json!(APP_VERSION).to_string()))
+        }
         ("PUT", "/api/application") | ("DELETE", "/api/application") => {
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
+        ("POST", "/api/application/gc") => Ok(routing::ok_response("true".to_owned())),
         ("GET", "/api/server") => {
             let session = state.session.read().await;
             let body = slskd_server_state_json(&session, &state.config).to_string();
             drop(session);
             Ok(routing::ok_response(body))
         }
-        ("POST", "/api/server") => {
+        ("PUT", "/api/server") | ("POST", "/api/server") => {
             send_session_command(state, SessionCommand::Connect).await.ok();
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
@@ -3787,10 +3974,7 @@ async fn route_http_request_with_headers(
             send_session_command(state, SessionCommand::Disconnect).await.ok();
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
-        ("GET", "/api/session/enabled") => Ok(routing::ok_response(format!(
-            "{{\"enabled\":{}}}",
-            state.config.auth_required
-        ))),
+        ("GET", "/api/session/enabled") => Ok(routing::ok_response(state.config.auth_required.to_string())),
         ("POST", "/api/session") => Ok(routing::ok_response(serde_json::json!({
             "name": "slskr",
             "tokenType": "ApiKey",
@@ -4106,6 +4290,21 @@ async fn route_http_request_with_headers(
                 content_type: "application/json",
                 body: events.json(route.query),
             })
+        }
+        ("GET", "/api/events/slskd") => {
+            let events = state.events.read().await;
+            Ok(HttpResponse {
+                status: "200 OK",
+                content_type: "application/json",
+                body: events.slskd_json(route.query),
+            })
+        }
+        ("POST", path) if path.starts_with("/api/events/") && path.len() > 12 => {
+            let kind = &path[12..];
+            let mut events = state.events.write().await;
+             events.record("compat.event", kind, json_body_string(body).or_else(|| Some(body.to_owned())));
+             drop(events);
+             Ok(routing::ok_response("true".to_owned()))
          }
          // WEBHOOK ENDPOINTS
          ("GET", "/api/webhooks") => {
@@ -4359,6 +4558,15 @@ async fn route_http_request_with_headers(
                 content_type: "application/json",
                 body: shares.catalog_json(route.query),
             })
+        }
+        ("PUT", "/api/shares") => {
+            let rebuilt = build_share_index(&state.config);
+            let json = rebuilt.json();
+            let mut shares = state.shares.write().await;
+            *shares = rebuilt;
+            drop(shares);
+            record_event(state, "share.scan.completed", "shares", None).await;
+            Ok(routing::ok_response((!json.is_empty()).to_string()))
         }
         ("GET", path) if path.starts_with("/api/files/") || path.starts_with("/api/v0/files/") => {
             let folder = path.strip_prefix("/api/v0/files/")
@@ -4757,14 +4965,14 @@ async fn route_http_request_with_headers(
               Ok(routing::created_response(entry.json()))
          }
 
-         ("GET", "/api/transfers/downloads") => {
+         ("GET", "/api/transfers/downloads") | ("GET", "/api/transfers/downloads/") => {
              let transfers = state.transfers.read().await;
              let body = transfers.slskd_transfers_json(0, None);
              drop(transfers);
              Ok(routing::ok_response(body))
          }
 
-         ("GET", "/api/transfers/uploads") => {
+         ("GET", "/api/transfers/uploads") | ("GET", "/api/transfers/uploads/") => {
              let transfers = state.transfers.read().await;
              let body = transfers.slskd_transfers_json(1, None);
              drop(transfers);
@@ -5111,24 +5319,28 @@ async fn route_http_request_with_headers(
 
         // USER PROFILE ENDPOINTS
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/info") => {
-            let username = path.strip_prefix("/api/users/")
+            let username = path
+                .strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/info"))
                 .unwrap_or("unknown");
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
-                let json = format!(
-                    "{{\"username\":\"{}\",\"file_count\":{},\"directory_count\":{},\"average_speed\":{},\"upload_count\":{}}}",
-                    json_escape(&record.username),
-                    json_u32_option(record.file_count),
-                    json_u32_option(record.directory_count),
-                    json_u32_option(record.average_speed),
-                    json_u32_option(record.upload_count)
-                );
+                let json = record.slskd_info_json().to_string();
                 drop(users);
                 Ok(routing::ok_response(json))
             } else {
                 drop(users);
-                Ok(routing::not_found_response())
+                let record = UserRecord {
+                    username: username.to_owned(),
+                    watched: false,
+                    status: None,
+                    average_speed: None,
+                    upload_count: None,
+                    file_count: None,
+                    directory_count: None,
+                    updated_at: unix_timestamp(),
+                };
+                Ok(routing::ok_response(record.slskd_info_json().to_string()))
             }
         }
 
@@ -5148,23 +5360,28 @@ async fn route_http_request_with_headers(
 
         // USER STATUS ENDPOINTS
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/status") => {
-            let username = path.strip_prefix("/api/users/")
+            let username = path
+                .strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/status"))
                 .unwrap_or("unknown");
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
-                let json = format!(
-                    "{{\"username\":\"{}\",\"status\":\"{}\",\"average_speed\":{},\"file_count\":{}}}",
-                    json_escape(&record.username),
-                    record.status.as_deref().unwrap_or("offline"),
-                    json_u32_option(record.average_speed),
-                    json_u32_option(record.file_count)
-                );
+                let json = record.slskd_status_json().to_string();
                 drop(users);
                 Ok(routing::ok_response(json))
             } else {
                 drop(users);
-                Ok(routing::not_found_response())
+                let record = UserRecord {
+                    username: username.to_owned(),
+                    watched: false,
+                    status: None,
+                    average_speed: None,
+                    upload_count: None,
+                    file_count: None,
+                    directory_count: None,
+                    updated_at: unix_timestamp(),
+                };
+                Ok(routing::ok_response(record.slskd_status_json().to_string()))
             }
         }
 
@@ -5430,7 +5647,9 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let username = extract_json_string_field(body, "username").unwrap_or_else(|| "unknown".to_string());
-            let message_body = extract_json_string_field(body, "body").unwrap_or_default();
+            let message_body = extract_json_string_field(body, "body")
+                .or_else(|| json_body_string(body))
+                .unwrap_or_default();
 
             let mut rooms = state.rooms.write().await;
             if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
@@ -5454,19 +5673,7 @@ async fn route_http_request_with_headers(
 
         ("GET", "/api/rooms/available") => {
             let rooms = state.rooms.read().await;
-            let available_rooms = rooms.records
-                .iter()
-                .filter(|r| !r.joined)
-                .map(|r| format!(
-                    "{{\"name\":\"{}\",\"user_count\":{},\"userCount\":{},\"isPrivate\":{}}}",
-                    json_escape(&r.name),
-                    r.user_count.unwrap_or(0),
-                    r.user_count.unwrap_or(0),
-                    r.kind != "public"
-                ))
-                .collect::<Vec<_>>()
-                .join(",");
-            let json = format!("[{}]", available_rooms);
+            let json = rooms.slskd_available_json();
             drop(rooms);
             Ok(routing::ok_response(json))
         }
@@ -5496,11 +5703,12 @@ async fn route_http_request_with_headers(
             let room_name = parts[4];
             let rooms = state.rooms.read().await;
             if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
-                let messages = room.messages.iter()
-                    .map(|m| m.json())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let json = format!("[{}]", messages);
+                let messages = room
+                    .messages
+                    .iter()
+                    .map(|message| message.slskd_json(&room.name))
+                    .collect::<Vec<_>>();
+                let json = serde_json::Value::Array(messages).to_string();
                 drop(rooms);
                 Ok(routing::ok_response(json))
             } else {
@@ -5853,6 +6061,7 @@ async fn route_http_request_with_headers(
         ("POST", "/api/rooms/joined") => {
             let Some(room_name) = extract_json_string_field(body, "room")
                 .or_else(|| extract_json_string_field(body, "name"))
+                .or_else(|| json_body_string(body))
                 .filter(|room| !room.trim().is_empty())
             else {
                 return Ok(routing::bad_request_response("room is required"));
@@ -5864,6 +6073,52 @@ async fn route_http_request_with_headers(
             send_session_command(state, SessionCommand::JoinRoom(room_name)).await.ok();
 
             Ok(routing::created_response(record.json()))
+        }
+        ("GET", path) if path.starts_with("/api/rooms/joined/") && path.matches('/').count() == 4 => {
+            let room_name = path.rsplit('/').next().unwrap_or("");
+            let rooms = state.rooms.read().await;
+            let response = rooms
+                .records
+                .iter()
+                .find(|r| r.name == room_name)
+                .map(|room| routing::ok_response(room.slskd_room_json().to_string()))
+                .unwrap_or_else(routing::not_found_response);
+            drop(rooms);
+            Ok(response)
+        }
+        ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/messages") => {
+            let room_name = path
+                .trim_start_matches("/api/rooms/joined/")
+                .strip_suffix("/messages")
+                .unwrap_or("");
+            let message_body = json_body_string(body)
+                .or_else(|| extract_json_string_field(body, "message"))
+                .or_else(|| extract_json_string_field(body, "body"))
+                .unwrap_or_default();
+            let mut rooms = state.rooms.write().await;
+            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
+                record.messages.push(RoomMessageRecord {
+                    username: "local".to_owned(),
+                    body: message_body.clone(),
+                    created_at: unix_timestamp(),
+                });
+                record.updated_at = unix_timestamp();
+                drop(rooms);
+                send_session_command(state, SessionCommand::SayRoom {
+                    room: room_name.to_owned(),
+                    body: message_body,
+                }).await.ok();
+                Ok(routing::ok_response("true".to_owned()))
+            } else {
+                drop(rooms);
+                Ok(routing::not_found_response())
+            }
+        }
+        ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/ticker") => {
+            Ok(routing::ok_response("true".to_owned()))
+        }
+        ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/members") => {
+            Ok(routing::ok_response("true".to_owned()))
         }
         ("DELETE", path) if path.starts_with("/api/rooms/joined/") => {
             let room_name = path
@@ -5890,15 +6145,6 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/messages") => {
-            // Room-scoped message projection. Live room message events are folded
-            // into the general message store when the session layer emits them.
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: "[]".to_owned(),
-            })
-        }
         // GET room detail by name
         ("GET", path) if path.starts_with("/api/rooms/") && !path.ends_with("/messages") && !path.ends_with("/users") && path.matches('/').count() == 3 => {
             let room_name = path.rsplit('/').next().unwrap_or("");
@@ -5911,15 +6157,6 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/users") => {
-            // Room user projection. The current session layer does not emit live
-            // room membership snapshots, so an empty set is the accurate response.
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: "[]".to_owned(),
-            })
-        }
         // WEBUI PARITY: Application/Server/Session status endpoints
         ("GET", "/api/application/build") => {
             Ok(routing::ok_response(
@@ -6755,18 +6992,51 @@ async fn route_http_request_with_headers(
 
         // BROWSE ENDPOINTS
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
-            let json = format!(
-                "{{\"username\":\"{}\",\"items\":[],\"count\":0}}",
-                path.split('/').nth(3).unwrap_or("unknown")
-            );
-            Ok(routing::ok_response(json))
+            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let browse = state.browse.read().await;
+            let entries = browse
+                .records
+                .iter()
+                .find(|record| record.username == username)
+                .map(|record| record.entries.as_slice())
+                .unwrap_or(&[]);
+            let body = slskd_user_root_json(entries);
+            drop(browse);
+            Ok(routing::ok_response(body))
         }
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse/status") => {
-            let json = format!(
-                "{{\"username\":\"{}\",\"status\":\"idle\",\"browsing\":false}}",
-                path.split('/').nth(3).unwrap_or("unknown")
-            );
-            Ok(routing::ok_response(json))
+            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let browse = state.browse.read().await;
+            let size = browse
+                .records
+                .iter()
+                .find(|record| record.username == username)
+                .map(|record| record.entries.iter().map(|entry| entry.size).sum::<u64>())
+                .unwrap_or(0);
+            drop(browse);
+            Ok(routing::ok_response(serde_json::json!({
+                "username": username,
+                "size": size,
+                "bytesTransferred": size,
+                "bytesRemaining": 0,
+                "percentComplete": 100.0,
+            }).to_string()))
+        }
+        ("POST", path) if path.starts_with("/api/users/") && path.ends_with("/directory") => {
+            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let directory = extract_json_string_field(body, "directory")
+                .or_else(|| json_body_string(body))
+                .unwrap_or_default();
+            let browse = state.browse.read().await;
+            let entries = browse
+                .records
+                .iter()
+                .find(|record| record.username == username)
+                .map(|record| record.entries.as_slice())
+                .unwrap_or(&[]);
+            let body = slskd_user_directories_json(&directory, entries);
+            drop(browse);
+            Ok(routing::ok_response(body))
         }
 
         // ADDITIONAL MISSING USER ENDPOINTS (Phase 5)
@@ -6785,12 +7055,11 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/endpoint") => {
-            let username = path.split('/').nth(3).unwrap_or("unknown");
-            let json = format!(
-                "{{\"username\":\"{}\",\"endpoint\":\"127.0.0.1:6346\",\"ip_address\":\"127.0.0.1\"}}",
-                username
-            );
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response(serde_json::json!({
+                "addressFamily": "IPv4",
+                "address": "0.0.0.0",
+                "port": 0,
+            }).to_string()))
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
@@ -6804,16 +7073,99 @@ async fn route_http_request_with_headers(
 
         ("GET", path) if path.starts_with("/api/users/") && path.contains("/info") => {
             let username = path.split('/').nth(3).unwrap_or("unknown");
-            let json = format!(
-                "{{\"username\":\"{}\",\"upload_slots\":10,\"queue_size\":0,\"has_free_slot\":true}}",
-                username
-            );
-            Ok(routing::ok_response(json))
+            let users = state.users.read().await;
+            let body = users
+                .records
+                .iter()
+                .find(|record| record.username == username)
+                .map(|record| record.slskd_info_json().to_string())
+                .unwrap_or_else(|| UserRecord {
+                    username: username.to_owned(),
+                    watched: false,
+                    status: None,
+                    average_speed: None,
+                    upload_count: None,
+                    file_count: None,
+                    directory_count: None,
+                    updated_at: unix_timestamp(),
+                }.slskd_info_json().to_string());
+            drop(users);
+            Ok(routing::ok_response(body))
+        }
+
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/status") => {
+            let username = path.split('/').nth(3).unwrap_or("unknown");
+            let users = state.users.read().await;
+            let body = users
+                .records
+                .iter()
+                .find(|record| record.username == username)
+                .map(|record| record.slskd_status_json().to_string())
+                .unwrap_or_else(|| UserRecord {
+                    username: username.to_owned(),
+                    watched: false,
+                    status: Some("Unknown".to_owned()),
+                    average_speed: None,
+                    upload_count: None,
+                    file_count: None,
+                    directory_count: None,
+                    updated_at: unix_timestamp(),
+                }.slskd_status_json().to_string());
+            drop(users);
+            Ok(routing::ok_response(body))
         }
 
         // CONVERSATIONS ENDPOINT
         ("GET", "/api/conversations") => {
-            Ok(routing::ok_response("[]".to_string()))
+            let messages = state.messages.read().await;
+            let body = messages.slskd_conversations_json(route.query);
+            drop(messages);
+            Ok(routing::ok_response(body))
+        }
+        ("GET", path) if conversation_messages_path(path).is_some() => {
+            let Some(username) = conversation_messages_path(path) else {
+                return Ok(routing::not_found_response());
+            };
+            let unacknowledged_only = query_params(route.query.unwrap_or_default())
+                .into_iter()
+                .find(|(key, _)| key == "unAcknowledgedOnly")
+                .and_then(|(_, value)| parse_bool_value(&value))
+                .unwrap_or(false);
+            let messages = state.messages.read().await;
+            let body = messages.slskd_messages_json(username, unacknowledged_only);
+            drop(messages);
+            Ok(routing::ok_response(body))
+        }
+        ("GET", path) if path_segment_after(path, "/api/conversations/").is_some() => {
+            let Some(username) = path_segment_after(path, "/api/conversations/") else {
+                return Ok(routing::not_found_response());
+            };
+            let include_messages = query_params(route.query.unwrap_or_default())
+                .into_iter()
+                .find(|(key, _)| key == "includeMessages")
+                .and_then(|(_, value)| parse_bool_value(&value))
+                .unwrap_or(true);
+            let messages = state.messages.read().await;
+            let body = messages.slskd_conversation_json(username, include_messages);
+            drop(messages);
+            Ok(routing::ok_response(body))
+        }
+        ("POST", path) if path_segment_after(path, "/api/conversations/").is_some() => {
+            let Some(username) = path_segment_after(path, "/api/conversations/") else {
+                return Ok(routing::not_found_response());
+            };
+            let message_body = json_body_string(body)
+                .or_else(|| extract_json_string_field(body, "message"))
+                .or_else(|| extract_json_string_field(body, "body"))
+                .unwrap_or_default();
+            let mut messages = state.messages.write().await;
+            let record = messages.add(username.to_owned(), "outbound", message_body.clone());
+            drop(messages);
+            send_session_command(state, SessionCommand::MessageUser {
+                username: username.to_owned(),
+                body: message_body,
+            }).await.ok();
+            Ok(routing::ok_response((record.id > 0).to_string()))
         }
 
         // JOBS ENDPOINT
@@ -7013,12 +7365,32 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response("{\"reordered\":false,\"items\":[]}".to_owned()))
         }
 
-        ("PUT", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
-            let conversation_id = &path[19..];
-            Ok(routing::ok_response(format!(
-                "{{\"id\":\"{}\",\"updated\":false}}",
-                json_escape(conversation_id)
-            )))
+        ("PUT", path) if conversation_message_path(path).is_some() => {
+            let Some((username, id)) = conversation_message_path(path) else {
+                return Ok(routing::not_found_response());
+            };
+            let mut messages = state.messages.write().await;
+            let updated = messages
+                .records
+                .iter()
+                .any(|record| record.username == username && record.id == id);
+            let response = if updated {
+                messages.ack(id);
+                routing::ok_response("true".to_owned())
+            } else {
+                routing::not_found_response()
+            };
+            drop(messages);
+            Ok(response)
+        }
+        ("PUT", path) if path_segment_after(path, "/api/conversations/").is_some() => {
+            let Some(username) = path_segment_after(path, "/api/conversations/") else {
+                return Ok(routing::not_found_response());
+            };
+            let mut messages = state.messages.write().await;
+            messages.ack_all_for_user(username);
+            drop(messages);
+            Ok(routing::ok_response("true".to_owned()))
         }
 
         ("PUT", "/api/nowplaying") => {
@@ -7056,15 +7428,6 @@ async fn route_http_request_with_headers(
                 "{{\"token\":\"{}\",\"updated\":false}}",
                 json_escape(token)
             )))
-        }
-
-        ("PUT", "/api/server") => {
-            Ok(routing::ok_response("{\"updated\":false,\"restart_required\":false}".to_owned()))
-        }
-
-        ("PUT", "/api/shares") => {
-            let snapshot = rebuild_share_index(state).await;
-            Ok(routing::ok_response(snapshot.json()))
         }
 
         ("PUT", "/api/transfers/downloads/accelerated") => {
@@ -7492,12 +7855,16 @@ async fn route_http_request_with_headers(
         }
 
         // ADDITIONAL MISSING DELETE ENDPOINTS (Phase 5)
-        ("DELETE", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
-            let conversation_id = &path[19..];
-            Ok(routing::ok_response(format!(
-                "{{\"id\":\"{}\",\"deleted\":false,\"messages\":0}}",
-                json_escape(conversation_id)
-            )))
+        ("DELETE", path) if path_segment_after(path, "/api/conversations/").is_some() => {
+            let Some(username) = path_segment_after(path, "/api/conversations/") else {
+                return Ok(routing::not_found_response());
+            };
+            let mut messages = state.messages.write().await;
+            let before = messages.records.len();
+            messages.records.retain(|record| record.username != username);
+            let removed = before.saturating_sub(messages.records.len());
+            drop(messages);
+            Ok(routing::ok_response((removed > 0).to_string()))
         }
 
         ("DELETE", path) if path.starts_with("/api/files/") && path.contains("/directories/") => {
@@ -7768,15 +8135,6 @@ async fn route_http_request_with_headers(
             let json = "{\"active_parties\":[],\"count\":0}".to_string();
             Ok(routing::ok_response(json))
         }
-
-         ("GET", path) if path.starts_with("/api/conversations/") && path.len() > 18 => {
-             let conversation_id = &path[18..];
-             let json = format!(
-                 "{{\"id\":\"{}\",\"messages\":[],\"count\":0}}",
-                 json_escape(conversation_id)
-             );
-             Ok(routing::ok_response(json))
-         }
 
          ("POST", "/api/conversations/batch") => {
              Ok(routing::created_response("{\"conversations\":[],\"count\":0}".to_owned()))
@@ -8329,9 +8687,16 @@ fn slskd_transfer_file_path<'a>(path: &'a str, direction: &str) -> Option<(&'a s
     let prefix = format!("/api/transfers/{direction}/");
     let rest = path.strip_prefix(&prefix)?;
     let (username, tail) = rest.split_once('/')?;
-    let id = tail.split_once('/').map_or(tail, |(id, suffix)| {
-        (suffix == "position").then_some(id).unwrap_or("")
-    });
+    let id = tail.split_once('/').map_or(
+        tail,
+        |(id, suffix)| {
+            if suffix == "position" {
+                id
+            } else {
+                ""
+            }
+        },
+    );
     if username.is_empty() || username.contains('/') || id.is_empty() {
         return None;
     }
@@ -8364,6 +8729,66 @@ fn slskd_enqueue_request(body: &str) -> Option<(String, Vec<serde_json::Value>)>
         .cloned()
         .unwrap_or_default();
     (!files.is_empty()).then_some((username, files))
+}
+
+fn json_body_string(body: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+}
+
+fn path_segment_after<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    path.strip_prefix(prefix)
+        .filter(|segment| !segment.is_empty() && !segment.contains('/'))
+}
+
+fn conversation_message_path(path: &str) -> Option<(&str, u64)> {
+    let rest = path.strip_prefix("/api/conversations/")?;
+    let (username, id) = rest.split_once('/')?;
+    if username.is_empty() || username.contains('/') || id.contains('/') {
+        return None;
+    }
+    Some((username, id.parse().ok()?))
+}
+
+fn conversation_messages_path(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/conversations/")?
+        .strip_suffix("/messages")
+        .filter(|username| !username.is_empty() && !username.contains('/'))
+}
+
+fn slskd_user_file_json(entry: &BrowseEntry) -> serde_json::Value {
+    serde_json::json!({
+        "filename": entry.filename,
+        "size": entry.size,
+        "code": 1,
+        "extension": entry.extension,
+        "attributeCount": 0,
+        "attributes": [],
+    })
+}
+
+fn slskd_user_directories_json(directory: &str, entries: &[BrowseEntry]) -> String {
+    serde_json::Value::Array(vec![serde_json::json!({
+        "name": directory,
+        "fileCount": entries.len(),
+        "files": entries.iter().map(slskd_user_file_json).collect::<Vec<_>>(),
+    })])
+    .to_string()
+}
+
+fn slskd_user_root_json(entries: &[BrowseEntry]) -> String {
+    serde_json::json!({
+        "directories": [{
+            "name": "",
+            "fileCount": entries.len(),
+            "files": entries.iter().map(slskd_user_file_json).collect::<Vec<_>>(),
+        }],
+        "directoryCount": 1,
+        "lockedDirectories": [],
+        "lockedDirectoryCount": 0,
+    })
+    .to_string()
 }
 
 async fn serve(once: bool) -> Result<(), String> {
@@ -13185,6 +13610,22 @@ mod tests {
             super::SessionCommand::Connect
         ));
 
+        let server_connect_put =
+            super::route_http_request("PUT", "/api/v0/server", None, "", &state)
+                .await
+                .expect("server put connect");
+        assert_eq!(server_connect_put.status, "202 Accepted");
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            super::SessionCommand::Connect
+        ));
+
+        let session_enabled =
+            super::route_http_request("GET", "/api/v0/session/enabled", None, "", &state)
+                .await
+                .expect("session enabled");
+        assert!(matches!(session_enabled.body.as_str(), "true" | "false"));
+
         let search = super::route_http_request(
             "POST",
             "/api/v0/searches",
@@ -13237,6 +13678,68 @@ mod tests {
             downloads_json[0]["directories"][0]["files"][0]["direction"],
             "Download"
         );
+
+        let joined =
+            super::route_http_request("POST", "/api/v0/rooms/joined", None, r#""music""#, &state)
+                .await
+                .expect("join room");
+        assert_eq!(joined.status, "201 Created");
+        let _ = receiver.try_recv();
+
+        let room_message = super::route_http_request(
+            "POST",
+            "/api/v0/rooms/joined/music/messages",
+            None,
+            r#""hello room""#,
+            &state,
+        )
+        .await
+        .expect("room message");
+        assert_eq!(room_message.body, "true");
+        let _ = receiver.try_recv();
+
+        let room_messages = super::route_http_request(
+            "GET",
+            "/api/v0/rooms/joined/music/messages",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("room messages");
+        let room_messages_json =
+            serde_json::from_str::<serde_json::Value>(&room_messages.body).unwrap();
+        assert_eq!(room_messages_json[0]["message"], "hello room");
+
+        let conversation_send = super::route_http_request(
+            "POST",
+            "/api/v0/conversations/peer1",
+            None,
+            r#""hello peer""#,
+            &state,
+        )
+        .await
+        .expect("conversation send");
+        assert_eq!(conversation_send.body, "true");
+        let _ = receiver.try_recv();
+
+        let conversations =
+            super::route_http_request("GET", "/api/v0/conversations", None, "", &state)
+                .await
+                .expect("conversations");
+        let conversations_json =
+            serde_json::from_str::<serde_json::Value>(&conversations.body).unwrap();
+        assert_eq!(conversations_json[0]["username"], "peer1");
+        assert_eq!(
+            conversations_json[0]["messages"][0]["message"],
+            "hello peer"
+        );
+
+        let user_status =
+            super::route_http_request("GET", "/api/v0/users/peer1/status", None, "", &state)
+                .await
+                .expect("user status");
+        assert!(user_status.body.contains("\"presence\""));
     }
 
     #[tokio::test]
