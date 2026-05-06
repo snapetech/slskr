@@ -11519,6 +11519,7 @@ pub struct RustMilkdropFrame {
     pub q_registers: [f64; 64],
     pub shape_count: usize,
     pub shader_source: String,
+    pub shader_texture_samplers: Vec<String>,
     pub textured_primitives: Vec<RustMilkdropTexturedPrimitive>,
     pub rotation: f64,
     pub treble: f64,
@@ -11662,6 +11663,7 @@ pub fn rust_milkdrop_frame(
         q_registers: [0.0; 64],
         shape_count: 0,
         shader_source: String::new(),
+        shader_texture_samplers: Vec::new(),
         textured_primitives: Vec::new(),
         rotation: preset.rot + (time_seconds * 0.37).sin() * 0.035 + (treble - 0.5) * 0.05,
         treble,
@@ -11974,6 +11976,18 @@ fn translated_rust_milkdrop_shader_source(preset: &MilkdropPresetDocument) -> St
     String::new()
 }
 
+fn rust_milkdrop_shader_texture_samplers(preset: &MilkdropPresetDocument) -> Vec<String> {
+    for shader in [&preset.comp_shader, &preset.warp_shader] {
+        if shader.trim().is_empty() {
+            continue;
+        }
+        if analyze_milkdrop_shader_support(shader).supported {
+            return get_milkdrop_shader_texture_samplers(shader);
+        }
+    }
+    Vec::new()
+}
+
 fn create_rust_milkdrop_warp_mesh(
     preset: &MilkdropPresetDocument,
     frame_scope: &BTreeMap<String, MilkdropValue>,
@@ -12118,6 +12132,7 @@ fn build_rust_milkdrop_frame_from_scope(
         rotation: clamp_range(milkdrop_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
             + (treble - 0.5) * 0.02,
         shader_source: translated_rust_milkdrop_shader_source(preset_document),
+        shader_texture_samplers: rust_milkdrop_shader_texture_samplers(preset_document),
         textured_primitives,
         treble,
         wave_color,
@@ -12204,6 +12219,7 @@ fn build_rust_milkdrop_frame_from_runtime_scope(
         rotation: clamp_range(milkdrop_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
             + (treble - 0.5) * 0.02,
         shader_source: translated_rust_milkdrop_shader_source(preset_document),
+        shader_texture_samplers: rust_milkdrop_shader_texture_samplers(preset_document),
         textured_primitives,
         treble,
         wave_color,
@@ -14295,6 +14311,7 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
             "pointPrimitives": frame.primitives.iter().filter(|primitive| primitive.mode == RustMilkdropPrimitiveMode::Points).count(),
             "q1": frame.q_registers[0],
             "shapeCount": frame.shape_count,
+            "shaderTextureSamplers": frame.shader_texture_samplers.clone(),
             "texturedPrimitives": frame.textured_primitives.len(),
             "texturedTextureNames": frame.textured_primitives.iter().map(|primitive| primitive.texture_name.clone()).filter(|name| !name.is_empty()).collect::<Vec<_>>(),
             "trianglePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::TriangleFan | RustMilkdropPrimitiveMode::Triangles)).count(),
@@ -19695,6 +19712,17 @@ mod tests {
         );
         assert!(textured.contains("uniform sampler2D shaderTexture0;"));
         assert!(textured.contains("vec3 noise = texture(shaderTexture0, uv).rgb;"));
+        let textured_frame = rust_milkdrop_frame_from_source(
+            "comp_shader=ret = tex2D(album_art, uv).rgb * tex2D(sampler_noise, uv).rgb;",
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+        assert_eq!(
+            textured_frame.shader_texture_samplers,
+            vec!["album_art".to_string(), "sampler_noise".to_string()]
+        );
 
         let conditional = create_translated_milkdrop_fragment_shader(
             "if (bass_att > 1.0) { ret = tex2D(sampler_noise, uv).rgb; } else { ret = vec3(x, y, rad); }",
