@@ -11596,6 +11596,7 @@ pub enum RustMilkdropTexturedPrimitiveMode {
 pub struct RustMilkdropTexturedPrimitive {
     pub color: [f64; 4],
     pub mode: RustMilkdropTexturedPrimitiveMode,
+    pub texture_name: String,
     pub uvs: Vec<f64>,
     pub vertices: Vec<f64>,
 }
@@ -13504,6 +13505,39 @@ fn is_milkdrop_shape_textured(shape: &MilkdropIndexedEntry) -> bool {
         || !milkdrop_entry_text(shape, &["texture", "tex_name", "texname", "tex"]).is_empty()
 }
 
+fn milkdrop_texture_name(entry: &MilkdropIndexedEntry) -> String {
+    milkdrop_entry_text(
+        entry,
+        &[
+            "texture", "tex", "tex_name", "texname", "image", "img", "file", "filename",
+        ],
+    )
+}
+
+pub fn get_milkdrop_texture_name_aliases(value: &str) -> Vec<String> {
+    let normalized = value
+        .trim()
+        .trim_matches(|ch| ch == '\'' || ch == '"')
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let basename = normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let stem = basename
+        .rsplit_once('.')
+        .map(|(stem, _)| stem.to_string())
+        .unwrap_or_else(|| basename.clone());
+    let mut aliases = Vec::new();
+    for alias in [normalized, basename, stem] {
+        if !alias.is_empty() && !aliases.contains(&alias) {
+            aliases.push(alias);
+        }
+    }
+    aliases
+}
+
 pub fn create_milkdrop_shape_texture_uvs(shape: &MilkdropIndexedEntry) -> Vec<f64> {
     let vertex_count = create_milkdrop_shape_fill_vertices(shape).len() / 2;
     if vertex_count == 0 {
@@ -13950,6 +13984,8 @@ pub fn create_rust_milkdrop_webgpu_screen_border_vertices(
 pub struct RustMilkdropWebGpuTexturedBatch {
     pub first_vertex: usize,
     pub primitive_index: usize,
+    pub texture_aliases: Vec<String>,
+    pub texture_name: String,
     pub vertex_count: usize,
 }
 
@@ -14082,6 +14118,8 @@ pub fn create_rust_milkdrop_webgpu_frame_batches(
             .push(RustMilkdropWebGpuTexturedBatch {
                 first_vertex,
                 primitive_index,
+                texture_aliases: get_milkdrop_texture_name_aliases(&primitive.texture_name),
+                texture_name: primitive.texture_name.clone(),
                 vertex_count,
             });
     }
@@ -14121,6 +14159,8 @@ pub fn create_rust_milkdrop_webgpu_frame_set_batches(
                 RustMilkdropWebGpuTexturedBatch {
                     first_vertex: batch.first_vertex + textured_first_vertex,
                     primitive_index: batch.primitive_index + textured_primitive_offset,
+                    texture_aliases: batch.texture_aliases,
+                    texture_name: batch.texture_name,
                     vertex_count: batch.vertex_count,
                 }
             }));
@@ -14194,6 +14234,8 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
             serde_json::json!({
                 "firstVertex": batch.first_vertex,
                 "primitiveIndex": batch.primitive_index,
+                "textureAliases": batch.texture_aliases,
+                "textureName": batch.texture_name,
                 "vertexCount": batch.vertex_count,
             })
         })
@@ -14254,6 +14296,7 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
             "q1": frame.q_registers[0],
             "shapeCount": frame.shape_count,
             "texturedPrimitives": frame.textured_primitives.len(),
+            "texturedTextureNames": frame.textured_primitives.iter().map(|primitive| primitive.texture_name.clone()).filter(|name| !name.is_empty()).collect::<Vec<_>>(),
             "trianglePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::TriangleFan | RustMilkdropPrimitiveMode::Triangles)).count(),
             "waveformBins": frame.waveform_bins.len(),
             "waveformCount": frame.waveform_count,
@@ -14653,6 +14696,7 @@ fn create_rust_milkdrop_frame_textured_primitives(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
                 ],
                 mode: RustMilkdropTexturedPrimitiveMode::TriangleFan,
+                texture_name: milkdrop_texture_name(&evaluated),
                 uvs,
                 vertices,
             });
@@ -14671,6 +14715,7 @@ fn create_rust_milkdrop_frame_textured_primitives(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
                 ],
                 mode: RustMilkdropTexturedPrimitiveMode::Quad,
+                texture_name: milkdrop_texture_name(&evaluated),
                 uvs,
                 vertices,
             });
@@ -14858,6 +14903,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                             clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
                         ],
                         mode: RustMilkdropTexturedPrimitiveMode::TriangleFan,
+                        texture_name: milkdrop_texture_name(&evaluated),
                         uvs,
                         vertices: fill_vertices,
                     });
@@ -14919,6 +14965,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
                 ],
                 mode: RustMilkdropTexturedPrimitiveMode::Quad,
+                texture_name: milkdrop_texture_name(&evaluated),
                 uvs,
                 vertices,
             });
@@ -17694,9 +17741,20 @@ impl RustMilkdropWebGlRenderer {
         );
         self.gl.uniform1i(uniform("previousFrame").as_ref(), 0);
         for index in 0..4 {
+            let texture_unit = index + 2;
             self.gl
-                .uniform1i(uniform(&format!("shaderTexture{index}")).as_ref(), 0);
+                .active_texture(web_sys::WebGl2RenderingContext::TEXTURE0 + texture_unit as u32);
+            self.gl.bind_texture(
+                web_sys::WebGl2RenderingContext::TEXTURE_2D,
+                Some(&self.procedural_texture),
+            );
+            self.gl.uniform1i(
+                uniform(&format!("shaderTexture{index}")).as_ref(),
+                texture_unit,
+            );
         }
+        self.gl
+            .active_texture(web_sys::WebGl2RenderingContext::TEXTURE0);
         self.gl.uniform1f(uniform("feedback").as_ref(), feedback);
         self.gl.uniform1f(uniform("outputAlpha").as_ref(), 1.0);
         self.gl.uniform1f(uniform("time").as_ref(), time as f32);
@@ -19900,10 +19958,12 @@ mod tests {
             wave_b=0.7
             shape00_enabled=1
             shape00_textured=1
+            shape00_texture='textures\cover.png'
             shape00_sides=4
             shape00_rad=0.25
             shape00_tex_zoom=1
             sprite00_enabled=1
+            sprite00_file=Sprites/flare.webp
             sprite00_x=0.5
             sprite00_y=0.5
             sprite00_w=0.25
@@ -19915,6 +19975,22 @@ mod tests {
             0.3,
         );
         assert_eq!(frame.textured_primitives.len(), 2);
+        assert_eq!(
+            frame.textured_primitives[0].texture_name,
+            "'textures\\cover.png'"
+        );
+        assert_eq!(
+            frame.textured_primitives[1].texture_name,
+            "Sprites/flare.webp"
+        );
+        assert_eq!(
+            get_milkdrop_texture_name_aliases(&frame.textured_primitives[0].texture_name),
+            vec![
+                "textures/cover.png".to_string(),
+                "cover.png".to_string(),
+                "cover".to_string()
+            ]
+        );
         assert_eq!(frame.textured_primitives[0].vertices.len(), 12);
         assert_eq!(frame.textured_primitives[0].uvs.len(), 12);
         assert_eq!(frame.textured_primitives[1].vertices.len(), 10);
@@ -20094,6 +20170,7 @@ mod tests {
             shape01_b=0.4
             shape01_a=0.5
             shape01_textured=1
+            shape01_texture=panel.png
             sprite00_enabled=1
             sprite00_x=0.5
             sprite00_y=0.5
@@ -20124,6 +20201,7 @@ mod tests {
         assert!(batches.line_vertices.len() >= 24);
         assert_eq!(batches.textured_batches.len(), 2);
         assert_eq!(batches.textured_batches[0].first_vertex, 0);
+        assert_eq!(batches.textured_batches[0].texture_name, "panel.png");
         assert_eq!(batches.textured_batches[0].vertex_count, 9);
         assert_eq!(batches.textured_batches[1].first_vertex, 9);
         assert_eq!(batches.textured_batches[1].vertex_count, 6);
