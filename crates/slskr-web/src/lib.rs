@@ -11548,6 +11548,27 @@ pub struct RustMilkdropFrameSet {
     pub transition_seconds: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RustMilkdropInputState {
+    pub mouse_down: f64,
+    pub mouse_dx: f64,
+    pub mouse_dy: f64,
+    pub mouse_x: f64,
+    pub mouse_y: f64,
+}
+
+impl Default for RustMilkdropInputState {
+    fn default() -> Self {
+        Self {
+            mouse_down: 0.0,
+            mouse_dx: 0.0,
+            mouse_dy: 0.0,
+            mouse_x: 0.5,
+            mouse_y: 0.5,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RustMilkdropPrimitiveMode {
     LineStrip,
@@ -11822,6 +11843,7 @@ fn create_rust_milkdrop_scope(
         "wave_b".to_string(),
         MilkdropValue::Number(milkdrop_base_number(&preset.base_values, "wave_b", 0.7)),
     );
+    update_rust_milkdrop_scope_input(&mut scope, RustMilkdropInputState::default());
     scope
 }
 
@@ -11861,6 +11883,26 @@ fn update_rust_milkdrop_scope_audio(
             MilkdropValue::Text(rust_milkdrop_sample_text(spectrum)),
         );
     }
+}
+
+fn update_rust_milkdrop_scope_input(
+    scope: &mut BTreeMap<String, MilkdropValue>,
+    input: RustMilkdropInputState,
+) {
+    scope.insert(
+        "mouse_down".to_string(),
+        MilkdropValue::Number(input.mouse_down),
+    );
+    scope.insert(
+        "mouse_dx".to_string(),
+        MilkdropValue::Number(input.mouse_dx),
+    );
+    scope.insert(
+        "mouse_dy".to_string(),
+        MilkdropValue::Number(input.mouse_dy),
+    );
+    scope.insert("mouse_x".to_string(), MilkdropValue::Number(input.mouse_x));
+    scope.insert("mouse_y".to_string(), MilkdropValue::Number(input.mouse_y));
 }
 
 fn rust_milkdrop_sample_text(values: &[f64]) -> String {
@@ -12193,6 +12235,28 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
     waveform: &[f64],
     spectrum: &[f64],
 ) -> RustMilkdropFrame {
+    rust_milkdrop_frame_from_source_with_audio_and_input(
+        source,
+        time_seconds,
+        bass,
+        mid,
+        treble,
+        waveform,
+        spectrum,
+        RustMilkdropInputState::default(),
+    )
+}
+
+pub fn rust_milkdrop_frame_from_source_with_audio_and_input(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+    input: RustMilkdropInputState,
+) -> RustMilkdropFrame {
     let parsed = parse_milkdrop_preset_set(source, false);
     let Some(preset_document) = parsed.presets.first() else {
         return rust_milkdrop_frame(
@@ -12214,6 +12278,7 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
         waveform,
         spectrum,
     );
+    update_rust_milkdrop_scope_input(&mut scope, input);
     if !preset_document.equations.init.trim().is_empty() {
         if let Ok(next_scope) = evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
         {
@@ -12249,6 +12314,28 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio(
     waveform: &[f64],
     spectrum: &[f64],
 ) -> RustMilkdropFrameSet {
+    rust_milkdrop_frame_set_from_source_with_audio_and_input(
+        source,
+        time_seconds,
+        bass,
+        mid,
+        treble,
+        waveform,
+        spectrum,
+        RustMilkdropInputState::default(),
+    )
+}
+
+pub fn rust_milkdrop_frame_set_from_source_with_audio_and_input(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+    input: RustMilkdropInputState,
+) -> RustMilkdropFrameSet {
     let parsed =
         parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
     let title = rust_milkdrop_preset_set_title(&parsed);
@@ -12271,6 +12358,7 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio(
                 waveform,
                 spectrum,
             );
+            update_rust_milkdrop_scope_input(&mut scope, input);
             if !preset_document.equations.init.trim().is_empty() {
                 if let Ok(next_scope) =
                     evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
@@ -12366,6 +12454,29 @@ impl RustMilkdropRuntime {
         waveform: &[f64],
         spectrum: &[f64],
     ) -> RustMilkdropFrame {
+        self.render_source_with_audio_and_input(
+            source,
+            time_seconds,
+            bass,
+            mid,
+            treble,
+            waveform,
+            spectrum,
+            RustMilkdropInputState::default(),
+        )
+    }
+
+    pub fn render_source_with_audio_and_input(
+        &mut self,
+        source: &str,
+        time_seconds: f64,
+        bass: f64,
+        mid: f64,
+        treble: f64,
+        waveform: &[f64],
+        spectrum: &[f64],
+        input: RustMilkdropInputState,
+    ) -> RustMilkdropFrame {
         if self.source != source || self.preset_document.is_none() {
             let parsed = parse_milkdrop_preset_set(source, false);
             let Some(preset_document) = parsed.presets.first().cloned() else {
@@ -12405,6 +12516,7 @@ impl RustMilkdropRuntime {
             waveform,
             spectrum,
         );
+        update_rust_milkdrop_scope_input(&mut self.scope, input);
         if !self.initialized {
             if !preset_document.equations.init.trim().is_empty() {
                 if let Ok(next_scope) =
@@ -12469,6 +12581,29 @@ impl RustMilkdropFrameSetRuntime {
         waveform: &[f64],
         spectrum: &[f64],
     ) -> RustMilkdropFrameSet {
+        self.render_source_with_audio_and_input(
+            source,
+            time_seconds,
+            bass,
+            mid,
+            treble,
+            waveform,
+            spectrum,
+            RustMilkdropInputState::default(),
+        )
+    }
+
+    pub fn render_source_with_audio_and_input(
+        &mut self,
+        source: &str,
+        time_seconds: f64,
+        bass: f64,
+        mid: f64,
+        treble: f64,
+        waveform: &[f64],
+        spectrum: &[f64],
+        input: RustMilkdropInputState,
+    ) -> RustMilkdropFrameSet {
         if self.source != source || self.preset_documents.is_empty() {
             let parsed = parse_milkdrop_preset_set(
                 source,
@@ -12505,6 +12640,7 @@ impl RustMilkdropFrameSetRuntime {
                 waveform,
                 spectrum,
             );
+            update_rust_milkdrop_scope_input(scope, input);
             if !self.initialized.get(index).copied().unwrap_or_default() {
                 if !preset_document.equations.init.trim().is_empty() {
                     if let Ok(next_scope) =
@@ -16625,6 +16761,8 @@ fn start_rust_milkdrop_visualizer(
         player_audio_element(document)
             .and_then(|audio| RustMilkdropAudioAnalyzer::new(&audio).ok()),
     ));
+    let input_state = Rc::new(RefCell::new(RustMilkdropInputState::default()));
+    mount_rust_milkdrop_mouse_input(&canvas, input_state.clone())?;
     let runtime = Rc::new(RefCell::new(RustMilkdropRuntime::default()));
     if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
         label.set_text_content(Some(renderer.label()));
@@ -16635,6 +16773,7 @@ fn start_rust_milkdrop_visualizer(
     let window_for_frame = window.clone();
     let document_for_frame = document.clone();
     let analyzer_for_frame = analyzer.clone();
+    let input_for_frame = input_state.clone();
     let runtime_for_frame = runtime.clone();
 
     *animation_handle_for_frame.borrow_mut() = Some(Closure::wrap(Box::new(move |time_ms: f64| {
@@ -16662,15 +16801,18 @@ fn start_rust_milkdrop_visualizer(
             .as_ref()
             .map(|analyzer| analyzer.snapshot(time))
             .unwrap_or_else(|| RustMilkdropAudioSnapshot::synthetic(time));
-        let frame = runtime_for_frame.borrow_mut().render_source_with_audio(
-            &preset_source,
-            time,
-            audio.bands.bass,
-            audio.bands.mid,
-            audio.bands.treble,
-            &audio.waveform,
-            &audio.spectrum,
-        );
+        let frame = runtime_for_frame
+            .borrow_mut()
+            .render_source_with_audio_and_input(
+                &preset_source,
+                time,
+                audio.bands.bass,
+                audio.bands.mid,
+                audio.bands.treble,
+                &audio.waveform,
+                &audio.spectrum,
+                *input_for_frame.borrow(),
+            );
         renderer.render(&frame, time);
         if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
             status.set_text_content(Some(&format!(
@@ -16755,6 +16897,67 @@ fn mount_rust_milkdrop_buttons(
         button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
         callback.forget();
     }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_mouse_position(
+    canvas: &web_sys::HtmlCanvasElement,
+    event: &web_sys::MouseEvent,
+) -> (f64, f64) {
+    let width = canvas.width().max(1) as f64;
+    let height = canvas.height().max(1) as f64;
+    (
+        (event.offset_x() as f64 / width).clamp(0.0, 1.0),
+        (event.offset_y() as f64 / height).clamp(0.0, 1.0),
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_rust_milkdrop_mouse_input(
+    canvas: &web_sys::HtmlCanvasElement,
+    input_state: Rc<RefCell<RustMilkdropInputState>>,
+) -> Result<(), JsValue> {
+    let canvas_for_move = canvas.clone();
+    let input_for_move = input_state.clone();
+    let move_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+        move |event: web_sys::MouseEvent| {
+            let (mouse_x, mouse_y) = rust_milkdrop_mouse_position(&canvas_for_move, &event);
+            let mut input = input_for_move.borrow_mut();
+            input.mouse_dx = mouse_x - input.mouse_x;
+            input.mouse_dy = mouse_y - input.mouse_y;
+            input.mouse_x = mouse_x;
+            input.mouse_y = mouse_y;
+        },
+    ));
+    canvas.add_event_listener_with_callback("mousemove", move_callback.as_ref().unchecked_ref())?;
+    move_callback.forget();
+
+    let canvas_for_down = canvas.clone();
+    let input_for_down = input_state.clone();
+    let down_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+        move |event: web_sys::MouseEvent| {
+            let (mouse_x, mouse_y) = rust_milkdrop_mouse_position(&canvas_for_down, &event);
+            let mut input = input_for_down.borrow_mut();
+            input.mouse_down = 1.0;
+            input.mouse_dx = mouse_x - input.mouse_x;
+            input.mouse_dy = mouse_y - input.mouse_y;
+            input.mouse_x = mouse_x;
+            input.mouse_y = mouse_y;
+        },
+    ));
+    canvas.add_event_listener_with_callback("mousedown", down_callback.as_ref().unchecked_ref())?;
+    down_callback.forget();
+
+    let input_for_up = input_state.clone();
+    let up_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+        move |_event: web_sys::MouseEvent| {
+            input_for_up.borrow_mut().mouse_down = 0.0;
+        },
+    ));
+    canvas.add_event_listener_with_callback("mouseup", up_callback.as_ref().unchecked_ref())?;
+    canvas.add_event_listener_with_callback("mouseleave", up_callback.as_ref().unchecked_ref())?;
+    up_callback.forget();
     Ok(())
 }
 
@@ -18788,6 +18991,51 @@ mod tests {
         assert!((first.q_registers[0] - 2.0).abs() < 0.0001);
         assert!((second.q_registers[0] - 3.0).abs() < 0.0001);
         assert!(second.wave_color.0 > first.wave_color.0);
+    }
+
+    #[test]
+    fn rust_milkdrop_runtime_feeds_mouse_state_into_equations() {
+        let input = RustMilkdropInputState {
+            mouse_down: 1.0,
+            mouse_dx: 0.2,
+            mouse_dy: -0.1,
+            mouse_x: 0.75,
+            mouse_y: 0.25,
+        };
+        let frame = rust_milkdrop_frame_from_source_with_audio_and_input(
+            r#"
+            name=Mouse input
+            wave_r=0
+            wave_g=0
+            wave_b=0
+            per_frame_1=wave_r=mouse_x;
+            per_frame_2=wave_g=mouse_y;
+            per_frame_3=q1=mouse_down+mouse_dx+mouse_dy;
+            shape00_enabled=1
+            shape00_sides=3
+            shape00_rad=0.1
+            shape00_per_frame1=x=mouse_x;
+            shape00_per_frame2=y=mouse_y;
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+            &[],
+            &[],
+            input,
+        );
+
+        assert_eq!(frame.wave_color.0, (0.75 * 255.0) as u8);
+        assert_eq!(frame.wave_color.1, (0.25 * 255.0) as u8);
+        assert!((frame.q_registers[0] - 1.1).abs() < 0.0001);
+        let shape = frame
+            .primitives
+            .iter()
+            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::TriangleFan)
+            .expect("shape");
+        assert!(shape.vertices[0] > 0.4);
+        assert!(shape.vertices[1] < -0.4);
     }
 
     #[test]
