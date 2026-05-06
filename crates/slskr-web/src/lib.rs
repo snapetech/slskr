@@ -11922,6 +11922,92 @@ fn build_rust_milkdrop_frame_from_scope(
     }
 }
 
+fn build_rust_milkdrop_frame_from_runtime_scope(
+    source: &str,
+    preset_document: &mut MilkdropPresetDocument,
+    scope: &mut BTreeMap<String, MilkdropValue>,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+) -> RustMilkdropFrame {
+    let fallback = parse_rust_milkdrop_preset(source);
+    let wave_r = clamp_unit(milkdrop_scope_number(scope, "wave_r", fallback.wave_r));
+    let wave_g = clamp_unit(milkdrop_scope_number(scope, "wave_g", fallback.wave_g));
+    let wave_b = clamp_unit(milkdrop_scope_number(scope, "wave_b", fallback.wave_b));
+    let wave_scale = clamp_range(
+        milkdrop_scope_number(scope, "wave_scale", fallback.wave_scale),
+        0.2,
+        3.0,
+    );
+    let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
+    let wave_color = (
+        (wave_r * 255.0).min(255.0) as u8,
+        (wave_g * 255.0).min(255.0) as u8,
+        (wave_b * 255.0).min(255.0) as u8,
+    );
+    let (primitives, textured_primitives) =
+        create_rust_milkdrop_frame_primitives_and_textures_stateful(
+            preset_document,
+            scope,
+            time_seconds,
+            bass,
+            mid,
+            treble,
+            waveform,
+            spectrum,
+            [wave_r, wave_g, wave_b],
+        );
+    let q_registers = rust_milkdrop_q_registers(scope);
+    let fft_bins = rust_milkdrop_sample_bins(spectrum);
+    let waveform_bins = rust_milkdrop_sample_bins(waveform);
+    let warp_mesh = create_rust_milkdrop_warp_mesh(preset_document, scope);
+    RustMilkdropFrame {
+        background_alpha: clamp_range(
+            1.0 - milkdrop_scope_number(scope, "decay", fallback.decay),
+            0.01,
+            0.5,
+        ),
+        bass,
+        dx: clamp_range(milkdrop_scope_number(scope, "dx", 0.0), -0.5, 0.5),
+        dy: clamp_range(milkdrop_scope_number(scope, "dy", 0.0), -0.5, 0.5),
+        fft_bins,
+        mid,
+        primitives,
+        q_registers,
+        shape_count: preset_document
+            .shapes
+            .iter()
+            .filter(|shape| milkdrop_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
+            .count(),
+        rotation: clamp_range(milkdrop_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
+            + (treble - 0.5) * 0.02,
+        shader_source: translated_rust_milkdrop_shader_source(preset_document),
+        textured_primitives,
+        treble,
+        wave_color,
+        waveform_bins,
+        wave_radius: clamp_range(
+            0.18 + wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
+            0.12,
+            0.68,
+        ),
+        waveform_count: preset_document
+            .waves
+            .iter()
+            .filter(|wave| milkdrop_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
+            .count(),
+        warp_mesh,
+        zoom: clamp_range(
+            milkdrop_scope_number(scope, "zoom", fallback.zoom),
+            0.001,
+            1.8,
+        ),
+    }
+}
+
 pub fn rust_milkdrop_frame_from_source_with_audio(
     source: &str,
     time_seconds: f64,
@@ -12027,7 +12113,7 @@ impl RustMilkdropRuntime {
             self.initialized = false;
         }
 
-        let Some(preset_document) = self.preset_document.clone() else {
+        let Some(mut preset_document) = self.preset_document.take() else {
             return rust_milkdrop_frame(
                 &RustMilkdropPreset::default(),
                 time_seconds,
@@ -12065,17 +12151,19 @@ impl RustMilkdropRuntime {
             }
         }
 
-        build_rust_milkdrop_frame_from_scope(
+        let frame = build_rust_milkdrop_frame_from_runtime_scope(
             &self.source,
-            &preset_document,
-            &self.scope,
+            &mut preset_document,
+            &mut self.scope,
             time_seconds,
             bass,
             mid,
             treble,
             waveform,
             spectrum,
-        )
+        );
+        self.preset_document = Some(preset_document);
+        frame
     }
 }
 
@@ -12162,6 +12250,7 @@ pub struct MilkdropEquations {
 pub struct MilkdropIndexedEntry {
     pub base_values: BTreeMap<String, MilkdropValue>,
     pub equations: MilkdropEquations,
+    pub initialized: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -12681,6 +12770,45 @@ fn evaluate_milkdrop_entry_state(
     MilkdropIndexedEntry {
         base_values: persist_milkdrop_scoped_values(&entry.base_values, &scope, allowed_keys),
         equations: entry.equations.clone(),
+        initialized: entry.initialized,
+    }
+}
+
+fn merge_milkdrop_q_registers(
+    scope: &mut BTreeMap<String, MilkdropValue>,
+    values: &BTreeMap<String, MilkdropValue>,
+) {
+    for index in 1..=64 {
+        let key = format!("q{index}");
+        if let Some(value) = values.get(&key) {
+            scope.insert(key, value.clone());
+        }
+    }
+}
+
+fn evaluate_milkdrop_entry_stateful(
+    entry: &mut MilkdropIndexedEntry,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+    allowed_keys: &[&str],
+) -> MilkdropIndexedEntry {
+    let mut scope = frame_scope.clone();
+    scope.extend(entry.base_values.clone());
+    if !entry.initialized && !entry.equations.init.trim().is_empty() {
+        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.init, &scope) {
+            scope = next_scope;
+        }
+        entry.initialized = true;
+    }
+    if !entry.equations.frame.trim().is_empty() {
+        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.frame, &scope) {
+            scope = next_scope;
+        }
+    }
+    entry.base_values = persist_milkdrop_scoped_values(&entry.base_values, &scope, allowed_keys);
+    MilkdropIndexedEntry {
+        base_values: entry.base_values.clone(),
+        equations: entry.equations.clone(),
+        initialized: entry.initialized,
     }
 }
 
@@ -13187,6 +13315,233 @@ fn create_rust_milkdrop_frame_textured_primitives(
         }
     }
     primitives
+}
+
+fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
+    preset: &mut MilkdropPresetDocument,
+    frame_scope: &mut BTreeMap<String, MilkdropValue>,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+    fallback_color: [f64; 3],
+) -> (
+    Vec<RustMilkdropPrimitive>,
+    Vec<RustMilkdropTexturedPrimitive>,
+) {
+    let generated_samples =
+        create_rust_milkdrop_audio_samples(time_seconds, bass, mid, treble, 192);
+    let waveform_samples = if waveform.is_empty() {
+        generated_samples.as_slice()
+    } else {
+        waveform
+    };
+    let spectrum_samples = if spectrum.is_empty() {
+        waveform_samples
+    } else {
+        spectrum
+    };
+    let mut primitives = Vec::new();
+    let mut textured_primitives = Vec::new();
+
+    for (prefix, inset, fallback_alpha) in [
+        ("ob", 0.0, 0.0),
+        (
+            "ib",
+            clamp_unit(milkdrop_scope_number(frame_scope, "ob_size", 0.0)) * 2.0,
+            0.0,
+        ),
+    ] {
+        let size = milkdrop_scope_number(frame_scope, &format!("{prefix}_size"), 0.0);
+        let vertices = create_milkdrop_screen_border_vertices(size, inset);
+        let alpha = clamp_unit(milkdrop_scope_number(
+            frame_scope,
+            &format!("{prefix}_a"),
+            fallback_alpha,
+        ));
+        if vertices.len() >= 6 && alpha > 0.0 {
+            primitives.push(RustMilkdropPrimitive {
+                color: [
+                    clamp_unit(milkdrop_scope_number(
+                        frame_scope,
+                        &format!("{prefix}_r"),
+                        fallback_color[0],
+                    )),
+                    clamp_unit(milkdrop_scope_number(
+                        frame_scope,
+                        &format!("{prefix}_g"),
+                        fallback_color[1],
+                    )),
+                    clamp_unit(milkdrop_scope_number(
+                        frame_scope,
+                        &format!("{prefix}_b"),
+                        fallback_color[2],
+                    )),
+                    alpha,
+                ],
+                mode: RustMilkdropPrimitiveMode::Triangles,
+                vertices,
+            });
+        }
+    }
+
+    let motion_vertices = create_milkdrop_motion_vector_vertices(frame_scope);
+    let motion_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "mv_a", 0.8));
+    if motion_vertices.len() >= 4 && motion_alpha > 0.0 {
+        primitives.push(RustMilkdropPrimitive {
+            color: [
+                clamp_unit(milkdrop_scope_number(
+                    frame_scope,
+                    "mv_r",
+                    fallback_color[0],
+                )),
+                clamp_unit(milkdrop_scope_number(
+                    frame_scope,
+                    "mv_g",
+                    fallback_color[1],
+                )),
+                clamp_unit(milkdrop_scope_number(
+                    frame_scope,
+                    "mv_b",
+                    fallback_color[2],
+                )),
+                motion_alpha,
+            ],
+            mode: RustMilkdropPrimitiveMode::Lines,
+            vertices: motion_vertices,
+        });
+    }
+
+    for wave in &mut preset.waves {
+        let evaluated =
+            evaluate_milkdrop_entry_stateful(wave, frame_scope, MILKDROP_WAVE_VALUE_KEYS);
+        merge_milkdrop_q_registers(frame_scope, &evaluated.base_values);
+        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+            continue;
+        }
+        let samples = if milkdrop_entry_flag(&evaluated, &["spectrum", "bspectrum"]) {
+            spectrum_samples
+        } else {
+            waveform_samples
+        };
+        let vertices = create_milkdrop_custom_wave_vertices(&evaluated, samples, frame_scope);
+        if vertices.len() < 4 {
+            continue;
+        }
+        primitives.push(RustMilkdropPrimitive {
+            color: [
+                clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
+                clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
+                clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
+                clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+            ],
+            mode: if milkdrop_entry_flag(&evaluated, &["dots", "busedots"]) {
+                RustMilkdropPrimitiveMode::Points
+            } else {
+                RustMilkdropPrimitiveMode::LineStrip
+            },
+            vertices,
+        });
+    }
+
+    for shape in &mut preset.shapes {
+        let evaluated =
+            evaluate_milkdrop_entry_stateful(shape, frame_scope, MILKDROP_SHAPE_VALUE_KEYS);
+        merge_milkdrop_q_registers(frame_scope, &evaluated.base_values);
+        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+            continue;
+        }
+        let fill_vertices = create_milkdrop_shape_fill_vertices(&evaluated);
+        if fill_vertices.len() >= 6 {
+            if is_milkdrop_shape_textured(&evaluated) {
+                let uvs = create_milkdrop_shape_texture_uvs(&evaluated);
+                if fill_vertices.len() == uvs.len() {
+                    textured_primitives.push(RustMilkdropTexturedPrimitive {
+                        color: [
+                            clamp_unit(milkdrop_entry_number(
+                                &evaluated,
+                                &["r"],
+                                fallback_color[0],
+                            )),
+                            clamp_unit(milkdrop_entry_number(
+                                &evaluated,
+                                &["g"],
+                                fallback_color[1],
+                            )),
+                            clamp_unit(milkdrop_entry_number(
+                                &evaluated,
+                                &["b"],
+                                fallback_color[2],
+                            )),
+                            clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                        ],
+                        uvs,
+                        vertices: fill_vertices,
+                    });
+                }
+            } else {
+                primitives.push(RustMilkdropPrimitive {
+                    color: [
+                        clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
+                        clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
+                        clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
+                        clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                    ],
+                    mode: RustMilkdropPrimitiveMode::TriangleFan,
+                    vertices: fill_vertices,
+                });
+            }
+        }
+        let outline_vertices = create_milkdrop_shape_vertices(&evaluated);
+        if outline_vertices.len() >= 8 {
+            primitives.push(RustMilkdropPrimitive {
+                color: [
+                    clamp_unit(milkdrop_entry_number(
+                        &evaluated,
+                        &["border_r", "r"],
+                        fallback_color[0],
+                    )),
+                    clamp_unit(milkdrop_entry_number(
+                        &evaluated,
+                        &["border_g", "g"],
+                        fallback_color[1],
+                    )),
+                    clamp_unit(milkdrop_entry_number(
+                        &evaluated,
+                        &["border_b", "b"],
+                        fallback_color[2],
+                    )),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["border_a"], 0.85)),
+                ],
+                mode: RustMilkdropPrimitiveMode::LineStrip,
+                vertices: outline_vertices,
+            });
+        }
+    }
+
+    for sprite in &mut preset.sprites {
+        let evaluated =
+            evaluate_milkdrop_entry_stateful(sprite, frame_scope, MILKDROP_SPRITE_VALUE_KEYS);
+        merge_milkdrop_q_registers(frame_scope, &evaluated.base_values);
+        let vertices = create_milkdrop_sprite_vertices(&evaluated);
+        let uvs = create_milkdrop_sprite_texture_uvs(&evaluated);
+        if vertices.len() >= 8 && vertices.len() == uvs.len() {
+            textured_primitives.push(RustMilkdropTexturedPrimitive {
+                color: [
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+                ],
+                uvs,
+                vertices,
+            });
+        }
+    }
+
+    (primitives, textured_primitives)
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -16920,6 +17275,63 @@ mod tests {
         assert!((accumulated.q_registers[0] - 8.0).abs() < 0.0001);
         assert!((reset.q_registers[0] - 2.0).abs() < 0.0001);
         assert!(reset.wave_color.0 < accumulated.wave_color.0);
+    }
+
+    #[test]
+    fn rust_milkdrop_runtime_persists_indexed_entry_state() {
+        let mut runtime = RustMilkdropRuntime::default();
+        let source = r#"
+            name=Entry state
+            shape00_enabled=1
+            shape00_sides=4
+            shape00_init1=q2=1;
+            shape00_per_frame1=q2=q2+1;
+            shape00_per_frame2=rad=0.05+q2*0.01;
+            "#;
+
+        let first = runtime.render_source(source, 1.0, 0.1, 0.2, 0.3);
+        let second = runtime.render_source(source, 2.0, 0.1, 0.2, 0.3);
+
+        assert!((first.q_registers[1] - 2.0).abs() < 0.0001);
+        assert!((second.q_registers[1] - 3.0).abs() < 0.0001);
+        assert!(second.primitives.iter().any(|primitive| {
+            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+                && primitive.vertices.iter().any(|value| value.abs() > 0.07)
+        }));
+    }
+
+    #[test]
+    fn rust_milkdrop_runtime_merges_entry_q_registers_in_js_order() {
+        let mut runtime = RustMilkdropRuntime::default();
+        let source = r#"
+            name=Entry q order
+            wavecode_0_enabled=1
+            wavecode_0_samples=3
+            wavecode_0_init1=q5=0.2;
+            wavecode_0_per_frame1=q5=q5+0.1;
+            wavecode_0_per_point1=x=i;
+            wavecode_0_per_point2=y=sample;
+            shape00_enabled=1
+            shape00_sides=4
+            shape00_rad=0.01
+            shape00_per_frame1=rad=q5;
+            "#;
+
+        let frame = runtime.render_source_with_audio(
+            source,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+            &[-1.0, 0.0, 1.0],
+            &[0.0, 0.5, 1.0],
+        );
+
+        assert!((frame.q_registers[4] - 0.3).abs() < 0.0001);
+        assert!(frame.primitives.iter().any(|primitive| {
+            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+                && primitive.vertices.iter().any(|value| value.abs() > 0.25)
+        }));
     }
 
     #[test]
