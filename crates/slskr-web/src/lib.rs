@@ -6441,7 +6441,7 @@ fn player_footer_html() -> String {
 }
 
 fn rust_milkdrop_panel_html() -> String {
-    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="preset">Preset</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
+    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><span id="slskr-milkdrop-library-status">3 bundled presets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -16965,7 +16965,9 @@ fn mount_rust_milkdrop_buttons(
                         });
                     }
                     "import" => import_rust_milkdrop_preset(&window, &document),
+                    "previous" => cycle_rust_milkdrop_preset_by(&document, -1),
                     "reset" => reset_rust_milkdrop_import(&document),
+                    "search" => search_rust_milkdrop_preset(&document),
                     _ => cycle_rust_milkdrop_preset(&document),
                 }
             },
@@ -17067,6 +17069,25 @@ fn rust_milkdrop_active_preset_name(panel: &web_sys::Element, index: usize) -> S
 }
 
 #[cfg(target_arch = "wasm32")]
+fn set_rust_milkdrop_active_preset(
+    document: &web_sys::Document,
+    panel: &web_sys::Element,
+    index: usize,
+    status: &str,
+) {
+    let count = rust_milkdrop_preset_count(panel).max(1);
+    let index = index % count;
+    let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", &index.to_string());
+    if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
+        label.set_text_content(Some(&rust_milkdrop_active_preset_name(panel, index)));
+    }
+    if let Some(status_label) = document.get_element_by_id("slskr-milkdrop-library-status") {
+        status_label.set_text_content(Some(&format!("Preset {} of {}", index + 1, count)));
+    }
+    set_player_status(document, status);
+}
+
+#[cfg(target_arch = "wasm32")]
 fn import_rust_milkdrop_preset(window: &web_sys::Window, document: &web_sys::Document) {
     let Ok(Some(source)) = window.prompt_with_message("Paste a MilkDrop preset") else {
         return;
@@ -17075,11 +17096,10 @@ fn import_rust_milkdrop_preset(window: &web_sys::Window, document: &web_sys::Doc
         Ok(title) => {
             if let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") {
                 let _ = panel.set_attribute("data-slskr-milkdrop-custom-source", &source);
-                let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", "0");
-                if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
-                    label.set_text_content(Some(&title));
+                set_rust_milkdrop_active_preset(document, &panel, 0, "MilkDrop preset imported");
+                if let Some(status_label) = document.get_element_by_id("slskr-milkdrop-preset") {
+                    status_label.set_text_content(Some(&title));
                 }
-                set_player_status(document, "MilkDrop preset imported");
             }
         }
         Err(error) => set_player_status(document, &error),
@@ -17092,15 +17112,16 @@ fn reset_rust_milkdrop_import(document: &web_sys::Document) {
         return;
     };
     let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
-    let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", "0");
-    if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
-        label.set_text_content(Some(&rust_milkdrop_preset_name(RUST_MILKDROP_PRESETS[0])));
-    }
-    set_player_status(document, "MilkDrop import reset");
+    set_rust_milkdrop_active_preset(document, &panel, 0, "MilkDrop import reset");
 }
 
 #[cfg(target_arch = "wasm32")]
 fn cycle_rust_milkdrop_preset(document: &web_sys::Document) {
+    cycle_rust_milkdrop_preset_by(document, 1);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn cycle_rust_milkdrop_preset_by(document: &web_sys::Document, offset: isize) {
     let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
         return;
     };
@@ -17108,12 +17129,34 @@ fn cycle_rust_milkdrop_preset(document: &web_sys::Document) {
         .get_attribute("data-slskr-milkdrop-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let next = (current + 1) % rust_milkdrop_preset_count(&panel);
-    let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", &next.to_string());
-    if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
-        label.set_text_content(Some(&rust_milkdrop_active_preset_name(&panel, next)));
+    let count = rust_milkdrop_preset_count(&panel).max(1) as isize;
+    let next = (current as isize + offset).rem_euclid(count) as usize;
+    set_rust_milkdrop_active_preset(document, &panel, next, "Rust MilkDrop preset changed");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn search_rust_milkdrop_preset(document: &web_sys::Document) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    let query = document
+        .get_element_by_id("slskr-milkdrop-search")
+        .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .map(|input| input.value().trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if query.is_empty() {
+        set_player_status(document, "Enter a preset search");
+        return;
     }
-    set_player_status(document, "Rust MilkDrop preset changed");
+    let count = rust_milkdrop_preset_count(&panel);
+    for index in 0..count {
+        let title = rust_milkdrop_active_preset_name(&panel, index);
+        if title.to_ascii_lowercase().contains(&query) {
+            set_rust_milkdrop_active_preset(document, &panel, index, "MilkDrop preset selected");
+            return;
+        }
+    }
+    set_player_status(document, "No matching MilkDrop preset");
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -18945,7 +18988,10 @@ mod tests {
         assert!(html.contains("slskr-player-transfers"));
         assert!(html.contains("slskr-rust-milkdrop"));
         assert!(html.contains("slskr-milkdrop-canvas"));
+        assert!(html.contains("Search native MilkDrop presets"));
+        assert!(html.contains("data-slskr-milkdrop-action=\"previous\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"preset\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"search\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"import\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"reset\""));
         assert!(html.contains("slskr-milkdrop-renderer"));
