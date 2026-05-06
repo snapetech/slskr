@@ -11489,12 +11489,19 @@ impl Default for RustMilkdropPreset {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RustMilkdropFrame {
     pub background_alpha: f64,
+    pub bass: f64,
     pub dx: f64,
     pub dy: f64,
+    pub fft_bins: [f64; 64],
+    pub mid: f64,
     pub primitives: Vec<RustMilkdropPrimitive>,
+    pub q_registers: [f64; 64],
     pub shape_count: usize,
+    pub shader_source: String,
     pub rotation: f64,
+    pub treble: f64,
     pub wave_color: (u8, u8, u8),
+    pub waveform_bins: [f64; 64],
     pub wave_radius: f64,
     pub waveform_count: usize,
     pub zoom: f64,
@@ -11560,16 +11567,23 @@ pub fn rust_milkdrop_frame(
     let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
     RustMilkdropFrame {
         background_alpha: clamp_range(1.0 - preset.decay, 0.01, 0.5),
+        bass,
         dx: 0.0,
         dy: 0.0,
+        fft_bins: [0.0; 64],
+        mid,
         primitives: Vec::new(),
+        q_registers: [0.0; 64],
         shape_count: 0,
+        shader_source: String::new(),
         rotation: preset.rot + (time_seconds * 0.37).sin() * 0.035 + (treble - 0.5) * 0.05,
+        treble,
         wave_color: (
             ((preset.wave_r + bass * 0.35) * 255.0).min(255.0) as u8,
             ((preset.wave_g + mid * 0.30) * 255.0).min(255.0) as u8,
             ((preset.wave_b + treble * 0.25) * 255.0).min(255.0) as u8,
         ),
+        waveform_bins: [0.0; 64],
         wave_radius: clamp_range(
             0.18 + preset.wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
             0.12,
@@ -11642,6 +11656,51 @@ fn rust_milkdrop_sample_text(values: &[f64]) -> String {
         .map(|value| format!("{:.6}", value.clamp(-1.0, 1.0)))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn rust_milkdrop_sample_bins(values: &[f64]) -> [f64; 64] {
+    let mut bins = [0.0; 64];
+    if values.is_empty() {
+        return bins;
+    }
+    let bin_count = bins.len();
+    for (index, bin) in bins.iter_mut().enumerate() {
+        let sample_index = if bin_count <= 1 {
+            0
+        } else {
+            index * values.len().saturating_sub(1) / bin_count.saturating_sub(1)
+        };
+        *bin = values
+            .get(sample_index)
+            .copied()
+            .unwrap_or_default()
+            .clamp(-1.0, 1.0);
+    }
+    bins
+}
+
+fn rust_milkdrop_q_registers(scope: &BTreeMap<String, MilkdropValue>) -> [f64; 64] {
+    let mut registers = [0.0; 64];
+    for index in 1..=64 {
+        registers[index - 1] = milkdrop_scope_number(scope, &format!("q{index}"), 0.0);
+    }
+    registers
+}
+
+fn translated_rust_milkdrop_shader_source(preset: &MilkdropPresetDocument) -> String {
+    if !preset.comp_shader.trim().is_empty() {
+        let shader = create_translated_milkdrop_fragment_shader(&preset.comp_shader);
+        if !shader.is_empty() {
+            return shader;
+        }
+    }
+    if !preset.warp_shader.trim().is_empty() {
+        let shader = create_translated_milkdrop_fragment_shader(&preset.warp_shader);
+        if !shader.is_empty() {
+            return shader;
+        }
+    }
+    String::new()
 }
 
 pub fn rust_milkdrop_frame_from_source(
@@ -11724,15 +11783,22 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
         waveform,
         [wave_r, wave_g, wave_b],
     );
+    let q_registers = rust_milkdrop_q_registers(&scope);
+    let fft_bins = rust_milkdrop_sample_bins(spectrum);
+    let waveform_bins = rust_milkdrop_sample_bins(waveform);
     RustMilkdropFrame {
         background_alpha: clamp_range(
             1.0 - milkdrop_scope_number(&scope, "decay", fallback.decay),
             0.01,
             0.5,
         ),
+        bass,
         dx: clamp_range(milkdrop_scope_number(&scope, "dx", 0.0), -0.5, 0.5),
         dy: clamp_range(milkdrop_scope_number(&scope, "dy", 0.0), -0.5, 0.5),
+        fft_bins,
+        mid,
         primitives,
+        q_registers,
         shape_count: preset_document
             .shapes
             .iter()
@@ -11743,7 +11809,10 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
             -0.5,
             0.5,
         ) + (treble - 0.5) * 0.02,
+        shader_source: translated_rust_milkdrop_shader_source(preset_document),
+        treble,
         wave_color,
+        waveform_bins,
         wave_radius: clamp_range(
             0.18 + wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
             0.12,
@@ -14563,6 +14632,7 @@ struct RustMilkdropWebGlRenderer {
     primitive_buffer: web_sys::WebGlBuffer,
     primitive_program: web_sys::WebGlProgram,
     program: web_sys::WebGlProgram,
+    translated_program: RefCell<Option<RustMilkdropTranslatedProgram>>,
     u_color: Option<web_sys::WebGlUniformLocation>,
     u_counts: Option<web_sys::WebGlUniformLocation>,
     u_display_only: Option<web_sys::WebGlUniformLocation>,
@@ -14573,6 +14643,12 @@ struct RustMilkdropWebGlRenderer {
     u_primitive_point_size: Option<web_sys::WebGlUniformLocation>,
     u_resolution: Option<web_sys::WebGlUniformLocation>,
     u_time: Option<web_sys::WebGlUniformLocation>,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct RustMilkdropTranslatedProgram {
+    program: web_sys::WebGlProgram,
+    source: String,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -14688,6 +14764,7 @@ impl RustMilkdropWebGlRenderer {
             primitive_buffer,
             primitive_program,
             program,
+            translated_program: RefCell::new(None),
         })
     }
 
@@ -14720,7 +14797,17 @@ impl RustMilkdropWebGlRenderer {
             web_sys::WebGl2RenderingContext::FRAMEBUFFER,
             Some(&targets.targets[write_index].framebuffer),
         );
-        self.draw_feedback_quad(frame, time, drawing_width, drawing_height, false);
+        if let Some(program) = self.translated_program_for(&frame.shader_source) {
+            self.draw_translated_feedback_quad(
+                &program,
+                frame,
+                time,
+                drawing_width,
+                drawing_height,
+            );
+        } else {
+            self.draw_feedback_quad(frame, time, drawing_width, drawing_height, false);
+        }
         self.draw_primitives(frame);
 
         self.gl
@@ -14731,6 +14818,148 @@ impl RustMilkdropWebGlRenderer {
         );
         self.draw_feedback_quad(frame, time, drawing_width, drawing_height, true);
         targets.read_index = write_index;
+    }
+
+    fn translated_program_for(&self, source: &str) -> Option<web_sys::WebGlProgram> {
+        if source.trim().is_empty() {
+            return None;
+        }
+        if let Some(cached) = self.translated_program.borrow().as_ref() {
+            if cached.source == source {
+                return Some(cached.program.clone());
+            }
+        }
+        let vertex_shader = compile_rust_milkdrop_shader(
+            &self.gl,
+            web_sys::WebGl2RenderingContext::VERTEX_SHADER,
+            RUST_MILKDROP_TRANSLATED_VERTEX_SHADER,
+        )
+        .ok()?;
+        let fragment_shader = compile_rust_milkdrop_shader(
+            &self.gl,
+            web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
+            source,
+        )
+        .ok()?;
+        let program =
+            link_rust_milkdrop_program(&self.gl, &vertex_shader, &fragment_shader).ok()?;
+        *self.translated_program.borrow_mut() = Some(RustMilkdropTranslatedProgram {
+            program: program.clone(),
+            source: source.to_string(),
+        });
+        Some(program)
+    }
+
+    fn set_translated_uniforms(
+        &self,
+        program: &web_sys::WebGlProgram,
+        frame: &RustMilkdropFrame,
+        time: f64,
+        drawing_width: i32,
+        drawing_height: i32,
+    ) {
+        let (r, g, b) = frame.wave_color;
+        let feedback = (1.0 - frame.background_alpha).clamp(0.0, 0.985) as f32;
+        let uniform = |name: &str| self.gl.get_uniform_location(program, name);
+        self.gl.uniform3f(
+            uniform("color").as_ref(),
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+        );
+        self.gl.uniform1i(uniform("previousFrame").as_ref(), 0);
+        for index in 0..4 {
+            self.gl
+                .uniform1i(uniform(&format!("shaderTexture{index}")).as_ref(), 0);
+        }
+        self.gl.uniform1f(uniform("feedback").as_ref(), feedback);
+        self.gl.uniform1f(uniform("outputAlpha").as_ref(), 1.0);
+        self.gl.uniform1f(uniform("time").as_ref(), time as f32);
+        self.gl.uniform1f(uniform("sampleRate").as_ref(), 44_100.0);
+        self.gl.uniform2f(
+            uniform("resolution").as_ref(),
+            drawing_width as f32,
+            drawing_height as f32,
+        );
+        self.gl.uniform2f(
+            uniform("pixelSize").as_ref(),
+            1.0 / drawing_width.max(1) as f32,
+            1.0 / drawing_height.max(1) as f32,
+        );
+        self.gl.uniform1f(
+            uniform("aspect").as_ref(),
+            drawing_width as f32 / drawing_height.max(1) as f32,
+        );
+        self.gl.uniform4f(
+            uniform("texsize").as_ref(),
+            drawing_width as f32,
+            drawing_height as f32,
+            1.0 / drawing_width.max(1) as f32,
+            1.0 / drawing_height.max(1) as f32,
+        );
+        self.gl
+            .uniform1f(uniform("bass").as_ref(), frame.bass as f32);
+        self.gl
+            .uniform1f(uniform("bass_att").as_ref(), frame.bass as f32);
+        self.gl.uniform1f(uniform("mid").as_ref(), frame.mid as f32);
+        self.gl
+            .uniform1f(uniform("mid_att").as_ref(), frame.mid as f32);
+        self.gl
+            .uniform1f(uniform("treb").as_ref(), frame.treble as f32);
+        self.gl
+            .uniform1f(uniform("treb_att").as_ref(), frame.treble as f32);
+        let fft = frame
+            .fft_bins
+            .iter()
+            .map(|value| *value as f32)
+            .collect::<Vec<_>>();
+        let waveform = frame
+            .waveform_bins
+            .iter()
+            .map(|value| *value as f32)
+            .collect::<Vec<_>>();
+        self.gl
+            .uniform1fv_with_f32_array(uniform("fftBins").as_ref(), &fft);
+        self.gl
+            .uniform1fv_with_f32_array(uniform("waveformBins").as_ref(), &waveform);
+        for (index, value) in frame.q_registers.iter().enumerate() {
+            self.gl
+                .uniform1f(uniform(&format!("q{}", index + 1)).as_ref(), *value as f32);
+        }
+    }
+
+    fn draw_translated_feedback_quad(
+        &self,
+        program: &web_sys::WebGlProgram,
+        frame: &RustMilkdropFrame,
+        time: f64,
+        drawing_width: i32,
+        drawing_height: i32,
+    ) {
+        self.gl.use_program(Some(program));
+        self.gl.bind_buffer(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            Some(&self.buffer),
+        );
+        let position = self.gl.get_attrib_location(program, "position");
+        if position >= 0 {
+            self.gl.enable_vertex_attrib_array(position as u32);
+            self.gl.vertex_attrib_pointer_with_i32(
+                position as u32,
+                2,
+                web_sys::WebGl2RenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+        }
+        self.gl.viewport(0, 0, drawing_width, drawing_height);
+        self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+        self.gl
+            .clear(web_sys::WebGl2RenderingContext::COLOR_BUFFER_BIT);
+        self.set_translated_uniforms(program, frame, time, drawing_width, drawing_height);
+        self.gl
+            .draw_arrays(web_sys::WebGl2RenderingContext::TRIANGLE_STRIP, 0, 4);
     }
 
     fn draw_feedback_quad(
@@ -15016,6 +15245,16 @@ in vec2 position;
 out vec2 v_uv;
 void main() {
   v_uv = position * 0.5 + vec2(0.5);
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_TRANSLATED_VERTEX_SHADER: &str = r#"#version 300 es
+in vec2 position;
+out vec2 uv;
+void main() {
+  uv = position * 0.5 + vec2(0.5);
   gl_Position = vec4(position, 0.0, 1.0);
 }
 "#;
@@ -15644,6 +15883,9 @@ mod tests {
             wave_g=0.3
             wave_b=0.4
             per_frame_1=wave_r=get_fft(0.5);
+            per_frame_2=q1=bass_att+0.25;
+            comp_shader=float energy = get_fft(0.5);
+            comp_shader_1=ret = tex2D(sampler_main, uv).rgb * vec3(q1, energy, get_waveform(0.5));
             wavecode_0_enabled=1
             wavecode_0_samples=3
             wavecode_0_per_point1=x=i;
@@ -15657,6 +15899,17 @@ mod tests {
             &[0.0, 0.5, 1.0],
         );
         assert_eq!(frame.wave_color.0, 127);
+        assert!((frame.q_registers[0] - 0.35).abs() < 0.0001);
+        assert!((frame.fft_bins[32] - 0.5).abs() < 0.0001);
+        assert!(frame.waveform_bins[0] < -0.9);
+        assert!(frame.waveform_bins[63] > 0.9);
+        assert!(frame
+            .shader_source
+            .contains("uniform sampler2D previousFrame;"));
+        assert!(frame.shader_source.contains("float energy"));
+        assert!(frame
+            .shader_source
+            .contains("texture(previousFrame, uv).rgb"));
         let wave = frame
             .primitives
             .iter()
