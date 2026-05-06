@@ -6441,7 +6441,7 @@ fn player_footer_html() -> String {
 }
 
 fn rust_milkdrop_panel_html() -> String {
-    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><input id="slskr-milkdrop-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
+    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><input id="slskr-milkdrop-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -17232,39 +17232,52 @@ fn mount_rust_milkdrop_texture_input(
             let Some(files) = input.files() else {
                 return;
             };
-            let Some(file) = files.item(0) else {
+            if files.length() == 0 {
                 return;
-            };
-            let file_name = file.name();
-            let Ok(reader) = web_sys::FileReader::new() else {
-                set_player_status(
-                    &document_for_change,
-                    "Texture import needs FileReader support",
-                );
-                return;
-            };
-            let document_for_load = document_for_change.clone();
-            let assets_for_load = assets_for_change.clone();
-            let reader_for_load = reader.clone();
-            let onload = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
-                let Some(data_url) = reader_for_load
-                    .result()
-                    .ok()
-                    .and_then(|value| value.as_string())
-                else {
-                    set_player_status(&document_for_load, "Texture file could not be read");
+            }
+            for index in 0..files.length() {
+                let Some(file) = files.item(index) else {
+                    continue;
+                };
+                let file_name = file.name();
+                let Ok(reader) = web_sys::FileReader::new() else {
+                    set_player_status(
+                        &document_for_change,
+                        "Texture import needs FileReader support",
+                    );
                     return;
                 };
-                store_rust_milkdrop_texture_asset(
-                    &document_for_load,
-                    assets_for_load.clone(),
-                    &file_name,
-                    &data_url,
-                );
-            }));
-            reader.set_onload(Some(onload.as_ref().unchecked_ref()));
-            onload.forget();
-            let _ = reader.read_as_data_url(&file);
+                let document_for_load = document_for_change.clone();
+                let assets_for_load = assets_for_change.clone();
+                let reader_for_load = reader.clone();
+                let onload = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+                    let Some(data_url) = reader_for_load
+                        .result()
+                        .ok()
+                        .and_then(|value| value.as_string())
+                    else {
+                        set_player_status(&document_for_load, "Texture file could not be read");
+                        return;
+                    };
+                    store_rust_milkdrop_texture_asset(
+                        &document_for_load,
+                        assets_for_load.clone(),
+                        &file_name,
+                        &data_url,
+                    );
+                }));
+                reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                onload.forget();
+                let _ = reader.read_as_data_url(&file);
+            }
+            set_player_status(
+                &document_for_change,
+                &format!(
+                    "Reading {} MilkDrop texture file{}",
+                    files.length(),
+                    if files.length() == 1 { "" } else { "s" }
+                ),
+            );
             input.set_value("");
         }));
     input.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())?;
@@ -19204,6 +19217,7 @@ mod tests {
         assert!(html.contains("data-slskr-milkdrop-action=\"import\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"texture\""));
         assert!(html.contains("slskr-milkdrop-texture-input"));
+        assert!(html.contains("multiple hidden"));
         assert!(html.contains("slskr-milkdrop-textures"));
         assert!(html.contains("data-slskr-milkdrop-action=\"reset\""));
         assert!(html.contains("slskr-milkdrop-renderer"));
