@@ -118,9 +118,10 @@ Completed across the main Rust routes:
 - Headless route audit passes for every main nav route. Enforced by
   `node scripts/audit-rust-web-ui.mjs`, which builds the Rust/WASM bundle,
   serves it with mocked daemon responses, visits every main route on desktop
-  and mobile, captures screenshots in `target/ux-audit/`, and fails if primary
-  workflow, inspector/detail, hidden Developer drawer, or browser-error checks
-  regress.
+  and mobile, captures screenshots in `target/ux-audit/`, selects a workflow row
+  by keyboard, exercises a selected-row action, and fails if primary workflow,
+  inspector/detail, action feedback or confirmation, hidden Developer drawer,
+  bottom-player spacing, selectable live rows, or browser-error checks regress.
 - No visible `GET /api/v0` text outside the Developer drawer.
 - Every page has a route-specific heading, primary action, table/list, empty
   state, and inspector/detail surface.

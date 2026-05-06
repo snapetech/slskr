@@ -159,15 +159,51 @@ try {
       const primaryActionCount = await page.locator('.slskr-toolbar-command, .slskr-native-command-row button, .slskr-native-panel-actions button').count();
       const nativeWorkspaceCount = await page.locator('.slskr-native-workspace').count();
       const inspectorCount = await page.locator('#slskr-native-inspector').count();
+      const rowCount = await page.locator('[data-slskr-native-select]').count();
+      let selectedTitle = '';
+      let selectedStatus = '';
+      let toastText = '';
+      let confirmationVisible = false;
+      if (rowCount > 0) {
+        await page.locator('[data-slskr-native-select]').first().focus();
+        await page.keyboard.press('Enter');
+        selectedTitle = await page.locator('[data-slskr-native-inspector-title]').first().innerText();
+        selectedStatus = await page.locator('#slskr-action-status').innerText();
+        const rowAction = page.locator('.slskr-native-row-actions button, [data-slskr-native-preview-action]').first();
+        if (await rowAction.count()) {
+          await rowAction.click();
+          toastText = await page.locator('#slskr-toast-region').innerText().catch(() => '');
+          confirmationVisible = await page.locator('.slskr-modal-backdrop').isVisible().catch(() => false);
+        }
+      }
+      const layout = await page.evaluate(() => {
+        const player = document.querySelector('[data-slskr-player]');
+        const main = document.querySelector('.slskr-main');
+        const workflow = document.querySelector('.slskr-native-workspace');
+        const playerBox = player?.getBoundingClientRect();
+        const workflowBox = workflow?.getBoundingClientRect();
+        const mainStyle = main ? window.getComputedStyle(main) : null;
+        return {
+          bodyPaddingBottom: Number.parseFloat(window.getComputedStyle(document.body).paddingBottom || '0'),
+          mainPaddingBottom: Number.parseFloat(mainStyle?.paddingBottom || '0'),
+          playerHeight: playerBox?.height || 0,
+        };
+      });
 
       const routeResult = {
         developerOpen,
         heading,
         inspectorCount,
+        layout,
         nativeWorkspaceCount,
         path,
         primaryActionCount,
+        confirmationVisible,
+        rowCount,
         screenshot: `${slug}-${viewport.name}.png`,
+        selectedStatus,
+        selectedTitle,
+        toastText,
         viewport: viewport.name,
       };
       audit.routes.push(routeResult);
@@ -178,6 +214,19 @@ try {
       if (primaryActionCount < 1) audit.errors.push(`${path} ${viewport.name}: no primary workflow action`);
       if (nativeWorkspaceCount < 1) audit.errors.push(`${path} ${viewport.name}: missing native workspace`);
       if (inspectorCount < 1) audit.errors.push(`${path} ${viewport.name}: missing inspector/detail surface`);
+      if (rowCount < 1) audit.errors.push(`${path} ${viewport.name}: no selectable workflow rows from mocked daemon data`);
+      if (rowCount > 0 && (!selectedTitle || selectedTitle === 'Nothing selected')) {
+        audit.errors.push(`${path} ${viewport.name}: row selection did not update inspector`);
+      }
+      if (rowCount > 0 && !selectedStatus.includes('Selected')) {
+        audit.errors.push(`${path} ${viewport.name}: row selection did not update action status`);
+      }
+      if (rowCount > 0 && !toastText.trim() && !selectedStatus.trim() && !confirmationVisible) {
+        audit.errors.push(`${path} ${viewport.name}: selected row action did not produce toast/status feedback`);
+      }
+      if (viewport.name === 'desktop' && layout.mainPaddingBottom < Math.max(72, layout.playerHeight - 4)) {
+        audit.errors.push(`${path} ${viewport.name}: main layout does not reserve bottom player space`);
+      }
       if (pageErrors.length > 0) audit.errors.push(`${path} ${viewport.name}: browser errors: ${pageErrors.join(' | ')}`);
       await page.close();
     }
