@@ -40,7 +40,7 @@ jobs:
       - name: Install workflow and shell linters
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck
+          sudo apt-get install -y ripgrep shellcheck
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Install cargo-audit
