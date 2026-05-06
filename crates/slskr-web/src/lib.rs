@@ -11688,6 +11688,11 @@ fn update_rust_milkdrop_scope_audio(
     scope.insert("time".to_string(), MilkdropValue::Number(time_seconds));
     scope.insert("frame".to_string(), MilkdropValue::Number(frame_index));
     scope.insert("fps".to_string(), MilkdropValue::Number(60.0));
+    scope.insert("sample_rate".to_string(), MilkdropValue::Number(44_100.0));
+    scope.insert("samplerate".to_string(), MilkdropValue::Number(44_100.0));
+    scope.insert("canvas_width".to_string(), MilkdropValue::Number(1.0));
+    scope.insert("canvas_height".to_string(), MilkdropValue::Number(1.0));
+    scope.insert("aspect".to_string(), MilkdropValue::Number(1.0));
     if !waveform.is_empty() {
         scope.insert(
             "waveform_data".to_string(),
@@ -13572,6 +13577,7 @@ pub fn is_milkdrop_function_supported(name: &str) -> bool {
             | "floor"
             | "get_fft"
             | "get_fft_hz"
+            | "get_waveform"
             | "if"
             | "int"
             | "log"
@@ -14813,6 +14819,10 @@ impl<'a> MilkdropExpressionParser<'a> {
                     },
                 )
             }
+            "get_waveform" => {
+                let values = milkdrop_waveform_data(self.scope);
+                milkdrop_indexed_sample(&values, arg(0, 0.0))
+            }
             "if" => {
                 if arg(0, 0.0) != 0.0 {
                     arg(1, 0.0)
@@ -15040,6 +15050,22 @@ fn milkdrop_frequency_data(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> 
         None => None,
     })
     .unwrap_or_default()
+}
+
+fn milkdrop_waveform_data(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> {
+    ["waveform_data", "waveform", "samples", "wave"]
+        .into_iter()
+        .find_map(|name| match scope.get(name) {
+            Some(MilkdropValue::Text(value)) => Some(
+                value
+                    .split(',')
+                    .filter_map(|item| item.trim().parse::<f64>().ok())
+                    .collect::<Vec<_>>(),
+            ),
+            Some(MilkdropValue::Number(value)) => Some(vec![*value]),
+            None => None,
+        })
+        .unwrap_or_default()
 }
 
 pub fn evaluate_milkdrop_expression(
@@ -17231,6 +17257,36 @@ mod tests {
     }
 
     #[test]
+    fn rust_milkdrop_runtime_uses_waveform_function_in_equations() {
+        let frame = rust_milkdrop_frame_from_source_with_audio(
+            r#"
+            name=Waveform expression
+            wave_r=0.1
+            wave_g=0.2
+            wave_b=0.3
+            per_frame_1=q1=get_waveform(0.5);
+            per_frame_2=wave_r=q1;
+            shape00_enabled=1
+            shape00_sides=4
+            shape00_per_frame1=rad=0.05+get_waveform(0.75)*0.1;
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+            &[-1.0, 0.0, 1.0, 0.5],
+            &[0.0, 0.5, 1.0],
+        );
+
+        assert!((frame.q_registers[0] - 1.0).abs() < 0.0001);
+        assert_eq!(frame.wave_color.0, 255);
+        assert!(frame.primitives.iter().any(|primitive| {
+            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+                && primitive.vertices.iter().any(|value| value.abs() > 0.09)
+        }));
+    }
+
+    #[test]
     fn rust_milkdrop_runtime_persists_q_registers_across_frames() {
         let mut runtime = RustMilkdropRuntime::default();
         let source = r#"
@@ -17475,6 +17531,15 @@ mod tests {
             evaluate_milkdrop_expression("get_fft_hz(5512.5)", &vars).unwrap(),
             1.0
         );
+        vars.insert(
+            "waveform_data".to_string(),
+            MilkdropValue::Text("-1,0,1,0.5".to_string()),
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression("get_waveform(0.5)", &vars).unwrap(),
+            1.0
+        );
+        assert!(is_milkdrop_function_supported("get_waveform"));
     }
 
     #[test]
