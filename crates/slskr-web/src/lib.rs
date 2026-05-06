@@ -16788,6 +16788,9 @@ struct RustMilkdropImportedPreset {
 }
 
 #[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY: &str = "slskr.rustMilkdropImportedPresets";
+
+#[cfg(target_arch = "wasm32")]
 fn toggle_rust_milkdrop_visualizer(
     window: &web_sys::Window,
     document: &web_sys::Document,
@@ -16824,7 +16827,7 @@ fn start_rust_milkdrop_visualizer(
     let texture_assets: Rc<RefCell<BTreeMap<String, String>>> =
         Rc::new(RefCell::new(BTreeMap::new()));
     let imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>> =
-        Rc::new(RefCell::new(Vec::new()));
+        Rc::new(RefCell::new(load_rust_milkdrop_imported_presets(window)));
     mount_rust_milkdrop_preset_input(document, imported_presets.clone())?;
     mount_rust_milkdrop_texture_input(document, texture_assets.clone())?;
     mount_rust_milkdrop_pack_input(document, imported_presets.clone(), texture_assets.clone())?;
@@ -16850,6 +16853,16 @@ fn start_rust_milkdrop_visualizer(
     if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
         label.set_text_content(Some(renderer.label()));
     }
+    set_rust_milkdrop_active_preset(
+        document,
+        &panel,
+        &imported_presets,
+        panel
+            .get_attribute("data-slskr-milkdrop-preset-index")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0),
+        "Rust MilkDrop visualizer ready",
+    );
     let animation_handle: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
         Rc::new(RefCell::new(None));
     let animation_handle_for_frame = animation_handle.clone();
@@ -17192,6 +17205,73 @@ fn set_rust_milkdrop_active_preset(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn load_rust_milkdrop_imported_presets(
+    window: &web_sys::Window,
+) -> Vec<RustMilkdropImportedPreset> {
+    let Some(storage) = window.local_storage().ok().flatten() else {
+        return Vec::new();
+    };
+    let Some(raw) = storage
+        .get_item(RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY)
+        .ok()
+        .flatten()
+    else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Vec::new();
+    };
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let source = item.get("source")?.as_str()?.to_string();
+            if source.trim().is_empty() {
+                return None;
+            }
+            let title = item
+                .get("title")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| rust_milkdrop_preset_name(&source));
+            Some(RustMilkdropImportedPreset { source, title })
+        })
+        .take(20)
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_rust_milkdrop_imported_presets(
+    document: &web_sys::Document,
+    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+) {
+    let Some(window) = document.default_view() else {
+        return;
+    };
+    let Some(storage) = window.local_storage().ok().flatten() else {
+        return;
+    };
+    let items = imported_presets
+        .borrow()
+        .iter()
+        .take(20)
+        .map(|preset| {
+            serde_json::json!({
+                "source": preset.source.clone(),
+                "title": preset.title.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let _ = storage.set_item(
+        RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY,
+        &serde_json::Value::Array(items).to_string(),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
 fn import_rust_milkdrop_preset(
     window: &web_sys::Window,
     document: &web_sys::Document,
@@ -17210,6 +17290,7 @@ fn import_rust_milkdrop_preset(
                         title: title.clone(),
                     },
                 );
+                persist_rust_milkdrop_imported_presets(document, &imported_presets);
                 set_rust_milkdrop_active_preset(
                     document,
                     &panel,
@@ -17232,6 +17313,7 @@ fn reset_rust_milkdrop_import(
         return;
     };
     imported_presets.borrow_mut().clear();
+    persist_rust_milkdrop_imported_presets(document, &imported_presets);
     let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
     set_rust_milkdrop_active_preset(
         document,
@@ -17471,6 +17553,7 @@ fn store_rust_milkdrop_imported_preset(
         });
         imports.len() - 1
     };
+    persist_rust_milkdrop_imported_presets(document, &imported_presets);
     set_rust_milkdrop_active_preset(
         document,
         &panel,
