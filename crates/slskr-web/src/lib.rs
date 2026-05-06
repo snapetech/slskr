@@ -12439,6 +12439,128 @@ impl RustMilkdropRuntime {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RustMilkdropFrameSetRuntime {
+    initialized: Vec<bool>,
+    preset_documents: Vec<MilkdropPresetDocument>,
+    scopes: Vec<BTreeMap<String, MilkdropValue>>,
+    source: String,
+}
+
+impl RustMilkdropFrameSetRuntime {
+    pub fn render_source(
+        &mut self,
+        source: &str,
+        time_seconds: f64,
+        bass: f64,
+        mid: f64,
+        treble: f64,
+    ) -> RustMilkdropFrameSet {
+        self.render_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
+    }
+
+    pub fn render_source_with_audio(
+        &mut self,
+        source: &str,
+        time_seconds: f64,
+        bass: f64,
+        mid: f64,
+        treble: f64,
+        waveform: &[f64],
+        spectrum: &[f64],
+    ) -> RustMilkdropFrameSet {
+        if self.source != source || self.preset_documents.is_empty() {
+            let parsed = parse_milkdrop_preset_set(
+                source,
+                source.to_ascii_lowercase().contains("[preset01]"),
+            );
+            self.initialized = vec![false; parsed.presets.len()];
+            self.scopes = parsed
+                .presets
+                .iter()
+                .map(|preset| create_rust_milkdrop_scope(preset, time_seconds, bass, mid, treble))
+                .collect();
+            self.preset_documents = parsed.presets;
+            self.source = source.to_string();
+        }
+
+        let parsed =
+            parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
+        let title = rust_milkdrop_preset_set_title(&parsed);
+        let transition_mode = rust_milkdrop_transition_mode(&parsed);
+        let transition_seconds = rust_milkdrop_transition_seconds(&parsed);
+        let mut entries = Vec::with_capacity(self.preset_documents.len());
+
+        for index in 0..self.preset_documents.len() {
+            let preset_document = &mut self.preset_documents[index];
+            let scope = &mut self.scopes[index];
+            let next_frame = milkdrop_scope_number(scope, "frame", 0.0) + 1.0;
+            update_rust_milkdrop_scope_audio(
+                scope,
+                time_seconds,
+                next_frame,
+                bass,
+                mid,
+                treble,
+                waveform,
+                spectrum,
+            );
+            if !self.initialized.get(index).copied().unwrap_or_default() {
+                if !preset_document.equations.init.trim().is_empty() {
+                    if let Ok(next_scope) =
+                        evaluate_milkdrop_equations(&preset_document.equations.init, scope)
+                    {
+                        *scope = next_scope;
+                    }
+                }
+                if let Some(initialized) = self.initialized.get_mut(index) {
+                    *initialized = true;
+                }
+            }
+            if !preset_document.equations.per_frame.trim().is_empty() {
+                if let Ok(next_scope) =
+                    evaluate_milkdrop_equations(&preset_document.equations.per_frame, scope)
+                {
+                    *scope = next_scope;
+                }
+            }
+            let blend_alpha = rust_milkdrop_composite_alpha(preset_document, index);
+            let composite_mode = rust_milkdrop_composite_mode(preset_document, index);
+            let title = if preset_document.title.trim().is_empty() {
+                format!("Preset {}", index + 1)
+            } else {
+                preset_document.title.clone()
+            };
+            let frame = build_rust_milkdrop_frame_from_runtime_scope(
+                source,
+                preset_document,
+                scope,
+                time_seconds,
+                bass,
+                mid,
+                treble,
+                waveform,
+                spectrum,
+            );
+            entries.push(RustMilkdropCompositeFrame {
+                blend_alpha,
+                composite_mode,
+                frame,
+                index,
+                title,
+            });
+        }
+
+        RustMilkdropFrameSet {
+            preset_count: entries.len(),
+            entries,
+            title,
+            transition_mode,
+            transition_seconds,
+        }
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const RUST_MILKDROP_PRESETS: [&str; 3] = [
     "name=slskr native grid smoke\ndecay=0.91\nwave_r=0.12\nwave_g=0.64\nwave_b=0.88\nwave_a=0.86\nwave_scale=1.2\nzoom=1\nrot=0\nper_frame_1=wave_r=0.35+0.25*bass_att;\nper_frame_2=wave_g=0.45+0.2*mid_att;\nper_frame_3=wave_b=0.55+0.2*treb_att;\nper_frame_4=rot=0.01*sin(time*0.7);\nper_frame_5=zoom=1+0.03*sin(time*0.5);\nper_frame_6=dx=0.015*sin(time*0.6);\nper_frame_7=dy=0.015*cos(time*0.5);\nshape00_enabled=1\nshape00_sides=5\nshape00_rad=0.18\nwavecode_0_enabled=1\nwavecode_0_samples=96",
@@ -19453,6 +19575,47 @@ mod tests {
         assert_eq!(frame_set.entries[1].composite_mode, "screen");
         assert_eq!(frame_set.entries[1].title, "Secondary");
         assert_eq!(frame_set.entries[1].frame.waveform_count, 1);
+    }
+
+    #[test]
+    fn rust_milkdrop_frame_set_runtime_persists_each_preset_state() {
+        let mut runtime = RustMilkdropFrameSetRuntime::default();
+        let source = r#"
+            [preset00]
+            name=Primary
+            q1=0
+            per_frame_1=q1=q1+1;
+            wave_r=0
+            per_frame_2=wave_r=q1/10;
+            [preset01]
+            name=Secondary
+            blend_alpha=0.5
+            composite_mode=multiply
+            q1=0
+            per_frame_1=q1=q1+2;
+            wave_g=0
+            per_frame_2=wave_g=q1/10;
+            shape00_enabled=1
+            shape00_init1=q2=0.1;
+            shape00_per_frame1=q2=q2+0.1;
+            shape00_per_frame2=rad=q2;
+            "#;
+
+        let first = runtime.render_source(source, 0.1, 0.1, 0.2, 0.3);
+        let second = runtime.render_source(source, 0.2, 0.1, 0.2, 0.3);
+
+        assert_eq!(second.preset_count, 2);
+        assert!(second.entries[0].frame.wave_color.0 > first.entries[0].frame.wave_color.0);
+        assert!(second.entries[1].frame.wave_color.1 > first.entries[1].frame.wave_color.1);
+        assert_eq!(second.entries[1].composite_mode, "multiply");
+        assert_eq!(second.entries[1].blend_alpha, 0.5);
+        assert!(second.entries[1].frame.primitives.iter().any(|primitive| {
+            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+                && primitive.vertices.iter().any(|value| value.abs() > 0.15)
+        }));
+
+        let reset = runtime.render_source("name=Reset\nwave_r=0.1", 0.3, 0.1, 0.2, 0.3);
+        assert_eq!(reset.preset_count, 1);
     }
 
     #[test]
