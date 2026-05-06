@@ -12702,6 +12702,13 @@ fn is_milkdrop_q_variable(key: &str) -> bool {
         .is_some_and(|index| (1..=64).contains(&index))
 }
 
+fn is_milkdrop_buffer_variable(key: &str) -> bool {
+    key.strip_prefix("megabuf_")
+        .or_else(|| key.strip_prefix("gmegabuf_"))
+        .and_then(|rest| rest.parse::<usize>().ok())
+        .is_some()
+}
+
 fn persist_milkdrop_scoped_values(
     base_values: &BTreeMap<String, MilkdropValue>,
     scope: &BTreeMap<String, MilkdropValue>,
@@ -12709,7 +12716,10 @@ fn persist_milkdrop_scoped_values(
 ) -> BTreeMap<String, MilkdropValue> {
     let mut next = base_values.clone();
     for (key, value) in scope {
-        if allowed_keys.contains(&key.as_str()) || is_milkdrop_q_variable(key) {
+        if allowed_keys.contains(&key.as_str())
+            || is_milkdrop_q_variable(key)
+            || is_milkdrop_buffer_variable(key)
+        {
             next.insert(key.clone(), value.clone());
         }
     }
@@ -14280,6 +14290,7 @@ pub fn is_milkdrop_function_supported(name: &str) -> bool {
             | "equal"
             | "exp"
             | "floor"
+            | "gmegabuf"
             | "get_fft"
             | "get_fft_hz"
             | "get_waveform"
@@ -14288,6 +14299,7 @@ pub fn is_milkdrop_function_supported(name: &str) -> bool {
             | "log"
             | "log10"
             | "max"
+            | "megabuf"
             | "min"
             | "mod"
             | "pow"
@@ -15379,6 +15391,24 @@ fn milkdrop_number(scope: &BTreeMap<String, MilkdropValue>, name: &str) -> f64 {
         .unwrap_or(0.0)
 }
 
+fn milkdrop_buffer_key(name: &str, index: f64) -> String {
+    let prefix = if name.eq_ignore_ascii_case("gmegabuf") {
+        "gmegabuf"
+    } else {
+        "megabuf"
+    };
+    let index = if index.is_finite() {
+        index.trunc().max(0.0) as usize
+    } else {
+        0
+    };
+    format!("{prefix}_{index}")
+}
+
+fn milkdrop_buffer_number(scope: &BTreeMap<String, MilkdropValue>, name: &str, index: f64) -> f64 {
+    milkdrop_number(scope, &milkdrop_buffer_key(name, index))
+}
+
 fn milkdrop_indexed_sample(values: &[f64], position: f64) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -15505,6 +15535,7 @@ impl<'a> MilkdropExpressionParser<'a> {
             "equal" => ((arg(0, 0.0) - arg(1, 0.0)).abs() < 0.00001) as i32 as f64,
             "exp" => arg(0, 0.0).exp(),
             "floor" => arg(0, 0.0).floor(),
+            "gmegabuf" => milkdrop_buffer_number(self.scope, name, arg(0, 0.0)),
             "get_fft" => {
                 let values = milkdrop_frequency_data(self.scope);
                 milkdrop_indexed_sample(&values, arg(0, 0.0))
@@ -15551,6 +15582,7 @@ impl<'a> MilkdropExpressionParser<'a> {
                 }
             }
             "max" => arg(0, 0.0).max(arg(1, 0.0)),
+            "megabuf" => milkdrop_buffer_number(self.scope, name, arg(0, 0.0)),
             "min" => arg(0, 0.0).min(arg(1, 0.0)),
             "mod" => {
                 let right = arg(1, 0.0);
@@ -15798,29 +15830,68 @@ pub fn evaluate_milkdrop_equations(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
+        if let Some((buffer_name, index_expression, operator, expression)) =
+            split_milkdrop_buffer_assignment(statement)
+        {
+            let buffer_index = evaluate_milkdrop_expression(index_expression, &scope)?;
+            let key = milkdrop_buffer_key(&buffer_name, buffer_index);
+            let current = milkdrop_number(&scope, &key);
+            let next = evaluate_milkdrop_expression(expression, &scope)?;
+            let value = apply_milkdrop_assignment_operator(current, operator, next);
+            scope.insert(key, MilkdropValue::Number(value));
+            continue;
+        }
         let Some((name, operator, expression)) = split_milkdrop_assignment(statement) else {
             let _ = evaluate_milkdrop_expression(statement, &scope)?;
             continue;
         };
         let current = milkdrop_number(&scope, &name);
         let next = evaluate_milkdrop_expression(expression, &scope)?;
-        let value = match operator {
-            "=" => next,
-            "+=" => current + next,
-            "-=" => current - next,
-            "*=" => current * next,
-            "/=" => {
-                if next == 0.0 {
-                    0.0
-                } else {
-                    current / next
-                }
-            }
-            _ => next,
-        };
+        let value = apply_milkdrop_assignment_operator(current, operator, next);
         scope.insert(name, MilkdropValue::Number(value));
     }
     Ok(scope)
+}
+
+fn apply_milkdrop_assignment_operator(current: f64, operator: &str, next: f64) -> f64 {
+    match operator {
+        "=" => next,
+        "+=" => current + next,
+        "-=" => current - next,
+        "*=" => current * next,
+        "/=" => {
+            if next == 0.0 {
+                0.0
+            } else {
+                current / next
+            }
+        }
+        _ => next,
+    }
+}
+
+fn split_milkdrop_buffer_assignment(statement: &str) -> Option<(String, &str, &'static str, &str)> {
+    for operator in ["+=", "-=", "*=", "/=", "="] {
+        let Some((raw_name, expression)) = statement.split_once(operator) else {
+            continue;
+        };
+        let raw_name = raw_name.trim();
+        let open = raw_name.find('(')?;
+        let close = raw_name.rfind(')')?;
+        if close <= open || close != raw_name.len() - 1 {
+            continue;
+        }
+        let name = raw_name[..open].trim().to_ascii_lowercase();
+        if name != "megabuf" && name != "gmegabuf" {
+            continue;
+        }
+        let index_expression = raw_name[open + 1..close].trim();
+        if index_expression.is_empty() {
+            continue;
+        }
+        return Some((name, index_expression, operator, expression.trim()));
+    }
+    None
 }
 
 fn split_milkdrop_assignment(statement: &str) -> Option<(String, &'static str, &str)> {
@@ -18251,10 +18322,6 @@ mod tests {
         );
         assert_eq!(scope.get("q33"), Some(&MilkdropValue::Number(7.0)));
         assert_eq!(scope.get("wave_r"), Some(&MilkdropValue::Number(0.4)));
-        assert!(matches!(
-            evaluate_milkdrop_expression("megabuf(1)", &BTreeMap::new()),
-            Err(error) if error.contains("Unsupported MilkDrop function")
-        ));
     }
 
     #[test]
@@ -18286,6 +18353,34 @@ mod tests {
             1.0
         );
         assert!(is_milkdrop_function_supported("get_waveform"));
+    }
+
+    #[test]
+    fn rust_milkdrop_expression_vm_supports_megabuf_state() {
+        let scope = evaluate_milkdrop_equations(
+            r#"
+            q1=2;
+            megabuf(q1)=0.25;
+            megabuf(q1)+=0.5;
+            gmegabuf(4)=megabuf(2)*2;
+            q2=megabuf(2)+gmegabuf(4);
+            "#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(scope.get("megabuf_2"), Some(&MilkdropValue::Number(0.75)));
+        assert_eq!(scope.get("gmegabuf_4"), Some(&MilkdropValue::Number(1.5)));
+        assert_eq!(scope.get("q2"), Some(&MilkdropValue::Number(2.25)));
+
+        let mut seeded = BTreeMap::new();
+        seeded.insert("megabuf_2".to_string(), MilkdropValue::Number(0.75));
+        assert_eq!(
+            evaluate_milkdrop_expression("megabuf(2)", &seeded).unwrap(),
+            0.75
+        );
+        assert!(is_milkdrop_function_supported("megabuf"));
+        assert!(is_milkdrop_function_supported("gmegabuf"));
     }
 
     #[test]
@@ -19092,16 +19187,12 @@ mod tests {
         let report = analyze_milkdrop_preset_compatibility(&parsed.presets[0]);
         assert_eq!(
             report.unsupported_functions,
-            vec![
-                "customcall".to_string(),
-                "megabuf".to_string(),
-                "spritecall".to_string()
-            ]
+            vec!["customcall".to_string(), "spritecall".to_string()]
         );
         assert_eq!(report.shader_sections, vec!["comp_shader".to_string()]);
         assert_eq!(
             milkdrop_compatibility_error(&report),
-            "Native MilkDrop preset has unsupported functions: customcall, megabuf, spritecall; shader translation pending: comp_shader."
+            "Native MilkDrop preset has unsupported functions: customcall, spritecall; shader translation pending: comp_shader."
         );
     }
 
@@ -19133,10 +19224,10 @@ mod tests {
             Ok("Imported".to_string())
         );
         let error = validate_rust_milkdrop_import(
-            "name=Bad\nper_frame_1=q1=megabuf(0);\ncomp_shader=for (;;) { ret = vec3(1.0); }",
+            "name=Bad\nper_frame_1=q1=megabuf(0);\nper_frame_2=q2=unknowncall(q1);\ncomp_shader=for (;;) { ret = vec3(1.0); }",
         )
         .expect_err("unsupported preset should be rejected");
-        assert!(error.contains("unsupported functions: megabuf"));
+        assert!(error.contains("unsupported functions: unknowncall"));
         assert!(error.contains("shader translation pending: comp_shader"));
     }
 
