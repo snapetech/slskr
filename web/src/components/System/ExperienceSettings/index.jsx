@@ -76,7 +76,6 @@ const options = {
   visualizerDefault: [
     { key: 'last', text: 'Last used', value: 'last' },
     { key: 'art', text: 'Album art', value: 'art' },
-    { key: 'butterchurn', text: 'Butterchurn', value: 'butterchurn' },
     { key: 'native-webgl2', text: 'MilkDrop3 WebGL2', value: 'native-webgl2' },
     { key: 'native-webgpu', text: 'MilkDrop3 WebGPU', value: 'native-webgpu' },
   ],

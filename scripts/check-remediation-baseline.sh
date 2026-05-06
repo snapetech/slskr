@@ -27,6 +27,7 @@ GATES=(
   scripts/check-openapi-docs-drift.sh
   scripts/check-docs-freshness.sh
   scripts/check-council-loop.sh
+  scripts/check-bug-council-all-phases.sh
   scripts/check-council-negative-space.sh
   scripts/check-rust-protocol-taint-lens.sh
   scripts/check-rust-protocol-adversarial-corpus.sh

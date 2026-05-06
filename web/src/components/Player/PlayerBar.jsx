@@ -82,15 +82,17 @@ const readStoredBoolean = (key) => {
 
 const readStoredVisualizerEngineTileMode = () => {
   const engine = getLocalStorageItem(visualizerEngineStorageKey);
+  if (engine === 'butterchurn') return 'native-webgl2';
   if (engine === 'native') return 'native-webgl2';
-  return ['butterchurn', 'native-webgl2', 'native-webgpu'].includes(engine)
+  return ['native-webgl2', 'native-webgpu'].includes(engine)
     ? engine
-    : 'butterchurn';
+    : 'native-webgl2';
 };
 
 const readStoredTileMode = () => {
   const mode = getLocalStorageItem(visualTileStorageKey);
-  if (['art', 'spectrum', 'scope', 'butterchurn', 'native-webgl2', 'native-webgpu'].includes(mode)) {
+  if (mode === 'butterchurn') return 'native-webgl2';
+  if (['art', 'spectrum', 'scope', 'native-webgl2', 'native-webgpu'].includes(mode)) {
     return mode;
   }
   if (mode === 'milkdrop') {
@@ -1853,18 +1855,16 @@ const PlayerVisualTile = ({
   onTileModeChange,
   tileMode,
 }) => {
-  const tileModes = ['art', 'butterchurn', 'native-webgl2', 'native-webgpu', 'spectrum', 'scope'];
-  const visualizerTileModes = ['butterchurn', 'native-webgl2', 'native-webgpu'];
+  const tileModes = ['art', 'native-webgl2', 'native-webgpu', 'spectrum', 'scope'];
+  const visualizerTileModes = ['native-webgl2', 'native-webgpu'];
   const tileModeLabels = {
     art: 'album art',
-    butterchurn: 'Butterchurn',
     'native-webgl2': 'MilkDrop3 WebGL2',
     'native-webgpu': 'MilkDrop3 WebGPU',
     scope: 'signal scope',
     spectrum: 'spectrum bars',
   };
   const tileModeIcons = {
-    butterchurn: 'magic',
     'native-webgl2': 'microchip',
     'native-webgpu': 'bolt',
     scope: 'signal',
@@ -1984,7 +1984,7 @@ const PlayerVisualTile = ({
         }
       />
       <div className="player-visual-tile-controls" onClick={(event) => event.stopPropagation()}>
-        {['spectrum', 'scope', 'butterchurn', 'native-webgl2', 'native-webgpu'].map((option) => (
+        {['spectrum', 'scope', 'native-webgl2', 'native-webgpu'].map((option) => (
           <Popup
             content={`Show ${tileModeLabels[option]}.`}
             key={option}

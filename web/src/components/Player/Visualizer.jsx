@@ -7,7 +7,6 @@ import {
 } from '../../lib/storage';
 import { resumeAudioGraph } from './audioGraph';
 import SpectrumAnalyzer from './SpectrumAnalyzer';
-import { createButterchurnEngine } from './visualizers/butterchurnEngine';
 import { createNativeMilkdropEngine } from './visualizers/nativeMilkdropEngine';
 
 const visualizerEngineStorageKey = 'slskr.player.visualizerEngine';
@@ -86,13 +85,14 @@ const nativeEditableParameters = [
 
 const readStoredEngine = () => {
   const stored = getLocalStorageItem(visualizerEngineStorageKey);
+  if (stored === 'butterchurn') return 'native-webgl2';
   if (stored === 'native') return 'native-webgl2';
-  return ['butterchurn', 'native-webgl2', 'native-webgpu'].includes(stored)
+  return ['native-webgl2', 'native-webgpu'].includes(stored)
     ? stored
-    : 'butterchurn';
+    : 'native-webgl2';
 };
 
-const visualizerEngineModes = ['butterchurn', 'native-webgl2', 'native-webgpu'];
+const visualizerEngineModes = ['native-webgl2', 'native-webgpu'];
 
 const isNativeEngine = (engine) => engine === 'native-webgl2' || engine === 'native-webgpu';
 
@@ -106,13 +106,12 @@ const getNextEngine = (engine) => {
 const getEngineLabel = (engine) => {
   if (engine === 'native-webgl2') return 'MilkDrop3 WebGL2';
   if (engine === 'native-webgpu') return 'MilkDrop3 WebGPU';
-  return 'Butterchurn';
+  return 'MilkDrop3 WebGL2';
 };
 
 const getEngineIcon = (engine) => {
   if (engine === 'native-webgpu') return 'bolt';
-  if (engine === 'native-webgl2') return 'microchip';
-  return 'magic';
+  return 'microchip';
 };
 
 const isPromiseLike = (value) => value && typeof value.then === 'function';
@@ -974,10 +973,7 @@ const Visualizer = ({
           return;
         }
 
-        const createEngine = isNativeEngine(activeEngineType)
-          ? createNativeMilkdropEngine
-          : createButterchurnEngine;
-        const engine = await createEngine({
+        const engine = await createNativeMilkdropEngine({
           audioContext: graph.ctx,
           audioNode: graph.visualizerInput,
           canvas: canvasRef.current,
