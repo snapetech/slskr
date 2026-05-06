@@ -11505,6 +11505,7 @@ pub struct RustMilkdropFrame {
     pub waveform_bins: [f64; 64],
     pub wave_radius: f64,
     pub waveform_count: usize,
+    pub warp_mesh: Option<RustMilkdropWarpMesh>,
     pub zoom: f64,
 }
 
@@ -11527,6 +11528,12 @@ pub struct RustMilkdropTexturedPrimitive {
     pub color: [f64; 4],
     pub uvs: Vec<f64>,
     pub vertices: Vec<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RustMilkdropWarpMesh {
+    pub positions: Vec<f64>,
+    pub source_uvs: Vec<f64>,
 }
 
 fn clamp_unit(value: f64) -> f64 {
@@ -11599,6 +11606,7 @@ pub fn rust_milkdrop_frame(
             0.68,
         ),
         waveform_count: 0,
+        warp_mesh: None,
         zoom: clamp_range(preset.zoom + (pulse - 0.5) * 0.035, 0.5, 1.8),
     }
 }
@@ -11712,6 +11720,74 @@ fn translated_rust_milkdrop_shader_source(preset: &MilkdropPresetDocument) -> St
     String::new()
 }
 
+fn create_rust_milkdrop_warp_mesh(
+    preset: &MilkdropPresetDocument,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+) -> Option<RustMilkdropWarpMesh> {
+    let equations = preset.equations.per_pixel.trim();
+    if equations.is_empty() {
+        return None;
+    }
+    let columns = milkdrop_scope_number(frame_scope, "meshx", 8.0)
+        .floor()
+        .clamp(1.0, 128.0) as usize;
+    let rows = milkdrop_scope_number(frame_scope, "meshy", 6.0)
+        .floor()
+        .clamp(1.0, 128.0) as usize;
+    let mut positions = Vec::with_capacity(columns * rows * 12);
+    let mut source_uvs = Vec::with_capacity(columns * rows * 12);
+    let mut push_point = |x: f64, y: f64| {
+        let centered_x = x - 0.5;
+        let centered_y = y - 0.5;
+        let mut point_scope = frame_scope.clone();
+        point_scope.insert(
+            "ang".to_string(),
+            MilkdropValue::Number(centered_y.atan2(centered_x)),
+        );
+        point_scope.insert(
+            "rad".to_string(),
+            MilkdropValue::Number((centered_x * centered_x + centered_y * centered_y).sqrt()),
+        );
+        point_scope.insert("x".to_string(), MilkdropValue::Number(x));
+        point_scope.insert("y".to_string(), MilkdropValue::Number(y));
+        if let Ok(next_scope) = evaluate_milkdrop_equations(equations, &point_scope) {
+            point_scope = next_scope;
+        }
+        let rotation = milkdrop_scope_number(&point_scope, "rot", 0.0);
+        let zoom = milkdrop_scope_number(&point_scope, "zoom", 1.0)
+            .abs()
+            .max(0.001);
+        let dx = milkdrop_scope_number(&point_scope, "dx", 0.0);
+        let dy = milkdrop_scope_number(&point_scope, "dy", 0.0);
+        let scaled_x = centered_x / zoom;
+        let scaled_y = centered_y / zoom;
+        let sine = rotation.sin();
+        let cosine = rotation.cos();
+        positions.push(x * 2.0 - 1.0);
+        positions.push(y * 2.0 - 1.0);
+        source_uvs.push(cosine * scaled_x - sine * scaled_y + 0.5 + dx);
+        source_uvs.push(sine * scaled_x + cosine * scaled_y + 0.5 + dy);
+    };
+    for row in 0..rows {
+        for column in 0..columns {
+            let left = column as f64 / columns as f64;
+            let right = (column + 1) as f64 / columns as f64;
+            let top = row as f64 / rows as f64;
+            let bottom = (row + 1) as f64 / rows as f64;
+            push_point(left, top);
+            push_point(left, bottom);
+            push_point(right, top);
+            push_point(right, top);
+            push_point(left, bottom);
+            push_point(right, bottom);
+        }
+    }
+    Some(RustMilkdropWarpMesh {
+        positions,
+        source_uvs,
+    })
+}
+
 pub fn rust_milkdrop_frame_from_source(
     source: &str,
     time_seconds: f64,
@@ -11800,6 +11876,7 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
     let q_registers = rust_milkdrop_q_registers(&scope);
     let fft_bins = rust_milkdrop_sample_bins(spectrum);
     let waveform_bins = rust_milkdrop_sample_bins(waveform);
+    let warp_mesh = create_rust_milkdrop_warp_mesh(preset_document, &scope);
     RustMilkdropFrame {
         background_alpha: clamp_range(
             1.0 - milkdrop_scope_number(&scope, "decay", fallback.decay),
@@ -11838,6 +11915,7 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
             .iter()
             .filter(|wave| milkdrop_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
             .count(),
+        warp_mesh,
         zoom: clamp_range(
             milkdrop_scope_number(&scope, "zoom", fallback.zoom),
             0.001,
@@ -14785,6 +14863,13 @@ struct RustMilkdropWebGlRenderer {
     u_textured_sampler: Option<web_sys::WebGlUniformLocation>,
     u_textured_tint: Option<web_sys::WebGlUniformLocation>,
     u_time: Option<web_sys::WebGlUniformLocation>,
+    u_warp_color: Option<web_sys::WebGlUniformLocation>,
+    u_warp_feedback: Option<web_sys::WebGlUniformLocation>,
+    u_warp_output_alpha: Option<web_sys::WebGlUniformLocation>,
+    u_warp_previous_frame: Option<web_sys::WebGlUniformLocation>,
+    warp_position_buffer: web_sys::WebGlBuffer,
+    warp_program: web_sys::WebGlProgram,
+    warp_uv_buffer: web_sys::WebGlBuffer,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -14867,6 +14952,18 @@ impl RustMilkdropWebGlRenderer {
         )?;
         let textured_program =
             link_rust_milkdrop_program(&gl, &textured_vertex_shader, &textured_fragment_shader)?;
+        let warp_vertex_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::VERTEX_SHADER,
+            RUST_MILKDROP_WARP_GRID_VERTEX_SHADER,
+        )?;
+        let warp_fragment_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
+            RUST_MILKDROP_WARP_GRID_FRAGMENT_SHADER,
+        )?;
+        let warp_program =
+            link_rust_milkdrop_program(&gl, &warp_vertex_shader, &warp_fragment_shader)?;
 
         let buffer = gl
             .create_buffer()
@@ -14901,6 +14998,12 @@ impl RustMilkdropWebGlRenderer {
             .create_buffer()
             .ok_or_else(|| JsValue::from_str("WebGL textured UV buffer allocation failed"))?;
         let procedural_texture = create_rust_milkdrop_procedural_texture(&gl)?;
+        let warp_position_buffer = gl
+            .create_buffer()
+            .ok_or_else(|| JsValue::from_str("WebGL warp position buffer allocation failed"))?;
+        let warp_uv_buffer = gl
+            .create_buffer()
+            .ok_or_else(|| JsValue::from_str("WebGL warp UV buffer allocation failed"))?;
         let feedback_targets = RefCell::new(create_rust_milkdrop_feedback_targets(
             &gl,
             gl.drawing_buffer_width().max(1),
@@ -14922,6 +15025,13 @@ impl RustMilkdropWebGlRenderer {
             u_textured_sampler: gl.get_uniform_location(&textured_program, "u_texture"),
             u_textured_tint: gl.get_uniform_location(&textured_program, "u_tint"),
             u_time: gl.get_uniform_location(&program, "u_time"),
+            u_warp_color: gl.get_uniform_location(&warp_program, "u_color"),
+            u_warp_feedback: gl.get_uniform_location(&warp_program, "u_feedback"),
+            u_warp_output_alpha: gl.get_uniform_location(&warp_program, "u_outputAlpha"),
+            u_warp_previous_frame: gl.get_uniform_location(&warp_program, "u_previousFrame"),
+            warp_position_buffer,
+            warp_program,
+            warp_uv_buffer,
             buffer,
             feedback_targets,
             gl,
@@ -14965,7 +15075,9 @@ impl RustMilkdropWebGlRenderer {
             web_sys::WebGl2RenderingContext::FRAMEBUFFER,
             Some(&targets.targets[write_index].framebuffer),
         );
-        if let Some(program) = self.translated_program_for(&frame.shader_source) {
+        if frame.warp_mesh.is_some() {
+            self.draw_warp_mesh(frame, drawing_width, drawing_height);
+        } else if let Some(program) = self.translated_program_for(&frame.shader_source) {
             self.draw_translated_feedback_quad(
                 &program,
                 frame,
@@ -14987,6 +15099,92 @@ impl RustMilkdropWebGlRenderer {
         );
         self.draw_feedback_quad(frame, time, drawing_width, drawing_height, true);
         targets.read_index = write_index;
+    }
+
+    fn draw_warp_mesh(&self, frame: &RustMilkdropFrame, drawing_width: i32, drawing_height: i32) {
+        let Some(mesh) = frame.warp_mesh.as_ref() else {
+            return;
+        };
+        if mesh.positions.len() < 6 || mesh.positions.len() != mesh.source_uvs.len() {
+            return;
+        }
+        self.gl.use_program(Some(&self.warp_program));
+        self.gl.viewport(0, 0, drawing_width, drawing_height);
+        self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+        self.gl
+            .clear(web_sys::WebGl2RenderingContext::COLOR_BUFFER_BIT);
+        let positions = mesh
+            .positions
+            .iter()
+            .map(|value| *value as f32)
+            .collect::<Vec<_>>();
+        let source_uvs = mesh
+            .source_uvs
+            .iter()
+            .map(|value| *value as f32)
+            .collect::<Vec<_>>();
+        let positions_array = js_sys::Float32Array::from(positions.as_slice());
+        let source_uvs_array = js_sys::Float32Array::from(source_uvs.as_slice());
+        let position = self.gl.get_attrib_location(&self.warp_program, "position");
+        let source_uv = self.gl.get_attrib_location(&self.warp_program, "sourceUv");
+        self.gl.bind_buffer(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            Some(&self.warp_position_buffer),
+        );
+        self.gl.buffer_data_with_array_buffer_view(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            &positions_array,
+            web_sys::WebGl2RenderingContext::DYNAMIC_DRAW,
+        );
+        if position >= 0 {
+            self.gl.enable_vertex_attrib_array(position as u32);
+            self.gl.vertex_attrib_pointer_with_i32(
+                position as u32,
+                2,
+                web_sys::WebGl2RenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+        }
+        self.gl.bind_buffer(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            Some(&self.warp_uv_buffer),
+        );
+        self.gl.buffer_data_with_array_buffer_view(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            &source_uvs_array,
+            web_sys::WebGl2RenderingContext::DYNAMIC_DRAW,
+        );
+        if source_uv >= 0 {
+            self.gl.enable_vertex_attrib_array(source_uv as u32);
+            self.gl.vertex_attrib_pointer_with_i32(
+                source_uv as u32,
+                2,
+                web_sys::WebGl2RenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+        }
+        let (r, g, b) = frame.wave_color;
+        self.gl.uniform3f(
+            self.u_warp_color.as_ref(),
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+        );
+        self.gl.uniform1f(
+            self.u_warp_feedback.as_ref(),
+            (1.0 - frame.background_alpha).clamp(0.0, 0.985) as f32,
+        );
+        self.gl.uniform1f(self.u_warp_output_alpha.as_ref(), 1.0);
+        self.gl.uniform1i(self.u_warp_previous_frame.as_ref(), 0);
+        self.gl.draw_arrays(
+            web_sys::WebGl2RenderingContext::TRIANGLES,
+            0,
+            (positions.len() / 2) as i32,
+        );
     }
 
     fn translated_program_for(&self, source: &str) -> Option<web_sys::WebGlProgram> {
@@ -15661,6 +15859,33 @@ out vec4 outColor;
 void main() {
   vec4 texel = texture(u_texture, v_uv);
   outColor = vec4(texel.rgb * u_tint, texel.a * u_alpha);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_WARP_GRID_VERTEX_SHADER: &str = r#"#version 300 es
+in vec2 position;
+in vec2 sourceUv;
+out vec2 v_sourceUv;
+void main() {
+  v_sourceUv = sourceUv;
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_WARP_GRID_FRAGMENT_SHADER: &str = r#"#version 300 es
+precision highp float;
+uniform vec3 u_color;
+uniform float u_feedback;
+uniform float u_outputAlpha;
+uniform sampler2D u_previousFrame;
+in vec2 v_sourceUv;
+out vec4 outColor;
+void main() {
+  vec3 previous = texture(u_previousFrame, clamp(v_sourceUv, vec2(0.0), vec2(1.0))).rgb;
+  vec3 base = mix(u_color * 0.18, previous, clamp(u_feedback, 0.0, 0.985));
+  outColor = vec4(base, u_outputAlpha);
 }
 "#;
 
@@ -16794,6 +17019,33 @@ mod tests {
             frame.textured_primitives[1].uvs,
             vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
         );
+    }
+
+    #[test]
+    fn rust_milkdrop_per_pixel_equations_build_warp_mesh() {
+        let frame = rust_milkdrop_frame_from_source(
+            r#"
+            name=Warp mesh
+            meshx=2
+            meshy=1
+            zoom=1
+            rot=0
+            per_pixel_1=zoom=1+rad;
+            per_pixel_2=dx=0.1*x;
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+        let mesh = frame.warp_mesh.expect("warp mesh");
+        assert_eq!(mesh.positions.len(), 24);
+        assert_eq!(mesh.source_uvs.len(), 24);
+        assert_eq!(&mesh.positions[0..6], &[-1.0, -1.0, -1.0, 1.0, 0.0, -1.0]);
+        assert!(mesh.source_uvs[0] > 0.1);
+        assert!(mesh.source_uvs[0] < 0.25);
+        assert!(mesh.source_uvs[2] > 0.1);
+        assert!(mesh.source_uvs[4] > 0.45);
     }
 
     #[test]
