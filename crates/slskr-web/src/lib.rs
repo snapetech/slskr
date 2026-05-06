@@ -12299,6 +12299,151 @@ pub fn create_milkdrop_custom_wave_vertices(
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropPresetCompatibility {
+    pub shader_sections: Vec<String>,
+    pub unsupported_functions: Vec<String>,
+}
+
+pub fn is_milkdrop_function_supported(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "abs"
+            | "above"
+            | "acos"
+            | "asin"
+            | "atan"
+            | "atan2"
+            | "below"
+            | "band"
+            | "bnot"
+            | "bor"
+            | "bxor"
+            | "ceil"
+            | "cos"
+            | "div"
+            | "equal"
+            | "exp"
+            | "floor"
+            | "get_fft"
+            | "get_fft_hz"
+            | "if"
+            | "int"
+            | "log"
+            | "log10"
+            | "max"
+            | "min"
+            | "mod"
+            | "pow"
+            | "rand"
+            | "sign"
+            | "sigmoid"
+            | "sin"
+            | "sqr"
+            | "sqrt"
+            | "tan"
+    )
+}
+
+fn collect_milkdrop_functions(text: &str, unsupported: &mut Vec<String>) {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < chars.len() {
+        if !(chars[index].is_ascii_alphabetic() || chars[index] == '_') {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < chars.len()
+            && (chars[index].is_ascii_alphanumeric() || chars[index] == '_' || chars[index] == '.')
+        {
+            index += 1;
+        }
+        let name = chars[start..index]
+            .iter()
+            .collect::<String>()
+            .to_ascii_lowercase();
+        let mut lookahead = index;
+        while lookahead < chars.len() && chars[lookahead].is_whitespace() {
+            lookahead += 1;
+        }
+        if lookahead < chars.len()
+            && chars[lookahead] == '('
+            && !is_milkdrop_function_supported(&name)
+            && !unsupported.contains(&name)
+        {
+            unsupported.push(name);
+        }
+    }
+}
+
+fn collect_milkdrop_equation_functions(
+    equations: &MilkdropEquations,
+    unsupported: &mut Vec<String>,
+) {
+    collect_milkdrop_functions(&equations.init, unsupported);
+    collect_milkdrop_functions(&equations.frame, unsupported);
+    collect_milkdrop_functions(&equations.per_frame, unsupported);
+    collect_milkdrop_functions(&equations.per_pixel, unsupported);
+    collect_milkdrop_functions(&equations.point, unsupported);
+}
+
+pub fn analyze_milkdrop_preset_compatibility(
+    preset: &MilkdropPresetDocument,
+) -> MilkdropPresetCompatibility {
+    let mut unsupported_functions = Vec::new();
+    collect_milkdrop_equation_functions(&preset.equations, &mut unsupported_functions);
+    for shape in &preset.shapes {
+        collect_milkdrop_equation_functions(&shape.equations, &mut unsupported_functions);
+    }
+    for sprite in &preset.sprites {
+        collect_milkdrop_equation_functions(&sprite.equations, &mut unsupported_functions);
+    }
+    for wave in &preset.waves {
+        collect_milkdrop_equation_functions(&wave.equations, &mut unsupported_functions);
+    }
+    unsupported_functions.sort();
+
+    let mut shader_sections = Vec::new();
+    if !preset.warp_shader.trim().is_empty()
+        && !analyze_milkdrop_shader_support(&preset.warp_shader).supported
+    {
+        shader_sections.push("warp_shader".to_string());
+    }
+    if !preset.comp_shader.trim().is_empty()
+        && !analyze_milkdrop_shader_support(&preset.comp_shader).supported
+    {
+        shader_sections.push("comp_shader".to_string());
+    }
+
+    MilkdropPresetCompatibility {
+        shader_sections,
+        unsupported_functions,
+    }
+}
+
+pub fn milkdrop_compatibility_error(report: &MilkdropPresetCompatibility) -> String {
+    let mut messages = Vec::new();
+    if !report.unsupported_functions.is_empty() {
+        messages.push(format!(
+            "unsupported functions: {}",
+            report.unsupported_functions.join(", ")
+        ));
+    }
+    if !report.shader_sections.is_empty() {
+        messages.push(format!(
+            "shader translation pending: {}",
+            report.shader_sections.join(", ")
+        ));
+    }
+    if messages.is_empty() {
+        String::new()
+    } else {
+        format!("Native MilkDrop preset has {}.", messages.join("; "))
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct MilkdropShaderProgram {
     pub declarations: Vec<String>,
     pub expression: String,
@@ -14451,6 +14596,57 @@ mod tests {
         assert!((spectrum_vertices[1] + 1.0).abs() < 0.0001);
         assert!((spectrum_vertices[3] - ((128.0 / 255.0) * 2.0 - 1.0)).abs() < 0.0001);
         assert!((spectrum_vertices[5] - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn rust_milkdrop_preset_compatibility_reports_before_rendering() {
+        let parsed = parse_milkdrop_preset_set(
+            r#"
+            per_frame_1=q1=megabuf(0);
+            per_pixel_1=q2=sin(pi);
+            comp_shader=for (;;) { ret = vec3(1.0); }
+            wavecode_0_enabled=1
+            wavecode_0_per_point1=y=customcall(sample);
+            shape00_enabled=1
+            shape00_per_frame1=rad=rand(4);
+            sprite00_enabled=1
+            sprite00_per_frame1=x=spritecall(time);
+            "#,
+            false,
+        );
+        let report = analyze_milkdrop_preset_compatibility(&parsed.presets[0]);
+        assert_eq!(
+            report.unsupported_functions,
+            vec![
+                "customcall".to_string(),
+                "megabuf".to_string(),
+                "spritecall".to_string()
+            ]
+        );
+        assert_eq!(report.shader_sections, vec!["comp_shader".to_string()]);
+        assert_eq!(
+            milkdrop_compatibility_error(&report),
+            "Native MilkDrop preset has unsupported functions: customcall, megabuf, spritecall; shader translation pending: comp_shader."
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_preset_compatibility_accepts_supported_first_slice() {
+        let parsed = parse_milkdrop_preset_set(
+            r#"
+            per_frame_1=q1=rand(4)+get_fft(0.5)+atan2(1,0);
+            per_frame_2=q2=band(7,3)+sigmoid(q1,2);
+            warp_shader=ret = tex2D(sampler_main, uv).rgb * vec3(0.5, 0.7, 1.0);
+            comp_shader=float2 shifted = uv + float2(frac(time), fmod(time, 1.0));
+            comp_shader_1=float energy = rsqrt(max(get_fft(0.5), 0.001));
+            comp_shader_2=ret = vec3(shifted, energy * bass_att);
+            "#,
+            false,
+        );
+        let report = analyze_milkdrop_preset_compatibility(&parsed.presets[0]);
+        assert!(report.unsupported_functions.is_empty());
+        assert!(report.shader_sections.is_empty());
+        assert_eq!(milkdrop_compatibility_error(&report), "");
     }
 
     #[test]
