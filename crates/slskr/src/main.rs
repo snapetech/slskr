@@ -14474,17 +14474,23 @@ fn build_folder_contents_payload(entries: &[FileEntry], folder: &str) -> Result<
 fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<BrowseEntry>, String> {
     let decompressed = decompress_zlib_payload(payload).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(&decompressed);
-    let folder_count = reader.read_u32_le().map_err(|error| error.to_string())?;
+    let folder_count = reader
+        .read_bounded_count("shared folders", 8)
+        .map_err(|error| error.to_string())?;
     let mut entries = Vec::new();
     for _ in 0..folder_count {
         let folder = reader.read_string().map_err(|error| error.to_string())?;
-        let file_count = reader.read_u32_le().map_err(|error| error.to_string())?;
+        let file_count = reader
+            .read_bounded_count("shared files", 21)
+            .map_err(|error| error.to_string())?;
         for _ in 0..file_count {
             let code = reader.read_u8().map_err(|error| error.to_string())?;
             let filename = reader.read_string().map_err(|error| error.to_string())?;
             let size = reader.read_u64_le().map_err(|error| error.to_string())?;
             let extension = reader.read_string().map_err(|error| error.to_string())?;
-            let attribute_count = reader.read_u32_le().map_err(|error| error.to_string())?;
+            let attribute_count = reader
+                .read_bounded_count("shared file attributes", 8)
+                .map_err(|error| error.to_string())?;
             for _ in 0..attribute_count {
                 let _code = reader.read_u32_le().map_err(|error| error.to_string())?;
                 let _value = reader.read_u32_le().map_err(|error| error.to_string())?;
@@ -14508,14 +14514,18 @@ fn parse_folder_file_list_payload(
 ) -> Result<Vec<BrowseEntry>, String> {
     let decompressed = decompress_zlib_payload(payload).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(&decompressed);
-    let file_count = reader.read_u32_le().map_err(|error| error.to_string())?;
+    let file_count = reader
+        .read_bounded_count("folder files", 21)
+        .map_err(|error| error.to_string())?;
     let mut entries = Vec::new();
     for _ in 0..file_count {
         let code = reader.read_u8().map_err(|error| error.to_string())?;
         let filename = reader.read_string().map_err(|error| error.to_string())?;
         let size = reader.read_u64_le().map_err(|error| error.to_string())?;
         let extension = reader.read_string().map_err(|error| error.to_string())?;
-        let attribute_count = reader.read_u32_le().map_err(|error| error.to_string())?;
+        let attribute_count = reader
+            .read_bounded_count("folder file attributes", 8)
+            .map_err(|error| error.to_string())?;
         for _ in 0..attribute_count {
             let _code = reader.read_u32_le().map_err(|error| error.to_string())?;
             let _value = reader.read_u32_le().map_err(|error| error.to_string())?;
@@ -18266,6 +18276,36 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].filename, "Remote/Album/Song.flac");
         assert_eq!(parsed[0].size, 321);
+    }
+
+    #[test]
+    fn shared_file_list_payload_rejects_untrusted_counts_without_looping() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&u32::MAX.to_le_bytes());
+        let compressed = super::compress_zlib_payload(&payload).expect("compressed");
+
+        let error = super::parse_shared_file_list_payload(&compressed)
+            .expect_err("untrusted folder count should be rejected");
+        assert!(error.contains("shared folders"));
+    }
+
+    #[test]
+    fn shared_file_list_payload_rejects_untrusted_attribute_counts_without_looping() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1_u32.to_le_bytes());
+        payload.extend_from_slice(&0_u32.to_le_bytes());
+        payload.extend_from_slice(&1_u32.to_le_bytes());
+        payload.push(1);
+        payload.extend_from_slice(&4_u32.to_le_bytes());
+        payload.extend_from_slice(b"song");
+        payload.extend_from_slice(&123_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u32.to_le_bytes());
+        payload.extend_from_slice(&u32::MAX.to_le_bytes());
+        let compressed = super::compress_zlib_payload(&payload).expect("compressed");
+
+        let error = super::parse_shared_file_list_payload(&compressed)
+            .expect_err("untrusted attribute count should be rejected");
+        assert!(error.contains("shared file attributes"));
     }
 
     #[tokio::test]

@@ -160,6 +160,27 @@ fn file_search_response_rejects_untrusted_count_without_preallocating() {
 }
 
 #[test]
+fn file_search_response_rejects_untrusted_attribute_count_without_looping() {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4_u32.to_le_bytes());
+    payload.extend_from_slice(b"peer");
+    payload.extend_from_slice(&14_u32.to_le_bytes());
+    payload.extend_from_slice(&1_u32.to_le_bytes());
+    payload.push(1);
+    payload.extend_from_slice(&4_u32.to_le_bytes());
+    payload.extend_from_slice(b"song");
+    payload.extend_from_slice(&123_u64.to_le_bytes());
+    payload.extend_from_slice(&0_u32.to_le_bytes());
+    payload.extend_from_slice(&u32::MAX.to_le_bytes());
+
+    let decoded = PeerMessage::decode(MessageFrame::new(
+        PeerCode::FileSearchResponse.as_u32(),
+        payload,
+    ));
+    assert!(decoded.is_err());
+}
+
+#[test]
 fn compressed_peer_payloads_are_preserved() {
     for message in [
         PeerMessage::SharedFileListResponse(vec![1, 2, 3]),

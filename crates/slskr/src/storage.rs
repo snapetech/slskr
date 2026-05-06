@@ -139,7 +139,7 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
     let decompressed = decompress_zlib_payload(payload).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(&decompressed);
     let folder_count = reader
-        .read_u32_le()
+        .read_bounded_count("shared folders", 8)
         .map_err(|e| format!("cannot read folder count: {e}"))?;
     let mut entries = Vec::new();
 
@@ -148,7 +148,7 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
             .read_string()
             .map_err(|e| format!("cannot read folder: {e}"))?;
         let file_count = reader
-            .read_u32_le()
+            .read_bounded_count("shared files", 21)
             .map_err(|e| format!("cannot read file count: {e}"))?;
 
         for _ in 0..file_count {
@@ -165,7 +165,7 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
                 .read_string()
                 .map_err(|e| format!("cannot read extension: {e}"))?;
             let attr_count = reader
-                .read_u32_le()
+                .read_bounded_count("shared file attributes", 8)
                 .map_err(|e| format!("cannot read attr count: {e}"))?;
             let mut attributes = Vec::new();
             for _ in 0..attr_count {
@@ -229,7 +229,7 @@ pub fn parse_folder_file_list_payload(
     let decompressed = decompress_zlib_payload(payload).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(&decompressed);
     let folder_count = reader
-        .read_u32_le()
+        .read_bounded_count("folder names", 4)
         .map_err(|e| format!("cannot read folder count: {e}"))?;
     let mut folders = Vec::new();
     for _ in 0..folder_count {
@@ -239,7 +239,7 @@ pub fn parse_folder_file_list_payload(
         folders.push(folder);
     }
     let file_count = reader
-        .read_u32_le()
+        .read_bounded_count("folder files", 21)
         .map_err(|e| format!("cannot read file count: {e}"))?;
     let mut entries = Vec::new();
     for _ in 0..file_count {
@@ -256,7 +256,7 @@ pub fn parse_folder_file_list_payload(
             .read_string()
             .map_err(|e| format!("cannot read extension: {e}"))?;
         let attr_count = reader
-            .read_u32_le()
+            .read_bounded_count("folder file attributes", 8)
             .map_err(|e| format!("cannot read attr count: {e}"))?;
         let mut attributes = Vec::new();
         for _ in 0..attr_count {

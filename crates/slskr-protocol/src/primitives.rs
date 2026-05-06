@@ -97,6 +97,29 @@ impl<'a> Reader<'a> {
         Ok(self.read_bytes(length)?.to_vec())
     }
 
+    pub fn read_bounded_count(
+        &mut self,
+        field: &'static str,
+        minimum_bytes_per_item: usize,
+    ) -> Result<usize, DecodeError> {
+        let count = self.read_u32_le()? as usize;
+        let maximum = if minimum_bytes_per_item == 0 {
+            self.remaining()
+        } else {
+            self.remaining() / minimum_bytes_per_item
+        };
+
+        if count > maximum {
+            return Err(DecodeError::InvalidCount {
+                field,
+                count,
+                maximum,
+            });
+        }
+
+        Ok(count)
+    }
+
     pub fn read_bytes(&mut self, length: usize) -> Result<&'a [u8], DecodeError> {
         self.read_exact("bytes", length)
     }

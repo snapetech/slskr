@@ -76,7 +76,12 @@ for expected in \
   'SLSKR_SLSKD_API_SMOKE_DIR: target/slskd-api-smoke' \
   'SLSKR_SLSKD_API_SMOKE_TOKEN:' \
   'target/ux-audit/**' \
-  'target/slskd-api-smoke/**'; do
+  'target/slskd-api-smoke/**' \
+  'Credentialed public live interop' \
+  'SLSKR_LIVE_INTEROP_ENV: ${{ secrets.SLSKR_LIVE_INTEROP_ENV }}' \
+  'scripts/run-live-interop-matrix.sh' \
+  'target/live-interop/**' \
+  'credentialed-live-interop.tsv'; do
   if ! rg -n -F "$expected" .github/workflows/live-parity.yml >/dev/null; then
     printf 'workflow release policy check failed: live parity workflow token missing: %s\n' "$expected" >&2
     status=1

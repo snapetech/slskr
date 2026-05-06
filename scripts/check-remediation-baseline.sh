@@ -28,6 +28,8 @@ GATES=(
   scripts/check-docs-freshness.sh
   scripts/check-council-loop.sh
   scripts/check-council-negative-space.sh
+  scripts/check-rust-protocol-taint-lens.sh
+  scripts/check-rust-protocol-adversarial-corpus.sh
   scripts/check-shell-script-hygiene.sh
   scripts/check-kubernetes-public-posture.sh
   scripts/check-compatibility-noop-documentation.sh

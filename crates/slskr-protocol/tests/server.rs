@@ -376,6 +376,13 @@ fn possible_parents_rejects_untrusted_count_without_preallocating() {
 }
 
 #[test]
+fn string_vec_rejects_untrusted_count_without_looping() {
+    let frame = MessageFrame::new(ServerCode::PrivilegedUsers.as_u32(), u32::MAX.to_le_bytes());
+    let decoded = ServerMessage::decode(frame, Direction::ServerToClient);
+    assert!(decoded.is_err());
+}
+
+#[test]
 fn unknown_server_codes_preserve_payload() {
     let frame = MessageFrame::new(4, [1, 2, 3]);
 

@@ -109,7 +109,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | TypeScript zero config defaults | TypeScript SDK lifecycle settings used `||` defaults, so explicit zero values such as `retries: 0` were ignored. | Fixed by switching to nullish defaults and covering no-retry behavior in the TS lifecycle test. |
 | Medium | WebSocket auth examples | Raw WebSocket docs showed unauthenticated browser snippets and a Node constructor/header pattern that did not match the enforced subprotocol auth path. | Fixed by updating raw browser and Node examples to pass the supported `slskr.api-token.<encoded-token>` WebSocket subprotocol. |
 | Low | Rust module hygiene | Broad crate/module-level `#![allow(dead_code)]` hid unused backend compatibility surfaces from compiler review. | Fixed by removing module-level dead-code allowances, keeping only narrow item-level exceptions, and adding a remediation gate that blocks broad suppressions from returning. |
-| Medium | Compatibility smoke | slskd API compatibility smoke was opt-in only, so normal CI could miss automation-client regressions. | Fixed by adding the scheduled/manual `Live Parity` workflow, which runs the Rust UI headless audit and hermetic local `slskd_api` smoke, uploads artifacts, and is guarded by workflow policy checks. |
+| Medium | Compatibility smoke | slskd API compatibility smoke was opt-in only, so normal CI could miss automation-client regressions. | Fixed by adding the scheduled/manual `Live Parity` workflow, which runs the Rust UI headless audit, hermetic local `slskd_api` smoke, and optional credentialed public live interop matrix, uploads artifacts, and is guarded by workflow policy checks. |
 
 ## Open Burn-Down
 

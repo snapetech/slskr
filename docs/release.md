@@ -24,7 +24,12 @@ SLSKR_RUN_SLSKD_API_COMPAT_SMOKE=1 scripts/run-release-gate.sh
 CI also runs a lighter scheduled/manual `Live Parity` workflow. That workflow
 executes the Rust web UI headless parity audit and the hermetic local
 `slskd_api` automation compatibility smoke, then uploads the Rust UI screenshots,
-web bundle, and daemon log as artifacts.
+web bundle, and daemon log as artifacts. The same workflow also has an optional
+credentialed public-live job: when the `SLSKR_LIVE_INTEROP_ENV` repository secret
+contains the same env-file variables used by `scripts/run-live-interop-matrix.sh`,
+CI runs login, local peer, private-message, and room-message probes and uploads
+`target/live-interop`; when the secret is absent, it uploads an explicit skipped
+TSV artifact.
 
 ## Local Archive
 

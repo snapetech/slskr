@@ -10,6 +10,12 @@ pub enum DecodeError {
     InvalidBool(u8),
     #[error("string length {length} exceeds remaining bytes {remaining}")]
     InvalidStringLength { length: usize, remaining: usize },
+    #[error("{field} count {count} exceeds maximum possible {maximum} for remaining bytes")]
+    InvalidCount {
+        field: &'static str,
+        count: usize,
+        maximum: usize,
+    },
     #[error("frame length {length} is smaller than code width {code_width}")]
     InvalidFrameLength { length: usize, code_width: usize },
     #[error("frame length {length} exceeds remaining bytes {remaining}")]

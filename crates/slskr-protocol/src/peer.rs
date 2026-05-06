@@ -464,14 +464,14 @@ fn encode_search_response(
 }
 
 fn decode_file_entries(reader: &mut Reader<'_>) -> Result<Vec<FileEntry>, DecodeError> {
-    let count = reader.read_u32_le()? as usize;
+    let count = reader.read_bounded_count("file entries", 21)?;
     let mut entries = Vec::new();
     for _ in 0..count {
         let code = reader.read_u8()?;
         let filename = reader.read_string()?;
         let size = reader.read_u64_le()?;
         let extension = reader.read_string()?;
-        let attribute_count = reader.read_u32_le()? as usize;
+        let attribute_count = reader.read_bounded_count("file attributes", 8)?;
         let mut attributes = Vec::new();
         for _ in 0..attribute_count {
             attributes.push(FileAttribute {
