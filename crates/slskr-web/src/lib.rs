@@ -15423,15 +15423,42 @@ fn milkdrop_indexed_sample(values: &[f64], position: f64) -> f64 {
     }
 }
 
+fn mix_milkdrop_rand_seed(mut seed: u64, value: f64) -> u64 {
+    seed ^= value.to_bits().wrapping_add(0x9e37_79b9_7f4a_7c15);
+    seed = seed.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    seed ^ (seed >> 31)
+}
+
+fn milkdrop_pseudo_random_unit(scope: &BTreeMap<String, MilkdropValue>, counter: usize) -> f64 {
+    let mut seed = 0x4d49_4c4b_4452_4f50u64 ^ counter as u64;
+    for key in [
+        "time", "frame", "bass", "mid", "treb", "bass_att", "mid_att", "treb_att",
+    ] {
+        seed = mix_milkdrop_rand_seed(seed, milkdrop_number(scope, key));
+    }
+    seed = mix_milkdrop_rand_seed(seed, counter as f64 + 0.123_456_789);
+    seed ^= seed >> 12;
+    seed ^= seed << 25;
+    seed ^= seed >> 27;
+    let value = seed.wrapping_mul(0x2545_f491_4f6c_dd1d);
+    (value as f64) / (u64::MAX as f64)
+}
+
 struct MilkdropExpressionParser<'a> {
+    rand_counter: usize,
     scope: &'a BTreeMap<String, MilkdropValue>,
     tokens: Vec<MilkdropToken>,
     index: usize,
 }
 
 impl<'a> MilkdropExpressionParser<'a> {
-    fn new(tokens: Vec<MilkdropToken>, scope: &'a BTreeMap<String, MilkdropValue>) -> Self {
+    fn new(
+        tokens: Vec<MilkdropToken>,
+        scope: &'a BTreeMap<String, MilkdropValue>,
+        rand_counter: usize,
+    ) -> Self {
         Self {
+            rand_counter,
             scope,
             tokens,
             index: 0,
@@ -15508,7 +15535,7 @@ impl<'a> MilkdropExpressionParser<'a> {
         }
     }
 
-    fn call_function(&self, name: &str, args: &[f64]) -> Result<f64, String> {
+    fn call_function(&mut self, name: &str, args: &[f64]) -> Result<f64, String> {
         let arg = |index: usize, default: f64| args.get(index).copied().unwrap_or(default);
         let out = match name {
             "abs" => arg(0, 0.0).abs(),
@@ -15598,7 +15625,11 @@ impl<'a> MilkdropExpressionParser<'a> {
                 if upper <= 0.0 {
                     0.0
                 } else {
-                    (upper / 2.0).floor()
+                    let counter = self.rand_counter;
+                    self.rand_counter += 1;
+                    (milkdrop_pseudo_random_unit(self.scope, counter) * upper)
+                        .floor()
+                        .min(upper - 1.0)
                 }
             }
             "sign" => arg(0, 0.0).signum(),
@@ -15809,12 +15840,22 @@ pub fn evaluate_milkdrop_expression(
     expression: &str,
     variables: &BTreeMap<String, MilkdropValue>,
 ) -> Result<f64, String> {
+    evaluate_milkdrop_expression_with_rand_counter(expression, variables, 0).map(|(value, _)| value)
+}
+
+fn evaluate_milkdrop_expression_with_rand_counter(
+    expression: &str,
+    variables: &BTreeMap<String, MilkdropValue>,
+    rand_counter: usize,
+) -> Result<(f64, usize), String> {
     let scope = variables
         .iter()
         .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
         .collect::<BTreeMap<_, _>>();
     let tokens = tokenize_milkdrop_expression(expression)?;
-    MilkdropExpressionParser::new(tokens, &scope).parse()
+    let mut parser = MilkdropExpressionParser::new(tokens, &scope, rand_counter);
+    let value = parser.parse()?;
+    Ok((value, parser.rand_counter))
 }
 
 pub fn evaluate_milkdrop_equations(
@@ -15825,6 +15866,7 @@ pub fn evaluate_milkdrop_equations(
         .iter()
         .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
         .collect::<BTreeMap<_, _>>();
+    let mut rand_counter = milkdrop_number(&scope, "__rand_counter").max(0.0) as usize;
     for statement in equations
         .split(';')
         .map(str::trim)
@@ -15833,23 +15875,38 @@ pub fn evaluate_milkdrop_equations(
         if let Some((buffer_name, index_expression, operator, expression)) =
             split_milkdrop_buffer_assignment(statement)
         {
-            let buffer_index = evaluate_milkdrop_expression(index_expression, &scope)?;
+            let (buffer_index, next_rand_counter) = evaluate_milkdrop_expression_with_rand_counter(
+                index_expression,
+                &scope,
+                rand_counter,
+            )?;
+            rand_counter = next_rand_counter;
             let key = milkdrop_buffer_key(&buffer_name, buffer_index);
             let current = milkdrop_number(&scope, &key);
-            let next = evaluate_milkdrop_expression(expression, &scope)?;
+            let (next, next_rand_counter) =
+                evaluate_milkdrop_expression_with_rand_counter(expression, &scope, rand_counter)?;
+            rand_counter = next_rand_counter;
             let value = apply_milkdrop_assignment_operator(current, operator, next);
             scope.insert(key, MilkdropValue::Number(value));
             continue;
         }
         let Some((name, operator, expression)) = split_milkdrop_assignment(statement) else {
-            let _ = evaluate_milkdrop_expression(statement, &scope)?;
+            let (_, next_rand_counter) =
+                evaluate_milkdrop_expression_with_rand_counter(statement, &scope, rand_counter)?;
+            rand_counter = next_rand_counter;
             continue;
         };
         let current = milkdrop_number(&scope, &name);
-        let next = evaluate_milkdrop_expression(expression, &scope)?;
+        let (next, next_rand_counter) =
+            evaluate_milkdrop_expression_with_rand_counter(expression, &scope, rand_counter)?;
+        rand_counter = next_rand_counter;
         let value = apply_milkdrop_assignment_operator(current, operator, next);
         scope.insert(name, MilkdropValue::Number(value));
     }
+    scope.insert(
+        "__rand_counter".to_string(),
+        MilkdropValue::Number(rand_counter as f64),
+    );
     Ok(scope)
 }
 
@@ -18381,6 +18438,29 @@ mod tests {
         );
         assert!(is_milkdrop_function_supported("megabuf"));
         assert!(is_milkdrop_function_supported("gmegabuf"));
+    }
+
+    #[test]
+    fn rust_milkdrop_rand_varies_by_call_and_frame_scope() {
+        let mut first_vars = BTreeMap::new();
+        first_vars.insert("frame".to_string(), MilkdropValue::Number(1.0));
+        first_vars.insert("time".to_string(), MilkdropValue::Number(0.016));
+        let first =
+            evaluate_milkdrop_equations("q1=rand(1000); q2=rand(1000);", &first_vars).unwrap();
+        let q1 = first.get("q1").and_then(MilkdropValue::as_number).unwrap();
+        let q2 = first.get("q2").and_then(MilkdropValue::as_number).unwrap();
+        assert!((0.0..1000.0).contains(&q1));
+        assert!((0.0..1000.0).contains(&q2));
+        assert_ne!(q1, q2);
+
+        let mut second_vars = BTreeMap::new();
+        second_vars.insert("frame".to_string(), MilkdropValue::Number(2.0));
+        second_vars.insert("time".to_string(), MilkdropValue::Number(0.032));
+        let second = evaluate_milkdrop_equations("q1=rand(1000);", &second_vars).unwrap();
+        assert_ne!(
+            q1,
+            second.get("q1").and_then(MilkdropValue::as_number).unwrap()
+        );
     }
 
     #[test]
