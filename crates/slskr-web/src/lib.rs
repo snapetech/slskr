@@ -6437,7 +6437,7 @@ pub fn route_page_html(path: &str) -> String {
 }
 
 fn player_footer_html() -> String {
-    r#"<footer class="slskr-player" data-slskr-player data-slskr-player-rating-key="" data-slskr-player-radio-query=""><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button><button type="button" data-slskr-player-action="radio">Radio</button></section><section class="slskr-player-rating" aria-label="Player rating"><strong>Rating</strong><div id="slskr-player-rating-controls"><button type="button" data-slskr-player-rating="1">1</button><button type="button" data-slskr-player-rating="2">2</button><button type="button" data-slskr-player-rating="3">3</button><button type="button" data-slskr-player-rating="4">4</button><button type="button" data-slskr-player-rating="5">5</button></div><span id="slskr-player-rating-status">Not rated</span></section><section><strong>Radio</strong><span id="slskr-player-radio">No track selected</span><span id="slskr-player-transfers">0 down / 0 up</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
+    r#"<footer class="slskr-player" data-slskr-player data-slskr-player-rating-key="" data-slskr-player-radio-query=""><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span><audio id="slskr-player-audio" preload="metadata" controls></audio></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="play">Play</button><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button><button type="button" data-slskr-player-action="radio">Radio</button></section><section class="slskr-player-rating" aria-label="Player rating"><strong>Rating</strong><div id="slskr-player-rating-controls"><button type="button" data-slskr-player-rating="1">1</button><button type="button" data-slskr-player-rating="2">2</button><button type="button" data-slskr-player-rating="3">3</button><button type="button" data-slskr-player-rating="4">4</button><button type="button" data-slskr-player-rating="5">5</button></div><span id="slskr-player-rating-status">Not rated</span></section><section><strong>Radio</strong><span id="slskr-player-radio">No track selected</span><span id="slskr-player-transfers">0 down / 0 up</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
 }
 
 fn rust_milkdrop_panel_html() -> String {
@@ -8704,6 +8704,41 @@ pub fn player_rating_key(track: &serde_json::Value) -> String {
     }
 }
 
+fn percent_encode_player_stream_component(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+pub fn player_stream_url(track: &serde_json::Value) -> String {
+    if let Some(stream_url) = track
+        .get("streamUrl")
+        .or_else(|| track.get("stream_url"))
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+    {
+        return stream_url;
+    }
+    track
+        .get("contentId")
+        .or_else(|| track.get("content_id"))
+        .map(json_scalar_preview)
+        .filter(|value| !value.is_empty())
+        .map(|content_id| {
+            format!(
+                "/api/v0/streams/{}",
+                percent_encode_player_stream_component(&content_id)
+            )
+        })
+        .unwrap_or_default()
+}
+
 pub fn player_rating_summary(rating: u32) -> &'static str {
     match rating {
         1 | 2 => "Discovery caution",
@@ -10342,6 +10377,32 @@ fn open_player_radio_search(window: &web_sys::Window, document: &web_sys::Docume
 }
 
 #[cfg(target_arch = "wasm32")]
+fn player_audio_element(document: &web_sys::Document) -> Option<web_sys::HtmlAudioElement> {
+    document
+        .get_element_by_id("slskr-player-audio")
+        .and_then(|element| element.dyn_into::<web_sys::HtmlAudioElement>().ok())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn toggle_player_audio(document: &web_sys::Document) {
+    let Some(audio) = player_audio_element(document) else {
+        set_player_status(document, "Player audio element unavailable");
+        return;
+    };
+    if audio.get_attribute("src").unwrap_or_default().is_empty() {
+        set_player_status(document, "No stream loaded");
+        return;
+    }
+    if audio.paused() {
+        let _ = audio.play();
+        set_player_status(document, "Playback requested");
+    } else {
+        let _ = audio.pause();
+        set_player_status(document, "Playback paused");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn mount_player_controls(
     window: &web_sys::Window,
     document: &web_sys::Document,
@@ -10365,6 +10426,10 @@ fn mount_player_controls(
                 let document = document.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     set_player_status(&document, "Player action running");
+                    if action == "play" {
+                        toggle_player_audio(&document);
+                        return;
+                    }
                     if action == "radio" {
                         open_player_radio_search(&window, &document);
                         return;
@@ -14090,6 +14155,10 @@ fn start_rust_milkdrop_visualizer(
         .ok_or_else(|| JsValue::from_str("Rust MilkDrop canvas is missing"))?
         .dyn_into()?;
     let renderer = Rc::new(rust_milkdrop_renderer(&canvas)?);
+    let analyzer = Rc::new(RefCell::new(
+        player_audio_element(document)
+            .and_then(|audio| RustMilkdropAudioAnalyzer::new(&audio).ok()),
+    ));
     if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
         label.set_text_content(Some(renderer.label()));
     }
@@ -14098,6 +14167,7 @@ fn start_rust_milkdrop_visualizer(
     let animation_handle_for_frame = animation_handle.clone();
     let window_for_frame = window.clone();
     let document_for_frame = document.clone();
+    let analyzer_for_frame = analyzer.clone();
 
     *animation_handle_for_frame.borrow_mut() = Some(Closure::wrap(Box::new(move |time_ms: f64| {
         let Some(panel) = document_for_frame.get_element_by_id("slskr-rust-milkdrop") else {
@@ -14112,17 +14182,33 @@ fn start_rust_milkdrop_visualizer(
             .unwrap_or(0);
         let preset_source = rust_milkdrop_active_preset_source(&panel, preset_index);
         let time = time_ms / 1000.0;
-        let bass = (time * 1.9).sin() * 0.5 + 0.5;
-        let mid = (time * 1.17 + 1.3).sin() * 0.5 + 0.5;
-        let treble = (time * 2.7 + 0.4).sin() * 0.5 + 0.5;
-        let frame = rust_milkdrop_frame_from_source(&preset_source, time, bass, mid, treble);
+        if analyzer_for_frame.borrow().is_none() {
+            if let Some(audio) = player_audio_element(&document_for_frame) {
+                if let Ok(next_analyzer) = RustMilkdropAudioAnalyzer::new(&audio) {
+                    *analyzer_for_frame.borrow_mut() = Some(next_analyzer);
+                }
+            }
+        }
+        let bands = analyzer_for_frame
+            .borrow()
+            .as_ref()
+            .map(|analyzer| analyzer.bands(time))
+            .unwrap_or_else(|| RustMilkdropAudioBands::synthetic(time));
+        let frame = rust_milkdrop_frame_from_source(
+            &preset_source,
+            time,
+            bands.bass,
+            bands.mid,
+            bands.treble,
+        );
         renderer.render(&frame, time);
         if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
             status.set_text_content(Some(&format!(
-                "MilkDrop running: bass {:.0}% mid {:.0}% treble {:.0}% / {} shapes / {} waves",
-                bass * 100.0,
-                mid * 100.0,
-                treble * 100.0,
+                "MilkDrop running: {} bass {:.0}% mid {:.0}% treble {:.0}% / {} shapes / {} waves",
+                bands.source,
+                bands.bass * 100.0,
+                bands.mid * 100.0,
+                bands.treble * 100.0,
                 frame.shape_count,
                 frame.waveform_count
             )));
@@ -14288,6 +14374,83 @@ enum RustMilkdropRenderer {
         canvas: web_sys::HtmlCanvasElement,
         context: web_sys::CanvasRenderingContext2d,
     },
+}
+
+#[cfg(target_arch = "wasm32")]
+struct RustMilkdropAudioAnalyzer {
+    _context: web_sys::AudioContext,
+    analyser: web_sys::AnalyserNode,
+    bins: RefCell<Vec<u8>>,
+    _source: web_sys::MediaElementAudioSourceNode,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RustMilkdropAudioAnalyzer {
+    fn new(audio: &web_sys::HtmlAudioElement) -> Result<Self, JsValue> {
+        let context = web_sys::AudioContext::new()?;
+        let source = context.create_media_element_source(audio)?;
+        let analyser = context.create_analyser()?;
+        analyser.set_fft_size(1024);
+        source.connect_with_audio_node(&analyser)?;
+        analyser.connect_with_audio_node(&context.destination())?;
+        let bins = RefCell::new(vec![0; analyser.frequency_bin_count() as usize]);
+        Ok(Self {
+            _context: context,
+            analyser,
+            bins,
+            _source: source,
+        })
+    }
+
+    fn bands(&self, time: f64) -> RustMilkdropAudioBands {
+        let mut bins = self.bins.borrow_mut();
+        self.analyser.get_byte_frequency_data(&mut bins);
+        let length = bins.len();
+        if length == 0 {
+            return RustMilkdropAudioBands::synthetic(time);
+        }
+        let band = |start: usize, end: usize| -> f64 {
+            let end = end.min(length).max(start + 1);
+            let mut total = 0.0;
+            let mut count = 0.0;
+            for index in start..end {
+                total += bins[index] as f64 / 255.0;
+                count += 1.0;
+            }
+            if count == 0.0 {
+                0.0
+            } else {
+                total / count
+            }
+        };
+        RustMilkdropAudioBands {
+            bass: band(0, length / 8),
+            mid: band(length / 8, length / 3),
+            treble: band(length / 3, length),
+            source: "audio",
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RustMilkdropAudioBands {
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    source: &'static str,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RustMilkdropAudioBands {
+    fn synthetic(time: f64) -> Self {
+        Self {
+            bass: (time * 1.9).sin() * 0.5 + 0.5,
+            mid: (time * 1.17 + 1.3).sin() * 0.5 + 0.5,
+            treble: (time * 2.7 + 0.4).sin() * 0.5 + 0.5,
+            source: "synthetic",
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -15019,11 +15182,21 @@ async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> 
             .as_ref()
             .map(|track| build_player_radio_plan(Some(track)).primary_query)
             .unwrap_or_default();
+        let stream_url = track.as_ref().map(player_stream_url).unwrap_or_default();
         if let Some(element) = document.get_element_by_id("slskr-player-now") {
             element.set_text_content(Some(&title));
         }
         if let Some(element) = document.get_element_by_id("slskr-player-now-detail") {
             element.set_text_content(Some(&detail));
+        }
+        if let Some(audio) = player_audio_element(&document) {
+            if audio.get_attribute("src").unwrap_or_default() != stream_url {
+                if stream_url.is_empty() {
+                    audio.remove_attribute("src")?;
+                } else {
+                    audio.set_attribute("src", &stream_url)?;
+                }
+            }
         }
         update_player_rating_controls(window, &document, &rating_key);
         update_player_radio_controls(&document, &radio_query);
@@ -15180,6 +15353,8 @@ mod tests {
         assert!(html.contains("Search, transfers, messages"));
         assert!(html.contains("slskr-player"));
         assert!(html.contains("data-slskr-player"));
+        assert!(html.contains("slskr-player-audio"));
+        assert!(html.contains("data-slskr-player-action=\"play\""));
         assert!(html.contains("data-slskr-player-action=\"refresh\""));
         assert!(html.contains("data-slskr-player-action=\"clear\""));
         assert!(html.contains("data-slskr-player-action=\"visualizer\""));
@@ -15235,6 +15410,14 @@ mod tests {
         assert_eq!(
             player_rating_key(&track),
             "meta:archive artist|open sessions|public domain theme"
+        );
+        assert_eq!(
+            player_stream_url(&serde_json::json!({"contentId":"sha256:track"})),
+            "/api/v0/streams/sha256%3Atrack"
+        );
+        assert_eq!(
+            player_stream_url(&serde_json::json!({"streamUrl":"/custom/stream"})),
+            "/custom/stream"
         );
         assert_eq!(player_rating_summary(1), "Discovery caution");
         assert_eq!(player_rating_summary(3), "Neutral rating");

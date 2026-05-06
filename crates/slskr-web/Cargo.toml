@@ -19,6 +19,11 @@ js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
+    "AnalyserNode",
+    "AudioContext",
+    "AudioDestinationNode",
+    "AudioNode",
+    "BaseAudioContext",
     "CanvasRenderingContext2d",
     "Document",
     "Element",
@@ -31,9 +36,12 @@ web-sys = { version = "0.3", features = [
     "HtmlSelectElement",
     "HtmlTextAreaElement",
     "HtmlAnchorElement",
+    "HtmlAudioElement",
     "HtmlCanvasElement",
+    "HtmlMediaElement",
     "KeyboardEvent",
     "Location",
+    "MediaElementAudioSourceNode",
     "MouseEvent",
     "Node",
     "NodeList",
