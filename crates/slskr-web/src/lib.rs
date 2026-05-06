@@ -16763,7 +16763,7 @@ fn start_rust_milkdrop_visualizer(
     ));
     let input_state = Rc::new(RefCell::new(RustMilkdropInputState::default()));
     mount_rust_milkdrop_mouse_input(&canvas, input_state.clone())?;
-    let runtime = Rc::new(RefCell::new(RustMilkdropRuntime::default()));
+    let runtime = Rc::new(RefCell::new(RustMilkdropFrameSetRuntime::default()));
     if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
         label.set_text_content(Some(renderer.label()));
     }
@@ -16801,7 +16801,7 @@ fn start_rust_milkdrop_visualizer(
             .as_ref()
             .map(|analyzer| analyzer.snapshot(time))
             .unwrap_or_else(|| RustMilkdropAudioSnapshot::synthetic(time));
-        let frame = runtime_for_frame
+        let frame_set = runtime_for_frame
             .borrow_mut()
             .render_source_with_audio_and_input(
                 &preset_source,
@@ -16813,16 +16813,28 @@ fn start_rust_milkdrop_visualizer(
                 &audio.spectrum,
                 *input_for_frame.borrow(),
             );
-        renderer.render(&frame, time);
+        renderer.render_frame_set(&frame_set, time);
         if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
+            let shape_count = frame_set
+                .entries
+                .iter()
+                .map(|entry| entry.frame.shape_count)
+                .sum::<usize>();
+            let waveform_count = frame_set
+                .entries
+                .iter()
+                .map(|entry| entry.frame.waveform_count)
+                .sum::<usize>();
             status.set_text_content(Some(&format!(
-                "MilkDrop running: {} bass {:.0}% mid {:.0}% treble {:.0}% / {} shapes / {} waves",
+                "MilkDrop running: {} bass {:.0}% mid {:.0}% treble {:.0}% / {} preset{} / {} shapes / {} waves",
                 audio.source,
                 audio.bands.bass * 100.0,
                 audio.bands.mid * 100.0,
                 audio.bands.treble * 100.0,
-                frame.shape_count,
-                frame.waveform_count
+                frame_set.preset_count,
+                if frame_set.preset_count == 1 { "" } else { "s" },
+                shape_count,
+                waveform_count
             )));
         }
         if let Some(callback) = animation_handle.borrow().as_ref() {
@@ -17176,11 +17188,32 @@ impl RustMilkdropRenderer {
         }
     }
 
-    fn render(&self, frame: &RustMilkdropFrame, time: f64) {
+    fn render_frame_set(&self, frame_set: &RustMilkdropFrameSet, time: f64) {
+        if frame_set.entries.is_empty() {
+            return;
+        }
         match self {
-            Self::WebGl(renderer) => renderer.render(frame, time),
+            Self::WebGl(renderer) => {
+                for entry in &frame_set.entries {
+                    renderer.render(&entry.frame, time);
+                }
+            }
             Self::Canvas { canvas, context } => {
-                render_rust_milkdrop_canvas_frame(context, canvas, frame, time);
+                for (index, entry) in frame_set.entries.iter().enumerate() {
+                    context.save();
+                    context.set_global_alpha(clamp_unit(entry.blend_alpha));
+                    if index == 0 {
+                        render_rust_milkdrop_canvas_frame(context, canvas, &entry.frame, time);
+                    } else {
+                        render_rust_milkdrop_canvas_overlay_frame(
+                            context,
+                            canvas,
+                            &entry.frame,
+                            time,
+                        );
+                    }
+                    context.restore();
+                }
             }
         }
     }
@@ -18359,6 +18392,33 @@ fn render_rust_milkdrop_canvas_frame(
         }
         context.stroke();
     }
+    render_rust_milkdrop_canvas_primitives(context, width, height, frame);
+    render_rust_milkdrop_canvas_textured_primitives(context, width, height, frame);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_rust_milkdrop_canvas_overlay_frame(
+    context: &web_sys::CanvasRenderingContext2d,
+    canvas: &web_sys::HtmlCanvasElement,
+    frame: &RustMilkdropFrame,
+    time: f64,
+) {
+    let width = canvas.width() as f64;
+    let height = canvas.height() as f64;
+    let (r, g, b) = frame.wave_color;
+    context.save();
+    let _ = context.translate(width * (0.5 + frame.dx), height * (0.5 + frame.dy));
+    let _ = context.rotate(frame.rotation + time * 0.05);
+    context.set_stroke_style_str(&format!("rgba({r}, {g}, {b}, 0.68)"));
+    context.set_line_width(1.5);
+    let base = width.min(height) * frame.wave_radius * frame.zoom;
+    for ring in 0..frame.shape_count.max(1).min(5) {
+        context.begin_path();
+        let radius = base * (0.22 + ring as f64 * 0.11);
+        let _ = context.arc(0.0, 0.0, radius, 0.0, std::f64::consts::TAU);
+        context.stroke();
+    }
+    context.restore();
     render_rust_milkdrop_canvas_primitives(context, width, height, frame);
     render_rust_milkdrop_canvas_textured_primitives(context, width, height, frame);
 }
