@@ -13726,6 +13726,59 @@ fn create_rust_milkdrop_audio_samples(
         .collect()
 }
 
+fn create_milkdrop_waveform_vertices(
+    samples: &[f64],
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+) -> Vec<f64> {
+    let count = samples.len();
+    if count < 2 {
+        return Vec::new();
+    }
+    let mode = milkdrop_scope_number(frame_scope, "wave_mode", 0.0).floor() as i64;
+    let scale = milkdrop_scope_number(frame_scope, "wave_scale", 1.0);
+    let scale = if scale == 0.0 { 1.0 } else { scale };
+    let smoothing = clamp_unit(milkdrop_scope_number(frame_scope, "wave_smoothing", 0.0));
+    let center_x = milkdrop_scope_number(frame_scope, "wave_x", 0.5) * 2.0 - 1.0;
+    let center_y = milkdrop_scope_number(frame_scope, "wave_y", 0.5) * 2.0 - 1.0;
+    let mut vertices = Vec::with_capacity(count * 2);
+    for index in 0..count {
+        let sample = samples.get(index).copied().unwrap_or_default();
+        let smoothed = if smoothing > 0.0 && index > 0 {
+            samples.get(index - 1).copied().unwrap_or_default() * smoothing
+                + sample * (1.0 - smoothing)
+        } else {
+            sample
+        };
+        let progress = if count <= 1 {
+            0.0
+        } else {
+            index as f64 / (count - 1) as f64
+        };
+        let value = smoothed * scale;
+        match mode {
+            2 => {
+                vertices.push((center_x + value).clamp(-1.0, 1.0));
+                vertices.push(progress * 2.0 - 1.0);
+            }
+            3 => {
+                let angle = progress * std::f64::consts::TAU;
+                let radius = (0.35 + value * 0.18).clamp(0.0, 1.0);
+                vertices.push((center_x + angle.cos() * radius).clamp(-1.0, 1.0));
+                vertices.push((center_y + angle.sin() * radius).clamp(-1.0, 1.0));
+            }
+            1 => {
+                vertices.push(progress * 2.0 - 1.0);
+                vertices.push((center_y + value).clamp(-1.0, 1.0));
+            }
+            _ => {
+                vertices.push(progress * 2.0 - 1.0);
+                vertices.push((0.5 + value * 0.5).clamp(0.0, 1.0) * 2.0 - 1.0);
+            }
+        }
+    }
+    vertices
+}
+
 fn create_rust_milkdrop_frame_primitives(
     preset: &MilkdropPresetDocument,
     frame_scope: &BTreeMap<String, MilkdropValue>,
@@ -13744,6 +13797,20 @@ fn create_rust_milkdrop_frame_primitives(
         waveform
     };
     let mut primitives = Vec::new();
+    let waveform_vertices = create_milkdrop_waveform_vertices(samples, frame_scope);
+    let waveform_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "wave_a", 1.0));
+    if waveform_vertices.len() >= 4 && waveform_alpha > 0.0 {
+        primitives.push(RustMilkdropPrimitive {
+            color: [
+                fallback_color[0],
+                fallback_color[1],
+                fallback_color[2],
+                waveform_alpha,
+            ],
+            mode: RustMilkdropPrimitiveMode::LineStrip,
+            vertices: waveform_vertices,
+        });
+    }
     for (prefix, inset, fallback_alpha) in [
         ("ob", 0.0, 0.0),
         (
@@ -13957,6 +14024,20 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
     };
     let mut primitives = Vec::new();
     let mut textured_primitives = Vec::new();
+    let waveform_vertices = create_milkdrop_waveform_vertices(waveform_samples, frame_scope);
+    let waveform_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "wave_a", 1.0));
+    if waveform_vertices.len() >= 4 && waveform_alpha > 0.0 {
+        primitives.push(RustMilkdropPrimitive {
+            color: [
+                fallback_color[0],
+                fallback_color[1],
+                fallback_color[2],
+                waveform_alpha,
+            ],
+            mode: RustMilkdropPrimitiveMode::LineStrip,
+            vertices: waveform_vertices,
+        });
+    }
 
     for (prefix, inset, fallback_alpha) in [
         ("ob", 0.0, 0.0),
@@ -17867,7 +17948,11 @@ mod tests {
         let wave = frame
             .primitives
             .iter()
-            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::LineStrip)
+            .find(|primitive| {
+                primitive.mode == RustMilkdropPrimitiveMode::LineStrip
+                    && primitive.vertices.len() == 6
+                    && (primitive.vertices[1] + 1.0).abs() < 0.0001
+            })
             .expect("custom wave primitive");
         assert_eq!(wave.vertices.len(), 6);
         assert!((wave.vertices[1] + 1.0).abs() < 0.0001);
@@ -18457,6 +18542,50 @@ mod tests {
         assert!((spectrum_vertices[1] + 1.0).abs() < 0.0001);
         assert!((spectrum_vertices[3] - ((128.0 / 255.0) * 2.0 - 1.0)).abs() < 0.0001);
         assert!((spectrum_vertices[5] - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn rust_milkdrop_main_waveform_vertices_match_js_modes() {
+        let samples = [-1.0, 0.0, 1.0];
+        let mut scope = BTreeMap::new();
+
+        assert_eq!(
+            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            vec![-1.0, -1.0, 0.0, 0.0, 1.0, 1.0]
+        );
+
+        scope.insert("wave_mode".to_string(), MilkdropValue::Number(1.0));
+        scope.insert("wave_scale".to_string(), MilkdropValue::Number(0.5));
+        scope.insert("wave_y".to_string(), MilkdropValue::Number(0.25));
+        assert_eq!(
+            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            vec![-1.0, -1.0, 0.0, -0.5, 1.0, 0.0]
+        );
+
+        scope.insert("wave_mode".to_string(), MilkdropValue::Number(2.0));
+        scope.insert("wave_x".to_string(), MilkdropValue::Number(0.75));
+        assert_eq!(
+            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            vec![0.0, -1.0, 0.5, 0.0, 1.0, 1.0]
+        );
+
+        scope.insert("wave_mode".to_string(), MilkdropValue::Number(3.0));
+        scope.insert("wave_scale".to_string(), MilkdropValue::Number(1.0));
+        scope.insert("wave_x".to_string(), MilkdropValue::Number(0.5));
+        scope.insert("wave_y".to_string(), MilkdropValue::Number(0.5));
+        assert_eq!(
+            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            vec![0.17, 0.0, -0.35, 0.0, 0.53, -0.0]
+        );
+
+        scope.insert("wave_mode".to_string(), MilkdropValue::Number(1.0));
+        scope.insert("wave_scale".to_string(), MilkdropValue::Number(1.0));
+        scope.insert("wave_y".to_string(), MilkdropValue::Number(0.5));
+        scope.insert("wave_smoothing".to_string(), MilkdropValue::Number(0.5));
+        assert_eq!(
+            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            vec![-1.0, -1.0, 0.0, -0.5, 1.0, 0.5]
+        );
     }
 
     #[test]
