@@ -13003,6 +13003,385 @@ pub fn create_milkdrop_sprite_texture_uvs(sprite: &MilkdropIndexedEntry) -> Vec<
     vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 }
 
+fn milkdrop_shape_fill_color(shape: &MilkdropIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
+    [
+        clamp_unit(milkdrop_entry_number(shape, &["r"], fallback_color[0])),
+        clamp_unit(milkdrop_entry_number(shape, &["g"], fallback_color[1])),
+        clamp_unit(milkdrop_entry_number(shape, &["b"], fallback_color[2])),
+        clamp_unit(milkdrop_entry_number(shape, &["a"], 0.6)),
+    ]
+}
+
+fn milkdrop_shape_fill_edge_color(
+    shape: &MilkdropIndexedEntry,
+    fallback_color: [f64; 3],
+) -> [f64; 4] {
+    [
+        clamp_unit(milkdrop_entry_number(
+            shape,
+            &["r2", "r"],
+            fallback_color[0],
+        )),
+        clamp_unit(milkdrop_entry_number(
+            shape,
+            &["g2", "g"],
+            fallback_color[1],
+        )),
+        clamp_unit(milkdrop_entry_number(
+            shape,
+            &["b2", "b"],
+            fallback_color[2],
+        )),
+        clamp_unit(milkdrop_entry_number(shape, &["a2", "a"], 0.6)),
+    ]
+}
+
+fn milkdrop_shape_border_color(shape: &MilkdropIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
+    [
+        clamp_unit(milkdrop_entry_number(
+            shape,
+            &["border_r", "r"],
+            fallback_color[0],
+        )),
+        clamp_unit(milkdrop_entry_number(
+            shape,
+            &["border_g", "g"],
+            fallback_color[1],
+        )),
+        clamp_unit(milkdrop_entry_number(
+            shape,
+            &["border_b", "b"],
+            fallback_color[2],
+        )),
+        clamp_unit(milkdrop_entry_number(shape, &["border_a"], 0.85)),
+    ]
+}
+
+fn milkdrop_sprite_fill_color(sprite: &MilkdropIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
+    [
+        clamp_unit(milkdrop_entry_number(sprite, &["r"], fallback_color[0])),
+        clamp_unit(milkdrop_entry_number(sprite, &["g"], fallback_color[1])),
+        clamp_unit(milkdrop_entry_number(sprite, &["b"], fallback_color[2])),
+        clamp_unit(milkdrop_entry_number(sprite, &["a"], 1.0)),
+    ]
+}
+
+fn create_milkdrop_shape_fill_colors(
+    shape: &MilkdropIndexedEntry,
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    let vertex_count = create_milkdrop_shape_fill_vertices(shape).len() / 2;
+    if vertex_count == 0 {
+        return Vec::new();
+    }
+    let mut colors = Vec::with_capacity(vertex_count * 4);
+    colors.extend_from_slice(&milkdrop_shape_fill_color(shape, fallback_color));
+    let edge_color = milkdrop_shape_fill_edge_color(shape, fallback_color);
+    for _ in 1..vertex_count {
+        colors.extend_from_slice(&edge_color);
+    }
+    colors
+}
+
+fn append_rust_milkdrop_webgpu_colored_vertex(
+    output: &mut Vec<f64>,
+    vertices: &[f64],
+    vertex_index: usize,
+    color: [f64; 4],
+) {
+    output.extend_from_slice(&[
+        vertices[vertex_index * 2],
+        vertices[vertex_index * 2 + 1],
+        color[0],
+        color[1],
+        color[2],
+        color[3],
+    ]);
+}
+
+pub fn create_rust_milkdrop_webgpu_triangle_list_vertices(
+    triangle_vertices: &[f64],
+    color: [f64; 4],
+) -> Vec<f64> {
+    let vertex_count = triangle_vertices.len() / 2;
+    if vertex_count < 3 {
+        return Vec::new();
+    }
+    let mut vertices = Vec::with_capacity(vertex_count * 6);
+    for index in 0..vertex_count {
+        append_rust_milkdrop_webgpu_colored_vertex(&mut vertices, triangle_vertices, index, color);
+    }
+    vertices
+}
+
+pub fn create_rust_milkdrop_webgpu_triangle_fan_vertices(
+    fan_vertices: &[f64],
+    fan_colors: &[f64],
+    fallback_color: [f64; 4],
+) -> Vec<f64> {
+    let vertex_count = fan_vertices.len() / 2;
+    if vertex_count < 3 {
+        return Vec::new();
+    }
+    let mut vertices = Vec::with_capacity((vertex_count - 2) * 18);
+    let append_vertex = |output: &mut Vec<f64>, vertex_index: usize| {
+        let color_offset = vertex_index * 4;
+        let color = [
+            *fan_colors.get(color_offset).unwrap_or(&fallback_color[0]),
+            *fan_colors
+                .get(color_offset + 1)
+                .unwrap_or(&fallback_color[1]),
+            *fan_colors
+                .get(color_offset + 2)
+                .unwrap_or(&fallback_color[2]),
+            *fan_colors
+                .get(color_offset + 3)
+                .unwrap_or(&fallback_color[3]),
+        ];
+        append_rust_milkdrop_webgpu_colored_vertex(output, fan_vertices, vertex_index, color);
+    };
+    for index in 1..vertex_count - 1 {
+        append_vertex(&mut vertices, 0);
+        append_vertex(&mut vertices, index);
+        append_vertex(&mut vertices, index + 1);
+    }
+    vertices
+}
+
+pub fn create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
+    fan_vertices: &[f64],
+    fan_uvs: &[f64],
+    fan_colors: &[f64],
+    fallback_color: [f64; 4],
+) -> Vec<f64> {
+    let vertex_count = fan_vertices.len() / 2;
+    if vertex_count < 3 {
+        return Vec::new();
+    }
+    let mut vertices = Vec::with_capacity((vertex_count - 2) * 24);
+    let append_vertex = |output: &mut Vec<f64>, vertex_index: usize| {
+        let color_offset = vertex_index * 4;
+        output.extend_from_slice(&[
+            fan_vertices[vertex_index * 2],
+            fan_vertices[vertex_index * 2 + 1],
+            *fan_uvs.get(vertex_index * 2).unwrap_or(&0.5),
+            *fan_uvs.get(vertex_index * 2 + 1).unwrap_or(&0.5),
+            *fan_colors.get(color_offset).unwrap_or(&fallback_color[0]),
+            *fan_colors
+                .get(color_offset + 1)
+                .unwrap_or(&fallback_color[1]),
+            *fan_colors
+                .get(color_offset + 2)
+                .unwrap_or(&fallback_color[2]),
+            *fan_colors
+                .get(color_offset + 3)
+                .unwrap_or(&fallback_color[3]),
+        ]);
+    };
+    for index in 1..vertex_count - 1 {
+        append_vertex(&mut vertices, 0);
+        append_vertex(&mut vertices, index);
+        append_vertex(&mut vertices, index + 1);
+    }
+    vertices
+}
+
+pub fn create_rust_milkdrop_webgpu_line_segment_vertices(
+    line_strip_vertices: &[f64],
+    color: [f64; 4],
+) -> Vec<f64> {
+    let vertex_count = line_strip_vertices.len() / 2;
+    if vertex_count < 2 {
+        return Vec::new();
+    }
+    let mut vertices = Vec::with_capacity((vertex_count - 1) * 12);
+    for index in 0..vertex_count - 1 {
+        append_rust_milkdrop_webgpu_colored_vertex(
+            &mut vertices,
+            line_strip_vertices,
+            index,
+            color,
+        );
+        append_rust_milkdrop_webgpu_colored_vertex(
+            &mut vertices,
+            line_strip_vertices,
+            index + 1,
+            color,
+        );
+    }
+    vertices
+}
+
+pub fn create_rust_milkdrop_webgpu_line_list_vertices(
+    line_list_vertices: &[f64],
+    color: [f64; 4],
+) -> Vec<f64> {
+    let vertex_count = line_list_vertices.len() / 2;
+    if vertex_count < 2 {
+        return Vec::new();
+    }
+    let mut vertices = Vec::with_capacity(vertex_count * 6);
+    for index in 0..vertex_count {
+        append_rust_milkdrop_webgpu_colored_vertex(&mut vertices, line_list_vertices, index, color);
+    }
+    vertices
+}
+
+pub fn create_rust_milkdrop_webgpu_shape_fill_vertices(
+    shapes: &[MilkdropIndexedEntry],
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    shapes
+        .iter()
+        .filter(|shape| !is_milkdrop_shape_textured(shape))
+        .flat_map(|shape| {
+            create_rust_milkdrop_webgpu_triangle_fan_vertices(
+                &create_milkdrop_shape_fill_vertices(shape),
+                &create_milkdrop_shape_fill_colors(shape, fallback_color),
+                [fallback_color[0], fallback_color[1], fallback_color[2], 0.6],
+            )
+        })
+        .collect()
+}
+
+pub fn create_rust_milkdrop_webgpu_textured_shape_vertices(
+    shape: &MilkdropIndexedEntry,
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
+        &create_milkdrop_shape_fill_vertices(shape),
+        &create_milkdrop_shape_texture_uvs(shape),
+        &create_milkdrop_shape_fill_colors(shape, fallback_color),
+        [fallback_color[0], fallback_color[1], fallback_color[2], 0.6],
+    )
+}
+
+pub fn create_rust_milkdrop_webgpu_shape_outline_vertices(
+    shapes: &[MilkdropIndexedEntry],
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    shapes
+        .iter()
+        .flat_map(|shape| {
+            create_rust_milkdrop_webgpu_line_segment_vertices(
+                &create_milkdrop_shape_vertices(shape),
+                milkdrop_shape_border_color(shape, fallback_color),
+            )
+        })
+        .collect()
+}
+
+fn create_rust_milkdrop_webgpu_textured_quad_vertices(
+    quad_vertices: &[f64],
+    quad_uvs: &[f64],
+    color: [f64; 4],
+) -> Vec<f64> {
+    if quad_vertices.len() < 8 || quad_uvs.len() < 8 {
+        return Vec::new();
+    }
+    let mut vertices = Vec::with_capacity(48);
+    for vertex_index in [0usize, 1, 2, 0, 2, 3] {
+        vertices.extend_from_slice(&[
+            quad_vertices[vertex_index * 2],
+            quad_vertices[vertex_index * 2 + 1],
+            quad_uvs[vertex_index * 2],
+            quad_uvs[vertex_index * 2 + 1],
+            color[0],
+            color[1],
+            color[2],
+            color[3],
+        ]);
+    }
+    vertices
+}
+
+pub fn create_rust_milkdrop_webgpu_sprite_vertices(
+    sprites: &[MilkdropIndexedEntry],
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    sprites
+        .iter()
+        .flat_map(|sprite| {
+            let sprite_vertices = create_milkdrop_sprite_vertices(sprite);
+            if sprite_vertices.len() < 8 {
+                return Vec::new();
+            }
+            let triangles = vec![
+                sprite_vertices[0],
+                sprite_vertices[1],
+                sprite_vertices[2],
+                sprite_vertices[3],
+                sprite_vertices[4],
+                sprite_vertices[5],
+                sprite_vertices[0],
+                sprite_vertices[1],
+                sprite_vertices[4],
+                sprite_vertices[5],
+                sprite_vertices[6],
+                sprite_vertices[7],
+            ];
+            create_rust_milkdrop_webgpu_triangle_list_vertices(
+                &triangles,
+                milkdrop_sprite_fill_color(sprite, fallback_color),
+            )
+        })
+        .collect()
+}
+
+pub fn create_rust_milkdrop_webgpu_textured_sprite_vertices(
+    sprite: &MilkdropIndexedEntry,
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    create_rust_milkdrop_webgpu_textured_quad_vertices(
+        &create_milkdrop_sprite_vertices(sprite),
+        &create_milkdrop_sprite_texture_uvs(sprite),
+        milkdrop_sprite_fill_color(sprite, fallback_color),
+    )
+}
+
+pub fn create_rust_milkdrop_webgpu_motion_vector_vertices(
+    scope: &BTreeMap<String, MilkdropValue>,
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    create_rust_milkdrop_webgpu_line_list_vertices(
+        &create_milkdrop_motion_vector_vertices(scope),
+        [
+            clamp_unit(milkdrop_scope_number(scope, "mv_r", fallback_color[0])),
+            clamp_unit(milkdrop_scope_number(scope, "mv_g", fallback_color[1])),
+            clamp_unit(milkdrop_scope_number(scope, "mv_b", fallback_color[2])),
+            clamp_unit(milkdrop_scope_number(scope, "mv_a", 0.8)),
+        ],
+    )
+}
+
+pub fn create_rust_milkdrop_webgpu_screen_border_vertices(
+    scope: &BTreeMap<String, MilkdropValue>,
+    fallback_color: [f64; 3],
+) -> Vec<f64> {
+    let mut vertices = create_rust_milkdrop_webgpu_triangle_list_vertices(
+        &create_milkdrop_screen_border_vertices(milkdrop_scope_number(scope, "ob_size", 0.0), 0.0),
+        [
+            clamp_unit(milkdrop_scope_number(scope, "ob_r", fallback_color[0])),
+            clamp_unit(milkdrop_scope_number(scope, "ob_g", fallback_color[1])),
+            clamp_unit(milkdrop_scope_number(scope, "ob_b", fallback_color[2])),
+            clamp_unit(milkdrop_scope_number(scope, "ob_a", 0.0)),
+        ],
+    );
+    vertices.extend(create_rust_milkdrop_webgpu_triangle_list_vertices(
+        &create_milkdrop_screen_border_vertices(
+            milkdrop_scope_number(scope, "ib_size", 0.0),
+            clamp_unit(milkdrop_scope_number(scope, "ob_size", 0.0)) * 2.0,
+        ),
+        [
+            clamp_unit(milkdrop_scope_number(scope, "ib_r", fallback_color[0])),
+            clamp_unit(milkdrop_scope_number(scope, "ib_g", fallback_color[1])),
+            clamp_unit(milkdrop_scope_number(scope, "ib_b", fallback_color[2])),
+            clamp_unit(milkdrop_scope_number(scope, "ib_a", 0.0)),
+        ],
+    ));
+    vertices
+}
+
 fn append_milkdrop_quad(vertices: &mut Vec<f64>, left: f64, bottom: f64, right: f64, top: f64) {
     vertices.extend_from_slice(&[
         left, bottom, right, bottom, left, top, left, top, right, bottom, right, top,
@@ -16994,6 +17373,13 @@ mod tests {
     const REACT_APP: &str = include_str!("../../../web/src/components/App.jsx");
     const STATIC_INDEX: &str = include_str!("../static/index.html");
 
+    fn rounded_vec(values: &[f64]) -> Vec<f64> {
+        values
+            .iter()
+            .map(|value| (value * 1000.0).round() / 1000.0)
+            .collect()
+    }
+
     #[test]
     fn api_endpoints_are_versioned() {
         for section in app_sections() {
@@ -17899,6 +18285,144 @@ mod tests {
         assert_eq!(
             frame.textured_primitives[1].uvs,
             vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_webgpu_vertex_packers_match_js_shapes() {
+        assert_eq!(
+            rounded_vec(&create_rust_milkdrop_webgpu_triangle_list_vertices(
+                &[-1.0, -1.0, 1.0, -1.0, 0.0, 1.0],
+                [0.2, 0.4, 0.6, 0.8],
+            )),
+            vec![
+                -1.0, -1.0, 0.2, 0.4, 0.6, 0.8, 1.0, -1.0, 0.2, 0.4, 0.6, 0.8, 0.0, 1.0, 0.2, 0.4,
+                0.6, 0.8,
+            ]
+        );
+        assert_eq!(
+            rounded_vec(&create_rust_milkdrop_webgpu_triangle_fan_vertices(
+                &[0.0, 0.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0],
+                &[1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.6, 0.0, 0.0, 1.0, 0.7, 1.0, 1.0, 1.0, 0.8,],
+                [1.0, 1.0, 1.0, 1.0],
+            )),
+            vec![
+                0.0, 0.0, 1.0, 0.0, 0.0, 0.5, -1.0, -1.0, 0.0, 1.0, 0.0, 0.6, 1.0, -1.0, 0.0, 0.0,
+                1.0, 0.7, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 1.0, -1.0, 0.0, 0.0, 1.0, 0.7, 1.0, 1.0,
+                1.0, 1.0, 1.0, 0.8,
+            ]
+        );
+        assert_eq!(
+            rounded_vec(&create_rust_milkdrop_webgpu_line_segment_vertices(
+                &[-1.0, 0.0, 0.0, 0.5, 1.0, 0.0],
+                [0.1, 0.2, 0.3, 0.4],
+            )),
+            vec![
+                -1.0, 0.0, 0.1, 0.2, 0.3, 0.4, 0.0, 0.5, 0.1, 0.2, 0.3, 0.4, 0.0, 0.5, 0.1, 0.2,
+                0.3, 0.4, 1.0, 0.0, 0.1, 0.2, 0.3, 0.4,
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_webgpu_textured_vertex_packers_match_js_shapes() {
+        let vertices = create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
+            &[0.0, 0.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0],
+            &[0.5, 0.5, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0],
+            &[
+                1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.6, 0.0, 0.0, 1.0, 0.7, 1.0, 1.0, 1.0, 0.8,
+            ],
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        assert_eq!(vertices.len(), 48);
+        assert_eq!(
+            rounded_vec(&vertices[..24]),
+            vec![
+                0.0, 0.0, 0.5, 0.5, 1.0, 0.0, 0.0, 0.5, -1.0, -1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.6,
+                1.0, -1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.7,
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_webgpu_domain_packers_match_js_renderer() {
+        let parsed = parse_milkdrop_preset_set(
+            r#"
+            name=WebGPU pack
+            ob_size=0.1
+            ob_r=1
+            ob_g=0.2
+            ob_b=0.3
+            ob_a=0.4
+            ib_size=0.05
+            ib_r=0.2
+            ib_g=0.8
+            ib_b=1
+            ib_a=0.5
+            mv_x=2
+            mv_y=1
+            mv_r=0.1
+            mv_g=0.2
+            mv_b=0.3
+            mv_a=0.75
+            mv_dx=0.5
+            mv_dy=-0.25
+            mv_l=0.1
+            shape00_enabled=1
+            shape00_sides=3
+            shape00_rad=0.25
+            shape00_r=0.1
+            shape00_g=0.2
+            shape00_b=0.3
+            shape00_a=0.4
+            shape00_r2=0.4
+            shape00_g2=0.5
+            shape00_b2=0.6
+            shape00_a2=0.2
+            sprite00_enabled=1
+            sprite00_x=0.5
+            sprite00_y=0.5
+            sprite00_w=0.2
+            sprite00_h=0.1
+            sprite00_r=0.1
+            sprite00_g=0.2
+            sprite00_b=0.3
+            sprite00_a=0.4
+            "#,
+            false,
+        );
+        let preset = &parsed.presets[0];
+        let borders = create_rust_milkdrop_webgpu_screen_border_vertices(
+            &preset.base_values,
+            [0.7, 0.7, 0.7],
+        );
+        assert_eq!(borders.len(), 288);
+        assert_eq!(rounded_vec(&borders[2..6]), vec![1.0, 0.2, 0.3, 0.4]);
+        let motion = create_rust_milkdrop_webgpu_motion_vector_vertices(
+            &preset.base_values,
+            [0.7, 0.7, 0.7],
+        );
+        assert_eq!(motion.len(), 24);
+        assert_eq!(rounded_vec(&motion[2..6]), vec![0.1, 0.2, 0.3, 0.75]);
+        let fills =
+            create_rust_milkdrop_webgpu_shape_fill_vertices(&preset.shapes, [0.7, 0.7, 0.7]);
+        assert_eq!(fills.len(), 54);
+        assert_eq!(rounded_vec(&fills[2..6]), vec![0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(rounded_vec(&fills[8..12]), vec![0.4, 0.5, 0.6, 0.2]);
+        let sprites = create_rust_milkdrop_webgpu_sprite_vertices(&preset.sprites, [1.0, 1.0, 1.0]);
+        assert_eq!(sprites.len(), 36);
+        assert_eq!(
+            rounded_vec(&sprites[..6]),
+            vec![-0.2, -0.1, 0.1, 0.2, 0.3, 0.4]
+        );
+        let textured_sprite = create_rust_milkdrop_webgpu_textured_sprite_vertices(
+            &preset.sprites[0],
+            [1.0, 1.0, 1.0],
+        );
+        assert_eq!(textured_sprite.len(), 48);
+        assert_eq!(
+            rounded_vec(&textured_sprite[..8]),
+            vec![-0.2, -0.1, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4]
         );
     }
 
