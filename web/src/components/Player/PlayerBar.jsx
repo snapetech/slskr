@@ -82,7 +82,6 @@ const readStoredBoolean = (key) => {
 
 const readStoredVisualizerEngineTileMode = () => {
   const engine = getLocalStorageItem(visualizerEngineStorageKey);
-  if (engine === 'butterchurn') return 'native-webgl2';
   if (engine === 'native') return 'native-webgl2';
   return ['native-webgl2', 'native-webgpu'].includes(engine)
     ? engine
@@ -91,7 +90,6 @@ const readStoredVisualizerEngineTileMode = () => {
 
 const readStoredTileMode = () => {
   const mode = getLocalStorageItem(visualTileStorageKey);
-  if (mode === 'butterchurn') return 'native-webgl2';
   if (['art', 'spectrum', 'scope', 'native-webgl2', 'native-webgpu'].includes(mode)) {
     return mode;
   }

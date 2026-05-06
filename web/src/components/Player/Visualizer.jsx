@@ -85,7 +85,6 @@ const nativeEditableParameters = [
 
 const readStoredEngine = () => {
   const stored = getLocalStorageItem(visualizerEngineStorageKey);
-  if (stored === 'butterchurn') return 'native-webgl2';
   if (stored === 'native') return 'native-webgl2';
   return ['native-webgl2', 'native-webgpu'].includes(stored)
     ? stored
