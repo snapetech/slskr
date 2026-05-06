@@ -11426,12 +11426,27 @@ pub struct RustMilkdropFrame {
     pub background_alpha: f64,
     pub dx: f64,
     pub dy: f64,
+    pub primitives: Vec<RustMilkdropPrimitive>,
     pub shape_count: usize,
     pub rotation: f64,
     pub wave_color: (u8, u8, u8),
     pub wave_radius: f64,
     pub waveform_count: usize,
     pub zoom: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RustMilkdropPrimitiveMode {
+    LineStrip,
+    Points,
+    TriangleFan,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RustMilkdropPrimitive {
+    pub color: [f64; 4],
+    pub mode: RustMilkdropPrimitiveMode,
+    pub vertices: Vec<f64>,
 }
 
 fn clamp_unit(value: f64) -> f64 {
@@ -11482,6 +11497,7 @@ pub fn rust_milkdrop_frame(
         background_alpha: clamp_range(1.0 - preset.decay, 0.01, 0.5),
         dx: 0.0,
         dy: 0.0,
+        primitives: Vec::new(),
         shape_count: 0,
         rotation: preset.rot + (time_seconds * 0.37).sin() * 0.035 + (treble - 0.5) * 0.05,
         wave_color: (
@@ -11596,6 +11612,20 @@ pub fn rust_milkdrop_frame_from_source(
         3.0,
     );
     let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
+    let wave_color = (
+        (wave_r * 255.0).min(255.0) as u8,
+        (wave_g * 255.0).min(255.0) as u8,
+        (wave_b * 255.0).min(255.0) as u8,
+    );
+    let primitives = create_rust_milkdrop_frame_primitives(
+        preset_document,
+        &scope,
+        time_seconds,
+        bass,
+        mid,
+        treble,
+        [wave_r, wave_g, wave_b],
+    );
     RustMilkdropFrame {
         background_alpha: clamp_range(
             1.0 - milkdrop_scope_number(&scope, "decay", fallback.decay),
@@ -11604,6 +11634,7 @@ pub fn rust_milkdrop_frame_from_source(
         ),
         dx: clamp_range(milkdrop_scope_number(&scope, "dx", 0.0), -0.5, 0.5),
         dy: clamp_range(milkdrop_scope_number(&scope, "dy", 0.0), -0.5, 0.5),
+        primitives,
         shape_count: preset_document
             .shapes
             .iter()
@@ -11614,11 +11645,7 @@ pub fn rust_milkdrop_frame_from_source(
             -0.5,
             0.5,
         ) + (treble - 0.5) * 0.02,
-        wave_color: (
-            (wave_r * 255.0).min(255.0) as u8,
-            (wave_g * 255.0).min(255.0) as u8,
-            (wave_b * 255.0).min(255.0) as u8,
-        ),
+        wave_color,
         wave_radius: clamp_range(
             0.18 + wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
             0.12,
@@ -12275,6 +12302,11 @@ fn milkdrop_entry_number(entry: &MilkdropIndexedEntry, keys: &[&str], fallback: 
         .unwrap_or(fallback)
 }
 
+fn milkdrop_entry_flag(entry: &MilkdropIndexedEntry, keys: &[&str]) -> bool {
+    keys.iter()
+        .any(|key| milkdrop_entry_number(entry, &[*key], 0.0).abs() > 0.00001)
+}
+
 pub fn create_milkdrop_custom_wave_vertices(
     wave: &MilkdropIndexedEntry,
     samples: &[f64],
@@ -12315,6 +12347,138 @@ pub fn create_milkdrop_custom_wave_vertices(
         vertices.push(y);
     }
     vertices
+}
+
+pub fn create_milkdrop_shape_vertices(shape: &MilkdropIndexedEntry) -> Vec<f64> {
+    if !milkdrop_entry_flag(shape, &["enabled", "benabled"]) {
+        return Vec::new();
+    }
+    let sides = milkdrop_entry_number(shape, &["sides", "numsides"], 4.0)
+        .floor()
+        .clamp(3.0, 500.0) as usize;
+    let radius = milkdrop_entry_number(shape, &["rad", "radius"], 0.1).max(0.0);
+    let center_x = milkdrop_entry_number(shape, &["x"], 0.5) * 2.0 - 1.0;
+    let center_y = milkdrop_entry_number(shape, &["y"], 0.5) * 2.0 - 1.0;
+    let angle = milkdrop_entry_number(shape, &["ang"], 0.0);
+    let mut vertices = Vec::with_capacity((sides + 1) * 2);
+    for index in 0..=sides {
+        let theta = angle + (index as f64 / sides as f64) * std::f64::consts::TAU;
+        vertices.push(center_x + theta.cos() * radius);
+        vertices.push(center_y + theta.sin() * radius);
+    }
+    vertices
+}
+
+pub fn create_milkdrop_shape_fill_vertices(shape: &MilkdropIndexedEntry) -> Vec<f64> {
+    let outline = create_milkdrop_shape_vertices(shape);
+    if outline.is_empty() {
+        return outline;
+    }
+    let mut vertices = Vec::with_capacity(outline.len() + 2);
+    vertices.push(milkdrop_entry_number(shape, &["x"], 0.5) * 2.0 - 1.0);
+    vertices.push(milkdrop_entry_number(shape, &["y"], 0.5) * 2.0 - 1.0);
+    vertices.extend(outline);
+    vertices
+}
+
+fn create_rust_milkdrop_audio_samples(
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    count: usize,
+) -> Vec<f64> {
+    let count = count.max(2);
+    (0..count)
+        .map(|index| {
+            let unit = index as f64 / (count - 1) as f64;
+            (unit * std::f64::consts::TAU * 3.0 + time_seconds * 2.1).sin() * bass * 0.42
+                + (unit * std::f64::consts::TAU * 7.0 + time_seconds * 1.3).sin() * mid * 0.24
+                + (unit * std::f64::consts::TAU * 13.0 + time_seconds * 3.2).sin() * treble * 0.14
+        })
+        .collect()
+}
+
+fn create_rust_milkdrop_frame_primitives(
+    preset: &MilkdropPresetDocument,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    fallback_color: [f64; 3],
+) -> Vec<RustMilkdropPrimitive> {
+    let samples = create_rust_milkdrop_audio_samples(time_seconds, bass, mid, treble, 192);
+    let mut primitives = Vec::new();
+    for wave in &preset.waves {
+        let evaluated = evaluate_milkdrop_wave_state(wave, frame_scope);
+        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+            continue;
+        }
+        let vertices = create_milkdrop_custom_wave_vertices(&evaluated, &samples, frame_scope);
+        if vertices.len() < 4 {
+            continue;
+        }
+        primitives.push(RustMilkdropPrimitive {
+            color: [
+                clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
+                clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
+                clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
+                clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+            ],
+            mode: if milkdrop_entry_flag(&evaluated, &["dots", "busedots"]) {
+                RustMilkdropPrimitiveMode::Points
+            } else {
+                RustMilkdropPrimitiveMode::LineStrip
+            },
+            vertices,
+        });
+    }
+    for shape in &preset.shapes {
+        let evaluated = evaluate_milkdrop_shape_state(shape, frame_scope);
+        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+            continue;
+        }
+        let fill_vertices = create_milkdrop_shape_fill_vertices(&evaluated);
+        if fill_vertices.len() >= 6 {
+            primitives.push(RustMilkdropPrimitive {
+                color: [
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                ],
+                mode: RustMilkdropPrimitiveMode::TriangleFan,
+                vertices: fill_vertices,
+            });
+        }
+        let outline_vertices = create_milkdrop_shape_vertices(&evaluated);
+        if outline_vertices.len() >= 8 {
+            primitives.push(RustMilkdropPrimitive {
+                color: [
+                    clamp_unit(milkdrop_entry_number(
+                        &evaluated,
+                        &["border_r", "r"],
+                        fallback_color[0],
+                    )),
+                    clamp_unit(milkdrop_entry_number(
+                        &evaluated,
+                        &["border_g", "g"],
+                        fallback_color[1],
+                    )),
+                    clamp_unit(milkdrop_entry_number(
+                        &evaluated,
+                        &["border_b", "b"],
+                        fallback_color[2],
+                    )),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["border_a"], 0.85)),
+                ],
+                mode: RustMilkdropPrimitiveMode::LineStrip,
+                vertices: outline_vertices,
+            });
+        }
+    }
+    primitives
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -14150,6 +14314,8 @@ struct RustMilkdropWebGlRenderer {
     buffer: web_sys::WebGlBuffer,
     feedback_targets: RefCell<RustMilkdropFeedbackTargets>,
     gl: web_sys::WebGl2RenderingContext,
+    primitive_buffer: web_sys::WebGlBuffer,
+    primitive_program: web_sys::WebGlProgram,
     program: web_sys::WebGlProgram,
     u_color: Option<web_sys::WebGlUniformLocation>,
     u_counts: Option<web_sys::WebGlUniformLocation>,
@@ -14157,6 +14323,8 @@ struct RustMilkdropWebGlRenderer {
     u_feedback: Option<web_sys::WebGlUniformLocation>,
     u_motion: Option<web_sys::WebGlUniformLocation>,
     u_previous_frame: Option<web_sys::WebGlUniformLocation>,
+    u_primitive_color: Option<web_sys::WebGlUniformLocation>,
+    u_primitive_point_size: Option<web_sys::WebGlUniformLocation>,
     u_resolution: Option<web_sys::WebGlUniformLocation>,
     u_time: Option<web_sys::WebGlUniformLocation>,
 }
@@ -14211,6 +14379,18 @@ impl RustMilkdropWebGlRenderer {
         )?;
         let program = link_rust_milkdrop_program(&gl, &vertex_shader, &fragment_shader)?;
         gl.use_program(Some(&program));
+        let primitive_vertex_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::VERTEX_SHADER,
+            RUST_MILKDROP_PRIMITIVE_VERTEX_SHADER,
+        )?;
+        let primitive_fragment_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
+            RUST_MILKDROP_PRIMITIVE_FRAGMENT_SHADER,
+        )?;
+        let primitive_program =
+            link_rust_milkdrop_program(&gl, &primitive_vertex_shader, &primitive_fragment_shader)?;
 
         let buffer = gl
             .create_buffer()
@@ -14235,6 +14415,9 @@ impl RustMilkdropWebGlRenderer {
                 0,
             );
         }
+        let primitive_buffer = gl
+            .create_buffer()
+            .ok_or_else(|| JsValue::from_str("WebGL primitive buffer allocation failed"))?;
         let feedback_targets = RefCell::new(create_rust_milkdrop_feedback_targets(
             &gl,
             gl.drawing_buffer_width().max(1),
@@ -14248,11 +14431,16 @@ impl RustMilkdropWebGlRenderer {
             u_feedback: gl.get_uniform_location(&program, "u_feedback"),
             u_motion: gl.get_uniform_location(&program, "u_motion"),
             u_previous_frame: gl.get_uniform_location(&program, "u_previousFrame"),
+            u_primitive_color: gl.get_uniform_location(&primitive_program, "u_primitiveColor"),
+            u_primitive_point_size: gl
+                .get_uniform_location(&primitive_program, "u_primitivePointSize"),
             u_resolution: gl.get_uniform_location(&program, "u_resolution"),
             u_time: gl.get_uniform_location(&program, "u_time"),
             buffer,
             feedback_targets,
             gl,
+            primitive_buffer,
+            primitive_program,
             program,
         })
     }
@@ -14287,6 +14475,7 @@ impl RustMilkdropWebGlRenderer {
             Some(&targets.targets[write_index].framebuffer),
         );
         self.draw_feedback_quad(frame, time, drawing_width, drawing_height, false);
+        self.draw_primitives(frame);
 
         self.gl
             .bind_framebuffer(web_sys::WebGl2RenderingContext::FRAMEBUFFER, None);
@@ -14306,6 +14495,23 @@ impl RustMilkdropWebGlRenderer {
         drawing_height: i32,
         display_only: bool,
     ) {
+        self.gl.use_program(Some(&self.program));
+        self.gl.bind_buffer(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            Some(&self.buffer),
+        );
+        let position = self.gl.get_attrib_location(&self.program, "position");
+        if position >= 0 {
+            self.gl.enable_vertex_attrib_array(position as u32);
+            self.gl.vertex_attrib_pointer_with_i32(
+                position as u32,
+                2,
+                web_sys::WebGl2RenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+        }
         self.gl.viewport(0, 0, drawing_width, drawing_height);
         self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
         self.gl
@@ -14345,6 +14551,77 @@ impl RustMilkdropWebGlRenderer {
         );
         self.gl
             .draw_arrays(web_sys::WebGl2RenderingContext::TRIANGLE_STRIP, 0, 4);
+    }
+
+    fn draw_primitives(&self, frame: &RustMilkdropFrame) {
+        if frame.primitives.is_empty() {
+            return;
+        }
+        self.gl.enable(web_sys::WebGl2RenderingContext::BLEND);
+        self.gl.blend_func(
+            web_sys::WebGl2RenderingContext::SRC_ALPHA,
+            web_sys::WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
+        );
+        self.gl.use_program(Some(&self.primitive_program));
+        self.gl.bind_buffer(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            Some(&self.primitive_buffer),
+        );
+        let position = self
+            .gl
+            .get_attrib_location(&self.primitive_program, "position");
+        if position >= 0 {
+            self.gl.enable_vertex_attrib_array(position as u32);
+            self.gl.vertex_attrib_pointer_with_i32(
+                position as u32,
+                2,
+                web_sys::WebGl2RenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+        }
+        for primitive in &frame.primitives {
+            if primitive.vertices.len() < 4 {
+                continue;
+            }
+            let vertices = primitive
+                .vertices
+                .iter()
+                .map(|value| *value as f32)
+                .collect::<Vec<_>>();
+            let vertex_array = js_sys::Float32Array::from(vertices.as_slice());
+            self.gl.buffer_data_with_array_buffer_view(
+                web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+                &vertex_array,
+                web_sys::WebGl2RenderingContext::DYNAMIC_DRAW,
+            );
+            self.gl.uniform4f(
+                self.u_primitive_color.as_ref(),
+                primitive.color[0] as f32,
+                primitive.color[1] as f32,
+                primitive.color[2] as f32,
+                primitive.color[3] as f32,
+            );
+            self.gl.uniform1f(
+                self.u_primitive_point_size.as_ref(),
+                if primitive.mode == RustMilkdropPrimitiveMode::Points {
+                    2.0
+                } else {
+                    1.0
+                },
+            );
+            let mode = match primitive.mode {
+                RustMilkdropPrimitiveMode::LineStrip => web_sys::WebGl2RenderingContext::LINE_STRIP,
+                RustMilkdropPrimitiveMode::Points => web_sys::WebGl2RenderingContext::POINTS,
+                RustMilkdropPrimitiveMode::TriangleFan => {
+                    web_sys::WebGl2RenderingContext::TRIANGLE_FAN
+                }
+            };
+            self.gl.draw_arrays(mode, 0, (vertices.len() / 2) as i32);
+        }
+        self.gl.disable(web_sys::WebGl2RenderingContext::BLEND);
+        self.gl.use_program(Some(&self.program));
     }
 }
 
@@ -14534,6 +14811,29 @@ void main() {
   vec3 previous = texture(u_previousFrame, clamp(feedbackUv, vec2(0.001), vec2(0.999))).rgb;
   vec3 composited = mix(tint, previous * 0.996, clamp(u_feedback, 0.0, 0.985));
   outColor = vec4(mix(composited, texture(u_previousFrame, v_uv).rgb, step(0.5, u_displayOnly)), 1.0);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_PRIMITIVE_VERTEX_SHADER: &str = r#"#version 300 es
+in vec2 position;
+uniform vec4 u_primitiveColor;
+uniform float u_primitivePointSize;
+out vec4 v_color;
+void main() {
+  v_color = u_primitiveColor;
+  gl_PointSize = u_primitivePointSize;
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_PRIMITIVE_FRAGMENT_SHADER: &str = r#"#version 300 es
+precision highp float;
+in vec4 v_color;
+out vec4 outColor;
+void main() {
+  outColor = v_color;
 }
 "#;
 
@@ -14983,6 +15283,13 @@ mod tests {
         assert_eq!(frame.wave_color.2, 140);
         assert_eq!(frame.shape_count, 2);
         assert_eq!(frame.waveform_count, 1);
+        assert!(frame.primitives.iter().any(|primitive| {
+            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+                && primitive.vertices.len() >= 8
+        }));
+        assert!(frame.primitives.iter().any(|primitive| {
+            primitive.mode == RustMilkdropPrimitiveMode::LineStrip && primitive.vertices.len() >= 4
+        }));
         assert!((frame.zoom - 1.2).abs() < 0.0001);
         assert!((frame.rotation - 0.245).abs() < 0.0001);
         assert!((frame.dx - 0.05).abs() < 0.0001);
@@ -15427,6 +15734,34 @@ mod tests {
         assert!((spectrum_vertices[1] + 1.0).abs() < 0.0001);
         assert!((spectrum_vertices[3] - ((128.0 / 255.0) * 2.0 - 1.0)).abs() < 0.0001);
         assert!((spectrum_vertices[5] - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn rust_milkdrop_shape_vertices_match_js_geometry() {
+        let mut shape = MilkdropIndexedEntry::default();
+        shape
+            .base_values
+            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+        shape
+            .base_values
+            .insert("sides".to_string(), MilkdropValue::Number(4.0));
+        shape
+            .base_values
+            .insert("rad".to_string(), MilkdropValue::Number(0.25));
+        shape
+            .base_values
+            .insert("x".to_string(), MilkdropValue::Number(0.5));
+        shape
+            .base_values
+            .insert("y".to_string(), MilkdropValue::Number(0.5));
+        let outline = create_milkdrop_shape_vertices(&shape);
+        let fill = create_milkdrop_shape_fill_vertices(&shape);
+        assert_eq!(outline.len(), 10);
+        assert_eq!(fill.len(), 12);
+        assert!((outline[0] - 0.25).abs() < 0.0001);
+        assert!(outline[1].abs() < 0.0001);
+        assert!(fill[0].abs() < 0.0001);
+        assert!(fill[1].abs() < 0.0001);
     }
 
     #[test]
