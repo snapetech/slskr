@@ -318,12 +318,8 @@ describe('PlayerBar', () => {
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('butterchurn'));
-    expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument();
-
-    fireEvent.click(tile);
-    await waitFor(() =>
       expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2'));
+    expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument();
 
     fireEvent.click(tile);
     await waitFor(() =>
@@ -339,9 +335,13 @@ describe('PlayerBar', () => {
       expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('scope'));
     expect(within(tile).getByLabelText('Oscilloscope')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('player-visual-tile-mode-butterchurn'));
+    fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('butterchurn'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('art'));
+
+    fireEvent.click(screen.getByTestId('player-visual-tile-mode-native-webgl2'));
+    await waitFor(() =>
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2'));
   });
 
   it('shows tile-level visualizer maximize controls even while analyzer bars are active', async () => {
@@ -353,9 +353,9 @@ describe('PlayerBar', () => {
     await waitFor(() =>
       expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('spectrum'));
 
-    fireEvent.click(screen.getByTestId('player-visual-tile-mode-butterchurn'));
+    fireEvent.click(screen.getByTestId('player-visual-tile-mode-native-webgl2'));
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('butterchurn'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2'));
 
     fireEvent.click(screen.getByTestId('player-visual-tile-mode-spectrum'));
     await waitFor(() =>

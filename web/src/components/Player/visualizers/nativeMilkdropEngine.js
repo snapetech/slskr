@@ -100,8 +100,12 @@ const defaultAutomation = {
 let rustModulePromise;
 
 const loadRustMilkdropModule = async () => {
+  if (globalThis.__slskrRustMilkdropModule) {
+    return globalThis.__slskrRustMilkdropModule;
+  }
   if (!rustModulePromise) {
-    rustModulePromise = import(/* @vite-ignore */ '/slskr_web.js');
+    const modulePath = '/slskr_web.js';
+    rustModulePromise = import(/* @vite-ignore */ modulePath);
   }
   return rustModulePromise;
 };

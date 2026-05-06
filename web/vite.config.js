@@ -105,8 +105,6 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
 
-          if (id.includes('butterchurn-presets')) return 'milkdrop-presets';
-          if (id.includes('butterchurn')) return 'milkdrop';
           if (id.includes('semantic-ui')) return 'semantic-ui';
           if (
             id.includes('/react/') ||

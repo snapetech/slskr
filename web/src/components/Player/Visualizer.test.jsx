@@ -2,17 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import Visualizer from './Visualizer';
-import { createButterchurnEngine } from './visualizers/butterchurnEngine';
 import { createNativeMilkdropEngine } from './visualizers/nativeMilkdropEngine';
-
-const butterchurnEngine = {
-  dispose: vi.fn(),
-  nextPreset: vi.fn(() => 'Butterchurn next'),
-  presetName: 'Butterchurn preset',
-  render: vi.fn(),
-  resize: vi.fn(),
-  name: 'Butterchurn',
-};
 
 const nativeEngine = {
   dispose: vi.fn(),
@@ -85,10 +75,6 @@ vi.mock('./audioGraph', () => ({
     })),
 }));
 
-vi.mock('./visualizers/butterchurnEngine', () => ({
-  createButterchurnEngine: vi.fn(() => Promise.resolve(butterchurnEngine)),
-}));
-
 vi.mock('./visualizers/nativeMilkdropEngine', () => ({
   createNativeMilkdropEngine: vi.fn(() => Promise.resolve(nativeEngine)),
 }));
@@ -106,9 +92,7 @@ describe('Visualizer', () => {
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({}));
     window.requestAnimationFrame = vi.fn(() => 1);
     window.cancelAnimationFrame = vi.fn();
-    createButterchurnEngine.mockClear();
     createNativeMilkdropEngine.mockClear();
-    butterchurnEngine.dispose.mockClear();
     nativeEngine.dispose.mockClear();
     nativeEngine.exportPresetFragment.mockClear();
     nativeEngine.exportPresetText.mockClear();
@@ -138,14 +122,13 @@ describe('Visualizer', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByTestId('visualizer-switch-engine'));
+    await screen.findByTestId('visualizer-switch-engine');
 
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('native-webgl2');
+      expect(createNativeMilkdropEngine).toHaveBeenLastCalledWith(
+        expect.objectContaining({ rendererBackend: 'webgl2' }),
+      );
     });
-    expect(createNativeMilkdropEngine).toHaveBeenLastCalledWith(
-      expect.objectContaining({ rendererBackend: 'webgl2' }),
-    );
 
     const input = document.querySelector('input[type="file"]');
     const file = new File(['name=Imported native preset\nwave_r=1'], 'imported.milk', {
@@ -195,7 +178,7 @@ describe('Visualizer', () => {
     expect(screen.queryByTestId('visualizer-native-preset-library')).not.toBeInTheDocument();
   });
 
-  it('cycles visualizer engines through Butterchurn, MilkDrop3 WebGL2, and MilkDrop3 WebGPU', async () => {
+  it('cycles visualizer engines through Rust MilkDrop WebGL2 and WebGPU', async () => {
     render(
       <Visualizer
         audioElement={{}}
@@ -205,12 +188,6 @@ describe('Visualizer', () => {
     );
 
     await screen.findByTestId('visualizer-switch-engine');
-    expect(createButterchurnEngine).toHaveBeenCalled();
-
-    fireEvent.click(screen.getByTestId('visualizer-switch-engine'));
-    await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('native-webgl2');
-    });
     expect(createNativeMilkdropEngine).toHaveBeenLastCalledWith(
       expect.objectContaining({ rendererBackend: 'webgl2' }),
     );
@@ -225,7 +202,7 @@ describe('Visualizer', () => {
 
     fireEvent.click(screen.getByTestId('visualizer-switch-engine'));
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('butterchurn');
+      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('native-webgl2');
     });
   });
 
