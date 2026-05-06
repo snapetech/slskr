@@ -14926,6 +14926,80 @@ fn render_rust_milkdrop_canvas_frame(
         }
         context.stroke();
     }
+    render_rust_milkdrop_canvas_primitives(context, width, height, frame);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_canvas_color(color: [f64; 4]) -> String {
+    format!(
+        "rgba({:.0}, {:.0}, {:.0}, {:.3})",
+        clamp_unit(color[0]) * 255.0,
+        clamp_unit(color[1]) * 255.0,
+        clamp_unit(color[2]) * 255.0,
+        clamp_unit(color[3])
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_clip_to_canvas(vertex: &[f64], width: f64, height: f64) -> (f64, f64) {
+    (
+        (vertex.first().copied().unwrap_or_default() * 0.5 + 0.5) * width,
+        (1.0 - (vertex.get(1).copied().unwrap_or_default() * 0.5 + 0.5)) * height,
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_rust_milkdrop_canvas_primitives(
+    context: &web_sys::CanvasRenderingContext2d,
+    width: f64,
+    height: f64,
+    frame: &RustMilkdropFrame,
+) {
+    for primitive in &frame.primitives {
+        if primitive.vertices.len() < 4 {
+            continue;
+        }
+        let color = rust_milkdrop_canvas_color(primitive.color);
+        match primitive.mode {
+            RustMilkdropPrimitiveMode::LineStrip => {
+                context.begin_path();
+                for (index, vertex) in primitive.vertices.chunks(2).enumerate() {
+                    let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+                    if index == 0 {
+                        context.move_to(x, y);
+                    } else {
+                        context.line_to(x, y);
+                    }
+                }
+                context.set_stroke_style_str(&color);
+                context.set_line_width(1.5);
+                context.stroke();
+            }
+            RustMilkdropPrimitiveMode::Points => {
+                context.set_fill_style_str(&color);
+                for vertex in primitive.vertices.chunks(2) {
+                    let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+                    context.begin_path();
+                    let _ = context.arc(x, y, 2.0, 0.0, std::f64::consts::TAU);
+                    context.fill();
+                }
+            }
+            RustMilkdropPrimitiveMode::TriangleFan => {
+                context.begin_path();
+                for (index, vertex) in primitive.vertices.chunks(2).enumerate() {
+                    let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+                    if index == 0 {
+                        context.move_to(x, y);
+                    } else {
+                        context.line_to(x, y);
+                    }
+                }
+                context.close_path();
+                context.set_fill_style_str(&color);
+                context.fill();
+            }
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
