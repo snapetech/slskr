@@ -11498,6 +11498,7 @@ pub struct RustMilkdropFrame {
     pub q_registers: [f64; 64],
     pub shape_count: usize,
     pub shader_source: String,
+    pub textured_primitives: Vec<RustMilkdropTexturedPrimitive>,
     pub rotation: f64,
     pub treble: f64,
     pub wave_color: (u8, u8, u8),
@@ -11518,6 +11519,13 @@ pub enum RustMilkdropPrimitiveMode {
 pub struct RustMilkdropPrimitive {
     pub color: [f64; 4],
     pub mode: RustMilkdropPrimitiveMode,
+    pub vertices: Vec<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RustMilkdropTexturedPrimitive {
+    pub color: [f64; 4],
+    pub uvs: Vec<f64>,
     pub vertices: Vec<f64>,
 }
 
@@ -11576,6 +11584,7 @@ pub fn rust_milkdrop_frame(
         q_registers: [0.0; 64],
         shape_count: 0,
         shader_source: String::new(),
+        textured_primitives: Vec::new(),
         rotation: preset.rot + (time_seconds * 0.37).sin() * 0.035 + (treble - 0.5) * 0.05,
         treble,
         wave_color: (
@@ -11783,6 +11792,11 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
         waveform,
         [wave_r, wave_g, wave_b],
     );
+    let textured_primitives = create_rust_milkdrop_frame_textured_primitives(
+        preset_document,
+        &scope,
+        [wave_r, wave_g, wave_b],
+    );
     let q_registers = rust_milkdrop_q_registers(&scope);
     let fft_bins = rust_milkdrop_sample_bins(spectrum);
     let waveform_bins = rust_milkdrop_sample_bins(waveform);
@@ -11810,6 +11824,7 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
             0.5,
         ) + (treble - 0.5) * 0.02,
         shader_source: translated_rust_milkdrop_shader_source(preset_document),
+        textured_primitives,
         treble,
         wave_color,
         waveform_bins,
@@ -12548,6 +12563,80 @@ pub fn create_milkdrop_shape_fill_vertices(shape: &MilkdropIndexedEntry) -> Vec<
     vertices
 }
 
+fn milkdrop_entry_text(entry: &MilkdropIndexedEntry, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| entry.base_values.get(*key).map(MilkdropValue::as_text))
+        .unwrap_or_default()
+}
+
+fn is_milkdrop_shape_textured(shape: &MilkdropIndexedEntry) -> bool {
+    milkdrop_entry_flag(shape, &["textured", "btextured"])
+        || !milkdrop_entry_text(shape, &["texture", "tex_name", "texname", "tex"]).is_empty()
+}
+
+pub fn create_milkdrop_shape_texture_uvs(shape: &MilkdropIndexedEntry) -> Vec<f64> {
+    let vertex_count = create_milkdrop_shape_fill_vertices(shape).len() / 2;
+    if vertex_count == 0 {
+        return Vec::new();
+    }
+    let zoom = milkdrop_entry_number(shape, &["tex_zoom", "texzoom"], 1.0)
+        .abs()
+        .max(0.001);
+    let angle = milkdrop_entry_number(shape, &["tex_ang", "texang"], 0.0);
+    let sine = angle.sin();
+    let cosine = angle.cos();
+    let mut uvs = Vec::with_capacity(vertex_count * 2);
+    uvs.push(0.5);
+    uvs.push(0.5);
+    for index in 1..vertex_count {
+        let progress = (index - 1) as f64 / (vertex_count.saturating_sub(2).max(1)) as f64;
+        let theta = progress * std::f64::consts::TAU;
+        let radius = 0.5 / zoom;
+        let x = theta.cos() * radius;
+        let y = theta.sin() * radius;
+        uvs.push(0.5 + cosine * x - sine * y);
+        uvs.push(0.5 + sine * x + cosine * y);
+    }
+    uvs
+}
+
+pub fn create_milkdrop_sprite_vertices(sprite: &MilkdropIndexedEntry) -> Vec<f64> {
+    if !milkdrop_entry_flag(sprite, &["enabled", "benabled"]) {
+        return Vec::new();
+    }
+    let width = milkdrop_entry_number(sprite, &["w", "width"], 0.25)
+        .abs()
+        .max(0.001);
+    let height = milkdrop_entry_number(sprite, &["h", "height"], width)
+        .abs()
+        .max(0.001);
+    let center_x = milkdrop_entry_number(sprite, &["x"], 0.5) * 2.0 - 1.0;
+    let center_y = milkdrop_entry_number(sprite, &["y"], 0.5) * 2.0 - 1.0;
+    let angle = milkdrop_entry_number(sprite, &["ang"], 0.0);
+    let sine = angle.sin();
+    let cosine = angle.cos();
+    let corners = [
+        (-width, -height),
+        (width, -height),
+        (width, height),
+        (-width, height),
+        (-width, -height),
+    ];
+    let mut vertices = Vec::with_capacity(10);
+    for (x, y) in corners {
+        vertices.push(center_x + cosine * x - sine * y);
+        vertices.push(center_y + sine * x + cosine * y);
+    }
+    vertices
+}
+
+pub fn create_milkdrop_sprite_texture_uvs(sprite: &MilkdropIndexedEntry) -> Vec<f64> {
+    if !milkdrop_entry_flag(sprite, &["enabled", "benabled"]) {
+        return Vec::new();
+    }
+    vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+}
+
 fn create_rust_milkdrop_audio_samples(
     time_seconds: f64,
     bass: f64,
@@ -12649,6 +12738,52 @@ fn create_rust_milkdrop_frame_primitives(
                 ],
                 mode: RustMilkdropPrimitiveMode::LineStrip,
                 vertices: outline_vertices,
+            });
+        }
+    }
+    primitives
+}
+
+fn create_rust_milkdrop_frame_textured_primitives(
+    preset: &MilkdropPresetDocument,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+    fallback_color: [f64; 3],
+) -> Vec<RustMilkdropTexturedPrimitive> {
+    let mut primitives = Vec::new();
+    for shape in &preset.shapes {
+        let evaluated = evaluate_milkdrop_shape_state(shape, frame_scope);
+        if !is_milkdrop_shape_textured(&evaluated) {
+            continue;
+        }
+        let vertices = create_milkdrop_shape_fill_vertices(&evaluated);
+        let uvs = create_milkdrop_shape_texture_uvs(&evaluated);
+        if vertices.len() >= 6 && vertices.len() == uvs.len() {
+            primitives.push(RustMilkdropTexturedPrimitive {
+                color: [
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                ],
+                uvs,
+                vertices,
+            });
+        }
+    }
+    for sprite in &preset.sprites {
+        let evaluated = evaluate_milkdrop_sprite_state(sprite, frame_scope);
+        let vertices = create_milkdrop_sprite_vertices(&evaluated);
+        let uvs = create_milkdrop_sprite_texture_uvs(&evaluated);
+        if vertices.len() >= 8 && vertices.len() == uvs.len() {
+            primitives.push(RustMilkdropTexturedPrimitive {
+                color: [
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+                ],
+                uvs,
+                vertices,
             });
         }
     }
@@ -14631,7 +14766,11 @@ struct RustMilkdropWebGlRenderer {
     gl: web_sys::WebGl2RenderingContext,
     primitive_buffer: web_sys::WebGlBuffer,
     primitive_program: web_sys::WebGlProgram,
+    procedural_texture: web_sys::WebGlTexture,
     program: web_sys::WebGlProgram,
+    textured_position_buffer: web_sys::WebGlBuffer,
+    textured_program: web_sys::WebGlProgram,
+    textured_uv_buffer: web_sys::WebGlBuffer,
     translated_program: RefCell<Option<RustMilkdropTranslatedProgram>>,
     u_color: Option<web_sys::WebGlUniformLocation>,
     u_counts: Option<web_sys::WebGlUniformLocation>,
@@ -14642,6 +14781,9 @@ struct RustMilkdropWebGlRenderer {
     u_primitive_color: Option<web_sys::WebGlUniformLocation>,
     u_primitive_point_size: Option<web_sys::WebGlUniformLocation>,
     u_resolution: Option<web_sys::WebGlUniformLocation>,
+    u_textured_alpha: Option<web_sys::WebGlUniformLocation>,
+    u_textured_sampler: Option<web_sys::WebGlUniformLocation>,
+    u_textured_tint: Option<web_sys::WebGlUniformLocation>,
     u_time: Option<web_sys::WebGlUniformLocation>,
 }
 
@@ -14713,6 +14855,18 @@ impl RustMilkdropWebGlRenderer {
         )?;
         let primitive_program =
             link_rust_milkdrop_program(&gl, &primitive_vertex_shader, &primitive_fragment_shader)?;
+        let textured_vertex_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::VERTEX_SHADER,
+            RUST_MILKDROP_TEXTURED_VERTEX_SHADER,
+        )?;
+        let textured_fragment_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
+            RUST_MILKDROP_TEXTURED_FRAGMENT_SHADER,
+        )?;
+        let textured_program =
+            link_rust_milkdrop_program(&gl, &textured_vertex_shader, &textured_fragment_shader)?;
 
         let buffer = gl
             .create_buffer()
@@ -14740,6 +14894,13 @@ impl RustMilkdropWebGlRenderer {
         let primitive_buffer = gl
             .create_buffer()
             .ok_or_else(|| JsValue::from_str("WebGL primitive buffer allocation failed"))?;
+        let textured_position_buffer = gl
+            .create_buffer()
+            .ok_or_else(|| JsValue::from_str("WebGL textured position buffer allocation failed"))?;
+        let textured_uv_buffer = gl
+            .create_buffer()
+            .ok_or_else(|| JsValue::from_str("WebGL textured UV buffer allocation failed"))?;
+        let procedural_texture = create_rust_milkdrop_procedural_texture(&gl)?;
         let feedback_targets = RefCell::new(create_rust_milkdrop_feedback_targets(
             &gl,
             gl.drawing_buffer_width().max(1),
@@ -14757,13 +14918,20 @@ impl RustMilkdropWebGlRenderer {
             u_primitive_point_size: gl
                 .get_uniform_location(&primitive_program, "u_primitivePointSize"),
             u_resolution: gl.get_uniform_location(&program, "u_resolution"),
+            u_textured_alpha: gl.get_uniform_location(&textured_program, "u_alpha"),
+            u_textured_sampler: gl.get_uniform_location(&textured_program, "u_texture"),
+            u_textured_tint: gl.get_uniform_location(&textured_program, "u_tint"),
             u_time: gl.get_uniform_location(&program, "u_time"),
             buffer,
             feedback_targets,
             gl,
             primitive_buffer,
             primitive_program,
+            procedural_texture,
             program,
+            textured_position_buffer,
+            textured_program,
+            textured_uv_buffer,
             translated_program: RefCell::new(None),
         })
     }
@@ -14808,6 +14976,7 @@ impl RustMilkdropWebGlRenderer {
         } else {
             self.draw_feedback_quad(frame, time, drawing_width, drawing_height, false);
         }
+        self.draw_textured_primitives(frame);
         self.draw_primitives(frame);
 
         self.gl
@@ -15098,6 +15267,105 @@ impl RustMilkdropWebGlRenderer {
         self.gl.disable(web_sys::WebGl2RenderingContext::BLEND);
         self.gl.use_program(Some(&self.program));
     }
+
+    fn draw_textured_primitives(&self, frame: &RustMilkdropFrame) {
+        if frame.textured_primitives.is_empty() {
+            return;
+        }
+        self.gl.enable(web_sys::WebGl2RenderingContext::BLEND);
+        self.gl.blend_func(
+            web_sys::WebGl2RenderingContext::SRC_ALPHA,
+            web_sys::WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
+        );
+        self.gl.use_program(Some(&self.textured_program));
+        self.gl
+            .active_texture(web_sys::WebGl2RenderingContext::TEXTURE1);
+        self.gl.bind_texture(
+            web_sys::WebGl2RenderingContext::TEXTURE_2D,
+            Some(&self.procedural_texture),
+        );
+        self.gl.uniform1i(self.u_textured_sampler.as_ref(), 1);
+        let position = self
+            .gl
+            .get_attrib_location(&self.textured_program, "position");
+        let source_uv = self
+            .gl
+            .get_attrib_location(&self.textured_program, "sourceUv");
+        for primitive in &frame.textured_primitives {
+            if primitive.vertices.len() < 6 || primitive.vertices.len() != primitive.uvs.len() {
+                continue;
+            }
+            let vertices = primitive
+                .vertices
+                .iter()
+                .map(|value| *value as f32)
+                .collect::<Vec<_>>();
+            let uvs = primitive
+                .uvs
+                .iter()
+                .map(|value| *value as f32)
+                .collect::<Vec<_>>();
+            let vertex_array = js_sys::Float32Array::from(vertices.as_slice());
+            let uv_array = js_sys::Float32Array::from(uvs.as_slice());
+            self.gl.bind_buffer(
+                web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+                Some(&self.textured_position_buffer),
+            );
+            self.gl.buffer_data_with_array_buffer_view(
+                web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+                &vertex_array,
+                web_sys::WebGl2RenderingContext::DYNAMIC_DRAW,
+            );
+            if position >= 0 {
+                self.gl.enable_vertex_attrib_array(position as u32);
+                self.gl.vertex_attrib_pointer_with_i32(
+                    position as u32,
+                    2,
+                    web_sys::WebGl2RenderingContext::FLOAT,
+                    false,
+                    0,
+                    0,
+                );
+            }
+            self.gl.bind_buffer(
+                web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+                Some(&self.textured_uv_buffer),
+            );
+            self.gl.buffer_data_with_array_buffer_view(
+                web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+                &uv_array,
+                web_sys::WebGl2RenderingContext::DYNAMIC_DRAW,
+            );
+            if source_uv >= 0 {
+                self.gl.enable_vertex_attrib_array(source_uv as u32);
+                self.gl.vertex_attrib_pointer_with_i32(
+                    source_uv as u32,
+                    2,
+                    web_sys::WebGl2RenderingContext::FLOAT,
+                    false,
+                    0,
+                    0,
+                );
+            }
+            self.gl.uniform3f(
+                self.u_textured_tint.as_ref(),
+                primitive.color[0] as f32,
+                primitive.color[1] as f32,
+                primitive.color[2] as f32,
+            );
+            self.gl
+                .uniform1f(self.u_textured_alpha.as_ref(), primitive.color[3] as f32);
+            self.gl.draw_arrays(
+                web_sys::WebGl2RenderingContext::TRIANGLE_FAN,
+                0,
+                (vertices.len() / 2) as i32,
+            );
+        }
+        self.gl
+            .active_texture(web_sys::WebGl2RenderingContext::TEXTURE0);
+        self.gl.disable(web_sys::WebGl2RenderingContext::BLEND);
+        self.gl.use_program(Some(&self.program));
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -15186,6 +15454,55 @@ fn create_rust_milkdrop_feedback_target(
         framebuffer,
         texture,
     })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn create_rust_milkdrop_procedural_texture(
+    gl: &web_sys::WebGl2RenderingContext,
+) -> Result<web_sys::WebGlTexture, JsValue> {
+    let texture = gl
+        .create_texture()
+        .ok_or_else(|| JsValue::from_str("WebGL procedural texture allocation failed"))?;
+    let mut pixels = Vec::with_capacity(16 * 16 * 4);
+    for y in 0..16 {
+        for x in 0..16 {
+            let checker = if (x / 4 + y / 4) % 2 == 0 { 224 } else { 72 };
+            pixels.extend_from_slice(&[checker, 192, 255_u8.saturating_sub(checker / 3), 255]);
+        }
+    }
+    gl.bind_texture(web_sys::WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_MIN_FILTER,
+        web_sys::WebGl2RenderingContext::LINEAR as i32,
+    );
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_MAG_FILTER,
+        web_sys::WebGl2RenderingContext::LINEAR as i32,
+    );
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_WRAP_S,
+        web_sys::WebGl2RenderingContext::REPEAT as i32,
+    );
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_WRAP_T,
+        web_sys::WebGl2RenderingContext::REPEAT as i32,
+    );
+    gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        0,
+        web_sys::WebGl2RenderingContext::RGBA as i32,
+        16,
+        16,
+        0,
+        web_sys::WebGl2RenderingContext::RGBA,
+        web_sys::WebGl2RenderingContext::UNSIGNED_BYTE,
+        Some(&pixels),
+    )?;
+    Ok(texture)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -15323,6 +15640,31 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_TEXTURED_VERTEX_SHADER: &str = r#"#version 300 es
+in vec2 position;
+in vec2 sourceUv;
+out vec2 v_uv;
+void main() {
+  v_uv = sourceUv;
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_TEXTURED_FRAGMENT_SHADER: &str = r#"#version 300 es
+precision highp float;
+uniform sampler2D u_texture;
+uniform vec3 u_tint;
+uniform float u_alpha;
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  vec4 texel = texture(u_texture, v_uv);
+  outColor = vec4(texel.rgb * u_tint, texel.a * u_alpha);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
 fn render_rust_milkdrop_canvas_frame(
     context: &web_sys::CanvasRenderingContext2d,
     canvas: &web_sys::HtmlCanvasElement,
@@ -15412,6 +15754,7 @@ fn render_rust_milkdrop_canvas_frame(
         context.stroke();
     }
     render_rust_milkdrop_canvas_primitives(context, width, height, frame);
+    render_rust_milkdrop_canvas_textured_primitives(context, width, height, frame);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -15484,6 +15827,35 @@ fn render_rust_milkdrop_canvas_primitives(
                 context.fill();
             }
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_rust_milkdrop_canvas_textured_primitives(
+    context: &web_sys::CanvasRenderingContext2d,
+    width: f64,
+    height: f64,
+    frame: &RustMilkdropFrame,
+) {
+    for primitive in &frame.textured_primitives {
+        if primitive.vertices.len() < 6 {
+            continue;
+        }
+        context.begin_path();
+        for (index, vertex) in primitive.vertices.chunks(2).enumerate() {
+            let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+            if index == 0 {
+                context.move_to(x, y);
+            } else {
+                context.line_to(x, y);
+            }
+        }
+        context.close_path();
+        context.set_fill_style_str(&rust_milkdrop_canvas_color(primitive.color));
+        context.fill();
+        context.set_stroke_style_str("rgba(255, 255, 255, 0.22)");
+        context.set_line_width(1.0);
+        context.stroke();
     }
 }
 
@@ -16388,6 +16760,40 @@ mod tests {
         assert!(outline[1].abs() < 0.0001);
         assert!(fill[0].abs() < 0.0001);
         assert!(fill[1].abs() < 0.0001);
+    }
+
+    #[test]
+    fn rust_milkdrop_textured_primitives_match_js_geometry() {
+        let frame = rust_milkdrop_frame_from_source(
+            r#"
+            name=Textured
+            wave_r=0.5
+            wave_g=0.6
+            wave_b=0.7
+            shape00_enabled=1
+            shape00_textured=1
+            shape00_sides=4
+            shape00_rad=0.25
+            shape00_tex_zoom=1
+            sprite00_enabled=1
+            sprite00_x=0.5
+            sprite00_y=0.5
+            sprite00_w=0.25
+            sprite00_h=0.125
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+        assert_eq!(frame.textured_primitives.len(), 2);
+        assert_eq!(frame.textured_primitives[0].vertices.len(), 12);
+        assert_eq!(frame.textured_primitives[0].uvs.len(), 12);
+        assert_eq!(frame.textured_primitives[1].vertices.len(), 10);
+        assert_eq!(
+            frame.textured_primitives[1].uvs,
+            vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+        );
     }
 
     #[test]
