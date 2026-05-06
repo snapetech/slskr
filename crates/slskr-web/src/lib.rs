@@ -6441,7 +6441,7 @@ fn player_footer_html() -> String {
 }
 
 fn rust_milkdrop_panel_html() -> String {
-    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><span id="slskr-milkdrop-library-status">3 bundled presets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
+    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -16814,13 +16814,15 @@ fn start_rust_milkdrop_visualizer(
     }
     panel.set_attribute("data-slskr-milkdrop-running", "true")?;
 
-    mount_rust_milkdrop_buttons(window, document)?;
+    let texture_assets: Rc<RefCell<BTreeMap<String, String>>> =
+        Rc::new(RefCell::new(BTreeMap::new()));
+    mount_rust_milkdrop_buttons(window, document, texture_assets.clone())?;
 
     let canvas: web_sys::HtmlCanvasElement = document
         .get_element_by_id("slskr-milkdrop-canvas")
         .ok_or_else(|| JsValue::from_str("Rust MilkDrop canvas is missing"))?
         .dyn_into()?;
-    let renderer = Rc::new(rust_milkdrop_renderer(&canvas)?);
+    let renderer = Rc::new(rust_milkdrop_renderer(&canvas, texture_assets)?);
     let analyzer = Rc::new(RefCell::new(
         player_audio_element(document)
             .and_then(|audio| RustMilkdropAudioAnalyzer::new(&audio).ok()),
@@ -16916,6 +16918,7 @@ fn start_rust_milkdrop_visualizer(
 fn mount_rust_milkdrop_buttons(
     window: &web_sys::Window,
     document: &web_sys::Document,
+    texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 ) -> Result<(), JsValue> {
     let buttons = document.query_selector_all("[data-slskr-milkdrop-action]")?;
     for index in 0..buttons.length() {
@@ -16932,6 +16935,7 @@ fn mount_rust_milkdrop_buttons(
             .unwrap_or_default();
         let window = window.clone();
         let document = document.clone();
+        let texture_assets = texture_assets.clone();
         let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
             move |event: web_sys::MouseEvent| {
                 event.prevent_default();
@@ -16968,6 +16972,11 @@ fn mount_rust_milkdrop_buttons(
                     "previous" => cycle_rust_milkdrop_preset_by(&document, -1),
                     "reset" => reset_rust_milkdrop_import(&document),
                     "search" => search_rust_milkdrop_preset(&document),
+                    "texture" => import_rust_milkdrop_texture_asset(
+                        &window,
+                        &document,
+                        texture_assets.clone(),
+                    ),
                     _ => cycle_rust_milkdrop_preset(&document),
                 }
             },
@@ -17160,6 +17169,44 @@ fn search_rust_milkdrop_preset(document: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn import_rust_milkdrop_texture_asset(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+    texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
+) {
+    let Ok(Some(value)) =
+        window.prompt_with_message("Paste a MilkDrop texture as name=data:image/png;base64,...")
+    else {
+        return;
+    };
+    let Some((name, data_url)) = value.split_once('=') else {
+        set_player_status(document, "Texture import needs name=data URL");
+        return;
+    };
+    let name = name.trim();
+    let data_url = data_url.trim();
+    if name.is_empty() || !data_url.starts_with("data:image/") {
+        set_player_status(document, "Texture import needs an image data URL");
+        return;
+    }
+    let aliases = get_milkdrop_texture_name_aliases(name);
+    if aliases.is_empty() {
+        set_player_status(document, "Texture import needs a usable name");
+        return;
+    }
+    {
+        let mut assets = texture_assets.borrow_mut();
+        for alias in &aliases {
+            assets.insert(alias.clone(), data_url.to_string());
+        }
+        if let Some(label) = document.get_element_by_id("slskr-milkdrop-textures") {
+            label.set_text_content(Some(&format!("{} texture assets", assets.len())));
+        }
+    }
+    set_player_status(document, "MilkDrop texture imported");
+}
+
+#[cfg(target_arch = "wasm32")]
 enum RustMilkdropRenderer {
     WebGl(RustMilkdropWebGlRendererSet),
     Canvas {
@@ -17326,6 +17373,7 @@ impl RustMilkdropRenderer {
 struct RustMilkdropWebGlRendererSet {
     gl: web_sys::WebGl2RenderingContext,
     renderers: RefCell<Vec<RustMilkdropWebGlRenderer>>,
+    texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -17337,11 +17385,13 @@ struct RustMilkdropWebGlRenderer {
     primitive_color_buffer: web_sys::WebGlBuffer,
     primitive_program: web_sys::WebGlProgram,
     procedural_texture: web_sys::WebGlTexture,
+    named_textures: RefCell<BTreeMap<String, web_sys::WebGlTexture>>,
     program: web_sys::WebGlProgram,
     textured_position_buffer: web_sys::WebGlBuffer,
     textured_program: web_sys::WebGlProgram,
     textured_uv_buffer: web_sys::WebGlBuffer,
     translated_program: RefCell<Option<RustMilkdropTranslatedProgram>>,
+    texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
     u_color: Option<web_sys::WebGlUniformLocation>,
     u_counts: Option<web_sys::WebGlUniformLocation>,
     u_display_only: Option<web_sys::WebGlUniformLocation>,
@@ -17387,10 +17437,11 @@ struct RustMilkdropFeedbackTarget {
 #[cfg(target_arch = "wasm32")]
 fn rust_milkdrop_renderer(
     canvas: &web_sys::HtmlCanvasElement,
+    texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 ) -> Result<RustMilkdropRenderer, JsValue> {
     if let Some(context) = canvas.get_context("webgl2")? {
         if let Ok(gl) = context.dyn_into::<web_sys::WebGl2RenderingContext>() {
-            if let Ok(renderer) = RustMilkdropWebGlRendererSet::new(gl) {
+            if let Ok(renderer) = RustMilkdropWebGlRendererSet::new(gl, texture_assets) {
                 return Ok(RustMilkdropRenderer::WebGl(renderer));
             }
         }
@@ -17407,10 +17458,14 @@ fn rust_milkdrop_renderer(
 
 #[cfg(target_arch = "wasm32")]
 impl RustMilkdropWebGlRendererSet {
-    fn new(gl: web_sys::WebGl2RenderingContext) -> Result<Self, JsValue> {
+    fn new(
+        gl: web_sys::WebGl2RenderingContext,
+        texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
+    ) -> Result<Self, JsValue> {
         Ok(Self {
             gl,
             renderers: RefCell::new(Vec::new()),
+            texture_assets,
         })
     }
 
@@ -17435,7 +17490,9 @@ impl RustMilkdropWebGlRendererSet {
     fn ensure_renderer_count(&self, count: usize) -> bool {
         let mut renderers = self.renderers.borrow_mut();
         while renderers.len() < count {
-            let Ok(renderer) = RustMilkdropWebGlRenderer::new(self.gl.clone()) else {
+            let Ok(renderer) =
+                RustMilkdropWebGlRenderer::new(self.gl.clone(), self.texture_assets.clone())
+            else {
                 return false;
             };
             renderers.push(renderer);
@@ -17446,7 +17503,10 @@ impl RustMilkdropWebGlRendererSet {
 
 #[cfg(target_arch = "wasm32")]
 impl RustMilkdropWebGlRenderer {
-    fn new(gl: web_sys::WebGl2RenderingContext) -> Result<Self, JsValue> {
+    fn new(
+        gl: web_sys::WebGl2RenderingContext,
+        texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
+    ) -> Result<Self, JsValue> {
         let vertex_shader = compile_rust_milkdrop_shader(
             &gl,
             web_sys::WebGl2RenderingContext::VERTEX_SHADER,
@@ -17569,6 +17629,7 @@ impl RustMilkdropWebGlRenderer {
             buffer,
             feedback_targets,
             gl,
+            named_textures: RefCell::new(BTreeMap::new()),
             primitive_buffer,
             primitive_color_buffer,
             primitive_program,
@@ -17577,6 +17638,7 @@ impl RustMilkdropWebGlRenderer {
             textured_position_buffer,
             textured_program,
             textured_uv_buffer,
+            texture_assets,
             translated_program: RefCell::new(None),
         })
     }
@@ -17804,13 +17866,16 @@ impl RustMilkdropWebGlRenderer {
             let texture_unit = index + 2;
             self.gl
                 .active_texture(web_sys::WebGl2RenderingContext::TEXTURE0 + texture_unit as u32);
-            self.gl.bind_texture(
-                web_sys::WebGl2RenderingContext::TEXTURE_2D,
-                Some(&self.procedural_texture),
-            );
+            let texture = frame
+                .shader_texture_samplers
+                .get(index)
+                .and_then(|name| self.named_texture_for(name))
+                .unwrap_or_else(|| self.procedural_texture.clone());
+            self.gl
+                .bind_texture(web_sys::WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
             self.gl.uniform1i(
                 uniform(&format!("shaderTexture{index}")).as_ref(),
-                texture_unit,
+                texture_unit as i32,
             );
         }
         self.gl
@@ -18073,6 +18138,27 @@ impl RustMilkdropWebGlRenderer {
         self.gl.use_program(Some(&self.program));
     }
 
+    fn named_texture_for(&self, raw_name: &str) -> Option<web_sys::WebGlTexture> {
+        for alias in get_milkdrop_texture_name_aliases(raw_name) {
+            if let Some(texture) = self.named_textures.borrow().get(&alias) {
+                return Some(texture.clone());
+            }
+            let data_url = self.texture_assets.borrow().get(&alias).cloned();
+            let Some(data_url) = data_url else {
+                continue;
+            };
+            let Ok(texture) = create_rust_milkdrop_texture_from_data_url(&self.gl, &data_url)
+            else {
+                continue;
+            };
+            self.named_textures
+                .borrow_mut()
+                .insert(alias, texture.clone());
+            return Some(texture);
+        }
+        None
+    }
+
     fn draw_textured_primitives(&self, frame: &RustMilkdropFrame) {
         if frame.textured_primitives.is_empty() {
             return;
@@ -18085,10 +18171,6 @@ impl RustMilkdropWebGlRenderer {
         self.gl.use_program(Some(&self.textured_program));
         self.gl
             .active_texture(web_sys::WebGl2RenderingContext::TEXTURE1);
-        self.gl.bind_texture(
-            web_sys::WebGl2RenderingContext::TEXTURE_2D,
-            Some(&self.procedural_texture),
-        );
         self.gl.uniform1i(self.u_textured_sampler.as_ref(), 1);
         let position = self
             .gl
@@ -18100,6 +18182,13 @@ impl RustMilkdropWebGlRenderer {
             if primitive.vertices.len() < 6 || primitive.vertices.len() != primitive.uvs.len() {
                 continue;
             }
+            self.gl
+                .active_texture(web_sys::WebGl2RenderingContext::TEXTURE1);
+            let texture = self
+                .named_texture_for(&primitive.texture_name)
+                .unwrap_or_else(|| self.procedural_texture.clone());
+            self.gl
+                .bind_texture(web_sys::WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
             let vertices = primitive
                 .vertices
                 .iter()
@@ -18332,6 +18421,36 @@ fn create_rust_milkdrop_procedural_texture(
         web_sys::WebGl2RenderingContext::UNSIGNED_BYTE,
         Some(&pixels),
     )?;
+    Ok(texture)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn create_rust_milkdrop_texture_from_data_url(
+    gl: &web_sys::WebGl2RenderingContext,
+    data_url: &str,
+) -> Result<web_sys::WebGlTexture, JsValue> {
+    let texture = create_rust_milkdrop_procedural_texture(gl)?;
+    let image = web_sys::HtmlImageElement::new()?;
+    let gl_for_load = gl.clone();
+    let texture_for_load = texture.clone();
+    let image_for_load = image.clone();
+    let onload = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+        gl_for_load.bind_texture(
+            web_sys::WebGl2RenderingContext::TEXTURE_2D,
+            Some(&texture_for_load),
+        );
+        let _ = gl_for_load.tex_image_2d_with_u32_and_u32_and_html_image_element(
+            web_sys::WebGl2RenderingContext::TEXTURE_2D,
+            0,
+            web_sys::WebGl2RenderingContext::RGBA as i32,
+            web_sys::WebGl2RenderingContext::RGBA,
+            web_sys::WebGl2RenderingContext::UNSIGNED_BYTE,
+            &image_for_load,
+        );
+    }));
+    image.set_onload(Some(onload.as_ref().unchecked_ref()));
+    onload.forget();
+    image.set_src(data_url);
     Ok(texture)
 }
 
@@ -18993,6 +19112,8 @@ mod tests {
         assert!(html.contains("data-slskr-milkdrop-action=\"preset\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"search\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"import\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"texture\""));
+        assert!(html.contains("slskr-milkdrop-textures"));
         assert!(html.contains("data-slskr-milkdrop-action=\"reset\""));
         assert!(html.contains("slskr-milkdrop-renderer"));
         assert!(html.contains("/api/v0/searches"));
