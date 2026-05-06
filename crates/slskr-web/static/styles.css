@@ -848,6 +848,24 @@ body {
 .slskr-milkdrop-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.slskr-milkdrop-library {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.slskr-milkdrop-library input {
+  min-width: 220px;
+}
+
+.slskr-milkdrop-actions button[aria-pressed="true"] {
+  border-color: #ffd166;
+  color: #ffd166;
 }
 
 #slskr-milkdrop-canvas {

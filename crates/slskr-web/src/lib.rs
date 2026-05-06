@@ -5,6 +5,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 #[cfg(target_arch = "wasm32")]
+use std::collections::BTreeSet;
+
+#[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -6441,7 +6444,7 @@ fn player_footer_html() -> String {
 }
 
 fn rust_milkdrop_panel_html() -> String {
-    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="pack">Pack</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><input id="slskr-milkdrop-preset-input" type="file" accept=".milk,.milk2,.txt,text/plain" multiple hidden><input id="slskr-milkdrop-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><input id="slskr-milkdrop-pack-input" type="file" accept=".milk,.milk2,.txt,text/plain,image/png,image/jpeg,image/webp,image/gif" multiple webkitdirectory hidden><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
+    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false" data-slskr-milkdrop-favorites-only="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="random">Random</button><button type="button" data-slskr-milkdrop-action="favorite" id="slskr-milkdrop-favorite">Favorite</button><button type="button" data-slskr-milkdrop-action="favorites" id="slskr-milkdrop-favorites-only">Favorites</button><button type="button" data-slskr-milkdrop-action="remove">Remove</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="pack">Pack</button><button type="button" data-slskr-milkdrop-action="clear">Clear</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><input id="slskr-milkdrop-preset-input" type="file" accept=".milk,.milk2,.txt,text/plain" multiple hidden><input id="slskr-milkdrop-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><input id="slskr-milkdrop-pack-input" type="file" accept=".milk,.milk2,.txt,text/plain,image/png,image/jpeg,image/webp,image/gif" multiple webkitdirectory hidden><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -16791,6 +16794,9 @@ struct RustMilkdropImportedPreset {
 const RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY: &str = "slskr.rustMilkdropImportedPresets";
 
 #[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_FAVORITE_PRESETS_STORAGE_KEY: &str = "slskr.rustMilkdropFavoritePresets";
+
+#[cfg(target_arch = "wasm32")]
 const RUST_MILKDROP_TEXTURE_ASSETS_STORAGE_KEY: &str = "slskr.rustMilkdropTextureAssets";
 
 #[cfg(target_arch = "wasm32")]
@@ -16831,6 +16837,8 @@ fn start_rust_milkdrop_visualizer(
         Rc::new(RefCell::new(load_rust_milkdrop_texture_assets(window)));
     let imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>> =
         Rc::new(RefCell::new(load_rust_milkdrop_imported_presets(window)));
+    let favorite_presets: Rc<RefCell<BTreeSet<String>>> =
+        Rc::new(RefCell::new(load_rust_milkdrop_favorite_presets(window)));
     mount_rust_milkdrop_preset_input(document, imported_presets.clone())?;
     mount_rust_milkdrop_texture_input(document, texture_assets.clone())?;
     mount_rust_milkdrop_pack_input(document, imported_presets.clone(), texture_assets.clone())?;
@@ -16838,6 +16846,7 @@ fn start_rust_milkdrop_visualizer(
         window,
         document,
         imported_presets.clone(),
+        favorite_presets.clone(),
         texture_assets.clone(),
     )?;
 
@@ -16861,6 +16870,7 @@ fn start_rust_milkdrop_visualizer(
         document,
         &panel,
         &imported_presets,
+        &favorite_presets,
         panel
             .get_attribute("data-slskr-milkdrop-preset-index")
             .and_then(|value| value.parse::<usize>().ok())
@@ -16874,6 +16884,7 @@ fn start_rust_milkdrop_visualizer(
     let document_for_frame = document.clone();
     let analyzer_for_frame = analyzer.clone();
     let imports_for_frame = imported_presets.clone();
+    let favorites_for_frame = favorite_presets.clone();
     let input_for_frame = input_state.clone();
     let runtime_for_frame = runtime.clone();
 
@@ -16939,6 +16950,13 @@ fn start_rust_milkdrop_visualizer(
                 waveform_count
             )));
         }
+        update_rust_milkdrop_library_controls(
+            &document_for_frame,
+            &panel,
+            &imports_for_frame,
+            &favorites_for_frame,
+            preset_index,
+        );
         if let Some(callback) = animation_handle.borrow().as_ref() {
             let _ = window_for_frame.request_animation_frame(callback.as_ref().unchecked_ref());
         }
@@ -16955,6 +16973,7 @@ fn mount_rust_milkdrop_buttons(
     window: &web_sys::Window,
     document: &web_sys::Document,
     imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: Rc<RefCell<BTreeSet<String>>>,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 ) -> Result<(), JsValue> {
     let buttons = document.query_selector_all("[data-slskr-milkdrop-action]")?;
@@ -16973,6 +16992,7 @@ fn mount_rust_milkdrop_buttons(
         let window = window.clone();
         let document = document.clone();
         let imported_presets = imported_presets.clone();
+        let favorite_presets = favorite_presets.clone();
         let texture_assets = texture_assets.clone();
         let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
             move |event: web_sys::MouseEvent| {
@@ -17022,9 +17042,44 @@ fn mount_rust_milkdrop_buttons(
                             );
                         }
                     }
-                    "previous" => cycle_rust_milkdrop_preset_by(&document, &imported_presets, -1),
-                    "reset" => reset_rust_milkdrop_import(&document, imported_presets.clone()),
-                    "search" => search_rust_milkdrop_preset(&document, &imported_presets),
+                    "clear" => clear_rust_milkdrop_library(
+                        &window,
+                        &document,
+                        imported_presets.clone(),
+                        favorite_presets.clone(),
+                    ),
+                    "favorite" => toggle_rust_milkdrop_favorite(
+                        &document,
+                        &imported_presets,
+                        favorite_presets.clone(),
+                    ),
+                    "favorites" => toggle_rust_milkdrop_favorites_only(
+                        &document,
+                        &imported_presets,
+                        &favorite_presets,
+                    ),
+                    "previous" => cycle_rust_milkdrop_preset_by(
+                        &document,
+                        &imported_presets,
+                        &favorite_presets,
+                        -1,
+                    ),
+                    "random" => {
+                        random_rust_milkdrop_preset(&document, &imported_presets, &favorite_presets)
+                    }
+                    "remove" => remove_rust_milkdrop_active_preset(
+                        &document,
+                        imported_presets.clone(),
+                        &favorite_presets,
+                    ),
+                    "reset" => reset_rust_milkdrop_import(
+                        &document,
+                        imported_presets.clone(),
+                        &favorite_presets,
+                    ),
+                    "search" => {
+                        search_rust_milkdrop_preset(&document, &imported_presets, &favorite_presets)
+                    }
                     "texture" => {
                         if let Some(input) = document
                             .get_element_by_id("slskr-milkdrop-texture-input")
@@ -17051,7 +17106,9 @@ fn mount_rust_milkdrop_buttons(
                             input.click();
                         }
                     }
-                    _ => cycle_rust_milkdrop_preset(&document, &imported_presets),
+                    _ => {
+                        cycle_rust_milkdrop_preset(&document, &imported_presets, &favorite_presets)
+                    }
                 }
             },
         ));
@@ -17179,10 +17236,105 @@ fn rust_milkdrop_active_preset_name(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_preset_favorite_key(
+    panel: &web_sys::Element,
+    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    index: usize,
+) -> String {
+    let source = rust_milkdrop_active_preset_source(panel, imported_presets, index);
+    let name = rust_milkdrop_active_preset_name(panel, imported_presets, index);
+    let preview = source
+        .lines()
+        .take(16)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .chars()
+        .take(4096)
+        .collect::<String>();
+    format!("{name}\n{preview}")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_favorites_only(panel: &web_sys::Element) -> bool {
+    panel
+        .get_attribute("data-slskr-milkdrop-favorites-only")
+        .as_deref()
+        == Some("true")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_visible_preset_indices(
+    panel: &web_sys::Element,
+    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
+) -> Vec<usize> {
+    let count = rust_milkdrop_preset_count(panel, imported_presets);
+    if !rust_milkdrop_favorites_only(panel) {
+        return (0..count).collect();
+    }
+    let favorites = favorite_presets.borrow();
+    (0..count)
+        .filter(|index| {
+            favorites.contains(&rust_milkdrop_preset_favorite_key(
+                panel,
+                imported_presets,
+                *index,
+            ))
+        })
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_rust_milkdrop_library_controls(
+    document: &web_sys::Document,
+    panel: &web_sys::Element,
+    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
+    index: usize,
+) {
+    let count = rust_milkdrop_preset_count(panel, imported_presets).max(1);
+    let index = index % count;
+    let favorite_key = rust_milkdrop_preset_favorite_key(panel, imported_presets, index);
+    let favorite_count = favorite_presets.borrow().len();
+    let is_favorite = favorite_presets.borrow().contains(&favorite_key);
+    if let Some(button) = document.get_element_by_id("slskr-milkdrop-favorite") {
+        button.set_text_content(Some(if is_favorite {
+            "Unfavorite"
+        } else {
+            "Favorite"
+        }));
+        let _ = button.set_attribute("aria-pressed", if is_favorite { "true" } else { "false" });
+    }
+    if let Some(button) = document.get_element_by_id("slskr-milkdrop-favorites-only") {
+        let only = rust_milkdrop_favorites_only(panel);
+        button.set_text_content(Some(if only { "All presets" } else { "Favorites" }));
+        let _ = button.set_attribute("aria-pressed", if only { "true" } else { "false" });
+    }
+    if let Some(status_label) = document.get_element_by_id("slskr-milkdrop-library-status") {
+        let imported_count = imported_presets.borrow().len();
+        let filter = if rust_milkdrop_favorites_only(panel) {
+            " / favorites only"
+        } else {
+            ""
+        };
+        status_label.set_text_content(Some(&format!(
+            "Preset {} of {} / {} imported / {} favorite{}{}",
+            index + 1,
+            count,
+            imported_count,
+            favorite_count,
+            if favorite_count == 1 { "" } else { "s" },
+            filter
+        )));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn set_rust_milkdrop_active_preset(
     document: &web_sys::Document,
     panel: &web_sys::Element,
     imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     index: usize,
     status: &str,
 ) {
@@ -17196,15 +17348,13 @@ fn set_rust_milkdrop_active_preset(
             index,
         )));
     }
-    if let Some(status_label) = document.get_element_by_id("slskr-milkdrop-library-status") {
-        let imported_count = imported_presets.borrow().len();
-        status_label.set_text_content(Some(&format!(
-            "Preset {} of {} / {} imported",
-            index + 1,
-            count,
-            imported_count
-        )));
-    }
+    update_rust_milkdrop_library_controls(
+        document,
+        panel,
+        imported_presets,
+        favorite_presets,
+        index,
+    );
     set_player_status(document, status);
 }
 
@@ -17271,6 +17421,56 @@ fn persist_rust_milkdrop_imported_presets(
         .collect::<Vec<_>>();
     let _ = storage.set_item(
         RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY,
+        &serde_json::Value::Array(items).to_string(),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_rust_milkdrop_favorite_presets(window: &web_sys::Window) -> BTreeSet<String> {
+    let Some(storage) = window.local_storage().ok().flatten() else {
+        return BTreeSet::new();
+    };
+    let Some(raw) = storage
+        .get_item(RUST_MILKDROP_FAVORITE_PRESETS_STORAGE_KEY)
+        .ok()
+        .flatten()
+    else {
+        return BTreeSet::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return BTreeSet::new();
+    };
+    let Some(items) = value.as_array() else {
+        return BTreeSet::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| item.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .take(200)
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_rust_milkdrop_favorite_presets(
+    document: &web_sys::Document,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
+) {
+    let Some(window) = document.default_view() else {
+        return;
+    };
+    let Some(storage) = window.local_storage().ok().flatten() else {
+        return;
+    };
+    let items = favorite_presets
+        .borrow()
+        .iter()
+        .take(200)
+        .map(|key| serde_json::Value::String(key.clone()))
+        .collect::<Vec<_>>();
+    let _ = storage.set_item(
+        RUST_MILKDROP_FAVORITE_PRESETS_STORAGE_KEY,
         &serde_json::Value::Array(items).to_string(),
     );
 }
@@ -17350,6 +17550,12 @@ fn import_rust_milkdrop_preset(
                     document,
                     &panel,
                     &imported_presets,
+                    &Rc::new(RefCell::new(
+                        document
+                            .default_view()
+                            .map(|window| load_rust_milkdrop_favorite_presets(&window))
+                            .unwrap_or_default(),
+                    )),
                     0,
                     "MilkDrop preset imported",
                 );
@@ -17363,6 +17569,7 @@ fn import_rust_milkdrop_preset(
 fn reset_rust_milkdrop_import(
     document: &web_sys::Document,
     imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
     let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
         return;
@@ -17374,6 +17581,7 @@ fn reset_rust_milkdrop_import(
         document,
         &panel,
         &imported_presets,
+        favorite_presets,
         0,
         "MilkDrop import reset",
     );
@@ -17383,14 +17591,16 @@ fn reset_rust_milkdrop_import(
 fn cycle_rust_milkdrop_preset(
     document: &web_sys::Document,
     imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    cycle_rust_milkdrop_preset_by(document, imported_presets, 1);
+    cycle_rust_milkdrop_preset_by(document, imported_presets, favorite_presets, 1);
 }
 
 #[cfg(target_arch = "wasm32")]
 fn cycle_rust_milkdrop_preset_by(
     document: &web_sys::Document,
     imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     offset: isize,
 ) {
     let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
@@ -17400,12 +17610,22 @@ fn cycle_rust_milkdrop_preset_by(
         .get_attribute("data-slskr-milkdrop-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let count = rust_milkdrop_preset_count(&panel, imported_presets).max(1) as isize;
-    let next = (current as isize + offset).rem_euclid(count) as usize;
+    let visible = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets);
+    if visible.is_empty() {
+        set_player_status(document, "No favorite MilkDrop presets");
+        return;
+    }
+    let visible_position = visible
+        .iter()
+        .position(|index| *index == current)
+        .unwrap_or(0) as isize;
+    let next_position = (visible_position + offset).rem_euclid(visible.len() as isize) as usize;
+    let next = visible[next_position];
     set_rust_milkdrop_active_preset(
         document,
         &panel,
         imported_presets,
+        favorite_presets,
         next,
         "Rust MilkDrop preset changed",
     );
@@ -17415,6 +17635,7 @@ fn cycle_rust_milkdrop_preset_by(
 fn search_rust_milkdrop_preset(
     document: &web_sys::Document,
     imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
     let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
         return;
@@ -17428,14 +17649,14 @@ fn search_rust_milkdrop_preset(
         set_player_status(document, "Enter a preset search");
         return;
     }
-    let count = rust_milkdrop_preset_count(&panel, imported_presets);
-    for index in 0..count {
+    for index in rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets) {
         let title = rust_milkdrop_active_preset_name(&panel, imported_presets, index);
         if title.to_ascii_lowercase().contains(&query) {
             set_rust_milkdrop_active_preset(
                 document,
                 &panel,
                 imported_presets,
+                favorite_presets,
                 index,
                 "MilkDrop preset selected",
             );
@@ -17443,6 +17664,212 @@ fn search_rust_milkdrop_preset(
         }
     }
     set_player_status(document, "No matching MilkDrop preset");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn toggle_rust_milkdrop_favorite(
+    document: &web_sys::Document,
+    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: Rc<RefCell<BTreeSet<String>>>,
+) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    let index = panel
+        .get_attribute("data-slskr-milkdrop-preset-index")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let key = rust_milkdrop_preset_favorite_key(&panel, imported_presets, index);
+    let added = {
+        let mut favorites = favorite_presets.borrow_mut();
+        if favorites.contains(&key) {
+            favorites.remove(&key);
+            false
+        } else {
+            favorites.insert(key);
+            true
+        }
+    };
+    persist_rust_milkdrop_favorite_presets(document, &favorite_presets);
+    update_rust_milkdrop_library_controls(
+        document,
+        &panel,
+        imported_presets,
+        &favorite_presets,
+        index,
+    );
+    set_player_status(
+        document,
+        if added {
+            "MilkDrop preset favorited"
+        } else {
+            "MilkDrop preset unfavorited"
+        },
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn toggle_rust_milkdrop_favorites_only(
+    document: &web_sys::Document,
+    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
+) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    let next = !rust_milkdrop_favorites_only(&panel);
+    let _ = panel.set_attribute(
+        "data-slskr-milkdrop-favorites-only",
+        if next { "true" } else { "false" },
+    );
+    let current = panel
+        .get_attribute("data-slskr-milkdrop-preset-index")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let visible = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets);
+    if next && visible.is_empty() {
+        let _ = panel.set_attribute("data-slskr-milkdrop-favorites-only", "false");
+        update_rust_milkdrop_library_controls(
+            document,
+            &panel,
+            imported_presets,
+            favorite_presets,
+            current,
+        );
+        set_player_status(document, "No favorite MilkDrop presets");
+        return;
+    }
+    let selected = if next && !visible.contains(&current) {
+        visible[0]
+    } else {
+        current
+    };
+    set_rust_milkdrop_active_preset(
+        document,
+        &panel,
+        imported_presets,
+        favorite_presets,
+        selected,
+        if next {
+            "Showing favorite MilkDrop presets"
+        } else {
+            "Showing all MilkDrop presets"
+        },
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn random_rust_milkdrop_preset(
+    document: &web_sys::Document,
+    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
+) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    let visible = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets);
+    if visible.is_empty() {
+        set_player_status(document, "No favorite MilkDrop presets");
+        return;
+    }
+    let index = (js_sys::Math::random() * visible.len() as f64).floor() as usize;
+    set_rust_milkdrop_active_preset(
+        document,
+        &panel,
+        imported_presets,
+        favorite_presets,
+        visible[index.min(visible.len() - 1)],
+        "Random MilkDrop preset selected",
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remove_rust_milkdrop_active_preset(
+    document: &web_sys::Document,
+    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
+) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    let index = panel
+        .get_attribute("data-slskr-milkdrop-preset-index")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let imports_len = imported_presets.borrow().len();
+    if index < imports_len {
+        let key = rust_milkdrop_preset_favorite_key(&panel, &imported_presets, index);
+        imported_presets.borrow_mut().remove(index);
+        favorite_presets.borrow_mut().remove(&key);
+        persist_rust_milkdrop_imported_presets(document, &imported_presets);
+        persist_rust_milkdrop_favorite_presets(document, favorite_presets);
+        let next =
+            index.min(rust_milkdrop_preset_count(&panel, &imported_presets).saturating_sub(1));
+        set_rust_milkdrop_active_preset(
+            document,
+            &panel,
+            &imported_presets,
+            favorite_presets,
+            next,
+            "MilkDrop preset removed",
+        );
+        return;
+    }
+    let custom_index = index.saturating_sub(imports_len);
+    if custom_index == 0
+        && panel
+            .get_attribute("data-slskr-milkdrop-custom-source")
+            .is_some_and(|value| !value.trim().is_empty())
+    {
+        let key = rust_milkdrop_preset_favorite_key(&panel, &imported_presets, index);
+        let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
+        favorite_presets.borrow_mut().remove(&key);
+        persist_rust_milkdrop_favorite_presets(document, favorite_presets);
+        set_rust_milkdrop_active_preset(
+            document,
+            &panel,
+            &imported_presets,
+            favorite_presets,
+            0,
+            "MilkDrop pasted preset removed",
+        );
+    } else {
+        set_player_status(document, "Bundled MilkDrop presets cannot be removed");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_rust_milkdrop_library(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    favorite_presets: Rc<RefCell<BTreeSet<String>>>,
+) {
+    let Ok(confirmed) =
+        window.confirm_with_message("Clear imported MilkDrop presets and favorites?")
+    else {
+        return;
+    };
+    if !confirmed {
+        return;
+    }
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    imported_presets.borrow_mut().clear();
+    favorite_presets.borrow_mut().clear();
+    persist_rust_milkdrop_imported_presets(document, &imported_presets);
+    persist_rust_milkdrop_favorite_presets(document, &favorite_presets);
+    let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
+    let _ = panel.set_attribute("data-slskr-milkdrop-favorites-only", "false");
+    set_rust_milkdrop_active_preset(
+        document,
+        &panel,
+        &imported_presets,
+        &favorite_presets,
+        0,
+        "MilkDrop library cleared",
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -17613,6 +18040,12 @@ fn store_rust_milkdrop_imported_preset(
         document,
         &panel,
         &imported_presets,
+        &Rc::new(RefCell::new(
+            document
+                .default_view()
+                .map(|window| load_rust_milkdrop_favorite_presets(&window))
+                .unwrap_or_default(),
+        )),
         index,
         "MilkDrop preset imported",
     );
@@ -19783,6 +20216,10 @@ mod tests {
         assert!(html.contains("Search native MilkDrop presets"));
         assert!(html.contains("data-slskr-milkdrop-action=\"previous\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"preset\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"random\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"favorite\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"favorites\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"remove\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"search\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"import\""));
         assert!(html.contains("slskr-milkdrop-preset-input"));
@@ -19794,6 +20231,7 @@ mod tests {
         assert!(html.contains("slskr-milkdrop-texture-input"));
         assert!(html.contains("multiple hidden"));
         assert!(html.contains("slskr-milkdrop-textures"));
+        assert!(html.contains("data-slskr-milkdrop-action=\"clear\""));
         assert!(html.contains("data-slskr-milkdrop-action=\"reset\""));
         assert!(html.contains("slskr-milkdrop-renderer"));
         assert!(html.contains("/api/v0/searches"));
