@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 #
-# slskR Bug Council negative-space gate. Asserts that every declared trust
-# boundary in docs/dev/bug-council-negative-space.md still has its required
-# validator symbol present in the expected sink file.
+# slskR Bug Council negative-space gate. Asserts two halves for every
+# declared trust boundary in docs/dev/bug-council-negative-space.md:
 #
-# Complementary to scripts/run-council-scan.sh (which inventories existing
-# suspicious call sites) and scripts/check-council-loop.sh (which gates sweep
-# closure). This gate inverts the search: declarative list of boundaries.
+#   1. assert_validator_present   — validator symbol exists in the sink.
+#   2. assert_loop_anchor         — the same symbol is referenced from
+#                                   scripts/check-council-loop.sh so the
+#                                   wider council loop fails if the gate
+#                                   wires get severed.
+#
+# Both halves are required. Mirrors the strengthening from slskdN's
+# scripts/check-council-negative-space.sh after the council found that the
+# original one-half version was itself a bug (a baseline could be removed
+# while the gate kept passing because it only inspected the sink file).
 
 set -euo pipefail
 
@@ -35,6 +41,18 @@ assert_validator_present() {
   fi
 }
 
+assert_loop_anchor() {
+  local boundary="$1"
+  local anchor="$2"
+
+  if rg -n --fixed-strings -- "$anchor" docs/dev/council-scan-inventory.md >/dev/null \
+     || rg -n --fixed-strings -- "$anchor" scripts/check-council-loop.sh >/dev/null; then
+    pass "negative-space: [$boundary] anchor '$anchor' is registered in council loop or inventory"
+  else
+    fail "negative-space: [$boundary] anchor '$anchor' is missing from council loop and inventory"
+  fi
+}
+
 # Wire-frame length bounds.
 assert_validator_present \
   "wire-frame-length" \
@@ -45,6 +63,13 @@ assert_validator_present \
   "wire-frame-length" \
   "crates/slskr-client/src/io.rs" \
   "read_raw_frame_with_max"
+
+# The wire-frame boundary is also tracked in the council inventory by name,
+# under the existing "Protocol count/length" candidate class. Strengthening:
+# at least one anchor (DEFAULT_MAX_FRAME_LEN, read_raw_frame_with_max, or the
+# inventory's BUG-035 row tag) must remain referenced in either the inventory
+# or check-council-loop.sh.
+assert_loop_anchor "wire-frame-length" "BUG-035"
 
 if [[ "$failures" -gt 0 ]]; then
   printf '\n%d negative-space gate check(s) failed.\n' "$failures" >&2
