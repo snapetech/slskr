@@ -15899,7 +15899,22 @@ fn tokenize_milkdrop_expression(expression: &str) -> Result<Vec<MilkdropToken>, 
         }
         if matches!(
             ch,
-            '(' | ')' | '+' | '-' | '*' | '/' | '%' | ',' | '<' | '>' | '&' | '|' | '^' | '!' | '~'
+            '(' | ')'
+                | '+'
+                | '-'
+                | '*'
+                | '/'
+                | '%'
+                | ','
+                | '?'
+                | ':'
+                | '<'
+                | '>'
+                | '&'
+                | '|'
+                | '^'
+                | '!'
+                | '~'
         ) {
             tokens.push(MilkdropToken::Op(ch.to_string()));
             index += 1;
@@ -16018,7 +16033,7 @@ impl<'a> MilkdropExpressionParser<'a> {
     }
 
     fn parse(&mut self) -> Result<f64, String> {
-        let value = self.parse_logical_or()?;
+        let value = self.parse_conditional()?;
         if self.index < self.tokens.len() {
             return Err("Unexpected trailing MilkDrop token".to_string());
         }
@@ -16029,7 +16044,7 @@ impl<'a> MilkdropExpressionParser<'a> {
         match self.consume() {
             Some(MilkdropToken::Number(value)) => Ok(value),
             Some(MilkdropToken::Op(op)) if op == "(" => {
-                let value = self.parse_logical_or()?;
+                let value = self.parse_conditional()?;
                 if !self.match_op(")") {
                     return Err("Unclosed MilkDrop expression group.".to_string());
                 }
@@ -16040,7 +16055,7 @@ impl<'a> MilkdropExpressionParser<'a> {
                     let mut args = Vec::new();
                     if self.peek_op() != Some(")") {
                         loop {
-                            args.push(self.parse_logical_or()?);
+                            args.push(self.parse_conditional()?);
                             if !self.match_op(",") {
                                 break;
                             }
@@ -16323,6 +16338,23 @@ impl<'a> MilkdropExpressionParser<'a> {
             value = (value != 0.0 || self.parse_logical_and()? != 0.0) as i32 as f64;
         }
         Ok(value)
+    }
+
+    fn parse_conditional(&mut self) -> Result<f64, String> {
+        let condition = self.parse_logical_or()?;
+        if !self.match_op("?") {
+            return Ok(condition);
+        }
+        let when_true = self.parse_conditional()?;
+        if !self.match_op(":") {
+            return Err("Unclosed MilkDrop conditional expression.".to_string());
+        }
+        let when_false = self.parse_conditional()?;
+        Ok(if condition != 0.0 {
+            when_true
+        } else {
+            when_false
+        })
     }
 }
 
@@ -18890,6 +18922,29 @@ mod tests {
             evaluate_milkdrop_expression("~0 + !0 + !2", &BTreeMap::new()).unwrap(),
             0.0
         );
+        assert_eq!(
+            evaluate_milkdrop_expression(
+                "q1 > 0.5 ? q2 + 1 : q3 + 1",
+                &BTreeMap::from([
+                    ("q1".to_string(), MilkdropValue::Number(1.0)),
+                    ("q2".to_string(), MilkdropValue::Number(4.0)),
+                    ("q3".to_string(), MilkdropValue::Number(9.0)),
+                ])
+            )
+            .unwrap(),
+            5.0
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression(
+                "q1 ? 1 : q2 ? 2 : 3",
+                &BTreeMap::from([
+                    ("q1".to_string(), MilkdropValue::Number(0.0)),
+                    ("q2".to_string(), MilkdropValue::Number(1.0)),
+                ])
+            )
+            .unwrap(),
+            2.0
+        );
 
         let mut equation_vars = BTreeMap::new();
         equation_vars.insert("bass_att".to_string(), MilkdropValue::Number(3.0));
@@ -18907,6 +18962,19 @@ mod tests {
         );
         assert_eq!(scope.get("q33"), Some(&MilkdropValue::Number(7.0)));
         assert_eq!(scope.get("wave_r"), Some(&MilkdropValue::Number(0.4)));
+        let conditional_scope = evaluate_milkdrop_equations(
+            "q1=0; q2=q1 ? 4 : 8; q3=(q2 == 8) ? 1 : 0;",
+            &equation_vars,
+        )
+        .unwrap();
+        assert_eq!(
+            conditional_scope.get("q2"),
+            Some(&MilkdropValue::Number(8.0))
+        );
+        assert_eq!(
+            conditional_scope.get("q3"),
+            Some(&MilkdropValue::Number(1.0))
+        );
     }
 
     #[test]
