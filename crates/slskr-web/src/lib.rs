@@ -11530,6 +11530,24 @@ pub struct RustMilkdropFrame {
     pub zoom: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct RustMilkdropCompositeFrame {
+    pub blend_alpha: f64,
+    pub composite_mode: String,
+    pub frame: RustMilkdropFrame,
+    pub index: usize,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RustMilkdropFrameSet {
+    pub entries: Vec<RustMilkdropCompositeFrame>,
+    pub preset_count: usize,
+    pub title: String,
+    pub transition_mode: String,
+    pub transition_seconds: f64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RustMilkdropPrimitiveMode {
     LineStrip,
@@ -11656,6 +11674,115 @@ fn milkdrop_base_number(values: &BTreeMap<String, MilkdropValue>, key: &str, fal
         .and_then(MilkdropValue::as_number)
         .filter(|value| value.is_finite())
         .unwrap_or(fallback)
+}
+
+fn milkdrop_base_number_any(
+    values: &BTreeMap<String, MilkdropValue>,
+    keys: &[&str],
+    fallback: f64,
+) -> f64 {
+    keys.iter()
+        .find_map(|key| {
+            values
+                .get(*key)
+                .and_then(MilkdropValue::as_number)
+                .filter(|value| value.is_finite())
+        })
+        .unwrap_or(fallback)
+}
+
+fn rust_milkdrop_composite_alpha(preset: &MilkdropPresetDocument, index: usize) -> f64 {
+    if index == 0 {
+        return 1.0;
+    }
+    clamp_unit(milkdrop_base_number_any(
+        &preset.base_values,
+        &["blend_alpha", "blendalpha", "composite_alpha", "alpha"],
+        0.5,
+    ))
+}
+
+fn normalize_rust_milkdrop_composite_mode(value: &str) -> String {
+    let normalized = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>();
+    match normalized.as_str() {
+        "add" | "additive" | "plus" => "additive".to_string(),
+        "screen" => "screen".to_string(),
+        "multiply" | "mult" => "multiply".to_string(),
+        _ => "alpha".to_string(),
+    }
+}
+
+fn rust_milkdrop_composite_mode(preset: &MilkdropPresetDocument, index: usize) -> String {
+    if index == 0 {
+        return "alpha".to_string();
+    }
+    let mode = [
+        "blend_mode",
+        "blendmode",
+        "composite_mode",
+        "compositemode",
+        "mode",
+    ]
+    .iter()
+    .find_map(|key| preset.base_values.get(*key).map(MilkdropValue::as_text))
+    .unwrap_or_default();
+    normalize_rust_milkdrop_composite_mode(&mode)
+}
+
+fn rust_milkdrop_transition_seconds(parsed: &MilkdropPresetSet) -> f64 {
+    parsed
+        .presets
+        .first()
+        .map(|preset| {
+            milkdrop_base_number_any(
+                &preset.base_values,
+                &[
+                    "transition_seconds",
+                    "transition_time",
+                    "transitiontime",
+                    "blend_seconds",
+                    "blend_time",
+                    "blendtime",
+                ],
+                1.25,
+            )
+            .max(0.0)
+        })
+        .unwrap_or(1.25)
+}
+
+fn rust_milkdrop_transition_mode(parsed: &MilkdropPresetSet) -> String {
+    let mode = parsed
+        .presets
+        .first()
+        .and_then(|preset| {
+            [
+                "transition_mode",
+                "transitionmode",
+                "transition_style",
+                "transitionstyle",
+                "blend_transition",
+            ]
+            .iter()
+            .find_map(|key| preset.base_values.get(*key).map(MilkdropValue::as_text))
+        })
+        .unwrap_or_else(|| "crossfade".to_string());
+    let normalized = mode
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>();
+    match normalized.as_str() {
+        "cut" | "instant" | "none" => "cut".to_string(),
+        "additive" | "add" => "additive".to_string(),
+        _ => "crossfade".to_string(),
+    }
 }
 
 fn create_rust_milkdrop_scope(
@@ -12113,6 +12240,102 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
     )
 }
 
+pub fn rust_milkdrop_frame_set_from_source_with_audio(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+) -> RustMilkdropFrameSet {
+    let parsed =
+        parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
+    let title = rust_milkdrop_preset_set_title(&parsed);
+    let transition_mode = rust_milkdrop_transition_mode(&parsed);
+    let transition_seconds = rust_milkdrop_transition_seconds(&parsed);
+    let entries = parsed
+        .presets
+        .iter()
+        .enumerate()
+        .map(|(index, preset_document)| {
+            let mut scope =
+                create_rust_milkdrop_scope(preset_document, time_seconds, bass, mid, treble);
+            update_rust_milkdrop_scope_audio(
+                &mut scope,
+                time_seconds,
+                (time_seconds * 60.0).floor(),
+                bass,
+                mid,
+                treble,
+                waveform,
+                spectrum,
+            );
+            if !preset_document.equations.init.trim().is_empty() {
+                if let Ok(next_scope) =
+                    evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
+                {
+                    scope = next_scope;
+                }
+            }
+            if !preset_document.equations.per_frame.trim().is_empty() {
+                if let Ok(next_scope) =
+                    evaluate_milkdrop_equations(&preset_document.equations.per_frame, &scope)
+                {
+                    scope = next_scope;
+                }
+            }
+            RustMilkdropCompositeFrame {
+                blend_alpha: rust_milkdrop_composite_alpha(preset_document, index),
+                composite_mode: rust_milkdrop_composite_mode(preset_document, index),
+                frame: build_rust_milkdrop_frame_from_scope(
+                    source,
+                    preset_document,
+                    &scope,
+                    time_seconds,
+                    bass,
+                    mid,
+                    treble,
+                    waveform,
+                    spectrum,
+                ),
+                index,
+                title: if preset_document.title.trim().is_empty() {
+                    format!("Preset {}", index + 1)
+                } else {
+                    preset_document.title.clone()
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+
+    RustMilkdropFrameSet {
+        preset_count: entries.len(),
+        entries,
+        title,
+        transition_mode,
+        transition_seconds,
+    }
+}
+
+pub fn rust_milkdrop_frame_set_from_source(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+) -> RustMilkdropFrameSet {
+    rust_milkdrop_frame_set_from_source_with_audio(
+        source,
+        time_seconds,
+        bass,
+        mid,
+        treble,
+        &[],
+        &[],
+    )
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RustMilkdropRuntime {
     initialized: bool,
@@ -12242,20 +12465,49 @@ pub fn rust_milkdrop_preset_name(source: &str) -> String {
 pub fn validate_rust_milkdrop_import(source: &str) -> Result<String, String> {
     let parsed =
         parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
-    let Some(primary) = parsed.presets.first() else {
+    if parsed.presets.is_empty() {
         return Err("MilkDrop preset is empty".to_string());
     };
-    let report = analyze_milkdrop_preset_compatibility(primary);
-    let error = milkdrop_compatibility_error(&report);
-    if !error.is_empty() {
-        return Err(error);
+    let errors = parsed
+        .presets
+        .iter()
+        .enumerate()
+        .filter_map(|(index, preset)| {
+            let report = analyze_milkdrop_preset_compatibility(preset);
+            let error = milkdrop_compatibility_error(&report);
+            if error.is_empty() {
+                None
+            } else if parsed.presets.len() == 1 {
+                Some(error)
+            } else {
+                Some(format!("preset {}: {error}", index + 1))
+            }
+        })
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(errors.join("; "));
     }
-    let title = if primary.title.trim().is_empty() {
-        "Imported MilkDrop preset".to_string()
-    } else {
-        primary.title.clone()
-    };
+    let title = rust_milkdrop_preset_set_title(&parsed);
+    if title.trim().is_empty() {
+        return Ok("Imported MilkDrop preset".to_string());
+    }
     Ok(title)
+}
+
+fn rust_milkdrop_preset_set_title(parsed: &MilkdropPresetSet) -> String {
+    let titles = parsed
+        .presets
+        .iter()
+        .map(|preset| preset.title.trim())
+        .filter(|title| !title.is_empty())
+        .collect::<Vec<_>>();
+    if titles.is_empty() {
+        "Imported MilkDrop preset".to_string()
+    } else if titles.len() == 1 {
+        titles[0].to_string()
+    } else {
+        titles.join(" + ")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -13567,7 +13819,7 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
     waveform: &[f64],
     spectrum: &[f64],
 ) -> String {
-    let frame = rust_milkdrop_frame_from_source_with_audio(
+    let frame_set = rust_milkdrop_frame_set_from_source_with_audio(
         source,
         time_seconds,
         bass,
@@ -13576,6 +13828,19 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
         waveform,
         spectrum,
     );
+    let frame = frame_set
+        .entries
+        .first()
+        .map(|entry| entry.frame.clone())
+        .unwrap_or_else(|| {
+            rust_milkdrop_frame(
+                &RustMilkdropPreset::default(),
+                time_seconds,
+                bass,
+                mid,
+                treble,
+            )
+        });
     let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
     let textured_batches = batches
         .textured_batches
@@ -13588,8 +13853,32 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
             })
         })
         .collect::<Vec<_>>();
+    let composite_entries = frame_set
+        .entries
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "blendAlpha": entry.blend_alpha,
+                "compositeMode": entry.composite_mode,
+                "index": entry.index,
+                "linePrimitives": entry.frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::LineStrip | RustMilkdropPrimitiveMode::Lines)).count(),
+                "shapeCount": entry.frame.shape_count,
+                "texturedPrimitives": entry.frame.textured_primitives.len(),
+                "title": entry.title,
+                "trianglePrimitives": entry.frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::TriangleFan | RustMilkdropPrimitiveMode::Triangles)).count(),
+                "waveformCount": entry.frame.waveform_count,
+            })
+        })
+        .collect::<Vec<_>>();
     serde_json::json!({
         "backend": "webgpu",
+        "frameSet": {
+            "entries": composite_entries,
+            "presetCount": frame_set.preset_count,
+            "title": frame_set.title,
+            "transitionMode": frame_set.transition_mode,
+            "transitionSeconds": frame_set.transition_seconds,
+        },
         "frame": {
             "bass": frame.bass,
             "fftBins": frame.fft_bins.len(),
@@ -19125,6 +19414,67 @@ mod tests {
     }
 
     #[test]
+    fn rust_milkdrop_frame_set_renders_milk2_composite_entries() {
+        let frame_set = rust_milkdrop_frame_set_from_source(
+            r#"
+            [preset00]
+            name=Primary
+            transition_seconds=2.5
+            transition_mode=additive
+            wave_r=0.1
+            wave_g=0.2
+            wave_b=0.3
+            shape00_enabled=1
+            shape00_sides=3
+            [preset01]
+            name=Secondary
+            blend_alpha=0.35
+            composite_mode=screen
+            wave_r=0.7
+            wave_g=0.6
+            wave_b=0.5
+            wavecode_0_enabled=1
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+
+        assert_eq!(frame_set.preset_count, 2);
+        assert_eq!(frame_set.title, "Primary + Secondary");
+        assert_eq!(frame_set.transition_seconds, 2.5);
+        assert_eq!(frame_set.transition_mode, "additive");
+        assert_eq!(frame_set.entries[0].blend_alpha, 1.0);
+        assert_eq!(frame_set.entries[0].composite_mode, "alpha");
+        assert_eq!(frame_set.entries[0].title, "Primary");
+        assert_eq!(frame_set.entries[0].frame.shape_count, 1);
+        assert_eq!(frame_set.entries[1].blend_alpha, 0.35);
+        assert_eq!(frame_set.entries[1].composite_mode, "screen");
+        assert_eq!(frame_set.entries[1].title, "Secondary");
+        assert_eq!(frame_set.entries[1].frame.waveform_count, 1);
+    }
+
+    #[test]
+    fn rust_milkdrop_validation_reports_secondary_milk2_errors() {
+        let error = validate_rust_milkdrop_import(
+            r#"
+            [preset00]
+            name=Primary
+            per_frame_1=q1=megabuf(0);
+            [preset01]
+            name=Secondary
+            per_frame_1=q1=unsupported_secondary();
+            "#,
+        )
+        .expect_err("secondary preset should be validated");
+
+        assert!(error.contains(
+            "preset 2: Native MilkDrop preset has unsupported functions: unsupported_secondary."
+        ));
+    }
+
+    #[test]
     fn rust_milkdrop_webgpu_batch_summary_json_exposes_wasm_contract() {
         let summary = rust_milkdrop_webgpu_batch_summary_json(
             r#"
@@ -19162,6 +19512,8 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&summary).unwrap();
 
         assert_eq!(value["backend"], "webgpu");
+        assert_eq!(value["frameSet"]["presetCount"], 1);
+        assert_eq!(value["frameSet"]["entries"][0]["title"], "WebGPU summary");
         assert_eq!(value["frame"]["q1"], 1.0);
         assert_eq!(value["frame"]["texturedPrimitives"], 2);
         assert!(value["packed"]["filledVertices"].as_u64().unwrap() >= 15);
