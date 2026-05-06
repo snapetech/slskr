@@ -6441,7 +6441,7 @@ fn player_footer_html() -> String {
 }
 
 fn rust_milkdrop_panel_html() -> String {
-    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native warp</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="preset">Preset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span>Preset-reactive player visualization</span></footer></section>"#.to_string()
+    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="preset">Preset</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -11660,6 +11660,25 @@ pub fn rust_milkdrop_preset_name(source: &str) -> String {
         .unwrap_or_else(|| "Rust MilkDrop preset".to_string())
 }
 
+pub fn validate_rust_milkdrop_import(source: &str) -> Result<String, String> {
+    let parsed =
+        parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
+    let Some(primary) = parsed.presets.first() else {
+        return Err("MilkDrop preset is empty".to_string());
+    };
+    let report = analyze_milkdrop_preset_compatibility(primary);
+    let error = milkdrop_compatibility_error(&report);
+    if !error.is_empty() {
+        return Err(error);
+    }
+    let title = if primary.title.trim().is_empty() {
+        "Imported MilkDrop preset".to_string()
+    } else {
+        primary.title.clone()
+    };
+    Ok(title)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum MilkdropValue {
     Number(f64),
@@ -13910,6 +13929,14 @@ fn start_rust_milkdrop_visualizer(
         .get_context("2d")?
         .ok_or_else(|| JsValue::from_str("2D canvas is unavailable"))?
         .dyn_into()?;
+    let webgl_available = canvas.get_context("webgl2")?.is_some();
+    if let Some(renderer) = document.get_element_by_id("slskr-milkdrop-renderer") {
+        renderer.set_text_content(Some(if webgl_available {
+            "WebGL2 available / Rust renderer active"
+        } else {
+            "Canvas renderer active"
+        }));
+    }
     let animation_handle: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
         Rc::new(RefCell::new(None));
     let animation_handle_for_frame = animation_handle.clone();
@@ -13927,12 +13954,12 @@ fn start_rust_milkdrop_visualizer(
             .get_attribute("data-slskr-milkdrop-preset-index")
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0);
-        let preset_source = RUST_MILKDROP_PRESETS[preset_index % RUST_MILKDROP_PRESETS.len()];
+        let preset_source = rust_milkdrop_active_preset_source(&panel, preset_index);
         let time = time_ms / 1000.0;
         let bass = (time * 1.9).sin() * 0.5 + 0.5;
         let mid = (time * 1.17 + 1.3).sin() * 0.5 + 0.5;
         let treble = (time * 2.7 + 0.4).sin() * 0.5 + 0.5;
-        let frame = rust_milkdrop_frame_from_source(preset_source, time, bass, mid, treble);
+        let frame = rust_milkdrop_frame_from_source(&preset_source, time, bass, mid, treble);
         render_rust_milkdrop_frame(&context, &canvas, &frame, time);
         if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
             status.set_text_content(Some(&format!(
@@ -14007,6 +14034,8 @@ fn mount_rust_milkdrop_buttons(
                             }
                         });
                     }
+                    "import" => import_rust_milkdrop_preset(&window, &document),
+                    "reset" => reset_rust_milkdrop_import(&document),
                     _ => cycle_rust_milkdrop_preset(&document),
                 }
             },
@@ -14018,6 +14047,68 @@ fn mount_rust_milkdrop_buttons(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_preset_count(panel: &web_sys::Element) -> usize {
+    RUST_MILKDROP_PRESETS.len()
+        + usize::from(
+            panel
+                .get_attribute("data-slskr-milkdrop-custom-source")
+                .is_some_and(|value| !value.trim().is_empty()),
+        )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_active_preset_source(panel: &web_sys::Element, index: usize) -> String {
+    if let Some(custom_source) = panel
+        .get_attribute("data-slskr-milkdrop-custom-source")
+        .filter(|value| !value.trim().is_empty())
+    {
+        if index == 0 {
+            return custom_source;
+        }
+        return RUST_MILKDROP_PRESETS[(index - 1) % RUST_MILKDROP_PRESETS.len()].to_string();
+    }
+    RUST_MILKDROP_PRESETS[index % RUST_MILKDROP_PRESETS.len()].to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_active_preset_name(panel: &web_sys::Element, index: usize) -> String {
+    rust_milkdrop_preset_name(&rust_milkdrop_active_preset_source(panel, index))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn import_rust_milkdrop_preset(window: &web_sys::Window, document: &web_sys::Document) {
+    let Ok(Some(source)) = window.prompt_with_message("Paste a MilkDrop preset") else {
+        return;
+    };
+    match validate_rust_milkdrop_import(&source) {
+        Ok(title) => {
+            if let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") {
+                let _ = panel.set_attribute("data-slskr-milkdrop-custom-source", &source);
+                let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", "0");
+                if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
+                    label.set_text_content(Some(&title));
+                }
+                set_player_status(document, "MilkDrop preset imported");
+            }
+        }
+        Err(error) => set_player_status(document, &error),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn reset_rust_milkdrop_import(document: &web_sys::Document) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
+    let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", "0");
+    if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
+        label.set_text_content(Some(&rust_milkdrop_preset_name(RUST_MILKDROP_PRESETS[0])));
+    }
+    set_player_status(document, "MilkDrop import reset");
+}
+
+#[cfg(target_arch = "wasm32")]
 fn cycle_rust_milkdrop_preset(document: &web_sys::Document) {
     let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
         return;
@@ -14026,12 +14117,10 @@ fn cycle_rust_milkdrop_preset(document: &web_sys::Document) {
         .get_attribute("data-slskr-milkdrop-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let next = (current + 1) % RUST_MILKDROP_PRESETS.len();
+    let next = (current + 1) % rust_milkdrop_preset_count(&panel);
     let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", &next.to_string());
     if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
-        label.set_text_content(Some(&rust_milkdrop_preset_name(
-            RUST_MILKDROP_PRESETS[next],
-        )));
+        label.set_text_content(Some(&rust_milkdrop_active_preset_name(&panel, next)));
     }
     set_player_status(document, "Rust MilkDrop preset changed");
 }
@@ -14321,6 +14410,9 @@ mod tests {
         assert!(html.contains("slskr-rust-milkdrop"));
         assert!(html.contains("slskr-milkdrop-canvas"));
         assert!(html.contains("data-slskr-milkdrop-action=\"preset\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"import\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"reset\""));
+        assert!(html.contains("slskr-milkdrop-renderer"));
         assert!(html.contains("/api/v0/searches"));
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
@@ -14974,6 +15066,22 @@ mod tests {
         assert!(report.unsupported_functions.is_empty());
         assert!(report.shader_sections.is_empty());
         assert_eq!(milkdrop_compatibility_error(&report), "");
+    }
+
+    #[test]
+    fn rust_milkdrop_import_validation_accepts_only_supported_presets() {
+        assert_eq!(
+            validate_rust_milkdrop_import(
+                "name=Imported\nper_frame_1=q1=rand(4)+get_fft(0.5);\ncomp_shader=ret = vec3(q1);"
+            ),
+            Ok("Imported".to_string())
+        );
+        let error = validate_rust_milkdrop_import(
+            "name=Bad\nper_frame_1=q1=megabuf(0);\ncomp_shader=for (;;) { ret = vec3(1.0); }",
+        )
+        .expect_err("unsupported preset should be rejected");
+        assert!(error.contains("unsupported functions: megabuf"));
+        assert!(error.contains("shader translation pending: comp_shader"));
     }
 
     #[test]
