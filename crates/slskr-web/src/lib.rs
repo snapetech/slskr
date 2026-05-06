@@ -15686,7 +15686,55 @@ void main() {{
     )
 }
 
+fn split_top_level_milkdrop_ternary(expression: &str) -> Option<(&str, &str, &str)> {
+    let chars = expression.char_indices().collect::<Vec<_>>();
+    let mut depth = 0i32;
+    let mut question_index = None;
+    for (index, ch) in &chars {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            '?' if depth == 0 => {
+                question_index = Some(*index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let question_index = question_index?;
+    let mut depth = 0i32;
+    let mut nested = 0i32;
+    for (index, ch) in chars
+        .into_iter()
+        .filter(|(index, _)| *index > question_index)
+    {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            '?' if depth == 0 => nested += 1,
+            ':' if depth == 0 && nested == 0 => {
+                return Some((
+                    expression[..question_index].trim(),
+                    expression[question_index + 1..index].trim(),
+                    expression[index + 1..].trim(),
+                ));
+            }
+            ':' if depth == 0 => nested -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
 fn normalize_milkdrop_wgsl_expression(expression: &str) -> String {
+    if let Some((condition, when_true, when_false)) = split_top_level_milkdrop_ternary(expression) {
+        return format!(
+            "select({}, {}, {})",
+            normalize_milkdrop_wgsl_expression(when_false),
+            normalize_milkdrop_wgsl_expression(when_true),
+            normalize_milkdrop_wgsl_expression(condition)
+        );
+    }
     expression
         .replace(
             "texture(previousFrame,",
@@ -15733,12 +15781,13 @@ pub fn create_translated_milkdrop_wgsl_shader(source: &str) -> String {
     };
     if std::iter::once(&program.expression)
         .chain(program.declarations.iter())
+        .map(|statement| normalize_milkdrop_wgsl_expression(statement))
         .any(|statement| {
-            statement.contains('?')
-                || statement.contains('&')
+            statement.contains('&')
                 || statement.contains('|')
                 || statement.contains('^')
                 || statement.contains('~')
+                || statement.contains('?')
         })
     {
         return String::new();
@@ -19249,9 +19298,12 @@ mod tests {
         assert!(
             analyze_milkdrop_webgpu_shader_support("ret = tex2D(sampler_noise, uv).rgb;").supported
         );
-        assert_eq!(
-            create_translated_milkdrop_wgsl_shader("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);"),
-            ""
+        let ternary =
+            create_translated_milkdrop_wgsl_shader("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);");
+        assert!(ternary.contains("let ret = vec3f(select(vec3f(0.0), vec3f(1.0), q1 > 0.5));"));
+        assert!(
+            analyze_milkdrop_webgpu_shader_support("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);")
+                .supported
         );
     }
 
@@ -20142,10 +20194,20 @@ mod tests {
             ]
         );
 
+        let webgpu_ternary = build_milkdrop_compatibility_entry(
+            "webgpu-shader-ternary-probe",
+            "",
+            "comp_shader=ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);",
+            false,
+        );
+        assert!(webgpu_ternary.supported);
+        assert!(webgpu_ternary.webgpu_supported);
+        assert!(webgpu_ternary.webgpu_shader_sections.is_empty());
+
         let webgpu_gap = build_milkdrop_compatibility_entry(
             "webgpu-shader-gap-probe",
             "",
-            "comp_shader=ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);",
+            "comp_shader=ret = (q1 & 3) > 0 ? vec3(1.0) : vec3(0.0);",
             false,
         );
         assert!(webgpu_gap.supported);
@@ -20154,9 +20216,9 @@ mod tests {
             webgpu_gap.webgpu_shader_sections,
             vec!["comp_shader".to_string()]
         );
-        let summary = summarize_milkdrop_compatibility_matrix(&[entry, webgpu_gap]);
-        assert_eq!(summary.total_count, 2);
-        assert_eq!(summary.webgpu_supported_count, 1);
+        let summary = summarize_milkdrop_compatibility_matrix(&[entry, webgpu_ternary, webgpu_gap]);
+        assert_eq!(summary.total_count, 3);
+        assert_eq!(summary.webgpu_supported_count, 2);
         assert_eq!(summary.webgpu_unsupported_count, 1);
         assert_eq!(
             summary.webgpu_unsupported_shader_sections,
