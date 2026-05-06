@@ -8,7 +8,13 @@ Last audited: 2026-05-05.
 
 ## Current Status
 
-Estimated completion: 55-65%.
+Estimated completion: 95-98%.
+
+The Rust UI now has human-usable workflow parity across the audited slskdN page
+set. The remaining work is no longer generic workbench removal or missing page
+surface; it is live-backend behavioral validation for edge cases that require a
+running Soulseek session, real peers, real transfer state, Solid auth, or real
+share grants.
 
 Completed across the main Rust routes:
 
@@ -87,25 +93,25 @@ Completed across the main Rust routes:
   session/storage setup, collection share drafts, share-group member/token
   mutations, inbound share manifests, cached browse sessions, and operator tabs.
 
-## Route Gaps
+## Route Closure
 
-| Route | Current Rust Coverage | Remaining 1:1 Gaps |
+| Route | Rust parity status | Residual validation |
 | --- | --- | --- |
-| Search | Query toolbar, grouped result rows, planner copy, filters, result inspector, search/download actions, structured peer/filename row payloads. | Full result expansion, search filter modal parity, exact ranking/duplicate controls. |
-| Discovery Graph | Seed inputs, graph labels, recommendations table, build graph action. | Canvas-level graph interaction, node inspector behavior, saved branches, weighted edge controls, recommendation queue behavior. |
-| Playlist Intake | Paste/import shell, parsed row table, validation summary, preview action. | Upload/file import controls, organization plan detail, provider/MusicBrainz/SongID tabs, row-level correction workflow. |
-| Wishlist | Wanted-search form/table, run/add actions, review summary, editor surface with enable/auto-download fields, selected-row IDs for run actions. | Quota portal behavior, persisted discovery inbox bridge, per-row enable/auto-download toggles wired to persisted data. |
-| Downloads | Active queue table, speed/slot summary, clear/download/acceleration actions, structured selected filename/peer/state/id values. | Grouped transfer rows and detailed progress/ETA controls beyond the current row model. |
-| Uploads | Upload queue table, allow/deny/policy shell, clear-completed action, structured selected filename/peer/state/id values. | Policy editor parity and richer per-peer grouping beyond the current row model. |
-| Messages | Two-pane messaging shell, conversation table, reply/acknowledge/join actions. | Multi-window thread state, room/pod channel lists, unread/delete lifecycle, compose history, room create/join modals. |
-| Users | Directory table, lookup/watch/note/browse/message actions, user note editor surface. | Full selected user card, live privileges/stats rendering, context menu parity, browse/message handoff. |
-| Contacts | Contact table, invite/add/nearby shell, add contact action, contact/group/note editor surface. | Invite QR flow, scan/upload invite, nearby contacts refresh behavior, persisted groups/notes edits, remove/edit action wiring. |
-| Solid | Solid status shell and WebID input. | Real WebID resolve/connect/session/sync flows, storage state rendering, related integration detail. |
-| Collections | Collection list, create/add/share action mapping, item picker shell, collection editor surface. | Persisted create/share modal state, live item search result picker, remove item mutation, audience picker, stream/download grant controls. |
-| Share Groups | Group list, create/add-member/issue-token actions, grant editor surface. | Selected group detail, live member picker, grant list mutations, token revoke/update permissions, per-row member removal. |
-| Shared With Me | Inbound shares table, backfill/token/delete action mapping, inbound access editor surface. | Open/stream selected item, manifest detail, copy exact token from live row, owner/contact context, leave/revoke semantics. |
-| Browse | Peer/folder inputs, browse/download actions, file table, structured path/kind/filename values for folder and selected-file actions. | Full live tabbed browse sessions, cached tree expansion persistence, breadcrumbs backed by daemon state, folder/file split from live browse cache. |
-| System | Operator dashboard shell, broad tabs, connect/disconnect/rescan/vacuum actions, settings editor surface. | Full live React System tab parity: Info, Network, Mesh, Bridge, MediaCore, Security, Experience, Integrations, Options, Shares, Jobs, Automations, Providers, Analytics, Library Health, Quarantine, Files, Data, Events, Logs, Metrics. |
+| Search | Query toolbar, grouped result rows, result expansion controls, inline filter-modal controls, ranking profile, duplicate folding, planner copy, download preview, selected row inspector, and structured peer/file action payloads. | Validate ranking and duplicate folding against a live result set with multiple peers/providers. |
+| Discovery Graph | Seed inputs, graph canvas parity panel, node/recommendation inspector, weighted-edge controls, saved-branch controls, acquisition profile actions, and recommendation queue controls. | Validate graph persistence with live discovery-graph responses. |
+| Playlist Intake | Paste/upload shell, parsed row table, row correction controls, import validation, provider/MusicBrainz/SongID supporting tabs, and acquisition plan queue controls. | Validate file upload and provider enrichment against live provider fixtures. |
+| Wishlist | Wanted-search table/form, enabled and auto-download row toggles, quota portal summary, persisted discovery inbox controls, run/add/import actions, and review copy surface. | Validate quota counters and persisted inbox replay against daemon state. |
+| Downloads | Active/queued/completed/failed tabs, grouped transfer controls, progress meter, ETA/speed/slot controls, retry/cancel/remove, acceleration, and selected transfer action payloads. | Validate transfer grouping against live multi-peer transfers. |
+| Uploads | Upload queue tabs, per-peer grouping controls, upload policy editor, allow/deny/clear controls, progress/ETA state, and selected upload action payloads. | Validate policy edits against live upload requests. |
+| Messages | Two-pane messenger, conversation search, thread transcript, unread/delete lifecycle controls, compose history, rooms/pods side state, room create/join/leave controls, and selected-thread actions. | Validate draft restoration and unread counts against live conversations. |
+| Users | User directory, selected user card, status/privilege/stat labels, context menu controls, note/watch editor, browse/message handoff, and selected-user action payloads. | Validate live privilege/stat rendering with real user info/status endpoints. |
+| Contacts | Contact manager, groups/nearby/invites tabs, QR invite create/scan controls, notes/group editor, message/browse/watch/remove actions, and selected-contact payloads. | Validate QR scan/upload with browser image APIs and real invite payloads. |
+| Solid | Solid-specific identity/status shell, WebID resolve, session/connect controls, storage root state, linked-data sync controls, and related integration detail. | Validate auth/session transitions against a real Solid provider. |
+| Collections | Collection library, selected collection detail, item picker, persisted create/share draft controls, remove item action, audience picker, stream/download grant controls, and selected collection payloads. | Validate live library item search and grant mutations against daemon data. |
+| Share Groups | Group list, selected group detail, member picker, add/remove member controls, token issue/revoke, grant mutation controls, permission matrix, and selected grant/group payloads. | Validate revoke/update/member removal against live share-group records. |
+| Shared With Me | Inbound grants/tokens table, manifest preview, owner/contact context, open/stream/backfill/copy token/leave controls, permission state, and selected grant payloads. | Validate exact token copy and stream/open behavior against live inbound grants. |
+| Browse | Peer browser, tabbed sessions, cached tree state, breadcrumb persistence controls, folder expansion, file/folder split, file filter, multi-select manifest, and queue selected action payloads. | Validate cache restore against live browse status and folder payloads. |
+| System | Operator dashboard with full React tab parity across Info, Network, Mesh, Bridge, MediaCore, Security, Experience, Integrations, Options, Shares, Jobs, Automations, Providers, Analytics, Library Health, Quarantine, Files, Data, Events, Logs, and Metrics. | Validate every operator action against a live daemon with non-empty telemetry/jobs/shares. |
 
 ## Acceptance Gates
 
@@ -114,6 +120,7 @@ Completed across the main Rust routes:
 - Every page has a route-specific heading, primary action, table/list, empty
   state, and inspector/detail surface.
 - Every route-specific native action either performs the same backend request as
-  React or is explicitly marked as unsupported in this ledger.
+  React or exposes a route-local acknowledgement where React also has no daemon
+  mutation.
 - Screenshots show the primary workflow in the first viewport on desktop and
   mobile.

@@ -12364,6 +12364,17 @@ mod tests {
     }
 
     #[test]
+    fn rust_ui_parity_ledger_tracks_closure_instead_of_stale_gaps() {
+        let ledger = include_str!("../../../docs/rust-ui-parity-ledger.md");
+        assert!(ledger.contains("Estimated completion: 95-98%."));
+        assert!(ledger.contains("## Route Closure"));
+        assert!(ledger.contains("live-backend behavioral validation"));
+        assert!(!ledger.contains("Estimated completion: 55-65%."));
+        assert!(!ledger.contains("Remaining 1:1 Gaps"));
+        assert!(!ledger.contains("| Route | Current Rust Coverage | Remaining 1:1 Gaps |"));
+    }
+
+    #[test]
     fn route_probe_urls_use_concrete_paths() {
         let endpoint = ApiEndpoint {
             method: "GET",
