@@ -6517,6 +6517,27 @@ pub fn wasm_route_page_html(path: &str) -> String {
     route_page_html(path)
 }
 
+#[wasm_bindgen(js_name = rustMilkdropWebGpuBatchSummaryJson)]
+pub fn wasm_rust_milkdrop_webgpu_batch_summary_json(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform_csv: &str,
+    spectrum_csv: &str,
+) -> String {
+    rust_milkdrop_webgpu_batch_summary_json(
+        source,
+        time_seconds,
+        bass,
+        mid,
+        treble,
+        &parse_milkdrop_sample_csv(waveform_csv),
+        &parse_milkdrop_sample_csv(spectrum_csv),
+    )
+}
+
 #[cfg(target_arch = "wasm32")]
 fn mount_router(window: &web_sys::Window, document: &web_sys::Document) -> Result<(), JsValue> {
     render_current_route(window, document)?;
@@ -11722,6 +11743,21 @@ fn rust_milkdrop_sample_text(values: &[f64]) -> String {
         .join(",")
 }
 
+fn parse_milkdrop_sample_csv(source: &str) -> Vec<f64> {
+    source
+        .split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
+        .filter_map(|item| {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                trimmed.parse::<f64>().ok()
+            }
+        })
+        .map(|value| value.clamp(-1.0, 1.0))
+        .collect()
+}
+
 fn rust_milkdrop_sample_bins(values: &[f64]) -> [f64; 64] {
     let mut bins = [0.0; 64];
     if values.is_empty() {
@@ -13499,6 +13535,77 @@ pub fn create_rust_milkdrop_webgpu_frame_batches(
             });
     }
     batches
+}
+
+fn rounded_milkdrop_buffer_sample(values: &[f64], count: usize) -> Vec<f64> {
+    values
+        .iter()
+        .take(count)
+        .map(|value| (value * 1000.0).round() / 1000.0)
+        .collect()
+}
+
+pub fn rust_milkdrop_webgpu_batch_summary_json(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+) -> String {
+    let frame = rust_milkdrop_frame_from_source_with_audio(
+        source,
+        time_seconds,
+        bass,
+        mid,
+        treble,
+        waveform,
+        spectrum,
+    );
+    let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
+    let textured_batches = batches
+        .textured_batches
+        .iter()
+        .map(|batch| {
+            serde_json::json!({
+                "firstVertex": batch.first_vertex,
+                "primitiveIndex": batch.primitive_index,
+                "vertexCount": batch.vertex_count,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "backend": "webgpu",
+        "frame": {
+            "bass": frame.bass,
+            "fftBins": frame.fft_bins.len(),
+            "linePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::LineStrip | RustMilkdropPrimitiveMode::Lines)).count(),
+            "pointPrimitives": frame.primitives.iter().filter(|primitive| primitive.mode == RustMilkdropPrimitiveMode::Points).count(),
+            "q1": frame.q_registers[0],
+            "shapeCount": frame.shape_count,
+            "texturedPrimitives": frame.textured_primitives.len(),
+            "trianglePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::TriangleFan | RustMilkdropPrimitiveMode::Triangles)).count(),
+            "waveformBins": frame.waveform_bins.len(),
+            "waveformCount": frame.waveform_count,
+            "warpMeshTriangles": frame.warp_mesh.as_ref().map(|mesh| mesh.positions.len() / 6).unwrap_or_default(),
+        },
+        "packed": {
+            "filledFloats": batches.filled_vertices.len(),
+            "filledVertices": batches.filled_vertices.len() / 6,
+            "filledSample": rounded_milkdrop_buffer_sample(&batches.filled_vertices, 18),
+            "lineFloats": batches.line_vertices.len(),
+            "lineVertices": batches.line_vertices.len() / 6,
+            "lineSample": rounded_milkdrop_buffer_sample(&batches.line_vertices, 12),
+            "pointFloats": batches.point_vertices.len(),
+            "pointVertices": batches.point_vertices.len() / 6,
+            "texturedBatches": textured_batches,
+            "texturedFloats": batches.textured_vertices.len(),
+            "texturedSample": rounded_milkdrop_buffer_sample(&batches.textured_vertices, 24),
+            "texturedVertices": batches.textured_vertices.len() / 8,
+        },
+    })
+    .to_string()
 }
 
 fn append_milkdrop_quad(vertices: &mut Vec<f64>, left: f64, bottom: f64, right: f64, top: f64) {
@@ -18624,6 +18731,61 @@ mod tests {
             ),
             vec![-0.2, -0.1, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4]
         );
+    }
+
+    #[test]
+    fn rust_milkdrop_webgpu_batch_summary_json_exposes_wasm_contract() {
+        let summary = rust_milkdrop_webgpu_batch_summary_json(
+            r#"
+            name=WebGPU summary
+            per_frame_1=q1=get_waveform(0.5);
+            ob_size=0.1
+            ob_r=1
+            ob_g=0.2
+            ob_b=0.3
+            ob_a=0.4
+            shape00_enabled=1
+            shape00_sides=3
+            shape00_rad=0.25
+            shape00_r=0.1
+            shape00_g=0.2
+            shape00_b=0.3
+            shape00_a=0.4
+            shape01_enabled=1
+            shape01_sides=3
+            shape01_rad=0.25
+            shape01_textured=1
+            sprite00_enabled=1
+            sprite00_x=0.5
+            sprite00_y=0.5
+            sprite00_w=0.2
+            sprite00_h=0.1
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+            &parse_milkdrop_sample_csv("-1, 0, 1, 0.5"),
+            &parse_milkdrop_sample_csv("0, .5, 1"),
+        );
+        let value: serde_json::Value = serde_json::from_str(&summary).unwrap();
+
+        assert_eq!(value["backend"], "webgpu");
+        assert_eq!(value["frame"]["q1"], 1.0);
+        assert_eq!(value["frame"]["texturedPrimitives"], 2);
+        assert!(value["packed"]["filledVertices"].as_u64().unwrap() >= 15);
+        assert_eq!(value["packed"]["texturedVertices"], 15);
+        assert_eq!(
+            value["packed"]["texturedBatches"][0]["firstVertex"],
+            serde_json::Value::from(0)
+        );
+        assert_eq!(
+            value["packed"]["texturedBatches"][1]["firstVertex"],
+            serde_json::Value::from(9)
+        );
+        assert!(value["packed"]["texturedSample"]
+            .as_array()
+            .is_some_and(|items| items.len() == 24));
     }
 
     #[test]
