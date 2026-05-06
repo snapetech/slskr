@@ -110,6 +110,8 @@ PY
   test -f "$root/COMPLIANCE.md"
   test -f "$root/docs/slskr.config.example.toml"
   test -f "$root/web/build/index.html"
+  test -f "$root/web/build/slskr_web_bootstrap.js"
+  test -f "$root/web/build/styles.css"
   test -f "$root/web/build/slskr_web.js"
   test -f "$root/web/build/slskr_web_bg.wasm"
   if [[ -f "$root/slskr" ]]; then

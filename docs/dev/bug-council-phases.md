@@ -11,6 +11,7 @@ The canonical multi-phase tracker for the upgrade work itself lives in `../slskN
 - `bug-council-behavior-pinning.md` — verbatim copy.
 - `bug-council-negative-space.md` — slskR-adapted, declares slskR's wire-frame and protocol boundaries.
 - `scripts/check-council-negative-space.sh` — slskR-adapted gate.
+- slskNet.Runtime's current canonical analyzer cycle now includes broadened `CSL0001`, a second `CSL0002` loop-bound lens, calibration fixtures, and multi-seed adversarial corpora. The Rust follow-up phases below should use the same calibration rule before treating zero findings as meaningful.
 
 ## What is intentionally not mirrored
 
@@ -23,7 +24,9 @@ The canonical multi-phase tracker for the upgrade work itself lives in `../slskN
 | --- | --- | --- | --- | --- |
 | 1 | Mirror council process docs + negative-space gate | Done | (agent) | Schema/sibling/behavior/negative-space docs and `check-council-negative-space.sh` present; gate passes locally. |
 | 2 | Severity/confidence retrofit on existing inventory | Pending | (agent) | `docs/dev/council-scan-inventory.md` rows annotated with severity/confidence per `bug-council-severity-schema.md`. |
-| 3 | Rust semantic-lens beachhead | Pending | (agent) | One Clippy custom lens or `dylint` driver implementing TaintToAllocation in Rust (read_u32_le → Vec::with_capacity without bound). |
+| 3 | Rust semantic-lens beachhead | Pending | (agent) | One Clippy custom lens or `dylint` driver implementing TaintToAllocation in Rust (read_u32_le -> Vec::with_capacity without bound). |
+| 4 | Rust loop-bound lens + calibration corpus | Pending | (agent) | Add a second semantic lens for protocol-derived loop bounds and a known-bad/known-good calibration corpus for every Rust semantic lens. |
+| 5 | Multi-seed adversarial protocol corpus | Pending | (agent) | Expand protocol/parser fuzzing to multiple deterministic seeds plus explicit hostile corpus inputs; gate both in the council loop. |
 
 ## How to resume
 

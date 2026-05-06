@@ -27,7 +27,17 @@ for target in \
   fi
 done
 
-for expected in 'SHA256SUMS.txt' 'sha256sum' 'verify-release-artifacts.sh' 'cargo package' 'verify-cargo-package-contents.sh'; do
+for expected in \
+  'SHA256SUMS.txt' \
+  'sha256sum' \
+  'verify-release-artifacts.sh' \
+  'cargo package' \
+  'verify-cargo-package-contents.sh' \
+  'scripts/audit-rust-web-ui.mjs' \
+  'Rust web UI headless audit' \
+  'slskr_web_bootstrap.js' \
+  'slskr_web_bg.wasm' \
+  'styles.css'; do
   if ! rg -n -F "$expected" .github/workflows scripts >/dev/null; then
     printf 'package artifact matrix check failed: expected packaging token missing: %s\n' "$expected" >&2
     status=1

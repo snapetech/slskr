@@ -90,7 +90,13 @@ if ((build_web)); then
 fi
 
 rust_web_build="${SLSKR_RUST_WEB_DIST:-target/slskr-web}"
-if [[ ! -f "$rust_web_build/index.html" || ! -f "$rust_web_build/slskr_web.js" || ! -f "$rust_web_build/slskr_web_bg.wasm" ]]; then
+if [[ \
+  ! -f "$rust_web_build/index.html" || \
+  ! -f "$rust_web_build/slskr_web_bootstrap.js" || \
+  ! -f "$rust_web_build/styles.css" || \
+  ! -f "$rust_web_build/slskr_web.js" || \
+  ! -f "$rust_web_build/slskr_web_bg.wasm" \
+ ]]; then
   echo "Rust/WASM web assets are missing from $rust_web_build" >&2
   echo "run scripts/build-rust-web.sh or unset --skip-web-build" >&2
   exit 1

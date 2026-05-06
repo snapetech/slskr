@@ -11,7 +11,8 @@ scripts/run-release-gate.sh
 
 This runs public-posture checks, shell syntax checks, Rust formatting, clippy,
 workspace tests, RustSec audit when `cargo-audit` is installed, workspace
-packaging, web tests, Rust/WASM web checks, and subpath smoke checks.
+packaging, web tests, Rust/WASM web checks, the Rust web UI headless parity
+audit, and subpath smoke checks.
 
 The live slskd automation-client compatibility smoke is opt-in because it starts
 a local daemon and may install the Python `slskd-api` package:
@@ -32,7 +33,7 @@ scripts/verify-release-artifacts.sh target/dist
 The archive includes:
 
 - `slskr` or `slskr.exe`
-- `web/build` with `slskr_web.js`, `slskr_web_bg.wasm`, `styles.css`, and `index.html`
+- `web/build` with `index.html`, `slskr_web_bootstrap.js`, `styles.css`, `slskr_web.js`, and `slskr_web_bg.wasm`
 - `README.md`, `LICENSE`, `NOTICE`, `COMPLIANCE.md`
 - `docs/slskr.config.example.toml`
 - `RUN.txt`
