@@ -61,6 +61,7 @@ else
 fi
 
 run_step "Install web dependencies" npm --prefix web ci
+run_step "Rust web UI headless audit" node scripts/audit-rust-web-ui.mjs
 run_step "Web advisory audit" npm --prefix web audit --audit-level=moderate
 run_step "Web lint" npm --prefix web run lint
 run_step "Web tests" npm --prefix web test

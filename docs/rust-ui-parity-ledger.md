@@ -4,7 +4,7 @@ This ledger tracks the Rust/WASM UI against the current React UI. It is
 intended to stay blunt: a route is not complete until the Rust page has the same
 primary workflow, state handling, and route-specific actions as the React page.
 
-Last audited: 2026-05-05.
+Last audited: 2026-05-06.
 
 ## Current Status
 
@@ -115,7 +115,12 @@ Completed across the main Rust routes:
 
 ## Acceptance Gates
 
-- Headless route audit passes for every main nav route.
+- Headless route audit passes for every main nav route. Enforced by
+  `node scripts/audit-rust-web-ui.mjs`, which builds the Rust/WASM bundle,
+  serves it with mocked daemon responses, visits every main route on desktop
+  and mobile, captures screenshots in `target/ux-audit/`, and fails if primary
+  workflow, inspector/detail, hidden Developer drawer, or browser-error checks
+  regress.
 - No visible `GET /api/v0` text outside the Developer drawer.
 - Every page has a route-specific heading, primary action, table/list, empty
   state, and inspector/detail surface.
