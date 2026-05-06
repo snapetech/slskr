@@ -12444,6 +12444,333 @@ pub fn milkdrop_compatibility_error(report: &MilkdropPresetCompatibility) -> Str
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropPresetMetrics {
+    pub max_q_register_index: usize,
+    pub q_registers: Vec<String>,
+    pub q_register_count: usize,
+    pub shape_count: usize,
+    pub sprite_count: usize,
+    pub wave_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropCompatibilityPresetReport {
+    pub error: String,
+    pub index: usize,
+    pub metrics: MilkdropPresetMetrics,
+    pub shader_sections: Vec<String>,
+    pub title: String,
+    pub unsupported_functions: Vec<String>,
+    pub webgpu_shader_sections: Vec<String>,
+    pub webgpu_supported: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropCompatibilityEntry {
+    pub file_name: String,
+    pub format: String,
+    pub id: String,
+    pub metrics: MilkdropCompatibilitySummary,
+    pub preset_count: usize,
+    pub preset_reports: Vec<MilkdropCompatibilityPresetReport>,
+    pub shader_sections: Vec<String>,
+    pub supported: bool,
+    pub unsupported_functions: Vec<String>,
+    pub webgpu_shader_sections: Vec<String>,
+    pub webgpu_supported: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropCompatibilitySummary {
+    pub max_q_register_index: usize,
+    pub max_shape_count: usize,
+    pub max_sprite_count: usize,
+    pub max_wave_count: usize,
+    pub preset_count: usize,
+    pub q_registers: Vec<String>,
+    pub supported_count: usize,
+    pub total_count: usize,
+    pub total_shapes: usize,
+    pub total_sprites: usize,
+    pub total_waves: usize,
+    pub unsupported_count: usize,
+    pub unsupported_functions: Vec<String>,
+    pub unsupported_shader_sections: Vec<String>,
+    pub webgpu_supported_count: usize,
+    pub webgpu_unsupported_count: usize,
+    pub webgpu_unsupported_shader_sections: Vec<String>,
+}
+
+fn milkdrop_entry_has_content(entry: &MilkdropIndexedEntry) -> bool {
+    !entry.base_values.is_empty() || entry.equations != MilkdropEquations::default()
+}
+
+fn merge_milkdrop_unique(mut values: Vec<String>) -> Vec<String> {
+    values.retain(|value| !value.is_empty());
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn collect_q_registers_from_text(text: &str, registers: &mut Vec<String>) {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < chars.len() {
+        if chars[index].to_ascii_lowercase() != 'q' {
+            index += 1;
+            continue;
+        }
+        let start = index + 1;
+        let mut end = start;
+        while end < chars.len() && chars[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end > start {
+            if let Ok(number) = chars[start..end]
+                .iter()
+                .collect::<String>()
+                .parse::<usize>()
+            {
+                if (1..=64).contains(&number) {
+                    let register = format!("q{number}");
+                    if !registers.contains(&register) {
+                        registers.push(register);
+                    }
+                }
+            }
+        }
+        index = end.max(index + 1);
+    }
+}
+
+fn collect_q_registers_from_equations(equations: &MilkdropEquations, registers: &mut Vec<String>) {
+    collect_q_registers_from_text(&equations.init, registers);
+    collect_q_registers_from_text(&equations.frame, registers);
+    collect_q_registers_from_text(&equations.per_frame, registers);
+    collect_q_registers_from_text(&equations.per_pixel, registers);
+    collect_q_registers_from_text(&equations.point, registers);
+}
+
+fn collect_milkdrop_q_registers(preset: &MilkdropPresetDocument) -> Vec<String> {
+    let mut registers = Vec::new();
+    for key in preset.base_values.keys() {
+        collect_q_registers_from_text(key, &mut registers);
+    }
+    collect_q_registers_from_equations(&preset.equations, &mut registers);
+    collect_q_registers_from_text(&preset.warp_shader, &mut registers);
+    collect_q_registers_from_text(&preset.comp_shader, &mut registers);
+    for entry in preset
+        .shapes
+        .iter()
+        .chain(preset.sprites.iter())
+        .chain(preset.waves.iter())
+    {
+        for key in entry.base_values.keys() {
+            collect_q_registers_from_text(key, &mut registers);
+        }
+        collect_q_registers_from_equations(&entry.equations, &mut registers);
+    }
+    registers.sort_by_key(|register| {
+        register
+            .strip_prefix('q')
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or_default()
+    });
+    registers
+}
+
+fn max_q_register_index(registers: &[String]) -> usize {
+    registers
+        .iter()
+        .filter_map(|register| register.strip_prefix('q')?.parse::<usize>().ok())
+        .max()
+        .unwrap_or_default()
+}
+
+pub fn milkdrop_preset_metrics(preset: &MilkdropPresetDocument) -> MilkdropPresetMetrics {
+    let q_registers = collect_milkdrop_q_registers(preset);
+    MilkdropPresetMetrics {
+        max_q_register_index: max_q_register_index(&q_registers),
+        q_register_count: q_registers.len(),
+        q_registers,
+        shape_count: preset
+            .shapes
+            .iter()
+            .filter(|entry| milkdrop_entry_has_content(entry))
+            .count(),
+        sprite_count: preset
+            .sprites
+            .iter()
+            .filter(|entry| milkdrop_entry_has_content(entry))
+            .count(),
+        wave_count: preset
+            .waves
+            .iter()
+            .filter(|entry| milkdrop_entry_has_content(entry))
+            .count(),
+    }
+}
+
+fn webgpu_shader_sections(preset: &MilkdropPresetDocument) -> Vec<String> {
+    let mut sections = Vec::new();
+    if !preset.warp_shader.trim().is_empty()
+        && !analyze_milkdrop_webgpu_shader_support(&preset.warp_shader).supported
+    {
+        sections.push("warp_shader".to_string());
+    }
+    if !preset.comp_shader.trim().is_empty()
+        && !analyze_milkdrop_webgpu_shader_support(&preset.comp_shader).supported
+    {
+        sections.push("comp_shader".to_string());
+    }
+    sections
+}
+
+fn merge_milkdrop_metrics(metrics: &[MilkdropPresetMetrics]) -> MilkdropCompatibilitySummary {
+    let mut summary = MilkdropCompatibilitySummary::default();
+    for metric in metrics {
+        summary.max_q_register_index = summary
+            .max_q_register_index
+            .max(metric.max_q_register_index);
+        summary.max_shape_count = summary.max_shape_count.max(metric.shape_count);
+        summary.max_sprite_count = summary.max_sprite_count.max(metric.sprite_count);
+        summary.max_wave_count = summary.max_wave_count.max(metric.wave_count);
+        summary.total_shapes += metric.shape_count;
+        summary.total_sprites += metric.sprite_count;
+        summary.total_waves += metric.wave_count;
+        summary.q_registers.extend(metric.q_registers.clone());
+    }
+    summary.q_registers = merge_milkdrop_unique(summary.q_registers);
+    summary.q_registers.sort_by_key(|register| {
+        register
+            .strip_prefix('q')
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or_default()
+    });
+    summary
+}
+
+pub fn build_milkdrop_compatibility_entry(
+    id: &str,
+    file_name: &str,
+    source: &str,
+    force_milk2: bool,
+) -> MilkdropCompatibilityEntry {
+    let parsed = parse_milkdrop_preset_set(source, force_milk2);
+    let preset_reports = parsed
+        .presets
+        .iter()
+        .map(|preset| {
+            let report = analyze_milkdrop_preset_compatibility(preset);
+            let webgpu_shader_sections = webgpu_shader_sections(preset);
+            MilkdropCompatibilityPresetReport {
+                error: milkdrop_compatibility_error(&report),
+                index: preset.index,
+                metrics: milkdrop_preset_metrics(preset),
+                shader_sections: report.shader_sections,
+                title: preset.title.clone(),
+                unsupported_functions: report.unsupported_functions,
+                webgpu_supported: webgpu_shader_sections.is_empty(),
+                webgpu_shader_sections,
+            }
+        })
+        .collect::<Vec<_>>();
+    let metrics = merge_milkdrop_metrics(
+        &preset_reports
+            .iter()
+            .map(|report| report.metrics.clone())
+            .collect::<Vec<_>>(),
+    );
+    let shader_sections = merge_milkdrop_unique(
+        preset_reports
+            .iter()
+            .flat_map(|report| report.shader_sections.clone())
+            .collect(),
+    );
+    let unsupported_functions = merge_milkdrop_unique(
+        preset_reports
+            .iter()
+            .flat_map(|report| report.unsupported_functions.clone())
+            .collect(),
+    );
+    let webgpu_shader_sections = merge_milkdrop_unique(
+        preset_reports
+            .iter()
+            .flat_map(|report| report.webgpu_shader_sections.clone())
+            .collect(),
+    );
+    let supported = preset_reports.iter().all(|report| report.error.is_empty());
+    let webgpu_supported = preset_reports.iter().all(|report| report.webgpu_supported);
+    MilkdropCompatibilityEntry {
+        file_name: file_name.to_string(),
+        format: parsed.format,
+        id: if id.is_empty() {
+            if file_name.is_empty() {
+                "preset"
+            } else {
+                file_name
+            }
+            .to_string()
+        } else {
+            id.to_string()
+        },
+        metrics,
+        preset_count: preset_reports.len(),
+        preset_reports,
+        shader_sections,
+        supported,
+        unsupported_functions,
+        webgpu_shader_sections,
+        webgpu_supported,
+    }
+}
+
+pub fn summarize_milkdrop_compatibility_matrix(
+    entries: &[MilkdropCompatibilityEntry],
+) -> MilkdropCompatibilitySummary {
+    let mut summary = MilkdropCompatibilitySummary::default();
+    for entry in entries {
+        summary.max_q_register_index = summary
+            .max_q_register_index
+            .max(entry.metrics.max_q_register_index);
+        summary.max_shape_count = summary.max_shape_count.max(entry.metrics.max_shape_count);
+        summary.max_sprite_count = summary.max_sprite_count.max(entry.metrics.max_sprite_count);
+        summary.max_wave_count = summary.max_wave_count.max(entry.metrics.max_wave_count);
+        summary.preset_count += entry.preset_count;
+        summary.supported_count += usize::from(entry.supported);
+        summary.total_count += 1;
+        summary.unsupported_count += usize::from(!entry.supported);
+        summary.webgpu_supported_count += usize::from(entry.webgpu_supported);
+        summary.webgpu_unsupported_count += usize::from(!entry.webgpu_supported);
+        summary
+            .q_registers
+            .extend(entry.metrics.q_registers.clone());
+        summary
+            .unsupported_functions
+            .extend(entry.unsupported_functions.clone());
+        summary
+            .unsupported_shader_sections
+            .extend(entry.shader_sections.clone());
+        summary
+            .webgpu_unsupported_shader_sections
+            .extend(entry.webgpu_shader_sections.clone());
+    }
+    summary.q_registers = merge_milkdrop_unique(summary.q_registers);
+    summary.q_registers.sort_by_key(|register| {
+        register
+            .strip_prefix('q')
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or_default()
+    });
+    summary.unsupported_functions = merge_milkdrop_unique(summary.unsupported_functions);
+    summary.unsupported_shader_sections =
+        merge_milkdrop_unique(summary.unsupported_shader_sections);
+    summary.webgpu_unsupported_shader_sections =
+        merge_milkdrop_unique(summary.webgpu_unsupported_shader_sections);
+    summary
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct MilkdropShaderProgram {
     pub declarations: Vec<String>,
     pub expression: String,
@@ -14647,6 +14974,89 @@ mod tests {
         assert!(report.unsupported_functions.is_empty());
         assert!(report.shader_sections.is_empty());
         assert_eq!(milkdrop_compatibility_error(&report), "");
+    }
+
+    #[test]
+    fn rust_milkdrop_compatibility_matrix_tracks_dense_primitive_pressure() {
+        let mut lines = vec!["name=Dense Compatibility Probe".to_string()];
+        for index in 0..40 {
+            lines.push(format!("shape{index:02}_enabled=1"));
+            lines.push(format!("shape{index:02}_sides=5"));
+            lines.push(format!("shape{index:02}_rad=0.1"));
+        }
+        for index in 0..20 {
+            lines.push(format!("wavecode_{index}_enabled=1"));
+            lines.push(format!("wavecode_{index}_samples=16"));
+            lines.push(format!("wavecode_{index}_per_point1=x=i;"));
+        }
+        let entry =
+            build_milkdrop_compatibility_entry("dense-pack-probe", "", &lines.join("\n"), false);
+        assert!(entry.supported);
+        assert!(entry.webgpu_supported);
+        assert_eq!(entry.metrics.max_shape_count, 40);
+        assert_eq!(entry.metrics.max_wave_count, 20);
+        let summary = summarize_milkdrop_compatibility_matrix(&[entry]);
+        assert_eq!(summary.total_count, 1);
+        assert_eq!(summary.supported_count, 1);
+        assert_eq!(summary.max_shape_count, 40);
+        assert_eq!(summary.max_wave_count, 20);
+    }
+
+    #[test]
+    fn rust_milkdrop_compatibility_matrix_tracks_q_register_and_webgpu_gaps() {
+        let entry = build_milkdrop_compatibility_entry(
+            "q-register-pack-probe",
+            "",
+            r#"
+            [preset00]
+            q64=0.5
+            per_frame_1=q1=q64+bass;
+            wavecode_0_enabled=1
+            wavecode_0_per_point1=y=q48+sample;
+            [preset01]
+            per_frame_1=q63=q1+treb;
+            shape00_enabled=1
+            shape00_per_frame1=q32=q63*0.5;
+            comp_shader=ret = tex2D(album_art, uv).rgb * vec3(q32, get_fft(0.5), get_waveform(0.5));
+            "#,
+            true,
+        );
+        assert!(entry.supported);
+        assert!(entry.webgpu_supported);
+        assert!(entry.webgpu_shader_sections.is_empty());
+        assert_eq!(entry.preset_count, 2);
+        assert_eq!(entry.metrics.max_q_register_index, 64);
+        assert_eq!(
+            entry.metrics.q_registers,
+            vec![
+                "q1".to_string(),
+                "q32".to_string(),
+                "q48".to_string(),
+                "q63".to_string(),
+                "q64".to_string()
+            ]
+        );
+
+        let webgpu_gap = build_milkdrop_compatibility_entry(
+            "webgpu-shader-gap-probe",
+            "",
+            "comp_shader=ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);",
+            false,
+        );
+        assert!(webgpu_gap.supported);
+        assert!(!webgpu_gap.webgpu_supported);
+        assert_eq!(
+            webgpu_gap.webgpu_shader_sections,
+            vec!["comp_shader".to_string()]
+        );
+        let summary = summarize_milkdrop_compatibility_matrix(&[entry, webgpu_gap]);
+        assert_eq!(summary.total_count, 2);
+        assert_eq!(summary.webgpu_supported_count, 1);
+        assert_eq!(summary.webgpu_unsupported_count, 1);
+        assert_eq!(
+            summary.webgpu_unsupported_shader_sections,
+            vec!["comp_shader".to_string()]
+        );
     }
 
     #[test]
