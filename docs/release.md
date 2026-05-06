@@ -1,7 +1,7 @@
 # slskr Release Runbook
 
 This is the release-prep path for binary archives. `slskr` is a single Rust
-binary plus runtime web assets from `web/build`.
+binary plus Rust/WASM runtime web assets staged as `web/build`.
 
 ## Local Gate
 
@@ -11,7 +11,7 @@ scripts/run-release-gate.sh
 
 This runs public-posture checks, shell syntax checks, Rust formatting, clippy,
 workspace tests, RustSec audit when `cargo-audit` is installed, workspace
-packaging, web tests, web build verification, and subpath smoke checks.
+packaging, web tests, Rust/WASM web checks, and subpath smoke checks.
 
 The live slskd automation-client compatibility smoke is opt-in because it starts
 a local daemon and may install the Python `slskd-api` package:
@@ -32,7 +32,7 @@ scripts/verify-release-artifacts.sh target/dist
 The archive includes:
 
 - `slskr` or `slskr.exe`
-- `web/build`
+- `web/build` with `slskr_web.js`, `slskr_web_bg.wasm`, `styles.css`, and `index.html`
 - `README.md`, `LICENSE`, `NOTICE`, `COMPLIANCE.md`
 - `docs/slskr.config.example.toml`
 - `RUN.txt`

@@ -3,6 +3,9 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, rc::Rc};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NavItem {
     pub href: &'static str,
@@ -6436,6 +6439,10 @@ fn player_footer_html() -> String {
     r#"<footer class="slskr-player" data-slskr-player data-slskr-player-rating-key="" data-slskr-player-radio-query=""><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button><button type="button" data-slskr-player-action="radio">Radio</button></section><section class="slskr-player-rating" aria-label="Player rating"><strong>Rating</strong><div id="slskr-player-rating-controls"><button type="button" data-slskr-player-rating="1">1</button><button type="button" data-slskr-player-rating="2">2</button><button type="button" data-slskr-player-rating="3">3</button><button type="button" data-slskr-player-rating="4">4</button><button type="button" data-slskr-player-rating="5">5</button></div><span id="slskr-player-rating-status">Not rated</span></section><section><strong>Radio</strong><span id="slskr-player-radio">No track selected</span><span id="slskr-player-transfers">0 down / 0 up</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
 }
 
+fn rust_milkdrop_panel_html() -> String {
+    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native warp</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="preset">Preset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span>Preset-reactive player visualization</span></footer></section>"#.to_string()
+}
+
 pub fn shell_html() -> String {
     let nav = nav_items()
         .iter()
@@ -6451,9 +6458,10 @@ pub fn shell_html() -> String {
         .join("");
 
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main>{player}</div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main>{milkdrop}{player}</div>"#,
         route_page = route_page_html("/searches"),
         runtime = runtime_probe_pending_html(),
+        milkdrop = rust_milkdrop_panel_html(),
         player = player_footer_html(),
     )
 }
@@ -10360,21 +10368,26 @@ fn mount_player_controls(
                         open_player_radio_search(&window, &document);
                         return;
                     }
+                    if action == "visualizer" {
+                        match toggle_rust_milkdrop_visualizer(&window, &document) {
+                            Ok(()) => {
+                                set_player_status(&document, "Rust MilkDrop visualizer ready")
+                            }
+                            Err(error) => set_player_status(
+                                &document,
+                                &error.as_string().unwrap_or_else(|| {
+                                    "Rust MilkDrop visualizer failed".to_string()
+                                }),
+                            ),
+                        }
+                        return;
+                    }
                     let result = match action.as_str() {
                         "clear" => {
                             fetch_text_with_method(
                                 &window,
                                 &endpoint_url("/nowplaying"),
                                 "DELETE",
-                                None,
-                            )
-                            .await
-                        }
-                        "visualizer" => {
-                            fetch_text_with_method(
-                                &window,
-                                &endpoint_url("/player/external-visualizer/launch"),
-                                "POST",
                                 None,
                             )
                             .await
@@ -11380,6 +11393,365 @@ pub fn player_visualizer_text(body: &str) -> String {
         .unwrap_or_else(|| "Visualizer status unavailable".to_string())
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct RustMilkdropPreset {
+    pub decay: f64,
+    pub rot: f64,
+    pub wave_a: f64,
+    pub wave_b: f64,
+    pub wave_g: f64,
+    pub wave_r: f64,
+    pub wave_scale: f64,
+    pub zoom: f64,
+}
+
+impl Default for RustMilkdropPreset {
+    fn default() -> Self {
+        Self {
+            decay: 0.89,
+            rot: 0.012,
+            wave_a: 0.86,
+            wave_b: 0.92,
+            wave_g: 0.58,
+            wave_r: 0.16,
+            wave_scale: 1.25,
+            zoom: 1.02,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RustMilkdropFrame {
+    pub background_alpha: f64,
+    pub rotation: f64,
+    pub wave_color: (u8, u8, u8),
+    pub wave_radius: f64,
+    pub zoom: f64,
+}
+
+fn clamp_unit(value: f64) -> f64 {
+    value.clamp(0.0, 1.0)
+}
+
+fn clamp_range(value: f64, min: f64, max: f64) -> f64 {
+    value.clamp(min, max)
+}
+
+pub fn parse_rust_milkdrop_preset(source: &str) -> RustMilkdropPreset {
+    let mut preset = RustMilkdropPreset::default();
+    for line in source.lines() {
+        let Some((raw_key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = raw_key.trim().to_ascii_lowercase();
+        let Ok(value) = raw_value.trim().parse::<f64>() else {
+            continue;
+        };
+        match key.as_str() {
+            "decay" => preset.decay = clamp_range(value, 0.5, 0.99),
+            "rot" => preset.rot = clamp_range(value, -0.5, 0.5),
+            "wave_a" => preset.wave_a = clamp_unit(value),
+            "wave_b" => preset.wave_b = clamp_unit(value),
+            "wave_g" => preset.wave_g = clamp_unit(value),
+            "wave_r" => preset.wave_r = clamp_unit(value),
+            "wave_scale" => preset.wave_scale = clamp_range(value, 0.2, 3.0),
+            "zoom" => preset.zoom = clamp_range(value, 0.5, 1.8),
+            _ => {}
+        }
+    }
+    preset
+}
+
+pub fn rust_milkdrop_frame(
+    preset: &RustMilkdropPreset,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+) -> RustMilkdropFrame {
+    let bass = clamp_unit(bass);
+    let mid = clamp_unit(mid);
+    let treble = clamp_unit(treble);
+    let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
+    RustMilkdropFrame {
+        background_alpha: clamp_range(1.0 - preset.decay, 0.01, 0.5),
+        rotation: preset.rot + (time_seconds * 0.37).sin() * 0.035 + (treble - 0.5) * 0.05,
+        wave_color: (
+            ((preset.wave_r + bass * 0.35) * 255.0).min(255.0) as u8,
+            ((preset.wave_g + mid * 0.30) * 255.0).min(255.0) as u8,
+            ((preset.wave_b + treble * 0.25) * 255.0).min(255.0) as u8,
+        ),
+        wave_radius: clamp_range(
+            0.18 + preset.wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
+            0.12,
+            0.68,
+        ),
+        zoom: clamp_range(preset.zoom + (pulse - 0.5) * 0.035, 0.5, 1.8),
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+const RUST_MILKDROP_PRESETS: [&str; 3] = [
+    "name=slskr native warp\ndecay=0.89\nwave_r=0.16\nwave_g=0.58\nwave_b=0.92\nwave_a=0.86\nwave_scale=1.25\nzoom=1.02\nrot=0.012",
+    "name=slskr amber tunnel\ndecay=0.86\nwave_r=0.92\nwave_g=0.52\nwave_b=0.18\nwave_a=0.82\nwave_scale=1.55\nzoom=1.05\nrot=-0.018",
+    "name=slskr green pulse\ndecay=0.91\nwave_r=0.20\nwave_g=0.86\nwave_b=0.44\nwave_a=0.78\nwave_scale=1.1\nzoom=0.98\nrot=0.028",
+];
+
+pub fn rust_milkdrop_preset_name(source: &str) -> String {
+    source
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            if key.trim().eq_ignore_ascii_case("name") {
+                let value = value.trim();
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| "Rust MilkDrop preset".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn toggle_rust_milkdrop_visualizer(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let panel = document
+        .get_element_by_id("slskr-rust-milkdrop")
+        .ok_or_else(|| JsValue::from_str("Rust MilkDrop panel is missing"))?;
+    if panel.has_attribute("hidden") {
+        panel.remove_attribute("hidden")?;
+        start_rust_milkdrop_visualizer(window, document)?;
+    } else {
+        panel.set_attribute("hidden", "")?;
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn start_rust_milkdrop_visualizer(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let panel = document
+        .get_element_by_id("slskr-rust-milkdrop")
+        .ok_or_else(|| JsValue::from_str("Rust MilkDrop panel is missing"))?;
+    if panel
+        .get_attribute("data-slskr-milkdrop-running")
+        .as_deref()
+        == Some("true")
+    {
+        return Ok(());
+    }
+    panel.set_attribute("data-slskr-milkdrop-running", "true")?;
+
+    mount_rust_milkdrop_buttons(window, document)?;
+
+    let canvas: web_sys::HtmlCanvasElement = document
+        .get_element_by_id("slskr-milkdrop-canvas")
+        .ok_or_else(|| JsValue::from_str("Rust MilkDrop canvas is missing"))?
+        .dyn_into()?;
+    let context: web_sys::CanvasRenderingContext2d = canvas
+        .get_context("2d")?
+        .ok_or_else(|| JsValue::from_str("2D canvas is unavailable"))?
+        .dyn_into()?;
+    let animation_handle: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
+        Rc::new(RefCell::new(None));
+    let animation_handle_for_frame = animation_handle.clone();
+    let window_for_frame = window.clone();
+    let document_for_frame = document.clone();
+
+    *animation_handle_for_frame.borrow_mut() = Some(Closure::wrap(Box::new(move |time_ms: f64| {
+        let Some(panel) = document_for_frame.get_element_by_id("slskr-rust-milkdrop") else {
+            return;
+        };
+        if panel.has_attribute("hidden") {
+            return;
+        }
+        let preset_index = panel
+            .get_attribute("data-slskr-milkdrop-preset-index")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        let preset_source = RUST_MILKDROP_PRESETS[preset_index % RUST_MILKDROP_PRESETS.len()];
+        let preset = parse_rust_milkdrop_preset(preset_source);
+        let time = time_ms / 1000.0;
+        let bass = (time * 1.9).sin() * 0.5 + 0.5;
+        let mid = (time * 1.17 + 1.3).sin() * 0.5 + 0.5;
+        let treble = (time * 2.7 + 0.4).sin() * 0.5 + 0.5;
+        let frame = rust_milkdrop_frame(&preset, time, bass, mid, treble);
+        render_rust_milkdrop_frame(&context, &canvas, &frame, time);
+        if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
+            status.set_text_content(Some(&format!(
+                "MilkDrop running: bass {:.0}% mid {:.0}% treble {:.0}%",
+                bass * 100.0,
+                mid * 100.0,
+                treble * 100.0
+            )));
+        }
+        if let Some(callback) = animation_handle.borrow().as_ref() {
+            let _ = window_for_frame.request_animation_frame(callback.as_ref().unchecked_ref());
+        }
+    }) as Box<dyn FnMut(f64)>));
+
+    if let Some(callback) = animation_handle_for_frame.borrow().as_ref() {
+        window.request_animation_frame(callback.as_ref().unchecked_ref())?;
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_rust_milkdrop_buttons(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let buttons = document.query_selector_all("[data-slskr-milkdrop-action]")?;
+    for index in 0..buttons.length() {
+        let Some(node) = buttons.item(index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        if button.has_attribute("data-slskr-mounted") {
+            continue;
+        }
+        button.set_attribute("data-slskr-mounted", "true")?;
+        let action = button
+            .get_attribute("data-slskr-milkdrop-action")
+            .unwrap_or_default();
+        let window = window.clone();
+        let document = document.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                match action.as_str() {
+                    "close" => {
+                        if let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") {
+                            let _ = panel.set_attribute("hidden", "");
+                        }
+                        set_player_status(&document, "Rust MilkDrop hidden");
+                    }
+                    "external" => {
+                        let window = window.clone();
+                        let document = document.clone();
+                        wasm_bindgen_futures::spawn_local(async move {
+                            let result = fetch_text_with_method(
+                                &window,
+                                &endpoint_url("/player/external-visualizer/launch"),
+                                "POST",
+                                None,
+                            )
+                            .await;
+                            match result {
+                                Ok(body) => set_player_status(&document, &compact_preview(&body)),
+                                Err(error) => set_player_status(
+                                    &document,
+                                    &error.as_string().unwrap_or_else(|| {
+                                        "external visualizer request failed".to_string()
+                                    }),
+                                ),
+                            }
+                        });
+                    }
+                    _ => cycle_rust_milkdrop_preset(&document),
+                }
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn cycle_rust_milkdrop_preset(document: &web_sys::Document) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+        return;
+    };
+    let current = panel
+        .get_attribute("data-slskr-milkdrop-preset-index")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let next = (current + 1) % RUST_MILKDROP_PRESETS.len();
+    let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", &next.to_string());
+    if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
+        label.set_text_content(Some(&rust_milkdrop_preset_name(
+            RUST_MILKDROP_PRESETS[next],
+        )));
+    }
+    set_player_status(document, "Rust MilkDrop preset changed");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_rust_milkdrop_frame(
+    context: &web_sys::CanvasRenderingContext2d,
+    canvas: &web_sys::HtmlCanvasElement,
+    frame: &RustMilkdropFrame,
+    time: f64,
+) {
+    let width = canvas.width() as f64;
+    let height = canvas.height() as f64;
+    context.set_fill_style_str(&format!("rgba(9, 13, 18, {:.3})", frame.background_alpha));
+    context.fill_rect(0.0, 0.0, width, height);
+
+    let (r, g, b) = frame.wave_color;
+    let center_x = width / 2.0;
+    let center_y = height / 2.0;
+    let base = width.min(height) * frame.wave_radius * frame.zoom;
+    context.save();
+    let _ = context.translate(center_x, center_y);
+    let _ = context.rotate(frame.rotation + time * 0.08);
+    context.set_stroke_style_str(&format!("rgba({r}, {g}, {b}, 0.92)"));
+    context.set_line_width(2.0);
+    context.begin_path();
+    for index in 0..192 {
+        let unit = index as f64 / 192.0;
+        let angle = unit * std::f64::consts::TAU;
+        let radius = base
+            * (0.72
+                + 0.12 * (time * 1.9 + angle * 3.0).sin()
+                + 0.08 * (time * 2.7 + angle * 7.0).cos());
+        let x = radius * angle.cos();
+        let y = radius * angle.sin();
+        if index == 0 {
+            context.move_to(x, y);
+        } else {
+            context.line_to(x, y);
+        }
+    }
+    context.close_path();
+    context.stroke();
+
+    context.set_fill_style_str(&format!("rgba({r}, {g}, {b}, 0.14)"));
+    context.fill();
+
+    context.set_stroke_style_str("rgba(255, 209, 102, 0.34)");
+    context.set_line_width(1.0);
+    for ring in 1..=4 {
+        context.begin_path();
+        let ring_radius = base * ring as f64 * 0.18 * (1.0 + 0.03 * (time + ring as f64).sin());
+        let _ = context.arc(0.0, 0.0, ring_radius, 0.0, std::f64::consts::TAU);
+        context.stroke();
+    }
+    context.restore();
+
+    context.set_stroke_style_str("rgba(216, 232, 225, 0.36)");
+    context.set_line_width(1.5);
+    context.begin_path();
+    for index in 0..128 {
+        let x = width * index as f64 / 127.0;
+        let amp =
+            (time * 5.0 + index as f64 * 0.19).sin() * (0.25 + 0.18 * (time * 2.0).sin().abs());
+        let y = height * (0.82 + amp * 0.28);
+        if index == 0 {
+            context.move_to(x, y);
+        } else {
+            context.line_to(x, y);
+        }
+    }
+    context.stroke();
+}
+
 #[cfg(target_arch = "wasm32")]
 async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> {
     let document = window
@@ -11571,6 +11943,9 @@ mod tests {
         assert!(html.contains("data-slskr-route-kind=\"Search\""));
         assert!(html.contains("slskr-player-now"));
         assert!(html.contains("slskr-player-transfers"));
+        assert!(html.contains("slskr-rust-milkdrop"));
+        assert!(html.contains("slskr-milkdrop-canvas"));
+        assert!(html.contains("data-slskr-milkdrop-action=\"preset\""));
         assert!(html.contains("/api/v0/searches"));
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
@@ -11667,6 +12042,35 @@ mod tests {
                 seed_label: "No track selected".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn rust_milkdrop_parser_and_frame_state_are_deterministic() {
+        let preset = parse_rust_milkdrop_preset(
+            "name=Test\ndecay=0.88\nwave_r=0.2\nwave_g=0.4\nwave_b=0.6\nwave_a=0.9\nwave_scale=1.5\nzoom=1.1\nrot=0.03",
+        );
+
+        assert_eq!(preset.decay, 0.88);
+        assert_eq!(preset.wave_r, 0.2);
+        assert_eq!(preset.wave_g, 0.4);
+        assert_eq!(preset.wave_b, 0.6);
+        assert_eq!(preset.wave_a, 0.9);
+        assert_eq!(preset.wave_scale, 1.5);
+        assert_eq!(preset.zoom, 1.1);
+        assert_eq!(preset.rot, 0.03);
+        assert_eq!(
+            rust_milkdrop_preset_name("name=Archive Tunnel\nwave_r=1"),
+            "Archive Tunnel"
+        );
+
+        let frame = rust_milkdrop_frame(&preset, 2.0, 0.5, 0.25, 0.75);
+        assert!(frame.background_alpha > 0.0);
+        assert!(frame.rotation.abs() > 0.0);
+        assert!(frame.wave_radius > 0.1);
+        assert!((0.5..=1.8).contains(&frame.zoom));
+        assert!(frame.wave_color.0 >= 95);
+        assert!(frame.wave_color.1 >= 120);
+        assert!(frame.wave_color.2 >= 200);
     }
 
     #[test]
