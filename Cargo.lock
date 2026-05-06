@@ -1320,6 +1320,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustymilk-core"
+version = "0.1.0"
+source = "git+https://github.com/snapetech/RustyMilk?branch=main#88c01a99bfd6aa4cda9997c76b7d7275b6684fd4"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1522,6 +1530,7 @@ name = "slskr-web"
 version = "0.0.0"
 dependencies = [
  "js-sys",
+ "rustymilk-core",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
