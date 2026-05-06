@@ -121,16 +121,16 @@ vi.mock('../../lib/externalVisualizer', () => ({
       available: true,
       configured: true,
       enabled: true,
-      name: 'MilkDrop3',
-      path: '/opt/MilkDrop3/MilkDrop 3.exe',
-      resolvedPath: '/opt/MilkDrop3/MilkDrop 3.exe',
-      workingDirectory: '/opt/MilkDrop3',
+      name: 'RustyMilk',
+      path: '/opt/RustyMilk/RustyMilk 3.exe',
+      resolvedPath: '/opt/RustyMilk/RustyMilk 3.exe',
+      workingDirectory: '/opt/RustyMilk',
     }),
   ),
   launchExternalVisualizer: vi.fn(() =>
     Promise.resolve({
       error: null,
-      name: 'MilkDrop3',
+      name: 'RustyMilk',
       processId: 1234,
       started: true,
     }),
@@ -300,7 +300,7 @@ describe('PlayerBar', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
   });
 
-  it('switches the visual tile from album art to the MilkDrop canvas', () => {
+  it('switches the visual tile from album art to the RustyMilk canvas', () => {
     renderPlayer();
 
     expect(screen.getByTestId('player-album-art')).toBeInTheDocument();
@@ -318,12 +318,12 @@ describe('PlayerBar', () => {
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('rustymilk-webgl2'));
     expect(document.querySelector('.player-visualizer-canvas')).toBeInTheDocument();
 
     fireEvent.click(tile);
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgpu'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('rustymilk-webgpu'));
 
     fireEvent.click(tile);
     await waitFor(() =>
@@ -339,23 +339,23 @@ describe('PlayerBar', () => {
     await waitFor(() =>
       expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('art'));
 
-    fireEvent.click(screen.getByTestId('player-visual-tile-mode-native-webgl2'));
+    fireEvent.click(screen.getByTestId('player-visual-tile-mode-rustymilk-webgl2'));
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('rustymilk-webgl2'));
   });
 
   it('shows tile-level visualizer maximize controls even while analyzer bars are active', async () => {
     renderPlayer();
-    window.localStorage.setItem('slskr.player.visualizerEngine', 'native-webgl2');
+    window.localStorage.setItem('slskr.player.visualizerEngine', 'rustymilk-webgl2');
 
     fireEvent.click(screen.getByTestId('player-visual-tile-mode-spectrum'));
 
     await waitFor(() =>
       expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('spectrum'));
 
-    fireEvent.click(screen.getByTestId('player-visual-tile-mode-native-webgl2'));
+    fireEvent.click(screen.getByTestId('player-visual-tile-mode-rustymilk-webgl2'));
     await waitFor(() =>
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2'));
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('rustymilk-webgl2'));
 
     fireEvent.click(screen.getByTestId('player-visual-tile-mode-spectrum'));
     await waitFor(() =>
@@ -364,7 +364,7 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('player-visual-tile-fullwindow'));
 
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('native-webgl2');
+      expect(window.localStorage.getItem('slskr.player.visualTileMode')).toBe('rustymilk-webgl2');
     });
     expect(document.querySelector('.player-visualizer-fullwindow')).toBeInTheDocument();
   });
@@ -426,14 +426,14 @@ describe('PlayerBar', () => {
     expect(
       await screen.findByText('Ready to launch on the slskr host.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('/opt/MilkDrop3/MilkDrop 3.exe')).toBeInTheDocument();
+    expect(screen.getByText('/opt/RustyMilk/RustyMilk 3.exe')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('player-launch-external-visualizer'));
 
     await waitFor(() => {
       expect(externalVisualizer.launchExternalVisualizer).toHaveBeenCalled();
     });
-    expect(await screen.findByText('MilkDrop3 launched.')).toBeInTheDocument();
+    expect(await screen.findByText('RustyMilk launched.')).toBeInTheDocument();
   });
 
   it('shows now-playing source badges and stores local discovery ratings', async () => {

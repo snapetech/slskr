@@ -7,22 +7,22 @@ import {
 } from '../../lib/storage';
 import { resumeAudioGraph } from './audioGraph';
 import SpectrumAnalyzer from './SpectrumAnalyzer';
-import { createNativeMilkdropEngine } from './visualizers/nativeMilkdropEngine';
+import { createRustyMilkEngine } from './visualizers/rustyMilkEngine';
 
 const visualizerEngineStorageKey = 'slskr.player.visualizerEngine';
-const nativePresetStorageKey = 'slskr.player.nativeMilkdropPreset';
-const nativePresetLibraryStorageKey = 'slskr.player.nativeMilkdropPresetLibrary';
-const nativePresetAutomationStorageKey = 'slskr.player.nativeMilkdropPresetAutomation';
-const nativePresetFavoritesStorageKey = 'slskr.player.nativeMilkdropPresetFavorites';
-const nativePresetFpsCapStorageKey = 'slskr.player.nativeMilkdropFpsCap';
-const nativePresetQualityStorageKey = 'slskr.player.nativeMilkdropQuality';
-const nativePresetLibraryModeStorageKey = 'slskr.player.nativeMilkdropPresetLibraryMode';
-const nativePresetSearchStorageKey = 'slskr.player.nativeMilkdropPresetSearch';
-const nativePresetPlaylistsStorageKey = 'slskr.player.nativeMilkdropPresetPlaylists';
-const activeNativePresetPlaylistStorageKey = 'slskr.player.nativeMilkdropActivePresetPlaylist';
-const nativePresetLibraryLimit = 20;
-const nativePresetHistoryLimit = 12;
-const nativePresetPlaylistLimit = 12;
+const rustyMilkPresetStorageKey = 'slskr.player.rustyMilkPreset';
+const rustyMilkPresetLibraryStorageKey = 'slskr.player.rustyMilkPresetLibrary';
+const rustyMilkPresetAutomationStorageKey = 'slskr.player.rustyMilkPresetAutomation';
+const rustyMilkPresetFavoritesStorageKey = 'slskr.player.rustyMilkPresetFavorites';
+const rustyMilkPresetFpsCapStorageKey = 'slskr.player.rustyMilkFpsCap';
+const rustyMilkPresetQualityStorageKey = 'slskr.player.rustyMilkQuality';
+const rustyMilkPresetLibraryModeStorageKey = 'slskr.player.rustyMilkPresetLibraryMode';
+const rustyMilkPresetSearchStorageKey = 'slskr.player.rustyMilkPresetSearch';
+const rustyMilkPresetPlaylistsStorageKey = 'slskr.player.rustyMilkPresetPlaylists';
+const activeRustyMilkPresetPlaylistStorageKey = 'slskr.player.rustyMilkActivePresetPlaylist';
+const rustyMilkPresetLibraryLimit = 20;
+const rustyMilkPresetHistoryLimit = 12;
+const rustyMilkPresetPlaylistLimit = 12;
 const nativeTextureAssetMaxBytes = 1024 * 1024;
 const nativeEditableParameters = [
   {
@@ -85,17 +85,17 @@ const nativeEditableParameters = [
 
 const readStoredEngine = () => {
   const stored = getLocalStorageItem(visualizerEngineStorageKey);
-  if (stored === 'native') return 'native-webgl2';
-  return ['native-webgl2', 'native-webgpu'].includes(stored)
+  if (stored === 'native') return 'rustymilk-webgl2';
+  return ['rustymilk-webgl2', 'rustymilk-webgpu'].includes(stored)
     ? stored
-    : 'native-webgl2';
+    : 'rustymilk-webgl2';
 };
 
-const visualizerEngineModes = ['native-webgl2', 'native-webgpu'];
+const visualizerEngineModes = ['rustymilk-webgl2', 'rustymilk-webgpu'];
 
-const isNativeEngine = (engine) => engine === 'native-webgl2' || engine === 'native-webgpu';
+const isRustyMilkEngine = (engine) => engine === 'rustymilk-webgl2' || engine === 'rustymilk-webgpu';
 
-const getNativeRendererBackend = (engine) => (engine === 'native-webgpu' ? 'webgpu' : 'webgl2');
+const getRustyMilkRendererBackend = (engine) => (engine === 'rustymilk-webgpu' ? 'webgpu' : 'webgl2');
 
 const getNextEngine = (engine) => {
   const index = visualizerEngineModes.indexOf(engine);
@@ -103,77 +103,77 @@ const getNextEngine = (engine) => {
 };
 
 const getEngineLabel = (engine) => {
-  if (engine === 'native-webgl2') return 'MilkDrop3 WebGL2';
-  if (engine === 'native-webgpu') return 'MilkDrop3 WebGPU';
-  return 'MilkDrop3 WebGL2';
+  if (engine === 'rustymilk-webgl2') return 'RustyMilk WebGL2';
+  if (engine === 'rustymilk-webgpu') return 'RustyMilk WebGPU';
+  return 'RustyMilk WebGL2';
 };
 
 const getEngineIcon = (engine) => {
-  if (engine === 'native-webgpu') return 'bolt';
+  if (engine === 'rustymilk-webgpu') return 'bolt';
   return 'microchip';
 };
 
 const isPromiseLike = (value) => value && typeof value.then === 'function';
 
-const getNextNativeAutomationMode = (mode) => {
+const getNextRustyMilkAutomationMode = (mode) => {
   if (mode === 'off') return 'beat';
   if (mode === 'beat') return 'timed';
   return 'off';
 };
 
-const getNativeAutomationLabel = (mode) => {
+const getRustyMilkAutomationLabel = (mode) => {
   if (mode === 'beat') return 'Beat';
   if (mode === 'timed') return 'Timed';
   return 'Off';
 };
 
-const defaultNativeAutomationSettings = {
+const defaultRustyMilkAutomationSettings = {
   beatsPerPreset: 8,
   mode: 'off',
   timedIntervalSeconds: 30,
 };
 
-const normalizeNativeAutomationSettings = (settings = {}) => ({
-  ...defaultNativeAutomationSettings,
+const normalizeRustyMilkAutomationSettings = (settings = {}) => ({
+  ...defaultRustyMilkAutomationSettings,
   ...settings,
   beatsPerPreset: [4, 8, 16].includes(Number(settings.beatsPerPreset))
     ? Number(settings.beatsPerPreset)
-    : defaultNativeAutomationSettings.beatsPerPreset,
+    : defaultRustyMilkAutomationSettings.beatsPerPreset,
   mode: ['beat', 'timed'].includes(settings.mode) ? settings.mode : 'off',
   timedIntervalSeconds: [15, 30, 60].includes(Number(settings.timedIntervalSeconds))
     ? Number(settings.timedIntervalSeconds)
-    : defaultNativeAutomationSettings.timedIntervalSeconds,
+    : defaultRustyMilkAutomationSettings.timedIntervalSeconds,
 });
 
-const readStoredNativeAutomationSettings = () => {
-  const stored = getLocalStorageItem(nativePresetAutomationStorageKey);
+const readStoredRustyMilkAutomationSettings = () => {
+  const stored = getLocalStorageItem(rustyMilkPresetAutomationStorageKey);
   if (['beat', 'timed', 'off'].includes(stored)) {
-    return normalizeNativeAutomationSettings({ mode: stored });
+    return normalizeRustyMilkAutomationSettings({ mode: stored });
   }
   try {
-    return normalizeNativeAutomationSettings(JSON.parse(stored || '{}'));
+    return normalizeRustyMilkAutomationSettings(JSON.parse(stored || '{}'));
   } catch {
-    return defaultNativeAutomationSettings;
+    return defaultRustyMilkAutomationSettings;
   }
 };
 
-const writeStoredNativeAutomationSettings = (settings) => {
+const writeStoredRustyMilkAutomationSettings = (settings) => {
   setLocalStorageItem(
-    nativePresetAutomationStorageKey,
-    JSON.stringify(normalizeNativeAutomationSettings(settings)),
+    rustyMilkPresetAutomationStorageKey,
+    JSON.stringify(normalizeRustyMilkAutomationSettings(settings)),
   );
 };
 
-const getNativeEditableParameter = (key) =>
+const getRustyMilkEditableParameter = (key) =>
   nativeEditableParameters.find((parameter) => parameter.key === key)
   || nativeEditableParameters[0];
 
-const readStoredNativeFpsCap = () => {
-  const value = getLocalStorageItem(nativePresetFpsCapStorageKey, 'full');
+const readStoredRustyMilkFpsCap = () => {
+  const value = getLocalStorageItem(rustyMilkPresetFpsCapStorageKey, 'full');
   return ['full', '60', '30', '24'].includes(value) ? value : 'full';
 };
 
-const getNativeFpsCapMs = (fpsCap) => {
+const getRustyMilkFpsCapMs = (fpsCap) => {
   if (fpsCap === '60') return 1000 / 60;
   if (fpsCap === '30') return 1000 / 30;
   if (fpsCap === '24') return 1000 / 24;
@@ -195,14 +195,14 @@ const nativeQualityPresets = {
   },
 };
 
-const readStoredNativeQuality = () => {
-  const value = getLocalStorageItem(nativePresetQualityStorageKey, 'balanced');
+const readStoredRustyMilkQuality = () => {
+  const value = getLocalStorageItem(rustyMilkPresetQualityStorageKey, 'balanced');
   return Object.keys(nativeQualityPresets).includes(value) || value === 'custom'
     ? value
     : 'balanced';
 };
 
-const getNativeWebGpuDebugLabel = (status = {}) => {
+const getRustyMilkWebGpuDebugLabel = (status = {}) => {
   if (!status.available) {
     return status.reason ? `WebGL2 baseline (${status.reason})` : 'WebGL2 baseline';
   }
@@ -216,23 +216,23 @@ const getNativeWebGpuDebugLabel = (status = {}) => {
 
 const getVisualizerErrorMessage = (engineType, error) => {
   const detail = error?.message ? ` ${error.message}` : '';
-  return isNativeEngine(engineType)
-    ? `Native MilkDrop render failed.${detail}`
-    : 'MilkDrop failed. Showing analyzer fallback.';
+  return isRustyMilkEngine(engineType)
+    ? `RustyMilk render failed.${detail}`
+    : 'RustyMilk failed. Showing analyzer fallback.';
 };
 
-const readStoredNativePreset = () => {
+const readStoredRustyMilkPreset = () => {
   try {
-    return JSON.parse(getLocalStorageItem(nativePresetStorageKey, 'null'));
+    return JSON.parse(getLocalStorageItem(rustyMilkPresetStorageKey, 'null'));
   } catch {
     return null;
   }
 };
 
-const readStoredNativePresetLibrary = () => {
+const readStoredRustyMilkPresetLibrary = () => {
   try {
     const library = JSON.parse(
-      getLocalStorageItem(nativePresetLibraryStorageKey, '[]'),
+      getLocalStorageItem(rustyMilkPresetLibraryStorageKey, '[]'),
     );
     return Array.isArray(library)
       ? library.filter((preset) => preset?.id && preset?.source)
@@ -242,10 +242,10 @@ const readStoredNativePresetLibrary = () => {
   }
 };
 
-const readStoredNativePresetFavorites = () => {
+const readStoredRustyMilkPresetFavorites = () => {
   try {
     const favorites = JSON.parse(
-      getLocalStorageItem(nativePresetFavoritesStorageKey, '[]'),
+      getLocalStorageItem(rustyMilkPresetFavoritesStorageKey, '[]'),
     );
     return Array.isArray(favorites)
       ? favorites.filter((id) => typeof id === 'string' && id.length > 0)
@@ -255,20 +255,20 @@ const readStoredNativePresetFavorites = () => {
   }
 };
 
-const readStoredNativePresetLibraryMode = () => {
-  return getLocalStorageItem(nativePresetLibraryModeStorageKey) === 'favorites'
+const readStoredRustyMilkPresetLibraryMode = () => {
+  return getLocalStorageItem(rustyMilkPresetLibraryModeStorageKey) === 'favorites'
     ? 'favorites'
     : 'all';
 };
 
-const readStoredNativePresetSearch = () => {
-  return getLocalStorageItem(nativePresetSearchStorageKey, '');
+const readStoredRustyMilkPresetSearch = () => {
+  return getLocalStorageItem(rustyMilkPresetSearchStorageKey, '');
 };
 
-const readStoredNativePresetPlaylists = () => {
+const readStoredRustyMilkPresetPlaylists = () => {
   try {
     const playlists = JSON.parse(
-      getLocalStorageItem(nativePresetPlaylistsStorageKey, '[]'),
+      getLocalStorageItem(rustyMilkPresetPlaylistsStorageKey, '[]'),
     );
     return Array.isArray(playlists)
       ? playlists
@@ -287,50 +287,50 @@ const readStoredNativePresetPlaylists = () => {
   }
 };
 
-const readStoredActiveNativePresetPlaylistId = () => {
-  return getLocalStorageItem(activeNativePresetPlaylistStorageKey, '');
+const readStoredActiveRustyMilkPresetPlaylistId = () => {
+  return getLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey, '');
 };
 
-const writeStoredNativePresetLibrary = (library) => {
+const writeStoredRustyMilkPresetLibrary = (library) => {
   setLocalStorageItem(
-    nativePresetLibraryStorageKey,
-    JSON.stringify(library.slice(0, nativePresetLibraryLimit)),
+    rustyMilkPresetLibraryStorageKey,
+    JSON.stringify(library.slice(0, rustyMilkPresetLibraryLimit)),
   );
 };
 
-const writeStoredNativePresetFavorites = (favoriteIds) => {
+const writeStoredRustyMilkPresetFavorites = (favoriteIds) => {
   if (favoriteIds.length === 0) {
-    removeLocalStorageItem(nativePresetFavoritesStorageKey);
+    removeLocalStorageItem(rustyMilkPresetFavoritesStorageKey);
     return;
   }
   setLocalStorageItem(
-    nativePresetFavoritesStorageKey,
+    rustyMilkPresetFavoritesStorageKey,
     JSON.stringify(favoriteIds),
   );
 };
 
-const writeStoredNativePresetPlaylists = (playlists) => {
+const writeStoredRustyMilkPresetPlaylists = (playlists) => {
   if (playlists.length === 0) {
-    removeLocalStorageItem(nativePresetPlaylistsStorageKey);
+    removeLocalStorageItem(rustyMilkPresetPlaylistsStorageKey);
     return;
   }
   setLocalStorageItem(
-    nativePresetPlaylistsStorageKey,
-    JSON.stringify(playlists.slice(0, nativePresetPlaylistLimit)),
+    rustyMilkPresetPlaylistsStorageKey,
+    JSON.stringify(playlists.slice(0, rustyMilkPresetPlaylistLimit)),
   );
 };
 
-const upsertNativePresetLibraryEntry = (library, entry) => [
+const upsertRustyMilkPresetLibraryEntry = (library, entry) => [
   entry,
   ...library.filter((preset) => preset.id !== entry.id),
-].slice(0, nativePresetLibraryLimit);
+].slice(0, rustyMilkPresetLibraryLimit);
 
-const pruneNativePresetFavorites = (favoriteIds, library) => {
+const pruneRustyMilkPresetFavorites = (favoriteIds, library) => {
   const libraryIds = new Set(library.map((preset) => preset.id));
   return favoriteIds.filter((id) => libraryIds.has(id));
 };
 
-const pruneNativePresetPlaylists = (playlists, library) => {
+const pruneRustyMilkPresetPlaylists = (playlists, library) => {
   const libraryIds = new Set(library.map((preset) => preset.id));
   return playlists
     .map((playlist) => ({
@@ -338,47 +338,47 @@ const pruneNativePresetPlaylists = (playlists, library) => {
       presetIds: playlist.presetIds.filter((id) => libraryIds.has(id)),
     }))
     .filter((playlist) => playlist.presetIds.length > 0)
-    .slice(0, nativePresetPlaylistLimit);
+    .slice(0, rustyMilkPresetPlaylistLimit);
 };
 
-const getNativePresetSearchText = (preset) =>
+const getRustyMilkPresetSearchText = (preset) =>
   [preset.title, preset.fileName].filter(Boolean).join(' ').toLowerCase();
 
-const filterNativePresetLibrary = (library, search) => {
+const filterRustyMilkPresetLibrary = (library, search) => {
   const query = search.trim().toLowerCase();
   if (!query) return library;
   const terms = query.split(/\s+/).filter(Boolean);
   return library.filter((preset) => {
-    const text = getNativePresetSearchText(preset);
+    const text = getRustyMilkPresetSearchText(preset);
     return terms.every((term) => text.includes(term));
   });
 };
 
-const getNativePresetPlaylistName = ({ mode, search }) => {
+const getRustyMilkPresetPlaylistName = ({ mode, search }) => {
   const query = search.trim();
   if (query) return `Search: ${query}`;
   if (mode === 'favorites') return 'Favorites';
   return 'Native playlist';
 };
 
-const getNativePresetPlaylistId = () =>
+const getRustyMilkPresetPlaylistId = () =>
   `playlist:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
 
-const getNativePresetFileId = (file) =>
+const getRustyMilkPresetFileId = (file) =>
   [file.name, file.size, file.lastModified].filter((part) => part !== undefined).join(':');
 
-const isNativePresetFile = (file) => /\.(milk2?|txt)$/i.test(file.name);
+const isRustyMilkPresetFile = (file) => /\.(milk2?|txt)$/i.test(file.name);
 
-const isNativeFragmentFile = (file) => /\.(shape|wave)$/i.test(file.name);
+const isRustyMilkFragmentFile = (file) => /\.(shape|wave)$/i.test(file.name);
 
-const getNativeImportFilePath = (file) =>
+const getRustyMilkImportFilePath = (file) =>
   file.webkitRelativePath || file.name;
 
 const isNativeTextureAssetCandidateFile = (file) =>
   /^image\//i.test(file.type) || /\.(png|jpe?g|webp|gif)$/i.test(file.name);
 
-const getNativeTextureAssetSkip = (file) => {
-  if (isNativePresetFile(file) || isNativeFragmentFile(file)) return null;
+const getRustyMilkTextureAssetSkip = (file) => {
+  if (isRustyMilkPresetFile(file) || isRustyMilkFragmentFile(file)) return null;
   if (!isNativeTextureAssetCandidateFile(file)) {
     return {
       fileName: file.name,
@@ -406,7 +406,7 @@ const textureReferencePattern =
 const standaloneTextureReferencePattern =
   /^\s*(?:texture|tex|tex_name|image|img|file|filename)\s*=\s*([^\r\n;]+)/gim;
 
-const collectNativePresetTextureReferences = (source) => {
+const collectRustyMilkPresetTextureReferences = (source) => {
   const references = new Set();
   let match = textureReferencePattern.exec(source || '');
   while (match) {
@@ -421,8 +421,8 @@ const collectNativePresetTextureReferences = (source) => {
   return references;
 };
 
-const selectNativePresetTextureAssets = (source, textureAssets) => {
-  const references = collectNativePresetTextureReferences(source);
+const selectRustyMilkPresetTextureAssets = (source, textureAssets) => {
+  const references = collectRustyMilkPresetTextureReferences(source);
   if (references.size === 0) return {};
   const selected = {};
   Object.entries(textureAssets).forEach(([key, asset]) => {
@@ -449,8 +449,8 @@ const readNativeTextureAssets = async (files) => {
   const textureAssets = {};
   const skippedTextureAssets = [];
   for (const file of files.filter((entry) =>
-    !isNativePresetFile(entry) && !isNativeFragmentFile(entry))) {
-    const skip = getNativeTextureAssetSkip(file);
+    !isRustyMilkPresetFile(entry) && !isRustyMilkFragmentFile(entry))) {
+    const skip = getRustyMilkTextureAssetSkip(file);
     if (skip) {
       skippedTextureAssets.push(skip);
       continue;
@@ -465,7 +465,7 @@ const readNativeTextureAssets = async (files) => {
       });
       continue;
     }
-    const filePath = getNativeImportFilePath(file);
+    const filePath = getRustyMilkImportFilePath(file);
     getTextureAssetKeys(filePath).forEach((key) => {
       textureAssets[key] = {
         dataUrl,
@@ -494,7 +494,7 @@ const formatSkippedFileNames = (skipped) => {
   return `${skippedNames}${remaining}`;
 };
 
-const getNativePresetImportMessage = ({ importedCount, skipped, skippedTextureAssets }) => {
+const getRustyMilkPresetImportMessage = ({ importedCount, skipped, skippedTextureAssets }) => {
   const messages = [];
   if (skipped.length > 0) {
     const prefix = importedCount > 0
@@ -537,38 +537,38 @@ const Visualizer = ({
   const lastNativeRenderAtRef = useRef(0);
   const rafRef = useRef(null);
   const engineAudioNodeRef = useRef(null);
-  const nativeAutomationSettingsRef = useRef(readStoredNativeAutomationSettings());
+  const rustyMilkAutomationSettingsRef = useRef(readStoredRustyMilkAutomationSettings());
   const [fallbackMode, setFallbackMode] = useState(false);
   const [engineType, setEngineType] = useState(readStoredEngine);
   const [engineName, setEngineName] = useState('');
-  const [nativeAutomationSettings, setNativeAutomationSettings] = useState(
-    () => nativeAutomationSettingsRef.current,
+  const [rustyMilkAutomationSettings, setRustyMilkAutomationSettings] = useState(
+    () => rustyMilkAutomationSettingsRef.current,
   );
-  const [activeNativePresetId, setActiveNativePresetId] = useState(
-    () => readStoredNativePreset()?.id || '',
+  const [activeRustyMilkPresetId, setActiveRustyMilkPresetId] = useState(
+    () => readStoredRustyMilkPreset()?.id || '',
   );
-  const [nativeFavoritePresetIds, setNativeFavoritePresetIds] = useState(
-    readStoredNativePresetFavorites,
+  const [rustyMilkFavoritePresetIds, setRustyMilkFavoritePresetIds] = useState(
+    readStoredRustyMilkPresetFavorites,
   );
-  const [nativeLibraryMode, setNativeLibraryMode] = useState(
-    readStoredNativePresetLibraryMode,
+  const [rustyMilkLibraryMode, setRustyMilkLibraryMode] = useState(
+    readStoredRustyMilkPresetLibraryMode,
   );
-  const [nativePresetHistory, setNativePresetHistory] = useState([]);
-  const [nativePresetLibrary, setNativePresetLibrary] = useState(readStoredNativePresetLibrary);
-  const [nativeFpsCap, setNativeFpsCap] = useState(readStoredNativeFpsCap);
-  const [nativeFrameMs, setNativeFrameMs] = useState(0);
-  const [nativeQualityPreset, setNativeQualityPreset] = useState(readStoredNativeQuality);
-  const [nativePresetSearch, setNativePresetSearch] = useState(readStoredNativePresetSearch);
-  const [nativePresetPlaylists, setNativePresetPlaylists] = useState(
-    readStoredNativePresetPlaylists,
+  const [rustyMilkPresetHistory, setRustyMilkPresetHistory] = useState([]);
+  const [rustyMilkPresetLibrary, setRustyMilkPresetLibrary] = useState(readStoredRustyMilkPresetLibrary);
+  const [nativeFpsCap, setNativeFpsCap] = useState(readStoredRustyMilkFpsCap);
+  const [rustyMilkFrameMs, setRustyMilkFrameMs] = useState(0);
+  const [nativeQualityPreset, setNativeQualityPreset] = useState(readStoredRustyMilkQuality);
+  const [rustyMilkPresetSearch, setRustyMilkPresetSearch] = useState(readStoredRustyMilkPresetSearch);
+  const [rustyMilkPresetPlaylists, setRustyMilkPresetPlaylists] = useState(
+    readStoredRustyMilkPresetPlaylists,
   );
-  const [nativeFragmentSummary, setNativeFragmentSummary] = useState({
+  const [rustyMilkFragmentSummary, setRustyMilkFragmentSummary] = useState({
     shapes: [],
     waves: [],
   });
-  const [nativeParameterValues, setNativeParameterValues] = useState({});
-  const [nativeParameterDrafts, setNativeParameterDrafts] = useState({});
-  const [selectedNativeParameter, setSelectedNativeParameter] = useState(
+  const [rustyMilkParameterValues, setRustyMilkParameterValues] = useState({});
+  const [rustyMilkParameterDrafts, setRustyMilkParameterDrafts] = useState({});
+  const [selectedRustyMilkParameter, setSelectedRustyMilkParameter] = useState(
     nativeEditableParameters[0].key,
   );
   const [showNativeDebug, setShowNativeDebug] = useState(false);
@@ -576,72 +576,72 @@ const Visualizer = ({
   const [selectedNativeShapeIndex, setSelectedNativeShapeIndex] = useState(0);
   const [selectedNativeWaveIndex, setSelectedNativeWaveIndex] = useState(0);
   const [activeNativePlaylistId, setActiveNativePlaylistId] = useState(
-    readStoredActiveNativePresetPlaylistId,
+    readStoredActiveRustyMilkPresetPlaylistId,
   );
   const [presetName, setPresetName] = useState('');
   const [error, setError] = useState(null);
   const activeEngineType = engineOverride || engineType;
 
-  const activeNativePlaylist = nativePresetPlaylists.find(
+  const activeNativePlaylist = rustyMilkPresetPlaylists.find(
     (playlist) => playlist.id === activeNativePlaylistId,
   );
-  const playlistScopedNativePresetLibrary = activeNativePlaylist
+  const playlistScopedRustyMilkPresetLibrary = activeNativePlaylist
     ? activeNativePlaylist.presetIds
-      .map((presetId) => nativePresetLibrary.find((preset) => preset.id === presetId))
+      .map((presetId) => rustyMilkPresetLibrary.find((preset) => preset.id === presetId))
       .filter(Boolean)
-    : nativePresetLibrary;
-  const modeFilteredNativePresetLibrary = nativeLibraryMode === 'favorites'
-    ? playlistScopedNativePresetLibrary.filter(
-      (preset) => nativeFavoritePresetIds.includes(preset.id),
+    : rustyMilkPresetLibrary;
+  const modeFilteredRustyMilkPresetLibrary = rustyMilkLibraryMode === 'favorites'
+    ? playlistScopedRustyMilkPresetLibrary.filter(
+      (preset) => rustyMilkFavoritePresetIds.includes(preset.id),
     )
-    : playlistScopedNativePresetLibrary;
-  const visibleNativePresetLibrary = filterNativePresetLibrary(
-    modeFilteredNativePresetLibrary,
-    nativePresetSearch,
+    : playlistScopedRustyMilkPresetLibrary;
+  const visibleRustyMilkPresetLibrary = filterRustyMilkPresetLibrary(
+    modeFilteredRustyMilkPresetLibrary,
+    rustyMilkPresetSearch,
   );
-  const visibleNativePresetIndex = visibleNativePresetLibrary.findIndex(
-    (preset) => preset.id === activeNativePresetId,
+  const visibleRustyMilkPresetIndex = visibleRustyMilkPresetLibrary.findIndex(
+    (preset) => preset.id === activeRustyMilkPresetId,
   );
-  const activeNativePresetIsFavorite = nativeFavoritePresetIds.includes(activeNativePresetId);
-  const selectedNativePresetValue = visibleNativePresetLibrary.some(
-    (preset) => preset.id === activeNativePresetId,
+  const activeRustyMilkPresetIsFavorite = rustyMilkFavoritePresetIds.includes(activeRustyMilkPresetId);
+  const selectedRustyMilkPresetValue = visibleRustyMilkPresetLibrary.some(
+    (preset) => preset.id === activeRustyMilkPresetId,
   )
-    ? activeNativePresetId
+    ? activeRustyMilkPresetId
     : '';
-  const hasNativePresetSearch = nativePresetSearch.trim().length > 0;
-  const nativeBankNavigationDisabled = isNativeEngine(activeEngineType)
-    && nativePresetLibrary.length > 0
-    && visibleNativePresetLibrary.length === 0;
-  const canSaveNativePlaylist = visibleNativePresetLibrary.length > 0;
-  const hasNativeShapes = nativeFragmentSummary.shapes.length > 0;
-  const hasNativeWaves = nativeFragmentSummary.waves.length > 0;
-  const nativeAutomationMode = nativeAutomationSettings.mode;
-  const nativeParameter = getNativeEditableParameter(selectedNativeParameter);
-  const nativeParameterValue = Number(
-    nativeParameterDrafts[selectedNativeParameter]
-    ?? nativeParameterValues[selectedNativeParameter]
-    ?? nativeParameter.defaultValue,
+  const hasRustyMilkPresetSearch = rustyMilkPresetSearch.trim().length > 0;
+  const nativeBankNavigationDisabled = isRustyMilkEngine(activeEngineType)
+    && rustyMilkPresetLibrary.length > 0
+    && visibleRustyMilkPresetLibrary.length === 0;
+  const canSaveNativePlaylist = visibleRustyMilkPresetLibrary.length > 0;
+  const hasNativeShapes = rustyMilkFragmentSummary.shapes.length > 0;
+  const hasNativeWaves = rustyMilkFragmentSummary.waves.length > 0;
+  const rustyMilkAutomationMode = rustyMilkAutomationSettings.mode;
+  const rustyMilkParameter = getRustyMilkEditableParameter(selectedRustyMilkParameter);
+  const rustyMilkParameterValue = Number(
+    rustyMilkParameterDrafts[selectedRustyMilkParameter]
+    ?? rustyMilkParameterValues[selectedRustyMilkParameter]
+    ?? rustyMilkParameter.defaultValue,
   );
 
-  const refreshNativeFragmentSummary = useCallback(() => {
+  const refreshRustyMilkFragmentSummary = useCallback(() => {
     const summary = engineRef.current?.getPresetFragmentSummary?.() || {
       shapes: [],
       waves: [],
     };
-    setNativeFragmentSummary(summary);
+    setRustyMilkFragmentSummary(summary);
     setSelectedNativeShapeIndex((index) =>
       Math.min(index, Math.max(0, summary.shapes.length - 1)));
     setSelectedNativeWaveIndex((index) =>
       Math.min(index, Math.max(0, summary.waves.length - 1)));
-    setNativeParameterValues(engineRef.current?.getPresetParameterSummary?.() || {});
-    setNativeParameterDrafts({});
+    setRustyMilkParameterValues(engineRef.current?.getPresetParameterSummary?.() || {});
+    setRustyMilkParameterDrafts({});
     setNativeDebugSnapshot(engineRef.current?.getPresetDebugSnapshot?.() || null);
   }, []);
 
   const renderLoop = useCallback((timestamp = performance.now()) => {
     if (!engineRef.current) return;
     try {
-      const fpsCapMs = isNativeEngine(activeEngineType) ? getNativeFpsCapMs(nativeFpsCap) : 0;
+      const fpsCapMs = isRustyMilkEngine(activeEngineType) ? getRustyMilkFpsCapMs(nativeFpsCap) : 0;
       if (
         fpsCapMs > 0
         && lastNativeRenderAtRef.current
@@ -652,10 +652,10 @@ const Visualizer = ({
       }
       const startedAt = performance.now();
       const renderResult = engineRef.current.render();
-      if (isNativeEngine(activeEngineType)) {
+      if (isRustyMilkEngine(activeEngineType)) {
         lastNativeRenderAtRef.current = timestamp;
         if (showNativeDebug) {
-          setNativeFrameMs(Number((performance.now() - startedAt).toFixed(1)));
+          setRustyMilkFrameMs(Number((performance.now() - startedAt).toFixed(1)));
         }
       }
       if (renderResult?.presetName) {
@@ -663,9 +663,9 @@ const Visualizer = ({
       }
     } catch (renderError) {
       // eslint-disable-next-line no-console
-      console.error('Failed to render MilkDrop visualizer', renderError);
-      if (isNativeEngine(activeEngineType)) {
-        removeLocalStorageItem(nativePresetStorageKey);
+      console.error('Failed to render RustyMilk visualizer', renderError);
+      if (isRustyMilkEngine(activeEngineType)) {
+        removeLocalStorageItem(rustyMilkPresetStorageKey);
       }
       setError(getVisualizerErrorMessage(activeEngineType, renderError));
       return;
@@ -673,25 +673,25 @@ const Visualizer = ({
     rafRef.current = window.requestAnimationFrame(renderLoop);
   }, [activeEngineType, nativeFpsCap, showNativeDebug]);
 
-  const cycleNativeAutomationMode = useCallback(() => {
-    setNativeAutomationSettings((current) =>
-      normalizeNativeAutomationSettings({
+  const cycleRustyMilkAutomationMode = useCallback(() => {
+    setRustyMilkAutomationSettings((current) =>
+      normalizeRustyMilkAutomationSettings({
         ...current,
-        mode: getNextNativeAutomationMode(current.mode),
+        mode: getNextRustyMilkAutomationMode(current.mode),
       }));
   }, []);
 
-  const updateNativeAutomationBeats = useCallback((event) => {
-    setNativeAutomationSettings((current) =>
-      normalizeNativeAutomationSettings({
+  const updateRustyMilkAutomationBeats = useCallback((event) => {
+    setRustyMilkAutomationSettings((current) =>
+      normalizeRustyMilkAutomationSettings({
         ...current,
         beatsPerPreset: Number(event.target.value),
       }));
   }, []);
 
-  const updateNativeAutomationInterval = useCallback((event) => {
-    setNativeAutomationSettings((current) =>
-      normalizeNativeAutomationSettings({
+  const updateRustyMilkAutomationInterval = useCallback((event) => {
+    setRustyMilkAutomationSettings((current) =>
+      normalizeRustyMilkAutomationSettings({
         ...current,
         timedIntervalSeconds: Number(event.target.value),
       }));
@@ -701,11 +701,11 @@ const Visualizer = ({
     const fpsCap = event.target.value;
     setNativeFpsCap(fpsCap);
     setNativeQualityPreset('custom');
-    setLocalStorageItem(nativePresetQualityStorageKey, 'custom');
+    setLocalStorageItem(rustyMilkPresetQualityStorageKey, 'custom');
     if (fpsCap === 'full') {
-      removeLocalStorageItem(nativePresetFpsCapStorageKey);
+      removeLocalStorageItem(rustyMilkPresetFpsCapStorageKey);
     } else {
-      setLocalStorageItem(nativePresetFpsCapStorageKey, fpsCap);
+      setLocalStorageItem(rustyMilkPresetFpsCapStorageKey, fpsCap);
     }
     lastNativeRenderAtRef.current = 0;
   }, []);
@@ -715,27 +715,27 @@ const Visualizer = ({
     const preset = nativeQualityPresets[quality];
     if (!preset) return;
     setNativeQualityPreset(quality);
-    setLocalStorageItem(nativePresetQualityStorageKey, quality);
+    setLocalStorageItem(rustyMilkPresetQualityStorageKey, quality);
     setNativeFpsCap(preset.fpsCap);
     if (preset.fpsCap === 'full') {
-      removeLocalStorageItem(nativePresetFpsCapStorageKey);
+      removeLocalStorageItem(rustyMilkPresetFpsCapStorageKey);
     } else {
-      setLocalStorageItem(nativePresetFpsCapStorageKey, preset.fpsCap);
+      setLocalStorageItem(rustyMilkPresetFpsCapStorageKey, preset.fpsCap);
     }
     lastNativeRenderAtRef.current = 0;
   }, []);
 
-  const selectNativeParameter = useCallback((event) => {
-    setSelectedNativeParameter(event.target.value);
+  const selectRustyMilkParameter = useCallback((event) => {
+    setSelectedRustyMilkParameter(event.target.value);
   }, []);
 
-  const updateNativeParameterDraft = useCallback((event) => {
+  const updateRustyMilkParameterDraft = useCallback((event) => {
     const value = Number(event.target.value);
-    setNativeParameterDrafts((drafts) => ({
+    setRustyMilkParameterDrafts((drafts) => ({
       ...drafts,
-      [selectedNativeParameter]: value,
+      [selectedRustyMilkParameter]: value,
     }));
-  }, [selectedNativeParameter]);
+  }, [selectedRustyMilkParameter]);
 
   const sizeCanvas = useCallback(() => {
     const container = containerRef.current;
@@ -750,7 +750,7 @@ const Visualizer = ({
     engine.resize(width, height);
   }, []);
 
-  const loadNativePresetEntry = useCallback(async (preset, options = {}) => {
+  const loadRustyMilkPresetEntry = useCallback(async (preset, options = {}) => {
     if (!preset || !engineRef.current?.loadPresetText) return false;
     const { pushHistory = true } = options;
 
@@ -764,40 +764,40 @@ const Visualizer = ({
       if (isPromiseLike(loadedPresetName)) {
         loadedPresetName = await loadedPresetName;
       }
-      setLocalStorageItem(nativePresetStorageKey, JSON.stringify(preset));
-      if (pushHistory && activeNativePresetId && activeNativePresetId !== preset.id) {
-        setNativePresetHistory((history) => [
-          activeNativePresetId,
-          ...history.filter((id) => id !== activeNativePresetId && id !== preset.id),
-        ].slice(0, nativePresetHistoryLimit));
+      setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(preset));
+      if (pushHistory && activeRustyMilkPresetId && activeRustyMilkPresetId !== preset.id) {
+        setRustyMilkPresetHistory((history) => [
+          activeRustyMilkPresetId,
+          ...history.filter((id) => id !== activeRustyMilkPresetId && id !== preset.id),
+        ].slice(0, rustyMilkPresetHistoryLimit));
       }
-      setActiveNativePresetId(preset.id);
+      setActiveRustyMilkPresetId(preset.id);
       setPresetName(loadedPresetName);
-      refreshNativeFragmentSummary();
+      refreshRustyMilkFragmentSummary();
       sizeCanvas();
       return true;
     } catch (presetError) {
       // eslint-disable-next-line no-console
-      console.error('Failed to load native MilkDrop preset from library', presetError);
+      console.error('Failed to load RustyMilk preset from library', presetError);
       setError(presetError?.message || 'Native preset load failed.');
       return false;
     }
-  }, [activeNativePresetId, refreshNativeFragmentSummary, sizeCanvas]);
+  }, [activeRustyMilkPresetId, refreshRustyMilkFragmentSummary, sizeCanvas]);
 
-  const loadNativePresetByOffset = useCallback((offset) => {
-    if (visibleNativePresetLibrary.length === 0) return false;
-    const currentIndex = visibleNativePresetIndex >= 0
-      ? visibleNativePresetIndex
+  const loadRustyMilkPresetByOffset = useCallback((offset) => {
+    if (visibleRustyMilkPresetLibrary.length === 0) return false;
+    const currentIndex = visibleRustyMilkPresetIndex >= 0
+      ? visibleRustyMilkPresetIndex
       : (offset > 0 ? -1 : 0);
     const nextIndex = (
-      currentIndex + offset + visibleNativePresetLibrary.length
-    ) % visibleNativePresetLibrary.length;
-    return loadNativePresetEntry(visibleNativePresetLibrary[nextIndex]);
-  }, [loadNativePresetEntry, visibleNativePresetIndex, visibleNativePresetLibrary]);
+      currentIndex + offset + visibleRustyMilkPresetLibrary.length
+    ) % visibleRustyMilkPresetLibrary.length;
+    return loadRustyMilkPresetEntry(visibleRustyMilkPresetLibrary[nextIndex]);
+  }, [loadRustyMilkPresetEntry, visibleRustyMilkPresetIndex, visibleRustyMilkPresetLibrary]);
 
   const cyclePreset = useCallback(async () => {
-    if (isNativeEngine(activeEngineType) && nativePresetLibrary.length > 0) {
-      await loadNativePresetByOffset(1);
+    if (isRustyMilkEngine(activeEngineType) && rustyMilkPresetLibrary.length > 0) {
+      await loadRustyMilkPresetByOffset(1);
       return;
     }
     if (!engineRef.current) return;
@@ -808,7 +808,7 @@ const Visualizer = ({
     if (nextPresetName) {
       setPresetName(nextPresetName);
     }
-  }, [activeEngineType, loadNativePresetByOffset, nativePresetLibrary.length]);
+  }, [activeEngineType, loadRustyMilkPresetByOffset, rustyMilkPresetLibrary.length]);
 
   const cycleEngineType = useCallback(() => {
     const nextEngine = getNextEngine(activeEngineType);
@@ -819,133 +819,133 @@ const Visualizer = ({
     setEngineType(nextEngine);
   }, [activeEngineType, onEngineChange]);
 
-  const previousNativeLibraryPreset = useCallback(async () => {
-    if (nativePresetHistory.length > 0) {
-      const [previousId, ...remainingHistory] = nativePresetHistory;
-      const previousPreset = nativePresetLibrary.find((preset) => preset.id === previousId);
-      setNativePresetHistory(remainingHistory);
-      await loadNativePresetEntry(previousPreset, { pushHistory: false });
+  const previousRustyMilkLibraryPreset = useCallback(async () => {
+    if (rustyMilkPresetHistory.length > 0) {
+      const [previousId, ...remainingHistory] = rustyMilkPresetHistory;
+      const previousPreset = rustyMilkPresetLibrary.find((preset) => preset.id === previousId);
+      setRustyMilkPresetHistory(remainingHistory);
+      await loadRustyMilkPresetEntry(previousPreset, { pushHistory: false });
       return;
     }
-    await loadNativePresetByOffset(-1);
+    await loadRustyMilkPresetByOffset(-1);
   }, [
-    loadNativePresetByOffset,
-    loadNativePresetEntry,
-    nativePresetHistory,
-    nativePresetLibrary,
+    loadRustyMilkPresetByOffset,
+    loadRustyMilkPresetEntry,
+    rustyMilkPresetHistory,
+    rustyMilkPresetLibrary,
   ]);
 
-  const randomNativeLibraryPreset = useCallback(async () => {
-    if (visibleNativePresetLibrary.length === 0) return;
-    const candidates = visibleNativePresetLibrary.filter(
-      (preset) => preset.id !== activeNativePresetId,
+  const randomRustyMilkLibraryPreset = useCallback(async () => {
+    if (visibleRustyMilkPresetLibrary.length === 0) return;
+    const candidates = visibleRustyMilkPresetLibrary.filter(
+      (preset) => preset.id !== activeRustyMilkPresetId,
     );
-    const pool = candidates.length > 0 ? candidates : visibleNativePresetLibrary;
+    const pool = candidates.length > 0 ? candidates : visibleRustyMilkPresetLibrary;
     const randomIndex = Math.floor(Math.random() * pool.length);
-    await loadNativePresetEntry(pool[randomIndex]);
-  }, [activeNativePresetId, loadNativePresetEntry, visibleNativePresetLibrary]);
+    await loadRustyMilkPresetEntry(pool[randomIndex]);
+  }, [activeRustyMilkPresetId, loadRustyMilkPresetEntry, visibleRustyMilkPresetLibrary]);
 
-  const toggleNativePresetFavorite = useCallback(() => {
-    if (!activeNativePresetId) return;
-    setNativeFavoritePresetIds((favoriteIds) => {
-      const nextFavoriteIds = favoriteIds.includes(activeNativePresetId)
-        ? favoriteIds.filter((id) => id !== activeNativePresetId)
-        : [activeNativePresetId, ...favoriteIds];
-      writeStoredNativePresetFavorites(nextFavoriteIds);
+  const toggleRustyMilkPresetFavorite = useCallback(() => {
+    if (!activeRustyMilkPresetId) return;
+    setRustyMilkFavoritePresetIds((favoriteIds) => {
+      const nextFavoriteIds = favoriteIds.includes(activeRustyMilkPresetId)
+        ? favoriteIds.filter((id) => id !== activeRustyMilkPresetId)
+        : [activeRustyMilkPresetId, ...favoriteIds];
+      writeStoredRustyMilkPresetFavorites(nextFavoriteIds);
       return nextFavoriteIds;
     });
-  }, [activeNativePresetId]);
+  }, [activeRustyMilkPresetId]);
 
-  const toggleNativeLibraryMode = useCallback(() => {
-    setNativeLibraryMode((current) => {
+  const toggleRustyMilkLibraryMode = useCallback(() => {
+    setRustyMilkLibraryMode((current) => {
       const nextMode = current === 'favorites' ? 'all' : 'favorites';
-      setLocalStorageItem(nativePresetLibraryModeStorageKey, nextMode);
+      setLocalStorageItem(rustyMilkPresetLibraryModeStorageKey, nextMode);
       return nextMode;
     });
   }, []);
 
-  const updateNativePresetSearch = useCallback((event) => {
+  const updateRustyMilkPresetSearch = useCallback((event) => {
     const nextSearch = event.target.value;
-    setNativePresetSearch(nextSearch);
+    setRustyMilkPresetSearch(nextSearch);
     if (nextSearch.trim()) {
-      setLocalStorageItem(nativePresetSearchStorageKey, nextSearch);
+      setLocalStorageItem(rustyMilkPresetSearchStorageKey, nextSearch);
     } else {
-      removeLocalStorageItem(nativePresetSearchStorageKey);
+      removeLocalStorageItem(rustyMilkPresetSearchStorageKey);
     }
   }, []);
 
-  const clearNativePresetSearch = useCallback(() => {
-    setNativePresetSearch('');
-    removeLocalStorageItem(nativePresetSearchStorageKey);
+  const clearRustyMilkPresetSearch = useCallback(() => {
+    setRustyMilkPresetSearch('');
+    removeLocalStorageItem(rustyMilkPresetSearchStorageKey);
   }, []);
 
   const saveNativePlaylistFromVisibleBank = useCallback(() => {
-    if (visibleNativePresetLibrary.length === 0) return;
-    const defaultName = getNativePresetPlaylistName({
-      mode: nativeLibraryMode,
-      search: nativePresetSearch,
+    if (visibleRustyMilkPresetLibrary.length === 0) return;
+    const defaultName = getRustyMilkPresetPlaylistName({
+      mode: rustyMilkLibraryMode,
+      search: rustyMilkPresetSearch,
     });
-    const nextName = window.prompt?.('Name this native MilkDrop playlist', defaultName);
+    const nextName = window.prompt?.('Name this RustyMilk playlist', defaultName);
     if (!nextName || !nextName.trim()) return;
     const playlist = {
       createdAt: new Date().toISOString(),
-      id: getNativePresetPlaylistId(),
+      id: getRustyMilkPresetPlaylistId(),
       name: nextName.trim(),
-      presetIds: visibleNativePresetLibrary.map((preset) => preset.id),
+      presetIds: visibleRustyMilkPresetLibrary.map((preset) => preset.id),
     };
-    setNativePresetPlaylists((playlists) => {
+    setRustyMilkPresetPlaylists((playlists) => {
       const nextPlaylists = [
         playlist,
         ...playlists.filter((entry) => entry.name !== playlist.name),
-      ].slice(0, nativePresetPlaylistLimit);
-      writeStoredNativePresetPlaylists(nextPlaylists);
+      ].slice(0, rustyMilkPresetPlaylistLimit);
+      writeStoredRustyMilkPresetPlaylists(nextPlaylists);
       return nextPlaylists;
     });
     setActiveNativePlaylistId(playlist.id);
-    setLocalStorageItem(activeNativePresetPlaylistStorageKey, playlist.id);
-  }, [nativeLibraryMode, nativePresetSearch, visibleNativePresetLibrary]);
+    setLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey, playlist.id);
+  }, [rustyMilkLibraryMode, rustyMilkPresetSearch, visibleRustyMilkPresetLibrary]);
 
   const selectNativePlaylist = useCallback((event) => {
     const playlistId = event.target.value;
     setActiveNativePlaylistId(playlistId);
     if (playlistId) {
-      setLocalStorageItem(activeNativePresetPlaylistStorageKey, playlistId);
+      setLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey, playlistId);
     } else {
-      removeLocalStorageItem(activeNativePresetPlaylistStorageKey);
+      removeLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey);
     }
   }, []);
 
   const clearActiveNativePlaylist = useCallback(() => {
     setActiveNativePlaylistId('');
-    removeLocalStorageItem(activeNativePresetPlaylistStorageKey);
+    removeLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey);
   }, []);
 
   const renameActiveNativePlaylist = useCallback(() => {
-    const activePlaylist = nativePresetPlaylists.find(
+    const activePlaylist = rustyMilkPresetPlaylists.find(
       (playlist) => playlist.id === activeNativePlaylistId,
     );
     if (!activePlaylist) return;
-    const nextName = window.prompt?.('Rename native MilkDrop playlist', activePlaylist.name);
+    const nextName = window.prompt?.('Rename RustyMilk playlist', activePlaylist.name);
     if (!nextName || !nextName.trim()) return;
-    setNativePresetPlaylists((playlists) => {
+    setRustyMilkPresetPlaylists((playlists) => {
       const nextPlaylists = playlists.map((playlist) =>
         (playlist.id === activePlaylist.id
           ? { ...playlist, name: nextName.trim(), updatedAt: new Date().toISOString() }
           : playlist));
-      writeStoredNativePresetPlaylists(nextPlaylists);
+      writeStoredRustyMilkPresetPlaylists(nextPlaylists);
       return nextPlaylists;
     });
-  }, [activeNativePlaylistId, nativePresetPlaylists]);
+  }, [activeNativePlaylistId, rustyMilkPresetPlaylists]);
 
   const removeActiveNativePlaylist = useCallback(() => {
     if (!activeNativePlaylistId) return;
-    setNativePresetPlaylists((playlists) => {
+    setRustyMilkPresetPlaylists((playlists) => {
       const nextPlaylists = playlists.filter((playlist) => playlist.id !== activeNativePlaylistId);
-      writeStoredNativePresetPlaylists(nextPlaylists);
+      writeStoredRustyMilkPresetPlaylists(nextPlaylists);
       return nextPlaylists;
     });
     setActiveNativePlaylistId('');
-    removeLocalStorageItem(activeNativePresetPlaylistStorageKey);
+    removeLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey);
   }, [activeNativePlaylistId]);
 
   useEffect(() => {
@@ -966,18 +966,18 @@ const Visualizer = ({
           return;
         }
 
-        if (activeEngineType === 'native-webgl2' && !supportsWebGl2()) {
-          setError('Native MilkDrop WebGL2 needs WebGL2. Showing analyzer fallback.');
+        if (activeEngineType === 'rustymilk-webgl2' && !supportsWebGl2()) {
+          setError('RustyMilk WebGL2 needs WebGL2. Showing analyzer fallback.');
           setFallbackMode(true);
           return;
         }
 
-        const engine = await createNativeMilkdropEngine({
+        const engine = await createRustyMilkEngine({
           audioContext: graph.ctx,
           audioNode: graph.visualizerInput,
           canvas: canvasRef.current,
           pixelRatio: window.devicePixelRatio || 1,
-          rendererBackend: getNativeRendererBackend(activeEngineType),
+          rendererBackend: getRustyMilkRendererBackend(activeEngineType),
         });
         createdEngine = engine;
         if (cancelled) {
@@ -989,25 +989,25 @@ const Visualizer = ({
         engineAudioNodeRef.current = graph.visualizerInput;
         setEngineName(engine.name);
         setPresetName(engine.presetName);
-        if (isNativeEngine(activeEngineType) && engine.setPresetAutomation) {
-          engine.setPresetAutomation(nativeAutomationSettingsRef.current);
+        if (isRustyMilkEngine(activeEngineType) && engine.setPresetAutomation) {
+          engine.setPresetAutomation(rustyMilkAutomationSettingsRef.current);
         }
-        if (isNativeEngine(activeEngineType)) {
-          refreshNativeFragmentSummary();
+        if (isRustyMilkEngine(activeEngineType)) {
+          refreshRustyMilkFragmentSummary();
         }
-        const storedNativePreset = isNativeEngine(activeEngineType) ? readStoredNativePreset() : null;
-        if (storedNativePreset?.source && engine.loadPresetText) {
+        const storedRustyMilkPreset = isRustyMilkEngine(activeEngineType) ? readStoredRustyMilkPreset() : null;
+        if (storedRustyMilkPreset?.source && engine.loadPresetText) {
           let importedPresetName = engine.loadPresetText(
-            storedNativePreset.source,
-            storedNativePreset.fileName,
-            { textureAssets: storedNativePreset.textureAssets },
+            storedRustyMilkPreset.source,
+            storedRustyMilkPreset.fileName,
+            { textureAssets: storedRustyMilkPreset.textureAssets },
           );
           if (isPromiseLike(importedPresetName)) {
             importedPresetName = await importedPresetName;
           }
-          setActiveNativePresetId(storedNativePreset.id || '');
+          setActiveRustyMilkPresetId(storedRustyMilkPreset.id || '');
           setPresetName(importedPresetName);
-          refreshNativeFragmentSummary();
+          refreshRustyMilkFragmentSummary();
         }
         sizeCanvas();
 
@@ -1030,7 +1030,7 @@ const Visualizer = ({
           engineAudioNodeRef.current = null;
         }
         // eslint-disable-next-line no-console
-        console.error('Failed to load Milkdrop visualizer', importError);
+        console.error('Failed to load RustyMilk visualizer', importError);
         setError(getVisualizerErrorMessage(activeEngineType, importError));
         setFallbackMode(true);
       }
@@ -1056,7 +1056,7 @@ const Visualizer = ({
       engineAudioNodeRef.current = null;
       setEngineName('');
     };
-  }, [mode, audioElement, activeEngineType, refreshNativeFragmentSummary, renderLoop, sizeCanvas]);
+  }, [mode, audioElement, activeEngineType, refreshRustyMilkFragmentSummary, renderLoop, sizeCanvas]);
 
   useEffect(() => {
     if (engineOverride) return;
@@ -1064,50 +1064,50 @@ const Visualizer = ({
   }, [engineOverride, engineType]);
 
   useEffect(() => {
-    nativeAutomationSettingsRef.current = nativeAutomationSettings;
-    writeStoredNativeAutomationSettings(nativeAutomationSettings);
-    if (isNativeEngine(activeEngineType) && engineRef.current?.setPresetAutomation) {
-      engineRef.current.setPresetAutomation(nativeAutomationSettings);
+    rustyMilkAutomationSettingsRef.current = rustyMilkAutomationSettings;
+    writeStoredRustyMilkAutomationSettings(rustyMilkAutomationSettings);
+    if (isRustyMilkEngine(activeEngineType) && engineRef.current?.setPresetAutomation) {
+      engineRef.current.setPresetAutomation(rustyMilkAutomationSettings);
     }
-  }, [activeEngineType, nativeAutomationSettings]);
+  }, [activeEngineType, rustyMilkAutomationSettings]);
 
   useEffect(() => {
-    setNativeFavoritePresetIds((favoriteIds) => {
-      const nextFavoriteIds = pruneNativePresetFavorites(favoriteIds, nativePresetLibrary);
+    setRustyMilkFavoritePresetIds((favoriteIds) => {
+      const nextFavoriteIds = pruneRustyMilkPresetFavorites(favoriteIds, rustyMilkPresetLibrary);
       if (nextFavoriteIds.length !== favoriteIds.length) {
-        writeStoredNativePresetFavorites(nextFavoriteIds);
-        if (nextFavoriteIds.length === 0 && nativeLibraryMode === 'favorites') {
-          setNativeLibraryMode('all');
-          setLocalStorageItem(nativePresetLibraryModeStorageKey, 'all');
+        writeStoredRustyMilkPresetFavorites(nextFavoriteIds);
+        if (nextFavoriteIds.length === 0 && rustyMilkLibraryMode === 'favorites') {
+          setRustyMilkLibraryMode('all');
+          setLocalStorageItem(rustyMilkPresetLibraryModeStorageKey, 'all');
         }
         return nextFavoriteIds;
       }
       return favoriteIds;
     });
-    setNativePresetHistory((history) => {
-      const libraryIds = new Set(nativePresetLibrary.map((preset) => preset.id));
+    setRustyMilkPresetHistory((history) => {
+      const libraryIds = new Set(rustyMilkPresetLibrary.map((preset) => preset.id));
       return history.filter((id) => libraryIds.has(id));
     });
-    setNativePresetPlaylists((playlists) => {
-      const nextPlaylists = pruneNativePresetPlaylists(playlists, nativePresetLibrary);
+    setRustyMilkPresetPlaylists((playlists) => {
+      const nextPlaylists = pruneRustyMilkPresetPlaylists(playlists, rustyMilkPresetLibrary);
       if (
         nextPlaylists.length !== playlists.length
         || nextPlaylists.some((playlist, index) =>
           playlist.presetIds.length !== playlists[index].presetIds.length)
       ) {
-        writeStoredNativePresetPlaylists(nextPlaylists);
+        writeStoredRustyMilkPresetPlaylists(nextPlaylists);
         if (
           activeNativePlaylistId
           && !nextPlaylists.some((playlist) => playlist.id === activeNativePlaylistId)
         ) {
           setActiveNativePlaylistId('');
-          removeLocalStorageItem(activeNativePresetPlaylistStorageKey);
+          removeLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey);
         }
         return nextPlaylists;
       }
       return playlists;
     });
-  }, [activeNativePlaylistId, nativeLibraryMode, nativePresetLibrary]);
+  }, [activeNativePlaylistId, rustyMilkLibraryMode, rustyMilkPresetLibrary]);
 
   useEffect(() => {
     sizeCanvas();
@@ -1150,7 +1150,7 @@ const Visualizer = ({
     onModeChange('inline');
   }, [onModeChange]);
 
-  const importNativePreset = useCallback(async (event) => {
+  const importRustyMilkPreset = useCallback(async (event) => {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
     if (files.length === 0 || !engineRef.current?.loadPresetText) return;
@@ -1162,23 +1162,23 @@ const Visualizer = ({
     const skipped = [];
     const { skippedTextureAssets, textureAssets } = await readNativeTextureAssets(files);
 
-    for (const file of files.filter(isNativePresetFile)) {
+    for (const file of files.filter(isRustyMilkPresetFile)) {
       try {
         const source = await file.text();
-        const presetTextureAssets = selectNativePresetTextureAssets(source, textureAssets);
+        const presetTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
         const importedPresetName = engineRef.current.inspectPresetText
           ? engineRef.current.inspectPresetText(source, file.name).title
           : engineRef.current.loadPresetText(source, file.name);
         imported.push({
           fileName: file.name,
-          id: getNativePresetFileId(file),
+          id: getRustyMilkPresetFileId(file),
           source,
           textureAssets: presetTextureAssets,
           title: importedPresetName,
         });
       } catch (presetError) {
         // eslint-disable-next-line no-console
-        console.error('Failed to import native MilkDrop preset', presetError);
+        console.error('Failed to import RustyMilk preset', presetError);
         skipped.push({
           fileName: file.name,
           message: presetError?.message || 'Unsupported syntax or shader features may be present.',
@@ -1198,22 +1198,22 @@ const Visualizer = ({
       }
       activePreset.title = activePresetName;
       activePresetEntry = activePreset;
-      setLocalStorageItem(nativePresetStorageKey, JSON.stringify(activePreset));
-      setActiveNativePresetId(activePreset.id);
-      refreshNativeFragmentSummary();
-      setNativePresetLibrary((library) => {
+      setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(activePreset));
+      setActiveRustyMilkPresetId(activePreset.id);
+      refreshRustyMilkFragmentSummary();
+      setRustyMilkPresetLibrary((library) => {
         const nextLibrary = imported.reduce(
-          (next, entry) => upsertNativePresetLibraryEntry(next, entry),
+          (next, entry) => upsertRustyMilkPresetLibraryEntry(next, entry),
           library,
         );
-        writeStoredNativePresetLibrary(nextLibrary);
+        writeStoredRustyMilkPresetLibrary(nextLibrary);
         return nextLibrary;
       });
       setPresetName(activePresetName);
       sizeCanvas();
     }
 
-    for (const file of files.filter(isNativeFragmentFile)) {
+    for (const file of files.filter(isRustyMilkFragmentFile)) {
       if (!engineRef.current?.loadPresetFragmentText) {
         skipped.push({
           fileName: file.name,
@@ -1223,7 +1223,7 @@ const Visualizer = ({
       }
       try {
         const source = await file.text();
-        const fragmentTextureAssets = selectNativePresetTextureAssets(source, textureAssets);
+        const fragmentTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
         const mergedTextureAssets = {
           ...(activePresetEntry?.textureAssets || {}),
           ...fragmentTextureAssets,
@@ -1234,10 +1234,10 @@ const Visualizer = ({
         if (isPromiseLike(result)) {
           result = await result;
         }
-        const existingPreset = activePresetEntry || readStoredNativePreset();
+        const existingPreset = activePresetEntry || readStoredRustyMilkPreset();
         const mergedPreset = {
           fileName: existingPreset?.fileName || file.name,
-          id: existingPreset?.id || `fragment:${getNativePresetFileId(file)}`,
+          id: existingPreset?.id || `fragment:${getRustyMilkPresetFileId(file)}`,
           source: result.source,
           textureAssets: {
             ...(existingPreset?.textureAssets || {}),
@@ -1247,19 +1247,19 @@ const Visualizer = ({
         };
         activePresetEntry = mergedPreset;
         importedFragmentCount += 1;
-        setLocalStorageItem(nativePresetStorageKey, JSON.stringify(mergedPreset));
-        setActiveNativePresetId(mergedPreset.id);
-        refreshNativeFragmentSummary();
-        setNativePresetLibrary((library) => {
-          const nextLibrary = upsertNativePresetLibraryEntry(library, mergedPreset);
-          writeStoredNativePresetLibrary(nextLibrary);
+        setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(mergedPreset));
+        setActiveRustyMilkPresetId(mergedPreset.id);
+        refreshRustyMilkFragmentSummary();
+        setRustyMilkPresetLibrary((library) => {
+          const nextLibrary = upsertRustyMilkPresetLibraryEntry(library, mergedPreset);
+          writeStoredRustyMilkPresetLibrary(nextLibrary);
           return nextLibrary;
         });
         setPresetName(result.title);
         sizeCanvas();
       } catch (presetError) {
         // eslint-disable-next-line no-console
-        console.error('Failed to import native MilkDrop fragment', presetError);
+        console.error('Failed to import RustyMilk fragment', presetError);
         skipped.push({
           fileName: file.name,
           message: presetError?.message || 'Unsupported fragment syntax may be present.',
@@ -1267,7 +1267,7 @@ const Visualizer = ({
       }
     }
 
-    const importMessage = getNativePresetImportMessage({
+    const importMessage = getRustyMilkPresetImportMessage({
       importedCount: imported.length + importedFragmentCount,
       skipped,
       skippedTextureAssets,
@@ -1275,48 +1275,48 @@ const Visualizer = ({
     if (importMessage) {
       setError(importMessage);
     }
-  }, [refreshNativeFragmentSummary, sizeCanvas]);
+  }, [refreshRustyMilkFragmentSummary, sizeCanvas]);
 
-  const exportNativeFragment = useCallback((type) => {
+  const exportRustyMilkFragment = useCallback((type) => {
     if (!engineRef.current?.exportPresetFragment) return;
     try {
       const selectedIndex = type === 'wave' ? selectedNativeWaveIndex : selectedNativeShapeIndex;
       const exported = engineRef.current.exportPresetFragment(type, selectedIndex);
       if (!exported) {
-        setError(`No ${type} fragment is available in the active native preset.`);
+        setError(`No ${type} fragment is available in the active RustyMilk preset.`);
         return;
       }
       downloadTextFile(exported.fileName, exported.source);
       setError(null);
     } catch (exportError) {
       // eslint-disable-next-line no-console
-      console.error('Failed to export native MilkDrop fragment', exportError);
+      console.error('Failed to export RustyMilk fragment', exportError);
       setError(exportError?.message || 'Native fragment export failed.');
     }
   }, [selectedNativeShapeIndex, selectedNativeWaveIndex]);
 
-  const exportNativePreset = useCallback(() => {
+  const exportRustyMilkPreset = useCallback(() => {
     if (!engineRef.current?.exportPresetText) return;
     try {
       const exported = engineRef.current.exportPresetText();
       if (!exported) {
-        setError('No native preset is available to export.');
+        setError('No RustyMilk preset is available to export.');
         return;
       }
       downloadTextFile(exported.fileName, exported.source);
       setError(null);
     } catch (exportError) {
       // eslint-disable-next-line no-console
-      console.error('Failed to export native MilkDrop preset', exportError);
+      console.error('Failed to export RustyMilk preset', exportError);
       setError(exportError?.message || 'Native preset export failed.');
     }
   }, []);
 
-  const removeNativeFragment = useCallback(async (type) => {
+  const removeRustyMilkFragment = useCallback(async (type) => {
     if (!engineRef.current?.removePresetFragment) return;
     const selectedIndex = type === 'wave' ? selectedNativeWaveIndex : selectedNativeShapeIndex;
     try {
-      const storedPreset = readStoredNativePreset();
+      const storedPreset = readStoredRustyMilkPreset();
       let result = engineRef.current.removePresetFragment(type, selectedIndex, {
         textureAssets: storedPreset?.textureAssets,
       });
@@ -1324,7 +1324,7 @@ const Visualizer = ({
         result = await result;
       }
       if (!result) {
-        setError(`No ${type} fragment is available in the active native preset.`);
+        setError(`No ${type} fragment is available in the active RustyMilk preset.`);
         return;
       }
       const editedPreset = {
@@ -1334,36 +1334,36 @@ const Visualizer = ({
         textureAssets: storedPreset?.textureAssets || {},
         title: result.title,
       };
-      setLocalStorageItem(nativePresetStorageKey, JSON.stringify(editedPreset));
-      setActiveNativePresetId(editedPreset.id);
-      setNativePresetLibrary((library) => {
-        const nextLibrary = upsertNativePresetLibraryEntry(library, editedPreset);
-        writeStoredNativePresetLibrary(nextLibrary);
+      setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(editedPreset));
+      setActiveRustyMilkPresetId(editedPreset.id);
+      setRustyMilkPresetLibrary((library) => {
+        const nextLibrary = upsertRustyMilkPresetLibraryEntry(library, editedPreset);
+        writeStoredRustyMilkPresetLibrary(nextLibrary);
         return nextLibrary;
       });
       setPresetName(result.title);
-      refreshNativeFragmentSummary();
+      refreshRustyMilkFragmentSummary();
       setError(null);
       sizeCanvas();
     } catch (removeError) {
       // eslint-disable-next-line no-console
-      console.error('Failed to remove native MilkDrop fragment', removeError);
+      console.error('Failed to remove RustyMilk fragment', removeError);
       setError(removeError?.message || 'Native fragment removal failed.');
     }
   }, [
-    refreshNativeFragmentSummary,
+    refreshRustyMilkFragmentSummary,
     selectedNativeShapeIndex,
     selectedNativeWaveIndex,
     sizeCanvas,
   ]);
 
-  const applyNativeParameterEdit = useCallback(async () => {
+  const applyRustyMilkParameterEdit = useCallback(async () => {
     if (!engineRef.current?.updatePresetBaseValue) return;
     try {
-      const storedPreset = readStoredNativePreset();
+      const storedPreset = readStoredRustyMilkPreset();
       let result = engineRef.current.updatePresetBaseValue(
-        selectedNativeParameter,
-        nativeParameterValue,
+        selectedRustyMilkParameter,
+        rustyMilkParameterValue,
         {
           textureAssets: storedPreset?.textureAssets,
         },
@@ -1382,29 +1382,29 @@ const Visualizer = ({
         textureAssets: storedPreset?.textureAssets || {},
         title: result.title,
       };
-      setLocalStorageItem(nativePresetStorageKey, JSON.stringify(editedPreset));
-      setActiveNativePresetId(editedPreset.id);
-      setNativePresetLibrary((library) => {
-        const nextLibrary = upsertNativePresetLibraryEntry(library, editedPreset);
-        writeStoredNativePresetLibrary(nextLibrary);
+      setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(editedPreset));
+      setActiveRustyMilkPresetId(editedPreset.id);
+      setRustyMilkPresetLibrary((library) => {
+        const nextLibrary = upsertRustyMilkPresetLibraryEntry(library, editedPreset);
+        writeStoredRustyMilkPresetLibrary(nextLibrary);
         return nextLibrary;
       });
       setPresetName(result.title);
-      setNativeParameterValues(result.values || {});
-      setNativeParameterDrafts({});
+      setRustyMilkParameterValues(result.values || {});
+      setRustyMilkParameterDrafts({});
       setError(null);
       sizeCanvas();
     } catch (editError) {
       // eslint-disable-next-line no-console
-      console.error('Failed to edit native MilkDrop parameter', editError);
+      console.error('Failed to edit RustyMilk parameter', editError);
       setError(editError?.message || 'Native parameter edit failed.');
     }
-  }, [nativeParameterValue, selectedNativeParameter, sizeCanvas]);
+  }, [rustyMilkParameterValue, selectedRustyMilkParameter, sizeCanvas]);
 
-  const randomizeNativePresetParameters = useCallback(async () => {
+  const randomizeRustyMilkPresetParameters = useCallback(async () => {
     if (!engineRef.current?.randomizePresetParameters) return;
     try {
-      const storedPreset = readStoredNativePreset();
+      const storedPreset = readStoredRustyMilkPreset();
       let result = engineRef.current.randomizePresetParameters({
         textureAssets: storedPreset?.textureAssets,
       });
@@ -1422,79 +1422,79 @@ const Visualizer = ({
         textureAssets: storedPreset?.textureAssets || {},
         title: result.title,
       };
-      setLocalStorageItem(nativePresetStorageKey, JSON.stringify(editedPreset));
-      setActiveNativePresetId(editedPreset.id);
-      setNativePresetLibrary((library) => {
-        const nextLibrary = upsertNativePresetLibraryEntry(library, editedPreset);
-        writeStoredNativePresetLibrary(nextLibrary);
+      setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(editedPreset));
+      setActiveRustyMilkPresetId(editedPreset.id);
+      setRustyMilkPresetLibrary((library) => {
+        const nextLibrary = upsertRustyMilkPresetLibraryEntry(library, editedPreset);
+        writeStoredRustyMilkPresetLibrary(nextLibrary);
         return nextLibrary;
       });
       setPresetName(result.title);
-      setNativeParameterValues(result.values || {});
-      setNativeParameterDrafts({});
-      refreshNativeFragmentSummary();
+      setRustyMilkParameterValues(result.values || {});
+      setRustyMilkParameterDrafts({});
+      refreshRustyMilkFragmentSummary();
       setError(null);
       sizeCanvas();
     } catch (randomizeError) {
       // eslint-disable-next-line no-console
-      console.error('Failed to randomize native MilkDrop preset', randomizeError);
+      console.error('Failed to randomize RustyMilk preset', randomizeError);
       setError(randomizeError?.message || 'Native parameter randomization failed.');
     }
-  }, [refreshNativeFragmentSummary, sizeCanvas]);
+  }, [refreshRustyMilkFragmentSummary, sizeCanvas]);
 
-  const loadNativeLibraryPreset = useCallback((event) => {
-    const preset = nativePresetLibrary.find((entry) => entry.id === event.target.value);
-    void loadNativePresetEntry(preset);
-  }, [loadNativePresetEntry, nativePresetLibrary]);
+  const loadRustyMilkLibraryPreset = useCallback((event) => {
+    const preset = rustyMilkPresetLibrary.find((entry) => entry.id === event.target.value);
+    void loadRustyMilkPresetEntry(preset);
+  }, [loadRustyMilkPresetEntry, rustyMilkPresetLibrary]);
 
-  const clearNativePresetLibrary = useCallback(() => {
-    removeLocalStorageItem(nativePresetStorageKey);
-    removeLocalStorageItem(nativePresetLibraryStorageKey);
-    removeLocalStorageItem(nativePresetFavoritesStorageKey);
-    removeLocalStorageItem(nativePresetLibraryModeStorageKey);
-    removeLocalStorageItem(nativePresetSearchStorageKey);
-    removeLocalStorageItem(nativePresetPlaylistsStorageKey);
-    removeLocalStorageItem(activeNativePresetPlaylistStorageKey);
-    setActiveNativePresetId('');
-    setNativeFavoritePresetIds([]);
-    setNativeFragmentSummary({ shapes: [], waves: [] });
+  const clearRustyMilkPresetLibrary = useCallback(() => {
+    removeLocalStorageItem(rustyMilkPresetStorageKey);
+    removeLocalStorageItem(rustyMilkPresetLibraryStorageKey);
+    removeLocalStorageItem(rustyMilkPresetFavoritesStorageKey);
+    removeLocalStorageItem(rustyMilkPresetLibraryModeStorageKey);
+    removeLocalStorageItem(rustyMilkPresetSearchStorageKey);
+    removeLocalStorageItem(rustyMilkPresetPlaylistsStorageKey);
+    removeLocalStorageItem(activeRustyMilkPresetPlaylistStorageKey);
+    setActiveRustyMilkPresetId('');
+    setRustyMilkFavoritePresetIds([]);
+    setRustyMilkFragmentSummary({ shapes: [], waves: [] });
     setNativeDebugSnapshot(null);
-    setNativeParameterDrafts({});
-    setNativeParameterValues({});
-    setNativeLibraryMode('all');
-    setNativePresetHistory([]);
-    setNativePresetLibrary([]);
-    setNativePresetSearch('');
-    setNativePresetPlaylists([]);
+    setRustyMilkParameterDrafts({});
+    setRustyMilkParameterValues({});
+    setRustyMilkLibraryMode('all');
+    setRustyMilkPresetHistory([]);
+    setRustyMilkPresetLibrary([]);
+    setRustyMilkPresetSearch('');
+    setRustyMilkPresetPlaylists([]);
     setActiveNativePlaylistId('');
     setError(null);
   }, []);
 
-  const removeActiveNativePreset = useCallback(() => {
-    if (!activeNativePresetId) return;
-    setNativePresetLibrary((library) => {
-      const nextLibrary = library.filter((preset) => preset.id !== activeNativePresetId);
+  const removeActiveRustyMilkPreset = useCallback(() => {
+    if (!activeRustyMilkPresetId) return;
+    setRustyMilkPresetLibrary((library) => {
+      const nextLibrary = library.filter((preset) => preset.id !== activeRustyMilkPresetId);
       if (nextLibrary.length > 0) {
-        writeStoredNativePresetLibrary(nextLibrary);
+        writeStoredRustyMilkPresetLibrary(nextLibrary);
       } else {
-        removeLocalStorageItem(nativePresetLibraryStorageKey);
+        removeLocalStorageItem(rustyMilkPresetLibraryStorageKey);
       }
-      const nextFavoriteIds = pruneNativePresetFavorites(nativeFavoritePresetIds, nextLibrary);
-      setNativeFavoritePresetIds(nextFavoriteIds);
-      writeStoredNativePresetFavorites(nextFavoriteIds);
+      const nextFavoriteIds = pruneRustyMilkPresetFavorites(rustyMilkFavoritePresetIds, nextLibrary);
+      setRustyMilkFavoritePresetIds(nextFavoriteIds);
+      writeStoredRustyMilkPresetFavorites(nextFavoriteIds);
       return nextLibrary;
     });
-    setNativePresetHistory((history) => history.filter((id) => id !== activeNativePresetId));
-    const storedNativePreset = readStoredNativePreset();
-    if (storedNativePreset?.id === activeNativePresetId) {
-      removeLocalStorageItem(nativePresetStorageKey);
+    setRustyMilkPresetHistory((history) => history.filter((id) => id !== activeRustyMilkPresetId));
+    const storedRustyMilkPreset = readStoredRustyMilkPreset();
+    if (storedRustyMilkPreset?.id === activeRustyMilkPresetId) {
+      removeLocalStorageItem(rustyMilkPresetStorageKey);
     }
-    setActiveNativePresetId('');
+    setActiveRustyMilkPresetId('');
     setError(null);
-  }, [activeNativePresetId, nativeFavoritePresetIds]);
+  }, [activeRustyMilkPresetId, rustyMilkFavoritePresetIds]);
 
   const updateNativeMouseState = useCallback((event) => {
-    if (!isNativeEngine(activeEngineType) || !engineRef.current?.setMouseState) return;
+    if (!isRustyMilkEngine(activeEngineType) || !engineRef.current?.setMouseState) return;
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect?.width || !rect?.height) return;
     const mouseX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
@@ -1511,7 +1511,7 @@ const Visualizer = ({
   }, [activeEngineType]);
 
   const clearNativeMouseState = useCallback(() => {
-    if (!isNativeEngine(activeEngineType) || !engineRef.current?.setMouseState) return;
+    if (!isRustyMilkEngine(activeEngineType) || !engineRef.current?.setMouseState) return;
     engineRef.current.setMouseState({
       mouse_down: 0,
       mouse_dx: 0,
@@ -1586,7 +1586,7 @@ const Visualizer = ({
             <div>
               {nativeFpsCap === 'full' ? 'uncapped' : `${nativeFpsCap} fps`}
               {' · '}
-              {nativeFrameMs.toFixed(1)}
+              {rustyMilkFrameMs.toFixed(1)}
               {' ms'}
             </div>
             <div>
@@ -1594,7 +1594,7 @@ const Visualizer = ({
                 ? 'custom quality'
                 : `${nativeQualityPresets[nativeQualityPreset]?.label || 'Balanced'} quality`}
               {' · '}
-              {getNativeWebGpuDebugLabel(nativeDebugSnapshot.webGpu)}
+              {getRustyMilkWebGpuDebugLabel(nativeDebugSnapshot.webGpu)}
             </div>
           </div>
         ) : null}
@@ -1606,7 +1606,7 @@ const Visualizer = ({
             accept=".milk,.milk2,.shape,.wave,text/plain,image/png,image/jpeg,image/webp,image/gif"
             hidden
             multiple
-            onChange={importNativePreset}
+            onChange={importRustyMilkPreset}
             ref={fileInputRef}
             type="file"
           />
@@ -1615,7 +1615,7 @@ const Visualizer = ({
             directory=""
             hidden
             multiple
-            onChange={importNativePreset}
+            onChange={importRustyMilkPreset}
             ref={directoryInputRef}
             type="file"
             webkitdirectory=""
@@ -1634,34 +1634,34 @@ const Visualizer = ({
               </Button>
             }
           />
-          {isNativeEngine(activeEngineType) && !compactControls ? (
+          {isRustyMilkEngine(activeEngineType) && !compactControls ? (
             <>
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
-                  content="Filter imported native presets by title or file name. The current filter also scopes next and random preset jumps."
+                  content="Filter imported RustyMilk presets by title or file name. The current filter also scopes next and random preset jumps."
                   trigger={
                     <input
-                      aria-label="Search native MilkDrop presets"
+                      aria-label="Search RustyMilk presets"
                       className="player-visualizer-native-search"
                       data-testid="visualizer-native-preset-search"
-                      onChange={updateNativePresetSearch}
+                      onChange={updateRustyMilkPresetSearch}
                       placeholder="Search presets"
                       type="search"
-                      value={nativePresetSearch}
+                      value={rustyMilkPresetSearch}
                     />
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
-                  content="Clear the native preset search filter."
+                  content="Clear the RustyMilk preset search filter."
                   trigger={
                     <Button
-                      aria-label="Clear native preset search"
+                      aria-label="Clear RustyMilk preset search"
                       data-testid="visualizer-clear-native-preset-search"
-                      disabled={!hasNativePresetSearch}
+                      disabled={!hasRustyMilkPresetSearch}
                       icon
-                      onClick={clearNativePresetSearch}
+                      onClick={clearRustyMilkPresetSearch}
                       size="mini"
                     >
                       <Icon name="remove" />
@@ -1669,19 +1669,19 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetPlaylists.length > 0 ? (
+              {rustyMilkPresetPlaylists.length > 0 ? (
                 <Popup
                   content="Use a saved native playlist as the active preset bank."
                   trigger={
                     <select
-                      aria-label="Native MilkDrop playlist"
+                      aria-label="RustyMilk playlist"
                       className="player-visualizer-native-library"
                       data-testid="visualizer-native-playlist"
                       onChange={selectNativePlaylist}
                       value={activeNativePlaylistId}
                     >
                       <option value="">All imported</option>
-                      {nativePresetPlaylists.map((playlist) => (
+                      {rustyMilkPresetPlaylists.map((playlist) => (
                         <option key={playlist.id} value={playlist.id}>
                           {playlist.name}
                         </option>
@@ -1690,12 +1690,12 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
-                  content="Save the current visible native preset bank as a browser-local playlist."
+                  content="Save the current visible RustyMilk preset bank as a browser-local playlist."
                   trigger={
                     <Button
-                      aria-label="Save visible native presets as playlist"
+                      aria-label="Save visible RustyMilk presets as playlist"
                       data-testid="visualizer-save-native-playlist"
                       disabled={!canSaveNativePlaylist}
                       icon
@@ -1725,7 +1725,7 @@ const Visualizer = ({
               ) : null}
               {activeNativePlaylistId ? (
                 <Popup
-                  content="Return to the full imported native preset bank without deleting this playlist."
+                  content="Return to the full imported RustyMilk preset bank without deleting this playlist."
                   trigger={
                     <Button
                       aria-label="Clear active native playlist"
@@ -1755,29 +1755,29 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
                   content={
-                    nativeLibraryMode === 'favorites'
-                      ? 'Reload a favorite native preset from this browser.'
-                      : 'Reload a previously imported native preset from this browser.'
+                    rustyMilkLibraryMode === 'favorites'
+                      ? 'Reload a favorite RustyMilk preset from this browser.'
+                      : 'Reload a previously imported RustyMilk preset from this browser.'
                   }
                   trigger={
                     <select
-                      aria-label="Native MilkDrop preset library"
+                      aria-label="RustyMilk preset library"
                       className="player-visualizer-native-library"
                       data-testid="visualizer-native-preset-library"
-                      onChange={loadNativeLibraryPreset}
-                      value={selectedNativePresetValue}
+                      onChange={loadRustyMilkLibraryPreset}
+                      value={selectedRustyMilkPresetValue}
                     >
                       <option value="">
-                        {visibleNativePresetLibrary.length === 0 ? 'No matches' : (
-                          nativeLibraryMode === 'favorites' ? 'Favorites' : 'Presets'
+                        {visibleRustyMilkPresetLibrary.length === 0 ? 'No matches' : (
+                          rustyMilkLibraryMode === 'favorites' ? 'Favorites' : 'Presets'
                         )}
                       </option>
-                      {visibleNativePresetLibrary.map((preset) => (
+                      {visibleRustyMilkPresetLibrary.map((preset) => (
                         <option key={preset.id} value={preset.id}>
-                          {nativeFavoritePresetIds.includes(preset.id) ? '(favorite) ' : ''}
+                          {rustyMilkFavoritePresetIds.includes(preset.id) ? '(favorite) ' : ''}
                           {preset.title || preset.fileName}
                         </option>
                       ))}
@@ -1785,51 +1785,51 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
                   content={
-                    activeNativePresetIsFavorite
-                      ? 'Remove the active native preset from favorites.'
-                      : 'Mark the active native preset as a favorite.'
+                    activeRustyMilkPresetIsFavorite
+                      ? 'Remove the active RustyMilk preset from favorites.'
+                      : 'Mark the active RustyMilk preset as a favorite.'
                   }
                   trigger={
                     <Button
                       aria-label={
-                        activeNativePresetIsFavorite
-                          ? 'Unfavorite active native preset'
-                          : 'Favorite active native preset'
+                        activeRustyMilkPresetIsFavorite
+                          ? 'Unfavorite active RustyMilk preset'
+                          : 'Favorite active RustyMilk preset'
                       }
-                      active={activeNativePresetIsFavorite}
+                      active={activeRustyMilkPresetIsFavorite}
                       data-testid="visualizer-toggle-native-favorite"
-                      disabled={!activeNativePresetId}
+                      disabled={!activeRustyMilkPresetId}
                       icon
-                      onClick={toggleNativePresetFavorite}
+                      onClick={toggleRustyMilkPresetFavorite}
                       size="mini"
                     >
-                      <Icon name={activeNativePresetIsFavorite ? 'star' : 'star outline'} />
+                      <Icon name={activeRustyMilkPresetIsFavorite ? 'star' : 'star outline'} />
                     </Button>
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
                   content={
-                    nativeLibraryMode === 'favorites'
-                      ? 'Show all imported native presets.'
-                      : 'Show only favorite native presets.'
+                    rustyMilkLibraryMode === 'favorites'
+                      ? 'Show all imported RustyMilk presets.'
+                      : 'Show only favorite RustyMilk presets.'
                   }
                   trigger={
                     <Button
                       aria-label={
-                        nativeLibraryMode === 'favorites'
-                          ? 'Show all native presets'
-                          : 'Show favorite native presets'
+                        rustyMilkLibraryMode === 'favorites'
+                          ? 'Show all RustyMilk presets'
+                          : 'Show favorite RustyMilk presets'
                       }
-                      active={nativeLibraryMode === 'favorites'}
+                      active={rustyMilkLibraryMode === 'favorites'}
                       data-testid="visualizer-toggle-native-favorites-only"
-                      disabled={nativeFavoritePresetIds.length === 0}
+                      disabled={rustyMilkFavoritePresetIds.length === 0}
                       icon
-                      onClick={toggleNativeLibraryMode}
+                      onClick={toggleRustyMilkLibraryMode}
                       size="mini"
                     >
                       <Icon name="filter" />
@@ -1837,16 +1837,16 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 1 ? (
+              {rustyMilkPresetLibrary.length > 1 ? (
                 <Popup
-                  content="Return to the previous native preset, or move backward in the local preset library."
+                  content="Return to the previous RustyMilk preset, or move backward in the local preset library."
                   trigger={
                     <Button
-                      aria-label="Previous native preset"
+                      aria-label="Previous RustyMilk preset"
                       data-testid="visualizer-previous-native-preset"
-                      disabled={visibleNativePresetLibrary.length === 0}
+                      disabled={visibleRustyMilkPresetLibrary.length === 0}
                       icon
-                      onClick={previousNativeLibraryPreset}
+                      onClick={previousRustyMilkLibraryPreset}
                       size="mini"
                     >
                       <Icon name="step backward" />
@@ -1854,16 +1854,16 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 1 ? (
+              {rustyMilkPresetLibrary.length > 1 ? (
                 <Popup
-                  content="Jump to a random imported native preset from this browser."
+                  content="Jump to a random imported RustyMilk preset from this browser."
                   trigger={
                     <Button
-                      aria-label="Random imported native preset"
+                      aria-label="Random imported RustyMilk preset"
                       data-testid="visualizer-random-native-preset"
-                      disabled={visibleNativePresetLibrary.length === 0}
+                      disabled={visibleRustyMilkPresetLibrary.length === 0}
                       icon
-                      onClick={randomNativeLibraryPreset}
+                      onClick={randomRustyMilkLibraryPreset}
                       size="mini"
                     >
                       <Icon name="random" />
@@ -1871,16 +1871,16 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
-                  content="Remove the selected native preset from this browser."
+                  content="Remove the selected RustyMilk preset from this browser."
                   trigger={
                     <Button
-                      aria-label="Remove selected native preset"
+                      aria-label="Remove selected RustyMilk preset"
                       data-testid="visualizer-remove-native-preset"
-                      disabled={!activeNativePresetId}
+                      disabled={!activeRustyMilkPresetId}
                       icon
-                      onClick={removeActiveNativePreset}
+                      onClick={removeActiveRustyMilkPreset}
                       size="mini"
                     >
                       <Icon name="minus circle" />
@@ -1888,15 +1888,15 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativePresetLibrary.length > 0 ? (
+              {rustyMilkPresetLibrary.length > 0 ? (
                 <Popup
-                  content="Clear imported native presets from this browser."
+                  content="Clear imported RustyMilk presets from this browser."
                   trigger={
                     <Button
-                      aria-label="Clear imported native presets"
+                      aria-label="Clear imported RustyMilk presets"
                       data-testid="visualizer-clear-native-preset-library"
                       icon
-                      onClick={clearNativePresetLibrary}
+                      onClick={clearRustyMilkPresetLibrary}
                       size="mini"
                     >
                       <Icon name="trash alternate outline" />
@@ -1905,10 +1905,10 @@ const Visualizer = ({
                 />
               ) : null}
               <Popup
-                content="Import a local .milk or .milk2 preset into the native MilkDrop renderer."
+                content="Import a local .milk or .milk2 preset into the RustyMilk renderer."
                 trigger={
                   <Button
-                    aria-label="Import native MilkDrop preset"
+                    aria-label="Import RustyMilk preset"
                     data-testid="visualizer-import-native-preset"
                     icon
                     onClick={() => fileInputRef.current?.click()}
@@ -1919,10 +1919,10 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Import a native MilkDrop preset folder with its local image assets."
+                content="Import a RustyMilk preset folder with its local image assets."
                 trigger={
                   <Button
-                    aria-label="Import native MilkDrop preset folder"
+                    aria-label="Import RustyMilk preset folder"
                     data-testid="visualizer-import-native-preset-folder"
                     icon
                     onClick={() => directoryInputRef.current?.click()}
@@ -1933,14 +1933,14 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Choose a global native MilkDrop parameter to edit on the active preset."
+                content="Choose a global RustyMilk parameter to edit on the active preset."
                 trigger={
                   <select
-                    aria-label="Native MilkDrop editable parameter"
+                    aria-label="RustyMilk editable parameter"
                     className="player-visualizer-native-library"
                     data-testid="visualizer-native-parameter"
-                    onChange={selectNativeParameter}
-                    value={selectedNativeParameter}
+                    onChange={selectRustyMilkParameter}
+                    value={selectedRustyMilkParameter}
                   >
                     {nativeEditableParameters.map((parameter) => (
                       <option key={parameter.key} value={parameter.key}>
@@ -1951,29 +1951,29 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content={`Adjust ${nativeParameter.label.toLowerCase()} for the active native preset before applying the edited copy locally.`}
+                content={`Adjust ${rustyMilkParameter.label.toLowerCase()} for the active RustyMilk preset before applying the edited copy locally.`}
                 trigger={
                   <input
-                    aria-label={`Adjust native MilkDrop ${nativeParameter.label}`}
+                    aria-label={`Adjust RustyMilk ${rustyMilkParameter.label}`}
                     className="player-visualizer-native-range"
                     data-testid="visualizer-native-parameter-value"
-                    max={nativeParameter.max}
-                    min={nativeParameter.min}
-                    onChange={updateNativeParameterDraft}
-                    step={nativeParameter.step}
+                    max={rustyMilkParameter.max}
+                    min={rustyMilkParameter.min}
+                    onChange={updateRustyMilkParameterDraft}
+                    step={rustyMilkParameter.step}
                     type="range"
-                    value={nativeParameterValue}
+                    value={rustyMilkParameterValue}
                   />
                 }
               />
               <Popup
-                content="Apply the selected native MilkDrop parameter value and save the edited preset in this browser."
+                content="Apply the selected RustyMilk parameter value and save the edited preset in this browser."
                 trigger={
                   <Button
-                    aria-label="Apply native MilkDrop parameter edit"
+                    aria-label="Apply RustyMilk parameter edit"
                     data-testid="visualizer-apply-native-parameter"
                     icon
-                    onClick={applyNativeParameterEdit}
+                    onClick={applyRustyMilkParameterEdit}
                     size="mini"
                   >
                     <Icon name="sliders horizontal" />
@@ -1981,13 +1981,13 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Randomize the active native MilkDrop preset's common visual parameters and save the edited copy locally."
+                content="Randomize the active RustyMilk preset's common visual parameters and save the edited copy locally."
                 trigger={
                   <Button
-                    aria-label="Randomize native MilkDrop visual parameters"
+                    aria-label="Randomize RustyMilk visual parameters"
                     data-testid="visualizer-randomize-native-parameters"
                     icon
-                    onClick={randomizeNativePresetParameters}
+                    onClick={randomizeRustyMilkPresetParameters}
                     size="mini"
                   >
                     <Icon name="shuffle" />
@@ -1995,10 +1995,10 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Show or hide native MilkDrop debug details for the active preset."
+                content="Show or hide RustyMilk debug details for the active preset."
                 trigger={
                   <Button
-                    aria-label={showNativeDebug ? 'Hide native MilkDrop debug details' : 'Show native MilkDrop debug details'}
+                    aria-label={showNativeDebug ? 'Hide RustyMilk debug details' : 'Show RustyMilk debug details'}
                     active={showNativeDebug}
                     data-testid="visualizer-toggle-native-debug"
                     icon
@@ -2010,10 +2010,10 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Cap native MilkDrop rendering for lower GPU load, or leave it uncapped for maximum smoothness."
+                content="Cap RustyMilk rendering for lower GPU load, or leave it uncapped for maximum smoothness."
                 trigger={
                   <select
-                    aria-label="Native MilkDrop FPS cap"
+                    aria-label="RustyMilk FPS cap"
                     className="player-visualizer-native-library"
                     data-testid="visualizer-native-fps-cap"
                     onChange={updateNativeFpsCap}
@@ -2027,10 +2027,10 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Choose a native MilkDrop quality preset. Efficient lowers GPU load, Balanced caps at 60 FPS, and Full leaves rendering uncapped."
+                content="Choose a RustyMilk quality preset. Efficient lowers GPU load, Balanced caps at 60 FPS, and Full leaves rendering uncapped."
                 trigger={
                   <select
-                    aria-label="Native MilkDrop quality preset"
+                    aria-label="RustyMilk quality preset"
                     className="player-visualizer-native-library"
                     data-testid="visualizer-native-quality"
                     onChange={updateNativeQualityPreset}
@@ -2044,13 +2044,13 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Export the active native MilkDrop preset text after any local edits."
+                content="Export the active RustyMilk preset text after any local edits."
                 trigger={
                   <Button
-                    aria-label="Export active native MilkDrop preset"
+                    aria-label="Export active RustyMilk preset"
                     data-testid="visualizer-export-native-preset"
                     icon
-                    onClick={exportNativePreset}
+                    onClick={exportRustyMilkPreset}
                     size="mini"
                   >
                     <Icon name="file alternate outline" />
@@ -2058,17 +2058,17 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Choose which custom shape from the active native preset should be exported or removed."
+                content="Choose which custom shape from the active RustyMilk preset should be exported or removed."
                 trigger={
                   <select
-                    aria-label="Native MilkDrop shape fragment"
+                    aria-label="RustyMilk shape fragment"
                     className="player-visualizer-native-library"
                     data-testid="visualizer-native-shape-fragment"
                     disabled={!hasNativeShapes}
                     onChange={(event) => setSelectedNativeShapeIndex(Number(event.target.value))}
                     value={hasNativeShapes ? selectedNativeShapeIndex : 0}
                   >
-                    {hasNativeShapes ? nativeFragmentSummary.shapes.map((shape) => (
+                    {hasNativeShapes ? rustyMilkFragmentSummary.shapes.map((shape) => (
                       <option key={shape.index} value={shape.index}>
                         {shape.label}
                       </option>
@@ -2079,14 +2079,14 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Export the selected custom shape in the active native preset as a .shape fragment."
+                content="Export the selected custom shape in the active RustyMilk preset as a .shape fragment."
                 trigger={
                   <Button
-                    aria-label="Export native MilkDrop shape fragment"
+                    aria-label="Export RustyMilk shape fragment"
                     data-testid="visualizer-export-native-shape"
                     disabled={!hasNativeShapes}
                     icon
-                    onClick={() => exportNativeFragment('shape')}
+                    onClick={() => exportRustyMilkFragment('shape')}
                     size="mini"
                   >
                     <Icon name="download" />
@@ -2094,14 +2094,14 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Remove the selected custom shape from the active native preset and persist the edited copy locally."
+                content="Remove the selected custom shape from the active RustyMilk preset and persist the edited copy locally."
                 trigger={
                   <Button
-                    aria-label="Remove native MilkDrop shape fragment"
+                    aria-label="Remove RustyMilk shape fragment"
                     data-testid="visualizer-remove-native-shape"
                     disabled={!hasNativeShapes}
                     icon
-                    onClick={() => removeNativeFragment('shape')}
+                    onClick={() => removeRustyMilkFragment('shape')}
                     size="mini"
                   >
                     <Icon name="erase" />
@@ -2109,17 +2109,17 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Choose which custom wave from the active native preset should be exported or removed."
+                content="Choose which custom wave from the active RustyMilk preset should be exported or removed."
                 trigger={
                   <select
-                    aria-label="Native MilkDrop wave fragment"
+                    aria-label="RustyMilk wave fragment"
                     className="player-visualizer-native-library"
                     data-testid="visualizer-native-wave-fragment"
                     disabled={!hasNativeWaves}
                     onChange={(event) => setSelectedNativeWaveIndex(Number(event.target.value))}
                     value={hasNativeWaves ? selectedNativeWaveIndex : 0}
                   >
-                    {hasNativeWaves ? nativeFragmentSummary.waves.map((wave) => (
+                    {hasNativeWaves ? rustyMilkFragmentSummary.waves.map((wave) => (
                       <option key={wave.index} value={wave.index}>
                         {wave.label}
                       </option>
@@ -2130,14 +2130,14 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Export the selected custom wave in the active native preset as a .wave fragment."
+                content="Export the selected custom wave in the active RustyMilk preset as a .wave fragment."
                 trigger={
                   <Button
-                    aria-label="Export native MilkDrop wave fragment"
+                    aria-label="Export RustyMilk wave fragment"
                     data-testid="visualizer-export-native-wave"
                     disabled={!hasNativeWaves}
                     icon
-                    onClick={() => exportNativeFragment('wave')}
+                    onClick={() => exportRustyMilkFragment('wave')}
                     size="mini"
                   >
                     <Icon name="download" />
@@ -2145,14 +2145,14 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content="Remove the selected custom wave from the active native preset and persist the edited copy locally."
+                content="Remove the selected custom wave from the active RustyMilk preset and persist the edited copy locally."
                 trigger={
                   <Button
-                    aria-label="Remove native MilkDrop wave fragment"
+                    aria-label="Remove RustyMilk wave fragment"
                     data-testid="visualizer-remove-native-wave"
                     disabled={!hasNativeWaves}
                     icon
-                    onClick={() => removeNativeFragment('wave')}
+                    onClick={() => removeRustyMilkFragment('wave')}
                     size="mini"
                   >
                     <Icon name="erase" />
@@ -2160,30 +2160,30 @@ const Visualizer = ({
                 }
               />
               <Popup
-                content={`Native automatic preset changes: ${getNativeAutomationLabel(nativeAutomationMode)}. Beat mode advances after repeated detected bass beats; timed mode advances on an interval.`}
+                content={`Native automatic preset changes: ${getRustyMilkAutomationLabel(rustyMilkAutomationMode)}. Beat mode advances after repeated detected bass beats; timed mode advances on an interval.`}
                 trigger={
                   <Button
-                    aria-label={`Native automatic preset changes: ${getNativeAutomationLabel(nativeAutomationMode)}`}
-                    active={nativeAutomationMode !== 'off'}
+                    aria-label={`Native automatic preset changes: ${getRustyMilkAutomationLabel(rustyMilkAutomationMode)}`}
+                    active={rustyMilkAutomationMode !== 'off'}
                     data-testid="visualizer-native-automation"
                     icon
-                    onClick={cycleNativeAutomationMode}
+                    onClick={cycleRustyMilkAutomationMode}
                     size="mini"
                   >
-                    <Icon name={nativeAutomationMode === 'beat' ? 'heartbeat' : 'clock outline'} />
+                    <Icon name={rustyMilkAutomationMode === 'beat' ? 'heartbeat' : 'clock outline'} />
                   </Button>
                 }
               />
-              {nativeAutomationMode === 'beat' ? (
+              {rustyMilkAutomationMode === 'beat' ? (
                 <Popup
-                  content="Choose how many detected bass beats should pass before native MilkDrop advances to another preset."
+                  content="Choose how many detected bass beats should pass before RustyMilk advances to another preset."
                   trigger={
                     <select
-                      aria-label="Native MilkDrop beats per preset"
+                      aria-label="RustyMilk beats per preset"
                       className="player-visualizer-native-library"
                       data-testid="visualizer-native-automation-beats"
-                      onChange={updateNativeAutomationBeats}
-                      value={nativeAutomationSettings.beatsPerPreset}
+                      onChange={updateRustyMilkAutomationBeats}
+                      value={rustyMilkAutomationSettings.beatsPerPreset}
                     >
                       <option value={4}>4 beats</option>
                       <option value={8}>8 beats</option>
@@ -2192,16 +2192,16 @@ const Visualizer = ({
                   }
                 />
               ) : null}
-              {nativeAutomationMode === 'timed' ? (
+              {rustyMilkAutomationMode === 'timed' ? (
                 <Popup
-                  content="Choose how long native MilkDrop should wait before timed preset changes."
+                  content="Choose how long RustyMilk should wait before timed preset changes."
                   trigger={
                     <select
-                      aria-label="Native MilkDrop timed preset interval"
+                      aria-label="RustyMilk timed preset interval"
                       className="player-visualizer-native-library"
                       data-testid="visualizer-native-automation-interval"
-                      onChange={updateNativeAutomationInterval}
-                      value={nativeAutomationSettings.timedIntervalSeconds}
+                      onChange={updateRustyMilkAutomationInterval}
+                      value={rustyMilkAutomationSettings.timedIntervalSeconds}
                     >
                       <option value={15}>15 sec</option>
                       <option value={30}>30 sec</option>
@@ -2215,8 +2215,8 @@ const Visualizer = ({
           <Popup
             content={
               nativeBankNavigationDisabled
-                ? 'No imported native presets match the current filter.'
-                : 'Load a different MilkDrop preset.'
+                ? 'No imported RustyMilk presets match the current filter.'
+                : 'Load a different RustyMilk preset.'
             }
             trigger={
               <Button

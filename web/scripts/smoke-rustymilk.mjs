@@ -51,11 +51,11 @@ const smokeHtml = `
       <div id="root"></div>
       <canvas id="canvas" width="240" height="160"></canvas>
       <script type="module">
-        import init, { RustMilkdropEngine } from '/slskr_web.js';
+        import init, { RustyMilkEngine } from '/slskr_web.js';
 
         await init({ module_or_path: '/slskr_web_bg.wasm' });
         const canvas = document.getElementById('canvas');
-        const engine = new RustMilkdropEngine(canvas);
+        const engine = new RustyMilkEngine(canvas);
         engine.resize(canvas.width, canvas.height);
         engine.loadPresetText(${JSON.stringify(presetSource)}, 'smoke.milk', '{}');
 
@@ -85,7 +85,7 @@ const smokeHtml = `
           if (total > 12) litPixels += 1;
           channelTotal += total;
         }
-        window.__rustMilkdropSmoke = {
+        window.__rustyMilkSmoke = {
           channelTotal,
           litPixels,
           pixelCount: canvas.width * canvas.height,
@@ -98,7 +98,7 @@ const smokeHtml = `
 
 const server = createServer(async (request, response) => {
   try {
-    if (request.url === '/native-milkdrop-smoke') {
+    if (request.url === '/rustymilk-smoke') {
       response.writeHead(200, { 'Content-Type': 'text/html' });
       response.end(smokeHtml);
       return;
@@ -132,15 +132,15 @@ page.on('pageerror', (error) => {
 });
 
 try {
-  await page.goto(`http://127.0.0.1:${port}/native-milkdrop-smoke`);
-  const handle = await page.waitForFunction(() => window.__rustMilkdropSmoke, null, {
+  await page.goto(`http://127.0.0.1:${port}/rustymilk-smoke`);
+  const handle = await page.waitForFunction(() => window.__rustyMilkSmoke, null, {
     timeout: 10_000,
   });
   const stats = await handle.jsonValue();
   if (stats.litPixels < stats.pixelCount * 0.05 || stats.channelTotal <= 0) {
-    throw new Error(`Rust MilkDrop smoke rendered a blank canvas: ${JSON.stringify(stats)}`);
+    throw new Error(`RustyMilk smoke rendered a blank canvas: ${JSON.stringify(stats)}`);
   }
-  console.log(`Rust MilkDrop smoke passed: ${JSON.stringify(stats)}`);
+  console.log(`RustyMilk smoke passed: ${JSON.stringify(stats)}`);
 } catch (error) {
   if (browserMessages.length > 0) {
     console.log(browserMessages.join('\n'));

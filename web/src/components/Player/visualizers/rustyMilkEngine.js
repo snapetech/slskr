@@ -1,4 +1,4 @@
-const nativePresets = [
+const rustyMilkPresets = [
   {
     name: 'slskr native grid smoke',
     source: `
@@ -99,9 +99,9 @@ const defaultAutomation = {
 
 let rustModulePromise;
 
-const loadRustMilkdropModule = async () => {
-  if (globalThis.__slskrRustMilkdropModule) {
-    return globalThis.__slskrRustMilkdropModule;
+const loadRustyMilkModule = async () => {
+  if (globalThis.__slskrRustyMilkModule) {
+    return globalThis.__slskrRustyMilkModule;
   }
   if (!rustModulePromise) {
     const modulePath = '/slskr_web.js';
@@ -166,7 +166,7 @@ const getSpectrumEnergy = (spectrum = []) => {
   return total / (limit * 255);
 };
 
-export const getNativeMilkdropBeatUpdate = (
+export const getRustyMilkBeatUpdate = (
   previous = {},
   spectrum = [],
   now = 0,
@@ -189,13 +189,13 @@ export const getNativeMilkdropBeatUpdate = (
   };
 };
 
-export const getNativeMilkdropTransitionProgress = (startedAt, seconds, now) => {
+export const getRustyMilkTransitionProgress = (startedAt, seconds, now) => {
   if (!Number.isFinite(seconds) || seconds <= 0) return 1;
   const linear = Math.max(0, Math.min(1, (now - startedAt) / seconds));
   return linear * linear * (3 - linear * 2);
 };
 
-export const getNativeMilkdropTransitionAlphas = (progress, mode = 'crossfade') => {
+export const getRustyMilkTransitionAlphas = (progress, mode = 'crossfade') => {
   const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
   const normalizedMode = String(mode || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
   if (['fade', 'fadeblack', 'fadethroughblack'].includes(normalizedMode)) {
@@ -246,24 +246,24 @@ const getWebGpuStatus = (rendererBackend) => ({
   available: false,
   backend: rendererBackend === 'webgpu' ? 'rust-webgl2-fallback' : 'rust-webgl2',
   reason: rendererBackend === 'webgpu'
-    ? 'Rust MilkDrop migration currently renders through the Rust WebGL2/canvas backend.'
+    ? 'RustyMilk migration currently renders through the Rust WebGL2/canvas backend.'
     : '',
 });
 
-export const createNativeMilkdropEngine = async ({
+export const createRustyMilkEngine = async ({
   audioContext,
   audioNode,
   canvas,
   rendererBackend = 'webgl2',
 }) => {
-  const rustModule = await loadRustMilkdropModule();
-  const rustEngine = new rustModule.RustMilkdropEngine(canvas);
+  const rustModule = await loadRustyMilkModule();
+  const rustEngine = new rustModule.RustyMilkEngine(canvas);
   const frameReader = createFrameReader(audioContext, audioNode);
   const webGpuStatus = getWebGpuStatus(rendererBackend);
   let presetIndex = 0;
   let activePresetTitle = rustEngine.loadPresetText(
-    nativePresets[presetIndex].source,
-    nativePresets[presetIndex].name,
+    rustyMilkPresets[presetIndex].source,
+    rustyMilkPresets[presetIndex].name,
     '{}',
   );
   let automation = normalizeAutomation();
@@ -278,10 +278,10 @@ export const createNativeMilkdropEngine = async ({
   };
 
   const loadPreset = (index, options = {}) => {
-    presetIndex = (index + nativePresets.length) % nativePresets.length;
+    presetIndex = (index + rustyMilkPresets.length) % rustyMilkPresets.length;
     activePresetTitle = rustEngine.loadPresetText(
-      nativePresets[presetIndex].source,
-      nativePresets[presetIndex].name,
+      rustyMilkPresets[presetIndex].source,
+      rustyMilkPresets[presetIndex].name,
       textureAssetsJson(options.textureAssets),
     );
     return activePresetTitle;
@@ -295,7 +295,7 @@ export const createNativeMilkdropEngine = async ({
       return loadPreset(presetIndex + 1);
     }
 
-    const nextBeatState = getNativeMilkdropBeatUpdate(
+    const nextBeatState = getRustyMilkBeatUpdate(
       beatState,
       renderFrame.spectrum,
       now,
@@ -319,8 +319,8 @@ export const createNativeMilkdropEngine = async ({
 
   return {
     name: rendererBackend === 'webgpu'
-      ? 'slskr Rust MilkDrop WebGL2 fallback'
-      : 'slskr Rust MilkDrop WebGL2',
+      ? 'slskr RustyMilk WebGL2 fallback'
+      : 'slskr RustyMilk WebGL2',
     presetName: activePresetTitle,
     dispose: () => {
       frameReader.disconnect();

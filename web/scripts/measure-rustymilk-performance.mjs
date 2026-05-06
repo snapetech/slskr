@@ -7,7 +7,7 @@ const result = spawnSync('cargo', [
   'test',
   '-p',
   'slskr-web',
-  'rust_milkdrop_webgpu_frame_batches_pack_runtime_primitives',
+  'rustymilk_webgpu_frame_batches_pack_runtime_primitives',
   '--',
   '--nocapture',
 ], {

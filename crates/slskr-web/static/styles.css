@@ -803,7 +803,7 @@ body {
   color: #17120d;
 }
 
-.slskr-milkdrop-panel {
+.slskr-rustymilk-panel {
   background: #080d12;
   border: 1px solid #38566b;
   border-radius: 8px;
@@ -820,62 +820,62 @@ body {
   z-index: 30;
 }
 
-.slskr-milkdrop-panel[hidden] {
+.slskr-rustymilk-panel[hidden] {
   display: none;
 }
 
-.slskr-milkdrop-panel header,
-.slskr-milkdrop-panel footer {
+.slskr-rustymilk-panel header,
+.slskr-rustymilk-panel footer {
   align-items: center;
   display: flex;
   gap: 12px;
   justify-content: space-between;
 }
 
-.slskr-milkdrop-panel header strong {
+.slskr-rustymilk-panel header strong {
   color: #ffd166;
   display: block;
   font-size: 15px;
 }
 
-.slskr-milkdrop-panel header span,
-.slskr-milkdrop-panel footer span {
+.slskr-rustymilk-panel header span,
+.slskr-rustymilk-panel footer span {
   color: #c6d0ca;
   display: block;
   font-size: 12px;
 }
 
-.slskr-milkdrop-actions {
+.slskr-rustymilk-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.slskr-milkdrop-library {
+.slskr-rustymilk-library {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.slskr-milkdrop-editor {
+.slskr-rustymilk-editor {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.slskr-milkdrop-library input,
-.slskr-milkdrop-editor input {
+.slskr-rustymilk-library input,
+.slskr-rustymilk-editor input {
   min-width: 220px;
 }
 
-.slskr-milkdrop-editor select {
+.slskr-rustymilk-editor select {
   max-width: 160px;
 }
 
-#slskr-milkdrop-debug {
+#slskr-rustymilk-debug {
   background: #05070a;
   border: 1px solid #263a4a;
   border-radius: 6px;
@@ -887,12 +887,12 @@ body {
   padding: 8px;
 }
 
-.slskr-milkdrop-actions button[aria-pressed="true"] {
+.slskr-rustymilk-actions button[aria-pressed="true"] {
   border-color: #ffd166;
   color: #ffd166;
 }
 
-#slskr-milkdrop-canvas {
+#slskr-rustymilk-canvas {
   aspect-ratio: 8 / 3;
   background: #05070a;
   border: 1px solid #263a4a;
@@ -2512,13 +2512,13 @@ body {
     position: static;
   }
 
-  .slskr-milkdrop-panel {
+  .slskr-rustymilk-panel {
     bottom: 12px;
     max-width: calc(100vw - 24px);
   }
 
-  .slskr-milkdrop-panel header,
-  .slskr-milkdrop-panel footer {
+  .slskr-rustymilk-panel header,
+  .slskr-rustymilk-panel footer {
     align-items: stretch;
     flex-direction: column;
   }

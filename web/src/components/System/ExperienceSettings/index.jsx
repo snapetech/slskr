@@ -76,8 +76,8 @@ const options = {
   visualizerDefault: [
     { key: 'last', text: 'Last used', value: 'last' },
     { key: 'art', text: 'Album art', value: 'art' },
-    { key: 'native-webgl2', text: 'MilkDrop3 WebGL2', value: 'native-webgl2' },
-    { key: 'native-webgpu', text: 'MilkDrop3 WebGPU', value: 'native-webgpu' },
+    { key: 'rustymilk-webgl2', text: 'RustyMilk WebGL2', value: 'rustymilk-webgl2' },
+    { key: 'rustymilk-webgpu', text: 'RustyMilk WebGPU', value: 'rustymilk-webgpu' },
   ],
 };
 

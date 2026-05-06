@@ -6443,8 +6443,8 @@ fn player_footer_html() -> String {
     r#"<footer class="slskr-player" data-slskr-player data-slskr-player-rating-key="" data-slskr-player-radio-query=""><section><strong>Now Playing</strong><span id="slskr-player-now">Queue idle</span><span id="slskr-player-now-detail">No local stream selected</span><audio id="slskr-player-audio" preload="metadata" controls></audio></section><section class="slskr-player-controls" aria-label="Player controls"><button type="button" data-slskr-player-action="play">Play</button><button type="button" data-slskr-player-action="refresh">Refresh</button><button type="button" data-slskr-player-action="clear">Clear</button><button type="button" data-slskr-player-action="visualizer">Visualizer</button><button type="button" data-slskr-player-action="radio">Radio</button></section><section class="slskr-player-rating" aria-label="Player rating"><strong>Rating</strong><div id="slskr-player-rating-controls"><button type="button" data-slskr-player-rating="1">1</button><button type="button" data-slskr-player-rating="2">2</button><button type="button" data-slskr-player-rating="3">3</button><button type="button" data-slskr-player-rating="4">4</button><button type="button" data-slskr-player-rating="5">5</button></div><span id="slskr-player-rating-status">Not rated</span></section><section><strong>Radio</strong><span id="slskr-player-radio">No track selected</span><span id="slskr-player-transfers">0 down / 0 up</span></section><section><strong>Visualizer</strong><span id="slskr-player-visualizer">Checking status</span><span id="slskr-player-status" aria-live="polite">Rust player surface ready</span></section></footer>"#.to_string()
 }
 
-fn rust_milkdrop_panel_html() -> String {
-    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false" data-slskr-milkdrop-favorites-only="false" data-slskr-milkdrop-search="" data-slskr-milkdrop-playlist="" data-slskr-milkdrop-automation="off" data-slskr-milkdrop-fps="full" data-slskr-milkdrop-quality="balanced" data-slskr-milkdrop-debug="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="random">Random</button><button type="button" data-slskr-milkdrop-action="favorite" id="slskr-milkdrop-favorite">Favorite</button><button type="button" data-slskr-milkdrop-action="favorites" id="slskr-milkdrop-favorites-only">Favorites</button><button type="button" data-slskr-milkdrop-action="remove">Remove</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="pack">Pack</button><button type="button" data-slskr-milkdrop-action="clear">Clear</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><button type="button" data-slskr-milkdrop-action="clear-search">Clear search</button><button type="button" data-slskr-milkdrop-action="save-playlist">Save playlist</button><button type="button" data-slskr-milkdrop-action="playlist">Playlist</button><button type="button" data-slskr-milkdrop-action="rename-playlist">Rename</button><button type="button" data-slskr-milkdrop-action="clear-playlist">All presets</button><button type="button" data-slskr-milkdrop-action="remove-playlist">Remove playlist</button><input id="slskr-milkdrop-preset-input" type="file" accept=".milk,.milk2,.txt,text/plain" multiple hidden><input id="slskr-milkdrop-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><input id="slskr-milkdrop-pack-input" type="file" accept=".milk,.milk2,.txt,text/plain,image/png,image/jpeg,image/webp,image/gif" multiple webkitdirectory hidden><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><div class="slskr-milkdrop-editor"><select id="slskr-milkdrop-parameter" aria-label="MilkDrop parameter"><option value="decay">Decay</option><option value="zoom">Zoom</option><option value="rot">Rotation</option><option value="wave_r">Wave red</option><option value="wave_g">Wave green</option><option value="wave_b">Wave blue</option><option value="wave_a">Wave alpha</option></select><input id="slskr-milkdrop-parameter-value" aria-label="MilkDrop parameter value" value="0.9"><button type="button" data-slskr-milkdrop-action="apply-parameter">Apply</button><button type="button" data-slskr-milkdrop-action="randomize-parameters">Randomize</button><button type="button" data-slskr-milkdrop-action="import-shape">Import shape</button><button type="button" data-slskr-milkdrop-action="export-shape">Export shape</button><button type="button" data-slskr-milkdrop-action="remove-shape">Remove shape</button><button type="button" data-slskr-milkdrop-action="import-wave">Import wave</button><button type="button" data-slskr-milkdrop-action="export-wave">Export wave</button><button type="button" data-slskr-milkdrop-action="remove-wave">Remove wave</button><button type="button" data-slskr-milkdrop-action="export-preset">Export preset</button><button type="button" data-slskr-milkdrop-action="automation">Automation</button><select id="slskr-milkdrop-automation-beats" aria-label="MilkDrop automation beats"><option value="4">4 beats</option><option value="8" selected>8 beats</option><option value="16">16 beats</option></select><select id="slskr-milkdrop-automation-interval" aria-label="MilkDrop automation interval"><option value="15">15 sec</option><option value="30" selected>30 sec</option><option value="60">60 sec</option></select><select id="slskr-milkdrop-fps" aria-label="MilkDrop FPS cap"><option value="full">Full FPS</option><option value="60">60 FPS</option><option value="30">30 FPS</option><option value="24">24 FPS</option></select><select id="slskr-milkdrop-quality" aria-label="MilkDrop quality"><option value="balanced" selected>Balanced</option><option value="efficient">Efficient</option><option value="full">Full</option><option value="custom">Custom</option></select><button type="button" data-slskr-milkdrop-action="debug">Debug</button></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer><pre id="slskr-milkdrop-debug" hidden></pre></section>"#.to_string()
+fn rustymilk_panel_html() -> String {
+    r#"<section class="slskr-rustymilk-panel" id="slskr-rust-rustymilk" hidden data-slskr-rustymilk-running="false" data-slskr-rustymilk-favorites-only="false" data-slskr-rustymilk-search="" data-slskr-rustymilk-playlist="" data-slskr-rustymilk-automation="off" data-slskr-rustymilk-fps="full" data-slskr-rustymilk-quality="balanced" data-slskr-rustymilk-debug="false"><header><div><strong>RustyMilk</strong><span id="slskr-rustymilk-preset">slskr native grid smoke</span></div><div class="slskr-rustymilk-actions"><button type="button" data-slskr-rustymilk-action="previous">Previous</button><button type="button" data-slskr-rustymilk-action="preset">Next</button><button type="button" data-slskr-rustymilk-action="random">Random</button><button type="button" data-slskr-rustymilk-action="favorite" id="slskr-rustymilk-favorite">Favorite</button><button type="button" data-slskr-rustymilk-action="favorites" id="slskr-rustymilk-favorites-only">Favorites</button><button type="button" data-slskr-rustymilk-action="remove">Remove</button><button type="button" data-slskr-rustymilk-action="import">Import</button><button type="button" data-slskr-rustymilk-action="texture">Texture</button><button type="button" data-slskr-rustymilk-action="pack">Pack</button><button type="button" data-slskr-rustymilk-action="clear">Clear</button><button type="button" data-slskr-rustymilk-action="reset">Reset</button><button type="button" data-slskr-rustymilk-action="external">External</button><button type="button" data-slskr-rustymilk-action="close">Close</button></div></header><div class="slskr-rustymilk-library"><input id="slskr-rustymilk-search" aria-label="Search RustyMilk presets" placeholder="Search preset library"><button type="button" data-slskr-rustymilk-action="search">Search</button><button type="button" data-slskr-rustymilk-action="clear-search">Clear search</button><button type="button" data-slskr-rustymilk-action="save-playlist">Save playlist</button><button type="button" data-slskr-rustymilk-action="playlist">Playlist</button><button type="button" data-slskr-rustymilk-action="rename-playlist">Rename</button><button type="button" data-slskr-rustymilk-action="clear-playlist">All presets</button><button type="button" data-slskr-rustymilk-action="remove-playlist">Remove playlist</button><input id="slskr-rustymilk-preset-input" type="file" accept=".milk,.milk2,.txt,text/plain" multiple hidden><input id="slskr-rustymilk-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><input id="slskr-rustymilk-pack-input" type="file" accept=".milk,.milk2,.txt,text/plain,image/png,image/jpeg,image/webp,image/gif" multiple webkitdirectory hidden><span id="slskr-rustymilk-library-status">3 bundled presets</span><span id="slskr-rustymilk-textures">0 texture assets</span></div><div class="slskr-rustymilk-editor"><select id="slskr-rustymilk-parameter" aria-label="RustyMilk parameter"><option value="decay">Decay</option><option value="zoom">Zoom</option><option value="rot">Rotation</option><option value="wave_r">Wave red</option><option value="wave_g">Wave green</option><option value="wave_b">Wave blue</option><option value="wave_a">Wave alpha</option></select><input id="slskr-rustymilk-parameter-value" aria-label="RustyMilk parameter value" value="0.9"><button type="button" data-slskr-rustymilk-action="apply-parameter">Apply</button><button type="button" data-slskr-rustymilk-action="randomize-parameters">Randomize</button><button type="button" data-slskr-rustymilk-action="import-shape">Import shape</button><button type="button" data-slskr-rustymilk-action="export-shape">Export shape</button><button type="button" data-slskr-rustymilk-action="remove-shape">Remove shape</button><button type="button" data-slskr-rustymilk-action="import-wave">Import wave</button><button type="button" data-slskr-rustymilk-action="export-wave">Export wave</button><button type="button" data-slskr-rustymilk-action="remove-wave">Remove wave</button><button type="button" data-slskr-rustymilk-action="export-preset">Export preset</button><button type="button" data-slskr-rustymilk-action="automation">Automation</button><select id="slskr-rustymilk-automation-beats" aria-label="RustyMilk automation beats"><option value="4">4 beats</option><option value="8" selected>8 beats</option><option value="16">16 beats</option></select><select id="slskr-rustymilk-automation-interval" aria-label="RustyMilk automation interval"><option value="15">15 sec</option><option value="30" selected>30 sec</option><option value="60">60 sec</option></select><select id="slskr-rustymilk-fps" aria-label="RustyMilk FPS cap"><option value="full">Full FPS</option><option value="60">60 FPS</option><option value="30">30 FPS</option><option value="24">24 FPS</option></select><select id="slskr-rustymilk-quality" aria-label="RustyMilk quality"><option value="balanced" selected>Balanced</option><option value="efficient">Efficient</option><option value="full">Full</option><option value="custom">Custom</option></select><button type="button" data-slskr-rustymilk-action="debug">Debug</button></div><canvas id="slskr-rustymilk-canvas" width="960" height="360" aria-label="RustyMilk visualizer"></canvas><footer><span id="slskr-rustymilk-status">Visualizer ready</span><span id="slskr-rustymilk-renderer">Renderer checking</span></footer><pre id="slskr-rustymilk-debug" hidden></pre></section>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -6462,10 +6462,10 @@ pub fn shell_html() -> String {
         .join("");
 
     format!(
-        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main>{milkdrop}{player}</div>"#,
+        r#"<div class="slskr-shell"><nav class="slskr-nav">{nav}</nav><main class="slskr-main"><header class="slskr-appbar"><div><strong>slskr</strong><span>Search, transfers, messages, rooms, browse, sharing, and system control</span></div><ul id="slskr-runtime-status">{runtime}</ul></header><section id="slskr-route-view">{route_page}</section></main>{rustymilk}{player}</div>"#,
         route_page = route_page_html("/searches"),
         runtime = runtime_probe_pending_html(),
-        milkdrop = rust_milkdrop_panel_html(),
+        rustymilk = rustymilk_panel_html(),
         player = player_footer_html(),
     )
 }
@@ -6520,8 +6520,8 @@ pub fn wasm_route_page_html(path: &str) -> String {
     route_page_html(path)
 }
 
-#[wasm_bindgen(js_name = rustMilkdropWebGpuBatchSummaryJson)]
-pub fn wasm_rust_milkdrop_webgpu_batch_summary_json(
+#[wasm_bindgen(js_name = rustyMilkWebGpuBatchSummaryJson)]
+pub fn wasm_rustymilk_webgpu_batch_summary_json(
     source: &str,
     time_seconds: f64,
     bass: f64,
@@ -6530,46 +6530,46 @@ pub fn wasm_rust_milkdrop_webgpu_batch_summary_json(
     waveform_csv: &str,
     spectrum_csv: &str,
 ) -> String {
-    rust_milkdrop_webgpu_batch_summary_json(
+    rustymilk_webgpu_batch_summary_json(
         source,
         time_seconds,
         bass,
         mid,
         treble,
-        &parse_milkdrop_sample_csv(waveform_csv),
-        &parse_milkdrop_sample_csv(spectrum_csv),
+        &parse_rustymilk_sample_csv(waveform_csv),
+        &parse_rustymilk_sample_csv(spectrum_csv),
     )
 }
 
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = RustMilkdropEngine)]
-pub struct WasmRustMilkdropEngine {
+#[wasm_bindgen(js_name = RustyMilkEngine)]
+pub struct WasmRustyMilkEngine {
     canvas: web_sys::HtmlCanvasElement,
-    renderer: RustMilkdropRenderer,
-    runtime: RustMilkdropFrameSetRuntime,
+    renderer: RustyMilkRenderer,
+    runtime: RustyMilkFrameSetRuntime,
     source: String,
     title: String,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 }
 
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_class = RustMilkdropEngine)]
-impl WasmRustMilkdropEngine {
+#[wasm_bindgen(js_class = RustyMilkEngine)]
+impl WasmRustyMilkEngine {
     #[wasm_bindgen(constructor)]
-    pub fn new(canvas: web_sys::HtmlCanvasElement) -> Result<WasmRustMilkdropEngine, JsValue> {
-        let source = RUST_MILKDROP_PRESETS
+    pub fn new(canvas: web_sys::HtmlCanvasElement) -> Result<WasmRustyMilkEngine, JsValue> {
+        let source = RUSTYMILK_PRESETS
             .first()
             .copied()
             .unwrap_or_default()
             .to_string();
         let texture_assets = Rc::new(RefCell::new(BTreeMap::new()));
-        let renderer = rust_milkdrop_renderer(&canvas, texture_assets.clone())?;
-        let title = validate_rust_milkdrop_import(&source)
-            .unwrap_or_else(|_| rust_milkdrop_preset_name(&source));
+        let renderer = rustymilk_renderer(&canvas, texture_assets.clone())?;
+        let title = validate_rustymilk_import(&source)
+            .unwrap_or_else(|_| rustymilk_preset_name(&source));
         Ok(Self {
             canvas,
             renderer,
-            runtime: RustMilkdropFrameSetRuntime::default(),
+            runtime: RustyMilkFrameSetRuntime::default(),
             source,
             title,
             texture_assets,
@@ -6588,28 +6588,28 @@ impl WasmRustMilkdropEngine {
         file_name: &str,
         texture_assets_json: &str,
     ) -> Result<String, JsValue> {
-        let title = validate_rust_milkdrop_import(source).map_err(|error| JsValue::from_str(&error))?;
+        let title = validate_rustymilk_import(source).map_err(|error| JsValue::from_str(&error))?;
         self.source = source.to_string();
         self.title = if title.trim().is_empty() {
             if file_name.trim().is_empty() {
-                "Imported MilkDrop preset".to_string()
+                "Imported RustyMilk preset".to_string()
             } else {
                 file_name.to_string()
             }
         } else {
             title
         };
-        self.runtime = RustMilkdropFrameSetRuntime::default();
+        self.runtime = RustyMilkFrameSetRuntime::default();
         self.replace_texture_assets(texture_assets_json);
         Ok(self.title.clone())
     }
 
     #[wasm_bindgen(js_name = inspectPresetText)]
     pub fn inspect_preset_text(&self, source: &str, file_name: &str) -> Result<String, JsValue> {
-        let title = validate_rust_milkdrop_import(source).map_err(|error| JsValue::from_str(&error))?;
+        let title = validate_rustymilk_import(source).map_err(|error| JsValue::from_str(&error))?;
         Ok(serde_json::json!({
             "title": if title.trim().is_empty() {
-                if file_name.trim().is_empty() { "Imported MilkDrop preset" } else { file_name }
+                if file_name.trim().is_empty() { "Imported RustyMilk preset" } else { file_name }
             } else {
                 &title
             }
@@ -6626,9 +6626,9 @@ impl WasmRustMilkdropEngine {
         texture_assets_json: &str,
     ) -> Result<String, JsValue> {
         let mut parsed = self.parsed_source();
-        let fragment = parse_milkdrop_fragment(source, file_name, requested_type);
+        let fragment = parse_rustymilk_fragment(source, file_name, requested_type);
         let Some(target) = parsed.presets.first_mut() else {
-            return Err(JsValue::from_str("MilkDrop preset is empty"));
+            return Err(JsValue::from_str("RustyMilk preset is empty"));
         };
         let target_entries = if fragment.fragment_type == "wave" {
             &mut target.waves
@@ -6636,7 +6636,7 @@ impl WasmRustMilkdropEngine {
             &mut target.shapes
         };
         target_entries.extend(fragment.entries);
-        let merged_source = serialize_milkdrop_preset_set(&parsed);
+        let merged_source = serialize_rustymilk_preset_set(&parsed);
         let title = format!(
             "{} + {}",
             self.title,
@@ -6670,7 +6670,7 @@ impl WasmRustMilkdropEngine {
             return Ok("null".to_string());
         }
         target_entries.remove(index);
-        let source = serialize_milkdrop_preset_set(&parsed);
+        let source = serialize_rustymilk_preset_set(&parsed);
         let title = format!("{} - {} {}", self.title, requested_type, index + 1);
         self.load_preset_text(&source, &title, texture_assets_json)?;
         Ok(serde_json::json!({ "source": source, "title": title }).to_string())
@@ -6696,8 +6696,8 @@ impl WasmRustMilkdropEngine {
         };
         target
             .base_values
-            .insert(key.to_string(), MilkdropValue::Number(value));
-        let source = serialize_milkdrop_preset_set(&parsed);
+            .insert(key.to_string(), RustyMilkValue::Number(value));
+        let source = serialize_rustymilk_preset_set(&parsed);
         let title = format!("{} edited", self.title);
         self.load_preset_text(&source, &title, texture_assets_json)?;
         Ok(serde_json::json!({
@@ -6726,15 +6726,15 @@ impl WasmRustMilkdropEngine {
             let current = target
                 .base_values
                 .get(key)
-                .and_then(MilkdropValue::as_number)
+                .and_then(RustyMilkValue::as_number)
                 .unwrap_or(fallback);
             let jittered = min + js_sys::Math::random() * (max - min);
             target.base_values.insert(
                 key.to_string(),
-                MilkdropValue::Number(((current + jittered) / 2.0 * 100.0).round() / 100.0),
+                RustyMilkValue::Number(((current + jittered) / 2.0 * 100.0).round() / 100.0),
             );
         }
-        let source = serialize_milkdrop_preset_set(&parsed);
+        let source = serialize_rustymilk_preset_set(&parsed);
         let title = format!("{} randomized", self.title);
         self.load_preset_text(&source, &title, texture_assets_json)?;
         Ok(serde_json::json!({
@@ -6750,7 +6750,7 @@ impl WasmRustMilkdropEngine {
         serde_json::json!({
             "fileName": format!(
                 "{}.{}",
-                sanitize_rust_milkdrop_file_name(&self.title),
+                sanitize_rustymilk_file_name(&self.title),
                 self.parsed_source().format
             ),
             "source": self.source
@@ -6773,8 +6773,8 @@ impl WasmRustMilkdropEngine {
             return "null".to_string();
         };
         serde_json::json!({
-            "fileName": format!("{}.{}", sanitize_rust_milkdrop_file_name(&self.title), requested_type),
-            "source": serialize_milkdrop_fragment(entry, requested_type)
+            "fileName": format!("{}.{}", sanitize_rustymilk_file_name(&self.title), requested_type),
+            "source": serialize_rustymilk_fragment(entry, requested_type)
         })
         .to_string()
     }
@@ -6832,15 +6832,15 @@ impl WasmRustMilkdropEngine {
         mouse_dx: f64,
         mouse_dy: f64,
     ) {
-        let input = RustMilkdropInputState {
+        let input = RustyMilkInputState {
             mouse_down,
             mouse_dx,
             mouse_dy,
             mouse_x,
             mouse_y,
         };
-        let waveform = parse_milkdrop_sample_csv(waveform_csv);
-        let spectrum = parse_milkdrop_sample_csv(spectrum_csv);
+        let waveform = parse_rustymilk_sample_csv(waveform_csv);
+        let spectrum = parse_rustymilk_sample_csv(spectrum_csv);
         let frame_set = self.runtime.render_source_with_audio_and_input(
             &self.source,
             time_seconds,
@@ -6862,9 +6862,9 @@ impl WasmRustMilkdropEngine {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl WasmRustMilkdropEngine {
-    fn parsed_source(&self) -> MilkdropPresetSet {
-        parse_milkdrop_preset_set(
+impl WasmRustyMilkEngine {
+    fn parsed_source(&self) -> RustyMilkPresetSet {
+        parse_rustymilk_preset_set(
             &self.source,
             self.source.to_ascii_lowercase().contains("[preset01]"),
         )
@@ -6886,7 +6886,7 @@ impl WasmRustMilkdropEngine {
             if !data_url.starts_with("data:image/") {
                 continue;
             }
-            for alias in get_milkdrop_texture_name_aliases(name) {
+            for alias in get_rustymilk_texture_name_aliases(name) {
                 assets.insert(alias, data_url.to_string());
             }
         }
@@ -6902,7 +6902,7 @@ impl WasmRustMilkdropEngine {
         for key in ["decay", "zoom", "rot", "wave_r", "wave_g", "wave_b", "wave_a"] {
             if let Some(value) = values
                 .and_then(|values| values.get(key))
-                .and_then(MilkdropValue::as_number)
+                .and_then(RustyMilkValue::as_number)
             {
                 summary.insert(key.to_string(), serde_json::json!(value));
             }
@@ -6919,13 +6919,13 @@ impl WasmRustMilkdropEngine {
             "shapes": primary.shapes.iter().enumerate().map(|(index, entry)| {
                 serde_json::json!({
                     "index": index,
-                    "label": rust_milkdrop_fragment_entry_label(entry, index, "shape")
+                    "label": rustymilk_fragment_entry_label(entry, index, "shape")
                 })
             }).collect::<Vec<_>>(),
             "waves": primary.waves.iter().enumerate().map(|(index, entry)| {
                 serde_json::json!({
                     "index": index,
-                    "label": rust_milkdrop_fragment_entry_label(entry, index, "wave")
+                    "label": rustymilk_fragment_entry_label(entry, index, "wave")
                 })
             }).collect::<Vec<_>>()
         })
@@ -6933,7 +6933,7 @@ impl WasmRustMilkdropEngine {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn sanitize_rust_milkdrop_file_name(value: &str) -> String {
+fn sanitize_rustymilk_file_name(value: &str) -> String {
     let sanitized = value
         .chars()
         .map(|ch| {
@@ -6946,15 +6946,15 @@ fn sanitize_rust_milkdrop_file_name(value: &str) -> String {
         .collect::<String>();
     let trimmed = sanitized.trim_matches('_');
     if trimmed.is_empty() {
-        "MilkDrop_preset".to_string()
+        "RustyMilk_preset".to_string()
     } else {
         trimmed.to_string()
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_fragment_entry_label(
-    entry: &MilkdropIndexedEntry,
+fn rustymilk_fragment_entry_label(
+    entry: &RustyMilkIndexedEntry,
     index: usize,
     requested_type: &str,
 ) -> String {
@@ -6963,7 +6963,7 @@ fn rust_milkdrop_fragment_entry_label(
         let value = entry
             .base_values
             .get(key)
-            .map(MilkdropValue::as_text)
+            .map(RustyMilkValue::as_text)
             .unwrap_or_default();
         if !value.trim().is_empty() {
             return format!("{prefix} {}: {value}", index + 1);
@@ -6974,7 +6974,7 @@ fn rust_milkdrop_fragment_entry_label(
             let value = entry
                 .base_values
                 .get(key)
-                .map(MilkdropValue::as_text)
+                .map(RustyMilkValue::as_text)
                 .unwrap_or_default();
             if !value.trim().is_empty() {
                 return format!("{prefix} {}: {value} samples", index + 1);
@@ -6985,7 +6985,7 @@ fn rust_milkdrop_fragment_entry_label(
             let value = entry
                 .base_values
                 .get(key)
-                .map(MilkdropValue::as_text)
+                .map(RustyMilkValue::as_text)
                 .unwrap_or_default();
             if !value.trim().is_empty() {
                 return format!("{prefix} {}: {value} sides", index + 1);
@@ -10913,14 +10913,14 @@ fn mount_player_controls(
                         return;
                     }
                     if action == "visualizer" {
-                        match toggle_rust_milkdrop_visualizer(&window, &document) {
+                        match toggle_rustymilk_visualizer(&window, &document) {
                             Ok(()) => {
-                                set_player_status(&document, "Rust MilkDrop visualizer ready")
+                                set_player_status(&document, "RustyMilk visualizer ready")
                             }
                             Err(error) => set_player_status(
                                 &document,
                                 &error.as_string().unwrap_or_else(|| {
-                                    "Rust MilkDrop visualizer failed".to_string()
+                                    "RustyMilk visualizer failed".to_string()
                                 }),
                             ),
                         }
@@ -11938,7 +11938,7 @@ pub fn player_visualizer_text(body: &str) -> String {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RustMilkdropPreset {
+pub struct RustyMilkPreset {
     pub decay: f64,
     pub rot: f64,
     pub wave_a: f64,
@@ -11949,7 +11949,7 @@ pub struct RustMilkdropPreset {
     pub zoom: f64,
 }
 
-impl Default for RustMilkdropPreset {
+impl Default for RustyMilkPreset {
     fn default() -> Self {
         Self {
             decay: 0.89,
@@ -11965,41 +11965,41 @@ impl Default for RustMilkdropPreset {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RustMilkdropFrame {
+pub struct RustyMilkFrame {
     pub background_alpha: f64,
     pub bass: f64,
     pub dx: f64,
     pub dy: f64,
     pub fft_bins: [f64; 64],
     pub mid: f64,
-    pub primitives: Vec<RustMilkdropPrimitive>,
+    pub primitives: Vec<RustyMilkPrimitive>,
     pub q_registers: [f64; 64],
     pub shape_count: usize,
     pub shader_source: String,
     pub shader_texture_samplers: Vec<String>,
-    pub textured_primitives: Vec<RustMilkdropTexturedPrimitive>,
+    pub textured_primitives: Vec<RustyMilkTexturedPrimitive>,
     pub rotation: f64,
     pub treble: f64,
     pub wave_color: (u8, u8, u8),
     pub waveform_bins: [f64; 64],
     pub wave_radius: f64,
     pub waveform_count: usize,
-    pub warp_mesh: Option<RustMilkdropWarpMesh>,
+    pub warp_mesh: Option<RustyMilkWarpMesh>,
     pub zoom: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RustMilkdropCompositeFrame {
+pub struct RustyMilkCompositeFrame {
     pub blend_alpha: f64,
     pub composite_mode: String,
-    pub frame: RustMilkdropFrame,
+    pub frame: RustyMilkFrame,
     pub index: usize,
     pub title: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RustMilkdropFrameSet {
-    pub entries: Vec<RustMilkdropCompositeFrame>,
+pub struct RustyMilkFrameSet {
+    pub entries: Vec<RustyMilkCompositeFrame>,
     pub preset_count: usize,
     pub title: String,
     pub transition_mode: String,
@@ -12007,7 +12007,7 @@ pub struct RustMilkdropFrameSet {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RustMilkdropInputState {
+pub struct RustyMilkInputState {
     pub mouse_down: f64,
     pub mouse_dx: f64,
     pub mouse_dy: f64,
@@ -12015,7 +12015,7 @@ pub struct RustMilkdropInputState {
     pub mouse_y: f64,
 }
 
-impl Default for RustMilkdropInputState {
+impl Default for RustyMilkInputState {
     fn default() -> Self {
         Self {
             mouse_down: 0.0,
@@ -12028,7 +12028,7 @@ impl Default for RustMilkdropInputState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RustMilkdropPrimitiveMode {
+pub enum RustyMilkPrimitiveMode {
     LineStrip,
     Lines,
     Points,
@@ -12037,30 +12037,30 @@ pub enum RustMilkdropPrimitiveMode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RustMilkdropPrimitive {
+pub struct RustyMilkPrimitive {
     pub color: [f64; 4],
-    pub mode: RustMilkdropPrimitiveMode,
+    pub mode: RustyMilkPrimitiveMode,
     pub vertex_colors: Vec<f64>,
     pub vertices: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RustMilkdropTexturedPrimitiveMode {
+pub enum RustyMilkTexturedPrimitiveMode {
     Quad,
     TriangleFan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RustMilkdropTexturedPrimitive {
+pub struct RustyMilkTexturedPrimitive {
     pub color: [f64; 4],
-    pub mode: RustMilkdropTexturedPrimitiveMode,
+    pub mode: RustyMilkTexturedPrimitiveMode,
     pub texture_name: String,
     pub uvs: Vec<f64>,
     pub vertices: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RustMilkdropWarpMesh {
+pub struct RustyMilkWarpMesh {
     pub positions: Vec<f64>,
     pub source_uvs: Vec<f64>,
 }
@@ -12073,8 +12073,8 @@ fn clamp_range(value: f64, min: f64, max: f64) -> f64 {
     value.clamp(min, max)
 }
 
-pub fn parse_rust_milkdrop_preset(source: &str) -> RustMilkdropPreset {
-    let mut preset = RustMilkdropPreset::default();
+pub fn parse_rustymilk_preset(source: &str) -> RustyMilkPreset {
+    let mut preset = RustyMilkPreset::default();
     for line in source.lines() {
         let Some((raw_key, raw_value)) = line.split_once('=') else {
             continue;
@@ -12098,18 +12098,18 @@ pub fn parse_rust_milkdrop_preset(source: &str) -> RustMilkdropPreset {
     preset
 }
 
-pub fn rust_milkdrop_frame(
-    preset: &RustMilkdropPreset,
+pub fn rustymilk_frame(
+    preset: &RustyMilkPreset,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
-) -> RustMilkdropFrame {
+) -> RustyMilkFrame {
     let bass = clamp_unit(bass);
     let mid = clamp_unit(mid);
     let treble = clamp_unit(treble);
     let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
-    RustMilkdropFrame {
+    RustyMilkFrame {
         background_alpha: clamp_range(1.0 - preset.decay, 0.01, 0.5),
         bass,
         dx: 0.0,
@@ -12141,24 +12141,24 @@ pub fn rust_milkdrop_frame(
     }
 }
 
-fn milkdrop_scope_number(scope: &BTreeMap<String, MilkdropValue>, key: &str, fallback: f64) -> f64 {
+fn rustymilk_scope_number(scope: &BTreeMap<String, RustyMilkValue>, key: &str, fallback: f64) -> f64 {
     scope
         .get(key)
-        .and_then(MilkdropValue::as_number)
+        .and_then(RustyMilkValue::as_number)
         .filter(|value| value.is_finite())
         .unwrap_or(fallback)
 }
 
-fn milkdrop_base_number(values: &BTreeMap<String, MilkdropValue>, key: &str, fallback: f64) -> f64 {
+fn rustymilk_base_number(values: &BTreeMap<String, RustyMilkValue>, key: &str, fallback: f64) -> f64 {
     values
         .get(key)
-        .and_then(MilkdropValue::as_number)
+        .and_then(RustyMilkValue::as_number)
         .filter(|value| value.is_finite())
         .unwrap_or(fallback)
 }
 
-fn milkdrop_base_number_any(
-    values: &BTreeMap<String, MilkdropValue>,
+fn rustymilk_base_number_any(
+    values: &BTreeMap<String, RustyMilkValue>,
     keys: &[&str],
     fallback: f64,
 ) -> f64 {
@@ -12166,24 +12166,24 @@ fn milkdrop_base_number_any(
         .find_map(|key| {
             values
                 .get(*key)
-                .and_then(MilkdropValue::as_number)
+                .and_then(RustyMilkValue::as_number)
                 .filter(|value| value.is_finite())
         })
         .unwrap_or(fallback)
 }
 
-fn rust_milkdrop_composite_alpha(preset: &MilkdropPresetDocument, index: usize) -> f64 {
+fn rustymilk_composite_alpha(preset: &RustyMilkPresetDocument, index: usize) -> f64 {
     if index == 0 {
         return 1.0;
     }
-    clamp_unit(milkdrop_base_number_any(
+    clamp_unit(rustymilk_base_number_any(
         &preset.base_values,
         &["blend_alpha", "blendalpha", "composite_alpha", "alpha"],
         0.5,
     ))
 }
 
-fn normalize_rust_milkdrop_composite_mode(value: &str) -> String {
+fn normalize_rustymilk_composite_mode(value: &str) -> String {
     let normalized = value
         .trim()
         .to_ascii_lowercase()
@@ -12198,7 +12198,7 @@ fn normalize_rust_milkdrop_composite_mode(value: &str) -> String {
     }
 }
 
-fn rust_milkdrop_composite_mode(preset: &MilkdropPresetDocument, index: usize) -> String {
+fn rustymilk_composite_mode(preset: &RustyMilkPresetDocument, index: usize) -> String {
     if index == 0 {
         return "alpha".to_string();
     }
@@ -12210,17 +12210,17 @@ fn rust_milkdrop_composite_mode(preset: &MilkdropPresetDocument, index: usize) -
         "mode",
     ]
     .iter()
-    .find_map(|key| preset.base_values.get(*key).map(MilkdropValue::as_text))
+    .find_map(|key| preset.base_values.get(*key).map(RustyMilkValue::as_text))
     .unwrap_or_default();
-    normalize_rust_milkdrop_composite_mode(&mode)
+    normalize_rustymilk_composite_mode(&mode)
 }
 
-fn rust_milkdrop_transition_seconds(parsed: &MilkdropPresetSet) -> f64 {
+fn rustymilk_transition_seconds(parsed: &RustyMilkPresetSet) -> f64 {
     parsed
         .presets
         .first()
         .map(|preset| {
-            milkdrop_base_number_any(
+            rustymilk_base_number_any(
                 &preset.base_values,
                 &[
                     "transition_seconds",
@@ -12237,7 +12237,7 @@ fn rust_milkdrop_transition_seconds(parsed: &MilkdropPresetSet) -> f64 {
         .unwrap_or(1.25)
 }
 
-fn rust_milkdrop_transition_mode(parsed: &MilkdropPresetSet) -> String {
+fn rustymilk_transition_mode(parsed: &RustyMilkPresetSet) -> String {
     let mode = parsed
         .presets
         .first()
@@ -12250,7 +12250,7 @@ fn rust_milkdrop_transition_mode(parsed: &MilkdropPresetSet) -> String {
                 "blend_transition",
             ]
             .iter()
-            .find_map(|key| preset.base_values.get(*key).map(MilkdropValue::as_text))
+            .find_map(|key| preset.base_values.get(*key).map(RustyMilkValue::as_text))
         })
         .unwrap_or_else(|| "crossfade".to_string());
     let normalized = mode
@@ -12266,49 +12266,49 @@ fn rust_milkdrop_transition_mode(parsed: &MilkdropPresetSet) -> String {
     }
 }
 
-fn create_rust_milkdrop_scope(
-    preset: &MilkdropPresetDocument,
+fn create_rustymilk_scope(
+    preset: &RustyMilkPresetDocument,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
-) -> BTreeMap<String, MilkdropValue> {
+) -> BTreeMap<String, RustyMilkValue> {
     let mut scope = preset.base_values.clone();
     for index in 1..=64 {
         scope
             .entry(format!("q{index}"))
-            .or_insert(MilkdropValue::Number(0.0));
+            .or_insert(RustyMilkValue::Number(0.0));
     }
-    scope.insert("bass".to_string(), MilkdropValue::Number(bass));
-    scope.insert("bass_att".to_string(), MilkdropValue::Number(bass));
-    scope.insert("mid".to_string(), MilkdropValue::Number(mid));
-    scope.insert("mid_att".to_string(), MilkdropValue::Number(mid));
-    scope.insert("treb".to_string(), MilkdropValue::Number(treble));
-    scope.insert("treb_att".to_string(), MilkdropValue::Number(treble));
-    scope.insert("time".to_string(), MilkdropValue::Number(time_seconds));
+    scope.insert("bass".to_string(), RustyMilkValue::Number(bass));
+    scope.insert("bass_att".to_string(), RustyMilkValue::Number(bass));
+    scope.insert("mid".to_string(), RustyMilkValue::Number(mid));
+    scope.insert("mid_att".to_string(), RustyMilkValue::Number(mid));
+    scope.insert("treb".to_string(), RustyMilkValue::Number(treble));
+    scope.insert("treb_att".to_string(), RustyMilkValue::Number(treble));
+    scope.insert("time".to_string(), RustyMilkValue::Number(time_seconds));
     scope.insert(
         "frame".to_string(),
-        MilkdropValue::Number((time_seconds * 60.0).floor()),
+        RustyMilkValue::Number((time_seconds * 60.0).floor()),
     );
-    scope.insert("fps".to_string(), MilkdropValue::Number(60.0));
+    scope.insert("fps".to_string(), RustyMilkValue::Number(60.0));
     scope.insert(
         "wave_r".to_string(),
-        MilkdropValue::Number(milkdrop_base_number(&preset.base_values, "wave_r", 0.7)),
+        RustyMilkValue::Number(rustymilk_base_number(&preset.base_values, "wave_r", 0.7)),
     );
     scope.insert(
         "wave_g".to_string(),
-        MilkdropValue::Number(milkdrop_base_number(&preset.base_values, "wave_g", 0.7)),
+        RustyMilkValue::Number(rustymilk_base_number(&preset.base_values, "wave_g", 0.7)),
     );
     scope.insert(
         "wave_b".to_string(),
-        MilkdropValue::Number(milkdrop_base_number(&preset.base_values, "wave_b", 0.7)),
+        RustyMilkValue::Number(rustymilk_base_number(&preset.base_values, "wave_b", 0.7)),
     );
-    update_rust_milkdrop_scope_input(&mut scope, RustMilkdropInputState::default());
+    update_rustymilk_scope_input(&mut scope, RustyMilkInputState::default());
     scope
 }
 
-fn update_rust_milkdrop_scope_audio(
-    scope: &mut BTreeMap<String, MilkdropValue>,
+fn update_rustymilk_scope_audio(
+    scope: &mut BTreeMap<String, RustyMilkValue>,
     time_seconds: f64,
     frame_index: f64,
     bass: f64,
@@ -12317,55 +12317,55 @@ fn update_rust_milkdrop_scope_audio(
     waveform: &[f64],
     spectrum: &[f64],
 ) {
-    scope.insert("bass".to_string(), MilkdropValue::Number(bass));
-    scope.insert("bass_att".to_string(), MilkdropValue::Number(bass));
-    scope.insert("mid".to_string(), MilkdropValue::Number(mid));
-    scope.insert("mid_att".to_string(), MilkdropValue::Number(mid));
-    scope.insert("treb".to_string(), MilkdropValue::Number(treble));
-    scope.insert("treb_att".to_string(), MilkdropValue::Number(treble));
-    scope.insert("time".to_string(), MilkdropValue::Number(time_seconds));
-    scope.insert("frame".to_string(), MilkdropValue::Number(frame_index));
-    scope.insert("fps".to_string(), MilkdropValue::Number(60.0));
-    scope.insert("sample_rate".to_string(), MilkdropValue::Number(44_100.0));
-    scope.insert("samplerate".to_string(), MilkdropValue::Number(44_100.0));
-    scope.insert("canvas_width".to_string(), MilkdropValue::Number(1.0));
-    scope.insert("canvas_height".to_string(), MilkdropValue::Number(1.0));
-    scope.insert("aspect".to_string(), MilkdropValue::Number(1.0));
+    scope.insert("bass".to_string(), RustyMilkValue::Number(bass));
+    scope.insert("bass_att".to_string(), RustyMilkValue::Number(bass));
+    scope.insert("mid".to_string(), RustyMilkValue::Number(mid));
+    scope.insert("mid_att".to_string(), RustyMilkValue::Number(mid));
+    scope.insert("treb".to_string(), RustyMilkValue::Number(treble));
+    scope.insert("treb_att".to_string(), RustyMilkValue::Number(treble));
+    scope.insert("time".to_string(), RustyMilkValue::Number(time_seconds));
+    scope.insert("frame".to_string(), RustyMilkValue::Number(frame_index));
+    scope.insert("fps".to_string(), RustyMilkValue::Number(60.0));
+    scope.insert("sample_rate".to_string(), RustyMilkValue::Number(44_100.0));
+    scope.insert("samplerate".to_string(), RustyMilkValue::Number(44_100.0));
+    scope.insert("canvas_width".to_string(), RustyMilkValue::Number(1.0));
+    scope.insert("canvas_height".to_string(), RustyMilkValue::Number(1.0));
+    scope.insert("aspect".to_string(), RustyMilkValue::Number(1.0));
     if !waveform.is_empty() {
         scope.insert(
             "waveform_data".to_string(),
-            MilkdropValue::Text(rust_milkdrop_sample_text(waveform)),
+            RustyMilkValue::Text(rustymilk_sample_text(waveform)),
         );
     }
     if !spectrum.is_empty() {
         scope.insert(
             "frequency_data".to_string(),
-            MilkdropValue::Text(rust_milkdrop_sample_text(spectrum)),
+            RustyMilkValue::Text(rustymilk_sample_text(spectrum)),
         );
     }
 }
 
-fn update_rust_milkdrop_scope_input(
-    scope: &mut BTreeMap<String, MilkdropValue>,
-    input: RustMilkdropInputState,
+fn update_rustymilk_scope_input(
+    scope: &mut BTreeMap<String, RustyMilkValue>,
+    input: RustyMilkInputState,
 ) {
     scope.insert(
         "mouse_down".to_string(),
-        MilkdropValue::Number(input.mouse_down),
+        RustyMilkValue::Number(input.mouse_down),
     );
     scope.insert(
         "mouse_dx".to_string(),
-        MilkdropValue::Number(input.mouse_dx),
+        RustyMilkValue::Number(input.mouse_dx),
     );
     scope.insert(
         "mouse_dy".to_string(),
-        MilkdropValue::Number(input.mouse_dy),
+        RustyMilkValue::Number(input.mouse_dy),
     );
-    scope.insert("mouse_x".to_string(), MilkdropValue::Number(input.mouse_x));
-    scope.insert("mouse_y".to_string(), MilkdropValue::Number(input.mouse_y));
+    scope.insert("mouse_x".to_string(), RustyMilkValue::Number(input.mouse_x));
+    scope.insert("mouse_y".to_string(), RustyMilkValue::Number(input.mouse_y));
 }
 
-fn rust_milkdrop_sample_text(values: &[f64]) -> String {
+fn rustymilk_sample_text(values: &[f64]) -> String {
     values
         .iter()
         .map(|value| format!("{:.6}", value.clamp(-1.0, 1.0)))
@@ -12373,7 +12373,7 @@ fn rust_milkdrop_sample_text(values: &[f64]) -> String {
         .join(",")
 }
 
-fn parse_milkdrop_sample_csv(source: &str) -> Vec<f64> {
+fn parse_rustymilk_sample_csv(source: &str) -> Vec<f64> {
     source
         .split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
         .filter_map(|item| {
@@ -12388,7 +12388,7 @@ fn parse_milkdrop_sample_csv(source: &str) -> Vec<f64> {
         .collect()
 }
 
-fn rust_milkdrop_sample_bins(values: &[f64]) -> [f64; 64] {
+fn rustymilk_sample_bins(values: &[f64]) -> [f64; 64] {
     let mut bins = [0.0; 64];
     if values.is_empty() {
         return bins;
@@ -12409,23 +12409,23 @@ fn rust_milkdrop_sample_bins(values: &[f64]) -> [f64; 64] {
     bins
 }
 
-fn rust_milkdrop_q_registers(scope: &BTreeMap<String, MilkdropValue>) -> [f64; 64] {
+fn rustymilk_q_registers(scope: &BTreeMap<String, RustyMilkValue>) -> [f64; 64] {
     let mut registers = [0.0; 64];
     for index in 1..=64 {
-        registers[index - 1] = milkdrop_scope_number(scope, &format!("q{index}"), 0.0);
+        registers[index - 1] = rustymilk_scope_number(scope, &format!("q{index}"), 0.0);
     }
     registers
 }
 
-fn translated_rust_milkdrop_shader_source(preset: &MilkdropPresetDocument) -> String {
+fn translated_rustymilk_shader_source(preset: &RustyMilkPresetDocument) -> String {
     if !preset.comp_shader.trim().is_empty() {
-        let shader = create_translated_milkdrop_fragment_shader(&preset.comp_shader);
+        let shader = create_translated_rustymilk_fragment_shader(&preset.comp_shader);
         if !shader.is_empty() {
             return shader;
         }
     }
     if !preset.warp_shader.trim().is_empty() {
-        let shader = create_translated_milkdrop_fragment_shader(&preset.warp_shader);
+        let shader = create_translated_rustymilk_fragment_shader(&preset.warp_shader);
         if !shader.is_empty() {
             return shader;
         }
@@ -12433,30 +12433,30 @@ fn translated_rust_milkdrop_shader_source(preset: &MilkdropPresetDocument) -> St
     String::new()
 }
 
-fn rust_milkdrop_shader_texture_samplers(preset: &MilkdropPresetDocument) -> Vec<String> {
+fn rustymilk_shader_texture_samplers(preset: &RustyMilkPresetDocument) -> Vec<String> {
     for shader in [&preset.comp_shader, &preset.warp_shader] {
         if shader.trim().is_empty() {
             continue;
         }
-        if analyze_milkdrop_shader_support(shader).supported {
-            return get_milkdrop_shader_texture_samplers(shader);
+        if analyze_rustymilk_shader_support(shader).supported {
+            return get_rustymilk_shader_texture_samplers(shader);
         }
     }
     Vec::new()
 }
 
-fn create_rust_milkdrop_warp_mesh(
-    preset: &MilkdropPresetDocument,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
-) -> Option<RustMilkdropWarpMesh> {
+fn create_rustymilk_warp_mesh(
+    preset: &RustyMilkPresetDocument,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
+) -> Option<RustyMilkWarpMesh> {
     let equations = preset.equations.per_pixel.trim();
     if equations.is_empty() {
         return None;
     }
-    let columns = milkdrop_scope_number(frame_scope, "meshx", 8.0)
+    let columns = rustymilk_scope_number(frame_scope, "meshx", 8.0)
         .floor()
         .clamp(1.0, 128.0) as usize;
-    let rows = milkdrop_scope_number(frame_scope, "meshy", 6.0)
+    let rows = rustymilk_scope_number(frame_scope, "meshy", 6.0)
         .floor()
         .clamp(1.0, 128.0) as usize;
     let mut positions = Vec::with_capacity(columns * rows * 12);
@@ -12467,23 +12467,23 @@ fn create_rust_milkdrop_warp_mesh(
         let mut point_scope = frame_scope.clone();
         point_scope.insert(
             "ang".to_string(),
-            MilkdropValue::Number(centered_y.atan2(centered_x)),
+            RustyMilkValue::Number(centered_y.atan2(centered_x)),
         );
         point_scope.insert(
             "rad".to_string(),
-            MilkdropValue::Number((centered_x * centered_x + centered_y * centered_y).sqrt()),
+            RustyMilkValue::Number((centered_x * centered_x + centered_y * centered_y).sqrt()),
         );
-        point_scope.insert("x".to_string(), MilkdropValue::Number(x));
-        point_scope.insert("y".to_string(), MilkdropValue::Number(y));
-        if let Ok(next_scope) = evaluate_milkdrop_equations(equations, &point_scope) {
+        point_scope.insert("x".to_string(), RustyMilkValue::Number(x));
+        point_scope.insert("y".to_string(), RustyMilkValue::Number(y));
+        if let Ok(next_scope) = evaluate_rustymilk_equations(equations, &point_scope) {
             point_scope = next_scope;
         }
-        let rotation = milkdrop_scope_number(&point_scope, "rot", 0.0);
-        let zoom = milkdrop_scope_number(&point_scope, "zoom", 1.0)
+        let rotation = rustymilk_scope_number(&point_scope, "rot", 0.0);
+        let zoom = rustymilk_scope_number(&point_scope, "zoom", 1.0)
             .abs()
             .max(0.001);
-        let dx = milkdrop_scope_number(&point_scope, "dx", 0.0);
-        let dy = milkdrop_scope_number(&point_scope, "dy", 0.0);
+        let dx = rustymilk_scope_number(&point_scope, "dx", 0.0);
+        let dy = rustymilk_scope_number(&point_scope, "dy", 0.0);
         let scaled_x = centered_x / zoom;
         let scaled_y = centered_y / zoom;
         let sine = rotation.sin();
@@ -12507,39 +12507,39 @@ fn create_rust_milkdrop_warp_mesh(
             push_point(right, bottom);
         }
     }
-    Some(RustMilkdropWarpMesh {
+    Some(RustyMilkWarpMesh {
         positions,
         source_uvs,
     })
 }
 
-pub fn rust_milkdrop_frame_from_source(
+pub fn rustymilk_frame_from_source(
     source: &str,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
-) -> RustMilkdropFrame {
-    rust_milkdrop_frame_from_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
+) -> RustyMilkFrame {
+    rustymilk_frame_from_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
 }
 
-fn build_rust_milkdrop_frame_from_scope(
+fn build_rustymilk_frame_from_scope(
     source: &str,
-    preset_document: &MilkdropPresetDocument,
-    scope: &BTreeMap<String, MilkdropValue>,
+    preset_document: &RustyMilkPresetDocument,
+    scope: &BTreeMap<String, RustyMilkValue>,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
     waveform: &[f64],
     spectrum: &[f64],
-) -> RustMilkdropFrame {
-    let fallback = parse_rust_milkdrop_preset(source);
-    let wave_r = clamp_unit(milkdrop_scope_number(scope, "wave_r", fallback.wave_r));
-    let wave_g = clamp_unit(milkdrop_scope_number(scope, "wave_g", fallback.wave_g));
-    let wave_b = clamp_unit(milkdrop_scope_number(scope, "wave_b", fallback.wave_b));
+) -> RustyMilkFrame {
+    let fallback = parse_rustymilk_preset(source);
+    let wave_r = clamp_unit(rustymilk_scope_number(scope, "wave_r", fallback.wave_r));
+    let wave_g = clamp_unit(rustymilk_scope_number(scope, "wave_g", fallback.wave_g));
+    let wave_b = clamp_unit(rustymilk_scope_number(scope, "wave_b", fallback.wave_b));
     let wave_scale = clamp_range(
-        milkdrop_scope_number(scope, "wave_scale", fallback.wave_scale),
+        rustymilk_scope_number(scope, "wave_scale", fallback.wave_scale),
         0.2,
         3.0,
     );
@@ -12549,7 +12549,7 @@ fn build_rust_milkdrop_frame_from_scope(
         (wave_g * 255.0).min(255.0) as u8,
         (wave_b * 255.0).min(255.0) as u8,
     );
-    let primitives = create_rust_milkdrop_frame_primitives(
+    let primitives = create_rustymilk_frame_primitives(
         preset_document,
         scope,
         time_seconds,
@@ -12559,24 +12559,24 @@ fn build_rust_milkdrop_frame_from_scope(
         waveform,
         [wave_r, wave_g, wave_b],
     );
-    let textured_primitives = create_rust_milkdrop_frame_textured_primitives(
+    let textured_primitives = create_rustymilk_frame_textured_primitives(
         preset_document,
         scope,
         [wave_r, wave_g, wave_b],
     );
-    let q_registers = rust_milkdrop_q_registers(scope);
-    let fft_bins = rust_milkdrop_sample_bins(spectrum);
-    let waveform_bins = rust_milkdrop_sample_bins(waveform);
-    let warp_mesh = create_rust_milkdrop_warp_mesh(preset_document, scope);
-    RustMilkdropFrame {
+    let q_registers = rustymilk_q_registers(scope);
+    let fft_bins = rustymilk_sample_bins(spectrum);
+    let waveform_bins = rustymilk_sample_bins(waveform);
+    let warp_mesh = create_rustymilk_warp_mesh(preset_document, scope);
+    RustyMilkFrame {
         background_alpha: clamp_range(
-            1.0 - milkdrop_scope_number(scope, "decay", fallback.decay),
+            1.0 - rustymilk_scope_number(scope, "decay", fallback.decay),
             0.01,
             0.5,
         ),
         bass,
-        dx: clamp_range(milkdrop_scope_number(scope, "dx", 0.0), -0.5, 0.5),
-        dy: clamp_range(milkdrop_scope_number(scope, "dy", 0.0), -0.5, 0.5),
+        dx: clamp_range(rustymilk_scope_number(scope, "dx", 0.0), -0.5, 0.5),
+        dy: clamp_range(rustymilk_scope_number(scope, "dy", 0.0), -0.5, 0.5),
         fft_bins,
         mid,
         primitives,
@@ -12584,12 +12584,12 @@ fn build_rust_milkdrop_frame_from_scope(
         shape_count: preset_document
             .shapes
             .iter()
-            .filter(|shape| milkdrop_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
+            .filter(|shape| rustymilk_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
             .count(),
-        rotation: clamp_range(milkdrop_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
+        rotation: clamp_range(rustymilk_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
             + (treble - 0.5) * 0.02,
-        shader_source: translated_rust_milkdrop_shader_source(preset_document),
-        shader_texture_samplers: rust_milkdrop_shader_texture_samplers(preset_document),
+        shader_source: translated_rustymilk_shader_source(preset_document),
+        shader_texture_samplers: rustymilk_shader_texture_samplers(preset_document),
         textured_primitives,
         treble,
         wave_color,
@@ -12602,34 +12602,34 @@ fn build_rust_milkdrop_frame_from_scope(
         waveform_count: preset_document
             .waves
             .iter()
-            .filter(|wave| milkdrop_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
+            .filter(|wave| rustymilk_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
             .count(),
         warp_mesh,
         zoom: clamp_range(
-            milkdrop_scope_number(scope, "zoom", fallback.zoom),
+            rustymilk_scope_number(scope, "zoom", fallback.zoom),
             0.001,
             1.8,
         ),
     }
 }
 
-fn build_rust_milkdrop_frame_from_runtime_scope(
+fn build_rustymilk_frame_from_runtime_scope(
     source: &str,
-    preset_document: &mut MilkdropPresetDocument,
-    scope: &mut BTreeMap<String, MilkdropValue>,
+    preset_document: &mut RustyMilkPresetDocument,
+    scope: &mut BTreeMap<String, RustyMilkValue>,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
     waveform: &[f64],
     spectrum: &[f64],
-) -> RustMilkdropFrame {
-    let fallback = parse_rust_milkdrop_preset(source);
-    let wave_r = clamp_unit(milkdrop_scope_number(scope, "wave_r", fallback.wave_r));
-    let wave_g = clamp_unit(milkdrop_scope_number(scope, "wave_g", fallback.wave_g));
-    let wave_b = clamp_unit(milkdrop_scope_number(scope, "wave_b", fallback.wave_b));
+) -> RustyMilkFrame {
+    let fallback = parse_rustymilk_preset(source);
+    let wave_r = clamp_unit(rustymilk_scope_number(scope, "wave_r", fallback.wave_r));
+    let wave_g = clamp_unit(rustymilk_scope_number(scope, "wave_g", fallback.wave_g));
+    let wave_b = clamp_unit(rustymilk_scope_number(scope, "wave_b", fallback.wave_b));
     let wave_scale = clamp_range(
-        milkdrop_scope_number(scope, "wave_scale", fallback.wave_scale),
+        rustymilk_scope_number(scope, "wave_scale", fallback.wave_scale),
         0.2,
         3.0,
     );
@@ -12640,7 +12640,7 @@ fn build_rust_milkdrop_frame_from_runtime_scope(
         (wave_b * 255.0).min(255.0) as u8,
     );
     let (primitives, textured_primitives) =
-        create_rust_milkdrop_frame_primitives_and_textures_stateful(
+        create_rustymilk_frame_primitives_and_textures_stateful(
             preset_document,
             scope,
             time_seconds,
@@ -12651,19 +12651,19 @@ fn build_rust_milkdrop_frame_from_runtime_scope(
             spectrum,
             [wave_r, wave_g, wave_b],
         );
-    let q_registers = rust_milkdrop_q_registers(scope);
-    let fft_bins = rust_milkdrop_sample_bins(spectrum);
-    let waveform_bins = rust_milkdrop_sample_bins(waveform);
-    let warp_mesh = create_rust_milkdrop_warp_mesh(preset_document, scope);
-    RustMilkdropFrame {
+    let q_registers = rustymilk_q_registers(scope);
+    let fft_bins = rustymilk_sample_bins(spectrum);
+    let waveform_bins = rustymilk_sample_bins(waveform);
+    let warp_mesh = create_rustymilk_warp_mesh(preset_document, scope);
+    RustyMilkFrame {
         background_alpha: clamp_range(
-            1.0 - milkdrop_scope_number(scope, "decay", fallback.decay),
+            1.0 - rustymilk_scope_number(scope, "decay", fallback.decay),
             0.01,
             0.5,
         ),
         bass,
-        dx: clamp_range(milkdrop_scope_number(scope, "dx", 0.0), -0.5, 0.5),
-        dy: clamp_range(milkdrop_scope_number(scope, "dy", 0.0), -0.5, 0.5),
+        dx: clamp_range(rustymilk_scope_number(scope, "dx", 0.0), -0.5, 0.5),
+        dy: clamp_range(rustymilk_scope_number(scope, "dy", 0.0), -0.5, 0.5),
         fft_bins,
         mid,
         primitives,
@@ -12671,12 +12671,12 @@ fn build_rust_milkdrop_frame_from_runtime_scope(
         shape_count: preset_document
             .shapes
             .iter()
-            .filter(|shape| milkdrop_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
+            .filter(|shape| rustymilk_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
             .count(),
-        rotation: clamp_range(milkdrop_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
+        rotation: clamp_range(rustymilk_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
             + (treble - 0.5) * 0.02,
-        shader_source: translated_rust_milkdrop_shader_source(preset_document),
-        shader_texture_samplers: rust_milkdrop_shader_texture_samplers(preset_document),
+        shader_source: translated_rustymilk_shader_source(preset_document),
+        shader_texture_samplers: rustymilk_shader_texture_samplers(preset_document),
         textured_primitives,
         treble,
         wave_color,
@@ -12689,18 +12689,18 @@ fn build_rust_milkdrop_frame_from_runtime_scope(
         waveform_count: preset_document
             .waves
             .iter()
-            .filter(|wave| milkdrop_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
+            .filter(|wave| rustymilk_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
             .count(),
         warp_mesh,
         zoom: clamp_range(
-            milkdrop_scope_number(scope, "zoom", fallback.zoom),
+            rustymilk_scope_number(scope, "zoom", fallback.zoom),
             0.001,
             1.8,
         ),
     }
 }
 
-pub fn rust_milkdrop_frame_from_source_with_audio(
+pub fn rustymilk_frame_from_source_with_audio(
     source: &str,
     time_seconds: f64,
     bass: f64,
@@ -12708,8 +12708,8 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
     treble: f64,
     waveform: &[f64],
     spectrum: &[f64],
-) -> RustMilkdropFrame {
-    rust_milkdrop_frame_from_source_with_audio_and_input(
+) -> RustyMilkFrame {
+    rustymilk_frame_from_source_with_audio_and_input(
         source,
         time_seconds,
         bass,
@@ -12717,11 +12717,11 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
         treble,
         waveform,
         spectrum,
-        RustMilkdropInputState::default(),
+        RustyMilkInputState::default(),
     )
 }
 
-pub fn rust_milkdrop_frame_from_source_with_audio_and_input(
+pub fn rustymilk_frame_from_source_with_audio_and_input(
     source: &str,
     time_seconds: f64,
     bass: f64,
@@ -12729,20 +12729,20 @@ pub fn rust_milkdrop_frame_from_source_with_audio_and_input(
     treble: f64,
     waveform: &[f64],
     spectrum: &[f64],
-    input: RustMilkdropInputState,
-) -> RustMilkdropFrame {
-    let parsed = parse_milkdrop_preset_set(source, false);
+    input: RustyMilkInputState,
+) -> RustyMilkFrame {
+    let parsed = parse_rustymilk_preset_set(source, false);
     let Some(preset_document) = parsed.presets.first() else {
-        return rust_milkdrop_frame(
-            &RustMilkdropPreset::default(),
+        return rustymilk_frame(
+            &RustyMilkPreset::default(),
             time_seconds,
             bass,
             mid,
             treble,
         );
     };
-    let mut scope = create_rust_milkdrop_scope(preset_document, time_seconds, bass, mid, treble);
-    update_rust_milkdrop_scope_audio(
+    let mut scope = create_rustymilk_scope(preset_document, time_seconds, bass, mid, treble);
+    update_rustymilk_scope_audio(
         &mut scope,
         time_seconds,
         (time_seconds * 60.0).floor(),
@@ -12752,21 +12752,21 @@ pub fn rust_milkdrop_frame_from_source_with_audio_and_input(
         waveform,
         spectrum,
     );
-    update_rust_milkdrop_scope_input(&mut scope, input);
+    update_rustymilk_scope_input(&mut scope, input);
     if !preset_document.equations.init.trim().is_empty() {
-        if let Ok(next_scope) = evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
+        if let Ok(next_scope) = evaluate_rustymilk_equations(&preset_document.equations.init, &scope)
         {
             scope = next_scope;
         }
     }
     if !preset_document.equations.per_frame.trim().is_empty() {
         if let Ok(next_scope) =
-            evaluate_milkdrop_equations(&preset_document.equations.per_frame, &scope)
+            evaluate_rustymilk_equations(&preset_document.equations.per_frame, &scope)
         {
             scope = next_scope;
         }
     }
-    build_rust_milkdrop_frame_from_scope(
+    build_rustymilk_frame_from_scope(
         source,
         preset_document,
         &scope,
@@ -12779,7 +12779,7 @@ pub fn rust_milkdrop_frame_from_source_with_audio_and_input(
     )
 }
 
-pub fn rust_milkdrop_frame_set_from_source_with_audio(
+pub fn rustymilk_frame_set_from_source_with_audio(
     source: &str,
     time_seconds: f64,
     bass: f64,
@@ -12787,8 +12787,8 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio(
     treble: f64,
     waveform: &[f64],
     spectrum: &[f64],
-) -> RustMilkdropFrameSet {
-    rust_milkdrop_frame_set_from_source_with_audio_and_input(
+) -> RustyMilkFrameSet {
+    rustymilk_frame_set_from_source_with_audio_and_input(
         source,
         time_seconds,
         bass,
@@ -12796,11 +12796,11 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio(
         treble,
         waveform,
         spectrum,
-        RustMilkdropInputState::default(),
+        RustyMilkInputState::default(),
     )
 }
 
-pub fn rust_milkdrop_frame_set_from_source_with_audio_and_input(
+pub fn rustymilk_frame_set_from_source_with_audio_and_input(
     source: &str,
     time_seconds: f64,
     bass: f64,
@@ -12808,21 +12808,21 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio_and_input(
     treble: f64,
     waveform: &[f64],
     spectrum: &[f64],
-    input: RustMilkdropInputState,
-) -> RustMilkdropFrameSet {
+    input: RustyMilkInputState,
+) -> RustyMilkFrameSet {
     let parsed =
-        parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
-    let title = rust_milkdrop_preset_set_title(&parsed);
-    let transition_mode = rust_milkdrop_transition_mode(&parsed);
-    let transition_seconds = rust_milkdrop_transition_seconds(&parsed);
+        parse_rustymilk_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
+    let title = rustymilk_preset_set_title(&parsed);
+    let transition_mode = rustymilk_transition_mode(&parsed);
+    let transition_seconds = rustymilk_transition_seconds(&parsed);
     let entries = parsed
         .presets
         .iter()
         .enumerate()
         .map(|(index, preset_document)| {
             let mut scope =
-                create_rust_milkdrop_scope(preset_document, time_seconds, bass, mid, treble);
-            update_rust_milkdrop_scope_audio(
+                create_rustymilk_scope(preset_document, time_seconds, bass, mid, treble);
+            update_rustymilk_scope_audio(
                 &mut scope,
                 time_seconds,
                 (time_seconds * 60.0).floor(),
@@ -12832,25 +12832,25 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio_and_input(
                 waveform,
                 spectrum,
             );
-            update_rust_milkdrop_scope_input(&mut scope, input);
+            update_rustymilk_scope_input(&mut scope, input);
             if !preset_document.equations.init.trim().is_empty() {
                 if let Ok(next_scope) =
-                    evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
+                    evaluate_rustymilk_equations(&preset_document.equations.init, &scope)
                 {
                     scope = next_scope;
                 }
             }
             if !preset_document.equations.per_frame.trim().is_empty() {
                 if let Ok(next_scope) =
-                    evaluate_milkdrop_equations(&preset_document.equations.per_frame, &scope)
+                    evaluate_rustymilk_equations(&preset_document.equations.per_frame, &scope)
                 {
                     scope = next_scope;
                 }
             }
-            RustMilkdropCompositeFrame {
-                blend_alpha: rust_milkdrop_composite_alpha(preset_document, index),
-                composite_mode: rust_milkdrop_composite_mode(preset_document, index),
-                frame: build_rust_milkdrop_frame_from_scope(
+            RustyMilkCompositeFrame {
+                blend_alpha: rustymilk_composite_alpha(preset_document, index),
+                composite_mode: rustymilk_composite_mode(preset_document, index),
+                frame: build_rustymilk_frame_from_scope(
                     source,
                     preset_document,
                     &scope,
@@ -12871,7 +12871,7 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio_and_input(
         })
         .collect::<Vec<_>>();
 
-    RustMilkdropFrameSet {
+    RustyMilkFrameSet {
         preset_count: entries.len(),
         entries,
         title,
@@ -12880,14 +12880,14 @@ pub fn rust_milkdrop_frame_set_from_source_with_audio_and_input(
     }
 }
 
-pub fn rust_milkdrop_frame_set_from_source(
+pub fn rustymilk_frame_set_from_source(
     source: &str,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
-) -> RustMilkdropFrameSet {
-    rust_milkdrop_frame_set_from_source_with_audio(
+) -> RustyMilkFrameSet {
+    rustymilk_frame_set_from_source_with_audio(
         source,
         time_seconds,
         bass,
@@ -12899,14 +12899,14 @@ pub fn rust_milkdrop_frame_set_from_source(
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct RustMilkdropRuntime {
+pub struct RustyMilkRuntime {
     initialized: bool,
-    preset_document: Option<MilkdropPresetDocument>,
-    scope: BTreeMap<String, MilkdropValue>,
+    preset_document: Option<RustyMilkPresetDocument>,
+    scope: BTreeMap<String, RustyMilkValue>,
     source: String,
 }
 
-impl RustMilkdropRuntime {
+impl RustyMilkRuntime {
     pub fn render_source(
         &mut self,
         source: &str,
@@ -12914,7 +12914,7 @@ impl RustMilkdropRuntime {
         bass: f64,
         mid: f64,
         treble: f64,
-    ) -> RustMilkdropFrame {
+    ) -> RustyMilkFrame {
         self.render_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
     }
 
@@ -12927,7 +12927,7 @@ impl RustMilkdropRuntime {
         treble: f64,
         waveform: &[f64],
         spectrum: &[f64],
-    ) -> RustMilkdropFrame {
+    ) -> RustyMilkFrame {
         self.render_source_with_audio_and_input(
             source,
             time_seconds,
@@ -12936,7 +12936,7 @@ impl RustMilkdropRuntime {
             treble,
             waveform,
             spectrum,
-            RustMilkdropInputState::default(),
+            RustyMilkInputState::default(),
         )
     }
 
@@ -12949,14 +12949,14 @@ impl RustMilkdropRuntime {
         treble: f64,
         waveform: &[f64],
         spectrum: &[f64],
-        input: RustMilkdropInputState,
-    ) -> RustMilkdropFrame {
+        input: RustyMilkInputState,
+    ) -> RustyMilkFrame {
         if self.source != source || self.preset_document.is_none() {
-            let parsed = parse_milkdrop_preset_set(source, false);
+            let parsed = parse_rustymilk_preset_set(source, false);
             let Some(preset_document) = parsed.presets.first().cloned() else {
                 *self = Self::default();
-                return rust_milkdrop_frame(
-                    &RustMilkdropPreset::default(),
+                return rustymilk_frame(
+                    &RustyMilkPreset::default(),
                     time_seconds,
                     bass,
                     mid,
@@ -12964,23 +12964,23 @@ impl RustMilkdropRuntime {
                 );
             };
             self.scope =
-                create_rust_milkdrop_scope(&preset_document, time_seconds, bass, mid, treble);
+                create_rustymilk_scope(&preset_document, time_seconds, bass, mid, treble);
             self.source = source.to_string();
             self.preset_document = Some(preset_document);
             self.initialized = false;
         }
 
         let Some(mut preset_document) = self.preset_document.take() else {
-            return rust_milkdrop_frame(
-                &RustMilkdropPreset::default(),
+            return rustymilk_frame(
+                &RustyMilkPreset::default(),
                 time_seconds,
                 bass,
                 mid,
                 treble,
             );
         };
-        let next_frame = milkdrop_scope_number(&self.scope, "frame", 0.0) + 1.0;
-        update_rust_milkdrop_scope_audio(
+        let next_frame = rustymilk_scope_number(&self.scope, "frame", 0.0) + 1.0;
+        update_rustymilk_scope_audio(
             &mut self.scope,
             time_seconds,
             next_frame,
@@ -12990,11 +12990,11 @@ impl RustMilkdropRuntime {
             waveform,
             spectrum,
         );
-        update_rust_milkdrop_scope_input(&mut self.scope, input);
+        update_rustymilk_scope_input(&mut self.scope, input);
         if !self.initialized {
             if !preset_document.equations.init.trim().is_empty() {
                 if let Ok(next_scope) =
-                    evaluate_milkdrop_equations(&preset_document.equations.init, &self.scope)
+                    evaluate_rustymilk_equations(&preset_document.equations.init, &self.scope)
                 {
                     self.scope = next_scope;
                 }
@@ -13003,13 +13003,13 @@ impl RustMilkdropRuntime {
         }
         if !preset_document.equations.per_frame.trim().is_empty() {
             if let Ok(next_scope) =
-                evaluate_milkdrop_equations(&preset_document.equations.per_frame, &self.scope)
+                evaluate_rustymilk_equations(&preset_document.equations.per_frame, &self.scope)
             {
                 self.scope = next_scope;
             }
         }
 
-        let frame = build_rust_milkdrop_frame_from_runtime_scope(
+        let frame = build_rustymilk_frame_from_runtime_scope(
             &self.source,
             &mut preset_document,
             &mut self.scope,
@@ -13026,14 +13026,14 @@ impl RustMilkdropRuntime {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct RustMilkdropFrameSetRuntime {
+pub struct RustyMilkFrameSetRuntime {
     initialized: Vec<bool>,
-    preset_documents: Vec<MilkdropPresetDocument>,
-    scopes: Vec<BTreeMap<String, MilkdropValue>>,
+    preset_documents: Vec<RustyMilkPresetDocument>,
+    scopes: Vec<BTreeMap<String, RustyMilkValue>>,
     source: String,
 }
 
-impl RustMilkdropFrameSetRuntime {
+impl RustyMilkFrameSetRuntime {
     pub fn render_source(
         &mut self,
         source: &str,
@@ -13041,7 +13041,7 @@ impl RustMilkdropFrameSetRuntime {
         bass: f64,
         mid: f64,
         treble: f64,
-    ) -> RustMilkdropFrameSet {
+    ) -> RustyMilkFrameSet {
         self.render_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
     }
 
@@ -13054,7 +13054,7 @@ impl RustMilkdropFrameSetRuntime {
         treble: f64,
         waveform: &[f64],
         spectrum: &[f64],
-    ) -> RustMilkdropFrameSet {
+    ) -> RustyMilkFrameSet {
         self.render_source_with_audio_and_input(
             source,
             time_seconds,
@@ -13063,7 +13063,7 @@ impl RustMilkdropFrameSetRuntime {
             treble,
             waveform,
             spectrum,
-            RustMilkdropInputState::default(),
+            RustyMilkInputState::default(),
         )
     }
 
@@ -13076,10 +13076,10 @@ impl RustMilkdropFrameSetRuntime {
         treble: f64,
         waveform: &[f64],
         spectrum: &[f64],
-        input: RustMilkdropInputState,
-    ) -> RustMilkdropFrameSet {
+        input: RustyMilkInputState,
+    ) -> RustyMilkFrameSet {
         if self.source != source || self.preset_documents.is_empty() {
-            let parsed = parse_milkdrop_preset_set(
+            let parsed = parse_rustymilk_preset_set(
                 source,
                 source.to_ascii_lowercase().contains("[preset01]"),
             );
@@ -13087,24 +13087,24 @@ impl RustMilkdropFrameSetRuntime {
             self.scopes = parsed
                 .presets
                 .iter()
-                .map(|preset| create_rust_milkdrop_scope(preset, time_seconds, bass, mid, treble))
+                .map(|preset| create_rustymilk_scope(preset, time_seconds, bass, mid, treble))
                 .collect();
             self.preset_documents = parsed.presets;
             self.source = source.to_string();
         }
 
         let parsed =
-            parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
-        let title = rust_milkdrop_preset_set_title(&parsed);
-        let transition_mode = rust_milkdrop_transition_mode(&parsed);
-        let transition_seconds = rust_milkdrop_transition_seconds(&parsed);
+            parse_rustymilk_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
+        let title = rustymilk_preset_set_title(&parsed);
+        let transition_mode = rustymilk_transition_mode(&parsed);
+        let transition_seconds = rustymilk_transition_seconds(&parsed);
         let mut entries = Vec::with_capacity(self.preset_documents.len());
 
         for index in 0..self.preset_documents.len() {
             let preset_document = &mut self.preset_documents[index];
             let scope = &mut self.scopes[index];
-            let next_frame = milkdrop_scope_number(scope, "frame", 0.0) + 1.0;
-            update_rust_milkdrop_scope_audio(
+            let next_frame = rustymilk_scope_number(scope, "frame", 0.0) + 1.0;
+            update_rustymilk_scope_audio(
                 scope,
                 time_seconds,
                 next_frame,
@@ -13114,11 +13114,11 @@ impl RustMilkdropFrameSetRuntime {
                 waveform,
                 spectrum,
             );
-            update_rust_milkdrop_scope_input(scope, input);
+            update_rustymilk_scope_input(scope, input);
             if !self.initialized.get(index).copied().unwrap_or_default() {
                 if !preset_document.equations.init.trim().is_empty() {
                     if let Ok(next_scope) =
-                        evaluate_milkdrop_equations(&preset_document.equations.init, scope)
+                        evaluate_rustymilk_equations(&preset_document.equations.init, scope)
                     {
                         *scope = next_scope;
                     }
@@ -13129,19 +13129,19 @@ impl RustMilkdropFrameSetRuntime {
             }
             if !preset_document.equations.per_frame.trim().is_empty() {
                 if let Ok(next_scope) =
-                    evaluate_milkdrop_equations(&preset_document.equations.per_frame, scope)
+                    evaluate_rustymilk_equations(&preset_document.equations.per_frame, scope)
                 {
                     *scope = next_scope;
                 }
             }
-            let blend_alpha = rust_milkdrop_composite_alpha(preset_document, index);
-            let composite_mode = rust_milkdrop_composite_mode(preset_document, index);
+            let blend_alpha = rustymilk_composite_alpha(preset_document, index);
+            let composite_mode = rustymilk_composite_mode(preset_document, index);
             let title = if preset_document.title.trim().is_empty() {
                 format!("Preset {}", index + 1)
             } else {
                 preset_document.title.clone()
             };
-            let frame = build_rust_milkdrop_frame_from_runtime_scope(
+            let frame = build_rustymilk_frame_from_runtime_scope(
                 source,
                 preset_document,
                 scope,
@@ -13152,7 +13152,7 @@ impl RustMilkdropFrameSetRuntime {
                 waveform,
                 spectrum,
             );
-            entries.push(RustMilkdropCompositeFrame {
+            entries.push(RustyMilkCompositeFrame {
                 blend_alpha,
                 composite_mode,
                 frame,
@@ -13161,7 +13161,7 @@ impl RustMilkdropFrameSetRuntime {
             });
         }
 
-        RustMilkdropFrameSet {
+        RustyMilkFrameSet {
             preset_count: entries.len(),
             entries,
             title,
@@ -13172,13 +13172,13 @@ impl RustMilkdropFrameSetRuntime {
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-const RUST_MILKDROP_PRESETS: [&str; 3] = [
+const RUSTYMILK_PRESETS: [&str; 3] = [
     "name=slskr native grid smoke\ndecay=0.91\nwave_r=0.12\nwave_g=0.64\nwave_b=0.88\nwave_a=0.86\nwave_scale=1.2\nzoom=1\nrot=0\nper_frame_1=wave_r=0.35+0.25*bass_att;\nper_frame_2=wave_g=0.45+0.2*mid_att;\nper_frame_3=wave_b=0.55+0.2*treb_att;\nper_frame_4=rot=0.01*sin(time*0.7);\nper_frame_5=zoom=1+0.03*sin(time*0.5);\nper_frame_6=dx=0.015*sin(time*0.6);\nper_frame_7=dy=0.015*cos(time*0.5);\nshape00_enabled=1\nshape00_sides=5\nshape00_rad=0.18\nwavecode_0_enabled=1\nwavecode_0_samples=96",
     "name=slskr amber tunnel\ndecay=0.86\nwave_r=0.92\nwave_g=0.52\nwave_b=0.18\nwave_a=0.82\nwave_scale=1.55\nzoom=1.05\nrot=-0.018\nper_frame_1=wave_r=0.65+0.25*bass_att;\nper_frame_2=wave_g=0.32+0.2*mid_att;\nper_frame_3=rot=-0.025*sin(time*0.3);\nshape00_enabled=1\nshape00_sides=3\nshape01_enabled=1\nshape01_sides=6\nwavecode_0_enabled=1",
     "name=slskr green pulse\ndecay=0.91\nwave_r=0.20\nwave_g=0.86\nwave_b=0.44\nwave_a=0.78\nwave_scale=1.1\nzoom=0.98\nrot=0.028\nper_frame_1=wave_g=0.55+0.35*mid_att;\nper_frame_2=wave_b=0.30+0.35*treb_att;\nper_frame_3=zoom=0.98+0.04*sin(time);\nwavecode_0_enabled=1\nwavecode_1_enabled=1",
 ];
 
-pub fn rust_milkdrop_preset_name(source: &str) -> String {
+pub fn rustymilk_preset_name(source: &str) -> String {
     source
         .lines()
         .find_map(|line| {
@@ -13191,22 +13191,22 @@ pub fn rust_milkdrop_preset_name(source: &str) -> String {
             }
             None
         })
-        .unwrap_or_else(|| "Rust MilkDrop preset".to_string())
+        .unwrap_or_else(|| "RustyMilk preset".to_string())
 }
 
-pub fn validate_rust_milkdrop_import(source: &str) -> Result<String, String> {
+pub fn validate_rustymilk_import(source: &str) -> Result<String, String> {
     let parsed =
-        parse_milkdrop_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
+        parse_rustymilk_preset_set(source, source.to_ascii_lowercase().contains("[preset01]"));
     if parsed.presets.is_empty() {
-        return Err("MilkDrop preset is empty".to_string());
+        return Err("RustyMilk preset is empty".to_string());
     };
     let errors = parsed
         .presets
         .iter()
         .enumerate()
         .filter_map(|(index, preset)| {
-            let report = analyze_milkdrop_preset_compatibility(preset);
-            let error = milkdrop_compatibility_error(&report);
+            let report = analyze_rustymilk_preset_compatibility(preset);
+            let error = rustymilk_compatibility_error(&report);
             if error.is_empty() {
                 None
             } else if parsed.presets.len() == 1 {
@@ -13219,14 +13219,14 @@ pub fn validate_rust_milkdrop_import(source: &str) -> Result<String, String> {
     if !errors.is_empty() {
         return Err(errors.join("; "));
     }
-    let title = rust_milkdrop_preset_set_title(&parsed);
+    let title = rustymilk_preset_set_title(&parsed);
     if title.trim().is_empty() {
-        return Ok("Imported MilkDrop preset".to_string());
+        return Ok("Imported RustyMilk preset".to_string());
     }
     Ok(title)
 }
 
-fn rust_milkdrop_preset_set_title(parsed: &MilkdropPresetSet) -> String {
+fn rustymilk_preset_set_title(parsed: &RustyMilkPresetSet) -> String {
     let titles = parsed
         .presets
         .iter()
@@ -13234,7 +13234,7 @@ fn rust_milkdrop_preset_set_title(parsed: &MilkdropPresetSet) -> String {
         .filter(|title| !title.is_empty())
         .collect::<Vec<_>>();
     if titles.is_empty() {
-        "Imported MilkDrop preset".to_string()
+        "Imported RustyMilk preset".to_string()
     } else if titles.len() == 1 {
         titles[0].to_string()
     } else {
@@ -13243,12 +13243,12 @@ fn rust_milkdrop_preset_set_title(parsed: &MilkdropPresetSet) -> String {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum MilkdropValue {
+pub enum RustyMilkValue {
     Number(f64),
     Text(String),
 }
 
-impl MilkdropValue {
+impl RustyMilkValue {
     pub fn as_number(&self) -> Option<f64> {
         match self {
             Self::Number(value) => Some(*value),
@@ -13271,7 +13271,7 @@ impl MilkdropValue {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropEquations {
+pub struct RustyMilkEquations {
     pub frame: String,
     pub init: String,
     pub per_frame: String,
@@ -13280,34 +13280,34 @@ pub struct MilkdropEquations {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropIndexedEntry {
-    pub base_values: BTreeMap<String, MilkdropValue>,
-    pub equations: MilkdropEquations,
+pub struct RustyMilkIndexedEntry {
+    pub base_values: BTreeMap<String, RustyMilkValue>,
+    pub equations: RustyMilkEquations,
     pub initialized: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MilkdropPresetDocument {
-    pub base_values: BTreeMap<String, MilkdropValue>,
+pub struct RustyMilkPresetDocument {
+    pub base_values: BTreeMap<String, RustyMilkValue>,
     pub comp_shader: String,
     pub format: String,
     pub index: usize,
-    pub raw_sections: BTreeMap<String, BTreeMap<String, MilkdropValue>>,
-    pub shapes: Vec<MilkdropIndexedEntry>,
+    pub raw_sections: BTreeMap<String, BTreeMap<String, RustyMilkValue>>,
+    pub shapes: Vec<RustyMilkIndexedEntry>,
     pub source: String,
-    pub sprites: Vec<MilkdropIndexedEntry>,
+    pub sprites: Vec<RustyMilkIndexedEntry>,
     pub title: String,
     pub warp_shader: String,
-    pub waves: Vec<MilkdropIndexedEntry>,
-    pub equations: MilkdropEquations,
+    pub waves: Vec<RustyMilkIndexedEntry>,
+    pub equations: RustyMilkEquations,
 }
 
-impl MilkdropPresetDocument {
+impl RustyMilkPresetDocument {
     fn new(source: &str, index: usize) -> Self {
         Self {
             base_values: BTreeMap::new(),
             comp_shader: String::new(),
-            equations: MilkdropEquations::default(),
+            equations: RustyMilkEquations::default(),
             format: "milk".to_string(),
             index,
             raw_sections: BTreeMap::new(),
@@ -13322,25 +13322,25 @@ impl MilkdropPresetDocument {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MilkdropPresetSet {
+pub struct RustyMilkPresetSet {
     pub format: String,
-    pub presets: Vec<MilkdropPresetDocument>,
+    pub presets: Vec<RustyMilkPresetDocument>,
 }
 
-fn is_numeric_milkdrop_value(value: &str) -> bool {
+fn is_numeric_rustymilk_value(value: &str) -> bool {
     value.trim().parse::<f64>().is_ok()
 }
 
-fn normalize_milkdrop_value(value: &str) -> MilkdropValue {
+fn normalize_rustymilk_value(value: &str) -> RustyMilkValue {
     let trimmed = value.trim();
-    if is_numeric_milkdrop_value(trimmed) {
-        MilkdropValue::Number(trimmed.parse::<f64>().unwrap_or(0.0))
+    if is_numeric_rustymilk_value(trimmed) {
+        RustyMilkValue::Number(trimmed.parse::<f64>().unwrap_or(0.0))
     } else {
-        MilkdropValue::Text(trimmed.to_string())
+        RustyMilkValue::Text(trimmed.to_string())
     }
 }
 
-fn append_milkdrop_statement(target: &mut String, value: &str) {
+fn append_rustymilk_statement(target: &mut String, value: &str) {
     if value.trim().is_empty() {
         return;
     }
@@ -13350,7 +13350,7 @@ fn append_milkdrop_statement(target: &mut String, value: &str) {
     target.push_str(value.trim());
 }
 
-fn split_milkdrop_preset_pair(source: &str) -> Vec<String> {
+fn split_rustymilk_preset_pair(source: &str) -> Vec<String> {
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
     let mut offset = 0usize;
     for line in normalized.split_inclusive('\n') {
@@ -13375,27 +13375,27 @@ fn parse_indexed_key<'a>(key: &'a str, prefix: &str) -> Option<(usize, &'a str)>
     Some((index, &rest[digit_count + 1..]))
 }
 
-fn ensure_milkdrop_entry(
-    entries: &mut Vec<MilkdropIndexedEntry>,
+fn ensure_rustymilk_entry(
+    entries: &mut Vec<RustyMilkIndexedEntry>,
     index: usize,
-) -> &mut MilkdropIndexedEntry {
+) -> &mut RustyMilkIndexedEntry {
     while entries.len() <= index {
-        entries.push(MilkdropIndexedEntry::default());
+        entries.push(RustyMilkIndexedEntry::default());
     }
     &mut entries[index]
 }
 
-fn assign_milkdrop_equation(equations: &mut MilkdropEquations, key: &str, value: &str) -> bool {
+fn assign_rustymilk_equation(equations: &mut RustyMilkEquations, key: &str, value: &str) -> bool {
     if key.starts_with("per_frame") || key.starts_with("frame") {
-        append_milkdrop_statement(&mut equations.per_frame, value);
+        append_rustymilk_statement(&mut equations.per_frame, value);
         return true;
     }
     if key.starts_with("per_pixel") || key.starts_with("per_vertex") {
-        append_milkdrop_statement(&mut equations.per_pixel, value);
+        append_rustymilk_statement(&mut equations.per_pixel, value);
         return true;
     }
     if key.starts_with("init") {
-        append_milkdrop_statement(&mut equations.init, value);
+        append_rustymilk_statement(&mut equations.init, value);
         return true;
     }
     matches!(
@@ -13404,28 +13404,28 @@ fn assign_milkdrop_equation(equations: &mut MilkdropEquations, key: &str, value:
     )
 }
 
-fn assign_milkdrop_indexed_equation(
-    equations: &mut MilkdropEquations,
+fn assign_rustymilk_indexed_equation(
+    equations: &mut RustyMilkEquations,
     key: &str,
     value: &str,
 ) -> bool {
     if key.starts_with("init") {
-        append_milkdrop_statement(&mut equations.init, value);
+        append_rustymilk_statement(&mut equations.init, value);
         return true;
     }
     if key.starts_with("frame") || key.starts_with("per_frame") {
-        append_milkdrop_statement(&mut equations.frame, value);
+        append_rustymilk_statement(&mut equations.frame, value);
         return true;
     }
     if key.starts_with("point") || key.starts_with("per_point") {
-        append_milkdrop_statement(&mut equations.point, value);
+        append_rustymilk_statement(&mut equations.point, value);
         return true;
     }
     false
 }
 
-fn parse_milkdrop_preset_text(text: &str, index: usize) -> MilkdropPresetDocument {
-    let mut preset = MilkdropPresetDocument::new(text, index);
+fn parse_rustymilk_preset_text(text: &str, index: usize) -> RustyMilkPresetDocument {
+    let mut preset = RustyMilkPresetDocument::new(text, index);
     let mut section = "preset".to_string();
 
     for raw_line in text.replace("\r\n", "\n").replace('\r', "\n").lines() {
@@ -13443,7 +13443,7 @@ fn parse_milkdrop_preset_text(text: &str, index: usize) -> MilkdropPresetDocumen
         };
         let key = raw_key.trim().to_ascii_lowercase();
         let raw_value = raw_value.trim();
-        let value = normalize_milkdrop_value(raw_value);
+        let value = normalize_rustymilk_value(raw_value);
         preset
             .raw_sections
             .entry(section.clone())
@@ -13455,35 +13455,35 @@ fn parse_milkdrop_preset_text(text: &str, index: usize) -> MilkdropPresetDocumen
             continue;
         }
         if let Some((shape_index, shape_key)) = parse_indexed_key(&key, "shape") {
-            let entry = ensure_milkdrop_entry(&mut preset.shapes, shape_index);
-            if !assign_milkdrop_indexed_equation(&mut entry.equations, shape_key, raw_value) {
+            let entry = ensure_rustymilk_entry(&mut preset.shapes, shape_index);
+            if !assign_rustymilk_indexed_equation(&mut entry.equations, shape_key, raw_value) {
                 entry.base_values.insert(shape_key.to_string(), value);
             }
             continue;
         }
         if let Some((sprite_index, sprite_key)) = parse_indexed_key(&key, "sprite") {
-            let entry = ensure_milkdrop_entry(&mut preset.sprites, sprite_index);
-            if !assign_milkdrop_indexed_equation(&mut entry.equations, sprite_key, raw_value) {
+            let entry = ensure_rustymilk_entry(&mut preset.sprites, sprite_index);
+            if !assign_rustymilk_indexed_equation(&mut entry.equations, sprite_key, raw_value) {
                 entry.base_values.insert(sprite_key.to_string(), value);
             }
             continue;
         }
         if let Some((wave_index, wave_key)) = parse_indexed_key(&key, "wavecode_") {
-            let entry = ensure_milkdrop_entry(&mut preset.waves, wave_index);
-            if !assign_milkdrop_indexed_equation(&mut entry.equations, wave_key, raw_value) {
+            let entry = ensure_rustymilk_entry(&mut preset.waves, wave_index);
+            if !assign_rustymilk_indexed_equation(&mut entry.equations, wave_key, raw_value) {
                 entry.base_values.insert(wave_key.to_string(), value);
             }
             continue;
         }
         if key.starts_with("warp_shader") {
-            append_milkdrop_statement(&mut preset.warp_shader, raw_value);
+            append_rustymilk_statement(&mut preset.warp_shader, raw_value);
             continue;
         }
         if key.starts_with("comp_shader") {
-            append_milkdrop_statement(&mut preset.comp_shader, raw_value);
+            append_rustymilk_statement(&mut preset.comp_shader, raw_value);
             continue;
         }
-        if assign_milkdrop_equation(&mut preset.equations, &key, raw_value) {
+        if assign_rustymilk_equation(&mut preset.equations, &key, raw_value) {
             continue;
         }
         preset.base_values.insert(key, value);
@@ -13492,8 +13492,8 @@ fn parse_milkdrop_preset_text(text: &str, index: usize) -> MilkdropPresetDocumen
     preset
 }
 
-pub fn parse_milkdrop_preset_set(source: &str, force_milk2: bool) -> MilkdropPresetSet {
-    let chunks = split_milkdrop_preset_pair(source);
+pub fn parse_rustymilk_preset_set(source: &str, force_milk2: bool) -> RustyMilkPresetSet {
+    let chunks = split_rustymilk_preset_pair(source);
     let format = if force_milk2 || chunks.len() > 1 {
         "milk2"
     } else {
@@ -13504,22 +13504,22 @@ pub fn parse_milkdrop_preset_set(source: &str, force_milk2: bool) -> MilkdropPre
         .iter()
         .enumerate()
         .map(|(index, chunk)| {
-            let mut preset = parse_milkdrop_preset_text(chunk, index);
+            let mut preset = parse_rustymilk_preset_text(chunk, index);
             preset.format = format.clone();
             preset
         })
         .collect::<Vec<_>>();
-    MilkdropPresetSet { format, presets }
+    RustyMilkPresetSet { format, presets }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MilkdropFragment {
-    pub entries: Vec<MilkdropIndexedEntry>,
+pub struct RustyMilkFragment {
+    pub entries: Vec<RustyMilkIndexedEntry>,
     pub fragment_type: String,
     pub source: String,
 }
 
-fn milkdrop_fragment_type(file_name: &str, requested_type: &str) -> String {
+fn rustymilk_fragment_type(file_name: &str, requested_type: &str) -> String {
     if requested_type == "shape" || requested_type == "wave" {
         return requested_type.to_string();
     }
@@ -13530,11 +13530,11 @@ fn milkdrop_fragment_type(file_name: &str, requested_type: &str) -> String {
     }
 }
 
-fn parse_standalone_milkdrop_fragment_entry(source: &str) -> MilkdropIndexedEntry {
-    let mut entry = MilkdropIndexedEntry::default();
+fn parse_standalone_rustymilk_fragment_entry(source: &str) -> RustyMilkIndexedEntry {
+    let mut entry = RustyMilkIndexedEntry::default();
     entry
         .base_values
-        .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+        .insert("enabled".to_string(), RustyMilkValue::Number(1.0));
     for raw_line in source.replace("\r\n", "\n").replace('\r', "\n").lines() {
         let trimmed = raw_line.trim();
         if trimmed.is_empty()
@@ -13549,22 +13549,22 @@ fn parse_standalone_milkdrop_fragment_entry(source: &str) -> MilkdropIndexedEntr
         };
         let key = raw_key.trim().to_ascii_lowercase();
         let raw_value = raw_value.trim();
-        if !assign_milkdrop_indexed_equation(&mut entry.equations, &key, raw_value) {
+        if !assign_rustymilk_indexed_equation(&mut entry.equations, &key, raw_value) {
             entry
                 .base_values
-                .insert(key, normalize_milkdrop_value(raw_value));
+                .insert(key, normalize_rustymilk_value(raw_value));
         }
     }
     entry
 }
 
-pub fn parse_milkdrop_fragment(
+pub fn parse_rustymilk_fragment(
     source: &str,
     file_name: &str,
     requested_type: &str,
-) -> MilkdropFragment {
-    let fragment_type = milkdrop_fragment_type(file_name, requested_type);
-    let parsed = parse_milkdrop_preset_set(source, false);
+) -> RustyMilkFragment {
+    let fragment_type = rustymilk_fragment_type(file_name, requested_type);
+    let parsed = parse_rustymilk_preset_set(source, false);
     let parsed_entries = if fragment_type == "wave" {
         parsed
             .presets
@@ -13579,26 +13579,26 @@ pub fn parse_milkdrop_fragment(
             .unwrap_or_default()
     };
     let has_prefixed_entries = parsed_entries.iter().any(|entry| {
-        !entry.base_values.is_empty() || entry.equations != MilkdropEquations::default()
+        !entry.base_values.is_empty() || entry.equations != RustyMilkEquations::default()
     });
     let entries = if has_prefixed_entries {
         parsed_entries
             .into_iter()
             .filter(|entry| {
-                !entry.base_values.is_empty() || entry.equations != MilkdropEquations::default()
+                !entry.base_values.is_empty() || entry.equations != RustyMilkEquations::default()
             })
             .collect()
     } else {
-        vec![parse_standalone_milkdrop_fragment_entry(source)]
+        vec![parse_standalone_rustymilk_fragment_entry(source)]
     };
-    MilkdropFragment {
+    RustyMilkFragment {
         entries,
         fragment_type,
         source: source.to_string(),
     }
 }
 
-fn append_milkdrop_equation_lines(lines: &mut Vec<String>, key: &str, equation_text: &str) {
+fn append_rustymilk_equation_lines(lines: &mut Vec<String>, key: &str, equation_text: &str) {
     for (index, line) in equation_text
         .lines()
         .map(str::trim)
@@ -13609,9 +13609,9 @@ fn append_milkdrop_equation_lines(lines: &mut Vec<String>, key: &str, equation_t
     }
 }
 
-fn append_milkdrop_base_value_lines(
+fn append_rustymilk_base_value_lines(
     lines: &mut Vec<String>,
-    values: &BTreeMap<String, MilkdropValue>,
+    values: &BTreeMap<String, RustyMilkValue>,
     prefix: &str,
 ) {
     for (key, value) in values {
@@ -13619,25 +13619,25 @@ fn append_milkdrop_base_value_lines(
     }
 }
 
-fn append_milkdrop_indexed_entry_lines(
+fn append_rustymilk_indexed_entry_lines(
     lines: &mut Vec<String>,
     prefix: &str,
-    entry: &MilkdropIndexedEntry,
+    entry: &RustyMilkIndexedEntry,
 ) {
-    append_milkdrop_base_value_lines(lines, &entry.base_values, prefix);
-    append_milkdrop_equation_lines(lines, &format!("{prefix}init"), &entry.equations.init);
-    append_milkdrop_equation_lines(lines, &format!("{prefix}per_frame"), &entry.equations.frame);
-    append_milkdrop_equation_lines(lines, &format!("{prefix}per_point"), &entry.equations.point);
+    append_rustymilk_base_value_lines(lines, &entry.base_values, prefix);
+    append_rustymilk_equation_lines(lines, &format!("{prefix}init"), &entry.equations.init);
+    append_rustymilk_equation_lines(lines, &format!("{prefix}per_frame"), &entry.equations.frame);
+    append_rustymilk_equation_lines(lines, &format!("{prefix}per_point"), &entry.equations.point);
 }
 
-pub fn serialize_milkdrop_fragment(entry: &MilkdropIndexedEntry, requested_type: &str) -> String {
-    let fragment_type = milkdrop_fragment_type("", requested_type);
+pub fn serialize_rustymilk_fragment(entry: &RustyMilkIndexedEntry, requested_type: &str) -> String {
+    let fragment_type = rustymilk_fragment_type("", requested_type);
     let mut lines = vec![format!("[{fragment_type}]")];
-    append_milkdrop_indexed_entry_lines(&mut lines, "", entry);
+    append_rustymilk_indexed_entry_lines(&mut lines, "", entry);
     format!("{}\n", lines.join("\n"))
 }
 
-pub fn serialize_milkdrop_preset_set(parsed: &MilkdropPresetSet) -> String {
+pub fn serialize_rustymilk_preset_set(parsed: &RustyMilkPresetSet) -> String {
     let include_sections = parsed.format == "milk2" || parsed.presets.len() > 1;
     let mut rendered_presets = Vec::new();
     for (index, preset) in parsed.presets.iter().enumerate() {
@@ -13648,28 +13648,28 @@ pub fn serialize_milkdrop_preset_set(parsed: &MilkdropPresetSet) -> String {
         if !preset.title.is_empty() {
             lines.push(format!("name={}", preset.title));
         }
-        append_milkdrop_base_value_lines(&mut lines, &preset.base_values, "");
-        append_milkdrop_equation_lines(&mut lines, "init", &preset.equations.init);
-        append_milkdrop_equation_lines(&mut lines, "per_frame", &preset.equations.per_frame);
-        append_milkdrop_equation_lines(&mut lines, "per_pixel", &preset.equations.per_pixel);
-        append_milkdrop_equation_lines(&mut lines, "warp_shader", &preset.warp_shader);
-        append_milkdrop_equation_lines(&mut lines, "comp_shader", &preset.comp_shader);
+        append_rustymilk_base_value_lines(&mut lines, &preset.base_values, "");
+        append_rustymilk_equation_lines(&mut lines, "init", &preset.equations.init);
+        append_rustymilk_equation_lines(&mut lines, "per_frame", &preset.equations.per_frame);
+        append_rustymilk_equation_lines(&mut lines, "per_pixel", &preset.equations.per_pixel);
+        append_rustymilk_equation_lines(&mut lines, "warp_shader", &preset.warp_shader);
+        append_rustymilk_equation_lines(&mut lines, "comp_shader", &preset.comp_shader);
         for (shape_index, shape) in preset.shapes.iter().enumerate() {
-            append_milkdrop_indexed_entry_lines(
+            append_rustymilk_indexed_entry_lines(
                 &mut lines,
                 &format!("shape{shape_index:02}_"),
                 shape,
             );
         }
         for (sprite_index, sprite) in preset.sprites.iter().enumerate() {
-            append_milkdrop_indexed_entry_lines(
+            append_rustymilk_indexed_entry_lines(
                 &mut lines,
                 &format!("sprite{sprite_index:02}_"),
                 sprite,
             );
         }
         for (wave_index, wave) in preset.waves.iter().enumerate() {
-            append_milkdrop_indexed_entry_lines(
+            append_rustymilk_indexed_entry_lines(
                 &mut lines,
                 &format!("wavecode_{wave_index}_"),
                 wave,
@@ -13680,29 +13680,29 @@ pub fn serialize_milkdrop_preset_set(parsed: &MilkdropPresetSet) -> String {
     format!("{}\n", rendered_presets.join("\n"))
 }
 
-fn is_milkdrop_q_variable(key: &str) -> bool {
+fn is_rustymilk_q_variable(key: &str) -> bool {
     key.strip_prefix('q')
         .and_then(|rest| rest.parse::<usize>().ok())
         .is_some_and(|index| (1..=64).contains(&index))
 }
 
-fn is_milkdrop_buffer_variable(key: &str) -> bool {
+fn is_rustymilk_buffer_variable(key: &str) -> bool {
     key.strip_prefix("megabuf_")
         .or_else(|| key.strip_prefix("gmegabuf_"))
         .and_then(|rest| rest.parse::<usize>().ok())
         .is_some()
 }
 
-fn persist_milkdrop_scoped_values(
-    base_values: &BTreeMap<String, MilkdropValue>,
-    scope: &BTreeMap<String, MilkdropValue>,
+fn persist_rustymilk_scoped_values(
+    base_values: &BTreeMap<String, RustyMilkValue>,
+    scope: &BTreeMap<String, RustyMilkValue>,
     allowed_keys: &[&str],
-) -> BTreeMap<String, MilkdropValue> {
+) -> BTreeMap<String, RustyMilkValue> {
     let mut next = base_values.clone();
     for (key, value) in scope {
         if allowed_keys.contains(&key.as_str())
-            || is_milkdrop_q_variable(key)
-            || is_milkdrop_buffer_variable(key)
+            || is_rustymilk_q_variable(key)
+            || is_rustymilk_buffer_variable(key)
         {
             next.insert(key.clone(), value.clone());
         }
@@ -13710,7 +13710,7 @@ fn persist_milkdrop_scoped_values(
     next
 }
 
-const MILKDROP_SHAPE_VALUE_KEYS: &[&str] = &[
+const RUSTYMILK_SHAPE_VALUE_KEYS: &[&str] = &[
     "a",
     "a2",
     "additive",
@@ -13746,7 +13746,7 @@ const MILKDROP_SHAPE_VALUE_KEYS: &[&str] = &[
     "y",
 ];
 
-const MILKDROP_SPRITE_VALUE_KEYS: &[&str] = &[
+const RUSTYMILK_SPRITE_VALUE_KEYS: &[&str] = &[
     "a",
     "additive",
     "ang",
@@ -13772,7 +13772,7 @@ const MILKDROP_SPRITE_VALUE_KEYS: &[&str] = &[
     "y",
 ];
 
-const MILKDROP_WAVE_VALUE_KEYS: &[&str] = &[
+const RUSTYMILK_WAVE_VALUE_KEYS: &[&str] = &[
     "a",
     "additive",
     "b",
@@ -13793,33 +13793,33 @@ const MILKDROP_WAVE_VALUE_KEYS: &[&str] = &[
     "thick",
 ];
 
-fn evaluate_milkdrop_entry_state(
-    entry: &MilkdropIndexedEntry,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
+fn evaluate_rustymilk_entry_state(
+    entry: &RustyMilkIndexedEntry,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
     allowed_keys: &[&str],
-) -> MilkdropIndexedEntry {
+) -> RustyMilkIndexedEntry {
     let mut scope = frame_scope.clone();
     scope.extend(entry.base_values.clone());
     if !entry.equations.init.trim().is_empty() {
-        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.init, &scope) {
+        if let Ok(next_scope) = evaluate_rustymilk_equations(&entry.equations.init, &scope) {
             scope = next_scope;
         }
     }
     if !entry.equations.frame.trim().is_empty() {
-        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.frame, &scope) {
+        if let Ok(next_scope) = evaluate_rustymilk_equations(&entry.equations.frame, &scope) {
             scope = next_scope;
         }
     }
-    MilkdropIndexedEntry {
-        base_values: persist_milkdrop_scoped_values(&entry.base_values, &scope, allowed_keys),
+    RustyMilkIndexedEntry {
+        base_values: persist_rustymilk_scoped_values(&entry.base_values, &scope, allowed_keys),
         equations: entry.equations.clone(),
         initialized: entry.initialized,
     }
 }
 
-fn merge_milkdrop_q_registers(
-    scope: &mut BTreeMap<String, MilkdropValue>,
-    values: &BTreeMap<String, MilkdropValue>,
+fn merge_rustymilk_q_registers(
+    scope: &mut BTreeMap<String, RustyMilkValue>,
+    values: &BTreeMap<String, RustyMilkValue>,
 ) {
     for index in 1..=64 {
         let key = format!("q{index}");
@@ -13829,76 +13829,76 @@ fn merge_milkdrop_q_registers(
     }
 }
 
-fn evaluate_milkdrop_entry_stateful(
-    entry: &mut MilkdropIndexedEntry,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
+fn evaluate_rustymilk_entry_stateful(
+    entry: &mut RustyMilkIndexedEntry,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
     allowed_keys: &[&str],
-) -> MilkdropIndexedEntry {
+) -> RustyMilkIndexedEntry {
     let mut scope = frame_scope.clone();
     scope.extend(entry.base_values.clone());
     if !entry.initialized && !entry.equations.init.trim().is_empty() {
-        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.init, &scope) {
+        if let Ok(next_scope) = evaluate_rustymilk_equations(&entry.equations.init, &scope) {
             scope = next_scope;
         }
         entry.initialized = true;
     }
     if !entry.equations.frame.trim().is_empty() {
-        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.frame, &scope) {
+        if let Ok(next_scope) = evaluate_rustymilk_equations(&entry.equations.frame, &scope) {
             scope = next_scope;
         }
     }
-    entry.base_values = persist_milkdrop_scoped_values(&entry.base_values, &scope, allowed_keys);
-    MilkdropIndexedEntry {
+    entry.base_values = persist_rustymilk_scoped_values(&entry.base_values, &scope, allowed_keys);
+    RustyMilkIndexedEntry {
         base_values: entry.base_values.clone(),
         equations: entry.equations.clone(),
         initialized: entry.initialized,
     }
 }
 
-pub fn evaluate_milkdrop_shape_state(
-    shape: &MilkdropIndexedEntry,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
-) -> MilkdropIndexedEntry {
-    evaluate_milkdrop_entry_state(shape, frame_scope, MILKDROP_SHAPE_VALUE_KEYS)
+pub fn evaluate_rustymilk_shape_state(
+    shape: &RustyMilkIndexedEntry,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
+) -> RustyMilkIndexedEntry {
+    evaluate_rustymilk_entry_state(shape, frame_scope, RUSTYMILK_SHAPE_VALUE_KEYS)
 }
 
-pub fn evaluate_milkdrop_sprite_state(
-    sprite: &MilkdropIndexedEntry,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
-) -> MilkdropIndexedEntry {
-    evaluate_milkdrop_entry_state(sprite, frame_scope, MILKDROP_SPRITE_VALUE_KEYS)
+pub fn evaluate_rustymilk_sprite_state(
+    sprite: &RustyMilkIndexedEntry,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
+) -> RustyMilkIndexedEntry {
+    evaluate_rustymilk_entry_state(sprite, frame_scope, RUSTYMILK_SPRITE_VALUE_KEYS)
 }
 
-pub fn evaluate_milkdrop_wave_state(
-    wave: &MilkdropIndexedEntry,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
-) -> MilkdropIndexedEntry {
-    evaluate_milkdrop_entry_state(wave, frame_scope, MILKDROP_WAVE_VALUE_KEYS)
+pub fn evaluate_rustymilk_wave_state(
+    wave: &RustyMilkIndexedEntry,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
+) -> RustyMilkIndexedEntry {
+    evaluate_rustymilk_entry_state(wave, frame_scope, RUSTYMILK_WAVE_VALUE_KEYS)
 }
 
-fn milkdrop_entry_number(entry: &MilkdropIndexedEntry, keys: &[&str], fallback: f64) -> f64 {
+fn rustymilk_entry_number(entry: &RustyMilkIndexedEntry, keys: &[&str], fallback: f64) -> f64 {
     keys.iter()
         .find_map(|key| {
             entry
                 .base_values
                 .get(*key)
-                .and_then(MilkdropValue::as_number)
+                .and_then(RustyMilkValue::as_number)
         })
         .filter(|value| value.is_finite())
         .unwrap_or(fallback)
 }
 
-fn milkdrop_entry_flag(entry: &MilkdropIndexedEntry, keys: &[&str]) -> bool {
+fn rustymilk_entry_flag(entry: &RustyMilkIndexedEntry, keys: &[&str]) -> bool {
     keys.iter()
-        .any(|key| milkdrop_entry_number(entry, &[*key], 0.0).abs() > 0.00001)
+        .any(|key| rustymilk_entry_number(entry, &[*key], 0.0).abs() > 0.00001)
 }
 
-pub fn create_milkdrop_custom_wave_vertices(
-    wave: &MilkdropIndexedEntry,
+pub fn create_rustymilk_custom_wave_vertices(
+    wave: &RustyMilkIndexedEntry,
     samples: &[f64],
-    frame_scope: &BTreeMap<String, MilkdropValue>,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
 ) -> Vec<f64> {
-    let sample_count = milkdrop_entry_number(wave, &["samples", "nsamples"], samples.len() as f64)
+    let sample_count = rustymilk_entry_number(wave, &["samples", "nsamples"], samples.len() as f64)
         .floor()
         .max(1.0) as usize;
     let mut vertices = Vec::with_capacity(sample_count * 2);
@@ -13919,33 +13919,33 @@ pub fn create_milkdrop_custom_wave_vertices(
         };
         let mut point_scope = frame_scope.clone();
         point_scope.extend(wave.base_values.clone());
-        point_scope.insert("i".to_string(), MilkdropValue::Number(i));
-        point_scope.insert("sample".to_string(), MilkdropValue::Number(sample));
+        point_scope.insert("i".to_string(), RustyMilkValue::Number(i));
+        point_scope.insert("sample".to_string(), RustyMilkValue::Number(sample));
         if !wave.equations.point.trim().is_empty() {
-            if let Ok(next_scope) = evaluate_milkdrop_equations(&wave.equations.point, &point_scope)
+            if let Ok(next_scope) = evaluate_rustymilk_equations(&wave.equations.point, &point_scope)
             {
                 point_scope = next_scope;
             }
         }
-        let x = milkdrop_scope_number(&point_scope, "x", i) * 2.0 - 1.0;
-        let y = milkdrop_scope_number(&point_scope, "y", sample) * 2.0 - 1.0;
+        let x = rustymilk_scope_number(&point_scope, "x", i) * 2.0 - 1.0;
+        let y = rustymilk_scope_number(&point_scope, "y", sample) * 2.0 - 1.0;
         vertices.push(x);
         vertices.push(y);
     }
     vertices
 }
 
-pub fn create_milkdrop_shape_vertices(shape: &MilkdropIndexedEntry) -> Vec<f64> {
-    if !milkdrop_entry_flag(shape, &["enabled", "benabled"]) {
+pub fn create_rustymilk_shape_vertices(shape: &RustyMilkIndexedEntry) -> Vec<f64> {
+    if !rustymilk_entry_flag(shape, &["enabled", "benabled"]) {
         return Vec::new();
     }
-    let sides = milkdrop_entry_number(shape, &["sides", "numsides"], 4.0)
+    let sides = rustymilk_entry_number(shape, &["sides", "numsides"], 4.0)
         .floor()
         .clamp(3.0, 500.0) as usize;
-    let radius = milkdrop_entry_number(shape, &["rad", "radius"], 0.1).max(0.0);
-    let center_x = milkdrop_entry_number(shape, &["x"], 0.5) * 2.0 - 1.0;
-    let center_y = milkdrop_entry_number(shape, &["y"], 0.5) * 2.0 - 1.0;
-    let angle = milkdrop_entry_number(shape, &["ang"], 0.0);
+    let radius = rustymilk_entry_number(shape, &["rad", "radius"], 0.1).max(0.0);
+    let center_x = rustymilk_entry_number(shape, &["x"], 0.5) * 2.0 - 1.0;
+    let center_y = rustymilk_entry_number(shape, &["y"], 0.5) * 2.0 - 1.0;
+    let angle = rustymilk_entry_number(shape, &["ang"], 0.0);
     let mut vertices = Vec::with_capacity((sides + 1) * 2);
     for index in 0..=sides {
         let theta = angle + (index as f64 / sides as f64) * std::f64::consts::TAU;
@@ -13955,31 +13955,31 @@ pub fn create_milkdrop_shape_vertices(shape: &MilkdropIndexedEntry) -> Vec<f64> 
     vertices
 }
 
-pub fn create_milkdrop_shape_fill_vertices(shape: &MilkdropIndexedEntry) -> Vec<f64> {
-    let outline = create_milkdrop_shape_vertices(shape);
+pub fn create_rustymilk_shape_fill_vertices(shape: &RustyMilkIndexedEntry) -> Vec<f64> {
+    let outline = create_rustymilk_shape_vertices(shape);
     if outline.is_empty() {
         return outline;
     }
     let mut vertices = Vec::with_capacity(outline.len() + 2);
-    vertices.push(milkdrop_entry_number(shape, &["x"], 0.5) * 2.0 - 1.0);
-    vertices.push(milkdrop_entry_number(shape, &["y"], 0.5) * 2.0 - 1.0);
+    vertices.push(rustymilk_entry_number(shape, &["x"], 0.5) * 2.0 - 1.0);
+    vertices.push(rustymilk_entry_number(shape, &["y"], 0.5) * 2.0 - 1.0);
     vertices.extend(outline);
     vertices
 }
 
-fn milkdrop_entry_text(entry: &MilkdropIndexedEntry, keys: &[&str]) -> String {
+fn rustymilk_entry_text(entry: &RustyMilkIndexedEntry, keys: &[&str]) -> String {
     keys.iter()
-        .find_map(|key| entry.base_values.get(*key).map(MilkdropValue::as_text))
+        .find_map(|key| entry.base_values.get(*key).map(RustyMilkValue::as_text))
         .unwrap_or_default()
 }
 
-fn is_milkdrop_shape_textured(shape: &MilkdropIndexedEntry) -> bool {
-    milkdrop_entry_flag(shape, &["textured", "btextured"])
-        || !milkdrop_entry_text(shape, &["texture", "tex_name", "texname", "tex"]).is_empty()
+fn is_rustymilk_shape_textured(shape: &RustyMilkIndexedEntry) -> bool {
+    rustymilk_entry_flag(shape, &["textured", "btextured"])
+        || !rustymilk_entry_text(shape, &["texture", "tex_name", "texname", "tex"]).is_empty()
 }
 
-fn milkdrop_texture_name(entry: &MilkdropIndexedEntry) -> String {
-    milkdrop_entry_text(
+fn rustymilk_texture_name(entry: &RustyMilkIndexedEntry) -> String {
+    rustymilk_entry_text(
         entry,
         &[
             "texture", "tex", "tex_name", "texname", "image", "img", "file", "filename",
@@ -13987,7 +13987,7 @@ fn milkdrop_texture_name(entry: &MilkdropIndexedEntry) -> String {
     )
 }
 
-pub fn get_milkdrop_texture_name_aliases(value: &str) -> Vec<String> {
+pub fn get_rustymilk_texture_name_aliases(value: &str) -> Vec<String> {
     let normalized = value
         .trim()
         .trim_matches(|ch| ch == '\'' || ch == '"')
@@ -14011,15 +14011,15 @@ pub fn get_milkdrop_texture_name_aliases(value: &str) -> Vec<String> {
     aliases
 }
 
-pub fn create_milkdrop_shape_texture_uvs(shape: &MilkdropIndexedEntry) -> Vec<f64> {
-    let vertex_count = create_milkdrop_shape_fill_vertices(shape).len() / 2;
+pub fn create_rustymilk_shape_texture_uvs(shape: &RustyMilkIndexedEntry) -> Vec<f64> {
+    let vertex_count = create_rustymilk_shape_fill_vertices(shape).len() / 2;
     if vertex_count == 0 {
         return Vec::new();
     }
-    let zoom = milkdrop_entry_number(shape, &["tex_zoom", "texzoom"], 1.0)
+    let zoom = rustymilk_entry_number(shape, &["tex_zoom", "texzoom"], 1.0)
         .abs()
         .max(0.001);
-    let angle = milkdrop_entry_number(shape, &["tex_ang", "texang"], 0.0);
+    let angle = rustymilk_entry_number(shape, &["tex_ang", "texang"], 0.0);
     let sine = angle.sin();
     let cosine = angle.cos();
     let mut uvs = Vec::with_capacity(vertex_count * 2);
@@ -14037,19 +14037,19 @@ pub fn create_milkdrop_shape_texture_uvs(shape: &MilkdropIndexedEntry) -> Vec<f6
     uvs
 }
 
-pub fn create_milkdrop_sprite_vertices(sprite: &MilkdropIndexedEntry) -> Vec<f64> {
-    if !milkdrop_entry_flag(sprite, &["enabled", "benabled"]) {
+pub fn create_rustymilk_sprite_vertices(sprite: &RustyMilkIndexedEntry) -> Vec<f64> {
+    if !rustymilk_entry_flag(sprite, &["enabled", "benabled"]) {
         return Vec::new();
     }
-    let width = milkdrop_entry_number(sprite, &["w", "width"], 0.25)
+    let width = rustymilk_entry_number(sprite, &["w", "width"], 0.25)
         .abs()
         .max(0.001);
-    let height = milkdrop_entry_number(sprite, &["h", "height"], width)
+    let height = rustymilk_entry_number(sprite, &["h", "height"], width)
         .abs()
         .max(0.001);
-    let center_x = milkdrop_entry_number(sprite, &["x"], 0.5) * 2.0 - 1.0;
-    let center_y = milkdrop_entry_number(sprite, &["y"], 0.5) * 2.0 - 1.0;
-    let angle = milkdrop_entry_number(sprite, &["ang"], 0.0);
+    let center_x = rustymilk_entry_number(sprite, &["x"], 0.5) * 2.0 - 1.0;
+    let center_y = rustymilk_entry_number(sprite, &["y"], 0.5) * 2.0 - 1.0;
+    let angle = rustymilk_entry_number(sprite, &["ang"], 0.0);
     let sine = angle.sin();
     let cosine = angle.cos();
     let corners = [
@@ -14067,94 +14067,94 @@ pub fn create_milkdrop_sprite_vertices(sprite: &MilkdropIndexedEntry) -> Vec<f64
     vertices
 }
 
-pub fn create_milkdrop_sprite_texture_uvs(sprite: &MilkdropIndexedEntry) -> Vec<f64> {
-    if !milkdrop_entry_flag(sprite, &["enabled", "benabled"]) {
+pub fn create_rustymilk_sprite_texture_uvs(sprite: &RustyMilkIndexedEntry) -> Vec<f64> {
+    if !rustymilk_entry_flag(sprite, &["enabled", "benabled"]) {
         return Vec::new();
     }
     vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 }
 
-fn milkdrop_shape_fill_color(shape: &MilkdropIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
+fn rustymilk_shape_fill_color(shape: &RustyMilkIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
     [
-        clamp_unit(milkdrop_entry_number(shape, &["r"], fallback_color[0])),
-        clamp_unit(milkdrop_entry_number(shape, &["g"], fallback_color[1])),
-        clamp_unit(milkdrop_entry_number(shape, &["b"], fallback_color[2])),
-        clamp_unit(milkdrop_entry_number(shape, &["a"], 0.6)),
+        clamp_unit(rustymilk_entry_number(shape, &["r"], fallback_color[0])),
+        clamp_unit(rustymilk_entry_number(shape, &["g"], fallback_color[1])),
+        clamp_unit(rustymilk_entry_number(shape, &["b"], fallback_color[2])),
+        clamp_unit(rustymilk_entry_number(shape, &["a"], 0.6)),
     ]
 }
 
-fn milkdrop_shape_fill_edge_color(
-    shape: &MilkdropIndexedEntry,
+fn rustymilk_shape_fill_edge_color(
+    shape: &RustyMilkIndexedEntry,
     fallback_color: [f64; 3],
 ) -> [f64; 4] {
     [
-        clamp_unit(milkdrop_entry_number(
+        clamp_unit(rustymilk_entry_number(
             shape,
             &["r2", "r"],
             fallback_color[0],
         )),
-        clamp_unit(milkdrop_entry_number(
+        clamp_unit(rustymilk_entry_number(
             shape,
             &["g2", "g"],
             fallback_color[1],
         )),
-        clamp_unit(milkdrop_entry_number(
+        clamp_unit(rustymilk_entry_number(
             shape,
             &["b2", "b"],
             fallback_color[2],
         )),
-        clamp_unit(milkdrop_entry_number(shape, &["a2", "a"], 0.6)),
+        clamp_unit(rustymilk_entry_number(shape, &["a2", "a"], 0.6)),
     ]
 }
 
-fn milkdrop_shape_border_color(shape: &MilkdropIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
+fn rustymilk_shape_border_color(shape: &RustyMilkIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
     [
-        clamp_unit(milkdrop_entry_number(
+        clamp_unit(rustymilk_entry_number(
             shape,
             &["border_r", "r"],
             fallback_color[0],
         )),
-        clamp_unit(milkdrop_entry_number(
+        clamp_unit(rustymilk_entry_number(
             shape,
             &["border_g", "g"],
             fallback_color[1],
         )),
-        clamp_unit(milkdrop_entry_number(
+        clamp_unit(rustymilk_entry_number(
             shape,
             &["border_b", "b"],
             fallback_color[2],
         )),
-        clamp_unit(milkdrop_entry_number(shape, &["border_a"], 0.85)),
+        clamp_unit(rustymilk_entry_number(shape, &["border_a"], 0.85)),
     ]
 }
 
-fn milkdrop_sprite_fill_color(sprite: &MilkdropIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
+fn rustymilk_sprite_fill_color(sprite: &RustyMilkIndexedEntry, fallback_color: [f64; 3]) -> [f64; 4] {
     [
-        clamp_unit(milkdrop_entry_number(sprite, &["r"], fallback_color[0])),
-        clamp_unit(milkdrop_entry_number(sprite, &["g"], fallback_color[1])),
-        clamp_unit(milkdrop_entry_number(sprite, &["b"], fallback_color[2])),
-        clamp_unit(milkdrop_entry_number(sprite, &["a"], 1.0)),
+        clamp_unit(rustymilk_entry_number(sprite, &["r"], fallback_color[0])),
+        clamp_unit(rustymilk_entry_number(sprite, &["g"], fallback_color[1])),
+        clamp_unit(rustymilk_entry_number(sprite, &["b"], fallback_color[2])),
+        clamp_unit(rustymilk_entry_number(sprite, &["a"], 1.0)),
     ]
 }
 
-fn create_milkdrop_shape_fill_colors(
-    shape: &MilkdropIndexedEntry,
+fn create_rustymilk_shape_fill_colors(
+    shape: &RustyMilkIndexedEntry,
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
-    let vertex_count = create_milkdrop_shape_fill_vertices(shape).len() / 2;
+    let vertex_count = create_rustymilk_shape_fill_vertices(shape).len() / 2;
     if vertex_count == 0 {
         return Vec::new();
     }
     let mut colors = Vec::with_capacity(vertex_count * 4);
-    colors.extend_from_slice(&milkdrop_shape_fill_color(shape, fallback_color));
-    let edge_color = milkdrop_shape_fill_edge_color(shape, fallback_color);
+    colors.extend_from_slice(&rustymilk_shape_fill_color(shape, fallback_color));
+    let edge_color = rustymilk_shape_fill_edge_color(shape, fallback_color);
     for _ in 1..vertex_count {
         colors.extend_from_slice(&edge_color);
     }
     colors
 }
 
-fn append_rust_milkdrop_webgpu_colored_vertex(
+fn append_rustymilk_webgpu_colored_vertex(
     output: &mut Vec<f64>,
     vertices: &[f64],
     vertex_index: usize,
@@ -14170,7 +14170,7 @@ fn append_rust_milkdrop_webgpu_colored_vertex(
     ]);
 }
 
-pub fn create_rust_milkdrop_webgpu_triangle_list_vertices(
+pub fn create_rustymilk_webgpu_triangle_list_vertices(
     triangle_vertices: &[f64],
     color: [f64; 4],
 ) -> Vec<f64> {
@@ -14180,12 +14180,12 @@ pub fn create_rust_milkdrop_webgpu_triangle_list_vertices(
     }
     let mut vertices = Vec::with_capacity(vertex_count * 6);
     for index in 0..vertex_count {
-        append_rust_milkdrop_webgpu_colored_vertex(&mut vertices, triangle_vertices, index, color);
+        append_rustymilk_webgpu_colored_vertex(&mut vertices, triangle_vertices, index, color);
     }
     vertices
 }
 
-pub fn create_rust_milkdrop_webgpu_triangle_fan_vertices(
+pub fn create_rustymilk_webgpu_triangle_fan_vertices(
     fan_vertices: &[f64],
     fan_colors: &[f64],
     fallback_color: [f64; 4],
@@ -14209,7 +14209,7 @@ pub fn create_rust_milkdrop_webgpu_triangle_fan_vertices(
                 .get(color_offset + 3)
                 .unwrap_or(&fallback_color[3]),
         ];
-        append_rust_milkdrop_webgpu_colored_vertex(output, fan_vertices, vertex_index, color);
+        append_rustymilk_webgpu_colored_vertex(output, fan_vertices, vertex_index, color);
     };
     for index in 1..vertex_count - 1 {
         append_vertex(&mut vertices, 0);
@@ -14219,7 +14219,7 @@ pub fn create_rust_milkdrop_webgpu_triangle_fan_vertices(
     vertices
 }
 
-pub fn create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
+pub fn create_rustymilk_webgpu_textured_triangle_fan_vertices(
     fan_vertices: &[f64],
     fan_uvs: &[f64],
     fan_colors: &[f64],
@@ -14257,7 +14257,7 @@ pub fn create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
     vertices
 }
 
-pub fn create_rust_milkdrop_webgpu_line_segment_vertices(
+pub fn create_rustymilk_webgpu_line_segment_vertices(
     line_strip_vertices: &[f64],
     color: [f64; 4],
 ) -> Vec<f64> {
@@ -14267,13 +14267,13 @@ pub fn create_rust_milkdrop_webgpu_line_segment_vertices(
     }
     let mut vertices = Vec::with_capacity((vertex_count - 1) * 12);
     for index in 0..vertex_count - 1 {
-        append_rust_milkdrop_webgpu_colored_vertex(
+        append_rustymilk_webgpu_colored_vertex(
             &mut vertices,
             line_strip_vertices,
             index,
             color,
         );
-        append_rust_milkdrop_webgpu_colored_vertex(
+        append_rustymilk_webgpu_colored_vertex(
             &mut vertices,
             line_strip_vertices,
             index + 1,
@@ -14283,7 +14283,7 @@ pub fn create_rust_milkdrop_webgpu_line_segment_vertices(
     vertices
 }
 
-pub fn create_rust_milkdrop_webgpu_line_list_vertices(
+pub fn create_rustymilk_webgpu_line_list_vertices(
     line_list_vertices: &[f64],
     color: [f64; 4],
 ) -> Vec<f64> {
@@ -14293,56 +14293,56 @@ pub fn create_rust_milkdrop_webgpu_line_list_vertices(
     }
     let mut vertices = Vec::with_capacity(vertex_count * 6);
     for index in 0..vertex_count {
-        append_rust_milkdrop_webgpu_colored_vertex(&mut vertices, line_list_vertices, index, color);
+        append_rustymilk_webgpu_colored_vertex(&mut vertices, line_list_vertices, index, color);
     }
     vertices
 }
 
-pub fn create_rust_milkdrop_webgpu_shape_fill_vertices(
-    shapes: &[MilkdropIndexedEntry],
+pub fn create_rustymilk_webgpu_shape_fill_vertices(
+    shapes: &[RustyMilkIndexedEntry],
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
     shapes
         .iter()
-        .filter(|shape| !is_milkdrop_shape_textured(shape))
+        .filter(|shape| !is_rustymilk_shape_textured(shape))
         .flat_map(|shape| {
-            create_rust_milkdrop_webgpu_triangle_fan_vertices(
-                &create_milkdrop_shape_fill_vertices(shape),
-                &create_milkdrop_shape_fill_colors(shape, fallback_color),
+            create_rustymilk_webgpu_triangle_fan_vertices(
+                &create_rustymilk_shape_fill_vertices(shape),
+                &create_rustymilk_shape_fill_colors(shape, fallback_color),
                 [fallback_color[0], fallback_color[1], fallback_color[2], 0.6],
             )
         })
         .collect()
 }
 
-pub fn create_rust_milkdrop_webgpu_textured_shape_vertices(
-    shape: &MilkdropIndexedEntry,
+pub fn create_rustymilk_webgpu_textured_shape_vertices(
+    shape: &RustyMilkIndexedEntry,
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
-    create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
-        &create_milkdrop_shape_fill_vertices(shape),
-        &create_milkdrop_shape_texture_uvs(shape),
-        &create_milkdrop_shape_fill_colors(shape, fallback_color),
+    create_rustymilk_webgpu_textured_triangle_fan_vertices(
+        &create_rustymilk_shape_fill_vertices(shape),
+        &create_rustymilk_shape_texture_uvs(shape),
+        &create_rustymilk_shape_fill_colors(shape, fallback_color),
         [fallback_color[0], fallback_color[1], fallback_color[2], 0.6],
     )
 }
 
-pub fn create_rust_milkdrop_webgpu_shape_outline_vertices(
-    shapes: &[MilkdropIndexedEntry],
+pub fn create_rustymilk_webgpu_shape_outline_vertices(
+    shapes: &[RustyMilkIndexedEntry],
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
     shapes
         .iter()
         .flat_map(|shape| {
-            create_rust_milkdrop_webgpu_line_segment_vertices(
-                &create_milkdrop_shape_vertices(shape),
-                milkdrop_shape_border_color(shape, fallback_color),
+            create_rustymilk_webgpu_line_segment_vertices(
+                &create_rustymilk_shape_vertices(shape),
+                rustymilk_shape_border_color(shape, fallback_color),
             )
         })
         .collect()
 }
 
-fn create_rust_milkdrop_webgpu_textured_quad_vertices(
+fn create_rustymilk_webgpu_textured_quad_vertices(
     quad_vertices: &[f64],
     quad_uvs: &[f64],
     color: [f64; 4],
@@ -14366,14 +14366,14 @@ fn create_rust_milkdrop_webgpu_textured_quad_vertices(
     vertices
 }
 
-pub fn create_rust_milkdrop_webgpu_sprite_vertices(
-    sprites: &[MilkdropIndexedEntry],
+pub fn create_rustymilk_webgpu_sprite_vertices(
+    sprites: &[RustyMilkIndexedEntry],
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
     sprites
         .iter()
         .flat_map(|sprite| {
-            let sprite_vertices = create_milkdrop_sprite_vertices(sprite);
+            let sprite_vertices = create_rustymilk_sprite_vertices(sprite);
             if sprite_vertices.len() < 8 {
                 return Vec::new();
             }
@@ -14391,70 +14391,70 @@ pub fn create_rust_milkdrop_webgpu_sprite_vertices(
                 sprite_vertices[6],
                 sprite_vertices[7],
             ];
-            create_rust_milkdrop_webgpu_triangle_list_vertices(
+            create_rustymilk_webgpu_triangle_list_vertices(
                 &triangles,
-                milkdrop_sprite_fill_color(sprite, fallback_color),
+                rustymilk_sprite_fill_color(sprite, fallback_color),
             )
         })
         .collect()
 }
 
-pub fn create_rust_milkdrop_webgpu_textured_sprite_vertices(
-    sprite: &MilkdropIndexedEntry,
+pub fn create_rustymilk_webgpu_textured_sprite_vertices(
+    sprite: &RustyMilkIndexedEntry,
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
-    create_rust_milkdrop_webgpu_textured_quad_vertices(
-        &create_milkdrop_sprite_vertices(sprite),
-        &create_milkdrop_sprite_texture_uvs(sprite),
-        milkdrop_sprite_fill_color(sprite, fallback_color),
+    create_rustymilk_webgpu_textured_quad_vertices(
+        &create_rustymilk_sprite_vertices(sprite),
+        &create_rustymilk_sprite_texture_uvs(sprite),
+        rustymilk_sprite_fill_color(sprite, fallback_color),
     )
 }
 
-pub fn create_rust_milkdrop_webgpu_motion_vector_vertices(
-    scope: &BTreeMap<String, MilkdropValue>,
+pub fn create_rustymilk_webgpu_motion_vector_vertices(
+    scope: &BTreeMap<String, RustyMilkValue>,
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
-    create_rust_milkdrop_webgpu_line_list_vertices(
-        &create_milkdrop_motion_vector_vertices(scope),
+    create_rustymilk_webgpu_line_list_vertices(
+        &create_rustymilk_motion_vector_vertices(scope),
         [
-            clamp_unit(milkdrop_scope_number(scope, "mv_r", fallback_color[0])),
-            clamp_unit(milkdrop_scope_number(scope, "mv_g", fallback_color[1])),
-            clamp_unit(milkdrop_scope_number(scope, "mv_b", fallback_color[2])),
-            clamp_unit(milkdrop_scope_number(scope, "mv_a", 0.8)),
+            clamp_unit(rustymilk_scope_number(scope, "mv_r", fallback_color[0])),
+            clamp_unit(rustymilk_scope_number(scope, "mv_g", fallback_color[1])),
+            clamp_unit(rustymilk_scope_number(scope, "mv_b", fallback_color[2])),
+            clamp_unit(rustymilk_scope_number(scope, "mv_a", 0.8)),
         ],
     )
 }
 
-pub fn create_rust_milkdrop_webgpu_screen_border_vertices(
-    scope: &BTreeMap<String, MilkdropValue>,
+pub fn create_rustymilk_webgpu_screen_border_vertices(
+    scope: &BTreeMap<String, RustyMilkValue>,
     fallback_color: [f64; 3],
 ) -> Vec<f64> {
-    let mut vertices = create_rust_milkdrop_webgpu_triangle_list_vertices(
-        &create_milkdrop_screen_border_vertices(milkdrop_scope_number(scope, "ob_size", 0.0), 0.0),
+    let mut vertices = create_rustymilk_webgpu_triangle_list_vertices(
+        &create_rustymilk_screen_border_vertices(rustymilk_scope_number(scope, "ob_size", 0.0), 0.0),
         [
-            clamp_unit(milkdrop_scope_number(scope, "ob_r", fallback_color[0])),
-            clamp_unit(milkdrop_scope_number(scope, "ob_g", fallback_color[1])),
-            clamp_unit(milkdrop_scope_number(scope, "ob_b", fallback_color[2])),
-            clamp_unit(milkdrop_scope_number(scope, "ob_a", 0.0)),
+            clamp_unit(rustymilk_scope_number(scope, "ob_r", fallback_color[0])),
+            clamp_unit(rustymilk_scope_number(scope, "ob_g", fallback_color[1])),
+            clamp_unit(rustymilk_scope_number(scope, "ob_b", fallback_color[2])),
+            clamp_unit(rustymilk_scope_number(scope, "ob_a", 0.0)),
         ],
     );
-    vertices.extend(create_rust_milkdrop_webgpu_triangle_list_vertices(
-        &create_milkdrop_screen_border_vertices(
-            milkdrop_scope_number(scope, "ib_size", 0.0),
-            clamp_unit(milkdrop_scope_number(scope, "ob_size", 0.0)) * 2.0,
+    vertices.extend(create_rustymilk_webgpu_triangle_list_vertices(
+        &create_rustymilk_screen_border_vertices(
+            rustymilk_scope_number(scope, "ib_size", 0.0),
+            clamp_unit(rustymilk_scope_number(scope, "ob_size", 0.0)) * 2.0,
         ),
         [
-            clamp_unit(milkdrop_scope_number(scope, "ib_r", fallback_color[0])),
-            clamp_unit(milkdrop_scope_number(scope, "ib_g", fallback_color[1])),
-            clamp_unit(milkdrop_scope_number(scope, "ib_b", fallback_color[2])),
-            clamp_unit(milkdrop_scope_number(scope, "ib_a", 0.0)),
+            clamp_unit(rustymilk_scope_number(scope, "ib_r", fallback_color[0])),
+            clamp_unit(rustymilk_scope_number(scope, "ib_g", fallback_color[1])),
+            clamp_unit(rustymilk_scope_number(scope, "ib_b", fallback_color[2])),
+            clamp_unit(rustymilk_scope_number(scope, "ib_a", 0.0)),
         ],
     ));
     vertices
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct RustMilkdropWebGpuTexturedBatch {
+pub struct RustyMilkWebGpuTexturedBatch {
     pub first_vertex: usize,
     pub primitive_index: usize,
     pub texture_aliases: Vec<String>,
@@ -14463,16 +14463,16 @@ pub struct RustMilkdropWebGpuTexturedBatch {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct RustMilkdropWebGpuFrameBatches {
+pub struct RustyMilkWebGpuFrameBatches {
     pub filled_vertices: Vec<f64>,
     pub line_vertices: Vec<f64>,
     pub point_vertices: Vec<f64>,
-    pub textured_batches: Vec<RustMilkdropWebGpuTexturedBatch>,
+    pub textured_batches: Vec<RustyMilkWebGpuTexturedBatch>,
     pub textured_vertices: Vec<f64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct RustMilkdropWebGpuCompositeBatch {
+pub struct RustyMilkWebGpuCompositeBatch {
     pub blend_alpha: f64,
     pub composite_mode: String,
     pub filled_first_vertex: usize,
@@ -14490,16 +14490,16 @@ pub struct RustMilkdropWebGpuCompositeBatch {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct RustMilkdropWebGpuFrameSetBatches {
-    pub composite_batches: Vec<RustMilkdropWebGpuCompositeBatch>,
+pub struct RustyMilkWebGpuFrameSetBatches {
+    pub composite_batches: Vec<RustyMilkWebGpuCompositeBatch>,
     pub filled_vertices: Vec<f64>,
     pub line_vertices: Vec<f64>,
     pub point_vertices: Vec<f64>,
-    pub textured_batches: Vec<RustMilkdropWebGpuTexturedBatch>,
+    pub textured_batches: Vec<RustyMilkWebGpuTexturedBatch>,
     pub textured_vertices: Vec<f64>,
 }
 
-fn create_repeated_milkdrop_colors(vertex_count: usize, color: [f64; 4]) -> Vec<f64> {
+fn create_repeated_rustymilk_colors(vertex_count: usize, color: [f64; 4]) -> Vec<f64> {
     let mut colors = Vec::with_capacity(vertex_count * 4);
     for _ in 0..vertex_count {
         colors.extend_from_slice(&color);
@@ -14507,54 +14507,54 @@ fn create_repeated_milkdrop_colors(vertex_count: usize, color: [f64; 4]) -> Vec<
     colors
 }
 
-pub fn create_rust_milkdrop_webgpu_frame_batches(
-    frame: &RustMilkdropFrame,
-) -> RustMilkdropWebGpuFrameBatches {
-    let mut batches = RustMilkdropWebGpuFrameBatches::default();
+pub fn create_rustymilk_webgpu_frame_batches(
+    frame: &RustyMilkFrame,
+) -> RustyMilkWebGpuFrameBatches {
+    let mut batches = RustyMilkWebGpuFrameBatches::default();
     for primitive in &frame.primitives {
         match primitive.mode {
-            RustMilkdropPrimitiveMode::Triangles => {
+            RustyMilkPrimitiveMode::Triangles => {
                 batches
                     .filled_vertices
-                    .extend(create_rust_milkdrop_webgpu_triangle_list_vertices(
+                    .extend(create_rustymilk_webgpu_triangle_list_vertices(
                         &primitive.vertices,
                         primitive.color,
                     ));
             }
-            RustMilkdropPrimitiveMode::TriangleFan => {
+            RustyMilkPrimitiveMode::TriangleFan => {
                 let vertex_colors = if primitive.vertex_colors.is_empty() {
-                    create_repeated_milkdrop_colors(primitive.vertices.len() / 2, primitive.color)
+                    create_repeated_rustymilk_colors(primitive.vertices.len() / 2, primitive.color)
                 } else {
                     primitive.vertex_colors.clone()
                 };
                 batches
                     .filled_vertices
-                    .extend(create_rust_milkdrop_webgpu_triangle_fan_vertices(
+                    .extend(create_rustymilk_webgpu_triangle_fan_vertices(
                         &primitive.vertices,
                         &vertex_colors,
                         primitive.color,
                     ));
             }
-            RustMilkdropPrimitiveMode::Lines => {
+            RustyMilkPrimitiveMode::Lines => {
                 batches
                     .line_vertices
-                    .extend(create_rust_milkdrop_webgpu_line_list_vertices(
+                    .extend(create_rustymilk_webgpu_line_list_vertices(
                         &primitive.vertices,
                         primitive.color,
                     ));
             }
-            RustMilkdropPrimitiveMode::LineStrip => {
+            RustyMilkPrimitiveMode::LineStrip => {
                 batches
                     .line_vertices
-                    .extend(create_rust_milkdrop_webgpu_line_segment_vertices(
+                    .extend(create_rustymilk_webgpu_line_segment_vertices(
                         &primitive.vertices,
                         primitive.color,
                     ));
             }
-            RustMilkdropPrimitiveMode::Points => {
+            RustyMilkPrimitiveMode::Points => {
                 batches
                     .point_vertices
-                    .extend(create_rust_milkdrop_webgpu_line_list_vertices(
+                    .extend(create_rustymilk_webgpu_line_list_vertices(
                         &primitive.vertices,
                         primitive.color,
                     ));
@@ -14564,18 +14564,18 @@ pub fn create_rust_milkdrop_webgpu_frame_batches(
 
     for (primitive_index, primitive) in frame.textured_primitives.iter().enumerate() {
         let vertices = match primitive.mode {
-            RustMilkdropTexturedPrimitiveMode::Quad => {
-                create_rust_milkdrop_webgpu_textured_quad_vertices(
+            RustyMilkTexturedPrimitiveMode::Quad => {
+                create_rustymilk_webgpu_textured_quad_vertices(
                     &primitive.vertices,
                     &primitive.uvs,
                     primitive.color,
                 )
             }
-            RustMilkdropTexturedPrimitiveMode::TriangleFan => {
-                create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
+            RustyMilkTexturedPrimitiveMode::TriangleFan => {
+                create_rustymilk_webgpu_textured_triangle_fan_vertices(
                     &primitive.vertices,
                     &primitive.uvs,
-                    &create_repeated_milkdrop_colors(primitive.vertices.len() / 2, primitive.color),
+                    &create_repeated_rustymilk_colors(primitive.vertices.len() / 2, primitive.color),
                     primitive.color,
                 )
             }
@@ -14588,10 +14588,10 @@ pub fn create_rust_milkdrop_webgpu_frame_batches(
         batches.textured_vertices.extend(vertices);
         batches
             .textured_batches
-            .push(RustMilkdropWebGpuTexturedBatch {
+            .push(RustyMilkWebGpuTexturedBatch {
                 first_vertex,
                 primitive_index,
-                texture_aliases: get_milkdrop_texture_name_aliases(&primitive.texture_name),
+                texture_aliases: get_rustymilk_texture_name_aliases(&primitive.texture_name),
                 texture_name: primitive.texture_name.clone(),
                 vertex_count,
             });
@@ -14599,12 +14599,12 @@ pub fn create_rust_milkdrop_webgpu_frame_batches(
     batches
 }
 
-pub fn create_rust_milkdrop_webgpu_frame_set_batches(
-    frame_set: &RustMilkdropFrameSet,
-) -> RustMilkdropWebGpuFrameSetBatches {
-    let mut batches = RustMilkdropWebGpuFrameSetBatches::default();
+pub fn create_rustymilk_webgpu_frame_set_batches(
+    frame_set: &RustyMilkFrameSet,
+) -> RustyMilkWebGpuFrameSetBatches {
+    let mut batches = RustyMilkWebGpuFrameSetBatches::default();
     for entry in &frame_set.entries {
-        let entry_batches = create_rust_milkdrop_webgpu_frame_batches(&entry.frame);
+        let entry_batches = create_rustymilk_webgpu_frame_batches(&entry.frame);
         let filled_first_vertex = batches.filled_vertices.len() / 6;
         let line_first_vertex = batches.line_vertices.len() / 6;
         let point_first_vertex = batches.point_vertices.len() / 6;
@@ -14629,7 +14629,7 @@ pub fn create_rust_milkdrop_webgpu_frame_set_batches(
         batches
             .textured_batches
             .extend(entry_batches.textured_batches.into_iter().map(|batch| {
-                RustMilkdropWebGpuTexturedBatch {
+                RustyMilkWebGpuTexturedBatch {
                     first_vertex: batch.first_vertex + textured_first_vertex,
                     primitive_index: batch.primitive_index + textured_primitive_offset,
                     texture_aliases: batch.texture_aliases,
@@ -14639,7 +14639,7 @@ pub fn create_rust_milkdrop_webgpu_frame_set_batches(
             }));
         batches
             .composite_batches
-            .push(RustMilkdropWebGpuCompositeBatch {
+            .push(RustyMilkWebGpuCompositeBatch {
                 blend_alpha: entry.blend_alpha,
                 composite_mode: entry.composite_mode.clone(),
                 filled_first_vertex,
@@ -14659,7 +14659,7 @@ pub fn create_rust_milkdrop_webgpu_frame_set_batches(
     batches
 }
 
-fn rounded_milkdrop_buffer_sample(values: &[f64], count: usize) -> Vec<f64> {
+fn rounded_rustymilk_buffer_sample(values: &[f64], count: usize) -> Vec<f64> {
     values
         .iter()
         .take(count)
@@ -14667,7 +14667,7 @@ fn rounded_milkdrop_buffer_sample(values: &[f64], count: usize) -> Vec<f64> {
         .collect()
 }
 
-pub fn rust_milkdrop_webgpu_batch_summary_json(
+pub fn rustymilk_webgpu_batch_summary_json(
     source: &str,
     time_seconds: f64,
     bass: f64,
@@ -14676,7 +14676,7 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
     waveform: &[f64],
     spectrum: &[f64],
 ) -> String {
-    let frame_set = rust_milkdrop_frame_set_from_source_with_audio(
+    let frame_set = rustymilk_frame_set_from_source_with_audio(
         source,
         time_seconds,
         bass,
@@ -14690,16 +14690,16 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
         .first()
         .map(|entry| entry.frame.clone())
         .unwrap_or_else(|| {
-            rust_milkdrop_frame(
-                &RustMilkdropPreset::default(),
+            rustymilk_frame(
+                &RustyMilkPreset::default(),
                 time_seconds,
                 bass,
                 mid,
                 treble,
             )
         });
-    let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
-    let frame_set_batches = create_rust_milkdrop_webgpu_frame_set_batches(&frame_set);
+    let batches = create_rustymilk_webgpu_frame_batches(&frame);
+    let frame_set_batches = create_rustymilk_webgpu_frame_set_batches(&frame_set);
     let textured_batches = batches
         .textured_batches
         .iter()
@@ -14743,11 +14743,11 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
                 "blendAlpha": entry.blend_alpha,
                 "compositeMode": entry.composite_mode,
                 "index": entry.index,
-                "linePrimitives": entry.frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::LineStrip | RustMilkdropPrimitiveMode::Lines)).count(),
+                "linePrimitives": entry.frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustyMilkPrimitiveMode::LineStrip | RustyMilkPrimitiveMode::Lines)).count(),
                 "shapeCount": entry.frame.shape_count,
                 "texturedPrimitives": entry.frame.textured_primitives.len(),
                 "title": entry.title,
-                "trianglePrimitives": entry.frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::TriangleFan | RustMilkdropPrimitiveMode::Triangles)).count(),
+                "trianglePrimitives": entry.frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustyMilkPrimitiveMode::TriangleFan | RustyMilkPrimitiveMode::Triangles)).count(),
                 "waveformCount": entry.frame.waveform_count,
             })
         })
@@ -14764,14 +14764,14 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
         "frame": {
             "bass": frame.bass,
             "fftBins": frame.fft_bins.len(),
-            "linePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::LineStrip | RustMilkdropPrimitiveMode::Lines)).count(),
-            "pointPrimitives": frame.primitives.iter().filter(|primitive| primitive.mode == RustMilkdropPrimitiveMode::Points).count(),
+            "linePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustyMilkPrimitiveMode::LineStrip | RustyMilkPrimitiveMode::Lines)).count(),
+            "pointPrimitives": frame.primitives.iter().filter(|primitive| primitive.mode == RustyMilkPrimitiveMode::Points).count(),
             "q1": frame.q_registers[0],
             "shapeCount": frame.shape_count,
             "shaderTextureSamplers": frame.shader_texture_samplers.clone(),
             "texturedPrimitives": frame.textured_primitives.len(),
             "texturedTextureNames": frame.textured_primitives.iter().map(|primitive| primitive.texture_name.clone()).filter(|name| !name.is_empty()).collect::<Vec<_>>(),
-            "trianglePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustMilkdropPrimitiveMode::TriangleFan | RustMilkdropPrimitiveMode::Triangles)).count(),
+            "trianglePrimitives": frame.primitives.iter().filter(|primitive| matches!(primitive.mode, RustyMilkPrimitiveMode::TriangleFan | RustyMilkPrimitiveMode::Triangles)).count(),
             "waveformBins": frame.waveform_bins.len(),
             "waveformCount": frame.waveform_count,
             "warpMeshTriangles": frame.warp_mesh.as_ref().map(|mesh| mesh.positions.len() / 6).unwrap_or_default(),
@@ -14779,15 +14779,15 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
         "packed": {
             "filledFloats": batches.filled_vertices.len(),
             "filledVertices": batches.filled_vertices.len() / 6,
-            "filledSample": rounded_milkdrop_buffer_sample(&batches.filled_vertices, 18),
+            "filledSample": rounded_rustymilk_buffer_sample(&batches.filled_vertices, 18),
             "lineFloats": batches.line_vertices.len(),
             "lineVertices": batches.line_vertices.len() / 6,
-            "lineSample": rounded_milkdrop_buffer_sample(&batches.line_vertices, 12),
+            "lineSample": rounded_rustymilk_buffer_sample(&batches.line_vertices, 12),
             "pointFloats": batches.point_vertices.len(),
             "pointVertices": batches.point_vertices.len() / 6,
             "texturedBatches": textured_batches,
             "texturedFloats": batches.textured_vertices.len(),
-            "texturedSample": rounded_milkdrop_buffer_sample(&batches.textured_vertices, 24),
+            "texturedSample": rounded_rustymilk_buffer_sample(&batches.textured_vertices, 24),
             "texturedVertices": batches.textured_vertices.len() / 8,
         },
         "packedFrameSet": {
@@ -14802,13 +14802,13 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
     .to_string()
 }
 
-fn append_milkdrop_quad(vertices: &mut Vec<f64>, left: f64, bottom: f64, right: f64, top: f64) {
+fn append_rustymilk_quad(vertices: &mut Vec<f64>, left: f64, bottom: f64, right: f64, top: f64) {
     vertices.extend_from_slice(&[
         left, bottom, right, bottom, left, top, left, top, right, bottom, right, top,
     ]);
 }
 
-pub fn create_milkdrop_screen_border_vertices(size: f64, inset: f64) -> Vec<f64> {
+pub fn create_rustymilk_screen_border_vertices(size: f64, inset: f64) -> Vec<f64> {
     let safe_inset = inset.clamp(0.0, 0.95);
     let extent = (1.0 - safe_inset).max(0.0);
     let thickness = (size * 2.0).clamp(0.0, extent);
@@ -14840,22 +14840,22 @@ pub fn create_milkdrop_screen_border_vertices(size: f64, inset: f64) -> Vec<f64>
         ];
     }
     let mut vertices = Vec::with_capacity(48);
-    append_milkdrop_quad(
+    append_rustymilk_quad(
         &mut vertices,
         outer_left,
         outer_bottom,
         outer_right,
         inner_bottom,
     );
-    append_milkdrop_quad(&mut vertices, outer_left, inner_top, outer_right, outer_top);
-    append_milkdrop_quad(
+    append_rustymilk_quad(&mut vertices, outer_left, inner_top, outer_right, outer_top);
+    append_rustymilk_quad(
         &mut vertices,
         outer_left,
         inner_bottom,
         inner_left,
         inner_top,
     );
-    append_milkdrop_quad(
+    append_rustymilk_quad(
         &mut vertices,
         inner_right,
         inner_bottom,
@@ -14865,19 +14865,19 @@ pub fn create_milkdrop_screen_border_vertices(size: f64, inset: f64) -> Vec<f64>
     vertices
 }
 
-pub fn create_milkdrop_motion_vector_vertices(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> {
-    let columns = milkdrop_scope_number(scope, "mv_x", 0.0)
+pub fn create_rustymilk_motion_vector_vertices(scope: &BTreeMap<String, RustyMilkValue>) -> Vec<f64> {
+    let columns = rustymilk_scope_number(scope, "mv_x", 0.0)
         .floor()
         .clamp(0.0, 128.0) as usize;
-    let rows = milkdrop_scope_number(scope, "mv_y", 0.0)
+    let rows = rustymilk_scope_number(scope, "mv_y", 0.0)
         .floor()
         .clamp(0.0, 128.0) as usize;
     if columns < 1 || rows < 1 {
         return Vec::new();
     }
-    let delta_x = milkdrop_scope_number(scope, "mv_dx", 0.02);
-    let delta_y = milkdrop_scope_number(scope, "mv_dy", 0.02);
-    let length = milkdrop_scope_number(scope, "mv_l", 0.05).max(0.0);
+    let delta_x = rustymilk_scope_number(scope, "mv_dx", 0.02);
+    let delta_y = rustymilk_scope_number(scope, "mv_dy", 0.02);
+    let length = rustymilk_scope_number(scope, "mv_l", 0.05).max(0.0);
     let mut vertices = Vec::with_capacity(columns * rows * 4);
     for row in 0..rows {
         for column in 0..columns {
@@ -14902,7 +14902,7 @@ pub fn create_milkdrop_motion_vector_vertices(scope: &BTreeMap<String, MilkdropV
     vertices
 }
 
-fn create_rust_milkdrop_audio_samples(
+fn create_rustymilk_audio_samples(
     time_seconds: f64,
     bass: f64,
     mid: f64,
@@ -14920,20 +14920,20 @@ fn create_rust_milkdrop_audio_samples(
         .collect()
 }
 
-fn create_milkdrop_waveform_vertices(
+fn create_rustymilk_waveform_vertices(
     samples: &[f64],
-    frame_scope: &BTreeMap<String, MilkdropValue>,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
 ) -> Vec<f64> {
     let count = samples.len();
     if count < 2 {
         return Vec::new();
     }
-    let mode = milkdrop_scope_number(frame_scope, "wave_mode", 0.0).floor() as i64;
-    let scale = milkdrop_scope_number(frame_scope, "wave_scale", 1.0);
+    let mode = rustymilk_scope_number(frame_scope, "wave_mode", 0.0).floor() as i64;
+    let scale = rustymilk_scope_number(frame_scope, "wave_scale", 1.0);
     let scale = if scale == 0.0 { 1.0 } else { scale };
-    let smoothing = clamp_unit(milkdrop_scope_number(frame_scope, "wave_smoothing", 0.0));
-    let center_x = milkdrop_scope_number(frame_scope, "wave_x", 0.5) * 2.0 - 1.0;
-    let center_y = milkdrop_scope_number(frame_scope, "wave_y", 0.5) * 2.0 - 1.0;
+    let smoothing = clamp_unit(rustymilk_scope_number(frame_scope, "wave_smoothing", 0.0));
+    let center_x = rustymilk_scope_number(frame_scope, "wave_x", 0.5) * 2.0 - 1.0;
+    let center_y = rustymilk_scope_number(frame_scope, "wave_y", 0.5) * 2.0 - 1.0;
     let mut vertices = Vec::with_capacity(count * 2);
     for index in 0..count {
         let sample = samples.get(index).copied().unwrap_or_default();
@@ -14973,35 +14973,35 @@ fn create_milkdrop_waveform_vertices(
     vertices
 }
 
-fn create_rust_milkdrop_frame_primitives(
-    preset: &MilkdropPresetDocument,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
+fn create_rustymilk_frame_primitives(
+    preset: &RustyMilkPresetDocument,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
     waveform: &[f64],
     fallback_color: [f64; 3],
-) -> Vec<RustMilkdropPrimitive> {
+) -> Vec<RustyMilkPrimitive> {
     let generated_samples =
-        create_rust_milkdrop_audio_samples(time_seconds, bass, mid, treble, 192);
+        create_rustymilk_audio_samples(time_seconds, bass, mid, treble, 192);
     let samples = if waveform.is_empty() {
         generated_samples.as_slice()
     } else {
         waveform
     };
     let mut primitives = Vec::new();
-    let waveform_vertices = create_milkdrop_waveform_vertices(samples, frame_scope);
-    let waveform_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "wave_a", 1.0));
+    let waveform_vertices = create_rustymilk_waveform_vertices(samples, frame_scope);
+    let waveform_alpha = clamp_unit(rustymilk_scope_number(frame_scope, "wave_a", 1.0));
     if waveform_vertices.len() >= 4 && waveform_alpha > 0.0 {
-        primitives.push(RustMilkdropPrimitive {
+        primitives.push(RustyMilkPrimitive {
             color: [
                 fallback_color[0],
                 fallback_color[1],
                 fallback_color[2],
                 waveform_alpha,
             ],
-            mode: RustMilkdropPrimitiveMode::LineStrip,
+            mode: RustyMilkPrimitiveMode::LineStrip,
             vertex_colors: Vec::new(),
             vertices: waveform_vertices,
         });
@@ -15010,136 +15010,136 @@ fn create_rust_milkdrop_frame_primitives(
         ("ob", 0.0, 0.0),
         (
             "ib",
-            clamp_unit(milkdrop_scope_number(frame_scope, "ob_size", 0.0)) * 2.0,
+            clamp_unit(rustymilk_scope_number(frame_scope, "ob_size", 0.0)) * 2.0,
             0.0,
         ),
     ] {
-        let size = milkdrop_scope_number(frame_scope, &format!("{prefix}_size"), 0.0);
-        let vertices = create_milkdrop_screen_border_vertices(size, inset);
-        let alpha = clamp_unit(milkdrop_scope_number(
+        let size = rustymilk_scope_number(frame_scope, &format!("{prefix}_size"), 0.0);
+        let vertices = create_rustymilk_screen_border_vertices(size, inset);
+        let alpha = clamp_unit(rustymilk_scope_number(
             frame_scope,
             &format!("{prefix}_a"),
             fallback_alpha,
         ));
         if vertices.len() >= 6 && alpha > 0.0 {
-            primitives.push(RustMilkdropPrimitive {
+            primitives.push(RustyMilkPrimitive {
                 color: [
-                    clamp_unit(milkdrop_scope_number(
+                    clamp_unit(rustymilk_scope_number(
                         frame_scope,
                         &format!("{prefix}_r"),
                         fallback_color[0],
                     )),
-                    clamp_unit(milkdrop_scope_number(
+                    clamp_unit(rustymilk_scope_number(
                         frame_scope,
                         &format!("{prefix}_g"),
                         fallback_color[1],
                     )),
-                    clamp_unit(milkdrop_scope_number(
+                    clamp_unit(rustymilk_scope_number(
                         frame_scope,
                         &format!("{prefix}_b"),
                         fallback_color[2],
                     )),
                     alpha,
                 ],
-                mode: RustMilkdropPrimitiveMode::Triangles,
+                mode: RustyMilkPrimitiveMode::Triangles,
                 vertex_colors: Vec::new(),
                 vertices,
             });
         }
     }
-    let motion_vertices = create_milkdrop_motion_vector_vertices(frame_scope);
-    let motion_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "mv_a", 0.8));
+    let motion_vertices = create_rustymilk_motion_vector_vertices(frame_scope);
+    let motion_alpha = clamp_unit(rustymilk_scope_number(frame_scope, "mv_a", 0.8));
     if motion_vertices.len() >= 4 && motion_alpha > 0.0 {
-        primitives.push(RustMilkdropPrimitive {
+        primitives.push(RustyMilkPrimitive {
             color: [
-                clamp_unit(milkdrop_scope_number(
+                clamp_unit(rustymilk_scope_number(
                     frame_scope,
                     "mv_r",
                     fallback_color[0],
                 )),
-                clamp_unit(milkdrop_scope_number(
+                clamp_unit(rustymilk_scope_number(
                     frame_scope,
                     "mv_g",
                     fallback_color[1],
                 )),
-                clamp_unit(milkdrop_scope_number(
+                clamp_unit(rustymilk_scope_number(
                     frame_scope,
                     "mv_b",
                     fallback_color[2],
                 )),
                 motion_alpha,
             ],
-            mode: RustMilkdropPrimitiveMode::Lines,
+            mode: RustyMilkPrimitiveMode::Lines,
             vertex_colors: Vec::new(),
             vertices: motion_vertices,
         });
     }
     for wave in &preset.waves {
-        let evaluated = evaluate_milkdrop_wave_state(wave, frame_scope);
-        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+        let evaluated = evaluate_rustymilk_wave_state(wave, frame_scope);
+        if !rustymilk_entry_flag(&evaluated, &["enabled", "benabled"]) {
             continue;
         }
-        let vertices = create_milkdrop_custom_wave_vertices(&evaluated, samples, frame_scope);
+        let vertices = create_rustymilk_custom_wave_vertices(&evaluated, samples, frame_scope);
         if vertices.len() < 4 {
             continue;
         }
-        primitives.push(RustMilkdropPrimitive {
+        primitives.push(RustyMilkPrimitive {
             color: [
-                clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
-                clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
-                clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
-                clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["r"], fallback_color[0])),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["g"], fallback_color[1])),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["b"], fallback_color[2])),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 1.0)),
             ],
-            mode: if milkdrop_entry_flag(&evaluated, &["dots", "busedots"]) {
-                RustMilkdropPrimitiveMode::Points
+            mode: if rustymilk_entry_flag(&evaluated, &["dots", "busedots"]) {
+                RustyMilkPrimitiveMode::Points
             } else {
-                RustMilkdropPrimitiveMode::LineStrip
+                RustyMilkPrimitiveMode::LineStrip
             },
             vertex_colors: Vec::new(),
             vertices,
         });
     }
     for shape in &preset.shapes {
-        let evaluated = evaluate_milkdrop_shape_state(shape, frame_scope);
-        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+        let evaluated = evaluate_rustymilk_shape_state(shape, frame_scope);
+        if !rustymilk_entry_flag(&evaluated, &["enabled", "benabled"]) {
             continue;
         }
-        let fill_vertices = create_milkdrop_shape_fill_vertices(&evaluated);
+        let fill_vertices = create_rustymilk_shape_fill_vertices(&evaluated);
         if fill_vertices.len() >= 6 {
-            primitives.push(RustMilkdropPrimitive {
+            primitives.push(RustyMilkPrimitive {
                 color: [
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 0.6)),
                 ],
-                mode: RustMilkdropPrimitiveMode::TriangleFan,
-                vertex_colors: create_milkdrop_shape_fill_colors(&evaluated, fallback_color),
+                mode: RustyMilkPrimitiveMode::TriangleFan,
+                vertex_colors: create_rustymilk_shape_fill_colors(&evaluated, fallback_color),
                 vertices: fill_vertices,
             });
         }
-        let outline_vertices = create_milkdrop_shape_vertices(&evaluated);
+        let outline_vertices = create_rustymilk_shape_vertices(&evaluated);
         if outline_vertices.len() >= 8 {
-            primitives.push(RustMilkdropPrimitive {
+            primitives.push(RustyMilkPrimitive {
                 color: [
-                    clamp_unit(milkdrop_entry_number(
+                    clamp_unit(rustymilk_entry_number(
                         &evaluated,
                         &["border_r", "r"],
                         fallback_color[0],
                     )),
-                    clamp_unit(milkdrop_entry_number(
+                    clamp_unit(rustymilk_entry_number(
                         &evaluated,
                         &["border_g", "g"],
                         fallback_color[1],
                     )),
-                    clamp_unit(milkdrop_entry_number(
+                    clamp_unit(rustymilk_entry_number(
                         &evaluated,
                         &["border_b", "b"],
                         fallback_color[2],
                     )),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["border_a"], 0.85)),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["border_a"], 0.85)),
                 ],
-                mode: RustMilkdropPrimitiveMode::LineStrip,
+                mode: RustyMilkPrimitiveMode::LineStrip,
                 vertex_colors: Vec::new(),
                 vertices: outline_vertices,
             });
@@ -15148,48 +15148,48 @@ fn create_rust_milkdrop_frame_primitives(
     primitives
 }
 
-fn create_rust_milkdrop_frame_textured_primitives(
-    preset: &MilkdropPresetDocument,
-    frame_scope: &BTreeMap<String, MilkdropValue>,
+fn create_rustymilk_frame_textured_primitives(
+    preset: &RustyMilkPresetDocument,
+    frame_scope: &BTreeMap<String, RustyMilkValue>,
     fallback_color: [f64; 3],
-) -> Vec<RustMilkdropTexturedPrimitive> {
+) -> Vec<RustyMilkTexturedPrimitive> {
     let mut primitives = Vec::new();
     for shape in &preset.shapes {
-        let evaluated = evaluate_milkdrop_shape_state(shape, frame_scope);
-        if !is_milkdrop_shape_textured(&evaluated) {
+        let evaluated = evaluate_rustymilk_shape_state(shape, frame_scope);
+        if !is_rustymilk_shape_textured(&evaluated) {
             continue;
         }
-        let vertices = create_milkdrop_shape_fill_vertices(&evaluated);
-        let uvs = create_milkdrop_shape_texture_uvs(&evaluated);
+        let vertices = create_rustymilk_shape_fill_vertices(&evaluated);
+        let uvs = create_rustymilk_shape_texture_uvs(&evaluated);
         if vertices.len() >= 6 && vertices.len() == uvs.len() {
-            primitives.push(RustMilkdropTexturedPrimitive {
+            primitives.push(RustyMilkTexturedPrimitive {
                 color: [
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 0.6)),
                 ],
-                mode: RustMilkdropTexturedPrimitiveMode::TriangleFan,
-                texture_name: milkdrop_texture_name(&evaluated),
+                mode: RustyMilkTexturedPrimitiveMode::TriangleFan,
+                texture_name: rustymilk_texture_name(&evaluated),
                 uvs,
                 vertices,
             });
         }
     }
     for sprite in &preset.sprites {
-        let evaluated = evaluate_milkdrop_sprite_state(sprite, frame_scope);
-        let vertices = create_milkdrop_sprite_vertices(&evaluated);
-        let uvs = create_milkdrop_sprite_texture_uvs(&evaluated);
+        let evaluated = evaluate_rustymilk_sprite_state(sprite, frame_scope);
+        let vertices = create_rustymilk_sprite_vertices(&evaluated);
+        let uvs = create_rustymilk_sprite_texture_uvs(&evaluated);
         if vertices.len() >= 8 && vertices.len() == uvs.len() {
-            primitives.push(RustMilkdropTexturedPrimitive {
+            primitives.push(RustyMilkTexturedPrimitive {
                 color: [
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 1.0)),
                 ],
-                mode: RustMilkdropTexturedPrimitiveMode::Quad,
-                texture_name: milkdrop_texture_name(&evaluated),
+                mode: RustyMilkTexturedPrimitiveMode::Quad,
+                texture_name: rustymilk_texture_name(&evaluated),
                 uvs,
                 vertices,
             });
@@ -15198,9 +15198,9 @@ fn create_rust_milkdrop_frame_textured_primitives(
     primitives
 }
 
-fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
-    preset: &mut MilkdropPresetDocument,
-    frame_scope: &mut BTreeMap<String, MilkdropValue>,
+fn create_rustymilk_frame_primitives_and_textures_stateful(
+    preset: &mut RustyMilkPresetDocument,
+    frame_scope: &mut BTreeMap<String, RustyMilkValue>,
     time_seconds: f64,
     bass: f64,
     mid: f64,
@@ -15209,11 +15209,11 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
     spectrum: &[f64],
     fallback_color: [f64; 3],
 ) -> (
-    Vec<RustMilkdropPrimitive>,
-    Vec<RustMilkdropTexturedPrimitive>,
+    Vec<RustyMilkPrimitive>,
+    Vec<RustyMilkTexturedPrimitive>,
 ) {
     let generated_samples =
-        create_rust_milkdrop_audio_samples(time_seconds, bass, mid, treble, 192);
+        create_rustymilk_audio_samples(time_seconds, bass, mid, treble, 192);
     let waveform_samples = if waveform.is_empty() {
         generated_samples.as_slice()
     } else {
@@ -15226,17 +15226,17 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
     };
     let mut primitives = Vec::new();
     let mut textured_primitives = Vec::new();
-    let waveform_vertices = create_milkdrop_waveform_vertices(waveform_samples, frame_scope);
-    let waveform_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "wave_a", 1.0));
+    let waveform_vertices = create_rustymilk_waveform_vertices(waveform_samples, frame_scope);
+    let waveform_alpha = clamp_unit(rustymilk_scope_number(frame_scope, "wave_a", 1.0));
     if waveform_vertices.len() >= 4 && waveform_alpha > 0.0 {
-        primitives.push(RustMilkdropPrimitive {
+        primitives.push(RustyMilkPrimitive {
             color: [
                 fallback_color[0],
                 fallback_color[1],
                 fallback_color[2],
                 waveform_alpha,
             ],
-            mode: RustMilkdropPrimitiveMode::LineStrip,
+            mode: RustyMilkPrimitiveMode::LineStrip,
             vertex_colors: Vec::new(),
             vertices: waveform_vertices,
         });
@@ -15246,67 +15246,67 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
         ("ob", 0.0, 0.0),
         (
             "ib",
-            clamp_unit(milkdrop_scope_number(frame_scope, "ob_size", 0.0)) * 2.0,
+            clamp_unit(rustymilk_scope_number(frame_scope, "ob_size", 0.0)) * 2.0,
             0.0,
         ),
     ] {
-        let size = milkdrop_scope_number(frame_scope, &format!("{prefix}_size"), 0.0);
-        let vertices = create_milkdrop_screen_border_vertices(size, inset);
-        let alpha = clamp_unit(milkdrop_scope_number(
+        let size = rustymilk_scope_number(frame_scope, &format!("{prefix}_size"), 0.0);
+        let vertices = create_rustymilk_screen_border_vertices(size, inset);
+        let alpha = clamp_unit(rustymilk_scope_number(
             frame_scope,
             &format!("{prefix}_a"),
             fallback_alpha,
         ));
         if vertices.len() >= 6 && alpha > 0.0 {
-            primitives.push(RustMilkdropPrimitive {
+            primitives.push(RustyMilkPrimitive {
                 color: [
-                    clamp_unit(milkdrop_scope_number(
+                    clamp_unit(rustymilk_scope_number(
                         frame_scope,
                         &format!("{prefix}_r"),
                         fallback_color[0],
                     )),
-                    clamp_unit(milkdrop_scope_number(
+                    clamp_unit(rustymilk_scope_number(
                         frame_scope,
                         &format!("{prefix}_g"),
                         fallback_color[1],
                     )),
-                    clamp_unit(milkdrop_scope_number(
+                    clamp_unit(rustymilk_scope_number(
                         frame_scope,
                         &format!("{prefix}_b"),
                         fallback_color[2],
                     )),
                     alpha,
                 ],
-                mode: RustMilkdropPrimitiveMode::Triangles,
+                mode: RustyMilkPrimitiveMode::Triangles,
                 vertex_colors: Vec::new(),
                 vertices,
             });
         }
     }
 
-    let motion_vertices = create_milkdrop_motion_vector_vertices(frame_scope);
-    let motion_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "mv_a", 0.8));
+    let motion_vertices = create_rustymilk_motion_vector_vertices(frame_scope);
+    let motion_alpha = clamp_unit(rustymilk_scope_number(frame_scope, "mv_a", 0.8));
     if motion_vertices.len() >= 4 && motion_alpha > 0.0 {
-        primitives.push(RustMilkdropPrimitive {
+        primitives.push(RustyMilkPrimitive {
             color: [
-                clamp_unit(milkdrop_scope_number(
+                clamp_unit(rustymilk_scope_number(
                     frame_scope,
                     "mv_r",
                     fallback_color[0],
                 )),
-                clamp_unit(milkdrop_scope_number(
+                clamp_unit(rustymilk_scope_number(
                     frame_scope,
                     "mv_g",
                     fallback_color[1],
                 )),
-                clamp_unit(milkdrop_scope_number(
+                clamp_unit(rustymilk_scope_number(
                     frame_scope,
                     "mv_b",
                     fallback_color[2],
                 )),
                 motion_alpha,
             ],
-            mode: RustMilkdropPrimitiveMode::Lines,
+            mode: RustyMilkPrimitiveMode::Lines,
             vertex_colors: Vec::new(),
             vertices: motion_vertices,
         });
@@ -15314,31 +15314,31 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
 
     for wave in &mut preset.waves {
         let evaluated =
-            evaluate_milkdrop_entry_stateful(wave, frame_scope, MILKDROP_WAVE_VALUE_KEYS);
-        merge_milkdrop_q_registers(frame_scope, &evaluated.base_values);
-        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+            evaluate_rustymilk_entry_stateful(wave, frame_scope, RUSTYMILK_WAVE_VALUE_KEYS);
+        merge_rustymilk_q_registers(frame_scope, &evaluated.base_values);
+        if !rustymilk_entry_flag(&evaluated, &["enabled", "benabled"]) {
             continue;
         }
-        let samples = if milkdrop_entry_flag(&evaluated, &["spectrum", "bspectrum"]) {
+        let samples = if rustymilk_entry_flag(&evaluated, &["spectrum", "bspectrum"]) {
             spectrum_samples
         } else {
             waveform_samples
         };
-        let vertices = create_milkdrop_custom_wave_vertices(&evaluated, samples, frame_scope);
+        let vertices = create_rustymilk_custom_wave_vertices(&evaluated, samples, frame_scope);
         if vertices.len() < 4 {
             continue;
         }
-        primitives.push(RustMilkdropPrimitive {
+        primitives.push(RustyMilkPrimitive {
             color: [
-                clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
-                clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
-                clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
-                clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["r"], fallback_color[0])),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["g"], fallback_color[1])),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["b"], fallback_color[2])),
+                clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 1.0)),
             ],
-            mode: if milkdrop_entry_flag(&evaluated, &["dots", "busedots"]) {
-                RustMilkdropPrimitiveMode::Points
+            mode: if rustymilk_entry_flag(&evaluated, &["dots", "busedots"]) {
+                RustyMilkPrimitiveMode::Points
             } else {
-                RustMilkdropPrimitiveMode::LineStrip
+                RustyMilkPrimitiveMode::LineStrip
             },
             vertex_colors: Vec::new(),
             vertices,
@@ -15347,77 +15347,77 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
 
     for shape in &mut preset.shapes {
         let evaluated =
-            evaluate_milkdrop_entry_stateful(shape, frame_scope, MILKDROP_SHAPE_VALUE_KEYS);
-        merge_milkdrop_q_registers(frame_scope, &evaluated.base_values);
-        if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
+            evaluate_rustymilk_entry_stateful(shape, frame_scope, RUSTYMILK_SHAPE_VALUE_KEYS);
+        merge_rustymilk_q_registers(frame_scope, &evaluated.base_values);
+        if !rustymilk_entry_flag(&evaluated, &["enabled", "benabled"]) {
             continue;
         }
-        let fill_vertices = create_milkdrop_shape_fill_vertices(&evaluated);
+        let fill_vertices = create_rustymilk_shape_fill_vertices(&evaluated);
         if fill_vertices.len() >= 6 {
-            if is_milkdrop_shape_textured(&evaluated) {
-                let uvs = create_milkdrop_shape_texture_uvs(&evaluated);
+            if is_rustymilk_shape_textured(&evaluated) {
+                let uvs = create_rustymilk_shape_texture_uvs(&evaluated);
                 if fill_vertices.len() == uvs.len() {
-                    textured_primitives.push(RustMilkdropTexturedPrimitive {
+                    textured_primitives.push(RustyMilkTexturedPrimitive {
                         color: [
-                            clamp_unit(milkdrop_entry_number(
+                            clamp_unit(rustymilk_entry_number(
                                 &evaluated,
                                 &["r"],
                                 fallback_color[0],
                             )),
-                            clamp_unit(milkdrop_entry_number(
+                            clamp_unit(rustymilk_entry_number(
                                 &evaluated,
                                 &["g"],
                                 fallback_color[1],
                             )),
-                            clamp_unit(milkdrop_entry_number(
+                            clamp_unit(rustymilk_entry_number(
                                 &evaluated,
                                 &["b"],
                                 fallback_color[2],
                             )),
-                            clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                            clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 0.6)),
                         ],
-                        mode: RustMilkdropTexturedPrimitiveMode::TriangleFan,
-                        texture_name: milkdrop_texture_name(&evaluated),
+                        mode: RustyMilkTexturedPrimitiveMode::TriangleFan,
+                        texture_name: rustymilk_texture_name(&evaluated),
                         uvs,
                         vertices: fill_vertices,
                     });
                 }
             } else {
-                primitives.push(RustMilkdropPrimitive {
+                primitives.push(RustyMilkPrimitive {
                     color: [
-                        clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
-                        clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
-                        clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
-                        clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
+                        clamp_unit(rustymilk_entry_number(&evaluated, &["r"], fallback_color[0])),
+                        clamp_unit(rustymilk_entry_number(&evaluated, &["g"], fallback_color[1])),
+                        clamp_unit(rustymilk_entry_number(&evaluated, &["b"], fallback_color[2])),
+                        clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 0.6)),
                     ],
-                    mode: RustMilkdropPrimitiveMode::TriangleFan,
-                    vertex_colors: create_milkdrop_shape_fill_colors(&evaluated, fallback_color),
+                    mode: RustyMilkPrimitiveMode::TriangleFan,
+                    vertex_colors: create_rustymilk_shape_fill_colors(&evaluated, fallback_color),
                     vertices: fill_vertices,
                 });
             }
         }
-        let outline_vertices = create_milkdrop_shape_vertices(&evaluated);
+        let outline_vertices = create_rustymilk_shape_vertices(&evaluated);
         if outline_vertices.len() >= 8 {
-            primitives.push(RustMilkdropPrimitive {
+            primitives.push(RustyMilkPrimitive {
                 color: [
-                    clamp_unit(milkdrop_entry_number(
+                    clamp_unit(rustymilk_entry_number(
                         &evaluated,
                         &["border_r", "r"],
                         fallback_color[0],
                     )),
-                    clamp_unit(milkdrop_entry_number(
+                    clamp_unit(rustymilk_entry_number(
                         &evaluated,
                         &["border_g", "g"],
                         fallback_color[1],
                     )),
-                    clamp_unit(milkdrop_entry_number(
+                    clamp_unit(rustymilk_entry_number(
                         &evaluated,
                         &["border_b", "b"],
                         fallback_color[2],
                     )),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["border_a"], 0.85)),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["border_a"], 0.85)),
                 ],
-                mode: RustMilkdropPrimitiveMode::LineStrip,
+                mode: RustyMilkPrimitiveMode::LineStrip,
                 vertex_colors: Vec::new(),
                 vertices: outline_vertices,
             });
@@ -15426,20 +15426,20 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
 
     for sprite in &mut preset.sprites {
         let evaluated =
-            evaluate_milkdrop_entry_stateful(sprite, frame_scope, MILKDROP_SPRITE_VALUE_KEYS);
-        merge_milkdrop_q_registers(frame_scope, &evaluated.base_values);
-        let vertices = create_milkdrop_sprite_vertices(&evaluated);
-        let uvs = create_milkdrop_sprite_texture_uvs(&evaluated);
+            evaluate_rustymilk_entry_stateful(sprite, frame_scope, RUSTYMILK_SPRITE_VALUE_KEYS);
+        merge_rustymilk_q_registers(frame_scope, &evaluated.base_values);
+        let vertices = create_rustymilk_sprite_vertices(&evaluated);
+        let uvs = create_rustymilk_sprite_texture_uvs(&evaluated);
         if vertices.len() >= 8 && vertices.len() == uvs.len() {
-            textured_primitives.push(RustMilkdropTexturedPrimitive {
+            textured_primitives.push(RustyMilkTexturedPrimitive {
                 color: [
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["r"], fallback_color[0])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["g"], fallback_color[1])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
-                    clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["r"], fallback_color[0])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["g"], fallback_color[1])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["b"], fallback_color[2])),
+                    clamp_unit(rustymilk_entry_number(&evaluated, &["a"], 1.0)),
                 ],
-                mode: RustMilkdropTexturedPrimitiveMode::Quad,
-                texture_name: milkdrop_texture_name(&evaluated),
+                mode: RustyMilkTexturedPrimitiveMode::Quad,
+                texture_name: rustymilk_texture_name(&evaluated),
                 uvs,
                 vertices,
             });
@@ -15450,12 +15450,12 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropPresetCompatibility {
+pub struct RustyMilkPresetCompatibility {
     pub shader_sections: Vec<String>,
     pub unsupported_functions: Vec<String>,
 }
 
-pub fn is_milkdrop_function_supported(name: &str) -> bool {
+pub fn is_rustymilk_function_supported(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "abs"
@@ -15498,7 +15498,7 @@ pub fn is_milkdrop_function_supported(name: &str) -> bool {
     )
 }
 
-fn collect_milkdrop_functions(text: &str, unsupported: &mut Vec<String>) {
+fn collect_rustymilk_functions(text: &str, unsupported: &mut Vec<String>) {
     let chars = text.chars().collect::<Vec<_>>();
     let mut index = 0usize;
     while index < chars.len() {
@@ -15523,7 +15523,7 @@ fn collect_milkdrop_functions(text: &str, unsupported: &mut Vec<String>) {
         }
         if lookahead < chars.len()
             && chars[lookahead] == '('
-            && !is_milkdrop_function_supported(&name)
+            && !is_rustymilk_function_supported(&name)
             && !unsupported.contains(&name)
         {
             unsupported.push(name);
@@ -15531,52 +15531,52 @@ fn collect_milkdrop_functions(text: &str, unsupported: &mut Vec<String>) {
     }
 }
 
-fn collect_milkdrop_equation_functions(
-    equations: &MilkdropEquations,
+fn collect_rustymilk_equation_functions(
+    equations: &RustyMilkEquations,
     unsupported: &mut Vec<String>,
 ) {
-    collect_milkdrop_functions(&equations.init, unsupported);
-    collect_milkdrop_functions(&equations.frame, unsupported);
-    collect_milkdrop_functions(&equations.per_frame, unsupported);
-    collect_milkdrop_functions(&equations.per_pixel, unsupported);
-    collect_milkdrop_functions(&equations.point, unsupported);
+    collect_rustymilk_functions(&equations.init, unsupported);
+    collect_rustymilk_functions(&equations.frame, unsupported);
+    collect_rustymilk_functions(&equations.per_frame, unsupported);
+    collect_rustymilk_functions(&equations.per_pixel, unsupported);
+    collect_rustymilk_functions(&equations.point, unsupported);
 }
 
-pub fn analyze_milkdrop_preset_compatibility(
-    preset: &MilkdropPresetDocument,
-) -> MilkdropPresetCompatibility {
+pub fn analyze_rustymilk_preset_compatibility(
+    preset: &RustyMilkPresetDocument,
+) -> RustyMilkPresetCompatibility {
     let mut unsupported_functions = Vec::new();
-    collect_milkdrop_equation_functions(&preset.equations, &mut unsupported_functions);
+    collect_rustymilk_equation_functions(&preset.equations, &mut unsupported_functions);
     for shape in &preset.shapes {
-        collect_milkdrop_equation_functions(&shape.equations, &mut unsupported_functions);
+        collect_rustymilk_equation_functions(&shape.equations, &mut unsupported_functions);
     }
     for sprite in &preset.sprites {
-        collect_milkdrop_equation_functions(&sprite.equations, &mut unsupported_functions);
+        collect_rustymilk_equation_functions(&sprite.equations, &mut unsupported_functions);
     }
     for wave in &preset.waves {
-        collect_milkdrop_equation_functions(&wave.equations, &mut unsupported_functions);
+        collect_rustymilk_equation_functions(&wave.equations, &mut unsupported_functions);
     }
     unsupported_functions.sort();
 
     let mut shader_sections = Vec::new();
     if !preset.warp_shader.trim().is_empty()
-        && !analyze_milkdrop_shader_support(&preset.warp_shader).supported
+        && !analyze_rustymilk_shader_support(&preset.warp_shader).supported
     {
         shader_sections.push("warp_shader".to_string());
     }
     if !preset.comp_shader.trim().is_empty()
-        && !analyze_milkdrop_shader_support(&preset.comp_shader).supported
+        && !analyze_rustymilk_shader_support(&preset.comp_shader).supported
     {
         shader_sections.push("comp_shader".to_string());
     }
 
-    MilkdropPresetCompatibility {
+    RustyMilkPresetCompatibility {
         shader_sections,
         unsupported_functions,
     }
 }
 
-pub fn milkdrop_compatibility_error(report: &MilkdropPresetCompatibility) -> String {
+pub fn rustymilk_compatibility_error(report: &RustyMilkPresetCompatibility) -> String {
     let mut messages = Vec::new();
     if !report.unsupported_functions.is_empty() {
         messages.push(format!(
@@ -15593,12 +15593,12 @@ pub fn milkdrop_compatibility_error(report: &MilkdropPresetCompatibility) -> Str
     if messages.is_empty() {
         String::new()
     } else {
-        format!("Native MilkDrop preset has {}.", messages.join("; "))
+        format!("RustyMilk preset has {}.", messages.join("; "))
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropPresetMetrics {
+pub struct RustyMilkPresetMetrics {
     pub max_q_register_index: usize,
     pub q_registers: Vec<String>,
     pub q_register_count: usize,
@@ -15608,10 +15608,10 @@ pub struct MilkdropPresetMetrics {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropCompatibilityPresetReport {
+pub struct RustyMilkCompatibilityPresetReport {
     pub error: String,
     pub index: usize,
-    pub metrics: MilkdropPresetMetrics,
+    pub metrics: RustyMilkPresetMetrics,
     pub shader_sections: Vec<String>,
     pub title: String,
     pub unsupported_functions: Vec<String>,
@@ -15620,13 +15620,13 @@ pub struct MilkdropCompatibilityPresetReport {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropCompatibilityEntry {
+pub struct RustyMilkCompatibilityEntry {
     pub file_name: String,
     pub format: String,
     pub id: String,
-    pub metrics: MilkdropCompatibilitySummary,
+    pub metrics: RustyMilkCompatibilitySummary,
     pub preset_count: usize,
-    pub preset_reports: Vec<MilkdropCompatibilityPresetReport>,
+    pub preset_reports: Vec<RustyMilkCompatibilityPresetReport>,
     pub shader_sections: Vec<String>,
     pub supported: bool,
     pub unsupported_functions: Vec<String>,
@@ -15635,7 +15635,7 @@ pub struct MilkdropCompatibilityEntry {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropCompatibilitySummary {
+pub struct RustyMilkCompatibilitySummary {
     pub max_q_register_index: usize,
     pub max_shape_count: usize,
     pub max_sprite_count: usize,
@@ -15655,11 +15655,11 @@ pub struct MilkdropCompatibilitySummary {
     pub webgpu_unsupported_shader_sections: Vec<String>,
 }
 
-fn milkdrop_entry_has_content(entry: &MilkdropIndexedEntry) -> bool {
-    !entry.base_values.is_empty() || entry.equations != MilkdropEquations::default()
+fn rustymilk_entry_has_content(entry: &RustyMilkIndexedEntry) -> bool {
+    !entry.base_values.is_empty() || entry.equations != RustyMilkEquations::default()
 }
 
-fn merge_milkdrop_unique(mut values: Vec<String>) -> Vec<String> {
+fn merge_rustymilk_unique(mut values: Vec<String>) -> Vec<String> {
     values.retain(|value| !value.is_empty());
     values.sort();
     values.dedup();
@@ -15697,7 +15697,7 @@ fn collect_q_registers_from_text(text: &str, registers: &mut Vec<String>) {
     }
 }
 
-fn collect_q_registers_from_equations(equations: &MilkdropEquations, registers: &mut Vec<String>) {
+fn collect_q_registers_from_equations(equations: &RustyMilkEquations, registers: &mut Vec<String>) {
     collect_q_registers_from_text(&equations.init, registers);
     collect_q_registers_from_text(&equations.frame, registers);
     collect_q_registers_from_text(&equations.per_frame, registers);
@@ -15705,7 +15705,7 @@ fn collect_q_registers_from_equations(equations: &MilkdropEquations, registers: 
     collect_q_registers_from_text(&equations.point, registers);
 }
 
-fn collect_milkdrop_q_registers(preset: &MilkdropPresetDocument) -> Vec<String> {
+fn collect_rustymilk_q_registers(preset: &RustyMilkPresetDocument) -> Vec<String> {
     let mut registers = Vec::new();
     for key in preset.base_values.keys() {
         collect_q_registers_from_text(key, &mut registers);
@@ -15741,47 +15741,47 @@ fn max_q_register_index(registers: &[String]) -> usize {
         .unwrap_or_default()
 }
 
-pub fn milkdrop_preset_metrics(preset: &MilkdropPresetDocument) -> MilkdropPresetMetrics {
-    let q_registers = collect_milkdrop_q_registers(preset);
-    MilkdropPresetMetrics {
+pub fn rustymilk_preset_metrics(preset: &RustyMilkPresetDocument) -> RustyMilkPresetMetrics {
+    let q_registers = collect_rustymilk_q_registers(preset);
+    RustyMilkPresetMetrics {
         max_q_register_index: max_q_register_index(&q_registers),
         q_register_count: q_registers.len(),
         q_registers,
         shape_count: preset
             .shapes
             .iter()
-            .filter(|entry| milkdrop_entry_has_content(entry))
+            .filter(|entry| rustymilk_entry_has_content(entry))
             .count(),
         sprite_count: preset
             .sprites
             .iter()
-            .filter(|entry| milkdrop_entry_has_content(entry))
+            .filter(|entry| rustymilk_entry_has_content(entry))
             .count(),
         wave_count: preset
             .waves
             .iter()
-            .filter(|entry| milkdrop_entry_has_content(entry))
+            .filter(|entry| rustymilk_entry_has_content(entry))
             .count(),
     }
 }
 
-fn webgpu_shader_sections(preset: &MilkdropPresetDocument) -> Vec<String> {
+fn webgpu_shader_sections(preset: &RustyMilkPresetDocument) -> Vec<String> {
     let mut sections = Vec::new();
     if !preset.warp_shader.trim().is_empty()
-        && !analyze_milkdrop_webgpu_shader_support(&preset.warp_shader).supported
+        && !analyze_rustymilk_webgpu_shader_support(&preset.warp_shader).supported
     {
         sections.push("warp_shader".to_string());
     }
     if !preset.comp_shader.trim().is_empty()
-        && !analyze_milkdrop_webgpu_shader_support(&preset.comp_shader).supported
+        && !analyze_rustymilk_webgpu_shader_support(&preset.comp_shader).supported
     {
         sections.push("comp_shader".to_string());
     }
     sections
 }
 
-fn merge_milkdrop_metrics(metrics: &[MilkdropPresetMetrics]) -> MilkdropCompatibilitySummary {
-    let mut summary = MilkdropCompatibilitySummary::default();
+fn merge_rustymilk_metrics(metrics: &[RustyMilkPresetMetrics]) -> RustyMilkCompatibilitySummary {
+    let mut summary = RustyMilkCompatibilitySummary::default();
     for metric in metrics {
         summary.max_q_register_index = summary
             .max_q_register_index
@@ -15794,7 +15794,7 @@ fn merge_milkdrop_metrics(metrics: &[MilkdropPresetMetrics]) -> MilkdropCompatib
         summary.total_waves += metric.wave_count;
         summary.q_registers.extend(metric.q_registers.clone());
     }
-    summary.q_registers = merge_milkdrop_unique(summary.q_registers);
+    summary.q_registers = merge_rustymilk_unique(summary.q_registers);
     summary.q_registers.sort_by_key(|register| {
         register
             .strip_prefix('q')
@@ -15804,23 +15804,23 @@ fn merge_milkdrop_metrics(metrics: &[MilkdropPresetMetrics]) -> MilkdropCompatib
     summary
 }
 
-pub fn build_milkdrop_compatibility_entry(
+pub fn build_rustymilk_compatibility_entry(
     id: &str,
     file_name: &str,
     source: &str,
     force_milk2: bool,
-) -> MilkdropCompatibilityEntry {
-    let parsed = parse_milkdrop_preset_set(source, force_milk2);
+) -> RustyMilkCompatibilityEntry {
+    let parsed = parse_rustymilk_preset_set(source, force_milk2);
     let preset_reports = parsed
         .presets
         .iter()
         .map(|preset| {
-            let report = analyze_milkdrop_preset_compatibility(preset);
+            let report = analyze_rustymilk_preset_compatibility(preset);
             let webgpu_shader_sections = webgpu_shader_sections(preset);
-            MilkdropCompatibilityPresetReport {
-                error: milkdrop_compatibility_error(&report),
+            RustyMilkCompatibilityPresetReport {
+                error: rustymilk_compatibility_error(&report),
                 index: preset.index,
-                metrics: milkdrop_preset_metrics(preset),
+                metrics: rustymilk_preset_metrics(preset),
                 shader_sections: report.shader_sections,
                 title: preset.title.clone(),
                 unsupported_functions: report.unsupported_functions,
@@ -15829,25 +15829,25 @@ pub fn build_milkdrop_compatibility_entry(
             }
         })
         .collect::<Vec<_>>();
-    let metrics = merge_milkdrop_metrics(
+    let metrics = merge_rustymilk_metrics(
         &preset_reports
             .iter()
             .map(|report| report.metrics.clone())
             .collect::<Vec<_>>(),
     );
-    let shader_sections = merge_milkdrop_unique(
+    let shader_sections = merge_rustymilk_unique(
         preset_reports
             .iter()
             .flat_map(|report| report.shader_sections.clone())
             .collect(),
     );
-    let unsupported_functions = merge_milkdrop_unique(
+    let unsupported_functions = merge_rustymilk_unique(
         preset_reports
             .iter()
             .flat_map(|report| report.unsupported_functions.clone())
             .collect(),
     );
-    let webgpu_shader_sections = merge_milkdrop_unique(
+    let webgpu_shader_sections = merge_rustymilk_unique(
         preset_reports
             .iter()
             .flat_map(|report| report.webgpu_shader_sections.clone())
@@ -15855,7 +15855,7 @@ pub fn build_milkdrop_compatibility_entry(
     );
     let supported = preset_reports.iter().all(|report| report.error.is_empty());
     let webgpu_supported = preset_reports.iter().all(|report| report.webgpu_supported);
-    MilkdropCompatibilityEntry {
+    RustyMilkCompatibilityEntry {
         file_name: file_name.to_string(),
         format: parsed.format,
         id: if id.is_empty() {
@@ -15879,10 +15879,10 @@ pub fn build_milkdrop_compatibility_entry(
     }
 }
 
-pub fn summarize_milkdrop_compatibility_matrix(
-    entries: &[MilkdropCompatibilityEntry],
-) -> MilkdropCompatibilitySummary {
-    let mut summary = MilkdropCompatibilitySummary::default();
+pub fn summarize_rustymilk_compatibility_matrix(
+    entries: &[RustyMilkCompatibilityEntry],
+) -> RustyMilkCompatibilitySummary {
+    let mut summary = RustyMilkCompatibilitySummary::default();
     for entry in entries {
         summary.max_q_register_index = summary
             .max_q_register_index
@@ -15909,34 +15909,34 @@ pub fn summarize_milkdrop_compatibility_matrix(
             .webgpu_unsupported_shader_sections
             .extend(entry.webgpu_shader_sections.clone());
     }
-    summary.q_registers = merge_milkdrop_unique(summary.q_registers);
+    summary.q_registers = merge_rustymilk_unique(summary.q_registers);
     summary.q_registers.sort_by_key(|register| {
         register
             .strip_prefix('q')
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or_default()
     });
-    summary.unsupported_functions = merge_milkdrop_unique(summary.unsupported_functions);
+    summary.unsupported_functions = merge_rustymilk_unique(summary.unsupported_functions);
     summary.unsupported_shader_sections =
-        merge_milkdrop_unique(summary.unsupported_shader_sections);
+        merge_rustymilk_unique(summary.unsupported_shader_sections);
     summary.webgpu_unsupported_shader_sections =
-        merge_milkdrop_unique(summary.webgpu_unsupported_shader_sections);
+        merge_rustymilk_unique(summary.webgpu_unsupported_shader_sections);
     summary
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MilkdropShaderProgram {
+pub struct RustyMilkShaderProgram {
     pub declarations: Vec<String>,
     pub expression: String,
     pub texture_samplers: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MilkdropShaderSupport {
+pub struct RustyMilkShaderSupport {
     pub supported: bool,
 }
 
-fn strip_milkdrop_shader_comments(source: &str) -> String {
+fn strip_rustymilk_shader_comments(source: &str) -> String {
     let mut output = String::new();
     let mut chars = source.chars().peekable();
     let mut in_block = false;
@@ -15967,8 +15967,8 @@ fn strip_milkdrop_shader_comments(source: &str) -> String {
     output.trim().to_string()
 }
 
-fn unwrap_milkdrop_shader_body(source: &str) -> String {
-    let mut source = strip_milkdrop_shader_comments(source);
+fn unwrap_rustymilk_shader_body(source: &str) -> String {
+    let mut source = strip_rustymilk_shader_comments(source);
     let lower = source.to_ascii_lowercase();
     if let Some(index) = lower.find("shader_body") {
         source.replace_range(index..index + "shader_body".len(), "");
@@ -15979,8 +15979,8 @@ fn unwrap_milkdrop_shader_body(source: &str) -> String {
     trimmed.to_string()
 }
 
-fn normalize_simple_milkdrop_conditional_return(source: &str) -> String {
-    let unwrapped = unwrap_milkdrop_shader_body(source);
+fn normalize_simple_rustymilk_conditional_return(source: &str) -> String {
+    let unwrapped = unwrap_rustymilk_shader_body(source);
     let compact = unwrapped
         .replace('{', " ")
         .replace('}', " ")
@@ -16023,15 +16023,15 @@ fn normalize_simple_milkdrop_conditional_return(source: &str) -> String {
     format!("ret = ({condition}) ? ({true_ret}) : ({false_ret});")
 }
 
-fn is_milkdrop_main_sampler(name: &str) -> bool {
+fn is_rustymilk_main_sampler(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "previousframe" | "sampler_main" | "sampler_fc_main" | "sampler_sampler_main"
     )
 }
 
-pub fn get_milkdrop_shader_texture_samplers(source: &str) -> Vec<String> {
-    let cleaned = strip_milkdrop_shader_comments(source);
+pub fn get_rustymilk_shader_texture_samplers(source: &str) -> Vec<String> {
+    let cleaned = strip_rustymilk_shader_comments(source);
     let mut samplers = Vec::new();
     for marker in ["tex2D(", "tex("] {
         let mut rest = cleaned.as_str();
@@ -16043,7 +16043,7 @@ pub fn get_milkdrop_shader_texture_samplers(source: &str) -> Vec<String> {
                 .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
                 .collect::<String>();
             if !sampler.is_empty()
-                && !is_milkdrop_main_sampler(&sampler)
+                && !is_rustymilk_main_sampler(&sampler)
                 && !samplers.contains(&sampler)
             {
                 samplers.push(sampler);
@@ -16055,7 +16055,7 @@ pub fn get_milkdrop_shader_texture_samplers(source: &str) -> Vec<String> {
     samplers
 }
 
-fn normalize_milkdrop_shader_expression(expression: &str) -> String {
+fn normalize_rustymilk_shader_expression(expression: &str) -> String {
     expression
         .replace("float4(", "vec4(")
         .replace("float3(", "vec3(")
@@ -16068,7 +16068,7 @@ fn normalize_milkdrop_shader_expression(expression: &str) -> String {
         .replace("atan2(", "atan(")
 }
 
-fn normalize_milkdrop_shader_type(shader_type: &str) -> String {
+fn normalize_rustymilk_shader_type(shader_type: &str) -> String {
     shader_type
         .to_ascii_lowercase()
         .replace("float2", "vec2")
@@ -16076,9 +16076,9 @@ fn normalize_milkdrop_shader_type(shader_type: &str) -> String {
         .replace("float4", "vec4")
 }
 
-fn normalize_milkdrop_shader_source(source: &str, texture_samplers: &[String]) -> String {
+fn normalize_rustymilk_shader_source(source: &str, texture_samplers: &[String]) -> String {
     let mut normalized =
-        unwrap_milkdrop_shader_body(&normalize_simple_milkdrop_conditional_return(source));
+        unwrap_rustymilk_shader_body(&normalize_simple_rustymilk_conditional_return(source));
     for sampler in ["tex2D", "tex"] {
         loop {
             let Some(index) = normalized
@@ -16100,7 +16100,7 @@ fn normalize_milkdrop_shader_source(source: &str, texture_samplers: &[String]) -
             let whitespace = after.len() - after.trim_start().len();
             let name_start = start + whitespace;
             let name_end = name_start + name.len();
-            let replacement = if is_milkdrop_main_sampler(&name) {
+            let replacement = if is_rustymilk_main_sampler(&name) {
                 "previousFrame".to_string()
             } else if let Some(texture_index) =
                 texture_samplers.iter().position(|value| value == &name)
@@ -16115,7 +16115,7 @@ fn normalize_milkdrop_shader_source(source: &str, texture_samplers: &[String]) -
     normalized
 }
 
-fn is_safe_milkdrop_shader_expression(expression: &str) -> bool {
+fn is_safe_rustymilk_shader_expression(expression: &str) -> bool {
     if expression.trim().is_empty() {
         return false;
     }
@@ -16155,7 +16155,7 @@ fn is_safe_milkdrop_shader_expression(expression: &str) -> bool {
     true
 }
 
-fn split_milkdrop_shader_declaration(statement: &str) -> Option<(&str, &str, &str)> {
+fn split_rustymilk_shader_declaration(statement: &str) -> Option<(&str, &str, &str)> {
     for shader_type in [
         "float4", "float3", "float2", "float", "vec4", "vec3", "vec2",
     ] {
@@ -16178,7 +16178,7 @@ fn split_milkdrop_shader_declaration(statement: &str) -> Option<(&str, &str, &st
     None
 }
 
-fn split_milkdrop_shader_assignment(statement: &str) -> Option<(&str, &str, &str)> {
+fn split_rustymilk_shader_assignment(statement: &str) -> Option<(&str, &str, &str)> {
     for operator in ["+=", "-=", "*=", "/=", "="] {
         let Some((name, expression)) = statement.split_once(operator) else {
             continue;
@@ -16195,8 +16195,8 @@ fn split_milkdrop_shader_assignment(statement: &str) -> Option<(&str, &str, &str
     None
 }
 
-fn parse_milkdrop_shader_program(source: &str) -> Option<MilkdropShaderProgram> {
-    let normalized_source = normalize_simple_milkdrop_conditional_return(source);
+fn parse_rustymilk_shader_program(source: &str) -> Option<RustyMilkShaderProgram> {
+    let normalized_source = normalize_simple_rustymilk_conditional_return(source);
     let lowered = normalized_source.to_ascii_lowercase();
     if lowered.contains("for (")
         || lowered.contains("while (")
@@ -16210,8 +16210,8 @@ fn parse_milkdrop_shader_program(source: &str) -> Option<MilkdropShaderProgram> 
     if lowered.starts_with("if") {
         return None;
     }
-    let texture_samplers = get_milkdrop_shader_texture_samplers(&normalized_source);
-    let cleaned = normalize_milkdrop_shader_source(&normalized_source, &texture_samplers);
+    let texture_samplers = get_rustymilk_shader_texture_samplers(&normalized_source);
+    let cleaned = normalize_rustymilk_shader_source(&normalized_source, &texture_samplers);
     let mut declarations = Vec::new();
     let mut mutable_variables = Vec::new();
     let mut expression = String::new();
@@ -16228,35 +16228,35 @@ fn parse_milkdrop_shader_program(source: &str) -> Option<MilkdropShaderProgram> 
             if !expression.is_empty() {
                 return None;
             }
-            expression = normalize_milkdrop_shader_expression(ret_expression.trim());
+            expression = normalize_rustymilk_shader_expression(ret_expression.trim());
             continue;
         }
         if !expression.is_empty() {
             return None;
         }
         if let Some((shader_type, name, declaration_expression)) =
-            split_milkdrop_shader_declaration(statement)
+            split_rustymilk_shader_declaration(statement)
         {
             let declaration_expression =
-                normalize_milkdrop_shader_expression(declaration_expression);
-            if !is_safe_milkdrop_shader_expression(&declaration_expression) {
+                normalize_rustymilk_shader_expression(declaration_expression);
+            if !is_safe_rustymilk_shader_expression(&declaration_expression) {
                 return None;
             }
             mutable_variables.push(name.to_string());
             declarations.push(format!(
                 "{} {name} = {declaration_expression};",
-                normalize_milkdrop_shader_type(shader_type)
+                normalize_rustymilk_shader_type(shader_type)
             ));
             continue;
         }
         if let Some((name, operator, assignment_expression)) =
-            split_milkdrop_shader_assignment(statement)
+            split_rustymilk_shader_assignment(statement)
         {
             if !mutable_variables.iter().any(|value| value == name) {
                 return None;
             }
-            let assignment_expression = normalize_milkdrop_shader_expression(assignment_expression);
-            if !is_safe_milkdrop_shader_expression(&assignment_expression) {
+            let assignment_expression = normalize_rustymilk_shader_expression(assignment_expression);
+            if !is_safe_rustymilk_shader_expression(&assignment_expression) {
                 return None;
             }
             declarations.push(format!("{name} {operator} {assignment_expression};"));
@@ -16265,24 +16265,24 @@ fn parse_milkdrop_shader_program(source: &str) -> Option<MilkdropShaderProgram> 
         return None;
     }
 
-    if !is_safe_milkdrop_shader_expression(&expression) {
+    if !is_safe_rustymilk_shader_expression(&expression) {
         return None;
     }
-    Some(MilkdropShaderProgram {
+    Some(RustyMilkShaderProgram {
         declarations,
         expression,
         texture_samplers,
     })
 }
 
-pub fn translate_milkdrop_shader_expression(source: &str) -> String {
-    parse_milkdrop_shader_program(source)
+pub fn translate_rustymilk_shader_expression(source: &str) -> String {
+    parse_rustymilk_shader_program(source)
         .map(|program| program.expression)
         .unwrap_or_default()
 }
 
-pub fn create_translated_milkdrop_fragment_shader(source: &str) -> String {
-    let Some(program) = parse_milkdrop_shader_program(source) else {
+pub fn create_translated_rustymilk_fragment_shader(source: &str) -> String {
+    let Some(program) = parse_rustymilk_shader_program(source) else {
         return String::new();
     };
     let uniforms = (1..=64)
@@ -16343,7 +16343,7 @@ void main() {{
     )
 }
 
-fn split_top_level_milkdrop_ternary(expression: &str) -> Option<(&str, &str, &str)> {
+fn split_top_level_rustymilk_ternary(expression: &str) -> Option<(&str, &str, &str)> {
     let chars = expression.char_indices().collect::<Vec<_>>();
     let mut depth = 0i32;
     let mut question_index = None;
@@ -16383,13 +16383,13 @@ fn split_top_level_milkdrop_ternary(expression: &str) -> Option<(&str, &str, &st
     None
 }
 
-fn normalize_milkdrop_wgsl_expression(expression: &str) -> String {
-    if let Some((condition, when_true, when_false)) = split_top_level_milkdrop_ternary(expression) {
+fn normalize_rustymilk_wgsl_expression(expression: &str) -> String {
+    if let Some((condition, when_true, when_false)) = split_top_level_rustymilk_ternary(expression) {
         return format!(
             "select({}, {}, {})",
-            normalize_milkdrop_wgsl_expression(when_false),
-            normalize_milkdrop_wgsl_expression(when_true),
-            normalize_milkdrop_wgsl_expression(condition)
+            normalize_rustymilk_wgsl_expression(when_false),
+            normalize_rustymilk_wgsl_expression(when_true),
+            normalize_rustymilk_wgsl_expression(condition)
         );
     }
     expression
@@ -16422,8 +16422,8 @@ fn normalize_milkdrop_wgsl_expression(expression: &str) -> String {
         .replace("atan(", "atan2(")
 }
 
-fn normalize_milkdrop_wgsl_declaration(declaration: &str) -> String {
-    let declaration = normalize_milkdrop_wgsl_expression(declaration);
+fn normalize_rustymilk_wgsl_declaration(declaration: &str) -> String {
+    let declaration = normalize_rustymilk_wgsl_expression(declaration);
     for prefix in ["vec2 ", "vec3 ", "vec4 ", "float "] {
         if let Some(rest) = declaration.strip_prefix(prefix) {
             return format!("var {rest}");
@@ -16432,13 +16432,13 @@ fn normalize_milkdrop_wgsl_declaration(declaration: &str) -> String {
     declaration
 }
 
-pub fn create_translated_milkdrop_wgsl_shader(source: &str) -> String {
-    let Some(program) = parse_milkdrop_shader_program(source) else {
+pub fn create_translated_rustymilk_wgsl_shader(source: &str) -> String {
+    let Some(program) = parse_rustymilk_shader_program(source) else {
         return String::new();
     };
     if std::iter::once(&program.expression)
         .chain(program.declarations.iter())
-        .map(|statement| normalize_milkdrop_wgsl_expression(statement))
+        .map(|statement| normalize_rustymilk_wgsl_expression(statement))
         .any(|statement| {
             statement.contains('&')
                 || statement.contains('|')
@@ -16472,10 +16472,10 @@ pub fn create_translated_milkdrop_wgsl_shader(source: &str) -> String {
     let declarations = program
         .declarations
         .iter()
-        .map(|declaration| format!("  {}", normalize_milkdrop_wgsl_declaration(declaration)))
+        .map(|declaration| format!("  {}", normalize_rustymilk_wgsl_declaration(declaration)))
         .collect::<Vec<_>>()
         .join("\n");
-    let expression = normalize_milkdrop_wgsl_expression(&program.expression);
+    let expression = normalize_rustymilk_wgsl_expression(&program.expression);
     format!(
         r#"struct Uniforms {{
   color: vec4f,
@@ -16516,28 +16516,28 @@ fn fragmentMain() -> @location(0) vec4f {{
     )
 }
 
-pub fn analyze_milkdrop_shader_support(source: &str) -> MilkdropShaderSupport {
-    MilkdropShaderSupport {
+pub fn analyze_rustymilk_shader_support(source: &str) -> RustyMilkShaderSupport {
+    RustyMilkShaderSupport {
         supported: source.trim().is_empty()
-            || !create_translated_milkdrop_fragment_shader(source).is_empty(),
+            || !create_translated_rustymilk_fragment_shader(source).is_empty(),
     }
 }
 
-pub fn analyze_milkdrop_webgpu_shader_support(source: &str) -> MilkdropShaderSupport {
-    MilkdropShaderSupport {
+pub fn analyze_rustymilk_webgpu_shader_support(source: &str) -> RustyMilkShaderSupport {
+    RustyMilkShaderSupport {
         supported: source.trim().is_empty()
-            || !create_translated_milkdrop_wgsl_shader(source).is_empty(),
+            || !create_translated_rustymilk_wgsl_shader(source).is_empty(),
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum MilkdropToken {
+enum RustyMilkToken {
     Ident(String),
     Number(f64),
     Op(String),
 }
 
-fn tokenize_milkdrop_expression(expression: &str) -> Result<Vec<MilkdropToken>, String> {
+fn tokenize_rustymilk_expression(expression: &str) -> Result<Vec<RustyMilkToken>, String> {
     let chars = expression.chars().collect::<Vec<_>>();
     let mut tokens = Vec::new();
     let mut index = 0usize;
@@ -16557,7 +16557,7 @@ fn tokenize_milkdrop_expression(expression: &str) -> Result<Vec<MilkdropToken>, 
             {
                 index += 1;
             }
-            tokens.push(MilkdropToken::Ident(
+            tokens.push(RustyMilkToken::Ident(
                 chars[start..index]
                     .iter()
                     .collect::<String>()
@@ -16584,8 +16584,8 @@ fn tokenize_milkdrop_expression(expression: &str) -> Result<Vec<MilkdropToken>, 
                 .iter()
                 .collect::<String>()
                 .parse::<f64>()
-                .map_err(|_| format!("Unsupported MilkDrop expression syntax: {expression}"))?;
-            tokens.push(MilkdropToken::Number(value));
+                .map_err(|_| format!("Unsupported RustyMilk expression syntax: {expression}"))?;
+            tokens.push(RustyMilkToken::Number(value));
             continue;
         }
         let two = if index + 1 < chars.len() {
@@ -16599,7 +16599,7 @@ fn tokenize_milkdrop_expression(expression: &str) -> Result<Vec<MilkdropToken>, 
                 "&&" | "||" | "<<" | ">>" | "==" | "!=" | "<=" | ">="
             )
         }) {
-            tokens.push(MilkdropToken::Op(two.to_string()));
+            tokens.push(RustyMilkToken::Op(two.to_string()));
             index += 2;
             continue;
         }
@@ -16622,25 +16622,25 @@ fn tokenize_milkdrop_expression(expression: &str) -> Result<Vec<MilkdropToken>, 
                 | '!'
                 | '~'
         ) {
-            tokens.push(MilkdropToken::Op(ch.to_string()));
+            tokens.push(RustyMilkToken::Op(ch.to_string()));
             index += 1;
             continue;
         }
         return Err(format!(
-            "Unsupported MilkDrop expression syntax: {expression}"
+            "Unsupported RustyMilk expression syntax: {expression}"
         ));
     }
     Ok(tokens)
 }
 
-fn milkdrop_number(scope: &BTreeMap<String, MilkdropValue>, name: &str) -> f64 {
+fn rustymilk_number(scope: &BTreeMap<String, RustyMilkValue>, name: &str) -> f64 {
     scope
         .get(name)
-        .and_then(MilkdropValue::as_number)
+        .and_then(RustyMilkValue::as_number)
         .unwrap_or(0.0)
 }
 
-fn milkdrop_buffer_key(name: &str, index: f64) -> String {
+fn rustymilk_buffer_key(name: &str, index: f64) -> String {
     let prefix = if name.eq_ignore_ascii_case("gmegabuf") {
         "gmegabuf"
     } else {
@@ -16654,11 +16654,11 @@ fn milkdrop_buffer_key(name: &str, index: f64) -> String {
     format!("{prefix}_{index}")
 }
 
-fn milkdrop_buffer_number(scope: &BTreeMap<String, MilkdropValue>, name: &str, index: f64) -> f64 {
-    milkdrop_number(scope, &milkdrop_buffer_key(name, index))
+fn rustymilk_buffer_number(scope: &BTreeMap<String, RustyMilkValue>, name: &str, index: f64) -> f64 {
+    rustymilk_number(scope, &rustymilk_buffer_key(name, index))
 }
 
-fn milkdrop_indexed_sample(values: &[f64], position: f64) -> f64 {
+fn rustymilk_indexed_sample(values: &[f64], position: f64) -> f64 {
     if values.is_empty() {
         return 0.0;
     }
@@ -16672,20 +16672,20 @@ fn milkdrop_indexed_sample(values: &[f64], position: f64) -> f64 {
     }
 }
 
-fn mix_milkdrop_rand_seed(mut seed: u64, value: f64) -> u64 {
+fn mix_rustymilk_rand_seed(mut seed: u64, value: f64) -> u64 {
     seed ^= value.to_bits().wrapping_add(0x9e37_79b9_7f4a_7c15);
     seed = seed.wrapping_mul(0xbf58_476d_1ce4_e5b9);
     seed ^ (seed >> 31)
 }
 
-fn milkdrop_pseudo_random_unit(scope: &BTreeMap<String, MilkdropValue>, counter: usize) -> f64 {
+fn rustymilk_pseudo_random_unit(scope: &BTreeMap<String, RustyMilkValue>, counter: usize) -> f64 {
     let mut seed = 0x4d49_4c4b_4452_4f50u64 ^ counter as u64;
     for key in [
         "time", "frame", "bass", "mid", "treb", "bass_att", "mid_att", "treb_att",
     ] {
-        seed = mix_milkdrop_rand_seed(seed, milkdrop_number(scope, key));
+        seed = mix_rustymilk_rand_seed(seed, rustymilk_number(scope, key));
     }
-    seed = mix_milkdrop_rand_seed(seed, counter as f64 + 0.123_456_789);
+    seed = mix_rustymilk_rand_seed(seed, counter as f64 + 0.123_456_789);
     seed ^= seed >> 12;
     seed ^= seed << 25;
     seed ^= seed >> 27;
@@ -16693,17 +16693,17 @@ fn milkdrop_pseudo_random_unit(scope: &BTreeMap<String, MilkdropValue>, counter:
     (value as f64) / (u64::MAX as f64)
 }
 
-struct MilkdropExpressionParser<'a> {
+struct RustyMilkExpressionParser<'a> {
     rand_counter: usize,
-    scope: &'a BTreeMap<String, MilkdropValue>,
-    tokens: Vec<MilkdropToken>,
+    scope: &'a BTreeMap<String, RustyMilkValue>,
+    tokens: Vec<RustyMilkToken>,
     index: usize,
 }
 
-impl<'a> MilkdropExpressionParser<'a> {
+impl<'a> RustyMilkExpressionParser<'a> {
     fn new(
-        tokens: Vec<MilkdropToken>,
-        scope: &'a BTreeMap<String, MilkdropValue>,
+        tokens: Vec<RustyMilkToken>,
+        scope: &'a BTreeMap<String, RustyMilkValue>,
         rand_counter: usize,
     ) -> Self {
         Self {
@@ -16716,7 +16716,7 @@ impl<'a> MilkdropExpressionParser<'a> {
 
     fn peek_op(&self) -> Option<&str> {
         match self.tokens.get(self.index) {
-            Some(MilkdropToken::Op(value)) => Some(value),
+            Some(RustyMilkToken::Op(value)) => Some(value),
             _ => None,
         }
     }
@@ -16730,7 +16730,7 @@ impl<'a> MilkdropExpressionParser<'a> {
         }
     }
 
-    fn consume(&mut self) -> Option<MilkdropToken> {
+    fn consume(&mut self) -> Option<RustyMilkToken> {
         let token = self.tokens.get(self.index).cloned();
         if token.is_some() {
             self.index += 1;
@@ -16741,22 +16741,22 @@ impl<'a> MilkdropExpressionParser<'a> {
     fn parse(&mut self) -> Result<f64, String> {
         let value = self.parse_conditional()?;
         if self.index < self.tokens.len() {
-            return Err("Unexpected trailing MilkDrop token".to_string());
+            return Err("Unexpected trailing RustyMilk token".to_string());
         }
         Ok(value)
     }
 
     fn parse_primary(&mut self) -> Result<f64, String> {
         match self.consume() {
-            Some(MilkdropToken::Number(value)) => Ok(value),
-            Some(MilkdropToken::Op(op)) if op == "(" => {
+            Some(RustyMilkToken::Number(value)) => Ok(value),
+            Some(RustyMilkToken::Op(op)) if op == "(" => {
                 let value = self.parse_conditional()?;
                 if !self.match_op(")") {
-                    return Err("Unclosed MilkDrop expression group.".to_string());
+                    return Err("Unclosed RustyMilk expression group.".to_string());
                 }
                 Ok(value)
             }
-            Some(MilkdropToken::Ident(name)) => {
+            Some(RustyMilkToken::Ident(name)) => {
                 if self.match_op("(") {
                     let mut args = Vec::new();
                     if self.peek_op() != Some(")") {
@@ -16775,12 +16775,12 @@ impl<'a> MilkdropExpressionParser<'a> {
                     Ok(match name.as_str() {
                         "e" => std::f64::consts::E,
                         "pi" => std::f64::consts::PI,
-                        _ => milkdrop_number(self.scope, &name),
+                        _ => rustymilk_number(self.scope, &name),
                     })
                 }
             }
-            Some(token) => Err(format!("Unexpected MilkDrop token: {token:?}")),
-            None => Err("Unexpected end of MilkDrop expression.".to_string()),
+            Some(token) => Err(format!("Unexpected RustyMilk token: {token:?}")),
+            None => Err("Unexpected end of RustyMilk expression.".to_string()),
         }
     }
 
@@ -16811,18 +16811,18 @@ impl<'a> MilkdropExpressionParser<'a> {
             "equal" => ((arg(0, 0.0) - arg(1, 0.0)).abs() < 0.00001) as i32 as f64,
             "exp" => arg(0, 0.0).exp(),
             "floor" => arg(0, 0.0).floor(),
-            "gmegabuf" => milkdrop_buffer_number(self.scope, name, arg(0, 0.0)),
+            "gmegabuf" => rustymilk_buffer_number(self.scope, name, arg(0, 0.0)),
             "get_fft" => {
-                let values = milkdrop_frequency_data(self.scope);
-                milkdrop_indexed_sample(&values, arg(0, 0.0))
+                let values = rustymilk_frequency_data(self.scope);
+                rustymilk_indexed_sample(&values, arg(0, 0.0))
             }
             "get_fft_hz" => {
-                let sample_rate = milkdrop_number(self.scope, "sample_rate")
-                    .max(milkdrop_number(self.scope, "samplerate"))
+                let sample_rate = rustymilk_number(self.scope, "sample_rate")
+                    .max(rustymilk_number(self.scope, "samplerate"))
                     .max(44100.0);
                 let nyquist = sample_rate / 2.0;
-                let values = milkdrop_frequency_data(self.scope);
-                milkdrop_indexed_sample(
+                let values = rustymilk_frequency_data(self.scope);
+                rustymilk_indexed_sample(
                     &values,
                     if nyquist > 0.0 {
                         arg(0, 0.0) / nyquist
@@ -16832,8 +16832,8 @@ impl<'a> MilkdropExpressionParser<'a> {
                 )
             }
             "get_waveform" => {
-                let values = milkdrop_waveform_data(self.scope);
-                milkdrop_indexed_sample(&values, arg(0, 0.0))
+                let values = rustymilk_waveform_data(self.scope);
+                rustymilk_indexed_sample(&values, arg(0, 0.0))
             }
             "if" => {
                 if arg(0, 0.0) != 0.0 {
@@ -16858,7 +16858,7 @@ impl<'a> MilkdropExpressionParser<'a> {
                 }
             }
             "max" => arg(0, 0.0).max(arg(1, 0.0)),
-            "megabuf" => milkdrop_buffer_number(self.scope, name, arg(0, 0.0)),
+            "megabuf" => rustymilk_buffer_number(self.scope, name, arg(0, 0.0)),
             "min" => arg(0, 0.0).min(arg(1, 0.0)),
             "mod" => {
                 let right = arg(1, 0.0);
@@ -16876,7 +16876,7 @@ impl<'a> MilkdropExpressionParser<'a> {
                 } else {
                     let counter = self.rand_counter;
                     self.rand_counter += 1;
-                    (milkdrop_pseudo_random_unit(self.scope, counter) * upper)
+                    (rustymilk_pseudo_random_unit(self.scope, counter) * upper)
                         .floor()
                         .min(upper - 1.0)
                 }
@@ -16896,7 +16896,7 @@ impl<'a> MilkdropExpressionParser<'a> {
                 }
             }
             "tan" => arg(0, 0.0).tan(),
-            _ => return Err(format!("Unsupported MilkDrop function: {name}")),
+            _ => return Err(format!("Unsupported RustyMilk function: {name}")),
         };
         Ok(if out.is_finite() { out } else { 0.0 })
     }
@@ -17053,7 +17053,7 @@ impl<'a> MilkdropExpressionParser<'a> {
         }
         let when_true = self.parse_conditional()?;
         if !self.match_op(":") {
-            return Err("Unclosed MilkDrop conditional expression.".to_string());
+            return Err("Unclosed RustyMilk conditional expression.".to_string());
         }
         let when_false = self.parse_conditional()?;
         Ok(if condition != 0.0 {
@@ -17064,7 +17064,7 @@ impl<'a> MilkdropExpressionParser<'a> {
     }
 }
 
-fn milkdrop_frequency_data(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> {
+fn rustymilk_frequency_data(scope: &BTreeMap<String, RustyMilkValue>) -> Vec<f64> {
     [
         "frequency_data",
         "frequencies",
@@ -17074,109 +17074,109 @@ fn milkdrop_frequency_data(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> 
     ]
     .into_iter()
     .find_map(|name| match scope.get(name) {
-        Some(MilkdropValue::Text(value)) => Some(
+        Some(RustyMilkValue::Text(value)) => Some(
             value
                 .split(',')
                 .filter_map(|item| item.trim().parse::<f64>().ok())
                 .collect::<Vec<_>>(),
         ),
-        Some(MilkdropValue::Number(value)) => Some(vec![*value]),
+        Some(RustyMilkValue::Number(value)) => Some(vec![*value]),
         None => None,
     })
     .unwrap_or_default()
 }
 
-fn milkdrop_waveform_data(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> {
+fn rustymilk_waveform_data(scope: &BTreeMap<String, RustyMilkValue>) -> Vec<f64> {
     ["waveform_data", "waveform", "samples", "wave"]
         .into_iter()
         .find_map(|name| match scope.get(name) {
-            Some(MilkdropValue::Text(value)) => Some(
+            Some(RustyMilkValue::Text(value)) => Some(
                 value
                     .split(',')
                     .filter_map(|item| item.trim().parse::<f64>().ok())
                     .collect::<Vec<_>>(),
             ),
-            Some(MilkdropValue::Number(value)) => Some(vec![*value]),
+            Some(RustyMilkValue::Number(value)) => Some(vec![*value]),
             None => None,
         })
         .unwrap_or_default()
 }
 
-pub fn evaluate_milkdrop_expression(
+pub fn evaluate_rustymilk_expression(
     expression: &str,
-    variables: &BTreeMap<String, MilkdropValue>,
+    variables: &BTreeMap<String, RustyMilkValue>,
 ) -> Result<f64, String> {
-    evaluate_milkdrop_expression_with_rand_counter(expression, variables, 0).map(|(value, _)| value)
+    evaluate_rustymilk_expression_with_rand_counter(expression, variables, 0).map(|(value, _)| value)
 }
 
-fn evaluate_milkdrop_expression_with_rand_counter(
+fn evaluate_rustymilk_expression_with_rand_counter(
     expression: &str,
-    variables: &BTreeMap<String, MilkdropValue>,
+    variables: &BTreeMap<String, RustyMilkValue>,
     rand_counter: usize,
 ) -> Result<(f64, usize), String> {
     let scope = variables
         .iter()
         .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let tokens = tokenize_milkdrop_expression(expression)?;
-    let mut parser = MilkdropExpressionParser::new(tokens, &scope, rand_counter);
+    let tokens = tokenize_rustymilk_expression(expression)?;
+    let mut parser = RustyMilkExpressionParser::new(tokens, &scope, rand_counter);
     let value = parser.parse()?;
     Ok((value, parser.rand_counter))
 }
 
-pub fn evaluate_milkdrop_equations(
+pub fn evaluate_rustymilk_equations(
     equations: &str,
-    variables: &BTreeMap<String, MilkdropValue>,
-) -> Result<BTreeMap<String, MilkdropValue>, String> {
+    variables: &BTreeMap<String, RustyMilkValue>,
+) -> Result<BTreeMap<String, RustyMilkValue>, String> {
     let mut scope = variables
         .iter()
         .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let mut rand_counter = milkdrop_number(&scope, "__rand_counter").max(0.0) as usize;
+    let mut rand_counter = rustymilk_number(&scope, "__rand_counter").max(0.0) as usize;
     for statement in equations
         .split(';')
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         if let Some((buffer_name, index_expression, operator, expression)) =
-            split_milkdrop_buffer_assignment(statement)
+            split_rustymilk_buffer_assignment(statement)
         {
-            let (buffer_index, next_rand_counter) = evaluate_milkdrop_expression_with_rand_counter(
+            let (buffer_index, next_rand_counter) = evaluate_rustymilk_expression_with_rand_counter(
                 index_expression,
                 &scope,
                 rand_counter,
             )?;
             rand_counter = next_rand_counter;
-            let key = milkdrop_buffer_key(&buffer_name, buffer_index);
-            let current = milkdrop_number(&scope, &key);
+            let key = rustymilk_buffer_key(&buffer_name, buffer_index);
+            let current = rustymilk_number(&scope, &key);
             let (next, next_rand_counter) =
-                evaluate_milkdrop_expression_with_rand_counter(expression, &scope, rand_counter)?;
+                evaluate_rustymilk_expression_with_rand_counter(expression, &scope, rand_counter)?;
             rand_counter = next_rand_counter;
-            let value = apply_milkdrop_assignment_operator(current, operator, next);
-            scope.insert(key, MilkdropValue::Number(value));
+            let value = apply_rustymilk_assignment_operator(current, operator, next);
+            scope.insert(key, RustyMilkValue::Number(value));
             continue;
         }
-        let Some((name, operator, expression)) = split_milkdrop_assignment(statement) else {
+        let Some((name, operator, expression)) = split_rustymilk_assignment(statement) else {
             let (_, next_rand_counter) =
-                evaluate_milkdrop_expression_with_rand_counter(statement, &scope, rand_counter)?;
+                evaluate_rustymilk_expression_with_rand_counter(statement, &scope, rand_counter)?;
             rand_counter = next_rand_counter;
             continue;
         };
-        let current = milkdrop_number(&scope, &name);
+        let current = rustymilk_number(&scope, &name);
         let (next, next_rand_counter) =
-            evaluate_milkdrop_expression_with_rand_counter(expression, &scope, rand_counter)?;
+            evaluate_rustymilk_expression_with_rand_counter(expression, &scope, rand_counter)?;
         rand_counter = next_rand_counter;
-        let value = apply_milkdrop_assignment_operator(current, operator, next);
-        scope.insert(name, MilkdropValue::Number(value));
+        let value = apply_rustymilk_assignment_operator(current, operator, next);
+        scope.insert(name, RustyMilkValue::Number(value));
     }
     scope.insert(
         "__rand_counter".to_string(),
-        MilkdropValue::Number(rand_counter as f64),
+        RustyMilkValue::Number(rand_counter as f64),
     );
     Ok(scope)
 }
 
-fn apply_milkdrop_assignment_operator(current: f64, operator: &str, next: f64) -> f64 {
+fn apply_rustymilk_assignment_operator(current: f64, operator: &str, next: f64) -> f64 {
     match operator {
         "=" => next,
         "+=" => current + next,
@@ -17193,7 +17193,7 @@ fn apply_milkdrop_assignment_operator(current: f64, operator: &str, next: f64) -
     }
 }
 
-fn split_milkdrop_buffer_assignment(statement: &str) -> Option<(String, &str, &'static str, &str)> {
+fn split_rustymilk_buffer_assignment(statement: &str) -> Option<(String, &str, &'static str, &str)> {
     for operator in ["+=", "-=", "*=", "/=", "="] {
         let Some((raw_name, expression)) = statement.split_once(operator) else {
             continue;
@@ -17217,7 +17217,7 @@ fn split_milkdrop_buffer_assignment(statement: &str) -> Option<(String, &str, &'
     None
 }
 
-fn split_milkdrop_assignment(statement: &str) -> Option<(String, &'static str, &str)> {
+fn split_rustymilk_assignment(statement: &str) -> Option<(String, &'static str, &str)> {
     for operator in ["+=", "-=", "*=", "/=", "="] {
         if let Some((raw_name, expression)) = statement.split_once(operator) {
             let name = raw_name.trim();
@@ -17239,14 +17239,14 @@ fn split_milkdrop_assignment(statement: &str) -> Option<(String, &'static str, &
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, PartialEq)]
-struct RustMilkdropImportedPreset {
+struct RustyMilkImportedPreset {
     source: String,
     title: String,
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, PartialEq)]
-struct RustMilkdropPlaylist {
+struct RustyMilkPlaylist {
     id: String,
     name: String,
     preset_keys: Vec<String>,
@@ -17254,7 +17254,7 @@ struct RustMilkdropPlaylist {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug)]
-struct RustMilkdropAutomationState {
+struct RustyMilkAutomationState {
     beat_count: usize,
     last_beat_at: f64,
     last_preset_at: f64,
@@ -17262,7 +17262,7 @@ struct RustMilkdropAutomationState {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl Default for RustMilkdropAutomationState {
+impl Default for RustyMilkAutomationState {
     fn default() -> Self {
         Self {
             beat_count: 0,
@@ -17274,43 +17274,43 @@ impl Default for RustMilkdropAutomationState {
 }
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY: &str = "slskr.rustMilkdropImportedPresets";
+const RUSTYMILK_IMPORTED_PRESETS_STORAGE_KEY: &str = "slskr.rustyMilkImportedPresets";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_FAVORITE_PRESETS_STORAGE_KEY: &str = "slskr.rustMilkdropFavoritePresets";
+const RUSTYMILK_FAVORITE_PRESETS_STORAGE_KEY: &str = "slskr.rustyMilkFavoritePresets";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_PRESET_SEARCH_STORAGE_KEY: &str = "slskr.rustMilkdropPresetSearch";
+const RUSTYMILK_PRESET_SEARCH_STORAGE_KEY: &str = "slskr.rustyMilkPresetSearch";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_PLAYLISTS_STORAGE_KEY: &str = "slskr.rustMilkdropPresetPlaylists";
+const RUSTYMILK_PLAYLISTS_STORAGE_KEY: &str = "slskr.rustyMilkPresetPlaylists";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_ACTIVE_PLAYLIST_STORAGE_KEY: &str = "slskr.rustMilkdropActivePresetPlaylist";
+const RUSTYMILK_ACTIVE_PLAYLIST_STORAGE_KEY: &str = "slskr.rustyMilkActivePresetPlaylist";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_AUTOMATION_STORAGE_KEY: &str = "slskr.rustMilkdropPresetAutomation";
+const RUSTYMILK_AUTOMATION_STORAGE_KEY: &str = "slskr.rustyMilkPresetAutomation";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_FPS_STORAGE_KEY: &str = "slskr.rustMilkdropFpsCap";
+const RUSTYMILK_FPS_STORAGE_KEY: &str = "slskr.rustyMilkFpsCap";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_QUALITY_STORAGE_KEY: &str = "slskr.rustMilkdropQuality";
+const RUSTYMILK_QUALITY_STORAGE_KEY: &str = "slskr.rustyMilkQuality";
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_TEXTURE_ASSETS_STORAGE_KEY: &str = "slskr.rustMilkdropTextureAssets";
+const RUSTYMILK_TEXTURE_ASSETS_STORAGE_KEY: &str = "slskr.rustyMilkTextureAssets";
 
 #[cfg(target_arch = "wasm32")]
-fn toggle_rust_milkdrop_visualizer(
+fn toggle_rustymilk_visualizer(
     window: &web_sys::Window,
     document: &web_sys::Document,
 ) -> Result<(), JsValue> {
     let panel = document
-        .get_element_by_id("slskr-rust-milkdrop")
-        .ok_or_else(|| JsValue::from_str("Rust MilkDrop panel is missing"))?;
+        .get_element_by_id("slskr-rust-rustymilk")
+        .ok_or_else(|| JsValue::from_str("RustyMilk panel is missing"))?;
     if panel.has_attribute("hidden") {
         panel.remove_attribute("hidden")?;
-        start_rust_milkdrop_visualizer(window, document)?;
+        start_rustymilk_visualizer(window, document)?;
     } else {
         panel.set_attribute("hidden", "")?;
     }
@@ -17318,57 +17318,57 @@ fn toggle_rust_milkdrop_visualizer(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn start_rust_milkdrop_visualizer(
+fn start_rustymilk_visualizer(
     window: &web_sys::Window,
     document: &web_sys::Document,
 ) -> Result<(), JsValue> {
     let panel = document
-        .get_element_by_id("slskr-rust-milkdrop")
-        .ok_or_else(|| JsValue::from_str("Rust MilkDrop panel is missing"))?;
+        .get_element_by_id("slskr-rust-rustymilk")
+        .ok_or_else(|| JsValue::from_str("RustyMilk panel is missing"))?;
     if panel
-        .get_attribute("data-slskr-milkdrop-running")
+        .get_attribute("data-slskr-rustymilk-running")
         .as_deref()
         == Some("true")
     {
         return Ok(());
     }
-    panel.set_attribute("data-slskr-milkdrop-running", "true")?;
-    let stored_search = load_rust_milkdrop_preset_search(window);
-    panel.set_attribute("data-slskr-milkdrop-search", &stored_search)?;
+    panel.set_attribute("data-slskr-rustymilk-running", "true")?;
+    let stored_search = load_rustymilk_preset_search(window);
+    panel.set_attribute("data-slskr-rustymilk-search", &stored_search)?;
     panel.set_attribute(
-        "data-slskr-milkdrop-playlist",
-        &load_rust_milkdrop_active_playlist(window),
+        "data-slskr-rustymilk-playlist",
+        &load_rustymilk_active_playlist(window),
     )?;
     panel.set_attribute(
-        "data-slskr-milkdrop-automation",
-        &load_rust_milkdrop_simple_setting(window, RUST_MILKDROP_AUTOMATION_STORAGE_KEY, "off"),
+        "data-slskr-rustymilk-automation",
+        &load_rustymilk_simple_setting(window, RUSTYMILK_AUTOMATION_STORAGE_KEY, "off"),
     )?;
     panel.set_attribute(
-        "data-slskr-milkdrop-fps",
-        &load_rust_milkdrop_simple_setting(window, RUST_MILKDROP_FPS_STORAGE_KEY, "full"),
+        "data-slskr-rustymilk-fps",
+        &load_rustymilk_simple_setting(window, RUSTYMILK_FPS_STORAGE_KEY, "full"),
     )?;
     panel.set_attribute(
-        "data-slskr-milkdrop-quality",
-        &load_rust_milkdrop_simple_setting(window, RUST_MILKDROP_QUALITY_STORAGE_KEY, "balanced"),
+        "data-slskr-rustymilk-quality",
+        &load_rustymilk_simple_setting(window, RUSTYMILK_QUALITY_STORAGE_KEY, "balanced"),
     )?;
     if let Some(search_input) = document
-        .get_element_by_id("slskr-milkdrop-search")
+        .get_element_by_id("slskr-rustymilk-search")
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
         search_input.set_value(&stored_search);
     }
 
     let texture_assets: Rc<RefCell<BTreeMap<String, String>>> =
-        Rc::new(RefCell::new(load_rust_milkdrop_texture_assets(window)));
-    let imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>> =
-        Rc::new(RefCell::new(load_rust_milkdrop_imported_presets(window)));
+        Rc::new(RefCell::new(load_rustymilk_texture_assets(window)));
+    let imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>> =
+        Rc::new(RefCell::new(load_rustymilk_imported_presets(window)));
     let favorite_presets: Rc<RefCell<BTreeSet<String>>> =
-        Rc::new(RefCell::new(load_rust_milkdrop_favorite_presets(window)));
-    mount_rust_milkdrop_preset_input(document, imported_presets.clone())?;
-    mount_rust_milkdrop_texture_input(document, texture_assets.clone())?;
-    mount_rust_milkdrop_pack_input(document, imported_presets.clone(), texture_assets.clone())?;
-    mount_rust_milkdrop_selects(document)?;
-    mount_rust_milkdrop_buttons(
+        Rc::new(RefCell::new(load_rustymilk_favorite_presets(window)));
+    mount_rustymilk_preset_input(document, imported_presets.clone())?;
+    mount_rustymilk_texture_input(document, texture_assets.clone())?;
+    mount_rustymilk_pack_input(document, imported_presets.clone(), texture_assets.clone())?;
+    mount_rustymilk_selects(document)?;
+    mount_rustymilk_buttons(
         window,
         document,
         imported_presets.clone(),
@@ -17377,33 +17377,33 @@ fn start_rust_milkdrop_visualizer(
     )?;
 
     let canvas: web_sys::HtmlCanvasElement = document
-        .get_element_by_id("slskr-milkdrop-canvas")
-        .ok_or_else(|| JsValue::from_str("Rust MilkDrop canvas is missing"))?
+        .get_element_by_id("slskr-rustymilk-canvas")
+        .ok_or_else(|| JsValue::from_str("RustyMilk canvas is missing"))?
         .dyn_into()?;
-    let renderer = Rc::new(rust_milkdrop_renderer(&canvas, texture_assets.clone())?);
+    let renderer = Rc::new(rustymilk_renderer(&canvas, texture_assets.clone())?);
     let analyzer = Rc::new(RefCell::new(
         player_audio_element(document)
-            .and_then(|audio| RustMilkdropAudioAnalyzer::new(&audio).ok()),
+            .and_then(|audio| RustyMilkAudioAnalyzer::new(&audio).ok()),
     ));
-    let input_state = Rc::new(RefCell::new(RustMilkdropInputState::default()));
-    mount_rust_milkdrop_mouse_input(&canvas, input_state.clone())?;
-    let runtime = Rc::new(RefCell::new(RustMilkdropFrameSetRuntime::default()));
-    let automation_state = Rc::new(RefCell::new(RustMilkdropAutomationState::default()));
+    let input_state = Rc::new(RefCell::new(RustyMilkInputState::default()));
+    mount_rustymilk_mouse_input(&canvas, input_state.clone())?;
+    let runtime = Rc::new(RefCell::new(RustyMilkFrameSetRuntime::default()));
+    let automation_state = Rc::new(RefCell::new(RustyMilkAutomationState::default()));
     let last_render_ms = Rc::new(RefCell::new(0.0));
-    if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
+    if let Some(label) = document.get_element_by_id("slskr-rustymilk-renderer") {
         label.set_text_content(Some(renderer.label()));
     }
-    update_rust_milkdrop_texture_status(document, &texture_assets);
-    set_rust_milkdrop_active_preset(
+    update_rustymilk_texture_status(document, &texture_assets);
+    set_rustymilk_active_preset(
         document,
         &panel,
         &imported_presets,
         &favorite_presets,
         panel
-            .get_attribute("data-slskr-milkdrop-preset-index")
+            .get_attribute("data-slskr-rustymilk-preset-index")
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0),
-        "Rust MilkDrop visualizer ready",
+        "RustyMilk visualizer ready",
     );
     let animation_handle: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
         Rc::new(RefCell::new(None));
@@ -17419,20 +17419,20 @@ fn start_rust_milkdrop_visualizer(
     let last_render_for_frame = last_render_ms.clone();
 
     *animation_handle_for_frame.borrow_mut() = Some(Closure::wrap(Box::new(move |time_ms: f64| {
-        let Some(panel) = document_for_frame.get_element_by_id("slskr-rust-milkdrop") else {
+        let Some(panel) = document_for_frame.get_element_by_id("slskr-rust-rustymilk") else {
             return;
         };
         if panel.has_attribute("hidden") {
             return;
         }
         let preset_index = panel
-            .get_attribute("data-slskr-milkdrop-preset-index")
+            .get_attribute("data-slskr-rustymilk-preset-index")
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0);
         let preset_source =
-            rust_milkdrop_active_preset_source(&panel, &imports_for_frame, preset_index);
+            rustymilk_active_preset_source(&panel, &imports_for_frame, preset_index);
         let time = time_ms / 1000.0;
-        let fps_cap = rust_milkdrop_fps_cap_ms(&panel);
+        let fps_cap = rustymilk_fps_cap_ms(&panel);
         if fps_cap > 0.0 && time_ms - *last_render_for_frame.borrow() < fps_cap {
             if let Some(callback) = animation_handle.borrow().as_ref() {
                 let _ = window_for_frame.request_animation_frame(callback.as_ref().unchecked_ref());
@@ -17442,7 +17442,7 @@ fn start_rust_milkdrop_visualizer(
         *last_render_for_frame.borrow_mut() = time_ms;
         if analyzer_for_frame.borrow().is_none() {
             if let Some(audio) = player_audio_element(&document_for_frame) {
-                if let Ok(next_analyzer) = RustMilkdropAudioAnalyzer::new(&audio) {
+                if let Ok(next_analyzer) = RustyMilkAudioAnalyzer::new(&audio) {
                     *analyzer_for_frame.borrow_mut() = Some(next_analyzer);
                 }
             }
@@ -17451,8 +17451,8 @@ fn start_rust_milkdrop_visualizer(
             .borrow()
             .as_ref()
             .map(|analyzer| analyzer.snapshot(time))
-            .unwrap_or_else(|| RustMilkdropAudioSnapshot::synthetic(time));
-        maybe_advance_rust_milkdrop_automation(
+            .unwrap_or_else(|| RustyMilkAudioSnapshot::synthetic(time));
+        maybe_advance_rustymilk_automation(
             &document_for_frame,
             &panel,
             &imports_for_frame,
@@ -17474,7 +17474,7 @@ fn start_rust_milkdrop_visualizer(
                 *input_for_frame.borrow(),
             );
         renderer.render_frame_set(&frame_set, time);
-        if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
+        if let Some(status) = document_for_frame.get_element_by_id("slskr-rustymilk-status") {
             let shape_count = frame_set
                 .entries
                 .iter()
@@ -17486,7 +17486,7 @@ fn start_rust_milkdrop_visualizer(
                 .map(|entry| entry.frame.waveform_count)
                 .sum::<usize>();
             status.set_text_content(Some(&format!(
-                "MilkDrop running: {} bass {:.0}% mid {:.0}% treble {:.0}% / {} preset{} / {} shapes / {} waves",
+                "RustyMilk running: {} bass {:.0}% mid {:.0}% treble {:.0}% / {} preset{} / {} shapes / {} waves",
                 audio.source,
                 audio.bands.bass * 100.0,
                 audio.bands.mid * 100.0,
@@ -17497,7 +17497,7 @@ fn start_rust_milkdrop_visualizer(
                 waveform_count
             )));
         }
-        update_rust_milkdrop_library_controls(
+        update_rustymilk_library_controls(
             &document_for_frame,
             &panel,
             &imports_for_frame,
@@ -17516,14 +17516,14 @@ fn start_rust_milkdrop_visualizer(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn mount_rust_milkdrop_buttons(
+fn mount_rustymilk_buttons(
     window: &web_sys::Window,
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: Rc<RefCell<BTreeSet<String>>>,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 ) -> Result<(), JsValue> {
-    let buttons = document.query_selector_all("[data-slskr-milkdrop-action]")?;
+    let buttons = document.query_selector_all("[data-slskr-rustymilk-action]")?;
     for index in 0..buttons.length() {
         let Some(node) = buttons.item(index) else {
             continue;
@@ -17534,7 +17534,7 @@ fn mount_rust_milkdrop_buttons(
         }
         button.set_attribute("data-slskr-mounted", "true")?;
         let action = button
-            .get_attribute("data-slskr-milkdrop-action")
+            .get_attribute("data-slskr-rustymilk-action")
             .unwrap_or_default();
         let window = window.clone();
         let document = document.clone();
@@ -17546,10 +17546,10 @@ fn mount_rust_milkdrop_buttons(
                 event.prevent_default();
                 match action.as_str() {
                     "close" => {
-                        if let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") {
+                        if let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") {
                             let _ = panel.set_attribute("hidden", "");
                         }
-                        set_player_status(&document, "Rust MilkDrop hidden");
+                        set_player_status(&document, "RustyMilk hidden");
                     }
                     "external" => {
                         let window = window.clone();
@@ -17575,104 +17575,104 @@ fn mount_rust_milkdrop_buttons(
                     }
                     "import" => {
                         if let Some(input) = document
-                            .get_element_by_id("slskr-milkdrop-preset-input")
+                            .get_element_by_id("slskr-rustymilk-preset-input")
                             .and_then(|element| {
                                 element.dyn_into::<web_sys::HtmlInputElement>().ok()
                             })
                         {
                             input.click();
                         } else {
-                            import_rust_milkdrop_preset(
+                            import_rustymilk_preset(
                                 &window,
                                 &document,
                                 imported_presets.clone(),
                             );
                         }
                     }
-                    "clear" => clear_rust_milkdrop_library(
+                    "clear" => clear_rustymilk_library(
                         &window,
                         &document,
                         imported_presets.clone(),
                         favorite_presets.clone(),
                     ),
-                    "clear-search" => clear_rust_milkdrop_preset_search(
+                    "clear-search" => clear_rustymilk_preset_search(
                         &document,
                         &imported_presets,
                         &favorite_presets,
                     ),
-                    "save-playlist" => save_rust_milkdrop_playlist(
+                    "save-playlist" => save_rustymilk_playlist(
                         &window,
                         &document,
                         &imported_presets,
                         &favorite_presets,
                     ),
-                    "playlist" => cycle_rust_milkdrop_playlist(
+                    "playlist" => cycle_rustymilk_playlist(
                         &document,
                         &imported_presets,
                         &favorite_presets,
                     ),
-                    "rename-playlist" => rename_rust_milkdrop_playlist(&window, &document),
-                    "clear-playlist" => clear_rust_milkdrop_playlist_filter(
+                    "rename-playlist" => rename_rustymilk_playlist(&window, &document),
+                    "clear-playlist" => clear_rustymilk_playlist_filter(
                         &document,
                         &imported_presets,
                         &favorite_presets,
                     ),
-                    "remove-playlist" => remove_rust_milkdrop_playlist(
+                    "remove-playlist" => remove_rustymilk_playlist(
                         &window,
                         &document,
                         &imported_presets,
                         &favorite_presets,
                     ),
-                    "favorite" => toggle_rust_milkdrop_favorite(
+                    "favorite" => toggle_rustymilk_favorite(
                         &document,
                         &imported_presets,
                         favorite_presets.clone(),
                     ),
-                    "favorites" => toggle_rust_milkdrop_favorites_only(
+                    "favorites" => toggle_rustymilk_favorites_only(
                         &document,
                         &imported_presets,
                         &favorite_presets,
                     ),
-                    "previous" => cycle_rust_milkdrop_preset_by(
+                    "previous" => cycle_rustymilk_preset_by(
                         &document,
                         &imported_presets,
                         &favorite_presets,
                         -1,
                     ),
                     "random" => {
-                        random_rust_milkdrop_preset(&document, &imported_presets, &favorite_presets)
+                        random_rustymilk_preset(&document, &imported_presets, &favorite_presets)
                     }
-                    "remove" => remove_rust_milkdrop_active_preset(
+                    "remove" => remove_rustymilk_active_preset(
                         &document,
                         imported_presets.clone(),
                         &favorite_presets,
                     ),
-                    "reset" => reset_rust_milkdrop_import(
+                    "reset" => reset_rustymilk_import(
                         &document,
                         imported_presets.clone(),
                         &favorite_presets,
                     ),
                     "search" => {
-                        search_rust_milkdrop_preset(&document, &imported_presets, &favorite_presets)
+                        search_rustymilk_preset(&document, &imported_presets, &favorite_presets)
                     }
-                    "apply-parameter" => apply_rust_milkdrop_parameter(
+                    "apply-parameter" => apply_rustymilk_parameter(
                         &document,
                         imported_presets.clone(),
                         &favorite_presets,
                     ),
-                    "randomize-parameters" => randomize_rust_milkdrop_parameters(
+                    "randomize-parameters" => randomize_rustymilk_parameters(
                         &document,
                         imported_presets.clone(),
                         &favorite_presets,
                     ),
-                    "import-shape" => import_rust_milkdrop_fragment(
+                    "import-shape" => import_rustymilk_fragment(
                         &window,
                         &document,
                         imported_presets.clone(),
                         &favorite_presets,
                         "shape",
                     ),
-                    "import-wave" => import_rust_milkdrop_fragment(
+                    "import-wave" => import_rustymilk_fragment(
                         &window,
                         &document,
                         imported_presets.clone(),
@@ -17680,36 +17680,36 @@ fn mount_rust_milkdrop_buttons(
                         "wave",
                     ),
                     "export-shape" => {
-                        export_rust_milkdrop_fragment(&document, &imported_presets, "shape")
+                        export_rustymilk_fragment(&document, &imported_presets, "shape")
                     }
                     "export-wave" => {
-                        export_rust_milkdrop_fragment(&document, &imported_presets, "wave")
+                        export_rustymilk_fragment(&document, &imported_presets, "wave")
                     }
-                    "remove-shape" => remove_rust_milkdrop_fragment(
+                    "remove-shape" => remove_rustymilk_fragment(
                         &document,
                         imported_presets.clone(),
                         &favorite_presets,
                         "shape",
                     ),
-                    "remove-wave" => remove_rust_milkdrop_fragment(
+                    "remove-wave" => remove_rustymilk_fragment(
                         &document,
                         imported_presets.clone(),
                         &favorite_presets,
                         "wave",
                     ),
-                    "export-preset" => export_rust_milkdrop_preset(&document, &imported_presets),
-                    "automation" => cycle_rust_milkdrop_automation(&document),
-                    "debug" => toggle_rust_milkdrop_debug(&document, &imported_presets),
+                    "export-preset" => export_rustymilk_preset(&document, &imported_presets),
+                    "automation" => cycle_rustymilk_automation(&document),
+                    "debug" => toggle_rustymilk_debug(&document, &imported_presets),
                     "texture" => {
                         if let Some(input) = document
-                            .get_element_by_id("slskr-milkdrop-texture-input")
+                            .get_element_by_id("slskr-rustymilk-texture-input")
                             .and_then(|element| {
                                 element.dyn_into::<web_sys::HtmlInputElement>().ok()
                             })
                         {
                             input.click();
                         } else {
-                            import_rust_milkdrop_texture_asset(
+                            import_rustymilk_texture_asset(
                                 &window,
                                 &document,
                                 texture_assets.clone(),
@@ -17718,7 +17718,7 @@ fn mount_rust_milkdrop_buttons(
                     }
                     "pack" => {
                         if let Some(input) = document
-                            .get_element_by_id("slskr-milkdrop-pack-input")
+                            .get_element_by_id("slskr-rustymilk-pack-input")
                             .and_then(|element| {
                                 element.dyn_into::<web_sys::HtmlInputElement>().ok()
                             })
@@ -17727,7 +17727,7 @@ fn mount_rust_milkdrop_buttons(
                         }
                     }
                     _ => {
-                        cycle_rust_milkdrop_preset(&document, &imported_presets, &favorite_presets)
+                        cycle_rustymilk_preset(&document, &imported_presets, &favorite_presets)
                     }
                 }
             },
@@ -17739,17 +17739,17 @@ fn mount_rust_milkdrop_buttons(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn mount_rust_milkdrop_selects(document: &web_sys::Document) -> Result<(), JsValue> {
+fn mount_rustymilk_selects(document: &web_sys::Document) -> Result<(), JsValue> {
     for (id, attribute, storage_key) in [
         (
-            "slskr-milkdrop-fps",
-            "data-slskr-milkdrop-fps",
-            RUST_MILKDROP_FPS_STORAGE_KEY,
+            "slskr-rustymilk-fps",
+            "data-slskr-rustymilk-fps",
+            RUSTYMILK_FPS_STORAGE_KEY,
         ),
         (
-            "slskr-milkdrop-quality",
-            "data-slskr-milkdrop-quality",
-            RUST_MILKDROP_QUALITY_STORAGE_KEY,
+            "slskr-rustymilk-quality",
+            "data-slskr-rustymilk-quality",
+            RUSTYMILK_QUALITY_STORAGE_KEY,
         ),
     ] {
         let Some(select) = document
@@ -17761,7 +17761,7 @@ fn mount_rust_milkdrop_selects(document: &web_sys::Document) -> Result<(), JsVal
         if select.has_attribute("data-slskr-mounted") {
             continue;
         }
-        if let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") {
+        if let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") {
             if let Some(value) = panel.get_attribute(attribute) {
                 select.set_value(&value);
             }
@@ -17778,15 +17778,15 @@ fn mount_rust_milkdrop_selects(document: &web_sys::Document) -> Result<(), JsVal
                 else {
                     return;
                 };
-                if let Some(panel) = document_for_change.get_element_by_id("slskr-rust-milkdrop") {
+                if let Some(panel) = document_for_change.get_element_by_id("slskr-rust-rustymilk") {
                     let _ = panel.set_attribute(&attribute, &select.value());
                 }
-                persist_rust_milkdrop_simple_setting(
+                persist_rustymilk_simple_setting(
                     &document_for_change,
                     &storage_key,
                     &select.value(),
                 );
-                set_player_status(&document_for_change, "MilkDrop render setting updated");
+                set_player_status(&document_for_change, "RustyMilk render setting updated");
             }));
         select.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())?;
         callback.forget();
@@ -17795,7 +17795,7 @@ fn mount_rust_milkdrop_selects(document: &web_sys::Document) -> Result<(), JsVal
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_mouse_position(
+fn rustymilk_mouse_position(
     canvas: &web_sys::HtmlCanvasElement,
     event: &web_sys::MouseEvent,
 ) -> (f64, f64) {
@@ -17808,15 +17808,15 @@ fn rust_milkdrop_mouse_position(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn mount_rust_milkdrop_mouse_input(
+fn mount_rustymilk_mouse_input(
     canvas: &web_sys::HtmlCanvasElement,
-    input_state: Rc<RefCell<RustMilkdropInputState>>,
+    input_state: Rc<RefCell<RustyMilkInputState>>,
 ) -> Result<(), JsValue> {
     let canvas_for_move = canvas.clone();
     let input_for_move = input_state.clone();
     let move_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
         move |event: web_sys::MouseEvent| {
-            let (mouse_x, mouse_y) = rust_milkdrop_mouse_position(&canvas_for_move, &event);
+            let (mouse_x, mouse_y) = rustymilk_mouse_position(&canvas_for_move, &event);
             let mut input = input_for_move.borrow_mut();
             input.mouse_dx = mouse_x - input.mouse_x;
             input.mouse_dy = mouse_y - input.mouse_y;
@@ -17831,7 +17831,7 @@ fn mount_rust_milkdrop_mouse_input(
     let input_for_down = input_state.clone();
     let down_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
         move |event: web_sys::MouseEvent| {
-            let (mouse_x, mouse_y) = rust_milkdrop_mouse_position(&canvas_for_down, &event);
+            let (mouse_x, mouse_y) = rustymilk_mouse_position(&canvas_for_down, &event);
             let mut input = input_for_down.borrow_mut();
             input.mouse_down = 1.0;
             input.mouse_dx = mouse_x - input.mouse_x;
@@ -17856,23 +17856,23 @@ fn mount_rust_milkdrop_mouse_input(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_preset_count(
+fn rustymilk_preset_count(
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
 ) -> usize {
     imported_presets.borrow().len()
-        + RUST_MILKDROP_PRESETS.len()
+        + RUSTYMILK_PRESETS.len()
         + usize::from(
             panel
-                .get_attribute("data-slskr-milkdrop-custom-source")
+                .get_attribute("data-slskr-rustymilk-custom-source")
                 .is_some_and(|value| !value.trim().is_empty()),
         )
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_active_preset_source(
+fn rustymilk_active_preset_source(
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     index: usize,
 ) -> String {
     let imports = imported_presets.borrow();
@@ -17882,21 +17882,21 @@ fn rust_milkdrop_active_preset_source(
     let index = index.saturating_sub(imports.len());
     drop(imports);
     if let Some(custom_source) = panel
-        .get_attribute("data-slskr-milkdrop-custom-source")
+        .get_attribute("data-slskr-rustymilk-custom-source")
         .filter(|value| !value.trim().is_empty())
     {
         if index == 0 {
             return custom_source;
         }
-        return RUST_MILKDROP_PRESETS[(index - 1) % RUST_MILKDROP_PRESETS.len()].to_string();
+        return RUSTYMILK_PRESETS[(index - 1) % RUSTYMILK_PRESETS.len()].to_string();
     }
-    RUST_MILKDROP_PRESETS[index % RUST_MILKDROP_PRESETS.len()].to_string()
+    RUSTYMILK_PRESETS[index % RUSTYMILK_PRESETS.len()].to_string()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_active_preset_name(
+fn rustymilk_active_preset_name(
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     index: usize,
 ) -> String {
     let imports = imported_presets.borrow();
@@ -17904,7 +17904,7 @@ fn rust_milkdrop_active_preset_name(
         return preset.title.clone();
     }
     drop(imports);
-    rust_milkdrop_preset_name(&rust_milkdrop_active_preset_source(
+    rustymilk_preset_name(&rustymilk_active_preset_source(
         panel,
         imported_presets,
         index,
@@ -17912,13 +17912,13 @@ fn rust_milkdrop_active_preset_name(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_preset_favorite_key(
+fn rustymilk_preset_favorite_key(
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     index: usize,
 ) -> String {
-    let source = rust_milkdrop_active_preset_source(panel, imported_presets, index);
-    let name = rust_milkdrop_active_preset_name(panel, imported_presets, index);
+    let source = rustymilk_active_preset_source(panel, imported_presets, index);
+    let name = rustymilk_active_preset_name(panel, imported_presets, index);
     let preview = source
         .lines()
         .take(16)
@@ -17931,42 +17931,42 @@ fn rust_milkdrop_preset_favorite_key(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_favorites_only(panel: &web_sys::Element) -> bool {
+fn rustymilk_favorites_only(panel: &web_sys::Element) -> bool {
     panel
-        .get_attribute("data-slskr-milkdrop-favorites-only")
+        .get_attribute("data-slskr-rustymilk-favorites-only")
         .as_deref()
         == Some("true")
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_active_playlist(panel: &web_sys::Element) -> String {
+fn rustymilk_active_playlist(panel: &web_sys::Element) -> String {
     panel
-        .get_attribute("data-slskr-milkdrop-playlist")
+        .get_attribute("data-slskr-rustymilk-playlist")
         .unwrap_or_default()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_preset_search_query(panel: &web_sys::Element) -> String {
+fn rustymilk_preset_search_query(panel: &web_sys::Element) -> String {
     panel
-        .get_attribute("data-slskr-milkdrop-search")
+        .get_attribute("data-slskr-rustymilk-search")
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_visible_preset_indices(
+fn rustymilk_visible_preset_indices(
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) -> Vec<usize> {
-    let count = rust_milkdrop_preset_count(panel, imported_presets);
-    let query = rust_milkdrop_preset_search_query(panel);
-    let active_playlist = rust_milkdrop_active_playlist(panel);
+    let count = rustymilk_preset_count(panel, imported_presets);
+    let query = rustymilk_preset_search_query(panel);
+    let active_playlist = rustymilk_active_playlist(panel);
     let playlist_keys = if active_playlist.is_empty() {
         BTreeSet::new()
     } else {
-        load_rust_milkdrop_playlists_from_document(panel)
+        load_rustymilk_playlists_from_document(panel)
             .into_iter()
             .find(|playlist| playlist.id == active_playlist)
             .map(|playlist| playlist.preset_keys.into_iter().collect::<BTreeSet<_>>())
@@ -17975,11 +17975,11 @@ fn rust_milkdrop_visible_preset_indices(
     let favorites = favorite_presets.borrow();
     (0..count)
         .filter(|index| {
-            let key = rust_milkdrop_preset_favorite_key(panel, imported_presets, *index);
-            let favorite_matches = !rust_milkdrop_favorites_only(panel) || favorites.contains(&key);
+            let key = rustymilk_preset_favorite_key(panel, imported_presets, *index);
+            let favorite_matches = !rustymilk_favorites_only(panel) || favorites.contains(&key);
             let playlist_matches = active_playlist.is_empty() || playlist_keys.contains(&key);
             let search_matches = query.is_empty()
-                || rust_milkdrop_active_preset_name(panel, imported_presets, *index)
+                || rustymilk_active_preset_name(panel, imported_presets, *index)
                     .to_ascii_lowercase()
                     .contains(&query);
             favorite_matches && playlist_matches && search_matches
@@ -17988,32 +17988,32 @@ fn rust_milkdrop_visible_preset_indices(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_empty_visible_preset_message(panel: &web_sys::Element) -> &'static str {
-    if !rust_milkdrop_preset_search_query(panel).is_empty() {
-        "No matching MilkDrop presets"
-    } else if rust_milkdrop_favorites_only(panel) {
-        "No favorite MilkDrop presets"
-    } else if !rust_milkdrop_active_playlist(panel).is_empty() {
-        "No presets in active MilkDrop playlist"
+fn rustymilk_empty_visible_preset_message(panel: &web_sys::Element) -> &'static str {
+    if !rustymilk_preset_search_query(panel).is_empty() {
+        "No matching RustyMilk presets"
+    } else if rustymilk_favorites_only(panel) {
+        "No favorite RustyMilk presets"
+    } else if !rustymilk_active_playlist(panel).is_empty() {
+        "No presets in active RustyMilk playlist"
     } else {
-        "No MilkDrop presets"
+        "No RustyMilk presets"
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn update_rust_milkdrop_library_controls(
+fn update_rustymilk_library_controls(
     document: &web_sys::Document,
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     index: usize,
 ) {
-    let count = rust_milkdrop_preset_count(panel, imported_presets).max(1);
+    let count = rustymilk_preset_count(panel, imported_presets).max(1);
     let index = index % count;
-    let favorite_key = rust_milkdrop_preset_favorite_key(panel, imported_presets, index);
+    let favorite_key = rustymilk_preset_favorite_key(panel, imported_presets, index);
     let favorite_count = favorite_presets.borrow().len();
     let is_favorite = favorite_presets.borrow().contains(&favorite_key);
-    if let Some(button) = document.get_element_by_id("slskr-milkdrop-favorite") {
+    if let Some(button) = document.get_element_by_id("slskr-rustymilk-favorite") {
         button.set_text_content(Some(if is_favorite {
             "Unfavorite"
         } else {
@@ -18021,21 +18021,21 @@ fn update_rust_milkdrop_library_controls(
         }));
         let _ = button.set_attribute("aria-pressed", if is_favorite { "true" } else { "false" });
     }
-    if let Some(button) = document.get_element_by_id("slskr-milkdrop-favorites-only") {
-        let only = rust_milkdrop_favorites_only(panel);
+    if let Some(button) = document.get_element_by_id("slskr-rustymilk-favorites-only") {
+        let only = rustymilk_favorites_only(panel);
         button.set_text_content(Some(if only { "All presets" } else { "Favorites" }));
         let _ = button.set_attribute("aria-pressed", if only { "true" } else { "false" });
     }
-    if let Some(status_label) = document.get_element_by_id("slskr-milkdrop-library-status") {
+    if let Some(status_label) = document.get_element_by_id("slskr-rustymilk-library-status") {
         let imported_count = imported_presets.borrow().len();
-        let filter = if rust_milkdrop_favorites_only(panel) {
+        let filter = if rustymilk_favorites_only(panel) {
             " / favorites only"
         } else {
             ""
         };
-        let search = rust_milkdrop_preset_search_query(panel);
+        let search = rustymilk_preset_search_query(panel);
         let search = if search.is_empty() { "" } else { " / filtered" };
-        let playlist = if rust_milkdrop_active_playlist(panel).is_empty() {
+        let playlist = if rustymilk_active_playlist(panel).is_empty() {
             ""
         } else {
             " / playlist"
@@ -18055,25 +18055,25 @@ fn update_rust_milkdrop_library_controls(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn set_rust_milkdrop_active_preset(
+fn set_rustymilk_active_preset(
     document: &web_sys::Document,
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     index: usize,
     status: &str,
 ) {
-    let count = rust_milkdrop_preset_count(panel, imported_presets).max(1);
+    let count = rustymilk_preset_count(panel, imported_presets).max(1);
     let index = index % count;
-    let _ = panel.set_attribute("data-slskr-milkdrop-preset-index", &index.to_string());
-    if let Some(label) = document.get_element_by_id("slskr-milkdrop-preset") {
-        label.set_text_content(Some(&rust_milkdrop_active_preset_name(
+    let _ = panel.set_attribute("data-slskr-rustymilk-preset-index", &index.to_string());
+    if let Some(label) = document.get_element_by_id("slskr-rustymilk-preset") {
+        label.set_text_content(Some(&rustymilk_active_preset_name(
             panel,
             imported_presets,
             index,
         )));
     }
-    update_rust_milkdrop_library_controls(
+    update_rustymilk_library_controls(
         document,
         panel,
         imported_presets,
@@ -18084,14 +18084,14 @@ fn set_rust_milkdrop_active_preset(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_imported_presets(
+fn load_rustymilk_imported_presets(
     window: &web_sys::Window,
-) -> Vec<RustMilkdropImportedPreset> {
+) -> Vec<RustyMilkImportedPreset> {
     let Some(storage) = window.local_storage().ok().flatten() else {
         return Vec::new();
     };
     let Some(raw) = storage
-        .get_item(RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY)
+        .get_item(RUSTYMILK_IMPORTED_PRESETS_STORAGE_KEY)
         .ok()
         .flatten()
     else {
@@ -18115,17 +18115,17 @@ fn load_rust_milkdrop_imported_presets(
                 .and_then(|value| value.as_str())
                 .filter(|value| !value.trim().is_empty())
                 .map(str::to_string)
-                .unwrap_or_else(|| rust_milkdrop_preset_name(&source));
-            Some(RustMilkdropImportedPreset { source, title })
+                .unwrap_or_else(|| rustymilk_preset_name(&source));
+            Some(RustyMilkImportedPreset { source, title })
         })
         .take(20)
         .collect()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rust_milkdrop_imported_presets(
+fn persist_rustymilk_imported_presets(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
 ) {
     let Some(window) = document.default_view() else {
         return;
@@ -18145,18 +18145,18 @@ fn persist_rust_milkdrop_imported_presets(
         })
         .collect::<Vec<_>>();
     let _ = storage.set_item(
-        RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY,
+        RUSTYMILK_IMPORTED_PRESETS_STORAGE_KEY,
         &serde_json::Value::Array(items).to_string(),
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_favorite_presets(window: &web_sys::Window) -> BTreeSet<String> {
+fn load_rustymilk_favorite_presets(window: &web_sys::Window) -> BTreeSet<String> {
     let Some(storage) = window.local_storage().ok().flatten() else {
         return BTreeSet::new();
     };
     let Some(raw) = storage
-        .get_item(RUST_MILKDROP_FAVORITE_PRESETS_STORAGE_KEY)
+        .get_item(RUSTYMILK_FAVORITE_PRESETS_STORAGE_KEY)
         .ok()
         .flatten()
     else {
@@ -18178,7 +18178,7 @@ fn load_rust_milkdrop_favorite_presets(window: &web_sys::Window) -> BTreeSet<Str
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rust_milkdrop_favorite_presets(
+fn persist_rustymilk_favorite_presets(
     document: &web_sys::Document,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
@@ -18195,20 +18195,20 @@ fn persist_rust_milkdrop_favorite_presets(
         .map(|key| serde_json::Value::String(key.clone()))
         .collect::<Vec<_>>();
     let _ = storage.set_item(
-        RUST_MILKDROP_FAVORITE_PRESETS_STORAGE_KEY,
+        RUSTYMILK_FAVORITE_PRESETS_STORAGE_KEY,
         &serde_json::Value::Array(items).to_string(),
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_preset_search(window: &web_sys::Window) -> String {
+fn load_rustymilk_preset_search(window: &web_sys::Window) -> String {
     window
         .local_storage()
         .ok()
         .flatten()
         .and_then(|storage| {
             storage
-                .get_item(RUST_MILKDROP_PRESET_SEARCH_STORAGE_KEY)
+                .get_item(RUSTYMILK_PRESET_SEARCH_STORAGE_KEY)
                 .ok()
                 .flatten()
         })
@@ -18219,7 +18219,7 @@ fn load_rust_milkdrop_preset_search(window: &web_sys::Window) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_simple_setting(
+fn load_rustymilk_simple_setting(
     window: &web_sys::Window,
     storage_key: &str,
     fallback: &str,
@@ -18234,7 +18234,7 @@ fn load_rust_milkdrop_simple_setting(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rust_milkdrop_simple_setting(
+fn persist_rustymilk_simple_setting(
     document: &web_sys::Document,
     storage_key: &str,
     value: &str,
@@ -18249,17 +18249,17 @@ fn persist_rust_milkdrop_simple_setting(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_active_playlist(window: &web_sys::Window) -> String {
-    load_rust_milkdrop_simple_setting(window, RUST_MILKDROP_ACTIVE_PLAYLIST_STORAGE_KEY, "")
+fn load_rustymilk_active_playlist(window: &web_sys::Window) -> String {
+    load_rustymilk_simple_setting(window, RUSTYMILK_ACTIVE_PLAYLIST_STORAGE_KEY, "")
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_playlists(window: &web_sys::Window) -> Vec<RustMilkdropPlaylist> {
+fn load_rustymilk_playlists(window: &web_sys::Window) -> Vec<RustyMilkPlaylist> {
     let Some(storage) = window.local_storage().ok().flatten() else {
         return Vec::new();
     };
     let Some(raw) = storage
-        .get_item(RUST_MILKDROP_PLAYLISTS_STORAGE_KEY)
+        .get_item(RUSTYMILK_PLAYLISTS_STORAGE_KEY)
         .ok()
         .flatten()
     else {
@@ -18285,7 +18285,7 @@ fn load_rust_milkdrop_playlists(window: &web_sys::Window) -> Vec<RustMilkdropPla
             if id.is_empty() || name.is_empty() || preset_keys.is_empty() {
                 return None;
             }
-            Some(RustMilkdropPlaylist {
+            Some(RustyMilkPlaylist {
                 id,
                 name,
                 preset_keys,
@@ -18296,20 +18296,20 @@ fn load_rust_milkdrop_playlists(window: &web_sys::Window) -> Vec<RustMilkdropPla
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_playlists_from_document(
+fn load_rustymilk_playlists_from_document(
     panel: &web_sys::Element,
-) -> Vec<RustMilkdropPlaylist> {
+) -> Vec<RustyMilkPlaylist> {
     panel
         .owner_document()
         .and_then(|document| document.default_view())
-        .map(|window| load_rust_milkdrop_playlists(&window))
+        .map(|window| load_rustymilk_playlists(&window))
         .unwrap_or_default()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rust_milkdrop_playlists(
+fn persist_rustymilk_playlists(
     document: &web_sys::Document,
-    playlists: &[RustMilkdropPlaylist],
+    playlists: &[RustyMilkPlaylist],
 ) {
     let Some(window) = document.default_view() else {
         return;
@@ -18329,17 +18329,17 @@ fn persist_rust_milkdrop_playlists(
         })
         .collect::<Vec<_>>();
     if items.is_empty() {
-        let _ = storage.remove_item(RUST_MILKDROP_PLAYLISTS_STORAGE_KEY);
+        let _ = storage.remove_item(RUSTYMILK_PLAYLISTS_STORAGE_KEY);
     } else {
         let _ = storage.set_item(
-            RUST_MILKDROP_PLAYLISTS_STORAGE_KEY,
+            RUSTYMILK_PLAYLISTS_STORAGE_KEY,
             &serde_json::Value::Array(items).to_string(),
         );
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rust_milkdrop_preset_search(document: &web_sys::Document, query: &str) {
+fn persist_rustymilk_preset_search(document: &web_sys::Document, query: &str) {
     let Some(window) = document.default_view() else {
         return;
     };
@@ -18347,19 +18347,19 @@ fn persist_rust_milkdrop_preset_search(document: &web_sys::Document, query: &str
         return;
     };
     if query.trim().is_empty() {
-        let _ = storage.remove_item(RUST_MILKDROP_PRESET_SEARCH_STORAGE_KEY);
+        let _ = storage.remove_item(RUSTYMILK_PRESET_SEARCH_STORAGE_KEY);
     } else {
-        let _ = storage.set_item(RUST_MILKDROP_PRESET_SEARCH_STORAGE_KEY, query.trim());
+        let _ = storage.set_item(RUSTYMILK_PRESET_SEARCH_STORAGE_KEY, query.trim());
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rust_milkdrop_texture_assets(window: &web_sys::Window) -> BTreeMap<String, String> {
+fn load_rustymilk_texture_assets(window: &web_sys::Window) -> BTreeMap<String, String> {
     let Some(storage) = window.local_storage().ok().flatten() else {
         return BTreeMap::new();
     };
     let Some(raw) = storage
-        .get_item(RUST_MILKDROP_TEXTURE_ASSETS_STORAGE_KEY)
+        .get_item(RUSTYMILK_TEXTURE_ASSETS_STORAGE_KEY)
         .ok()
         .flatten()
     else {
@@ -18384,7 +18384,7 @@ fn load_rust_milkdrop_texture_assets(window: &web_sys::Window) -> BTreeMap<Strin
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rust_milkdrop_texture_assets(
+fn persist_rustymilk_texture_assets(
     document: &web_sys::Document,
     texture_assets: &Rc<RefCell<BTreeMap<String, String>>>,
 ) {
@@ -18399,43 +18399,43 @@ fn persist_rust_milkdrop_texture_assets(
         map.insert(name.clone(), serde_json::Value::String(data_url.clone()));
     }
     let _ = storage.set_item(
-        RUST_MILKDROP_TEXTURE_ASSETS_STORAGE_KEY,
+        RUSTYMILK_TEXTURE_ASSETS_STORAGE_KEY,
         &serde_json::Value::Object(map).to_string(),
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn import_rust_milkdrop_preset(
+fn import_rustymilk_preset(
     window: &web_sys::Window,
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
 ) {
-    let Ok(Some(source)) = window.prompt_with_message("Paste a MilkDrop preset") else {
+    let Ok(Some(source)) = window.prompt_with_message("Paste a RustyMilk preset") else {
         return;
     };
-    match validate_rust_milkdrop_import(&source) {
+    match validate_rustymilk_import(&source) {
         Ok(title) => {
-            if let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") {
+            if let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") {
                 imported_presets.borrow_mut().insert(
                     0,
-                    RustMilkdropImportedPreset {
+                    RustyMilkImportedPreset {
                         source,
                         title: title.clone(),
                     },
                 );
-                persist_rust_milkdrop_imported_presets(document, &imported_presets);
-                set_rust_milkdrop_active_preset(
+                persist_rustymilk_imported_presets(document, &imported_presets);
+                set_rustymilk_active_preset(
                     document,
                     &panel,
                     &imported_presets,
                     &Rc::new(RefCell::new(
                         document
                             .default_view()
-                            .map(|window| load_rust_milkdrop_favorite_presets(&window))
+                            .map(|window| load_rustymilk_favorite_presets(&window))
                             .unwrap_or_default(),
                     )),
                     0,
-                    "MilkDrop preset imported",
+                    "RustyMilk preset imported",
                 );
             }
         }
@@ -18444,53 +18444,53 @@ fn import_rust_milkdrop_preset(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn reset_rust_milkdrop_import(
+fn reset_rustymilk_import(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     imported_presets.borrow_mut().clear();
-    persist_rust_milkdrop_imported_presets(document, &imported_presets);
-    let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
-    set_rust_milkdrop_active_preset(
+    persist_rustymilk_imported_presets(document, &imported_presets);
+    let _ = panel.remove_attribute("data-slskr-rustymilk-custom-source");
+    set_rustymilk_active_preset(
         document,
         &panel,
         &imported_presets,
         favorite_presets,
         0,
-        "MilkDrop import reset",
+        "RustyMilk import reset",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn cycle_rust_milkdrop_preset(
+fn cycle_rustymilk_preset(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    cycle_rust_milkdrop_preset_by(document, imported_presets, favorite_presets, 1);
+    cycle_rustymilk_preset_by(document, imported_presets, favorite_presets, 1);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn cycle_rust_milkdrop_preset_by(
+fn cycle_rustymilk_preset_by(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     offset: isize,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let current = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let visible = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets);
+    let visible = rustymilk_visible_preset_indices(&panel, imported_presets, favorite_presets);
     if visible.is_empty() {
-        set_player_status(document, rust_milkdrop_empty_visible_preset_message(&panel));
+        set_player_status(document, rustymilk_empty_visible_preset_message(&panel));
         return;
     }
     let visible_position = visible
@@ -18499,27 +18499,27 @@ fn cycle_rust_milkdrop_preset_by(
         .unwrap_or(0) as isize;
     let next_position = (visible_position + offset).rem_euclid(visible.len() as isize) as usize;
     let next = visible[next_position];
-    set_rust_milkdrop_active_preset(
+    set_rustymilk_active_preset(
         document,
         &panel,
         imported_presets,
         favorite_presets,
         next,
-        "Rust MilkDrop preset changed",
+        "RustyMilk preset changed",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn search_rust_milkdrop_preset(
+fn search_rustymilk_preset(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let query = document
-        .get_element_by_id("slskr-milkdrop-search")
+        .get_element_by_id("slskr-rustymilk-search")
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
         .map(|input| input.value().trim().to_ascii_lowercase())
         .unwrap_or_default();
@@ -18527,67 +18527,67 @@ fn search_rust_milkdrop_preset(
         set_player_status(document, "Enter a preset search");
         return;
     }
-    let _ = panel.set_attribute("data-slskr-milkdrop-search", &query);
-    persist_rust_milkdrop_preset_search(document, &query);
-    for index in rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets) {
-        set_rust_milkdrop_active_preset(
+    let _ = panel.set_attribute("data-slskr-rustymilk-search", &query);
+    persist_rustymilk_preset_search(document, &query);
+    for index in rustymilk_visible_preset_indices(&panel, imported_presets, favorite_presets) {
+        set_rustymilk_active_preset(
             document,
             &panel,
             imported_presets,
             favorite_presets,
             index,
-            "MilkDrop preset filter applied",
+            "RustyMilk preset filter applied",
         );
         return;
     }
-    set_player_status(document, "No matching MilkDrop preset");
+    set_player_status(document, "No matching RustyMilk preset");
 }
 
 #[cfg(target_arch = "wasm32")]
-fn clear_rust_milkdrop_preset_search(
+fn clear_rustymilk_preset_search(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let _ = panel.set_attribute("data-slskr-milkdrop-search", "");
+    let _ = panel.set_attribute("data-slskr-rustymilk-search", "");
     if let Some(input) = document
-        .get_element_by_id("slskr-milkdrop-search")
+        .get_element_by_id("slskr-rustymilk-search")
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
         input.set_value("");
     }
-    persist_rust_milkdrop_preset_search(document, "");
+    persist_rustymilk_preset_search(document, "");
     let current = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    update_rust_milkdrop_library_controls(
+    update_rustymilk_library_controls(
         document,
         &panel,
         imported_presets,
         favorite_presets,
         current,
     );
-    set_player_status(document, "MilkDrop preset search cleared");
+    set_player_status(document, "RustyMilk preset search cleared");
 }
 
 #[cfg(target_arch = "wasm32")]
-fn toggle_rust_milkdrop_favorite(
+fn toggle_rustymilk_favorite(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let index = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let key = rust_milkdrop_preset_favorite_key(&panel, imported_presets, index);
+    let key = rustymilk_preset_favorite_key(&panel, imported_presets, index);
     let added = {
         let mut favorites = favorite_presets.borrow_mut();
         if favorites.contains(&key) {
@@ -18598,8 +18598,8 @@ fn toggle_rust_milkdrop_favorite(
             true
         }
     };
-    persist_rust_milkdrop_favorite_presets(document, &favorite_presets);
-    update_rust_milkdrop_library_controls(
+    persist_rustymilk_favorite_presets(document, &favorite_presets);
+    update_rustymilk_library_controls(
         document,
         &panel,
         imported_presets,
@@ -18609,42 +18609,42 @@ fn toggle_rust_milkdrop_favorite(
     set_player_status(
         document,
         if added {
-            "MilkDrop preset favorited"
+            "RustyMilk preset favorited"
         } else {
-            "MilkDrop preset unfavorited"
+            "RustyMilk preset unfavorited"
         },
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn toggle_rust_milkdrop_favorites_only(
+fn toggle_rustymilk_favorites_only(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let next = !rust_milkdrop_favorites_only(&panel);
+    let next = !rustymilk_favorites_only(&panel);
     let _ = panel.set_attribute(
-        "data-slskr-milkdrop-favorites-only",
+        "data-slskr-rustymilk-favorites-only",
         if next { "true" } else { "false" },
     );
     let current = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let visible = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets);
+    let visible = rustymilk_visible_preset_indices(&panel, imported_presets, favorite_presets);
     if next && visible.is_empty() {
-        let _ = panel.set_attribute("data-slskr-milkdrop-favorites-only", "false");
-        update_rust_milkdrop_library_controls(
+        let _ = panel.set_attribute("data-slskr-rustymilk-favorites-only", "false");
+        update_rustymilk_library_controls(
             document,
             &panel,
             imported_presets,
             favorite_presets,
             current,
         );
-        set_player_status(document, rust_milkdrop_empty_visible_preset_message(&panel));
+        set_player_status(document, rustymilk_empty_visible_preset_message(&panel));
         return;
     }
     let selected = if next && !visible.contains(&current) {
@@ -18652,153 +18652,153 @@ fn toggle_rust_milkdrop_favorites_only(
     } else {
         current
     };
-    set_rust_milkdrop_active_preset(
+    set_rustymilk_active_preset(
         document,
         &panel,
         imported_presets,
         favorite_presets,
         selected,
         if next {
-            "Showing favorite MilkDrop presets"
+            "Showing favorite RustyMilk presets"
         } else {
-            "Showing all MilkDrop presets"
+            "Showing all RustyMilk presets"
         },
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn random_rust_milkdrop_preset(
+fn random_rustymilk_preset(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let visible = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets);
+    let visible = rustymilk_visible_preset_indices(&panel, imported_presets, favorite_presets);
     if visible.is_empty() {
-        set_player_status(document, rust_milkdrop_empty_visible_preset_message(&panel));
+        set_player_status(document, rustymilk_empty_visible_preset_message(&panel));
         return;
     }
     let index = (js_sys::Math::random() * visible.len() as f64).floor() as usize;
-    set_rust_milkdrop_active_preset(
+    set_rustymilk_active_preset(
         document,
         &panel,
         imported_presets,
         favorite_presets,
         visible[index.min(visible.len() - 1)],
-        "Random MilkDrop preset selected",
+        "Random RustyMilk preset selected",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn remove_rust_milkdrop_active_preset(
+fn remove_rustymilk_active_preset(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let index = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
     let imports_len = imported_presets.borrow().len();
     if index < imports_len {
-        let key = rust_milkdrop_preset_favorite_key(&panel, &imported_presets, index);
+        let key = rustymilk_preset_favorite_key(&panel, &imported_presets, index);
         imported_presets.borrow_mut().remove(index);
         favorite_presets.borrow_mut().remove(&key);
-        persist_rust_milkdrop_imported_presets(document, &imported_presets);
-        persist_rust_milkdrop_favorite_presets(document, favorite_presets);
+        persist_rustymilk_imported_presets(document, &imported_presets);
+        persist_rustymilk_favorite_presets(document, favorite_presets);
         let next =
-            index.min(rust_milkdrop_preset_count(&panel, &imported_presets).saturating_sub(1));
-        set_rust_milkdrop_active_preset(
+            index.min(rustymilk_preset_count(&panel, &imported_presets).saturating_sub(1));
+        set_rustymilk_active_preset(
             document,
             &panel,
             &imported_presets,
             favorite_presets,
             next,
-            "MilkDrop preset removed",
+            "RustyMilk preset removed",
         );
         return;
     }
     let custom_index = index.saturating_sub(imports_len);
     if custom_index == 0
         && panel
-            .get_attribute("data-slskr-milkdrop-custom-source")
+            .get_attribute("data-slskr-rustymilk-custom-source")
             .is_some_and(|value| !value.trim().is_empty())
     {
-        let key = rust_milkdrop_preset_favorite_key(&panel, &imported_presets, index);
-        let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
+        let key = rustymilk_preset_favorite_key(&panel, &imported_presets, index);
+        let _ = panel.remove_attribute("data-slskr-rustymilk-custom-source");
         favorite_presets.borrow_mut().remove(&key);
-        persist_rust_milkdrop_favorite_presets(document, favorite_presets);
-        set_rust_milkdrop_active_preset(
+        persist_rustymilk_favorite_presets(document, favorite_presets);
+        set_rustymilk_active_preset(
             document,
             &panel,
             &imported_presets,
             favorite_presets,
             0,
-            "MilkDrop pasted preset removed",
+            "RustyMilk pasted preset removed",
         );
     } else {
-        set_player_status(document, "Bundled MilkDrop presets cannot be removed");
+        set_player_status(document, "Bundled RustyMilk presets cannot be removed");
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn clear_rust_milkdrop_library(
+fn clear_rustymilk_library(
     window: &web_sys::Window,
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: Rc<RefCell<BTreeSet<String>>>,
 ) {
     let Ok(confirmed) =
-        window.confirm_with_message("Clear imported MilkDrop presets and favorites?")
+        window.confirm_with_message("Clear imported RustyMilk presets and favorites?")
     else {
         return;
     };
     if !confirmed {
         return;
     }
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     imported_presets.borrow_mut().clear();
     favorite_presets.borrow_mut().clear();
-    persist_rust_milkdrop_imported_presets(document, &imported_presets);
-    persist_rust_milkdrop_favorite_presets(document, &favorite_presets);
-    let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
-    let _ = panel.set_attribute("data-slskr-milkdrop-favorites-only", "false");
-    set_rust_milkdrop_active_preset(
+    persist_rustymilk_imported_presets(document, &imported_presets);
+    persist_rustymilk_favorite_presets(document, &favorite_presets);
+    let _ = panel.remove_attribute("data-slskr-rustymilk-custom-source");
+    let _ = panel.set_attribute("data-slskr-rustymilk-favorites-only", "false");
+    set_rustymilk_active_preset(
         document,
         &panel,
         &imported_presets,
         &favorite_presets,
         0,
-        "MilkDrop library cleared",
+        "RustyMilk library cleared",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn save_rust_milkdrop_playlist(
+fn save_rustymilk_playlist(
     window: &web_sys::Window,
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let keys = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets)
+    let keys = rustymilk_visible_preset_indices(&panel, imported_presets, favorite_presets)
         .into_iter()
-        .map(|index| rust_milkdrop_preset_favorite_key(&panel, imported_presets, index))
+        .map(|index| rustymilk_preset_favorite_key(&panel, imported_presets, index))
         .collect::<Vec<_>>();
     if keys.is_empty() {
-        set_player_status(document, rust_milkdrop_empty_visible_preset_message(&panel));
+        set_player_status(document, rustymilk_empty_visible_preset_message(&panel));
         return;
     }
-    let Ok(Some(name)) = window.prompt_with_message("Name this MilkDrop playlist") else {
+    let Ok(Some(name)) = window.prompt_with_message("Name this RustyMilk playlist") else {
         return;
     };
     let name = name.trim();
@@ -18809,144 +18809,144 @@ fn save_rust_milkdrop_playlist(
         "playlist-{}",
         (js_sys::Date::now() + js_sys::Math::random() * 1000.0).floor() as u64
     );
-    let mut playlists = load_rust_milkdrop_playlists(window);
+    let mut playlists = load_rustymilk_playlists(window);
     playlists.insert(
         0,
-        RustMilkdropPlaylist {
+        RustyMilkPlaylist {
             id: id.clone(),
             name: name.to_string(),
             preset_keys: keys,
         },
     );
     playlists.truncate(12);
-    persist_rust_milkdrop_playlists(document, &playlists);
-    persist_rust_milkdrop_simple_setting(document, RUST_MILKDROP_ACTIVE_PLAYLIST_STORAGE_KEY, &id);
-    let _ = panel.set_attribute("data-slskr-milkdrop-playlist", &id);
-    set_player_status(document, "MilkDrop playlist saved");
+    persist_rustymilk_playlists(document, &playlists);
+    persist_rustymilk_simple_setting(document, RUSTYMILK_ACTIVE_PLAYLIST_STORAGE_KEY, &id);
+    let _ = panel.set_attribute("data-slskr-rustymilk-playlist", &id);
+    set_player_status(document, "RustyMilk playlist saved");
 }
 
 #[cfg(target_arch = "wasm32")]
-fn cycle_rust_milkdrop_playlist(
+fn cycle_rustymilk_playlist(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let Some(window) = document.default_view() else {
         return;
     };
-    let playlists = load_rust_milkdrop_playlists(&window);
+    let playlists = load_rustymilk_playlists(&window);
     if playlists.is_empty() {
-        set_player_status(document, "No MilkDrop playlists saved");
+        set_player_status(document, "No RustyMilk playlists saved");
         return;
     }
-    let current = rust_milkdrop_active_playlist(&panel);
+    let current = rustymilk_active_playlist(&panel);
     let next_index = playlists
         .iter()
         .position(|playlist| playlist.id == current)
         .map(|index| (index + 1) % playlists.len())
         .unwrap_or(0);
     let playlist = &playlists[next_index];
-    let _ = panel.set_attribute("data-slskr-milkdrop-playlist", &playlist.id);
-    persist_rust_milkdrop_simple_setting(
+    let _ = panel.set_attribute("data-slskr-rustymilk-playlist", &playlist.id);
+    persist_rustymilk_simple_setting(
         document,
-        RUST_MILKDROP_ACTIVE_PLAYLIST_STORAGE_KEY,
+        RUSTYMILK_ACTIVE_PLAYLIST_STORAGE_KEY,
         &playlist.id,
     );
-    let visible = rust_milkdrop_visible_preset_indices(&panel, imported_presets, favorite_presets);
+    let visible = rustymilk_visible_preset_indices(&panel, imported_presets, favorite_presets);
     if let Some(index) = visible.first() {
-        set_rust_milkdrop_active_preset(
+        set_rustymilk_active_preset(
             document,
             &panel,
             imported_presets,
             favorite_presets,
             *index,
-            &format!("MilkDrop playlist: {}", playlist.name),
+            &format!("RustyMilk playlist: {}", playlist.name),
         );
     } else {
-        set_player_status(document, "Active MilkDrop playlist has no matching presets");
+        set_player_status(document, "Active RustyMilk playlist has no matching presets");
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rename_rust_milkdrop_playlist(window: &web_sys::Window, document: &web_sys::Document) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+fn rename_rustymilk_playlist(window: &web_sys::Window, document: &web_sys::Document) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let active = rust_milkdrop_active_playlist(&panel);
+    let active = rustymilk_active_playlist(&panel);
     if active.is_empty() {
-        set_player_status(document, "No active MilkDrop playlist");
+        set_player_status(document, "No active RustyMilk playlist");
         return;
     }
-    let Ok(Some(name)) = window.prompt_with_message("Rename active MilkDrop playlist") else {
+    let Ok(Some(name)) = window.prompt_with_message("Rename active RustyMilk playlist") else {
         return;
     };
-    let mut playlists = load_rust_milkdrop_playlists(window);
+    let mut playlists = load_rustymilk_playlists(window);
     if let Some(playlist) = playlists.iter_mut().find(|playlist| playlist.id == active) {
         playlist.name = name.trim().to_string();
-        persist_rust_milkdrop_playlists(document, &playlists);
-        set_player_status(document, "MilkDrop playlist renamed");
+        persist_rustymilk_playlists(document, &playlists);
+        set_player_status(document, "RustyMilk playlist renamed");
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn clear_rust_milkdrop_playlist_filter(
+fn clear_rustymilk_playlist_filter(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let _ = panel.set_attribute("data-slskr-milkdrop-playlist", "");
-    persist_rust_milkdrop_simple_setting(document, RUST_MILKDROP_ACTIVE_PLAYLIST_STORAGE_KEY, "");
-    update_rust_milkdrop_library_controls(document, &panel, imported_presets, favorite_presets, 0);
-    set_player_status(document, "Showing all MilkDrop presets");
+    let _ = panel.set_attribute("data-slskr-rustymilk-playlist", "");
+    persist_rustymilk_simple_setting(document, RUSTYMILK_ACTIVE_PLAYLIST_STORAGE_KEY, "");
+    update_rustymilk_library_controls(document, &panel, imported_presets, favorite_presets, 0);
+    set_player_status(document, "Showing all RustyMilk presets");
 }
 
 #[cfg(target_arch = "wasm32")]
-fn remove_rust_milkdrop_playlist(
+fn remove_rustymilk_playlist(
     window: &web_sys::Window,
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let active = rust_milkdrop_active_playlist(&panel);
+    let active = rustymilk_active_playlist(&panel);
     if active.is_empty() {
-        set_player_status(document, "No active MilkDrop playlist");
+        set_player_status(document, "No active RustyMilk playlist");
         return;
     }
-    let Ok(true) = window.confirm_with_message("Remove active MilkDrop playlist?") else {
+    let Ok(true) = window.confirm_with_message("Remove active RustyMilk playlist?") else {
         return;
     };
-    let playlists = load_rust_milkdrop_playlists(window)
+    let playlists = load_rustymilk_playlists(window)
         .into_iter()
         .filter(|playlist| playlist.id != active)
         .collect::<Vec<_>>();
-    persist_rust_milkdrop_playlists(document, &playlists);
-    let _ = panel.set_attribute("data-slskr-milkdrop-playlist", "");
-    persist_rust_milkdrop_simple_setting(document, RUST_MILKDROP_ACTIVE_PLAYLIST_STORAGE_KEY, "");
-    update_rust_milkdrop_library_controls(document, &panel, imported_presets, favorite_presets, 0);
-    set_player_status(document, "MilkDrop playlist removed");
+    persist_rustymilk_playlists(document, &playlists);
+    let _ = panel.set_attribute("data-slskr-rustymilk-playlist", "");
+    persist_rustymilk_simple_setting(document, RUSTYMILK_ACTIVE_PLAYLIST_STORAGE_KEY, "");
+    update_rustymilk_library_controls(document, &panel, imported_presets, favorite_presets, 0);
+    set_player_status(document, "RustyMilk playlist removed");
 }
 
 #[cfg(target_arch = "wasm32")]
-fn store_rust_milkdrop_edited_source(
+fn store_rustymilk_edited_source(
     document: &web_sys::Document,
     panel: &web_sys::Element,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     source: String,
     status: &str,
 ) {
-    let title = rust_milkdrop_preset_name(&source);
+    let title = rustymilk_preset_name(&source);
     let current = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
     if current < imported_presets.borrow().len() {
@@ -18954,8 +18954,8 @@ fn store_rust_milkdrop_edited_source(
             preset.source = source;
             preset.title = title;
         }
-        persist_rust_milkdrop_imported_presets(document, &imported_presets);
-        set_rust_milkdrop_active_preset(
+        persist_rustymilk_imported_presets(document, &imported_presets);
+        set_rustymilk_active_preset(
             document,
             panel,
             &imported_presets,
@@ -18966,14 +18966,14 @@ fn store_rust_milkdrop_edited_source(
     } else {
         imported_presets.borrow_mut().insert(
             0,
-            RustMilkdropImportedPreset {
+            RustyMilkImportedPreset {
                 source,
                 title: title.clone(),
             },
         );
-        persist_rust_milkdrop_imported_presets(document, &imported_presets);
-        let _ = panel.remove_attribute("data-slskr-milkdrop-custom-source");
-        set_rust_milkdrop_active_preset(
+        persist_rustymilk_imported_presets(document, &imported_presets);
+        let _ = panel.remove_attribute("data-slskr-rustymilk-custom-source");
+        set_rustymilk_active_preset(
             document,
             panel,
             &imported_presets,
@@ -18985,34 +18985,34 @@ fn store_rust_milkdrop_edited_source(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn active_rust_milkdrop_parsed(
+fn active_rustymilk_parsed(
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
-) -> MilkdropPresetSet {
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
+) -> RustyMilkPresetSet {
     let index = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let source = rust_milkdrop_active_preset_source(panel, imported_presets, index);
-    parse_milkdrop_preset_set(&source, source.contains("[preset01]"))
+    let source = rustymilk_active_preset_source(panel, imported_presets, index);
+    parse_rustymilk_preset_set(&source, source.contains("[preset01]"))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn apply_rust_milkdrop_parameter(
+fn apply_rustymilk_parameter(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let key = document
-        .get_element_by_id("slskr-milkdrop-parameter")
+        .get_element_by_id("slskr-rustymilk-parameter")
         .and_then(|element| element.dyn_into::<web_sys::HtmlSelectElement>().ok())
         .map(|select| select.value())
         .unwrap_or_else(|| "decay".to_string());
     let value = document
-        .get_element_by_id("slskr-milkdrop-parameter-value")
+        .get_element_by_id("slskr-rustymilk-parameter-value")
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
         .map(|input| input.value())
         .unwrap_or_else(|| "0.9".to_string());
@@ -19022,35 +19022,35 @@ fn apply_rust_milkdrop_parameter(
         .ok()
         .filter(|value| value.is_finite())
     else {
-        set_player_status(document, "MilkDrop parameter needs a finite number");
+        set_player_status(document, "RustyMilk parameter needs a finite number");
         return;
     };
-    let mut parsed = active_rust_milkdrop_parsed(&panel, &imported_presets);
+    let mut parsed = active_rustymilk_parsed(&panel, &imported_presets);
     if let Some(preset) = parsed.presets.first_mut() {
         preset
             .base_values
-            .insert(key, MilkdropValue::Number(clamp_range(number, -2.0, 2.0)));
+            .insert(key, RustyMilkValue::Number(clamp_range(number, -2.0, 2.0)));
     }
-    store_rust_milkdrop_edited_source(
+    store_rustymilk_edited_source(
         document,
         &panel,
         imported_presets,
         favorite_presets,
-        serialize_milkdrop_preset_set(&parsed),
-        "MilkDrop parameter applied",
+        serialize_rustymilk_preset_set(&parsed),
+        "RustyMilk parameter applied",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn randomize_rust_milkdrop_parameters(
+fn randomize_rustymilk_parameters(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let mut parsed = active_rust_milkdrop_parsed(&panel, &imported_presets);
+    let mut parsed = active_rustymilk_parsed(&panel, &imported_presets);
     if let Some(preset) = parsed.presets.first_mut() {
         for (key, min, max) in [
             ("decay", 0.82, 0.97),
@@ -19064,37 +19064,37 @@ fn randomize_rust_milkdrop_parameters(
             let value = min + js_sys::Math::random() * (max - min);
             preset
                 .base_values
-                .insert(key.to_string(), MilkdropValue::Number(value));
+                .insert(key.to_string(), RustyMilkValue::Number(value));
         }
     }
-    store_rust_milkdrop_edited_source(
+    store_rustymilk_edited_source(
         document,
         &panel,
         imported_presets,
         favorite_presets,
-        serialize_milkdrop_preset_set(&parsed),
-        "MilkDrop parameters randomized",
+        serialize_rustymilk_preset_set(&parsed),
+        "RustyMilk parameters randomized",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn import_rust_milkdrop_fragment(
+fn import_rustymilk_fragment(
     window: &web_sys::Window,
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     fragment_type: &str,
 ) {
     let Ok(Some(source)) =
-        window.prompt_with_message(&format!("Paste a MilkDrop {fragment_type} fragment"))
+        window.prompt_with_message(&format!("Paste a RustyMilk {fragment_type} fragment"))
     else {
         return;
     };
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let fragment = parse_milkdrop_fragment(&source, fragment_type, fragment_type);
-    let mut parsed = active_rust_milkdrop_parsed(&panel, &imported_presets);
+    let fragment = parse_rustymilk_fragment(&source, fragment_type, fragment_type);
+    let mut parsed = active_rustymilk_parsed(&panel, &imported_presets);
     if let Some(preset) = parsed.presets.first_mut() {
         if fragment.fragment_type == "wave" {
             preset.waves.extend(fragment.entries);
@@ -19102,26 +19102,26 @@ fn import_rust_milkdrop_fragment(
             preset.shapes.extend(fragment.entries);
         }
     }
-    store_rust_milkdrop_edited_source(
+    store_rustymilk_edited_source(
         document,
         &panel,
         imported_presets,
         favorite_presets,
-        serialize_milkdrop_preset_set(&parsed),
-        "MilkDrop fragment imported",
+        serialize_rustymilk_preset_set(&parsed),
+        "RustyMilk fragment imported",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn export_rust_milkdrop_fragment(
+fn export_rustymilk_fragment(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     fragment_type: &str,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let parsed = active_rust_milkdrop_parsed(&panel, imported_presets);
+    let parsed = active_rustymilk_parsed(&panel, imported_presets);
     let Some(preset) = parsed.presets.first() else {
         return;
     };
@@ -19133,25 +19133,25 @@ fn export_rust_milkdrop_fragment(
     let Some(entry) = entry else {
         set_player_status(
             document,
-            &format!("No MilkDrop {fragment_type} fragment available"),
+            &format!("No RustyMilk {fragment_type} fragment available"),
         );
         return;
     };
-    let text = serialize_milkdrop_fragment(entry, fragment_type);
-    download_rust_milkdrop_text(document, &format!("slskr.{fragment_type}"), &text);
+    let text = serialize_rustymilk_fragment(entry, fragment_type);
+    download_rustymilk_text(document, &format!("slskr.{fragment_type}"), &text);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn remove_rust_milkdrop_fragment(
+fn remove_rustymilk_fragment(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
     fragment_type: &str,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let mut parsed = active_rust_milkdrop_parsed(&panel, &imported_presets);
+    let mut parsed = active_rustymilk_parsed(&panel, &imported_presets);
     let removed = if let Some(preset) = parsed.presets.first_mut() {
         if fragment_type == "wave" {
             if preset.waves.is_empty() {
@@ -19172,48 +19172,48 @@ fn remove_rust_milkdrop_fragment(
     if !removed {
         set_player_status(
             document,
-            &format!("No MilkDrop {fragment_type} fragment available"),
+            &format!("No RustyMilk {fragment_type} fragment available"),
         );
         return;
     }
-    store_rust_milkdrop_edited_source(
+    store_rustymilk_edited_source(
         document,
         &panel,
         imported_presets,
         favorite_presets,
-        serialize_milkdrop_preset_set(&parsed),
-        "MilkDrop fragment removed",
+        serialize_rustymilk_preset_set(&parsed),
+        "RustyMilk fragment removed",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn export_rust_milkdrop_preset(
+fn export_rustymilk_preset(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let index = panel
-        .get_attribute("data-slskr-milkdrop-preset-index")
+        .get_attribute("data-slskr-rustymilk-preset-index")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let source = rust_milkdrop_active_preset_source(&panel, imported_presets, index);
-    download_rust_milkdrop_text(document, "slskr.milk", &source);
+    let source = rustymilk_active_preset_source(&panel, imported_presets, index);
+    download_rustymilk_text(document, "slskr.milk", &source);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn download_rust_milkdrop_text(document: &web_sys::Document, file_name: &str, text: &str) {
+fn download_rustymilk_text(document: &web_sys::Document, file_name: &str, text: &str) {
     let array = js_sys::Array::new();
     array.push(&JsValue::from_str(text));
     let options = web_sys::BlobPropertyBag::new();
     options.set_type("text/plain");
     let Ok(blob) = web_sys::Blob::new_with_str_sequence_and_options(&array, &options) else {
-        set_player_status(document, "MilkDrop export failed");
+        set_player_status(document, "RustyMilk export failed");
         return;
     };
     let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
-        set_player_status(document, "MilkDrop export failed");
+        set_player_status(document, "RustyMilk export failed");
         return;
     };
     if let Some(anchor) = document
@@ -19226,13 +19226,13 @@ fn download_rust_milkdrop_text(document: &web_sys::Document, file_name: &str, te
         anchor.click();
     }
     let _ = web_sys::Url::revoke_object_url(&url);
-    set_player_status(document, "MilkDrop export downloaded");
+    set_player_status(document, "RustyMilk export downloaded");
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_fps_cap_ms(panel: &web_sys::Element) -> f64 {
+fn rustymilk_fps_cap_ms(panel: &web_sys::Element) -> f64 {
     match panel
-        .get_attribute("data-slskr-milkdrop-fps")
+        .get_attribute("data-slskr-rustymilk-fps")
         .unwrap_or_else(|| "full".to_string())
         .as_str()
     {
@@ -19244,12 +19244,12 @@ fn rust_milkdrop_fps_cap_ms(panel: &web_sys::Element) -> f64 {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn cycle_rust_milkdrop_automation(document: &web_sys::Document) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+fn cycle_rustymilk_automation(document: &web_sys::Document) {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let next = match panel
-        .get_attribute("data-slskr-milkdrop-automation")
+        .get_attribute("data-slskr-rustymilk-automation")
         .unwrap_or_else(|| "off".to_string())
         .as_str()
     {
@@ -19257,13 +19257,13 @@ fn cycle_rust_milkdrop_automation(document: &web_sys::Document) {
         "beat" => "timed",
         _ => "off",
     };
-    let _ = panel.set_attribute("data-slskr-milkdrop-automation", next);
-    persist_rust_milkdrop_simple_setting(document, RUST_MILKDROP_AUTOMATION_STORAGE_KEY, next);
-    set_player_status(document, &format!("MilkDrop automation: {next}"));
+    let _ = panel.set_attribute("data-slskr-rustymilk-automation", next);
+    persist_rustymilk_simple_setting(document, RUSTYMILK_AUTOMATION_STORAGE_KEY, next);
+    set_player_status(document, &format!("RustyMilk automation: {next}"));
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_select_number(document: &web_sys::Document, id: &str, fallback: f64) -> f64 {
+fn rustymilk_select_number(document: &web_sys::Document, id: &str, fallback: f64) -> f64 {
     document
         .get_element_by_id(id)
         .and_then(|element| element.dyn_into::<web_sys::HtmlSelectElement>().ok())
@@ -19273,27 +19273,27 @@ fn rust_milkdrop_select_number(document: &web_sys::Document, id: &str, fallback:
 }
 
 #[cfg(target_arch = "wasm32")]
-fn maybe_advance_rust_milkdrop_automation(
+fn maybe_advance_rustymilk_automation(
     document: &web_sys::Document,
     panel: &web_sys::Element,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     favorite_presets: &Rc<RefCell<BTreeSet<String>>>,
-    state: &mut RustMilkdropAutomationState,
+    state: &mut RustyMilkAutomationState,
     time: f64,
     energy: f64,
 ) {
     match panel
-        .get_attribute("data-slskr-milkdrop-automation")
+        .get_attribute("data-slskr-rustymilk-automation")
         .unwrap_or_else(|| "off".to_string())
         .as_str()
     {
         "timed" => {
             let interval =
-                rust_milkdrop_select_number(document, "slskr-milkdrop-automation-interval", 30.0);
+                rustymilk_select_number(document, "slskr-rustymilk-automation-interval", 30.0);
             if state.last_preset_at == 0.0 {
                 state.last_preset_at = time;
             } else if time - state.last_preset_at >= interval {
-                cycle_rust_milkdrop_preset(document, imported_presets, favorite_presets);
+                cycle_rustymilk_preset(document, imported_presets, favorite_presets);
                 state.last_preset_at = time;
             }
         }
@@ -19304,10 +19304,10 @@ fn maybe_advance_rust_milkdrop_automation(
                 state.last_beat_at = time;
                 state.beat_count += 1;
                 let beats =
-                    rust_milkdrop_select_number(document, "slskr-milkdrop-automation-beats", 8.0)
+                    rustymilk_select_number(document, "slskr-rustymilk-automation-beats", 8.0)
                         as usize;
                 if state.beat_count >= beats.max(1) {
-                    cycle_rust_milkdrop_preset(document, imported_presets, favorite_presets);
+                    cycle_rustymilk_preset(document, imported_presets, favorite_presets);
                     state.beat_count = 0;
                     state.last_preset_at = time;
                 }
@@ -19318,21 +19318,21 @@ fn maybe_advance_rust_milkdrop_automation(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn toggle_rust_milkdrop_debug(
+fn toggle_rustymilk_debug(
     document: &web_sys::Document,
-    imported_presets: &Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: &Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
 ) {
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
-    let next = panel.get_attribute("data-slskr-milkdrop-debug").as_deref() != Some("true");
+    let next = panel.get_attribute("data-slskr-rustymilk-debug").as_deref() != Some("true");
     let _ = panel.set_attribute(
-        "data-slskr-milkdrop-debug",
+        "data-slskr-rustymilk-debug",
         if next { "true" } else { "false" },
     );
-    if let Some(debug) = document.get_element_by_id("slskr-milkdrop-debug") {
+    if let Some(debug) = document.get_element_by_id("slskr-rustymilk-debug") {
         if next {
-            let parsed = active_rust_milkdrop_parsed(&panel, imported_presets);
+            let parsed = active_rustymilk_parsed(&panel, imported_presets);
             let preset = parsed.presets.first();
             debug.set_text_content(Some(&format!(
                 "format: {}\npresets: {}\nshapes: {}\nwaves: {}\nquality: {}\nfps: {}\nautomation: {}",
@@ -19340,9 +19340,9 @@ fn toggle_rust_milkdrop_debug(
                 parsed.presets.len(),
                 preset.map(|preset| preset.shapes.len()).unwrap_or_default(),
                 preset.map(|preset| preset.waves.len()).unwrap_or_default(),
-                panel.get_attribute("data-slskr-milkdrop-quality").unwrap_or_default(),
-                panel.get_attribute("data-slskr-milkdrop-fps").unwrap_or_default(),
-                panel.get_attribute("data-slskr-milkdrop-automation").unwrap_or_default(),
+                panel.get_attribute("data-slskr-rustymilk-quality").unwrap_or_default(),
+                panel.get_attribute("data-slskr-rustymilk-fps").unwrap_or_default(),
+                panel.get_attribute("data-slskr-rustymilk-automation").unwrap_or_default(),
             )));
             let _ = debug.remove_attribute("hidden");
         } else {
@@ -19352,13 +19352,13 @@ fn toggle_rust_milkdrop_debug(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn import_rust_milkdrop_texture_asset(
+fn import_rustymilk_texture_asset(
     window: &web_sys::Window,
     document: &web_sys::Document,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 ) {
     let Ok(Some(value)) =
-        window.prompt_with_message("Paste a MilkDrop texture as name=data:image/png;base64,...")
+        window.prompt_with_message("Paste a RustyMilk texture as name=data:image/png;base64,...")
     else {
         return;
     };
@@ -19372,11 +19372,11 @@ fn import_rust_milkdrop_texture_asset(
         set_player_status(document, "Texture import needs an image data URL");
         return;
     }
-    store_rust_milkdrop_texture_asset(document, texture_assets, name, data_url);
+    store_rustymilk_texture_asset(document, texture_assets, name, data_url);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_import_file_name(file: &web_sys::File) -> String {
+fn rustymilk_import_file_name(file: &web_sys::File) -> String {
     js_sys::Reflect::get(file.as_ref(), &JsValue::from_str("webkitRelativePath"))
         .ok()
         .and_then(|value| value.as_string())
@@ -19385,13 +19385,13 @@ fn rust_milkdrop_import_file_name(file: &web_sys::File) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn is_rust_milkdrop_preset_file_name(file_name: &str) -> bool {
+fn is_rustymilk_preset_file_name(file_name: &str) -> bool {
     let lower = file_name.to_ascii_lowercase();
     lower.ends_with(".milk") || lower.ends_with(".milk2") || lower.ends_with(".txt")
 }
 
 #[cfg(target_arch = "wasm32")]
-fn is_rust_milkdrop_texture_file_name(file_name: &str) -> bool {
+fn is_rustymilk_texture_file_name(file_name: &str) -> bool {
     let lower = file_name.to_ascii_lowercase();
     [".png", ".jpg", ".jpeg", ".webp", ".gif"]
         .iter()
@@ -19399,12 +19399,12 @@ fn is_rust_milkdrop_texture_file_name(file_name: &str) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn mount_rust_milkdrop_preset_input(
+fn mount_rustymilk_preset_input(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
 ) -> Result<(), JsValue> {
     let Some(input) = document
-        .get_element_by_id("slskr-milkdrop-preset-input")
+        .get_element_by_id("slskr-rustymilk-preset-input")
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
     else {
         return Ok(());
@@ -19433,7 +19433,7 @@ fn mount_rust_milkdrop_preset_input(
                 let Some(file) = files.item(index) else {
                     continue;
                 };
-                let file_name = rust_milkdrop_import_file_name(&file);
+                let file_name = rustymilk_import_file_name(&file);
                 let Ok(reader) = web_sys::FileReader::new() else {
                     set_player_status(
                         &document_for_change,
@@ -19453,7 +19453,7 @@ fn mount_rust_milkdrop_preset_input(
                         set_player_status(&document_for_load, "Preset file could not be read");
                         return;
                     };
-                    store_rust_milkdrop_imported_preset(
+                    store_rustymilk_imported_preset(
                         &document_for_load,
                         imports_for_load.clone(),
                         &file_name,
@@ -19467,7 +19467,7 @@ fn mount_rust_milkdrop_preset_input(
             set_player_status(
                 &document_for_change,
                 &format!(
-                    "Reading {} MilkDrop preset file{}",
+                    "Reading {} RustyMilk preset file{}",
                     files.length(),
                     if files.length() == 1 { "" } else { "s" }
                 ),
@@ -19480,13 +19480,13 @@ fn mount_rust_milkdrop_preset_input(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn store_rust_milkdrop_imported_preset(
+fn store_rustymilk_imported_preset(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     file_name: &str,
     source: &str,
 ) {
-    let title = match validate_rust_milkdrop_import(source) {
+    let title = match validate_rustymilk_import(source) {
         Ok(title) => {
             if title.trim().is_empty() {
                 file_name
@@ -19503,37 +19503,37 @@ fn store_rust_milkdrop_imported_preset(
             return;
         }
     };
-    let Some(panel) = document.get_element_by_id("slskr-rust-milkdrop") else {
+    let Some(panel) = document.get_element_by_id("slskr-rust-rustymilk") else {
         return;
     };
     let index = {
         let mut imports = imported_presets.borrow_mut();
-        imports.push(RustMilkdropImportedPreset {
+        imports.push(RustyMilkImportedPreset {
             source: source.to_string(),
             title,
         });
         imports.len() - 1
     };
-    persist_rust_milkdrop_imported_presets(document, &imported_presets);
-    set_rust_milkdrop_active_preset(
+    persist_rustymilk_imported_presets(document, &imported_presets);
+    set_rustymilk_active_preset(
         document,
         &panel,
         &imported_presets,
         &Rc::new(RefCell::new(
             document
                 .default_view()
-                .map(|window| load_rust_milkdrop_favorite_presets(&window))
+                .map(|window| load_rustymilk_favorite_presets(&window))
                 .unwrap_or_default(),
         )),
         index,
-        "MilkDrop preset imported",
+        "RustyMilk preset imported",
     );
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_rust_milkdrop_preset_file(
+fn read_rustymilk_preset_file(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     file: &web_sys::File,
     file_name: &str,
 ) {
@@ -19554,7 +19554,7 @@ fn read_rust_milkdrop_preset_file(
             set_player_status(&document_for_load, "Preset file could not be read");
             return;
         };
-        store_rust_milkdrop_imported_preset(
+        store_rustymilk_imported_preset(
             &document_for_load,
             imports_for_load.clone(),
             &file_name,
@@ -19567,7 +19567,7 @@ fn read_rust_milkdrop_preset_file(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_rust_milkdrop_texture_file(
+fn read_rustymilk_texture_file(
     document: &web_sys::Document,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
     file: &web_sys::File,
@@ -19590,7 +19590,7 @@ fn read_rust_milkdrop_texture_file(
             set_player_status(&document_for_load, "Texture file could not be read");
             return;
         };
-        store_rust_milkdrop_texture_asset(
+        store_rustymilk_texture_asset(
             &document_for_load,
             assets_for_load.clone(),
             &file_name,
@@ -19603,13 +19603,13 @@ fn read_rust_milkdrop_texture_file(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn mount_rust_milkdrop_pack_input(
+fn mount_rustymilk_pack_input(
     document: &web_sys::Document,
-    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    imported_presets: Rc<RefCell<Vec<RustyMilkImportedPreset>>>,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 ) -> Result<(), JsValue> {
     let Some(input) = document
-        .get_element_by_id("slskr-milkdrop-pack-input")
+        .get_element_by_id("slskr-rustymilk-pack-input")
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
     else {
         return Ok(());
@@ -19640,18 +19640,18 @@ fn mount_rust_milkdrop_pack_input(
                 let Some(file) = files.item(index) else {
                     continue;
                 };
-                let file_name = rust_milkdrop_import_file_name(&file);
-                if is_rust_milkdrop_preset_file_name(&file_name) {
+                let file_name = rustymilk_import_file_name(&file);
+                if is_rustymilk_preset_file_name(&file_name) {
                     readable += 1;
-                    read_rust_milkdrop_preset_file(
+                    read_rustymilk_preset_file(
                         &document_for_change,
                         imports_for_change.clone(),
                         &file,
                         &file_name,
                     );
-                } else if is_rust_milkdrop_texture_file_name(&file_name) {
+                } else if is_rustymilk_texture_file_name(&file_name) {
                     readable += 1;
-                    read_rust_milkdrop_texture_file(
+                    read_rustymilk_texture_file(
                         &document_for_change,
                         assets_for_change.clone(),
                         &file,
@@ -19662,7 +19662,7 @@ fn mount_rust_milkdrop_pack_input(
             set_player_status(
                 &document_for_change,
                 &format!(
-                    "Reading {} MilkDrop pack file{}",
+                    "Reading {} RustyMilk pack file{}",
                     readable,
                     if readable == 1 { "" } else { "s" }
                 ),
@@ -19675,12 +19675,12 @@ fn mount_rust_milkdrop_pack_input(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn mount_rust_milkdrop_texture_input(
+fn mount_rustymilk_texture_input(
     document: &web_sys::Document,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 ) -> Result<(), JsValue> {
     let Some(input) = document
-        .get_element_by_id("slskr-milkdrop-texture-input")
+        .get_element_by_id("slskr-rustymilk-texture-input")
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
     else {
         return Ok(());
@@ -19709,7 +19709,7 @@ fn mount_rust_milkdrop_texture_input(
                 let Some(file) = files.item(index) else {
                     continue;
                 };
-                let file_name = rust_milkdrop_import_file_name(&file);
+                let file_name = rustymilk_import_file_name(&file);
                 let Ok(reader) = web_sys::FileReader::new() else {
                     set_player_status(
                         &document_for_change,
@@ -19729,7 +19729,7 @@ fn mount_rust_milkdrop_texture_input(
                         set_player_status(&document_for_load, "Texture file could not be read");
                         return;
                     };
-                    store_rust_milkdrop_texture_asset(
+                    store_rustymilk_texture_asset(
                         &document_for_load,
                         assets_for_load.clone(),
                         &file_name,
@@ -19743,7 +19743,7 @@ fn mount_rust_milkdrop_texture_input(
             set_player_status(
                 &document_for_change,
                 &format!(
-                    "Reading {} MilkDrop texture file{}",
+                    "Reading {} RustyMilk texture file{}",
                     files.length(),
                     if files.length() == 1 { "" } else { "s" }
                 ),
@@ -19756,13 +19756,13 @@ fn mount_rust_milkdrop_texture_input(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn store_rust_milkdrop_texture_asset(
+fn store_rustymilk_texture_asset(
     document: &web_sys::Document,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
     name: &str,
     data_url: &str,
 ) {
-    let aliases = get_milkdrop_texture_name_aliases(name);
+    let aliases = get_rustymilk_texture_name_aliases(name);
     if aliases.is_empty() || !data_url.starts_with("data:image/") {
         set_player_status(document, "Texture import needs an image file");
         return;
@@ -19773,17 +19773,17 @@ fn store_rust_milkdrop_texture_asset(
             assets.insert(alias.clone(), data_url.to_string());
         }
     }
-    persist_rust_milkdrop_texture_assets(document, &texture_assets);
-    update_rust_milkdrop_texture_status(document, &texture_assets);
-    set_player_status(document, "MilkDrop texture imported");
+    persist_rustymilk_texture_assets(document, &texture_assets);
+    update_rustymilk_texture_status(document, &texture_assets);
+    set_player_status(document, "RustyMilk texture imported");
 }
 
 #[cfg(target_arch = "wasm32")]
-fn update_rust_milkdrop_texture_status(
+fn update_rustymilk_texture_status(
     document: &web_sys::Document,
     texture_assets: &Rc<RefCell<BTreeMap<String, String>>>,
 ) {
-    if let Some(label) = document.get_element_by_id("slskr-milkdrop-textures") {
+    if let Some(label) = document.get_element_by_id("slskr-rustymilk-textures") {
         label.set_text_content(Some(&format!(
             "{} texture assets",
             texture_assets.borrow().len()
@@ -19792,8 +19792,8 @@ fn update_rust_milkdrop_texture_status(
 }
 
 #[cfg(target_arch = "wasm32")]
-enum RustMilkdropRenderer {
-    WebGl(RustMilkdropWebGlRendererSet),
+enum RustyMilkRenderer {
+    WebGl(RustyMilkWebGlRendererSet),
     Canvas {
         canvas: web_sys::HtmlCanvasElement,
         context: web_sys::CanvasRenderingContext2d,
@@ -19801,7 +19801,7 @@ enum RustMilkdropRenderer {
 }
 
 #[cfg(target_arch = "wasm32")]
-struct RustMilkdropAudioAnalyzer {
+struct RustyMilkAudioAnalyzer {
     _context: web_sys::AudioContext,
     analyser: web_sys::AnalyserNode,
     frequency_bins: RefCell<Vec<u8>>,
@@ -19810,7 +19810,7 @@ struct RustMilkdropAudioAnalyzer {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl RustMilkdropAudioAnalyzer {
+impl RustyMilkAudioAnalyzer {
     fn new(audio: &web_sys::HtmlAudioElement) -> Result<Self, JsValue> {
         let context = web_sys::AudioContext::new()?;
         let source = context.create_media_element_source(audio)?;
@@ -19829,12 +19829,12 @@ impl RustMilkdropAudioAnalyzer {
         })
     }
 
-    fn snapshot(&self, time: f64) -> RustMilkdropAudioSnapshot {
+    fn snapshot(&self, time: f64) -> RustyMilkAudioSnapshot {
         let mut frequency_bins = self.frequency_bins.borrow_mut();
         self.analyser.get_byte_frequency_data(&mut frequency_bins);
         let length = frequency_bins.len();
         if length == 0 {
-            return RustMilkdropAudioSnapshot::synthetic(time);
+            return RustyMilkAudioSnapshot::synthetic(time);
         }
         let band = |start: usize, end: usize| -> f64 {
             let end = end.min(length).max(start + 1);
@@ -19854,7 +19854,7 @@ impl RustMilkdropAudioAnalyzer {
             .iter()
             .map(|value| *value as f64 / 255.0)
             .collect::<Vec<_>>();
-        let bands = RustMilkdropAudioBands {
+        let bands = RustyMilkAudioBands {
             bass: band(0, length / 8),
             mid: band(length / 8, length / 3),
             treble: band(length / 3, length),
@@ -19867,7 +19867,7 @@ impl RustMilkdropAudioAnalyzer {
             .iter()
             .map(|value| (*value as f64 - 128.0) / 128.0)
             .collect::<Vec<_>>();
-        RustMilkdropAudioSnapshot {
+        RustyMilkAudioSnapshot {
             bands,
             source: "audio",
             spectrum,
@@ -19878,18 +19878,18 @@ impl RustMilkdropAudioAnalyzer {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, PartialEq)]
-struct RustMilkdropAudioSnapshot {
-    bands: RustMilkdropAudioBands,
+struct RustyMilkAudioSnapshot {
+    bands: RustyMilkAudioBands,
     source: &'static str,
     spectrum: Vec<f64>,
     waveform: Vec<f64>,
 }
 
 #[cfg(target_arch = "wasm32")]
-impl RustMilkdropAudioSnapshot {
+impl RustyMilkAudioSnapshot {
     fn synthetic(time: f64) -> Self {
         Self {
-            bands: RustMilkdropAudioBands::synthetic(time),
+            bands: RustyMilkAudioBands::synthetic(time),
             source: "synthetic",
             spectrum: Vec::new(),
             waveform: Vec::new(),
@@ -19899,7 +19899,7 @@ impl RustMilkdropAudioSnapshot {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct RustMilkdropAudioBands {
+struct RustyMilkAudioBands {
     bass: f64,
     mid: f64,
     treble: f64,
@@ -19907,7 +19907,7 @@ struct RustMilkdropAudioBands {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl RustMilkdropAudioBands {
+impl RustyMilkAudioBands {
     fn synthetic(time: f64) -> Self {
         Self {
             bass: (time * 1.9).sin() * 0.5 + 0.5,
@@ -19919,7 +19919,7 @@ impl RustMilkdropAudioBands {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl RustMilkdropRenderer {
+impl RustyMilkRenderer {
     fn label(&self) -> &'static str {
         match self {
             Self::WebGl(_) => "Rust WebGL2 renderer active",
@@ -19927,7 +19927,7 @@ impl RustMilkdropRenderer {
         }
     }
 
-    fn render_frame_set(&self, frame_set: &RustMilkdropFrameSet, time: f64) {
+    fn render_frame_set(&self, frame_set: &RustyMilkFrameSet, time: f64) {
         if frame_set.entries.is_empty() {
             return;
         }
@@ -19938,9 +19938,9 @@ impl RustMilkdropRenderer {
                     context.save();
                     context.set_global_alpha(clamp_unit(entry.blend_alpha));
                     if index == 0 {
-                        render_rust_milkdrop_canvas_frame(context, canvas, &entry.frame, time);
+                        render_rustymilk_canvas_frame(context, canvas, &entry.frame, time);
                     } else {
-                        render_rust_milkdrop_canvas_overlay_frame(
+                        render_rustymilk_canvas_overlay_frame(
                             context,
                             canvas,
                             &entry.frame,
@@ -19955,16 +19955,16 @@ impl RustMilkdropRenderer {
 }
 
 #[cfg(target_arch = "wasm32")]
-struct RustMilkdropWebGlRendererSet {
+struct RustyMilkWebGlRendererSet {
     gl: web_sys::WebGl2RenderingContext,
-    renderers: RefCell<Vec<RustMilkdropWebGlRenderer>>,
+    renderers: RefCell<Vec<RustyMilkWebGlRenderer>>,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
 }
 
 #[cfg(target_arch = "wasm32")]
-struct RustMilkdropWebGlRenderer {
+struct RustyMilkWebGlRenderer {
     buffer: web_sys::WebGlBuffer,
-    feedback_targets: RefCell<RustMilkdropFeedbackTargets>,
+    feedback_targets: RefCell<RustyMilkFeedbackTargets>,
     gl: web_sys::WebGl2RenderingContext,
     primitive_buffer: web_sys::WebGlBuffer,
     primitive_color_buffer: web_sys::WebGlBuffer,
@@ -19975,7 +19975,7 @@ struct RustMilkdropWebGlRenderer {
     textured_position_buffer: web_sys::WebGlBuffer,
     textured_program: web_sys::WebGlProgram,
     textured_uv_buffer: web_sys::WebGlBuffer,
-    translated_program: RefCell<Option<RustMilkdropTranslatedProgram>>,
+    translated_program: RefCell<Option<RustyMilkTranslatedProgram>>,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
     u_color: Option<web_sys::WebGlUniformLocation>,
     u_counts: Option<web_sys::WebGlUniformLocation>,
@@ -20000,34 +20000,34 @@ struct RustMilkdropWebGlRenderer {
 }
 
 #[cfg(target_arch = "wasm32")]
-struct RustMilkdropTranslatedProgram {
+struct RustyMilkTranslatedProgram {
     program: web_sys::WebGlProgram,
     source: String,
 }
 
 #[cfg(target_arch = "wasm32")]
-struct RustMilkdropFeedbackTargets {
+struct RustyMilkFeedbackTargets {
     height: i32,
     read_index: usize,
-    targets: [RustMilkdropFeedbackTarget; 2],
+    targets: [RustyMilkFeedbackTarget; 2],
     width: i32,
 }
 
 #[cfg(target_arch = "wasm32")]
-struct RustMilkdropFeedbackTarget {
+struct RustyMilkFeedbackTarget {
     framebuffer: web_sys::WebGlFramebuffer,
     texture: web_sys::WebGlTexture,
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_renderer(
+fn rustymilk_renderer(
     canvas: &web_sys::HtmlCanvasElement,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
-) -> Result<RustMilkdropRenderer, JsValue> {
+) -> Result<RustyMilkRenderer, JsValue> {
     if let Some(context) = canvas.get_context("webgl2")? {
         if let Ok(gl) = context.dyn_into::<web_sys::WebGl2RenderingContext>() {
-            if let Ok(renderer) = RustMilkdropWebGlRendererSet::new(gl, texture_assets) {
-                return Ok(RustMilkdropRenderer::WebGl(renderer));
+            if let Ok(renderer) = RustyMilkWebGlRendererSet::new(gl, texture_assets) {
+                return Ok(RustyMilkRenderer::WebGl(renderer));
             }
         }
     }
@@ -20035,14 +20035,14 @@ fn rust_milkdrop_renderer(
         .get_context("2d")?
         .ok_or_else(|| JsValue::from_str("2D canvas is unavailable"))?
         .dyn_into()?;
-    Ok(RustMilkdropRenderer::Canvas {
+    Ok(RustyMilkRenderer::Canvas {
         canvas: canvas.clone(),
         context,
     })
 }
 
 #[cfg(target_arch = "wasm32")]
-impl RustMilkdropWebGlRendererSet {
+impl RustyMilkWebGlRendererSet {
     fn new(
         gl: web_sys::WebGl2RenderingContext,
         texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
@@ -20054,7 +20054,7 @@ impl RustMilkdropWebGlRendererSet {
         })
     }
 
-    fn render_frame_set(&self, frame_set: &RustMilkdropFrameSet, time: f64) {
+    fn render_frame_set(&self, frame_set: &RustyMilkFrameSet, time: f64) {
         if frame_set.entries.is_empty() || !self.ensure_renderer_count(frame_set.entries.len()) {
             return;
         }
@@ -20076,7 +20076,7 @@ impl RustMilkdropWebGlRendererSet {
         let mut renderers = self.renderers.borrow_mut();
         while renderers.len() < count {
             let Ok(renderer) =
-                RustMilkdropWebGlRenderer::new(self.gl.clone(), self.texture_assets.clone())
+                RustyMilkWebGlRenderer::new(self.gl.clone(), self.texture_assets.clone())
             else {
                 return false;
             };
@@ -20087,59 +20087,59 @@ impl RustMilkdropWebGlRendererSet {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl RustMilkdropWebGlRenderer {
+impl RustyMilkWebGlRenderer {
     fn new(
         gl: web_sys::WebGl2RenderingContext,
         texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
     ) -> Result<Self, JsValue> {
-        let vertex_shader = compile_rust_milkdrop_shader(
+        let vertex_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::VERTEX_SHADER,
-            RUST_MILKDROP_WEBGL_VERTEX_SHADER,
+            RUSTYMILK_WEBGL_VERTEX_SHADER,
         )?;
-        let fragment_shader = compile_rust_milkdrop_shader(
+        let fragment_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
-            RUST_MILKDROP_WEBGL_FRAGMENT_SHADER,
+            RUSTYMILK_WEBGL_FRAGMENT_SHADER,
         )?;
-        let program = link_rust_milkdrop_program(&gl, &vertex_shader, &fragment_shader)?;
+        let program = link_rustymilk_program(&gl, &vertex_shader, &fragment_shader)?;
         gl.use_program(Some(&program));
-        let primitive_vertex_shader = compile_rust_milkdrop_shader(
+        let primitive_vertex_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::VERTEX_SHADER,
-            RUST_MILKDROP_PRIMITIVE_VERTEX_SHADER,
+            RUSTYMILK_PRIMITIVE_VERTEX_SHADER,
         )?;
-        let primitive_fragment_shader = compile_rust_milkdrop_shader(
+        let primitive_fragment_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
-            RUST_MILKDROP_PRIMITIVE_FRAGMENT_SHADER,
+            RUSTYMILK_PRIMITIVE_FRAGMENT_SHADER,
         )?;
         let primitive_program =
-            link_rust_milkdrop_program(&gl, &primitive_vertex_shader, &primitive_fragment_shader)?;
-        let textured_vertex_shader = compile_rust_milkdrop_shader(
+            link_rustymilk_program(&gl, &primitive_vertex_shader, &primitive_fragment_shader)?;
+        let textured_vertex_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::VERTEX_SHADER,
-            RUST_MILKDROP_TEXTURED_VERTEX_SHADER,
+            RUSTYMILK_TEXTURED_VERTEX_SHADER,
         )?;
-        let textured_fragment_shader = compile_rust_milkdrop_shader(
+        let textured_fragment_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
-            RUST_MILKDROP_TEXTURED_FRAGMENT_SHADER,
+            RUSTYMILK_TEXTURED_FRAGMENT_SHADER,
         )?;
         let textured_program =
-            link_rust_milkdrop_program(&gl, &textured_vertex_shader, &textured_fragment_shader)?;
-        let warp_vertex_shader = compile_rust_milkdrop_shader(
+            link_rustymilk_program(&gl, &textured_vertex_shader, &textured_fragment_shader)?;
+        let warp_vertex_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::VERTEX_SHADER,
-            RUST_MILKDROP_WARP_GRID_VERTEX_SHADER,
+            RUSTYMILK_WARP_GRID_VERTEX_SHADER,
         )?;
-        let warp_fragment_shader = compile_rust_milkdrop_shader(
+        let warp_fragment_shader = compile_rustymilk_shader(
             &gl,
             web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
-            RUST_MILKDROP_WARP_GRID_FRAGMENT_SHADER,
+            RUSTYMILK_WARP_GRID_FRAGMENT_SHADER,
         )?;
         let warp_program =
-            link_rust_milkdrop_program(&gl, &warp_vertex_shader, &warp_fragment_shader)?;
+            link_rustymilk_program(&gl, &warp_vertex_shader, &warp_fragment_shader)?;
 
         let buffer = gl
             .create_buffer()
@@ -20176,14 +20176,14 @@ impl RustMilkdropWebGlRenderer {
         let textured_uv_buffer = gl
             .create_buffer()
             .ok_or_else(|| JsValue::from_str("WebGL textured UV buffer allocation failed"))?;
-        let procedural_texture = create_rust_milkdrop_procedural_texture(&gl)?;
+        let procedural_texture = create_rustymilk_procedural_texture(&gl)?;
         let warp_position_buffer = gl
             .create_buffer()
             .ok_or_else(|| JsValue::from_str("WebGL warp position buffer allocation failed"))?;
         let warp_uv_buffer = gl
             .create_buffer()
             .ok_or_else(|| JsValue::from_str("WebGL warp UV buffer allocation failed"))?;
-        let feedback_targets = RefCell::new(create_rust_milkdrop_feedback_targets(
+        let feedback_targets = RefCell::new(create_rustymilk_feedback_targets(
             &gl,
             gl.drawing_buffer_width().max(1),
             gl.drawing_buffer_height().max(1),
@@ -20230,7 +20230,7 @@ impl RustMilkdropWebGlRenderer {
 
     fn render_with_options(
         &self,
-        frame: &RustMilkdropFrame,
+        frame: &RustyMilkFrame,
         time: f64,
         clear_screen: bool,
         composite_mode: &str,
@@ -20246,7 +20246,7 @@ impl RustMilkdropWebGlRenderer {
         let mut targets = self.feedback_targets.borrow_mut();
         if targets.width != drawing_width || targets.height != drawing_height {
             if let Ok(next_targets) =
-                create_rust_milkdrop_feedback_targets(&self.gl, drawing_width, drawing_height)
+                create_rustymilk_feedback_targets(&self.gl, drawing_width, drawing_height)
             {
                 *targets = next_targets;
             }
@@ -20296,7 +20296,7 @@ impl RustMilkdropWebGlRenderer {
         if should_blend {
             self.gl.enable(web_sys::WebGl2RenderingContext::BLEND);
             let (source_factor, destination_factor) =
-                rust_milkdrop_webgl_composite_blend_factors(composite_mode);
+                rustymilk_webgl_composite_blend_factors(composite_mode);
             self.gl.blend_func(source_factor, destination_factor);
         }
         self.draw_feedback_quad(
@@ -20313,7 +20313,7 @@ impl RustMilkdropWebGlRenderer {
         targets.read_index = write_index;
     }
 
-    fn draw_warp_mesh(&self, frame: &RustMilkdropFrame, drawing_width: i32, drawing_height: i32) {
+    fn draw_warp_mesh(&self, frame: &RustyMilkFrame, drawing_width: i32, drawing_height: i32) {
         let Some(mesh) = frame.warp_mesh.as_ref() else {
             return;
         };
@@ -20408,21 +20408,21 @@ impl RustMilkdropWebGlRenderer {
                 return Some(cached.program.clone());
             }
         }
-        let vertex_shader = compile_rust_milkdrop_shader(
+        let vertex_shader = compile_rustymilk_shader(
             &self.gl,
             web_sys::WebGl2RenderingContext::VERTEX_SHADER,
-            RUST_MILKDROP_TRANSLATED_VERTEX_SHADER,
+            RUSTYMILK_TRANSLATED_VERTEX_SHADER,
         )
         .ok()?;
-        let fragment_shader = compile_rust_milkdrop_shader(
+        let fragment_shader = compile_rustymilk_shader(
             &self.gl,
             web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
             source,
         )
         .ok()?;
         let program =
-            link_rust_milkdrop_program(&self.gl, &vertex_shader, &fragment_shader).ok()?;
-        *self.translated_program.borrow_mut() = Some(RustMilkdropTranslatedProgram {
+            link_rustymilk_program(&self.gl, &vertex_shader, &fragment_shader).ok()?;
+        *self.translated_program.borrow_mut() = Some(RustyMilkTranslatedProgram {
             program: program.clone(),
             source: source.to_string(),
         });
@@ -20432,7 +20432,7 @@ impl RustMilkdropWebGlRenderer {
     fn set_translated_uniforms(
         &self,
         program: &web_sys::WebGlProgram,
-        frame: &RustMilkdropFrame,
+        frame: &RustyMilkFrame,
         time: f64,
         drawing_width: i32,
         drawing_height: i32,
@@ -20524,7 +20524,7 @@ impl RustMilkdropWebGlRenderer {
     fn draw_translated_feedback_quad(
         &self,
         program: &web_sys::WebGlProgram,
-        frame: &RustMilkdropFrame,
+        frame: &RustyMilkFrame,
         time: f64,
         drawing_width: i32,
         drawing_height: i32,
@@ -20557,7 +20557,7 @@ impl RustMilkdropWebGlRenderer {
 
     fn draw_feedback_quad(
         &self,
-        frame: &RustMilkdropFrame,
+        frame: &RustyMilkFrame,
         time: f64,
         drawing_width: i32,
         drawing_height: i32,
@@ -20626,7 +20626,7 @@ impl RustMilkdropWebGlRenderer {
             .draw_arrays(web_sys::WebGl2RenderingContext::TRIANGLE_STRIP, 0, 4);
     }
 
-    fn draw_primitives(&self, frame: &RustMilkdropFrame) {
+    fn draw_primitives(&self, frame: &RustyMilkFrame) {
         if frame.primitives.is_empty() {
             return;
         }
@@ -20676,7 +20676,7 @@ impl RustMilkdropWebGlRenderer {
             let colors = if primitive.vertex_colors.len() == vertex_count * 4 {
                 primitive.vertex_colors.clone()
             } else {
-                create_repeated_milkdrop_colors(vertex_count, primitive.color)
+                create_repeated_rustymilk_colors(vertex_count, primitive.color)
             };
             let colors = colors.iter().map(|value| *value as f32).collect::<Vec<_>>();
             let color_array = js_sys::Float32Array::from(colors.as_slice());
@@ -20702,20 +20702,20 @@ impl RustMilkdropWebGlRenderer {
             }
             self.gl.uniform1f(
                 self.u_primitive_point_size.as_ref(),
-                if primitive.mode == RustMilkdropPrimitiveMode::Points {
+                if primitive.mode == RustyMilkPrimitiveMode::Points {
                     2.0
                 } else {
                     1.0
                 },
             );
             let mode = match primitive.mode {
-                RustMilkdropPrimitiveMode::LineStrip => web_sys::WebGl2RenderingContext::LINE_STRIP,
-                RustMilkdropPrimitiveMode::Lines => web_sys::WebGl2RenderingContext::LINES,
-                RustMilkdropPrimitiveMode::Points => web_sys::WebGl2RenderingContext::POINTS,
-                RustMilkdropPrimitiveMode::TriangleFan => {
+                RustyMilkPrimitiveMode::LineStrip => web_sys::WebGl2RenderingContext::LINE_STRIP,
+                RustyMilkPrimitiveMode::Lines => web_sys::WebGl2RenderingContext::LINES,
+                RustyMilkPrimitiveMode::Points => web_sys::WebGl2RenderingContext::POINTS,
+                RustyMilkPrimitiveMode::TriangleFan => {
                     web_sys::WebGl2RenderingContext::TRIANGLE_FAN
                 }
-                RustMilkdropPrimitiveMode::Triangles => web_sys::WebGl2RenderingContext::TRIANGLES,
+                RustyMilkPrimitiveMode::Triangles => web_sys::WebGl2RenderingContext::TRIANGLES,
             };
             self.gl.draw_arrays(mode, 0, vertex_count as i32);
         }
@@ -20724,7 +20724,7 @@ impl RustMilkdropWebGlRenderer {
     }
 
     fn named_texture_for(&self, raw_name: &str) -> Option<web_sys::WebGlTexture> {
-        for alias in get_milkdrop_texture_name_aliases(raw_name) {
+        for alias in get_rustymilk_texture_name_aliases(raw_name) {
             if let Some(texture) = self.named_textures.borrow().get(&alias) {
                 return Some(texture.clone());
             }
@@ -20732,7 +20732,7 @@ impl RustMilkdropWebGlRenderer {
             let Some(data_url) = data_url else {
                 continue;
             };
-            let Ok(texture) = create_rust_milkdrop_texture_from_data_url(&self.gl, &data_url)
+            let Ok(texture) = create_rustymilk_texture_from_data_url(&self.gl, &data_url)
             else {
                 continue;
             };
@@ -20744,7 +20744,7 @@ impl RustMilkdropWebGlRenderer {
         None
     }
 
-    fn draw_textured_primitives(&self, frame: &RustMilkdropFrame) {
+    fn draw_textured_primitives(&self, frame: &RustyMilkFrame) {
         if frame.textured_primitives.is_empty() {
             return;
         }
@@ -20835,8 +20835,8 @@ impl RustMilkdropWebGlRenderer {
             self.gl
                 .uniform1f(self.u_textured_alpha.as_ref(), primitive.color[3] as f32);
             let draw_mode = match primitive.mode {
-                RustMilkdropTexturedPrimitiveMode::Quad
-                | RustMilkdropTexturedPrimitiveMode::TriangleFan => {
+                RustyMilkTexturedPrimitiveMode::Quad
+                | RustyMilkTexturedPrimitiveMode::TriangleFan => {
                     web_sys::WebGl2RenderingContext::TRIANGLE_FAN
                 }
             };
@@ -20851,7 +20851,7 @@ impl RustMilkdropWebGlRenderer {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_webgl_composite_blend_factors(mode: &str) -> (u32, u32) {
+fn rustymilk_webgl_composite_blend_factors(mode: &str) -> (u32, u32) {
     match mode {
         "additive" => (
             web_sys::WebGl2RenderingContext::SRC_ALPHA,
@@ -20873,30 +20873,30 @@ fn rust_milkdrop_webgl_composite_blend_factors(mode: &str) -> (u32, u32) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn create_rust_milkdrop_feedback_targets(
+fn create_rustymilk_feedback_targets(
     gl: &web_sys::WebGl2RenderingContext,
     width: i32,
     height: i32,
-) -> Result<RustMilkdropFeedbackTargets, JsValue> {
+) -> Result<RustyMilkFeedbackTargets, JsValue> {
     let width = width.max(1);
     let height = height.max(1);
-    Ok(RustMilkdropFeedbackTargets {
+    Ok(RustyMilkFeedbackTargets {
         height,
         read_index: 0,
         targets: [
-            create_rust_milkdrop_feedback_target(gl, width, height)?,
-            create_rust_milkdrop_feedback_target(gl, width, height)?,
+            create_rustymilk_feedback_target(gl, width, height)?,
+            create_rustymilk_feedback_target(gl, width, height)?,
         ],
         width,
     })
 }
 
 #[cfg(target_arch = "wasm32")]
-fn create_rust_milkdrop_feedback_target(
+fn create_rustymilk_feedback_target(
     gl: &web_sys::WebGl2RenderingContext,
     width: i32,
     height: i32,
-) -> Result<RustMilkdropFeedbackTarget, JsValue> {
+) -> Result<RustyMilkFeedbackTarget, JsValue> {
     let texture = gl
         .create_texture()
         .ok_or_else(|| JsValue::from_str("WebGL feedback texture allocation failed"))?;
@@ -20954,14 +20954,14 @@ fn create_rust_milkdrop_feedback_target(
         ));
     }
 
-    Ok(RustMilkdropFeedbackTarget {
+    Ok(RustyMilkFeedbackTarget {
         framebuffer,
         texture,
     })
 }
 
 #[cfg(target_arch = "wasm32")]
-fn create_rust_milkdrop_procedural_texture(
+fn create_rustymilk_procedural_texture(
     gl: &web_sys::WebGl2RenderingContext,
 ) -> Result<web_sys::WebGlTexture, JsValue> {
     let texture = gl
@@ -21010,11 +21010,11 @@ fn create_rust_milkdrop_procedural_texture(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn create_rust_milkdrop_texture_from_data_url(
+fn create_rustymilk_texture_from_data_url(
     gl: &web_sys::WebGl2RenderingContext,
     data_url: &str,
 ) -> Result<web_sys::WebGlTexture, JsValue> {
-    let texture = create_rust_milkdrop_procedural_texture(gl)?;
+    let texture = create_rustymilk_procedural_texture(gl)?;
     let image = web_sys::HtmlImageElement::new()?;
     let gl_for_load = gl.clone();
     let texture_for_load = texture.clone();
@@ -21040,7 +21040,7 @@ fn create_rust_milkdrop_texture_from_data_url(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn compile_rust_milkdrop_shader(
+fn compile_rustymilk_shader(
     gl: &web_sys::WebGl2RenderingContext,
     shader_type: u32,
     source: &str,
@@ -21059,13 +21059,13 @@ fn compile_rust_milkdrop_shader(
     } else {
         Err(JsValue::from_str(
             &gl.get_shader_info_log(&shader)
-                .unwrap_or_else(|| "MilkDrop WebGL shader compile failed".to_string()),
+                .unwrap_or_else(|| "RustyMilk WebGL shader compile failed".to_string()),
         ))
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn link_rust_milkdrop_program(
+fn link_rustymilk_program(
     gl: &web_sys::WebGl2RenderingContext,
     vertex_shader: &web_sys::WebGlShader,
     fragment_shader: &web_sys::WebGlShader,
@@ -21085,13 +21085,13 @@ fn link_rust_milkdrop_program(
     } else {
         Err(JsValue::from_str(
             &gl.get_program_info_log(&program)
-                .unwrap_or_else(|| "MilkDrop WebGL program link failed".to_string()),
+                .unwrap_or_else(|| "RustyMilk WebGL program link failed".to_string()),
         ))
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_WEBGL_VERTEX_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_WEBGL_VERTEX_SHADER: &str = r#"#version 300 es
 in vec2 position;
 out vec2 v_uv;
 void main() {
@@ -21101,7 +21101,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_TRANSLATED_VERTEX_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_TRANSLATED_VERTEX_SHADER: &str = r#"#version 300 es
 in vec2 position;
 out vec2 uv;
 void main() {
@@ -21111,7 +21111,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_WEBGL_FRAGMENT_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_WEBGL_FRAGMENT_SHADER: &str = r#"#version 300 es
 precision highp float;
 uniform vec2 u_resolution;
 uniform float u_time;
@@ -21152,7 +21152,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_PRIMITIVE_VERTEX_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_PRIMITIVE_VERTEX_SHADER: &str = r#"#version 300 es
 in vec2 position;
 in vec4 color;
 uniform float u_primitivePointSize;
@@ -21165,7 +21165,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_PRIMITIVE_FRAGMENT_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_PRIMITIVE_FRAGMENT_SHADER: &str = r#"#version 300 es
 precision highp float;
 in vec4 v_color;
 out vec4 outColor;
@@ -21175,7 +21175,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_TEXTURED_VERTEX_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_TEXTURED_VERTEX_SHADER: &str = r#"#version 300 es
 in vec2 position;
 in vec2 sourceUv;
 out vec2 v_uv;
@@ -21186,7 +21186,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_TEXTURED_FRAGMENT_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_TEXTURED_FRAGMENT_SHADER: &str = r#"#version 300 es
 precision highp float;
 uniform sampler2D u_texture;
 uniform vec3 u_tint;
@@ -21200,7 +21200,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_WARP_GRID_VERTEX_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_WARP_GRID_VERTEX_SHADER: &str = r#"#version 300 es
 in vec2 position;
 in vec2 sourceUv;
 out vec2 v_sourceUv;
@@ -21211,7 +21211,7 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-const RUST_MILKDROP_WARP_GRID_FRAGMENT_SHADER: &str = r#"#version 300 es
+const RUSTYMILK_WARP_GRID_FRAGMENT_SHADER: &str = r#"#version 300 es
 precision highp float;
 uniform vec3 u_color;
 uniform float u_feedback;
@@ -21227,10 +21227,10 @@ void main() {
 "#;
 
 #[cfg(target_arch = "wasm32")]
-fn render_rust_milkdrop_canvas_frame(
+fn render_rustymilk_canvas_frame(
     context: &web_sys::CanvasRenderingContext2d,
     canvas: &web_sys::HtmlCanvasElement,
-    frame: &RustMilkdropFrame,
+    frame: &RustyMilkFrame,
     time: f64,
 ) {
     let width = canvas.width() as f64;
@@ -21315,15 +21315,15 @@ fn render_rust_milkdrop_canvas_frame(
         }
         context.stroke();
     }
-    render_rust_milkdrop_canvas_primitives(context, width, height, frame);
-    render_rust_milkdrop_canvas_textured_primitives(context, width, height, frame);
+    render_rustymilk_canvas_primitives(context, width, height, frame);
+    render_rustymilk_canvas_textured_primitives(context, width, height, frame);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_rust_milkdrop_canvas_overlay_frame(
+fn render_rustymilk_canvas_overlay_frame(
     context: &web_sys::CanvasRenderingContext2d,
     canvas: &web_sys::HtmlCanvasElement,
-    frame: &RustMilkdropFrame,
+    frame: &RustyMilkFrame,
     time: f64,
 ) {
     let width = canvas.width() as f64;
@@ -21342,12 +21342,12 @@ fn render_rust_milkdrop_canvas_overlay_frame(
         context.stroke();
     }
     context.restore();
-    render_rust_milkdrop_canvas_primitives(context, width, height, frame);
-    render_rust_milkdrop_canvas_textured_primitives(context, width, height, frame);
+    render_rustymilk_canvas_primitives(context, width, height, frame);
+    render_rustymilk_canvas_textured_primitives(context, width, height, frame);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_canvas_color(color: [f64; 4]) -> String {
+fn rustymilk_canvas_color(color: [f64; 4]) -> String {
     format!(
         "rgba({:.0}, {:.0}, {:.0}, {:.3})",
         clamp_unit(color[0]) * 255.0,
@@ -21358,7 +21358,7 @@ fn rust_milkdrop_canvas_color(color: [f64; 4]) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn rust_milkdrop_clip_to_canvas(vertex: &[f64], width: f64, height: f64) -> (f64, f64) {
+fn rustymilk_clip_to_canvas(vertex: &[f64], width: f64, height: f64) -> (f64, f64) {
     (
         (vertex.first().copied().unwrap_or_default() * 0.5 + 0.5) * width,
         (1.0 - (vertex.get(1).copied().unwrap_or_default() * 0.5 + 0.5)) * height,
@@ -21366,22 +21366,22 @@ fn rust_milkdrop_clip_to_canvas(vertex: &[f64], width: f64, height: f64) -> (f64
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_rust_milkdrop_canvas_primitives(
+fn render_rustymilk_canvas_primitives(
     context: &web_sys::CanvasRenderingContext2d,
     width: f64,
     height: f64,
-    frame: &RustMilkdropFrame,
+    frame: &RustyMilkFrame,
 ) {
     for primitive in &frame.primitives {
         if primitive.vertices.len() < 4 {
             continue;
         }
-        let color = rust_milkdrop_canvas_color(primitive.color);
+        let color = rustymilk_canvas_color(primitive.color);
         match primitive.mode {
-            RustMilkdropPrimitiveMode::LineStrip => {
+            RustyMilkPrimitiveMode::LineStrip => {
                 context.begin_path();
                 for (index, vertex) in primitive.vertices.chunks(2).enumerate() {
-                    let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+                    let (x, y) = rustymilk_clip_to_canvas(vertex, width, height);
                     if index == 0 {
                         context.move_to(x, y);
                     } else {
@@ -21392,34 +21392,34 @@ fn render_rust_milkdrop_canvas_primitives(
                 context.set_line_width(1.5);
                 context.stroke();
             }
-            RustMilkdropPrimitiveMode::Lines => {
+            RustyMilkPrimitiveMode::Lines => {
                 context.set_stroke_style_str(&color);
                 context.set_line_width(1.0);
                 for line in primitive.vertices.chunks(4) {
                     if line.len() < 4 {
                         continue;
                     }
-                    let (x1, y1) = rust_milkdrop_clip_to_canvas(&line[0..2], width, height);
-                    let (x2, y2) = rust_milkdrop_clip_to_canvas(&line[2..4], width, height);
+                    let (x1, y1) = rustymilk_clip_to_canvas(&line[0..2], width, height);
+                    let (x2, y2) = rustymilk_clip_to_canvas(&line[2..4], width, height);
                     context.begin_path();
                     context.move_to(x1, y1);
                     context.line_to(x2, y2);
                     context.stroke();
                 }
             }
-            RustMilkdropPrimitiveMode::Points => {
+            RustyMilkPrimitiveMode::Points => {
                 context.set_fill_style_str(&color);
                 for vertex in primitive.vertices.chunks(2) {
-                    let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+                    let (x, y) = rustymilk_clip_to_canvas(vertex, width, height);
                     context.begin_path();
                     let _ = context.arc(x, y, 2.0, 0.0, std::f64::consts::TAU);
                     context.fill();
                 }
             }
-            RustMilkdropPrimitiveMode::TriangleFan => {
+            RustyMilkPrimitiveMode::TriangleFan => {
                 context.begin_path();
                 for (index, vertex) in primitive.vertices.chunks(2).enumerate() {
-                    let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+                    let (x, y) = rustymilk_clip_to_canvas(vertex, width, height);
                     if index == 0 {
                         context.move_to(x, y);
                     } else {
@@ -21430,16 +21430,16 @@ fn render_rust_milkdrop_canvas_primitives(
                 context.set_fill_style_str(&color);
                 context.fill();
             }
-            RustMilkdropPrimitiveMode::Triangles => {
+            RustyMilkPrimitiveMode::Triangles => {
                 context.set_fill_style_str(&color);
                 for triangle in primitive.vertices.chunks(6) {
                     if triangle.len() < 6 {
                         continue;
                     }
                     context.begin_path();
-                    let (x1, y1) = rust_milkdrop_clip_to_canvas(&triangle[0..2], width, height);
-                    let (x2, y2) = rust_milkdrop_clip_to_canvas(&triangle[2..4], width, height);
-                    let (x3, y3) = rust_milkdrop_clip_to_canvas(&triangle[4..6], width, height);
+                    let (x1, y1) = rustymilk_clip_to_canvas(&triangle[0..2], width, height);
+                    let (x2, y2) = rustymilk_clip_to_canvas(&triangle[2..4], width, height);
+                    let (x3, y3) = rustymilk_clip_to_canvas(&triangle[4..6], width, height);
                     context.move_to(x1, y1);
                     context.line_to(x2, y2);
                     context.line_to(x3, y3);
@@ -21452,11 +21452,11 @@ fn render_rust_milkdrop_canvas_primitives(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_rust_milkdrop_canvas_textured_primitives(
+fn render_rustymilk_canvas_textured_primitives(
     context: &web_sys::CanvasRenderingContext2d,
     width: f64,
     height: f64,
-    frame: &RustMilkdropFrame,
+    frame: &RustyMilkFrame,
 ) {
     for primitive in &frame.textured_primitives {
         if primitive.vertices.len() < 6 {
@@ -21464,7 +21464,7 @@ fn render_rust_milkdrop_canvas_textured_primitives(
         }
         context.begin_path();
         for (index, vertex) in primitive.vertices.chunks(2).enumerate() {
-            let (x, y) = rust_milkdrop_clip_to_canvas(vertex, width, height);
+            let (x, y) = rustymilk_clip_to_canvas(vertex, width, height);
             if index == 0 {
                 context.move_to(x, y);
             } else {
@@ -21472,7 +21472,7 @@ fn render_rust_milkdrop_canvas_textured_primitives(
             }
         }
         context.close_path();
-        context.set_fill_style_str(&rust_milkdrop_canvas_color(primitive.color));
+        context.set_fill_style_str(&rustymilk_canvas_color(primitive.color));
         context.fill();
         context.set_stroke_style_str("rgba(255, 255, 255, 0.22)");
         context.set_line_width(1.0);
@@ -21690,52 +21690,52 @@ mod tests {
         assert!(html.contains("data-slskr-route-kind=\"Search\""));
         assert!(html.contains("slskr-player-now"));
         assert!(html.contains("slskr-player-transfers"));
-        assert!(html.contains("slskr-rust-milkdrop"));
-        assert!(html.contains("data-slskr-milkdrop-search=\"\""));
-        assert!(html.contains("data-slskr-milkdrop-playlist=\"\""));
-        assert!(html.contains("data-slskr-milkdrop-automation=\"off\""));
-        assert!(html.contains("data-slskr-milkdrop-fps=\"full\""));
-        assert!(html.contains("data-slskr-milkdrop-quality=\"balanced\""));
-        assert!(html.contains("slskr-milkdrop-canvas"));
-        assert!(html.contains("Search native MilkDrop presets"));
-        assert!(html.contains("data-slskr-milkdrop-action=\"previous\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"preset\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"random\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"favorite\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"favorites\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"remove\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"search\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"clear-search\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"save-playlist\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"playlist\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"rename-playlist\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"clear-playlist\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"remove-playlist\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"import\""));
-        assert!(html.contains("slskr-milkdrop-preset-input"));
+        assert!(html.contains("slskr-rust-rustymilk"));
+        assert!(html.contains("data-slskr-rustymilk-search=\"\""));
+        assert!(html.contains("data-slskr-rustymilk-playlist=\"\""));
+        assert!(html.contains("data-slskr-rustymilk-automation=\"off\""));
+        assert!(html.contains("data-slskr-rustymilk-fps=\"full\""));
+        assert!(html.contains("data-slskr-rustymilk-quality=\"balanced\""));
+        assert!(html.contains("slskr-rustymilk-canvas"));
+        assert!(html.contains("Search RustyMilk presets"));
+        assert!(html.contains("data-slskr-rustymilk-action=\"previous\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"preset\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"random\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"favorite\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"favorites\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"remove\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"search\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"clear-search\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"save-playlist\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"playlist\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"rename-playlist\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"clear-playlist\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"remove-playlist\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"import\""));
+        assert!(html.contains("slskr-rustymilk-preset-input"));
         assert!(html.contains("accept=\".milk,.milk2,.txt,text/plain\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"pack\""));
-        assert!(html.contains("slskr-milkdrop-pack-input"));
+        assert!(html.contains("data-slskr-rustymilk-action=\"pack\""));
+        assert!(html.contains("slskr-rustymilk-pack-input"));
         assert!(html.contains("webkitdirectory hidden"));
-        assert!(html.contains("data-slskr-milkdrop-action=\"texture\""));
-        assert!(html.contains("slskr-milkdrop-texture-input"));
+        assert!(html.contains("data-slskr-rustymilk-action=\"texture\""));
+        assert!(html.contains("slskr-rustymilk-texture-input"));
         assert!(html.contains("multiple hidden"));
-        assert!(html.contains("slskr-milkdrop-textures"));
-        assert!(html.contains("data-slskr-milkdrop-action=\"clear\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"reset\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"apply-parameter\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"randomize-parameters\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"import-shape\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"export-shape\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"remove-shape\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"import-wave\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"export-wave\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"remove-wave\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"export-preset\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"automation\""));
-        assert!(html.contains("data-slskr-milkdrop-action=\"debug\""));
-        assert!(html.contains("slskr-milkdrop-debug"));
-        assert!(html.contains("slskr-milkdrop-renderer"));
+        assert!(html.contains("slskr-rustymilk-textures"));
+        assert!(html.contains("data-slskr-rustymilk-action=\"clear\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"reset\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"apply-parameter\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"randomize-parameters\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"import-shape\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"export-shape\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"remove-shape\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"import-wave\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"export-wave\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"remove-wave\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"export-preset\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"automation\""));
+        assert!(html.contains("data-slskr-rustymilk-action=\"debug\""));
+        assert!(html.contains("slskr-rustymilk-debug"));
+        assert!(html.contains("slskr-rustymilk-renderer"));
         assert!(html.contains("/api/v0/searches"));
         assert!(html.contains("slskr-runtime-status"));
         assert!(html.contains("/api/v0/health"));
@@ -21843,8 +21843,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_parser_and_frame_state_are_deterministic() {
-        let preset = parse_rust_milkdrop_preset(
+    fn rustymilk_parser_and_frame_state_are_deterministic() {
+        let preset = parse_rustymilk_preset(
             "name=Test\ndecay=0.88\nwave_r=0.2\nwave_g=0.4\nwave_b=0.6\nwave_a=0.9\nwave_scale=1.5\nzoom=1.1\nrot=0.03",
         );
 
@@ -21857,11 +21857,11 @@ mod tests {
         assert_eq!(preset.zoom, 1.1);
         assert_eq!(preset.rot, 0.03);
         assert_eq!(
-            rust_milkdrop_preset_name("name=Archive Tunnel\nwave_r=1"),
+            rustymilk_preset_name("name=Archive Tunnel\nwave_r=1"),
             "Archive Tunnel"
         );
 
-        let frame = rust_milkdrop_frame(&preset, 2.0, 0.5, 0.25, 0.75);
+        let frame = rustymilk_frame(&preset, 2.0, 0.5, 0.25, 0.75);
         assert!(frame.background_alpha > 0.0);
         assert!(frame.rotation.abs() > 0.0);
         assert!(frame.wave_radius > 0.1);
@@ -21872,8 +21872,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_runtime_evaluates_parsed_frame_equations() {
-        let frame = rust_milkdrop_frame_from_source(
+    fn rustymilk_runtime_evaluates_parsed_frame_equations() {
+        let frame = rustymilk_frame_from_source(
             r#"
             name=Runtime
             decay=0.88
@@ -21903,11 +21903,11 @@ mod tests {
         assert_eq!(frame.shape_count, 2);
         assert_eq!(frame.waveform_count, 1);
         assert!(frame.primitives.iter().any(|primitive| {
-            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+            primitive.mode == RustyMilkPrimitiveMode::TriangleFan
                 && primitive.vertices.len() >= 8
         }));
         assert!(frame.primitives.iter().any(|primitive| {
-            primitive.mode == RustMilkdropPrimitiveMode::LineStrip && primitive.vertices.len() >= 4
+            primitive.mode == RustyMilkPrimitiveMode::LineStrip && primitive.vertices.len() >= 4
         }));
         assert!((frame.zoom - 1.2).abs() < 0.0001);
         assert!((frame.rotation - 0.245).abs() < 0.0001);
@@ -21915,8 +21915,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_runtime_uses_audio_samples_for_custom_waves() {
-        let frame = rust_milkdrop_frame_from_source_with_audio(
+    fn rustymilk_runtime_uses_audio_samples_for_custom_waves() {
+        let frame = rustymilk_frame_from_source_with_audio(
             r#"
             name=Audio reactive
             wave_r=0.2
@@ -21954,7 +21954,7 @@ mod tests {
             .primitives
             .iter()
             .find(|primitive| {
-                primitive.mode == RustMilkdropPrimitiveMode::LineStrip
+                primitive.mode == RustyMilkPrimitiveMode::LineStrip
                     && primitive.vertices.len() == 6
                     && (primitive.vertices[1] + 1.0).abs() < 0.0001
             })
@@ -21966,8 +21966,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_runtime_uses_waveform_function_in_equations() {
-        let frame = rust_milkdrop_frame_from_source_with_audio(
+    fn rustymilk_runtime_uses_waveform_function_in_equations() {
+        let frame = rustymilk_frame_from_source_with_audio(
             r#"
             name=Waveform expression
             wave_r=0.1
@@ -21990,14 +21990,14 @@ mod tests {
         assert!((frame.q_registers[0] - 1.0).abs() < 0.0001);
         assert_eq!(frame.wave_color.0, 255);
         assert!(frame.primitives.iter().any(|primitive| {
-            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+            primitive.mode == RustyMilkPrimitiveMode::TriangleFan
                 && primitive.vertices.iter().any(|value| value.abs() > 0.09)
         }));
     }
 
     #[test]
-    fn rust_milkdrop_runtime_persists_q_registers_across_frames() {
-        let mut runtime = RustMilkdropRuntime::default();
+    fn rustymilk_runtime_persists_q_registers_across_frames() {
+        let mut runtime = RustyMilkRuntime::default();
         let source = r#"
             name=Persistent
             wave_r=0
@@ -22017,15 +22017,15 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_runtime_feeds_mouse_state_into_equations() {
-        let input = RustMilkdropInputState {
+    fn rustymilk_runtime_feeds_mouse_state_into_equations() {
+        let input = RustyMilkInputState {
             mouse_down: 1.0,
             mouse_dx: 0.2,
             mouse_dy: -0.1,
             mouse_x: 0.75,
             mouse_y: 0.25,
         };
-        let frame = rust_milkdrop_frame_from_source_with_audio_and_input(
+        let frame = rustymilk_frame_from_source_with_audio_and_input(
             r#"
             name=Mouse input
             wave_r=0
@@ -22055,15 +22055,15 @@ mod tests {
         let shape = frame
             .primitives
             .iter()
-            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::TriangleFan)
+            .find(|primitive| primitive.mode == RustyMilkPrimitiveMode::TriangleFan)
             .expect("shape");
         assert!(shape.vertices[0] > 0.4);
         assert!(shape.vertices[1] < -0.4);
     }
 
     #[test]
-    fn rust_milkdrop_runtime_resets_when_source_changes() {
-        let mut runtime = RustMilkdropRuntime::default();
+    fn rustymilk_runtime_resets_when_source_changes() {
+        let mut runtime = RustyMilkRuntime::default();
         let first_source = r#"
             name=First
             init_1=q1=4;
@@ -22088,8 +22088,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_runtime_persists_indexed_entry_state() {
-        let mut runtime = RustMilkdropRuntime::default();
+    fn rustymilk_runtime_persists_indexed_entry_state() {
+        let mut runtime = RustyMilkRuntime::default();
         let source = r#"
             name=Entry state
             shape00_enabled=1
@@ -22105,14 +22105,14 @@ mod tests {
         assert!((first.q_registers[1] - 2.0).abs() < 0.0001);
         assert!((second.q_registers[1] - 3.0).abs() < 0.0001);
         assert!(second.primitives.iter().any(|primitive| {
-            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+            primitive.mode == RustyMilkPrimitiveMode::TriangleFan
                 && primitive.vertices.iter().any(|value| value.abs() > 0.07)
         }));
     }
 
     #[test]
-    fn rust_milkdrop_runtime_merges_entry_q_registers_in_js_order() {
-        let mut runtime = RustMilkdropRuntime::default();
+    fn rustymilk_runtime_merges_entry_q_registers_in_js_order() {
+        let mut runtime = RustyMilkRuntime::default();
         let source = r#"
             name=Entry q order
             wavecode_0_enabled=1
@@ -22139,14 +22139,14 @@ mod tests {
 
         assert!((frame.q_registers[4] - 0.3).abs() < 0.0001);
         assert!(frame.primitives.iter().any(|primitive| {
-            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+            primitive.mode == RustyMilkPrimitiveMode::TriangleFan
                 && primitive.vertices.iter().any(|value| value.abs() > 0.25)
         }));
     }
 
     #[test]
-    fn rust_milkdrop_preset_parser_matches_js_fixture_shapes() {
-        let parsed = parse_milkdrop_preset_set(
+    fn rustymilk_preset_parser_matches_js_fixture_shapes() {
+        let parsed = parse_rustymilk_preset_set(
             r#"
             // comments are ignored
             [preset00]
@@ -22181,7 +22181,7 @@ mod tests {
         assert_eq!(preset.title, "slskr smoke preset");
         assert_eq!(
             preset.base_values.get("fgammaadj"),
-            Some(&MilkdropValue::Number(1.35))
+            Some(&RustyMilkValue::Number(1.35))
         );
         assert_eq!(
             preset.equations.per_frame,
@@ -22192,74 +22192,74 @@ mod tests {
         assert_eq!(preset.comp_shader, "shader_body { ret = vec3(q1); }");
         assert_eq!(
             preset.shapes[0].base_values.get("enabled"),
-            Some(&MilkdropValue::Number(1.0))
+            Some(&RustyMilkValue::Number(1.0))
         );
         assert_eq!(
             preset.shapes[0].base_values.get("sides"),
-            Some(&MilkdropValue::Number(5.0))
+            Some(&RustyMilkValue::Number(5.0))
         );
         assert_eq!(preset.shapes[0].equations.init, "q2=0;");
         assert_eq!(preset.shapes[0].equations.frame, "q2=q2+0.1;");
         assert_eq!(
             preset.sprites[0].base_values.get("image"),
-            Some(&MilkdropValue::Text("logo.png".to_string()))
+            Some(&RustyMilkValue::Text("logo.png".to_string()))
         );
         assert_eq!(preset.waves[0].equations.point, "x=sample;");
     }
 
     #[test]
-    fn rust_milkdrop_expression_vm_matches_js_compatibility_cases() {
+    fn rustymilk_expression_vm_matches_js_compatibility_cases() {
         let mut vars = BTreeMap::new();
-        vars.insert("bass_att".to_string(), MilkdropValue::Number(2.0));
+        vars.insert("bass_att".to_string(), RustyMilkValue::Number(2.0));
         assert_eq!(
-            evaluate_milkdrop_expression("pow(bass_att, 2) + sqr(3)", &vars).unwrap(),
+            evaluate_rustymilk_expression("pow(bass_att, 2) + sqr(3)", &vars).unwrap(),
             13.0
         );
-        vars.insert("treb".to_string(), MilkdropValue::Number(2.0));
+        vars.insert("treb".to_string(), RustyMilkValue::Number(2.0));
         assert_eq!(
-            evaluate_milkdrop_expression("if(above(treb, 1.5), sin(0), 7)", &vars).unwrap(),
+            evaluate_rustymilk_expression("if(above(treb, 1.5), sin(0), 7)", &vars).unwrap(),
             0.0
         );
         assert_eq!(
-            evaluate_milkdrop_expression("div(10, 0) + sqrt(-1)", &BTreeMap::new()).unwrap(),
+            evaluate_rustymilk_expression("div(10, 0) + sqrt(-1)", &BTreeMap::new()).unwrap(),
             0.0
         );
         assert_eq!(
-            evaluate_milkdrop_expression("sin(pi/2)+log(e)+log10(100)", &BTreeMap::new())
+            evaluate_rustymilk_expression("sin(pi/2)+log(e)+log10(100)", &BTreeMap::new())
                 .unwrap()
                 .round(),
             4.0
         );
         assert_eq!(
-            evaluate_milkdrop_expression("(7 & 3) + (4 | 1) + (7 ^ 3)", &BTreeMap::new()).unwrap(),
+            evaluate_rustymilk_expression("(7 & 3) + (4 | 1) + (7 ^ 3)", &BTreeMap::new()).unwrap(),
             12.0
         );
         assert_eq!(
-            evaluate_milkdrop_expression("(1 << 3) + (8 >> 1)", &BTreeMap::new()).unwrap(),
+            evaluate_rustymilk_expression("(1 << 3) + (8 >> 1)", &BTreeMap::new()).unwrap(),
             12.0
         );
         assert_eq!(
-            evaluate_milkdrop_expression("~0 + !0 + !2", &BTreeMap::new()).unwrap(),
+            evaluate_rustymilk_expression("~0 + !0 + !2", &BTreeMap::new()).unwrap(),
             0.0
         );
         assert_eq!(
-            evaluate_milkdrop_expression(
+            evaluate_rustymilk_expression(
                 "q1 > 0.5 ? q2 + 1 : q3 + 1",
                 &BTreeMap::from([
-                    ("q1".to_string(), MilkdropValue::Number(1.0)),
-                    ("q2".to_string(), MilkdropValue::Number(4.0)),
-                    ("q3".to_string(), MilkdropValue::Number(9.0)),
+                    ("q1".to_string(), RustyMilkValue::Number(1.0)),
+                    ("q2".to_string(), RustyMilkValue::Number(4.0)),
+                    ("q3".to_string(), RustyMilkValue::Number(9.0)),
                 ])
             )
             .unwrap(),
             5.0
         );
         assert_eq!(
-            evaluate_milkdrop_expression(
+            evaluate_rustymilk_expression(
                 "q1 ? 1 : q2 ? 2 : 3",
                 &BTreeMap::from([
-                    ("q1".to_string(), MilkdropValue::Number(0.0)),
-                    ("q2".to_string(), MilkdropValue::Number(1.0)),
+                    ("q1".to_string(), RustyMilkValue::Number(0.0)),
+                    ("q2".to_string(), RustyMilkValue::Number(1.0)),
                 ])
             )
             .unwrap(),
@@ -22267,70 +22267,70 @@ mod tests {
         );
 
         let mut equation_vars = BTreeMap::new();
-        equation_vars.insert("bass_att".to_string(), MilkdropValue::Number(3.0));
-        equation_vars.insert("treb_att".to_string(), MilkdropValue::Number(1.0));
-        equation_vars.insert("wave_r".to_string(), MilkdropValue::Number(0.8));
-        equation_vars.insert("zoom".to_string(), MilkdropValue::Number(1.0));
-        let scope = evaluate_milkdrop_equations(
+        equation_vars.insert("bass_att".to_string(), RustyMilkValue::Number(3.0));
+        equation_vars.insert("treb_att".to_string(), RustyMilkValue::Number(1.0));
+        equation_vars.insert("wave_r".to_string(), RustyMilkValue::Number(0.8));
+        equation_vars.insert("zoom".to_string(), RustyMilkValue::Number(1.0));
+        let scope = evaluate_rustymilk_equations(
             "q1 = bass_att * 0.2; zoom += q1; q33 = if(below(treb_att, 2), 7, 9); wave_r *= 0.5;",
             &equation_vars,
         )
         .unwrap();
         assert_eq!(
             scope.get("q1"),
-            Some(&MilkdropValue::Number(0.6000000000000001))
+            Some(&RustyMilkValue::Number(0.6000000000000001))
         );
-        assert_eq!(scope.get("q33"), Some(&MilkdropValue::Number(7.0)));
-        assert_eq!(scope.get("wave_r"), Some(&MilkdropValue::Number(0.4)));
-        let conditional_scope = evaluate_milkdrop_equations(
+        assert_eq!(scope.get("q33"), Some(&RustyMilkValue::Number(7.0)));
+        assert_eq!(scope.get("wave_r"), Some(&RustyMilkValue::Number(0.4)));
+        let conditional_scope = evaluate_rustymilk_equations(
             "q1=0; q2=q1 ? 4 : 8; q3=(q2 == 8) ? 1 : 0;",
             &equation_vars,
         )
         .unwrap();
         assert_eq!(
             conditional_scope.get("q2"),
-            Some(&MilkdropValue::Number(8.0))
+            Some(&RustyMilkValue::Number(8.0))
         );
         assert_eq!(
             conditional_scope.get("q3"),
-            Some(&MilkdropValue::Number(1.0))
+            Some(&RustyMilkValue::Number(1.0))
         );
     }
 
     #[test]
-    fn rust_milkdrop_expression_vm_samples_fft_data() {
+    fn rustymilk_expression_vm_samples_fft_data() {
         let mut vars = BTreeMap::new();
         vars.insert(
             "frequency_data".to_string(),
-            MilkdropValue::Text("0,128,255,64".to_string()),
+            RustyMilkValue::Text("0,128,255,64".to_string()),
         );
         assert_eq!(
-            evaluate_milkdrop_expression("get_fft(0.5)", &vars).unwrap(),
+            evaluate_rustymilk_expression("get_fft(0.5)", &vars).unwrap(),
             1.0
         );
         vars.insert(
             "frequency_data".to_string(),
-            MilkdropValue::Text("0,255,0,0".to_string()),
+            RustyMilkValue::Text("0,255,0,0".to_string()),
         );
-        vars.insert("sample_rate".to_string(), MilkdropValue::Number(44100.0));
+        vars.insert("sample_rate".to_string(), RustyMilkValue::Number(44100.0));
         assert_eq!(
-            evaluate_milkdrop_expression("get_fft_hz(5512.5)", &vars).unwrap(),
+            evaluate_rustymilk_expression("get_fft_hz(5512.5)", &vars).unwrap(),
             1.0
         );
         vars.insert(
             "waveform_data".to_string(),
-            MilkdropValue::Text("-1,0,1,0.5".to_string()),
+            RustyMilkValue::Text("-1,0,1,0.5".to_string()),
         );
         assert_eq!(
-            evaluate_milkdrop_expression("get_waveform(0.5)", &vars).unwrap(),
+            evaluate_rustymilk_expression("get_waveform(0.5)", &vars).unwrap(),
             1.0
         );
-        assert!(is_milkdrop_function_supported("get_waveform"));
+        assert!(is_rustymilk_function_supported("get_waveform"));
     }
 
     #[test]
-    fn rust_milkdrop_expression_vm_supports_megabuf_state() {
-        let scope = evaluate_milkdrop_equations(
+    fn rustymilk_expression_vm_supports_megabuf_state() {
+        let scope = evaluate_rustymilk_equations(
             r#"
             q1=2;
             megabuf(q1)=0.25;
@@ -22342,46 +22342,46 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(scope.get("megabuf_2"), Some(&MilkdropValue::Number(0.75)));
-        assert_eq!(scope.get("gmegabuf_4"), Some(&MilkdropValue::Number(1.5)));
-        assert_eq!(scope.get("q2"), Some(&MilkdropValue::Number(2.25)));
+        assert_eq!(scope.get("megabuf_2"), Some(&RustyMilkValue::Number(0.75)));
+        assert_eq!(scope.get("gmegabuf_4"), Some(&RustyMilkValue::Number(1.5)));
+        assert_eq!(scope.get("q2"), Some(&RustyMilkValue::Number(2.25)));
 
         let mut seeded = BTreeMap::new();
-        seeded.insert("megabuf_2".to_string(), MilkdropValue::Number(0.75));
+        seeded.insert("megabuf_2".to_string(), RustyMilkValue::Number(0.75));
         assert_eq!(
-            evaluate_milkdrop_expression("megabuf(2)", &seeded).unwrap(),
+            evaluate_rustymilk_expression("megabuf(2)", &seeded).unwrap(),
             0.75
         );
-        assert!(is_milkdrop_function_supported("megabuf"));
-        assert!(is_milkdrop_function_supported("gmegabuf"));
+        assert!(is_rustymilk_function_supported("megabuf"));
+        assert!(is_rustymilk_function_supported("gmegabuf"));
     }
 
     #[test]
-    fn rust_milkdrop_rand_varies_by_call_and_frame_scope() {
+    fn rustymilk_rand_varies_by_call_and_frame_scope() {
         let mut first_vars = BTreeMap::new();
-        first_vars.insert("frame".to_string(), MilkdropValue::Number(1.0));
-        first_vars.insert("time".to_string(), MilkdropValue::Number(0.016));
+        first_vars.insert("frame".to_string(), RustyMilkValue::Number(1.0));
+        first_vars.insert("time".to_string(), RustyMilkValue::Number(0.016));
         let first =
-            evaluate_milkdrop_equations("q1=rand(1000); q2=rand(1000);", &first_vars).unwrap();
-        let q1 = first.get("q1").and_then(MilkdropValue::as_number).unwrap();
-        let q2 = first.get("q2").and_then(MilkdropValue::as_number).unwrap();
+            evaluate_rustymilk_equations("q1=rand(1000); q2=rand(1000);", &first_vars).unwrap();
+        let q1 = first.get("q1").and_then(RustyMilkValue::as_number).unwrap();
+        let q2 = first.get("q2").and_then(RustyMilkValue::as_number).unwrap();
         assert!((0.0..1000.0).contains(&q1));
         assert!((0.0..1000.0).contains(&q2));
         assert_ne!(q1, q2);
 
         let mut second_vars = BTreeMap::new();
-        second_vars.insert("frame".to_string(), MilkdropValue::Number(2.0));
-        second_vars.insert("time".to_string(), MilkdropValue::Number(0.032));
-        let second = evaluate_milkdrop_equations("q1=rand(1000);", &second_vars).unwrap();
+        second_vars.insert("frame".to_string(), RustyMilkValue::Number(2.0));
+        second_vars.insert("time".to_string(), RustyMilkValue::Number(0.032));
+        let second = evaluate_rustymilk_equations("q1=rand(1000);", &second_vars).unwrap();
         assert_ne!(
             q1,
-            second.get("q1").and_then(MilkdropValue::as_number).unwrap()
+            second.get("q1").and_then(RustyMilkValue::as_number).unwrap()
         );
     }
 
     #[test]
-    fn rust_milkdrop_fragment_parser_and_serializer_match_js_shapes() {
-        let fragment = parse_milkdrop_fragment(
+    fn rustymilk_fragment_parser_and_serializer_match_js_shapes() {
+        let fragment = parse_rustymilk_fragment(
             r#"
             [shape]
             sides=7
@@ -22395,17 +22395,17 @@ mod tests {
         assert_eq!(fragment.fragment_type, "shape");
         assert_eq!(
             fragment.entries[0].base_values.get("enabled"),
-            Some(&MilkdropValue::Number(1.0))
+            Some(&RustyMilkValue::Number(1.0))
         );
         assert_eq!(
             fragment.entries[0].base_values.get("sides"),
-            Some(&MilkdropValue::Number(7.0))
+            Some(&RustyMilkValue::Number(7.0))
         );
         assert_eq!(fragment.entries[0].equations.frame, "ang=time;");
-        assert!(serialize_milkdrop_fragment(&fragment.entries[0], "shape")
+        assert!(serialize_rustymilk_fragment(&fragment.entries[0], "shape")
             .contains("per_frame_1=ang=time;"));
 
-        let wave = parse_milkdrop_fragment(
+        let wave = parse_rustymilk_fragment(
             "samples=64\nspectrum=1\nper_point_1=x=i;\nper_point_2=y=sample;",
             "spectrum.wave",
             "",
@@ -22413,18 +22413,18 @@ mod tests {
         assert_eq!(wave.fragment_type, "wave");
         assert_eq!(
             wave.entries[0].base_values.get("samples"),
-            Some(&MilkdropValue::Number(64.0))
+            Some(&RustyMilkValue::Number(64.0))
         );
         assert_eq!(wave.entries[0].equations.point, "x=i;\ny=sample;");
 
-        let prefixed = parse_milkdrop_fragment(
+        let prefixed = parse_rustymilk_fragment(
             "shape00_enabled=1\nshape00_sides=4\nshape00_per_frame1=rad=0.25+0.05*sin(time);",
             "prefixed.shape",
             "",
         );
         assert_eq!(
             prefixed.entries[0].base_values.get("sides"),
-            Some(&MilkdropValue::Number(4.0))
+            Some(&RustyMilkValue::Number(4.0))
         );
         assert_eq!(
             prefixed.entries[0].equations.frame,
@@ -22433,12 +22433,12 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_preset_serializer_keeps_custom_primitives() {
-        let parsed = parse_milkdrop_preset_set(
+    fn rustymilk_preset_serializer_keeps_custom_primitives() {
+        let parsed = parse_rustymilk_preset_set(
             "name=Serializable\nwave_r=1\nshape00_enabled=1\nshape00_sides=5\nwavecode_0_enabled=1\nwavecode_0_samples=16\nwavecode_0_per_point1=x=i;",
             false,
         );
-        let serialized = serialize_milkdrop_preset_set(&parsed);
+        let serialized = serialize_rustymilk_preset_set(&parsed);
         assert!(serialized.contains("name=Serializable"));
         assert!(serialized.contains("shape00_sides=5"));
         assert!(serialized.contains("wavecode_0_samples=16"));
@@ -22446,14 +22446,14 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_shader_translator_handles_glsl_safe_subset() {
+    fn rustymilk_shader_translator_handles_glsl_safe_subset() {
         assert_eq!(
-            translate_milkdrop_shader_expression(
+            translate_rustymilk_shader_expression(
                 "ret = tex2D(sampler_main, uv).rgb * vec3(0.5, 1.0, 0.25);"
             ),
             "texture(previousFrame, uv).rgb * vec3(0.5, 1.0, 0.25)"
         );
-        let shader = create_translated_milkdrop_fragment_shader(
+        let shader = create_translated_rustymilk_fragment_shader(
             "ret = saturate(vec3(uv.x, uv.y, sin(time)));",
         );
         assert!(shader.contains("uniform sampler2D previousFrame;"));
@@ -22465,12 +22465,12 @@ mod tests {
         assert!(shader.contains("float get_fft(float position)"));
         assert!(shader.contains("uniform float q64;"));
         assert!(shader.contains("vec3 ret = vec3(clamp01(vec3(uv.x, uv.y, sin(time))));"));
-        assert!(analyze_milkdrop_shader_support("ret = vec3(color);").supported);
+        assert!(analyze_rustymilk_shader_support("ret = vec3(color);").supported);
     }
 
     #[test]
-    fn rust_milkdrop_shader_translator_handles_temps_textures_and_conditionals() {
-        let shader = create_translated_milkdrop_fragment_shader(
+    fn rustymilk_shader_translator_handles_temps_textures_and_conditionals() {
+        let shader = create_translated_rustymilk_fragment_shader(
             r#"
             float2 shifted = uv + float2(frac(time), fmod(time, 1.0));
             float3 tinted = lerp(color, tex2D(sampler_main, shifted).rgb, 0.25);
@@ -22484,22 +22484,22 @@ mod tests {
         );
         assert!(shader.contains("float energy = inversesqrt(max(get_fft(0.25), 0.001));"));
         assert_eq!(
-            translate_milkdrop_shader_expression("float3 tint = vec3(1.0); ret = tint;"),
+            translate_rustymilk_shader_expression("float3 tint = vec3(1.0); ret = tint;"),
             "tint"
         );
 
         assert_eq!(
-            get_milkdrop_shader_texture_samplers(
+            get_rustymilk_shader_texture_samplers(
                 "ret = tex2D(sampler_noise, uv).rgb + tex2D(album_art, uv).rgb;"
             ),
             vec!["sampler_noise".to_string(), "album_art".to_string()]
         );
-        let textured = create_translated_milkdrop_fragment_shader(
+        let textured = create_translated_rustymilk_fragment_shader(
             "float3 noise = tex2D(sampler_noise, uv).rgb; ret = noise;",
         );
         assert!(textured.contains("uniform sampler2D shaderTexture0;"));
         assert!(textured.contains("vec3 noise = texture(shaderTexture0, uv).rgb;"));
-        let textured_frame = rust_milkdrop_frame_from_source(
+        let textured_frame = rustymilk_frame_from_source(
             "comp_shader=ret = tex2D(album_art, uv).rgb * tex2D(sampler_noise, uv).rgb;",
             1.0,
             0.1,
@@ -22511,14 +22511,14 @@ mod tests {
             vec!["album_art".to_string(), "sampler_noise".to_string()]
         );
 
-        let conditional = create_translated_milkdrop_fragment_shader(
+        let conditional = create_translated_rustymilk_fragment_shader(
             "if (bass_att > 1.0) { ret = tex2D(sampler_noise, uv).rgb; } else { ret = vec3(x, y, rad); }",
         );
         assert!(conditional.contains("vec3 ret = vec3((bass_att > 1.0)"));
         assert!(conditional.contains("shaderTexture0"));
         assert!(conditional.contains("vec3(x, y, rad)"));
         assert_eq!(
-            translate_milkdrop_shader_expression(
+            translate_rustymilk_shader_expression(
                 "if (q1 > 0.5) ret = vec3(1.0); else ret = vec3(0.0);"
             ),
             "(q1 > 0.5) ? (vec3(1.0)) : (vec3(0.0))"
@@ -22526,35 +22526,35 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_shader_translator_rejects_unsafe_subset() {
+    fn rustymilk_shader_translator_rejects_unsafe_subset() {
         assert_eq!(
-            translate_milkdrop_shader_expression("for (;;) { ret = vec3(1.0); }"),
+            translate_rustymilk_shader_expression("for (;;) { ret = vec3(1.0); }"),
             ""
         );
         assert_eq!(
-            translate_milkdrop_shader_expression("ret = unknown[index];"),
+            translate_rustymilk_shader_expression("ret = unknown[index];"),
             ""
         );
         assert_eq!(
-            translate_milkdrop_shader_expression("float3 tint; ret = tint;"),
+            translate_rustymilk_shader_expression("float3 tint; ret = tint;"),
             ""
         );
-        assert!(!analyze_milkdrop_shader_support("if (uv.x > 0.5) ret = vec3(1.0);").supported);
+        assert!(!analyze_rustymilk_shader_support("if (uv.x > 0.5) ret = vec3(1.0);").supported);
         assert_eq!(
-            translate_milkdrop_shader_expression(
+            translate_rustymilk_shader_expression(
                 "float3 tint = vec3(1.0); ret = tint; tint *= 0.5;"
             ),
             ""
         );
         assert_eq!(
-            translate_milkdrop_shader_expression("ret = vec3(1.0); ret = vec3(0.0);"),
+            translate_rustymilk_shader_expression("ret = vec3(1.0); ret = vec3(0.0);"),
             ""
         );
     }
 
     #[test]
-    fn rust_milkdrop_shader_translator_generates_wgsl_subset() {
-        let shader = create_translated_milkdrop_wgsl_shader(
+    fn rustymilk_shader_translator_generates_wgsl_subset() {
+        let shader = create_translated_rustymilk_wgsl_shader(
             r#"
             float3 tint = saturate(vec3(q1, bass_att, uv.x));
             tint *= tex2D(sampler_main, uv).rgb;
@@ -22574,99 +22574,99 @@ mod tests {
         ));
 
         let textured =
-            create_translated_milkdrop_wgsl_shader("ret = tex2D(sampler_noise, uv).rgb;");
+            create_translated_rustymilk_wgsl_shader("ret = tex2D(sampler_noise, uv).rgb;");
         assert!(textured.contains("@group(0) @binding(3) var shaderTexture0: texture_2d<f32>;"));
         assert!(textured.contains("textureSample(shaderTexture0, shaderTextureSampler, uv).rgb"));
         assert!(
-            analyze_milkdrop_webgpu_shader_support("ret = tex2D(sampler_noise, uv).rgb;").supported
+            analyze_rustymilk_webgpu_shader_support("ret = tex2D(sampler_noise, uv).rgb;").supported
         );
         let ternary =
-            create_translated_milkdrop_wgsl_shader("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);");
+            create_translated_rustymilk_wgsl_shader("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);");
         assert!(ternary.contains("let ret = vec3f(select(vec3f(0.0), vec3f(1.0), q1 > 0.5));"));
         assert!(
-            analyze_milkdrop_webgpu_shader_support("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);")
+            analyze_rustymilk_webgpu_shader_support("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);")
                 .supported
         );
     }
 
     #[test]
-    fn rust_milkdrop_primitive_state_evaluators_match_js_runtime() {
-        let mut shape = MilkdropIndexedEntry::default();
+    fn rustymilk_primitive_state_evaluators_match_js_runtime() {
+        let mut shape = RustyMilkIndexedEntry::default();
         shape
             .base_values
-            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+            .insert("enabled".to_string(), RustyMilkValue::Number(1.0));
         shape
             .base_values
-            .insert("r".to_string(), MilkdropValue::Number(0.2));
+            .insert("r".to_string(), RustyMilkValue::Number(0.2));
         shape
             .base_values
-            .insert("rad".to_string(), MilkdropValue::Number(0.1));
+            .insert("rad".to_string(), RustyMilkValue::Number(0.1));
         shape.equations.init = "q1=0.2;".to_string();
         shape.equations.frame = "rad=rad+q1+bass_att*0.1; r=min(1,r+0.3);".to_string();
 
         let mut frame_scope = BTreeMap::new();
-        frame_scope.insert("bass_att".to_string(), MilkdropValue::Number(2.0));
-        frame_scope.insert("time".to_string(), MilkdropValue::Number(9.0));
-        let evaluated_shape = evaluate_milkdrop_shape_state(&shape, &frame_scope);
+        frame_scope.insert("bass_att".to_string(), RustyMilkValue::Number(2.0));
+        frame_scope.insert("time".to_string(), RustyMilkValue::Number(9.0));
+        let evaluated_shape = evaluate_rustymilk_shape_state(&shape, &frame_scope);
         assert_eq!(
             evaluated_shape.base_values.get("rad"),
-            Some(&MilkdropValue::Number(0.5))
+            Some(&RustyMilkValue::Number(0.5))
         );
         assert_eq!(
             evaluated_shape.base_values.get("r"),
-            Some(&MilkdropValue::Number(0.5))
+            Some(&RustyMilkValue::Number(0.5))
         );
         assert_eq!(
             evaluated_shape.base_values.get("q1"),
-            Some(&MilkdropValue::Number(0.2))
+            Some(&RustyMilkValue::Number(0.2))
         );
         assert!(!evaluated_shape.base_values.contains_key("bass_att"));
         assert!(!evaluated_shape.base_values.contains_key("time"));
 
-        let mut sprite = MilkdropIndexedEntry::default();
+        let mut sprite = RustyMilkIndexedEntry::default();
         sprite
             .base_values
-            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+            .insert("enabled".to_string(), RustyMilkValue::Number(1.0));
         sprite
             .base_values
-            .insert("w".to_string(), MilkdropValue::Number(0.1));
+            .insert("w".to_string(), RustyMilkValue::Number(0.1));
         sprite.equations.init = "q1=0.2;".to_string();
         sprite.equations.frame = "w=w+q1+bass_att*0.1;".to_string();
-        let evaluated_sprite = evaluate_milkdrop_sprite_state(&sprite, &frame_scope);
+        let evaluated_sprite = evaluate_rustymilk_sprite_state(&sprite, &frame_scope);
         assert_eq!(
             evaluated_sprite.base_values.get("w"),
-            Some(&MilkdropValue::Number(0.5))
+            Some(&RustyMilkValue::Number(0.5))
         );
         assert_eq!(
             evaluated_sprite.base_values.get("q1"),
-            Some(&MilkdropValue::Number(0.2))
+            Some(&RustyMilkValue::Number(0.2))
         );
         assert!(!evaluated_sprite.base_values.contains_key("bass_att"));
     }
 
     #[test]
-    fn rust_milkdrop_custom_wave_vertices_match_js_point_mapping() {
-        let mut wave = MilkdropIndexedEntry::default();
+    fn rustymilk_custom_wave_vertices_match_js_point_mapping() {
+        let mut wave = RustyMilkIndexedEntry::default();
         wave.base_values
-            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+            .insert("enabled".to_string(), RustyMilkValue::Number(1.0));
         wave.base_values
-            .insert("samples".to_string(), MilkdropValue::Number(3.0));
+            .insert("samples".to_string(), RustyMilkValue::Number(3.0));
         wave.equations.init = "q1=0.2;".to_string();
         wave.equations.frame = "a=q1+0.3;".to_string();
         wave.equations.point = "x=i; y=0.5+sample*0.25;".to_string();
         let mut frame_scope = BTreeMap::new();
-        frame_scope.insert("bass_att".to_string(), MilkdropValue::Number(3.0));
+        frame_scope.insert("bass_att".to_string(), RustyMilkValue::Number(3.0));
 
-        let evaluated_wave = evaluate_milkdrop_wave_state(&wave, &frame_scope);
+        let evaluated_wave = evaluate_rustymilk_wave_state(&wave, &frame_scope);
         let vertices =
-            create_milkdrop_custom_wave_vertices(&evaluated_wave, &[-1.0, 0.0, 1.0], &frame_scope);
+            create_rustymilk_custom_wave_vertices(&evaluated_wave, &[-1.0, 0.0, 1.0], &frame_scope);
         assert_eq!(
             evaluated_wave.base_values.get("a"),
-            Some(&MilkdropValue::Number(0.5))
+            Some(&RustyMilkValue::Number(0.5))
         );
         assert_eq!(
             evaluated_wave.base_values.get("q1"),
-            Some(&MilkdropValue::Number(0.2))
+            Some(&RustyMilkValue::Number(0.2))
         );
         assert_eq!(vertices.len(), 6);
         assert!((vertices[0] + 1.0).abs() < 0.0001);
@@ -22676,12 +22676,12 @@ mod tests {
         assert!((vertices[4] - 1.0).abs() < 0.0001);
         assert!((vertices[5] - 0.5).abs() < 0.0001);
 
-        let mut spectrum_wave = MilkdropIndexedEntry::default();
+        let mut spectrum_wave = RustyMilkIndexedEntry::default();
         spectrum_wave
             .base_values
-            .insert("samples".to_string(), MilkdropValue::Number(3.0));
+            .insert("samples".to_string(), RustyMilkValue::Number(3.0));
         spectrum_wave.equations.point = "x=i; y=sample;".to_string();
-        let spectrum_vertices = create_milkdrop_custom_wave_vertices(
+        let spectrum_vertices = create_rustymilk_custom_wave_vertices(
             &spectrum_wave,
             &[0.0, 128.0, 255.0],
             &BTreeMap::new(),
@@ -22692,69 +22692,69 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_main_waveform_vertices_match_js_modes() {
+    fn rustymilk_main_waveform_vertices_match_js_modes() {
         let samples = [-1.0, 0.0, 1.0];
         let mut scope = BTreeMap::new();
 
         assert_eq!(
-            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            rounded_vec(&create_rustymilk_waveform_vertices(&samples, &scope)),
             vec![-1.0, -1.0, 0.0, 0.0, 1.0, 1.0]
         );
 
-        scope.insert("wave_mode".to_string(), MilkdropValue::Number(1.0));
-        scope.insert("wave_scale".to_string(), MilkdropValue::Number(0.5));
-        scope.insert("wave_y".to_string(), MilkdropValue::Number(0.25));
+        scope.insert("wave_mode".to_string(), RustyMilkValue::Number(1.0));
+        scope.insert("wave_scale".to_string(), RustyMilkValue::Number(0.5));
+        scope.insert("wave_y".to_string(), RustyMilkValue::Number(0.25));
         assert_eq!(
-            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            rounded_vec(&create_rustymilk_waveform_vertices(&samples, &scope)),
             vec![-1.0, -1.0, 0.0, -0.5, 1.0, 0.0]
         );
 
-        scope.insert("wave_mode".to_string(), MilkdropValue::Number(2.0));
-        scope.insert("wave_x".to_string(), MilkdropValue::Number(0.75));
+        scope.insert("wave_mode".to_string(), RustyMilkValue::Number(2.0));
+        scope.insert("wave_x".to_string(), RustyMilkValue::Number(0.75));
         assert_eq!(
-            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            rounded_vec(&create_rustymilk_waveform_vertices(&samples, &scope)),
             vec![0.0, -1.0, 0.5, 0.0, 1.0, 1.0]
         );
 
-        scope.insert("wave_mode".to_string(), MilkdropValue::Number(3.0));
-        scope.insert("wave_scale".to_string(), MilkdropValue::Number(1.0));
-        scope.insert("wave_x".to_string(), MilkdropValue::Number(0.5));
-        scope.insert("wave_y".to_string(), MilkdropValue::Number(0.5));
+        scope.insert("wave_mode".to_string(), RustyMilkValue::Number(3.0));
+        scope.insert("wave_scale".to_string(), RustyMilkValue::Number(1.0));
+        scope.insert("wave_x".to_string(), RustyMilkValue::Number(0.5));
+        scope.insert("wave_y".to_string(), RustyMilkValue::Number(0.5));
         assert_eq!(
-            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            rounded_vec(&create_rustymilk_waveform_vertices(&samples, &scope)),
             vec![0.17, 0.0, -0.35, 0.0, 0.53, -0.0]
         );
 
-        scope.insert("wave_mode".to_string(), MilkdropValue::Number(1.0));
-        scope.insert("wave_scale".to_string(), MilkdropValue::Number(1.0));
-        scope.insert("wave_y".to_string(), MilkdropValue::Number(0.5));
-        scope.insert("wave_smoothing".to_string(), MilkdropValue::Number(0.5));
+        scope.insert("wave_mode".to_string(), RustyMilkValue::Number(1.0));
+        scope.insert("wave_scale".to_string(), RustyMilkValue::Number(1.0));
+        scope.insert("wave_y".to_string(), RustyMilkValue::Number(0.5));
+        scope.insert("wave_smoothing".to_string(), RustyMilkValue::Number(0.5));
         assert_eq!(
-            rounded_vec(&create_milkdrop_waveform_vertices(&samples, &scope)),
+            rounded_vec(&create_rustymilk_waveform_vertices(&samples, &scope)),
             vec![-1.0, -1.0, 0.0, -0.5, 1.0, 0.5]
         );
     }
 
     #[test]
-    fn rust_milkdrop_shape_vertices_match_js_geometry() {
-        let mut shape = MilkdropIndexedEntry::default();
+    fn rustymilk_shape_vertices_match_js_geometry() {
+        let mut shape = RustyMilkIndexedEntry::default();
         shape
             .base_values
-            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+            .insert("enabled".to_string(), RustyMilkValue::Number(1.0));
         shape
             .base_values
-            .insert("sides".to_string(), MilkdropValue::Number(4.0));
+            .insert("sides".to_string(), RustyMilkValue::Number(4.0));
         shape
             .base_values
-            .insert("rad".to_string(), MilkdropValue::Number(0.25));
+            .insert("rad".to_string(), RustyMilkValue::Number(0.25));
         shape
             .base_values
-            .insert("x".to_string(), MilkdropValue::Number(0.5));
+            .insert("x".to_string(), RustyMilkValue::Number(0.5));
         shape
             .base_values
-            .insert("y".to_string(), MilkdropValue::Number(0.5));
-        let outline = create_milkdrop_shape_vertices(&shape);
-        let fill = create_milkdrop_shape_fill_vertices(&shape);
+            .insert("y".to_string(), RustyMilkValue::Number(0.5));
+        let outline = create_rustymilk_shape_vertices(&shape);
+        let fill = create_rustymilk_shape_fill_vertices(&shape);
         assert_eq!(outline.len(), 10);
         assert_eq!(fill.len(), 12);
         assert!((outline[0] - 0.25).abs() < 0.0001);
@@ -22764,8 +22764,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_textured_primitives_match_js_geometry() {
-        let frame = rust_milkdrop_frame_from_source(
+    fn rustymilk_textured_primitives_match_js_geometry() {
+        let frame = rustymilk_frame_from_source(
             r#"
             name=Textured
             wave_r=0.5
@@ -22799,7 +22799,7 @@ mod tests {
             "Sprites/flare.webp"
         );
         assert_eq!(
-            get_milkdrop_texture_name_aliases(&frame.textured_primitives[0].texture_name),
+            get_rustymilk_texture_name_aliases(&frame.textured_primitives[0].texture_name),
             vec![
                 "textures/cover.png".to_string(),
                 "cover.png".to_string(),
@@ -22816,9 +22816,9 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_webgpu_vertex_packers_match_js_shapes() {
+    fn rustymilk_webgpu_vertex_packers_match_js_shapes() {
         assert_eq!(
-            rounded_vec(&create_rust_milkdrop_webgpu_triangle_list_vertices(
+            rounded_vec(&create_rustymilk_webgpu_triangle_list_vertices(
                 &[-1.0, -1.0, 1.0, -1.0, 0.0, 1.0],
                 [0.2, 0.4, 0.6, 0.8],
             )),
@@ -22828,7 +22828,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            rounded_vec(&create_rust_milkdrop_webgpu_triangle_fan_vertices(
+            rounded_vec(&create_rustymilk_webgpu_triangle_fan_vertices(
                 &[0.0, 0.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0],
                 &[1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.6, 0.0, 0.0, 1.0, 0.7, 1.0, 1.0, 1.0, 0.8,],
                 [1.0, 1.0, 1.0, 1.0],
@@ -22840,7 +22840,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            rounded_vec(&create_rust_milkdrop_webgpu_line_segment_vertices(
+            rounded_vec(&create_rustymilk_webgpu_line_segment_vertices(
                 &[-1.0, 0.0, 0.0, 0.5, 1.0, 0.0],
                 [0.1, 0.2, 0.3, 0.4],
             )),
@@ -22852,8 +22852,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_webgpu_textured_vertex_packers_match_js_shapes() {
-        let vertices = create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
+    fn rustymilk_webgpu_textured_vertex_packers_match_js_shapes() {
+        let vertices = create_rustymilk_webgpu_textured_triangle_fan_vertices(
             &[0.0, 0.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0],
             &[0.5, 0.5, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0],
             &[
@@ -22872,8 +22872,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_webgpu_domain_packers_match_js_renderer() {
-        let parsed = parse_milkdrop_preset_set(
+    fn rustymilk_webgpu_domain_packers_match_js_renderer() {
+        let parsed = parse_rustymilk_preset_set(
             r#"
             name=WebGPU pack
             ob_size=0.1
@@ -22919,30 +22919,30 @@ mod tests {
             false,
         );
         let preset = &parsed.presets[0];
-        let borders = create_rust_milkdrop_webgpu_screen_border_vertices(
+        let borders = create_rustymilk_webgpu_screen_border_vertices(
             &preset.base_values,
             [0.7, 0.7, 0.7],
         );
         assert_eq!(borders.len(), 288);
         assert_eq!(rounded_vec(&borders[2..6]), vec![1.0, 0.2, 0.3, 0.4]);
-        let motion = create_rust_milkdrop_webgpu_motion_vector_vertices(
+        let motion = create_rustymilk_webgpu_motion_vector_vertices(
             &preset.base_values,
             [0.7, 0.7, 0.7],
         );
         assert_eq!(motion.len(), 24);
         assert_eq!(rounded_vec(&motion[2..6]), vec![0.1, 0.2, 0.3, 0.75]);
         let fills =
-            create_rust_milkdrop_webgpu_shape_fill_vertices(&preset.shapes, [0.7, 0.7, 0.7]);
+            create_rustymilk_webgpu_shape_fill_vertices(&preset.shapes, [0.7, 0.7, 0.7]);
         assert_eq!(fills.len(), 54);
         assert_eq!(rounded_vec(&fills[2..6]), vec![0.1, 0.2, 0.3, 0.4]);
         assert_eq!(rounded_vec(&fills[8..12]), vec![0.4, 0.5, 0.6, 0.2]);
-        let sprites = create_rust_milkdrop_webgpu_sprite_vertices(&preset.sprites, [1.0, 1.0, 1.0]);
+        let sprites = create_rustymilk_webgpu_sprite_vertices(&preset.sprites, [1.0, 1.0, 1.0]);
         assert_eq!(sprites.len(), 36);
         assert_eq!(
             rounded_vec(&sprites[..6]),
             vec![-0.2, -0.1, 0.1, 0.2, 0.3, 0.4]
         );
-        let textured_sprite = create_rust_milkdrop_webgpu_textured_sprite_vertices(
+        let textured_sprite = create_rustymilk_webgpu_textured_sprite_vertices(
             &preset.sprites[0],
             [1.0, 1.0, 1.0],
         );
@@ -22954,8 +22954,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_webgpu_frame_batches_pack_runtime_primitives() {
-        let frame = rust_milkdrop_frame_from_source(
+    fn rustymilk_webgpu_frame_batches_pack_runtime_primitives() {
+        let frame = rustymilk_frame_from_source(
             r#"
             name=WebGPU frame
             ob_size=0.1
@@ -23004,13 +23004,13 @@ mod tests {
         assert!(frame
             .textured_primitives
             .iter()
-            .any(|primitive| primitive.mode == RustMilkdropTexturedPrimitiveMode::TriangleFan));
+            .any(|primitive| primitive.mode == RustyMilkTexturedPrimitiveMode::TriangleFan));
         assert!(frame
             .textured_primitives
             .iter()
-            .any(|primitive| primitive.mode == RustMilkdropTexturedPrimitiveMode::Quad));
+            .any(|primitive| primitive.mode == RustyMilkTexturedPrimitiveMode::Quad));
 
-        let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
+        let batches = create_rustymilk_webgpu_frame_batches(&frame);
 
         assert!(batches.filled_vertices.len() >= 48);
         assert!(batches.line_vertices.len() >= 24);
@@ -23030,8 +23030,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_shape_fill_vertex_colors_match_js_edges() {
-        let frame = rust_milkdrop_frame_from_source(
+    fn rustymilk_shape_fill_vertex_colors_match_js_edges() {
+        let frame = rustymilk_frame_from_source(
             r#"
             name=Shape edge colors
             wave_a=0
@@ -23055,7 +23055,7 @@ mod tests {
         let shape = frame
             .primitives
             .iter()
-            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::TriangleFan)
+            .find(|primitive| primitive.mode == RustyMilkPrimitiveMode::TriangleFan)
             .expect("shape fill primitive");
 
         assert_eq!(
@@ -23063,7 +23063,7 @@ mod tests {
             vec![0.1, 0.2, 0.3, 0.4, 0.4, 0.5, 0.6, 0.2]
         );
 
-        let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
+        let batches = create_rustymilk_webgpu_frame_batches(&frame);
         assert_eq!(
             rounded_vec(&batches.filled_vertices[2..6]),
             vec![0.1, 0.2, 0.3, 0.4]
@@ -23075,8 +23075,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_frame_set_renders_milk2_composite_entries() {
-        let frame_set = rust_milkdrop_frame_set_from_source(
+    fn rustymilk_frame_set_renders_milk2_composite_entries() {
+        let frame_set = rustymilk_frame_set_from_source(
             r#"
             [preset00]
             name=Primary
@@ -23117,8 +23117,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_frame_set_runtime_persists_each_preset_state() {
-        let mut runtime = RustMilkdropFrameSetRuntime::default();
+    fn rustymilk_frame_set_runtime_persists_each_preset_state() {
+        let mut runtime = RustyMilkFrameSetRuntime::default();
         let source = r#"
             [preset00]
             name=Primary
@@ -23149,7 +23149,7 @@ mod tests {
         assert_eq!(second.entries[1].composite_mode, "multiply");
         assert_eq!(second.entries[1].blend_alpha, 0.5);
         assert!(second.entries[1].frame.primitives.iter().any(|primitive| {
-            primitive.mode == RustMilkdropPrimitiveMode::TriangleFan
+            primitive.mode == RustyMilkPrimitiveMode::TriangleFan
                 && primitive.vertices.iter().any(|value| value.abs() > 0.15)
         }));
 
@@ -23158,8 +23158,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_webgpu_frame_set_batches_keep_composite_offsets() {
-        let frame_set = rust_milkdrop_frame_set_from_source(
+    fn rustymilk_webgpu_frame_set_batches_keep_composite_offsets() {
+        let frame_set = rustymilk_frame_set_from_source(
             r#"
             [preset00]
             name=Primary
@@ -23188,7 +23188,7 @@ mod tests {
             0.2,
             0.3,
         );
-        let batches = create_rust_milkdrop_webgpu_frame_set_batches(&frame_set);
+        let batches = create_rustymilk_webgpu_frame_set_batches(&frame_set);
 
         assert_eq!(batches.composite_batches.len(), 2);
         assert_eq!(batches.composite_batches[0].index, 0);
@@ -23223,8 +23223,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_validation_reports_secondary_milk2_errors() {
-        let error = validate_rust_milkdrop_import(
+    fn rustymilk_validation_reports_secondary_milk2_errors() {
+        let error = validate_rustymilk_import(
             r#"
             [preset00]
             name=Primary
@@ -23237,13 +23237,13 @@ mod tests {
         .expect_err("secondary preset should be validated");
 
         assert!(error.contains(
-            "preset 2: Native MilkDrop preset has unsupported functions: unsupported_secondary."
+            "preset 2: RustyMilk preset has unsupported functions: unsupported_secondary."
         ));
     }
 
     #[test]
-    fn rust_milkdrop_webgpu_batch_summary_json_exposes_wasm_contract() {
-        let summary = rust_milkdrop_webgpu_batch_summary_json(
+    fn rustymilk_webgpu_batch_summary_json_exposes_wasm_contract() {
+        let summary = rustymilk_webgpu_batch_summary_json(
             r#"
             name=WebGPU summary
             per_frame_1=q1=get_waveform(0.5);
@@ -23273,8 +23273,8 @@ mod tests {
             0.1,
             0.2,
             0.3,
-            &parse_milkdrop_sample_csv("-1, 0, 1, 0.5"),
-            &parse_milkdrop_sample_csv("0, .5, 1"),
+            &parse_rustymilk_sample_csv("-1, 0, 1, 0.5"),
+            &parse_rustymilk_sample_csv("0, .5, 1"),
         );
         let value: serde_json::Value = serde_json::from_str(&summary).unwrap();
 
@@ -23304,8 +23304,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_per_pixel_equations_build_warp_mesh() {
-        let frame = rust_milkdrop_frame_from_source(
+    fn rustymilk_per_pixel_equations_build_warp_mesh() {
+        let frame = rustymilk_frame_from_source(
             r#"
             name=Warp mesh
             meshx=2
@@ -23331,8 +23331,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_borders_and_motion_vectors_match_js_geometry() {
-        let frame = rust_milkdrop_frame_from_source(
+    fn rustymilk_borders_and_motion_vectors_match_js_geometry() {
+        let frame = rustymilk_frame_from_source(
             r#"
             name=Overlay primitives
             wave_r=0.5
@@ -23357,7 +23357,7 @@ mod tests {
         let borders = frame
             .primitives
             .iter()
-            .filter(|primitive| primitive.mode == RustMilkdropPrimitiveMode::Triangles)
+            .filter(|primitive| primitive.mode == RustyMilkPrimitiveMode::Triangles)
             .collect::<Vec<_>>();
         assert_eq!(borders.len(), 2);
         assert_eq!(borders[0].vertices.len(), 48);
@@ -23365,7 +23365,7 @@ mod tests {
         let motion = frame
             .primitives
             .iter()
-            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::Lines)
+            .find(|primitive| primitive.mode == RustyMilkPrimitiveMode::Lines)
             .expect("motion vectors");
         assert_eq!(motion.vertices.len(), 16);
         assert_eq!(&motion.vertices[0..4], &[-1.0, -1.0, -0.9, -0.8]);
@@ -23373,8 +23373,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_preset_compatibility_reports_before_rendering() {
-        let parsed = parse_milkdrop_preset_set(
+    fn rustymilk_preset_compatibility_reports_before_rendering() {
+        let parsed = parse_rustymilk_preset_set(
             r#"
             per_frame_1=q1=megabuf(0);
             per_pixel_1=q2=sin(pi);
@@ -23388,21 +23388,21 @@ mod tests {
             "#,
             false,
         );
-        let report = analyze_milkdrop_preset_compatibility(&parsed.presets[0]);
+        let report = analyze_rustymilk_preset_compatibility(&parsed.presets[0]);
         assert_eq!(
             report.unsupported_functions,
             vec!["customcall".to_string(), "spritecall".to_string()]
         );
         assert_eq!(report.shader_sections, vec!["comp_shader".to_string()]);
         assert_eq!(
-            milkdrop_compatibility_error(&report),
-            "Native MilkDrop preset has unsupported functions: customcall, spritecall; shader translation pending: comp_shader."
+            rustymilk_compatibility_error(&report),
+            "RustyMilk preset has unsupported functions: customcall, spritecall; shader translation pending: comp_shader."
         );
     }
 
     #[test]
-    fn rust_milkdrop_preset_compatibility_accepts_supported_first_slice() {
-        let parsed = parse_milkdrop_preset_set(
+    fn rustymilk_preset_compatibility_accepts_supported_first_slice() {
+        let parsed = parse_rustymilk_preset_set(
             r#"
             per_frame_1=q1=rand(4)+get_fft(0.5)+atan2(1,0);
             per_frame_2=q2=band(7,3)+sigmoid(q1,2);
@@ -23413,21 +23413,21 @@ mod tests {
             "#,
             false,
         );
-        let report = analyze_milkdrop_preset_compatibility(&parsed.presets[0]);
+        let report = analyze_rustymilk_preset_compatibility(&parsed.presets[0]);
         assert!(report.unsupported_functions.is_empty());
         assert!(report.shader_sections.is_empty());
-        assert_eq!(milkdrop_compatibility_error(&report), "");
+        assert_eq!(rustymilk_compatibility_error(&report), "");
     }
 
     #[test]
-    fn rust_milkdrop_import_validation_accepts_only_supported_presets() {
+    fn rustymilk_import_validation_accepts_only_supported_presets() {
         assert_eq!(
-            validate_rust_milkdrop_import(
+            validate_rustymilk_import(
                 "name=Imported\nper_frame_1=q1=rand(4)+get_fft(0.5);\ncomp_shader=ret = vec3(q1);"
             ),
             Ok("Imported".to_string())
         );
-        let error = validate_rust_milkdrop_import(
+        let error = validate_rustymilk_import(
             "name=Bad\nper_frame_1=q1=megabuf(0);\nper_frame_2=q2=unknowncall(q1);\ncomp_shader=for (;;) { ret = vec3(1.0); }",
         )
         .expect_err("unsupported preset should be rejected");
@@ -23436,7 +23436,7 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_compatibility_matrix_tracks_dense_primitive_pressure() {
+    fn rustymilk_compatibility_matrix_tracks_dense_primitive_pressure() {
         let mut lines = vec!["name=Dense Compatibility Probe".to_string()];
         for index in 0..40 {
             lines.push(format!("shape{index:02}_enabled=1"));
@@ -23449,12 +23449,12 @@ mod tests {
             lines.push(format!("wavecode_{index}_per_point1=x=i;"));
         }
         let entry =
-            build_milkdrop_compatibility_entry("dense-pack-probe", "", &lines.join("\n"), false);
+            build_rustymilk_compatibility_entry("dense-pack-probe", "", &lines.join("\n"), false);
         assert!(entry.supported);
         assert!(entry.webgpu_supported);
         assert_eq!(entry.metrics.max_shape_count, 40);
         assert_eq!(entry.metrics.max_wave_count, 20);
-        let summary = summarize_milkdrop_compatibility_matrix(&[entry]);
+        let summary = summarize_rustymilk_compatibility_matrix(&[entry]);
         assert_eq!(summary.total_count, 1);
         assert_eq!(summary.supported_count, 1);
         assert_eq!(summary.max_shape_count, 40);
@@ -23462,8 +23462,8 @@ mod tests {
     }
 
     #[test]
-    fn rust_milkdrop_compatibility_matrix_tracks_q_register_and_webgpu_gaps() {
-        let entry = build_milkdrop_compatibility_entry(
+    fn rustymilk_compatibility_matrix_tracks_q_register_and_webgpu_gaps() {
+        let entry = build_rustymilk_compatibility_entry(
             "q-register-pack-probe",
             "",
             r#"
@@ -23496,7 +23496,7 @@ mod tests {
             ]
         );
 
-        let webgpu_ternary = build_milkdrop_compatibility_entry(
+        let webgpu_ternary = build_rustymilk_compatibility_entry(
             "webgpu-shader-ternary-probe",
             "",
             "comp_shader=ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);",
@@ -23506,7 +23506,7 @@ mod tests {
         assert!(webgpu_ternary.webgpu_supported);
         assert!(webgpu_ternary.webgpu_shader_sections.is_empty());
 
-        let webgpu_gap = build_milkdrop_compatibility_entry(
+        let webgpu_gap = build_rustymilk_compatibility_entry(
             "webgpu-shader-gap-probe",
             "",
             "comp_shader=ret = (q1 & 3) > 0 ? vec3(1.0) : vec3(0.0);",
@@ -23518,7 +23518,7 @@ mod tests {
             webgpu_gap.webgpu_shader_sections,
             vec!["comp_shader".to_string()]
         );
-        let summary = summarize_milkdrop_compatibility_matrix(&[entry, webgpu_ternary, webgpu_gap]);
+        let summary = summarize_rustymilk_compatibility_matrix(&[entry, webgpu_ternary, webgpu_gap]);
         assert_eq!(summary.total_count, 3);
         assert_eq!(summary.webgpu_supported_count, 2);
         assert_eq!(summary.webgpu_unsupported_count, 1);

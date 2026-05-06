@@ -82,18 +82,18 @@ const readStoredBoolean = (key) => {
 
 const readStoredVisualizerEngineTileMode = () => {
   const engine = getLocalStorageItem(visualizerEngineStorageKey);
-  if (engine === 'native') return 'native-webgl2';
-  return ['native-webgl2', 'native-webgpu'].includes(engine)
+  if (engine === 'native') return 'rustymilk-webgl2';
+  return ['rustymilk-webgl2', 'rustymilk-webgpu'].includes(engine)
     ? engine
-    : 'native-webgl2';
+    : 'rustymilk-webgl2';
 };
 
 const readStoredTileMode = () => {
   const mode = getLocalStorageItem(visualTileStorageKey);
-  if (['art', 'spectrum', 'scope', 'native-webgl2', 'native-webgpu'].includes(mode)) {
+  if (['art', 'spectrum', 'scope', 'rustymilk-webgl2', 'rustymilk-webgpu'].includes(mode)) {
     return mode;
   }
-  if (mode === 'milkdrop') {
+  if (mode === 'rustymilk') {
     return readStoredVisualizerEngineTileMode();
   }
   return 'art';
@@ -1853,18 +1853,18 @@ const PlayerVisualTile = ({
   onTileModeChange,
   tileMode,
 }) => {
-  const tileModes = ['art', 'native-webgl2', 'native-webgpu', 'spectrum', 'scope'];
-  const visualizerTileModes = ['native-webgl2', 'native-webgpu'];
+  const tileModes = ['art', 'rustymilk-webgl2', 'rustymilk-webgpu', 'spectrum', 'scope'];
+  const visualizerTileModes = ['rustymilk-webgl2', 'rustymilk-webgpu'];
   const tileModeLabels = {
     art: 'album art',
-    'native-webgl2': 'MilkDrop3 WebGL2',
-    'native-webgpu': 'MilkDrop3 WebGPU',
+    'rustymilk-webgl2': 'RustyMilk WebGL2',
+    'rustymilk-webgpu': 'RustyMilk WebGPU',
     scope: 'signal scope',
     spectrum: 'spectrum bars',
   };
   const tileModeIcons = {
-    'native-webgl2': 'microchip',
-    'native-webgpu': 'bolt',
+    'rustymilk-webgl2': 'microchip',
+    'rustymilk-webgpu': 'bolt',
     scope: 'signal',
     spectrum: 'chart bar',
   };
@@ -1982,7 +1982,7 @@ const PlayerVisualTile = ({
         }
       />
       <div className="player-visual-tile-controls" onClick={(event) => event.stopPropagation()}>
-        {['spectrum', 'scope', 'native-webgl2', 'native-webgpu'].map((option) => (
+        {['spectrum', 'scope', 'rustymilk-webgl2', 'rustymilk-webgpu'].map((option) => (
           <Popup
             content={`Show ${tileModeLabels[option]}.`}
             key={option}
@@ -2731,13 +2731,13 @@ const PlayerBar = () => {
               active={visualizerMode !== 'off'}
               content={
                 visualizerMode === 'off'
-                  ? 'Show the MilkDrop visualizer.'
-                  : 'Hide the MilkDrop visualizer.'
+                  ? 'Show the RustyMilk visualizer.'
+                  : 'Hide the RustyMilk visualizer.'
               }
               aria-label={
                 visualizerMode === 'off'
-                  ? 'Show MilkDrop visualizer'
-                  : 'Hide MilkDrop visualizer'
+                  ? 'Show RustyMilk visualizer'
+                  : 'Hide RustyMilk visualizer'
               }
               data-testid="player-toggle-visualizer"
               icon="eye"
@@ -2915,7 +2915,7 @@ const PlayerBar = () => {
               />
               <div>
                 <div className="player-external-visualizer-name">
-                  {externalVisualizerStatus?.name || 'MilkDrop3'}
+                  {externalVisualizerStatus?.name || 'RustyMilk'}
                 </div>
                 <div className="player-external-visualizer-status">
                   {getExternalVisualizerStatusText(
@@ -2947,7 +2947,7 @@ const PlayerBar = () => {
             ) : null}
             <div className="player-external-visualizer-actions">
               <Popup
-                content="Start the configured external visualizer on the slskr host. Use this for MilkDrop3 or another local visualizer that captures system audio."
+                content="Start the configured external visualizer on the slskr host. Use this for RustyMilk or another local visualizer that captures system audio."
                 trigger={
                   <Button
                     data-testid="player-launch-external-visualizer"

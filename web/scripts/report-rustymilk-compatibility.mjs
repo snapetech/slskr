@@ -8,7 +8,7 @@ const result = spawnSync('cargo', [
   'test',
   '-p',
   'slskr-web',
-  'rust_milkdrop_compatibility',
+  'rustymilk_compatibility',
   '--',
   '--nocapture',
 ], {

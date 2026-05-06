@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import Visualizer from './Visualizer';
-import { createNativeMilkdropEngine } from './visualizers/nativeMilkdropEngine';
+import { createRustyMilkEngine } from './visualizers/rustyMilkEngine';
 
 const nativeEngine = {
   dispose: vi.fn(),
@@ -33,12 +33,12 @@ const nativeEngine = {
     wave_r: 0.4,
     zoom: 1,
   })),
-  inspectPresetText: vi.fn(() => ({ title: 'Imported native preset' })),
+  inspectPresetText: vi.fn(() => ({ title: 'Imported RustyMilk preset' })),
   loadPresetFragmentText: vi.fn((_source, fileName) => ({
-    source: `name=Imported native preset\n; merged ${fileName}`,
-    title: `Imported native preset + ${fileName}`,
+    source: `name=Imported RustyMilk preset\n; merged ${fileName}`,
+    title: `Imported RustyMilk preset + ${fileName}`,
   })),
-  loadPresetText: vi.fn(() => 'Imported native preset'),
+  loadPresetText: vi.fn(() => 'Imported RustyMilk preset'),
   nextPreset: vi.fn(() => 'Native next'),
   presetName: 'Native preset',
   render: vi.fn(),
@@ -48,7 +48,7 @@ const nativeEngine = {
   })),
   randomizePresetParameters: vi.fn(() => ({
     source: 'name=Randomized\nzoom=1.2\nwave_r=0.8',
-    title: 'Randomized native preset',
+    title: 'Randomized RustyMilk preset',
     values: {
       wave_r: 0.8,
       zoom: 1.2,
@@ -64,7 +64,7 @@ const nativeEngine = {
       [key]: value,
     },
   })),
-  name: 'slskr MilkDrop WebGL',
+  name: 'slskr RustyMilk WebGL',
 };
 
 vi.mock('./audioGraph', () => ({
@@ -75,8 +75,8 @@ vi.mock('./audioGraph', () => ({
     })),
 }));
 
-vi.mock('./visualizers/nativeMilkdropEngine', () => ({
-  createNativeMilkdropEngine: vi.fn(() => Promise.resolve(nativeEngine)),
+vi.mock('./visualizers/rustyMilkEngine', () => ({
+  createRustyMilkEngine: vi.fn(() => Promise.resolve(nativeEngine)),
 }));
 
 const createFileList = (fileOrFiles) => {
@@ -92,7 +92,7 @@ describe('Visualizer', () => {
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({}));
     window.requestAnimationFrame = vi.fn(() => 1);
     window.cancelAnimationFrame = vi.fn();
-    createNativeMilkdropEngine.mockClear();
+    createRustyMilkEngine.mockClear();
     nativeEngine.dispose.mockClear();
     nativeEngine.exportPresetFragment.mockClear();
     nativeEngine.exportPresetText.mockClear();
@@ -113,7 +113,7 @@ describe('Visualizer', () => {
     nativeEngine.updatePresetBaseValue.mockClear();
   });
 
-  it('switches to the native engine and imports a local preset', async () => {
+  it('switches to the RustyMilk engine and imports a local preset', async () => {
     render(
       <Visualizer
         audioElement={{}}
@@ -125,13 +125,13 @@ describe('Visualizer', () => {
     await screen.findByTestId('visualizer-switch-engine');
 
     await waitFor(() => {
-      expect(createNativeMilkdropEngine).toHaveBeenLastCalledWith(
+      expect(createRustyMilkEngine).toHaveBeenLastCalledWith(
         expect.objectContaining({ rendererBackend: 'webgl2' }),
       );
     });
 
     const input = document.querySelector('input[type="file"]');
-    const file = new File(['name=Imported native preset\nwave_r=1'], 'imported.milk', {
+    const file = new File(['name=Imported RustyMilk preset\nwave_r=1'], 'imported.milk', {
       type: 'text/plain',
     });
     const fileId = `${file.name}:${file.size}:${file.lastModified}`;
@@ -143,21 +143,21 @@ describe('Visualizer', () => {
 
     await waitFor(() => {
       expect(nativeEngine.inspectPresetText).toHaveBeenCalledWith(
-        'name=Imported native preset\nwave_r=1',
+        'name=Imported RustyMilk preset\nwave_r=1',
         'imported.milk',
       );
     });
     expect(nativeEngine.loadPresetText).toHaveBeenCalledWith(
-      'name=Imported native preset\nwave_r=1',
+      'name=Imported RustyMilk preset\nwave_r=1',
       'imported.milk',
       { textureAssets: {} },
     );
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
-      'Imported native preset',
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
+      'Imported RustyMilk preset',
     );
     expect(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary'),
-    ).toContain('Imported native preset');
+      window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary'),
+    ).toContain('Imported RustyMilk preset');
 
     fireEvent.change(screen.getByTestId('visualizer-native-preset-library'), {
       target: { value: fileId },
@@ -165,7 +165,7 @@ describe('Visualizer', () => {
 
     await waitFor(() => {
       expect(nativeEngine.loadPresetText).toHaveBeenLastCalledWith(
-        'name=Imported native preset\nwave_r=1',
+        'name=Imported RustyMilk preset\nwave_r=1',
         'imported.milk',
         { textureAssets: {} },
       );
@@ -173,12 +173,12 @@ describe('Visualizer', () => {
 
     fireEvent.click(screen.getByTestId('visualizer-clear-native-preset-library'));
 
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toBeNull();
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary')).toBeNull();
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toBeNull();
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary')).toBeNull();
     expect(screen.queryByTestId('visualizer-native-preset-library')).not.toBeInTheDocument();
   });
 
-  it('cycles visualizer engines through Rust MilkDrop WebGL2 and WebGPU', async () => {
+  it('cycles visualizer engines through RustyMilk WebGL2 and WebGPU', async () => {
     render(
       <Visualizer
         audioElement={{}}
@@ -188,29 +188,29 @@ describe('Visualizer', () => {
     );
 
     await screen.findByTestId('visualizer-switch-engine');
-    expect(createNativeMilkdropEngine).toHaveBeenLastCalledWith(
+    expect(createRustyMilkEngine).toHaveBeenLastCalledWith(
       expect.objectContaining({ rendererBackend: 'webgl2' }),
     );
 
     fireEvent.click(screen.getByTestId('visualizer-switch-engine'));
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('native-webgpu');
+      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('rustymilk-webgpu');
     });
-    expect(createNativeMilkdropEngine).toHaveBeenLastCalledWith(
+    expect(createRustyMilkEngine).toHaveBeenLastCalledWith(
       expect.objectContaining({ rendererBackend: 'webgpu' }),
     );
 
     fireEvent.click(screen.getByTestId('visualizer-switch-engine'));
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('native-webgl2');
+      expect(window.localStorage.getItem('slskr.player.visualizerEngine')).toBe('rustymilk-webgl2');
     });
   });
 
-  it('imports compatible native preset batches and reports skipped files', async () => {
+  it('imports compatible RustyMilk preset batches and reports skipped files', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     nativeEngine.inspectPresetText.mockImplementation((source, fileName) => {
       if (source.includes('warp_shader')) {
-        throw new Error('Native MilkDrop preset has shader translation pending: warp_shader.');
+        throw new Error('RustyMilk preset has shader translation pending: warp_shader.');
       }
       return { title: fileName.replace(/\.milk2?$/, '') };
     });
@@ -246,13 +246,13 @@ describe('Visualizer', () => {
     fireEvent.change(input);
 
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
+      expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
         'second.milk',
       );
     });
 
     const library = JSON.parse(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary'),
+      window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary'),
     );
     expect(library.map((preset) => preset.fileName)).toEqual(['second.milk', 'first.milk']);
     expect(nativeEngine.loadPresetText).toHaveBeenCalledTimes(1);
@@ -267,7 +267,7 @@ describe('Visualizer', () => {
   it('imports native .shape and .wave fragments into the active preset', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'base.milk',
         id: 'base',
@@ -317,15 +317,15 @@ describe('Visualizer', () => {
       'scope.wave',
       { textureAssets: {} },
     );
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
       'scope.wave',
     );
     const library = JSON.parse(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary'),
+      window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary'),
     );
     expect(library[0]).toEqual(expect.objectContaining({
       id: 'base',
-      title: 'Imported native preset + scope.wave',
+      title: 'Imported RustyMilk preset + scope.wave',
     }));
   });
 
@@ -366,7 +366,7 @@ describe('Visualizer', () => {
     clickSpy.mockRestore();
   });
 
-  it('exports the active native preset text', async () => {
+  it('exports the active RustyMilk preset text', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     const createObjectUrl = vi.fn(() => 'blob:native-preset');
     const revokeObjectUrl = vi.fn();
@@ -404,7 +404,7 @@ describe('Visualizer', () => {
   it('selects and removes native shape and wave fragments from the active preset', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'editable.milk',
         id: 'editable',
@@ -444,7 +444,7 @@ describe('Visualizer', () => {
     expect(nativeEngine.removePresetFragment).toHaveBeenCalledWith('shape', 1, {
       textureAssets: undefined,
     });
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
       'Editable without shape 1',
     );
 
@@ -457,10 +457,10 @@ describe('Visualizer', () => {
     clickSpy.mockRestore();
   });
 
-  it('applies native preset parameter edits to a browser-local edited copy', async () => {
+  it('applies RustyMilk preset parameter edits to a browser-local edited copy', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'editable.milk',
         id: 'editable',
@@ -494,18 +494,18 @@ describe('Visualizer', () => {
         cover: { dataUrl: 'data:image/png;base64,fixture', fileName: 'cover.png' },
       },
     });
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
       'Edited zoom',
     );
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary')).toContain(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary')).toContain(
       'zoom=1.25',
     );
   });
 
-  it('randomizes native parameters and toggles debug details', async () => {
+  it('randomizes RustyMilk parameters and toggles debug details', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'editable.milk',
         id: 'editable',
@@ -527,10 +527,10 @@ describe('Visualizer', () => {
     expect(nativeEngine.randomizePresetParameters).toHaveBeenCalledWith({
       textureAssets: undefined,
     });
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
-      'Randomized native preset',
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
+      'Randomized RustyMilk preset',
     );
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary')).toContain(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary')).toContain(
       'wave_r=0.8',
     );
 
@@ -540,16 +540,16 @@ describe('Visualizer', () => {
     fireEvent.change(screen.getByTestId('visualizer-native-fps-cap'), {
       target: { value: '30' },
     });
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropFpsCap')).toBe('30');
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropQuality')).toBe('custom');
+    expect(window.localStorage.getItem('slskr.player.rustyMilkFpsCap')).toBe('30');
+    expect(window.localStorage.getItem('slskr.player.rustyMilkQuality')).toBe('custom');
     fireEvent.change(screen.getByTestId('visualizer-native-quality'), {
       target: { value: 'efficient' },
     });
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropQuality')).toBe('efficient');
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropFpsCap')).toBe('30');
+    expect(window.localStorage.getItem('slskr.player.rustyMilkQuality')).toBe('efficient');
+    expect(window.localStorage.getItem('slskr.player.rustyMilkFpsCap')).toBe('30');
   });
 
-  it('feeds normalized pointer state into the native engine', async () => {
+  it('feeds normalized pointer state into the RustyMilk engine', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
 
     render(
@@ -615,7 +615,7 @@ describe('Visualizer', () => {
 
     fireEvent.click(screen.getByTestId('visualizer-native-automation'));
     expect(
-      JSON.parse(window.localStorage.getItem('slskr.player.nativeMilkdropPresetAutomation')),
+      JSON.parse(window.localStorage.getItem('slskr.player.rustyMilkPresetAutomation')),
     ).toEqual({
       beatsPerPreset: 8,
       mode: 'beat',
@@ -661,7 +661,7 @@ describe('Visualizer', () => {
     });
   });
 
-  it('updates displayed native preset name when automation advances', async () => {
+  it('updates displayed RustyMilk preset name when automation advances', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     let animationFrameCalled = false;
     window.requestAnimationFrame = vi.fn((callback) => {
@@ -686,7 +686,7 @@ describe('Visualizer', () => {
     expect(await screen.findByText(/Native automated next/)).toBeInTheDocument();
   });
 
-  it('stores selected image assets with imported native presets', async () => {
+  it('stores selected image assets with imported RustyMilk presets', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     vi.stubGlobal('FileReader', class {
       readAsDataURL() {
@@ -736,12 +736,12 @@ describe('Visualizer', () => {
         },
       );
     });
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
       'cover.png',
     );
   });
 
-  it('stores only referenced image assets with each imported native preset', async () => {
+  it('stores only referenced image assets with each imported RustyMilk preset', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     nativeEngine.inspectPresetText.mockImplementation((_source, fileName) => ({
       title: fileName.replace(/\.milk$/, ''),
@@ -791,18 +791,18 @@ describe('Visualizer', () => {
     fireEvent.change(input);
 
     await waitFor(() => {
-      expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toContain(
+      expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toContain(
         'second.milk',
       );
     });
 
     const activePreset = JSON.parse(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPreset'),
+      window.localStorage.getItem('slskr.player.rustyMilkPreset'),
     );
     expect(Object.keys(activePreset.textureAssets).sort()).toEqual(['second', 'second.png']);
 
     const library = JSON.parse(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary'),
+      window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary'),
     );
     const firstEntry = library.find((preset) => preset.fileName === 'first.milk');
     expect(Object.keys(firstEntry.textureAssets).sort()).toEqual([
@@ -821,7 +821,7 @@ describe('Visualizer', () => {
     );
   });
 
-  it('imports native preset folders with relative asset paths', async () => {
+  it('imports RustyMilk preset folders with relative asset paths', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     nativeEngine.inspectPresetText.mockImplementation((_source, fileName) => ({
       title: fileName.replace(/\.milk$/, ''),
@@ -936,10 +936,10 @@ describe('Visualizer', () => {
     expect(screen.getByText(/Skipped 1 texture asset: huge.png/)).toBeInTheDocument();
   });
 
-  it('removes only the selected native preset from the local library', async () => {
+  it('removes only the selected RustyMilk preset from the local library', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'first.milk',
         id: 'first',
@@ -948,7 +948,7 @@ describe('Visualizer', () => {
       }),
     );
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPresetLibrary',
+      'slskr.player.rustyMilkPresetLibrary',
       JSON.stringify([
         {
           fileName: 'first.milk',
@@ -984,17 +984,17 @@ describe('Visualizer', () => {
     fireEvent.click(screen.getByTestId('visualizer-remove-native-preset'));
 
     const library = JSON.parse(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibrary'),
+      window.localStorage.getItem('slskr.player.rustyMilkPresetLibrary'),
     );
     expect(library.map((preset) => preset.id)).toEqual(['second']);
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toBeNull();
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toBeNull();
     expect(screen.getByTestId('visualizer-native-preset-library')).toHaveValue('');
   });
 
-  it('supports native preset favorites, history, next, and random library jumps', async () => {
+  it('supports RustyMilk preset favorites, history, next, and random library jumps', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'first.milk',
         id: 'first',
@@ -1003,7 +1003,7 @@ describe('Visualizer', () => {
       }),
     );
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPresetLibrary',
+      'slskr.player.rustyMilkPresetLibrary',
       JSON.stringify([
         {
           fileName: 'first.milk',
@@ -1046,7 +1046,7 @@ describe('Visualizer', () => {
     });
 
     fireEvent.click(screen.getByTestId('visualizer-toggle-native-favorite'));
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetFavorites')).toContain(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetFavorites')).toContain(
       'first',
     );
 
@@ -1068,7 +1068,7 @@ describe('Visualizer', () => {
     expect(randomSpy).toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('visualizer-toggle-native-favorites-only'));
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetLibraryMode')).toBe(
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetLibraryMode')).toBe(
       'favorites',
     );
     expect(screen.getByRole('option', { name: '(favorite) First' })).toBeInTheDocument();
@@ -1076,10 +1076,10 @@ describe('Visualizer', () => {
     randomSpy.mockRestore();
   });
 
-  it('filters the native preset bank search and scopes native next navigation', async () => {
+  it('filters the RustyMilk preset bank search and scopes RustyMilk next navigation', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'first.milk',
         id: 'first',
@@ -1088,7 +1088,7 @@ describe('Visualizer', () => {
       }),
     );
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPresetLibrary',
+      'slskr.player.rustyMilkPresetLibrary',
       JSON.stringify([
         {
           fileName: 'first.milk',
@@ -1132,7 +1132,7 @@ describe('Visualizer', () => {
     fireEvent.change(screen.getByTestId('visualizer-native-preset-search'), {
       target: { value: 'grid' },
     });
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetSearch')).toBe('grid');
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetSearch')).toBe('grid');
     expect(screen.getByRole('option', { name: 'Third Grid' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Second' })).not.toBeInTheDocument();
 
@@ -1148,15 +1148,15 @@ describe('Visualizer', () => {
     expect(screen.getByTestId('visualizer-next-preset')).toBeDisabled();
 
     fireEvent.click(screen.getByTestId('visualizer-clear-native-preset-search'));
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetSearch')).toBeNull();
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetSearch')).toBeNull();
     expect(screen.getByTestId('visualizer-native-preset-search')).toHaveValue('');
     expect(screen.getByRole('option', { name: 'Second' })).toBeInTheDocument();
   });
 
-  it('saves, scopes, clears, and removes native preset playlists', async () => {
+  it('saves, scopes, clears, and removes RustyMilk preset playlists', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'first.milk',
         id: 'first',
@@ -1165,7 +1165,7 @@ describe('Visualizer', () => {
       }),
     );
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPresetLibrary',
+      'slskr.player.rustyMilkPresetLibrary',
       JSON.stringify([
         {
           fileName: 'first.milk',
@@ -1215,7 +1215,7 @@ describe('Visualizer', () => {
     fireEvent.click(screen.getByTestId('visualizer-save-native-playlist'));
 
     const storedPlaylists = JSON.parse(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPresetPlaylists'),
+      window.localStorage.getItem('slskr.player.rustyMilkPresetPlaylists'),
     );
     expect(storedPlaylists).toHaveLength(1);
     expect(storedPlaylists[0]).toEqual(expect.objectContaining({
@@ -1223,12 +1223,12 @@ describe('Visualizer', () => {
       presetIds: ['second', 'third'],
     }));
     expect(
-      window.localStorage.getItem('slskr.player.nativeMilkdropActivePresetPlaylist'),
+      window.localStorage.getItem('slskr.player.rustyMilkActivePresetPlaylist'),
     ).toBe(storedPlaylists[0].id);
 
     fireEvent.click(screen.getByTestId('visualizer-rename-native-playlist'));
     const renamedPlaylists = JSON.parse(
-      window.localStorage.getItem('slskr.player.nativeMilkdropPresetPlaylists'),
+      window.localStorage.getItem('slskr.player.rustyMilkPresetPlaylists'),
     );
     expect(renamedPlaylists[0]).toEqual(expect.objectContaining({
       name: 'Renamed grid',
@@ -1249,7 +1249,7 @@ describe('Visualizer', () => {
 
     fireEvent.click(screen.getByTestId('visualizer-clear-active-native-playlist'));
     expect(
-      window.localStorage.getItem('slskr.player.nativeMilkdropActivePresetPlaylist'),
+      window.localStorage.getItem('slskr.player.rustyMilkActivePresetPlaylist'),
     ).toBeNull();
     expect(screen.getByRole('option', { name: 'First' })).toBeInTheDocument();
 
@@ -1257,7 +1257,7 @@ describe('Visualizer', () => {
       target: { value: storedPlaylists[0].id },
     });
     fireEvent.click(screen.getByTestId('visualizer-remove-native-playlist'));
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPresetPlaylists')).toBeNull();
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPresetPlaylists')).toBeNull();
     expect(screen.queryByTestId('visualizer-native-playlist')).not.toBeInTheDocument();
     promptSpy.mockRestore();
   });
@@ -1265,7 +1265,7 @@ describe('Visualizer', () => {
   it('surfaces native render errors and clears the persisted imported preset', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     window.localStorage.setItem(
-      'slskr.player.nativeMilkdropPreset',
+      'slskr.player.rustyMilkPreset',
       JSON.stringify({
         fileName: 'bad.milk',
         source: 'per_frame_1=q1=rand(1);',
@@ -1276,7 +1276,7 @@ describe('Visualizer', () => {
       return 1;
     });
     nativeEngine.render.mockImplementationOnce(() => {
-      throw new Error('Unsupported MilkDrop function: rand');
+      throw new Error('Unsupported RustyMilk function: rand');
     });
 
     render(
@@ -1288,8 +1288,8 @@ describe('Visualizer', () => {
     );
 
     expect(
-      await screen.findByText(/Native MilkDrop render failed. Unsupported MilkDrop function: rand/),
+      await screen.findByText(/RustyMilk render failed. Unsupported RustyMilk function: rand/),
     ).toBeInTheDocument();
-    expect(window.localStorage.getItem('slskr.player.nativeMilkdropPreset')).toBeNull();
+    expect(window.localStorage.getItem('slskr.player.rustyMilkPreset')).toBeNull();
   });
 });

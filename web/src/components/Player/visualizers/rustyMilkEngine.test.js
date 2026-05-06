@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  createNativeMilkdropEngine,
-  getNativeMilkdropBeatUpdate,
-  getNativeMilkdropTransitionAlphas,
-  getNativeMilkdropTransitionProgress,
-} from './nativeMilkdropEngine';
+  createRustyMilkEngine,
+  getRustyMilkBeatUpdate,
+  getRustyMilkTransitionAlphas,
+  getRustyMilkTransitionProgress,
+} from './rustyMilkEngine';
 
 const createAnalyser = () => ({
   fftSize: 0,
@@ -51,55 +51,55 @@ const createRustEngineMock = () => ({
     })),
 });
 
-describe('createNativeMilkdropEngine', () => {
+describe('createRustyMilkEngine', () => {
   let rustEngine;
 
   beforeEach(() => {
     rustEngine = createRustEngineMock();
-    class RustMilkdropEngineMock {
+    class RustyMilkEngineMock {
       constructor() {
         return rustEngine;
       }
     }
-    globalThis.__slskrRustMilkdropModule = {
-      RustMilkdropEngine: RustMilkdropEngineMock,
+    globalThis.__slskrRustyMilkModule = {
+      RustyMilkEngine: RustyMilkEngineMock,
     };
   });
 
   it('eases native transition progress between renderer sets', () => {
-    expect(getNativeMilkdropTransitionProgress(10, 2, 10)).toBe(0);
-    expect(getNativeMilkdropTransitionProgress(10, 2, 11)).toBe(0.5);
-    expect(getNativeMilkdropTransitionProgress(10, 2, 12)).toBe(1);
-    expect(getNativeMilkdropTransitionProgress(10, 0, 10)).toBe(1);
+    expect(getRustyMilkTransitionProgress(10, 2, 10)).toBe(0);
+    expect(getRustyMilkTransitionProgress(10, 2, 11)).toBe(0.5);
+    expect(getRustyMilkTransitionProgress(10, 2, 12)).toBe(1);
+    expect(getRustyMilkTransitionProgress(10, 0, 10)).toBe(1);
   });
 
   it('maps native transition modes to incoming and outgoing alphas', () => {
-    expect(getNativeMilkdropTransitionAlphas(0.25, 'crossfade')).toEqual({
+    expect(getRustyMilkTransitionAlphas(0.25, 'crossfade')).toEqual({
       incoming: 0.25,
       outgoing: 0.75,
     });
-    expect(getNativeMilkdropTransitionAlphas(0.25, 'fade_through_black')).toEqual({
+    expect(getRustyMilkTransitionAlphas(0.25, 'fade_through_black')).toEqual({
       incoming: 0,
       outgoing: 0.5,
     });
-    expect(getNativeMilkdropTransitionAlphas(0.5, 'overlay')).toEqual({
+    expect(getRustyMilkTransitionAlphas(0.5, 'overlay')).toEqual({
       incoming: 0.5,
       outgoing: 1,
     });
-    expect(getNativeMilkdropTransitionAlphas(0.5, 'cut')).toEqual({
+    expect(getRustyMilkTransitionAlphas(0.5, 'cut')).toEqual({
       incoming: 1,
       outgoing: 0,
     });
   });
 
   it('detects beat pulses from low-frequency spectrum energy', () => {
-    const baseline = getNativeMilkdropBeatUpdate(
+    const baseline = getRustyMilkBeatUpdate(
       {},
       [16, 18, 17, 19],
       1,
       { beatSensitivity: 1.35, minBeatIntervalSeconds: 0.25 },
     );
-    const pulse = getNativeMilkdropBeatUpdate(
+    const pulse = getRustyMilkBeatUpdate(
       baseline,
       [240, 230, 220, 210],
       1.4,
@@ -117,7 +117,7 @@ describe('createNativeMilkdropEngine', () => {
       connect: vi.fn(),
       disconnect: vi.fn(),
     };
-    const engine = await createNativeMilkdropEngine({
+    const engine = await createRustyMilkEngine({
       audioContext: {
         createAnalyser: () => analyser,
         currentTime: 12,
@@ -136,7 +136,7 @@ describe('createNativeMilkdropEngine', () => {
     engine.render();
     engine.resize(320, 180);
 
-    expect(engine.name).toBe('slskr Rust MilkDrop WebGL2');
+    expect(engine.name).toBe('slskr RustyMilk WebGL2');
     expect(audioNode.connect).toHaveBeenCalledWith(analyser);
     expect(rustEngine.render).toHaveBeenCalledWith(
       12,
@@ -160,7 +160,7 @@ describe('createNativeMilkdropEngine', () => {
       connect: vi.fn(),
       disconnect: vi.fn(),
     };
-    const engine = await createNativeMilkdropEngine({
+    const engine = await createRustyMilkEngine({
       audioContext: {
         createAnalyser: () => analyser,
         currentTime: 0,
@@ -170,7 +170,7 @@ describe('createNativeMilkdropEngine', () => {
       rendererBackend: 'webgpu',
     });
 
-    expect(engine.name).toBe('slskr Rust MilkDrop WebGL2 fallback');
+    expect(engine.name).toBe('slskr RustyMilk WebGL2 fallback');
     expect(engine.loadPresetText('name=Imported', 'imported.milk')).toBe('imported');
     expect(engine.inspectPresetText('name=Imported', 'imported.milk')).toEqual({
       title: 'imported',
