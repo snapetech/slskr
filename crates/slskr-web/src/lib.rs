@@ -11951,6 +11951,563 @@ pub fn serialize_milkdrop_preset_set(parsed: &MilkdropPresetSet) -> String {
     format!("{}\n", rendered_presets.join("\n"))
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropShaderProgram {
+    pub declarations: Vec<String>,
+    pub expression: String,
+    pub texture_samplers: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MilkdropShaderSupport {
+    pub supported: bool,
+}
+
+fn strip_milkdrop_shader_comments(source: &str) -> String {
+    let mut output = String::new();
+    let mut chars = source.chars().peekable();
+    let mut in_block = false;
+    while let Some(ch) = chars.next() {
+        if in_block {
+            if ch == '*' && chars.peek() == Some(&'/') {
+                let _ = chars.next();
+                in_block = false;
+            }
+            continue;
+        }
+        if ch == '/' && chars.peek() == Some(&'*') {
+            let _ = chars.next();
+            in_block = true;
+            continue;
+        }
+        if ch == '/' && chars.peek() == Some(&'/') {
+            for next in chars.by_ref() {
+                if next == '\n' {
+                    output.push('\n');
+                    break;
+                }
+            }
+            continue;
+        }
+        output.push(ch);
+    }
+    output.trim().to_string()
+}
+
+fn unwrap_milkdrop_shader_body(source: &str) -> String {
+    let mut source = strip_milkdrop_shader_comments(source);
+    let lower = source.to_ascii_lowercase();
+    if let Some(index) = lower.find("shader_body") {
+        source.replace_range(index..index + "shader_body".len(), "");
+    }
+    let trimmed = source.trim();
+    let trimmed = trimmed.strip_prefix('{').unwrap_or(trimmed).trim();
+    let trimmed = trimmed.strip_suffix('}').unwrap_or(trimmed).trim();
+    trimmed.to_string()
+}
+
+fn normalize_simple_milkdrop_conditional_return(source: &str) -> String {
+    let unwrapped = unwrap_milkdrop_shader_body(source);
+    let compact = unwrapped
+        .replace('{', " ")
+        .replace('}', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let lower = compact.to_ascii_lowercase();
+    if !lower.starts_with("if") || !lower.contains(" else ") {
+        return source.to_string();
+    }
+    let Some(condition_start) = compact.find('(') else {
+        return source.to_string();
+    };
+    let Some(condition_end) = compact[condition_start + 1..].find(')') else {
+        return source.to_string();
+    };
+    let condition_end = condition_start + 1 + condition_end;
+    let condition = compact[condition_start + 1..condition_end].trim();
+    let rest = compact[condition_end + 1..].trim();
+    let lower_rest = rest.to_ascii_lowercase();
+    let Some(else_index) = lower_rest.find(" else ") else {
+        return source.to_string();
+    };
+    let true_part = rest[..else_index].trim();
+    let false_part = rest[else_index + " else ".len()..].trim();
+    let extract_ret = |part: &str| -> Option<String> {
+        let part = part.trim();
+        let lower = part.to_ascii_lowercase();
+        let value = lower.strip_prefix("ret")?;
+        let value = value.trim_start();
+        let value = value.strip_prefix('=')?.trim();
+        Some(value.trim_end_matches(';').trim().to_string())
+    };
+    let Some(true_ret) = extract_ret(true_part) else {
+        return source.to_string();
+    };
+    let Some(false_ret) = extract_ret(false_part) else {
+        return source.to_string();
+    };
+    format!("ret = ({condition}) ? ({true_ret}) : ({false_ret});")
+}
+
+fn is_milkdrop_main_sampler(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "previousframe" | "sampler_main" | "sampler_fc_main" | "sampler_sampler_main"
+    )
+}
+
+pub fn get_milkdrop_shader_texture_samplers(source: &str) -> Vec<String> {
+    let cleaned = strip_milkdrop_shader_comments(source);
+    let mut samplers = Vec::new();
+    for marker in ["tex2D(", "tex("] {
+        let mut rest = cleaned.as_str();
+        while let Some(index) = rest.to_ascii_lowercase().find(&marker.to_ascii_lowercase()) {
+            let after = &rest[index + marker.len()..];
+            let sampler = after
+                .trim_start()
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+                .collect::<String>();
+            if !sampler.is_empty()
+                && !is_milkdrop_main_sampler(&sampler)
+                && !samplers.contains(&sampler)
+            {
+                samplers.push(sampler);
+            }
+            rest = &after[after.find(',').unwrap_or(after.len())..];
+        }
+    }
+    samplers.truncate(4);
+    samplers
+}
+
+fn normalize_milkdrop_shader_expression(expression: &str) -> String {
+    expression
+        .replace("float4(", "vec4(")
+        .replace("float3(", "vec3(")
+        .replace("float2(", "vec2(")
+        .replace("saturate(", "clamp01(")
+        .replace("lerp(", "mix(")
+        .replace("frac(", "fract(")
+        .replace("fmod(", "mod(")
+        .replace("rsqrt(", "inversesqrt(")
+        .replace("atan2(", "atan(")
+}
+
+fn normalize_milkdrop_shader_type(shader_type: &str) -> String {
+    shader_type
+        .to_ascii_lowercase()
+        .replace("float2", "vec2")
+        .replace("float3", "vec3")
+        .replace("float4", "vec4")
+}
+
+fn normalize_milkdrop_shader_source(source: &str, texture_samplers: &[String]) -> String {
+    let mut normalized =
+        unwrap_milkdrop_shader_body(&normalize_simple_milkdrop_conditional_return(source));
+    for sampler in ["tex2D", "tex"] {
+        loop {
+            let Some(index) = normalized
+                .to_ascii_lowercase()
+                .find(&format!("{}(", sampler.to_ascii_lowercase()))
+            else {
+                break;
+            };
+            let start = index + sampler.len() + 1;
+            let after = &normalized[start..];
+            let name = after
+                .trim_start()
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+                .collect::<String>();
+            if name.is_empty() {
+                break;
+            }
+            let whitespace = after.len() - after.trim_start().len();
+            let name_start = start + whitespace;
+            let name_end = name_start + name.len();
+            let replacement = if is_milkdrop_main_sampler(&name) {
+                "previousFrame".to_string()
+            } else if let Some(texture_index) =
+                texture_samplers.iter().position(|value| value == &name)
+            {
+                format!("shaderTexture{texture_index}")
+            } else {
+                name.clone()
+            };
+            normalized.replace_range(index..name_end, &format!("texture({replacement}"));
+        }
+    }
+    normalized
+}
+
+fn is_safe_milkdrop_shader_expression(expression: &str) -> bool {
+    if expression.trim().is_empty() {
+        return false;
+    }
+    if !expression.chars().all(|ch| {
+        ch.is_ascii_alphanumeric()
+            || matches!(
+                ch,
+                '_' | '.'
+                    | ','
+                    | '+'
+                    | '-'
+                    | '*'
+                    | '/'
+                    | '%'
+                    | '<'
+                    | '>'
+                    | '='
+                    | '!'
+                    | '&'
+                    | '|'
+                    | '^'
+                    | '~'
+                    | '?'
+                    | ':'
+                    | '('
+                    | ')'
+                    | ' '
+            )
+    }) {
+        return false;
+    }
+    if expression.contains("texture(")
+        && !(expression.contains("previousFrame") || expression.contains("shaderTexture"))
+    {
+        return false;
+    }
+    true
+}
+
+fn split_milkdrop_shader_declaration(statement: &str) -> Option<(&str, &str, &str)> {
+    for shader_type in [
+        "float4", "float3", "float2", "float", "vec4", "vec3", "vec2",
+    ] {
+        let Some(rest) = statement.strip_prefix(shader_type) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some((name, expression)) = rest.split_once('=') else {
+            return None;
+        };
+        let name = name.trim();
+        if !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return None;
+        }
+        return Some((shader_type, name, expression.trim()));
+    }
+    None
+}
+
+fn split_milkdrop_shader_assignment(statement: &str) -> Option<(&str, &str, &str)> {
+    for operator in ["+=", "-=", "*=", "/=", "="] {
+        let Some((name, expression)) = statement.split_once(operator) else {
+            continue;
+        };
+        let name = name.trim();
+        if !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return None;
+        }
+        return Some((name, operator, expression.trim()));
+    }
+    None
+}
+
+fn parse_milkdrop_shader_program(source: &str) -> Option<MilkdropShaderProgram> {
+    let normalized_source = normalize_simple_milkdrop_conditional_return(source);
+    let lowered = normalized_source.to_ascii_lowercase();
+    if lowered.contains("for (")
+        || lowered.contains("while (")
+        || lowered.contains("float3x")
+        || lowered.contains("float4x")
+        || lowered.contains("mul(")
+        || lowered.contains("sampler2d ")
+    {
+        return None;
+    }
+    if lowered.starts_with("if") {
+        return None;
+    }
+    let texture_samplers = get_milkdrop_shader_texture_samplers(&normalized_source);
+    let cleaned = normalize_milkdrop_shader_source(&normalized_source, &texture_samplers);
+    let mut declarations = Vec::new();
+    let mut mutable_variables = Vec::new();
+    let mut expression = String::new();
+
+    for statement in cleaned
+        .split(';')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if let Some(ret_expression) = statement
+            .strip_prefix("ret")
+            .and_then(|rest| rest.trim_start().strip_prefix('='))
+        {
+            if !expression.is_empty() {
+                return None;
+            }
+            expression = normalize_milkdrop_shader_expression(ret_expression.trim());
+            continue;
+        }
+        if !expression.is_empty() {
+            return None;
+        }
+        if let Some((shader_type, name, declaration_expression)) =
+            split_milkdrop_shader_declaration(statement)
+        {
+            let declaration_expression =
+                normalize_milkdrop_shader_expression(declaration_expression);
+            if !is_safe_milkdrop_shader_expression(&declaration_expression) {
+                return None;
+            }
+            mutable_variables.push(name.to_string());
+            declarations.push(format!(
+                "{} {name} = {declaration_expression};",
+                normalize_milkdrop_shader_type(shader_type)
+            ));
+            continue;
+        }
+        if let Some((name, operator, assignment_expression)) =
+            split_milkdrop_shader_assignment(statement)
+        {
+            if !mutable_variables.iter().any(|value| value == name) {
+                return None;
+            }
+            let assignment_expression = normalize_milkdrop_shader_expression(assignment_expression);
+            if !is_safe_milkdrop_shader_expression(&assignment_expression) {
+                return None;
+            }
+            declarations.push(format!("{name} {operator} {assignment_expression};"));
+            continue;
+        }
+        return None;
+    }
+
+    if !is_safe_milkdrop_shader_expression(&expression) {
+        return None;
+    }
+    Some(MilkdropShaderProgram {
+        declarations,
+        expression,
+        texture_samplers,
+    })
+}
+
+pub fn translate_milkdrop_shader_expression(source: &str) -> String {
+    parse_milkdrop_shader_program(source)
+        .map(|program| program.expression)
+        .unwrap_or_default()
+}
+
+pub fn create_translated_milkdrop_fragment_shader(source: &str) -> String {
+    let Some(program) = parse_milkdrop_shader_program(source) else {
+        return String::new();
+    };
+    let uniforms = (1..=64)
+        .map(|index| format!("uniform float q{index};"))
+        .chain(
+            ["bass", "bass_att", "mid", "mid_att", "treb", "treb_att"]
+                .into_iter()
+                .map(|name| format!("uniform float {name};")),
+        )
+        .collect::<Vec<_>>()
+        .join("\n");
+    let texture_uniforms = program
+        .texture_samplers
+        .iter()
+        .enumerate()
+        .map(|(index, _)| format!("uniform sampler2D shaderTexture{index};"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        r#"#version 300 es
+precision highp float;
+uniform vec3 color;
+uniform sampler2D previousFrame;
+{texture_uniforms}
+uniform float feedback;
+uniform float outputAlpha;
+uniform float time;
+uniform float sampleRate;
+uniform float fftBins[64];
+uniform float waveformBins[64];
+uniform vec2 resolution;
+uniform vec2 pixelSize;
+uniform float aspect;
+uniform vec4 texsize;
+{uniforms}
+in vec2 uv;
+out vec4 outColor;
+float clamp01(float value) {{ return clamp(value, 0.0, 1.0); }}
+vec2 clamp01(vec2 value) {{ return clamp(value, vec2(0.0), vec2(1.0)); }}
+vec3 clamp01(vec3 value) {{ return clamp(value, vec3(0.0), vec3(1.0)); }}
+vec4 clamp01(vec4 value) {{ return clamp(value, vec4(0.0), vec4(1.0)); }}
+float get_fft(float position) {{ int index = int(clamp(position, 0.0, 1.0) * 63.0); return fftBins[index]; }}
+float get_fft_hz(float hz) {{ float nyquist = max(sampleRate * 0.5, 1.0); return get_fft(hz / nyquist); }}
+float get_waveform(float position) {{ int index = int(clamp(position, 0.0, 1.0) * 63.0); return waveformBins[index]; }}
+void main() {{
+  float x = uv.x;
+  float y = uv.y;
+  vec2 centeredUv = uv - vec2(0.5);
+  float rad = length(centeredUv);
+  float ang = atan(centeredUv.y, centeredUv.x);
+  {}
+  vec3 ret = vec3({});
+  vec3 previous = texture(previousFrame, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
+  outColor = vec4(mix(ret, previous, feedback), outputAlpha);
+}}"#,
+        program.declarations.join("\n  "),
+        program.expression
+    )
+}
+
+fn normalize_milkdrop_wgsl_expression(expression: &str) -> String {
+    expression
+        .replace(
+            "texture(previousFrame,",
+            "textureSample(previousFrame, previousSampler,",
+        )
+        .replace(
+            "texture(shaderTexture0,",
+            "textureSample(shaderTexture0, shaderTextureSampler,",
+        )
+        .replace(
+            "texture(shaderTexture1,",
+            "textureSample(shaderTexture1, shaderTextureSampler,",
+        )
+        .replace(
+            "texture(shaderTexture2,",
+            "textureSample(shaderTexture2, shaderTextureSampler,",
+        )
+        .replace(
+            "texture(shaderTexture3,",
+            "textureSample(shaderTexture3, shaderTextureSampler,",
+        )
+        .replace("vec2(", "vec2f(")
+        .replace("vec3(", "vec3f(")
+        .replace("vec4(", "vec4f(")
+        .replace("clamp01(vec2f(", "clamp01v2(vec2f(")
+        .replace("clamp01(vec3f(", "clamp01v3(vec3f(")
+        .replace("clamp01(vec4f(", "clamp01v4(vec4f(")
+        .replace("atan(", "atan2(")
+}
+
+fn normalize_milkdrop_wgsl_declaration(declaration: &str) -> String {
+    let declaration = normalize_milkdrop_wgsl_expression(declaration);
+    for prefix in ["vec2 ", "vec3 ", "vec4 ", "float "] {
+        if let Some(rest) = declaration.strip_prefix(prefix) {
+            return format!("var {rest}");
+        }
+    }
+    declaration
+}
+
+pub fn create_translated_milkdrop_wgsl_shader(source: &str) -> String {
+    let Some(program) = parse_milkdrop_shader_program(source) else {
+        return String::new();
+    };
+    if std::iter::once(&program.expression)
+        .chain(program.declarations.iter())
+        .any(|statement| {
+            statement.contains('?')
+                || statement.contains('&')
+                || statement.contains('|')
+                || statement.contains('^')
+                || statement.contains('~')
+        })
+    {
+        return String::new();
+    }
+    let q_fields = (1..=64)
+        .map(|index| format!("  q{index}: f32,"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let q_locals = (1..=64)
+        .map(|index| format!("  let q{index} = uniforms.q{index};"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let texture_declarations = program
+        .texture_samplers
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            format!(
+                "@group(0) @binding({}) var shaderTexture{index}: texture_2d<f32>;",
+                index + 3
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let declarations = program
+        .declarations
+        .iter()
+        .map(|declaration| format!("  {}", normalize_milkdrop_wgsl_declaration(declaration)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let expression = normalize_milkdrop_wgsl_expression(&program.expression);
+    format!(
+        r#"struct Uniforms {{
+  color: vec4f,
+  time: f32,
+  bass: f32,
+  mid: f32,
+  treb: f32,
+  bass_att: f32,
+  mid_att: f32,
+  treb_att: f32,
+  feedback: f32,
+  outputAlpha: f32,
+  sampleRate: f32,
+{q_fields}
+  fft63: f32,
+  waveform63: f32,
+}};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var previousFrame: texture_2d<f32>;
+@group(0) @binding(2) var previousSampler: sampler;
+@group(0) @binding(7) var shaderTextureSampler: sampler;
+{texture_declarations}
+fn get_fft(position: f32) -> f32 {{ return uniforms.fft63; }}
+fn get_fft_hz(hz: f32) -> f32 {{ return get_fft(hz / max(uniforms.sampleRate * 0.5, 1.0)); }}
+fn get_waveform(position: f32) -> f32 {{ return uniforms.waveform63; }}
+@fragment
+fn fragmentMain() -> @location(0) vec4f {{
+  let uv = vec2f(0.5);
+  let color = uniforms.color.rgb;
+  let time = uniforms.time;
+  let bass = uniforms.bass;
+  let bass_att = uniforms.bass_att;
+{q_locals}
+{declarations}
+  let ret = vec3f({expression});
+  return vec4f(ret, uniforms.outputAlpha);
+}}"#
+    )
+}
+
+pub fn analyze_milkdrop_shader_support(source: &str) -> MilkdropShaderSupport {
+    MilkdropShaderSupport {
+        supported: source.trim().is_empty()
+            || !create_translated_milkdrop_fragment_shader(source).is_empty(),
+    }
+}
+
+pub fn analyze_milkdrop_webgpu_shader_support(source: &str) -> MilkdropShaderSupport {
+    MilkdropShaderSupport {
+        supported: source.trim().is_empty()
+            || !create_translated_milkdrop_wgsl_shader(source).is_empty(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum MilkdropToken {
     Ident(String),
@@ -13257,6 +13814,136 @@ mod tests {
         assert!(serialized.contains("shape00_sides=5"));
         assert!(serialized.contains("wavecode_0_samples=16"));
         assert!(serialized.contains("wavecode_0_per_point_1=x=i;"));
+    }
+
+    #[test]
+    fn rust_milkdrop_shader_translator_handles_glsl_safe_subset() {
+        assert_eq!(
+            translate_milkdrop_shader_expression(
+                "ret = tex2D(sampler_main, uv).rgb * vec3(0.5, 1.0, 0.25);"
+            ),
+            "texture(previousFrame, uv).rgb * vec3(0.5, 1.0, 0.25)"
+        );
+        let shader = create_translated_milkdrop_fragment_shader(
+            "ret = saturate(vec3(uv.x, uv.y, sin(time)));",
+        );
+        assert!(shader.contains("uniform sampler2D previousFrame;"));
+        assert!(shader.contains("uniform float fftBins[64];"));
+        assert!(shader.contains("uniform float waveformBins[64];"));
+        assert!(shader.contains("uniform float aspect;"));
+        assert!(shader.contains("float rad = length(centeredUv);"));
+        assert!(shader.contains("float ang = atan(centeredUv.y, centeredUv.x);"));
+        assert!(shader.contains("float get_fft(float position)"));
+        assert!(shader.contains("uniform float q64;"));
+        assert!(shader.contains("vec3 ret = vec3(clamp01(vec3(uv.x, uv.y, sin(time))));"));
+        assert!(analyze_milkdrop_shader_support("ret = vec3(color);").supported);
+    }
+
+    #[test]
+    fn rust_milkdrop_shader_translator_handles_temps_textures_and_conditionals() {
+        let shader = create_translated_milkdrop_fragment_shader(
+            r#"
+            float2 shifted = uv + float2(frac(time), fmod(time, 1.0));
+            float3 tinted = lerp(color, tex2D(sampler_main, shifted).rgb, 0.25);
+            float energy = rsqrt(max(get_fft(0.25), 0.001));
+            ret = tinted * vec3(energy, atan2(shifted.y, shifted.x), 1.0);
+            "#,
+        );
+        assert!(shader.contains("vec2 shifted = uv + vec2(fract(time), mod(time, 1.0));"));
+        assert!(
+            shader.contains("vec3 tinted = mix(color, texture(previousFrame, shifted).rgb, 0.25);")
+        );
+        assert!(shader.contains("float energy = inversesqrt(max(get_fft(0.25), 0.001));"));
+        assert_eq!(
+            translate_milkdrop_shader_expression("float3 tint = vec3(1.0); ret = tint;"),
+            "tint"
+        );
+
+        assert_eq!(
+            get_milkdrop_shader_texture_samplers(
+                "ret = tex2D(sampler_noise, uv).rgb + tex2D(album_art, uv).rgb;"
+            ),
+            vec!["sampler_noise".to_string(), "album_art".to_string()]
+        );
+        let textured = create_translated_milkdrop_fragment_shader(
+            "float3 noise = tex2D(sampler_noise, uv).rgb; ret = noise;",
+        );
+        assert!(textured.contains("uniform sampler2D shaderTexture0;"));
+        assert!(textured.contains("vec3 noise = texture(shaderTexture0, uv).rgb;"));
+
+        let conditional = create_translated_milkdrop_fragment_shader(
+            "if (bass_att > 1.0) { ret = tex2D(sampler_noise, uv).rgb; } else { ret = vec3(x, y, rad); }",
+        );
+        assert!(conditional.contains("vec3 ret = vec3((bass_att > 1.0)"));
+        assert!(conditional.contains("shaderTexture0"));
+        assert!(conditional.contains("vec3(x, y, rad)"));
+        assert_eq!(
+            translate_milkdrop_shader_expression(
+                "if (q1 > 0.5) ret = vec3(1.0); else ret = vec3(0.0);"
+            ),
+            "(q1 > 0.5) ? (vec3(1.0)) : (vec3(0.0))"
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_shader_translator_rejects_unsafe_subset() {
+        assert_eq!(
+            translate_milkdrop_shader_expression("for (;;) { ret = vec3(1.0); }"),
+            ""
+        );
+        assert_eq!(
+            translate_milkdrop_shader_expression("ret = unknown[index];"),
+            ""
+        );
+        assert_eq!(
+            translate_milkdrop_shader_expression("float3 tint; ret = tint;"),
+            ""
+        );
+        assert!(!analyze_milkdrop_shader_support("if (uv.x > 0.5) ret = vec3(1.0);").supported);
+        assert_eq!(
+            translate_milkdrop_shader_expression(
+                "float3 tint = vec3(1.0); ret = tint; tint *= 0.5;"
+            ),
+            ""
+        );
+        assert_eq!(
+            translate_milkdrop_shader_expression("ret = vec3(1.0); ret = vec3(0.0);"),
+            ""
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_shader_translator_generates_wgsl_subset() {
+        let shader = create_translated_milkdrop_wgsl_shader(
+            r#"
+            float3 tint = saturate(vec3(q1, bass_att, uv.x));
+            tint *= tex2D(sampler_main, uv).rgb;
+            ret = tint + vec3(time * 0.01, get_fft(0.25), get_waveform(0.5));
+            "#,
+        );
+        assert!(shader.contains("@fragment"));
+        assert!(shader.contains("q64: f32"));
+        assert!(shader.contains("fft63: f32"));
+        assert!(shader.contains("waveform63: f32"));
+        assert!(shader.contains("let q1 = uniforms.q1;"));
+        assert!(shader.contains("fn get_fft(position: f32) -> f32"));
+        assert!(shader.contains("var tint = clamp01v3(vec3f(q1, bass_att, uv.x));"));
+        assert!(shader.contains("tint *= textureSample(previousFrame, previousSampler, uv).rgb;"));
+        assert!(shader.contains(
+            "let ret = vec3f(tint + vec3f(time * 0.01, get_fft(0.25), get_waveform(0.5)));"
+        ));
+
+        let textured =
+            create_translated_milkdrop_wgsl_shader("ret = tex2D(sampler_noise, uv).rgb;");
+        assert!(textured.contains("@group(0) @binding(3) var shaderTexture0: texture_2d<f32>;"));
+        assert!(textured.contains("textureSample(shaderTexture0, shaderTextureSampler, uv).rgb"));
+        assert!(
+            analyze_milkdrop_webgpu_shader_support("ret = tex2D(sampler_noise, uv).rgb;").supported
+        );
+        assert_eq!(
+            create_translated_milkdrop_wgsl_shader("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);"),
+            ""
+        );
     }
 
     #[test]
