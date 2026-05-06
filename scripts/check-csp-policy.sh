@@ -31,7 +31,7 @@ if ! rg -q "script-src 'self' 'wasm-unsafe-eval'" crates/slskr/src/main.rs; then
   status=1
 fi
 
-wasm_exception_count="$(rg -n "script-src 'self' 'wasm-unsafe-eval'" "${csp_scan_paths[@]}" | grep -v "assert!" | wc -l | tr -d ' ')"
+wasm_exception_count="$(rg -n "script-src 'self' 'wasm-unsafe-eval'" "${csp_scan_paths[@]}" | awk '!/assert!/ { count++ } END { print count + 0 }')"
 if [[ "$wasm_exception_count" != "1" ]]; then
   printf 'csp policy failed: wasm-unsafe-eval should appear only in the scoped served policy\n' >&2
   status=1

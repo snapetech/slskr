@@ -169,7 +169,7 @@ run_probe() {
   status=$?
   set -e
   if [[ $status -eq 0 ]]; then
-    detail="$(cat "$stdout_file" | sanitize_detail)"
+    detail="$(sanitize_detail <"$stdout_file")"
   else
     detail="$( { cat "$stdout_file"; tail -n 20 "$stderr_file"; } | sanitize_detail )"
   fi
