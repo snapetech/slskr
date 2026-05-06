@@ -11669,6 +11669,39 @@ fn create_rust_milkdrop_scope(
     scope
 }
 
+fn update_rust_milkdrop_scope_audio(
+    scope: &mut BTreeMap<String, MilkdropValue>,
+    time_seconds: f64,
+    frame_index: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+) {
+    scope.insert("bass".to_string(), MilkdropValue::Number(bass));
+    scope.insert("bass_att".to_string(), MilkdropValue::Number(bass));
+    scope.insert("mid".to_string(), MilkdropValue::Number(mid));
+    scope.insert("mid_att".to_string(), MilkdropValue::Number(mid));
+    scope.insert("treb".to_string(), MilkdropValue::Number(treble));
+    scope.insert("treb_att".to_string(), MilkdropValue::Number(treble));
+    scope.insert("time".to_string(), MilkdropValue::Number(time_seconds));
+    scope.insert("frame".to_string(), MilkdropValue::Number(frame_index));
+    scope.insert("fps".to_string(), MilkdropValue::Number(60.0));
+    if !waveform.is_empty() {
+        scope.insert(
+            "waveform_data".to_string(),
+            MilkdropValue::Text(rust_milkdrop_sample_text(waveform)),
+        );
+    }
+    if !spectrum.is_empty() {
+        scope.insert(
+            "frequency_data".to_string(),
+            MilkdropValue::Text(rust_milkdrop_sample_text(spectrum)),
+        );
+    }
+}
+
 fn rust_milkdrop_sample_text(values: &[f64]) -> String {
     values
         .iter()
@@ -11800,6 +11833,95 @@ pub fn rust_milkdrop_frame_from_source(
     rust_milkdrop_frame_from_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
 }
 
+fn build_rust_milkdrop_frame_from_scope(
+    source: &str,
+    preset_document: &MilkdropPresetDocument,
+    scope: &BTreeMap<String, MilkdropValue>,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
+) -> RustMilkdropFrame {
+    let fallback = parse_rust_milkdrop_preset(source);
+    let wave_r = clamp_unit(milkdrop_scope_number(scope, "wave_r", fallback.wave_r));
+    let wave_g = clamp_unit(milkdrop_scope_number(scope, "wave_g", fallback.wave_g));
+    let wave_b = clamp_unit(milkdrop_scope_number(scope, "wave_b", fallback.wave_b));
+    let wave_scale = clamp_range(
+        milkdrop_scope_number(scope, "wave_scale", fallback.wave_scale),
+        0.2,
+        3.0,
+    );
+    let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
+    let wave_color = (
+        (wave_r * 255.0).min(255.0) as u8,
+        (wave_g * 255.0).min(255.0) as u8,
+        (wave_b * 255.0).min(255.0) as u8,
+    );
+    let primitives = create_rust_milkdrop_frame_primitives(
+        preset_document,
+        scope,
+        time_seconds,
+        bass,
+        mid,
+        treble,
+        waveform,
+        [wave_r, wave_g, wave_b],
+    );
+    let textured_primitives = create_rust_milkdrop_frame_textured_primitives(
+        preset_document,
+        scope,
+        [wave_r, wave_g, wave_b],
+    );
+    let q_registers = rust_milkdrop_q_registers(scope);
+    let fft_bins = rust_milkdrop_sample_bins(spectrum);
+    let waveform_bins = rust_milkdrop_sample_bins(waveform);
+    let warp_mesh = create_rust_milkdrop_warp_mesh(preset_document, scope);
+    RustMilkdropFrame {
+        background_alpha: clamp_range(
+            1.0 - milkdrop_scope_number(scope, "decay", fallback.decay),
+            0.01,
+            0.5,
+        ),
+        bass,
+        dx: clamp_range(milkdrop_scope_number(scope, "dx", 0.0), -0.5, 0.5),
+        dy: clamp_range(milkdrop_scope_number(scope, "dy", 0.0), -0.5, 0.5),
+        fft_bins,
+        mid,
+        primitives,
+        q_registers,
+        shape_count: preset_document
+            .shapes
+            .iter()
+            .filter(|shape| milkdrop_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
+            .count(),
+        rotation: clamp_range(milkdrop_scope_number(scope, "rot", fallback.rot), -0.5, 0.5)
+            + (treble - 0.5) * 0.02,
+        shader_source: translated_rust_milkdrop_shader_source(preset_document),
+        textured_primitives,
+        treble,
+        wave_color,
+        waveform_bins,
+        wave_radius: clamp_range(
+            0.18 + wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
+            0.12,
+            0.68,
+        ),
+        waveform_count: preset_document
+            .waves
+            .iter()
+            .filter(|wave| milkdrop_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
+            .count(),
+        warp_mesh,
+        zoom: clamp_range(
+            milkdrop_scope_number(scope, "zoom", fallback.zoom),
+            0.001,
+            1.8,
+        ),
+    }
+}
+
 pub fn rust_milkdrop_frame_from_source_with_audio(
     source: &str,
     time_seconds: f64,
@@ -11820,18 +11942,16 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
         );
     };
     let mut scope = create_rust_milkdrop_scope(preset_document, time_seconds, bass, mid, treble);
-    if !waveform.is_empty() {
-        scope.insert(
-            "waveform_data".to_string(),
-            MilkdropValue::Text(rust_milkdrop_sample_text(waveform)),
-        );
-    }
-    if !spectrum.is_empty() {
-        scope.insert(
-            "frequency_data".to_string(),
-            MilkdropValue::Text(rust_milkdrop_sample_text(spectrum)),
-        );
-    }
+    update_rust_milkdrop_scope_audio(
+        &mut scope,
+        time_seconds,
+        (time_seconds * 60.0).floor(),
+        bass,
+        mid,
+        treble,
+        waveform,
+        spectrum,
+    );
     if !preset_document.equations.init.trim().is_empty() {
         if let Ok(next_scope) = evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
         {
@@ -11845,22 +11965,8 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
             scope = next_scope;
         }
     }
-    let fallback = parse_rust_milkdrop_preset(source);
-    let wave_r = clamp_unit(milkdrop_scope_number(&scope, "wave_r", fallback.wave_r));
-    let wave_g = clamp_unit(milkdrop_scope_number(&scope, "wave_g", fallback.wave_g));
-    let wave_b = clamp_unit(milkdrop_scope_number(&scope, "wave_b", fallback.wave_b));
-    let wave_scale = clamp_range(
-        milkdrop_scope_number(&scope, "wave_scale", fallback.wave_scale),
-        0.2,
-        3.0,
-    );
-    let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
-    let wave_color = (
-        (wave_r * 255.0).min(255.0) as u8,
-        (wave_g * 255.0).min(255.0) as u8,
-        (wave_b * 255.0).min(255.0) as u8,
-    );
-    let primitives = create_rust_milkdrop_frame_primitives(
+    build_rust_milkdrop_frame_from_scope(
+        source,
         preset_document,
         &scope,
         time_seconds,
@@ -11868,61 +11974,108 @@ pub fn rust_milkdrop_frame_from_source_with_audio(
         mid,
         treble,
         waveform,
-        [wave_r, wave_g, wave_b],
-    );
-    let textured_primitives = create_rust_milkdrop_frame_textured_primitives(
-        preset_document,
-        &scope,
-        [wave_r, wave_g, wave_b],
-    );
-    let q_registers = rust_milkdrop_q_registers(&scope);
-    let fft_bins = rust_milkdrop_sample_bins(spectrum);
-    let waveform_bins = rust_milkdrop_sample_bins(waveform);
-    let warp_mesh = create_rust_milkdrop_warp_mesh(preset_document, &scope);
-    RustMilkdropFrame {
-        background_alpha: clamp_range(
-            1.0 - milkdrop_scope_number(&scope, "decay", fallback.decay),
-            0.01,
-            0.5,
-        ),
-        bass,
-        dx: clamp_range(milkdrop_scope_number(&scope, "dx", 0.0), -0.5, 0.5),
-        dy: clamp_range(milkdrop_scope_number(&scope, "dy", 0.0), -0.5, 0.5),
-        fft_bins,
-        mid,
-        primitives,
-        q_registers,
-        shape_count: preset_document
-            .shapes
-            .iter()
-            .filter(|shape| milkdrop_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
-            .count(),
-        rotation: clamp_range(
-            milkdrop_scope_number(&scope, "rot", fallback.rot),
-            -0.5,
-            0.5,
-        ) + (treble - 0.5) * 0.02,
-        shader_source: translated_rust_milkdrop_shader_source(preset_document),
-        textured_primitives,
-        treble,
-        wave_color,
-        waveform_bins,
-        wave_radius: clamp_range(
-            0.18 + wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
-            0.12,
-            0.68,
-        ),
-        waveform_count: preset_document
-            .waves
-            .iter()
-            .filter(|wave| milkdrop_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
-            .count(),
-        warp_mesh,
-        zoom: clamp_range(
-            milkdrop_scope_number(&scope, "zoom", fallback.zoom),
-            0.001,
-            1.8,
-        ),
+        spectrum,
+    )
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RustMilkdropRuntime {
+    initialized: bool,
+    preset_document: Option<MilkdropPresetDocument>,
+    scope: BTreeMap<String, MilkdropValue>,
+    source: String,
+}
+
+impl RustMilkdropRuntime {
+    pub fn render_source(
+        &mut self,
+        source: &str,
+        time_seconds: f64,
+        bass: f64,
+        mid: f64,
+        treble: f64,
+    ) -> RustMilkdropFrame {
+        self.render_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
+    }
+
+    pub fn render_source_with_audio(
+        &mut self,
+        source: &str,
+        time_seconds: f64,
+        bass: f64,
+        mid: f64,
+        treble: f64,
+        waveform: &[f64],
+        spectrum: &[f64],
+    ) -> RustMilkdropFrame {
+        if self.source != source || self.preset_document.is_none() {
+            let parsed = parse_milkdrop_preset_set(source, false);
+            let Some(preset_document) = parsed.presets.first().cloned() else {
+                *self = Self::default();
+                return rust_milkdrop_frame(
+                    &RustMilkdropPreset::default(),
+                    time_seconds,
+                    bass,
+                    mid,
+                    treble,
+                );
+            };
+            self.scope =
+                create_rust_milkdrop_scope(&preset_document, time_seconds, bass, mid, treble);
+            self.source = source.to_string();
+            self.preset_document = Some(preset_document);
+            self.initialized = false;
+        }
+
+        let Some(preset_document) = self.preset_document.clone() else {
+            return rust_milkdrop_frame(
+                &RustMilkdropPreset::default(),
+                time_seconds,
+                bass,
+                mid,
+                treble,
+            );
+        };
+        let next_frame = milkdrop_scope_number(&self.scope, "frame", 0.0) + 1.0;
+        update_rust_milkdrop_scope_audio(
+            &mut self.scope,
+            time_seconds,
+            next_frame,
+            bass,
+            mid,
+            treble,
+            waveform,
+            spectrum,
+        );
+        if !self.initialized {
+            if !preset_document.equations.init.trim().is_empty() {
+                if let Ok(next_scope) =
+                    evaluate_milkdrop_equations(&preset_document.equations.init, &self.scope)
+                {
+                    self.scope = next_scope;
+                }
+            }
+            self.initialized = true;
+        }
+        if !preset_document.equations.per_frame.trim().is_empty() {
+            if let Ok(next_scope) =
+                evaluate_milkdrop_equations(&preset_document.equations.per_frame, &self.scope)
+            {
+                self.scope = next_scope;
+            }
+        }
+
+        build_rust_milkdrop_frame_from_scope(
+            &self.source,
+            &preset_document,
+            &self.scope,
+            time_seconds,
+            bass,
+            mid,
+            treble,
+            waveform,
+            spectrum,
+        )
     }
 }
 
@@ -14649,6 +14802,7 @@ fn start_rust_milkdrop_visualizer(
         player_audio_element(document)
             .and_then(|audio| RustMilkdropAudioAnalyzer::new(&audio).ok()),
     ));
+    let runtime = Rc::new(RefCell::new(RustMilkdropRuntime::default()));
     if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
         label.set_text_content(Some(renderer.label()));
     }
@@ -14658,6 +14812,7 @@ fn start_rust_milkdrop_visualizer(
     let window_for_frame = window.clone();
     let document_for_frame = document.clone();
     let analyzer_for_frame = analyzer.clone();
+    let runtime_for_frame = runtime.clone();
 
     *animation_handle_for_frame.borrow_mut() = Some(Closure::wrap(Box::new(move |time_ms: f64| {
         let Some(panel) = document_for_frame.get_element_by_id("slskr-rust-milkdrop") else {
@@ -14684,7 +14839,7 @@ fn start_rust_milkdrop_visualizer(
             .as_ref()
             .map(|analyzer| analyzer.snapshot(time))
             .unwrap_or_else(|| RustMilkdropAudioSnapshot::synthetic(time));
-        let frame = rust_milkdrop_frame_from_source_with_audio(
+        let frame = runtime_for_frame.borrow_mut().render_source_with_audio(
             &preset_source,
             time,
             audio.bands.bass,
@@ -16718,6 +16873,53 @@ mod tests {
         assert!((wave.vertices[1] + 1.0).abs() < 0.0001);
         assert!(wave.vertices[3].abs() < 0.0001);
         assert!((wave.vertices[5] - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn rust_milkdrop_runtime_persists_q_registers_across_frames() {
+        let mut runtime = RustMilkdropRuntime::default();
+        let source = r#"
+            name=Persistent
+            wave_r=0
+            wave_g=0.2
+            wave_b=0.3
+            init_1=q1=1;
+            per_frame_1=q1=q1+1;
+            per_frame_2=wave_r=q1/10;
+            "#;
+
+        let first = runtime.render_source(source, 1.0, 0.1, 0.2, 0.3);
+        let second = runtime.render_source(source, 2.0, 0.1, 0.2, 0.3);
+
+        assert!((first.q_registers[0] - 2.0).abs() < 0.0001);
+        assert!((second.q_registers[0] - 3.0).abs() < 0.0001);
+        assert!(second.wave_color.0 > first.wave_color.0);
+    }
+
+    #[test]
+    fn rust_milkdrop_runtime_resets_when_source_changes() {
+        let mut runtime = RustMilkdropRuntime::default();
+        let first_source = r#"
+            name=First
+            init_1=q1=4;
+            per_frame_1=q1=q1+2;
+            per_frame_2=wave_r=q1/10;
+            "#;
+        let second_source = r#"
+            name=Second
+            init_1=q1=1;
+            per_frame_1=q1=q1+1;
+            per_frame_2=wave_r=q1/10;
+            "#;
+
+        let first = runtime.render_source(first_source, 1.0, 0.1, 0.2, 0.3);
+        let accumulated = runtime.render_source(first_source, 2.0, 0.1, 0.2, 0.3);
+        let reset = runtime.render_source(second_source, 3.0, 0.1, 0.2, 0.3);
+
+        assert!((first.q_registers[0] - 6.0).abs() < 0.0001);
+        assert!((accumulated.q_registers[0] - 8.0).abs() < 0.0001);
+        assert!((reset.q_registers[0] - 2.0).abs() < 0.0001);
+        assert!(reset.wave_color.0 < accumulated.wave_color.0);
     }
 
     #[test]
