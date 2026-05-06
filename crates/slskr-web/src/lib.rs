@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -11513,6 +11514,982 @@ pub fn rust_milkdrop_preset_name(source: &str) -> String {
         .unwrap_or_else(|| "Rust MilkDrop preset".to_string())
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum MilkdropValue {
+    Number(f64),
+    Text(String),
+}
+
+impl MilkdropValue {
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            Self::Number(value) => Some(*value),
+            Self::Text(_) => None,
+        }
+    }
+
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::Number(value) => {
+                if value.fract().abs() < f64::EPSILON {
+                    format!("{}", *value as i64)
+                } else {
+                    format!("{value}")
+                }
+            }
+            Self::Text(value) => value.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropEquations {
+    pub frame: String,
+    pub init: String,
+    pub per_frame: String,
+    pub per_pixel: String,
+    pub point: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilkdropIndexedEntry {
+    pub base_values: BTreeMap<String, MilkdropValue>,
+    pub equations: MilkdropEquations,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MilkdropPresetDocument {
+    pub base_values: BTreeMap<String, MilkdropValue>,
+    pub comp_shader: String,
+    pub format: String,
+    pub index: usize,
+    pub raw_sections: BTreeMap<String, BTreeMap<String, MilkdropValue>>,
+    pub shapes: Vec<MilkdropIndexedEntry>,
+    pub source: String,
+    pub sprites: Vec<MilkdropIndexedEntry>,
+    pub title: String,
+    pub warp_shader: String,
+    pub waves: Vec<MilkdropIndexedEntry>,
+    pub equations: MilkdropEquations,
+}
+
+impl MilkdropPresetDocument {
+    fn new(source: &str, index: usize) -> Self {
+        Self {
+            base_values: BTreeMap::new(),
+            comp_shader: String::new(),
+            equations: MilkdropEquations::default(),
+            format: "milk".to_string(),
+            index,
+            raw_sections: BTreeMap::new(),
+            shapes: Vec::new(),
+            source: source.to_string(),
+            sprites: Vec::new(),
+            title: String::new(),
+            warp_shader: String::new(),
+            waves: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MilkdropPresetSet {
+    pub format: String,
+    pub presets: Vec<MilkdropPresetDocument>,
+}
+
+fn is_numeric_milkdrop_value(value: &str) -> bool {
+    value.trim().parse::<f64>().is_ok()
+}
+
+fn normalize_milkdrop_value(value: &str) -> MilkdropValue {
+    let trimmed = value.trim();
+    if is_numeric_milkdrop_value(trimmed) {
+        MilkdropValue::Number(trimmed.parse::<f64>().unwrap_or(0.0))
+    } else {
+        MilkdropValue::Text(trimmed.to_string())
+    }
+}
+
+fn append_milkdrop_statement(target: &mut String, value: &str) {
+    if value.trim().is_empty() {
+        return;
+    }
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(value.trim());
+}
+
+fn split_milkdrop_preset_pair(source: &str) -> Vec<String> {
+    let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+    let mut offset = 0usize;
+    for line in normalized.split_inclusive('\n') {
+        if line.trim().eq_ignore_ascii_case("[preset01]") {
+            return vec![
+                normalized[..offset].to_string(),
+                normalized[offset..].to_string(),
+            ];
+        }
+        offset += line.len();
+    }
+    vec![normalized]
+}
+
+fn parse_indexed_key<'a>(key: &'a str, prefix: &str) -> Option<(usize, &'a str)> {
+    let rest = key.strip_prefix(prefix)?;
+    let digit_count = rest.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if digit_count == 0 || !rest[digit_count..].starts_with('_') {
+        return None;
+    }
+    let index = rest[..digit_count].parse::<usize>().ok()?;
+    Some((index, &rest[digit_count + 1..]))
+}
+
+fn ensure_milkdrop_entry(
+    entries: &mut Vec<MilkdropIndexedEntry>,
+    index: usize,
+) -> &mut MilkdropIndexedEntry {
+    while entries.len() <= index {
+        entries.push(MilkdropIndexedEntry::default());
+    }
+    &mut entries[index]
+}
+
+fn assign_milkdrop_equation(equations: &mut MilkdropEquations, key: &str, value: &str) -> bool {
+    if key.starts_with("per_frame") || key.starts_with("frame") {
+        append_milkdrop_statement(&mut equations.per_frame, value);
+        return true;
+    }
+    if key.starts_with("per_pixel") || key.starts_with("per_vertex") {
+        append_milkdrop_statement(&mut equations.per_pixel, value);
+        return true;
+    }
+    if key.starts_with("init") {
+        append_milkdrop_statement(&mut equations.init, value);
+        return true;
+    }
+    matches!(
+        key.split('_').next().unwrap_or_default(),
+        "per_frame" | "per_pixel" | "per_vertex" | "init"
+    )
+}
+
+fn assign_milkdrop_indexed_equation(
+    equations: &mut MilkdropEquations,
+    key: &str,
+    value: &str,
+) -> bool {
+    if key.starts_with("init") {
+        append_milkdrop_statement(&mut equations.init, value);
+        return true;
+    }
+    if key.starts_with("frame") || key.starts_with("per_frame") {
+        append_milkdrop_statement(&mut equations.frame, value);
+        return true;
+    }
+    if key.starts_with("point") || key.starts_with("per_point") {
+        append_milkdrop_statement(&mut equations.point, value);
+        return true;
+    }
+    false
+}
+
+fn parse_milkdrop_preset_text(text: &str, index: usize) -> MilkdropPresetDocument {
+    let mut preset = MilkdropPresetDocument::new(text, index);
+    let mut section = "preset".to_string();
+
+    for raw_line in text.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() > 2 {
+            section = trimmed[1..trimmed.len() - 1].trim().to_ascii_lowercase();
+            preset.raw_sections.entry(section.clone()).or_default();
+            continue;
+        }
+        let Some((raw_key, raw_value)) = raw_line.split_once('=') else {
+            continue;
+        };
+        let key = raw_key.trim().to_ascii_lowercase();
+        let raw_value = raw_value.trim();
+        let value = normalize_milkdrop_value(raw_value);
+        preset
+            .raw_sections
+            .entry(section.clone())
+            .or_default()
+            .insert(key.clone(), value.clone());
+
+        if key == "name" || key == "preset_name" {
+            preset.title = raw_value.to_string();
+            continue;
+        }
+        if let Some((shape_index, shape_key)) = parse_indexed_key(&key, "shape") {
+            let entry = ensure_milkdrop_entry(&mut preset.shapes, shape_index);
+            if !assign_milkdrop_indexed_equation(&mut entry.equations, shape_key, raw_value) {
+                entry.base_values.insert(shape_key.to_string(), value);
+            }
+            continue;
+        }
+        if let Some((sprite_index, sprite_key)) = parse_indexed_key(&key, "sprite") {
+            let entry = ensure_milkdrop_entry(&mut preset.sprites, sprite_index);
+            if !assign_milkdrop_indexed_equation(&mut entry.equations, sprite_key, raw_value) {
+                entry.base_values.insert(sprite_key.to_string(), value);
+            }
+            continue;
+        }
+        if let Some((wave_index, wave_key)) = parse_indexed_key(&key, "wavecode_") {
+            let entry = ensure_milkdrop_entry(&mut preset.waves, wave_index);
+            if !assign_milkdrop_indexed_equation(&mut entry.equations, wave_key, raw_value) {
+                entry.base_values.insert(wave_key.to_string(), value);
+            }
+            continue;
+        }
+        if key.starts_with("warp_shader") {
+            append_milkdrop_statement(&mut preset.warp_shader, raw_value);
+            continue;
+        }
+        if key.starts_with("comp_shader") {
+            append_milkdrop_statement(&mut preset.comp_shader, raw_value);
+            continue;
+        }
+        if assign_milkdrop_equation(&mut preset.equations, &key, raw_value) {
+            continue;
+        }
+        preset.base_values.insert(key, value);
+    }
+
+    preset
+}
+
+pub fn parse_milkdrop_preset_set(source: &str, force_milk2: bool) -> MilkdropPresetSet {
+    let chunks = split_milkdrop_preset_pair(source);
+    let format = if force_milk2 || chunks.len() > 1 {
+        "milk2"
+    } else {
+        "milk"
+    }
+    .to_string();
+    let presets = chunks
+        .iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            let mut preset = parse_milkdrop_preset_text(chunk, index);
+            preset.format = format.clone();
+            preset
+        })
+        .collect::<Vec<_>>();
+    MilkdropPresetSet { format, presets }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MilkdropFragment {
+    pub entries: Vec<MilkdropIndexedEntry>,
+    pub fragment_type: String,
+    pub source: String,
+}
+
+fn milkdrop_fragment_type(file_name: &str, requested_type: &str) -> String {
+    if requested_type == "shape" || requested_type == "wave" {
+        return requested_type.to_string();
+    }
+    if file_name.to_ascii_lowercase().ends_with(".wave") {
+        "wave".to_string()
+    } else {
+        "shape".to_string()
+    }
+}
+
+fn parse_standalone_milkdrop_fragment_entry(source: &str) -> MilkdropIndexedEntry {
+    let mut entry = MilkdropIndexedEntry::default();
+    entry
+        .base_values
+        .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+    for raw_line in source.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+        {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = raw_line.split_once('=') else {
+            continue;
+        };
+        let key = raw_key.trim().to_ascii_lowercase();
+        let raw_value = raw_value.trim();
+        if !assign_milkdrop_indexed_equation(&mut entry.equations, &key, raw_value) {
+            entry
+                .base_values
+                .insert(key, normalize_milkdrop_value(raw_value));
+        }
+    }
+    entry
+}
+
+pub fn parse_milkdrop_fragment(
+    source: &str,
+    file_name: &str,
+    requested_type: &str,
+) -> MilkdropFragment {
+    let fragment_type = milkdrop_fragment_type(file_name, requested_type);
+    let parsed = parse_milkdrop_preset_set(source, false);
+    let parsed_entries = if fragment_type == "wave" {
+        parsed
+            .presets
+            .first()
+            .map(|preset| preset.waves.clone())
+            .unwrap_or_default()
+    } else {
+        parsed
+            .presets
+            .first()
+            .map(|preset| preset.shapes.clone())
+            .unwrap_or_default()
+    };
+    let has_prefixed_entries = parsed_entries.iter().any(|entry| {
+        !entry.base_values.is_empty() || entry.equations != MilkdropEquations::default()
+    });
+    let entries = if has_prefixed_entries {
+        parsed_entries
+            .into_iter()
+            .filter(|entry| {
+                !entry.base_values.is_empty() || entry.equations != MilkdropEquations::default()
+            })
+            .collect()
+    } else {
+        vec![parse_standalone_milkdrop_fragment_entry(source)]
+    };
+    MilkdropFragment {
+        entries,
+        fragment_type,
+        source: source.to_string(),
+    }
+}
+
+fn append_milkdrop_equation_lines(lines: &mut Vec<String>, key: &str, equation_text: &str) {
+    for (index, line) in equation_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        lines.push(format!("{key}_{}={line}", index + 1));
+    }
+}
+
+fn append_milkdrop_base_value_lines(
+    lines: &mut Vec<String>,
+    values: &BTreeMap<String, MilkdropValue>,
+    prefix: &str,
+) {
+    for (key, value) in values {
+        lines.push(format!("{prefix}{key}={}", value.as_text()));
+    }
+}
+
+fn append_milkdrop_indexed_entry_lines(
+    lines: &mut Vec<String>,
+    prefix: &str,
+    entry: &MilkdropIndexedEntry,
+) {
+    append_milkdrop_base_value_lines(lines, &entry.base_values, prefix);
+    append_milkdrop_equation_lines(lines, &format!("{prefix}init"), &entry.equations.init);
+    append_milkdrop_equation_lines(lines, &format!("{prefix}per_frame"), &entry.equations.frame);
+    append_milkdrop_equation_lines(lines, &format!("{prefix}per_point"), &entry.equations.point);
+}
+
+pub fn serialize_milkdrop_fragment(entry: &MilkdropIndexedEntry, requested_type: &str) -> String {
+    let fragment_type = milkdrop_fragment_type("", requested_type);
+    let mut lines = vec![format!("[{fragment_type}]")];
+    append_milkdrop_indexed_entry_lines(&mut lines, "", entry);
+    format!("{}\n", lines.join("\n"))
+}
+
+pub fn serialize_milkdrop_preset_set(parsed: &MilkdropPresetSet) -> String {
+    let include_sections = parsed.format == "milk2" || parsed.presets.len() > 1;
+    let mut rendered_presets = Vec::new();
+    for (index, preset) in parsed.presets.iter().enumerate() {
+        let mut lines = Vec::new();
+        if include_sections {
+            lines.push(format!("[preset{index:02}]"));
+        }
+        if !preset.title.is_empty() {
+            lines.push(format!("name={}", preset.title));
+        }
+        append_milkdrop_base_value_lines(&mut lines, &preset.base_values, "");
+        append_milkdrop_equation_lines(&mut lines, "init", &preset.equations.init);
+        append_milkdrop_equation_lines(&mut lines, "per_frame", &preset.equations.per_frame);
+        append_milkdrop_equation_lines(&mut lines, "per_pixel", &preset.equations.per_pixel);
+        append_milkdrop_equation_lines(&mut lines, "warp_shader", &preset.warp_shader);
+        append_milkdrop_equation_lines(&mut lines, "comp_shader", &preset.comp_shader);
+        for (shape_index, shape) in preset.shapes.iter().enumerate() {
+            append_milkdrop_indexed_entry_lines(
+                &mut lines,
+                &format!("shape{shape_index:02}_"),
+                shape,
+            );
+        }
+        for (sprite_index, sprite) in preset.sprites.iter().enumerate() {
+            append_milkdrop_indexed_entry_lines(
+                &mut lines,
+                &format!("sprite{sprite_index:02}_"),
+                sprite,
+            );
+        }
+        for (wave_index, wave) in preset.waves.iter().enumerate() {
+            append_milkdrop_indexed_entry_lines(
+                &mut lines,
+                &format!("wavecode_{wave_index}_"),
+                wave,
+            );
+        }
+        rendered_presets.push(lines.join("\n"));
+    }
+    format!("{}\n", rendered_presets.join("\n"))
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum MilkdropToken {
+    Ident(String),
+    Number(f64),
+    Op(String),
+}
+
+fn tokenize_milkdrop_expression(expression: &str) -> Result<Vec<MilkdropToken>, String> {
+    let chars = expression.chars().collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch.is_whitespace() {
+            index += 1;
+            continue;
+        }
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = index;
+            index += 1;
+            while index < chars.len()
+                && (chars[index].is_ascii_alphanumeric()
+                    || chars[index] == '_'
+                    || chars[index] == '.')
+            {
+                index += 1;
+            }
+            tokens.push(MilkdropToken::Ident(
+                chars[start..index]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_lowercase(),
+            ));
+            continue;
+        }
+        if ch.is_ascii_digit() || ch == '.' {
+            let start = index;
+            index += 1;
+            while index < chars.len() && (chars[index].is_ascii_digit() || chars[index] == '.') {
+                index += 1;
+            }
+            if index < chars.len() && matches!(chars[index], 'e' | 'E') {
+                index += 1;
+                if index < chars.len() && matches!(chars[index], '+' | '-') {
+                    index += 1;
+                }
+                while index < chars.len() && chars[index].is_ascii_digit() {
+                    index += 1;
+                }
+            }
+            let value = chars[start..index]
+                .iter()
+                .collect::<String>()
+                .parse::<f64>()
+                .map_err(|_| format!("Unsupported MilkDrop expression syntax: {expression}"))?;
+            tokens.push(MilkdropToken::Number(value));
+            continue;
+        }
+        let two = if index + 1 < chars.len() {
+            Some([chars[index], chars[index + 1]].iter().collect::<String>())
+        } else {
+            None
+        };
+        if let Some(two) = two.as_deref().filter(|value| {
+            matches!(
+                *value,
+                "&&" | "||" | "<<" | ">>" | "==" | "!=" | "<=" | ">="
+            )
+        }) {
+            tokens.push(MilkdropToken::Op(two.to_string()));
+            index += 2;
+            continue;
+        }
+        if matches!(
+            ch,
+            '(' | ')' | '+' | '-' | '*' | '/' | '%' | ',' | '<' | '>' | '&' | '|' | '^' | '!' | '~'
+        ) {
+            tokens.push(MilkdropToken::Op(ch.to_string()));
+            index += 1;
+            continue;
+        }
+        return Err(format!(
+            "Unsupported MilkDrop expression syntax: {expression}"
+        ));
+    }
+    Ok(tokens)
+}
+
+fn milkdrop_number(scope: &BTreeMap<String, MilkdropValue>, name: &str) -> f64 {
+    scope
+        .get(name)
+        .and_then(MilkdropValue::as_number)
+        .unwrap_or(0.0)
+}
+
+fn milkdrop_indexed_sample(values: &[f64], position: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let normalized = position.clamp(0.0, 1.0);
+    let index = ((normalized * values.len() as f64).floor() as usize).min(values.len() - 1);
+    let value = values[index];
+    if value > 1.0 {
+        value / 255.0
+    } else {
+        value
+    }
+}
+
+struct MilkdropExpressionParser<'a> {
+    scope: &'a BTreeMap<String, MilkdropValue>,
+    tokens: Vec<MilkdropToken>,
+    index: usize,
+}
+
+impl<'a> MilkdropExpressionParser<'a> {
+    fn new(tokens: Vec<MilkdropToken>, scope: &'a BTreeMap<String, MilkdropValue>) -> Self {
+        Self {
+            scope,
+            tokens,
+            index: 0,
+        }
+    }
+
+    fn peek_op(&self) -> Option<&str> {
+        match self.tokens.get(self.index) {
+            Some(MilkdropToken::Op(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    fn match_op(&mut self, expected: &str) -> bool {
+        if self.peek_op() == Some(expected) {
+            self.index += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn consume(&mut self) -> Option<MilkdropToken> {
+        let token = self.tokens.get(self.index).cloned();
+        if token.is_some() {
+            self.index += 1;
+        }
+        token
+    }
+
+    fn parse(&mut self) -> Result<f64, String> {
+        let value = self.parse_logical_or()?;
+        if self.index < self.tokens.len() {
+            return Err("Unexpected trailing MilkDrop token".to_string());
+        }
+        Ok(value)
+    }
+
+    fn parse_primary(&mut self) -> Result<f64, String> {
+        match self.consume() {
+            Some(MilkdropToken::Number(value)) => Ok(value),
+            Some(MilkdropToken::Op(op)) if op == "(" => {
+                let value = self.parse_logical_or()?;
+                if !self.match_op(")") {
+                    return Err("Unclosed MilkDrop expression group.".to_string());
+                }
+                Ok(value)
+            }
+            Some(MilkdropToken::Ident(name)) => {
+                if self.match_op("(") {
+                    let mut args = Vec::new();
+                    if self.peek_op() != Some(")") {
+                        loop {
+                            args.push(self.parse_logical_or()?);
+                            if !self.match_op(",") {
+                                break;
+                            }
+                        }
+                    }
+                    if !self.match_op(")") {
+                        return Err(format!("Unclosed function call: {name}"));
+                    }
+                    self.call_function(&name, &args)
+                } else {
+                    Ok(match name.as_str() {
+                        "e" => std::f64::consts::E,
+                        "pi" => std::f64::consts::PI,
+                        _ => milkdrop_number(self.scope, &name),
+                    })
+                }
+            }
+            Some(token) => Err(format!("Unexpected MilkDrop token: {token:?}")),
+            None => Err("Unexpected end of MilkDrop expression.".to_string()),
+        }
+    }
+
+    fn call_function(&self, name: &str, args: &[f64]) -> Result<f64, String> {
+        let arg = |index: usize, default: f64| args.get(index).copied().unwrap_or(default);
+        let out = match name {
+            "abs" => arg(0, 0.0).abs(),
+            "above" => (arg(0, 0.0) > arg(1, 0.0)) as i32 as f64,
+            "acos" => arg(0, 0.0).clamp(-1.0, 1.0).acos(),
+            "asin" => arg(0, 0.0).clamp(-1.0, 1.0).asin(),
+            "atan" => arg(0, 0.0).atan(),
+            "atan2" => arg(0, 0.0).atan2(arg(1, 0.0)),
+            "below" => (arg(0, 0.0) < arg(1, 0.0)) as i32 as f64,
+            "band" => ((arg(0, 0.0).trunc() as i64) & (arg(1, 0.0).trunc() as i64)) as f64,
+            "bor" => ((arg(0, 0.0).trunc() as i64) | (arg(1, 0.0).trunc() as i64)) as f64,
+            "bnot" => (!(arg(0, 0.0).trunc() as i64)) as f64,
+            "bxor" => ((arg(0, 0.0).trunc() as i64) ^ (arg(1, 0.0).trunc() as i64)) as f64,
+            "ceil" => arg(0, 0.0).ceil(),
+            "cos" => arg(0, 0.0).cos(),
+            "div" => {
+                let right = arg(1, 0.0);
+                if right == 0.0 {
+                    0.0
+                } else {
+                    arg(0, 0.0) / right
+                }
+            }
+            "equal" => ((arg(0, 0.0) - arg(1, 0.0)).abs() < 0.00001) as i32 as f64,
+            "exp" => arg(0, 0.0).exp(),
+            "floor" => arg(0, 0.0).floor(),
+            "get_fft" => {
+                let values = milkdrop_frequency_data(self.scope);
+                milkdrop_indexed_sample(&values, arg(0, 0.0))
+            }
+            "get_fft_hz" => {
+                let sample_rate = milkdrop_number(self.scope, "sample_rate")
+                    .max(milkdrop_number(self.scope, "samplerate"))
+                    .max(44100.0);
+                let nyquist = sample_rate / 2.0;
+                let values = milkdrop_frequency_data(self.scope);
+                milkdrop_indexed_sample(
+                    &values,
+                    if nyquist > 0.0 {
+                        arg(0, 0.0) / nyquist
+                    } else {
+                        0.0
+                    },
+                )
+            }
+            "if" => {
+                if arg(0, 0.0) != 0.0 {
+                    arg(1, 0.0)
+                } else {
+                    arg(2, 0.0)
+                }
+            }
+            "int" => arg(0, 0.0).trunc(),
+            "log" => {
+                if arg(0, 0.0) <= 0.0 {
+                    0.0
+                } else {
+                    arg(0, 0.0).ln()
+                }
+            }
+            "log10" => {
+                if arg(0, 0.0) <= 0.0 {
+                    0.0
+                } else {
+                    arg(0, 0.0).log10()
+                }
+            }
+            "max" => arg(0, 0.0).max(arg(1, 0.0)),
+            "min" => arg(0, 0.0).min(arg(1, 0.0)),
+            "mod" => {
+                let right = arg(1, 0.0);
+                if right == 0.0 {
+                    0.0
+                } else {
+                    arg(0, 0.0) % right
+                }
+            }
+            "pow" => arg(0, 0.0).powf(arg(1, 0.0)),
+            "rand" => {
+                let upper = arg(0, 1.0).trunc().max(0.0);
+                if upper <= 0.0 {
+                    0.0
+                } else {
+                    (upper / 2.0).floor()
+                }
+            }
+            "sign" => arg(0, 0.0).signum(),
+            "sigmoid" => {
+                let constraint = if arg(1, 1.0) == 0.0 { 1.0 } else { arg(1, 1.0) };
+                1.0 / (1.0 + (-arg(0, 0.0) * constraint).exp())
+            }
+            "sin" => arg(0, 0.0).sin(),
+            "sqr" => arg(0, 0.0) * arg(0, 0.0),
+            "sqrt" => {
+                if arg(0, 0.0) < 0.0 {
+                    0.0
+                } else {
+                    arg(0, 0.0).sqrt()
+                }
+            }
+            "tan" => arg(0, 0.0).tan(),
+            _ => return Err(format!("Unsupported MilkDrop function: {name}")),
+        };
+        Ok(if out.is_finite() { out } else { 0.0 })
+    }
+
+    fn parse_unary(&mut self) -> Result<f64, String> {
+        if self.match_op("+") {
+            return self.parse_unary();
+        }
+        if self.match_op("-") {
+            return Ok(-self.parse_unary()?);
+        }
+        if self.match_op("!") {
+            return Ok((self.parse_unary()? == 0.0) as i32 as f64);
+        }
+        if self.match_op("~") {
+            return Ok((!(self.parse_unary()?.trunc() as i64)) as f64);
+        }
+        self.parse_primary()
+    }
+
+    fn parse_factor(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_unary()?;
+        while let Some(op) = self
+            .peek_op()
+            .filter(|op| matches!(*op, "*" | "/" | "%"))
+            .map(str::to_string)
+        {
+            self.index += 1;
+            let right = self.parse_unary()?;
+            value = match op.as_str() {
+                "*" => value * right,
+                "/" => {
+                    if right == 0.0 {
+                        0.0
+                    } else {
+                        value / right
+                    }
+                }
+                "%" => {
+                    if right == 0.0 {
+                        0.0
+                    } else {
+                        value % right
+                    }
+                }
+                _ => value,
+            };
+        }
+        Ok(value)
+    }
+
+    fn parse_term(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_factor()?;
+        while let Some(op) = self
+            .peek_op()
+            .filter(|op| matches!(*op, "+" | "-"))
+            .map(str::to_string)
+        {
+            self.index += 1;
+            let right = self.parse_factor()?;
+            value = if op == "+" {
+                value + right
+            } else {
+                value - right
+            };
+        }
+        Ok(value)
+    }
+
+    fn parse_shift(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_term()?;
+        while let Some(op) = self
+            .peek_op()
+            .filter(|op| matches!(*op, "<<" | ">>"))
+            .map(str::to_string)
+        {
+            self.index += 1;
+            let right = self.parse_term()?;
+            value = if op == "<<" {
+                ((value.trunc() as i64) << (right.trunc() as u32)) as f64
+            } else {
+                ((value.trunc() as i64) >> (right.trunc() as u32)) as f64
+            };
+        }
+        Ok(value)
+    }
+
+    fn parse_comparison(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_shift()?;
+        while let Some(op) = self
+            .peek_op()
+            .filter(|op| matches!(*op, "<" | ">" | "<=" | ">=" | "==" | "!="))
+            .map(str::to_string)
+        {
+            self.index += 1;
+            let right = self.parse_shift()?;
+            value = match op.as_str() {
+                "<" => (value < right) as i32 as f64,
+                ">" => (value > right) as i32 as f64,
+                "<=" => (value <= right) as i32 as f64,
+                ">=" => (value >= right) as i32 as f64,
+                "==" => ((value - right).abs() < 0.00001) as i32 as f64,
+                "!=" => ((value - right).abs() >= 0.00001) as i32 as f64,
+                _ => value,
+            };
+        }
+        Ok(value)
+    }
+
+    fn parse_bitwise_and(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_comparison()?;
+        while self.match_op("&") {
+            value = ((value.trunc() as i64) & (self.parse_comparison()?.trunc() as i64)) as f64;
+        }
+        Ok(value)
+    }
+
+    fn parse_bitwise_xor(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_bitwise_and()?;
+        while self.match_op("^") {
+            value = ((value.trunc() as i64) ^ (self.parse_bitwise_and()?.trunc() as i64)) as f64;
+        }
+        Ok(value)
+    }
+
+    fn parse_bitwise_or(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_bitwise_xor()?;
+        while self.match_op("|") {
+            value = ((value.trunc() as i64) | (self.parse_bitwise_xor()?.trunc() as i64)) as f64;
+        }
+        Ok(value)
+    }
+
+    fn parse_logical_and(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_bitwise_or()?;
+        while self.match_op("&&") {
+            value = (value != 0.0 && self.parse_bitwise_or()? != 0.0) as i32 as f64;
+        }
+        Ok(value)
+    }
+
+    fn parse_logical_or(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_logical_and()?;
+        while self.match_op("||") {
+            value = (value != 0.0 || self.parse_logical_and()? != 0.0) as i32 as f64;
+        }
+        Ok(value)
+    }
+}
+
+fn milkdrop_frequency_data(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> {
+    [
+        "frequency_data",
+        "frequencies",
+        "frequency",
+        "spectrum",
+        "fft",
+    ]
+    .into_iter()
+    .find_map(|name| match scope.get(name) {
+        Some(MilkdropValue::Text(value)) => Some(
+            value
+                .split(',')
+                .filter_map(|item| item.trim().parse::<f64>().ok())
+                .collect::<Vec<_>>(),
+        ),
+        Some(MilkdropValue::Number(value)) => Some(vec![*value]),
+        None => None,
+    })
+    .unwrap_or_default()
+}
+
+pub fn evaluate_milkdrop_expression(
+    expression: &str,
+    variables: &BTreeMap<String, MilkdropValue>,
+) -> Result<f64, String> {
+    let scope = variables
+        .iter()
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let tokens = tokenize_milkdrop_expression(expression)?;
+    MilkdropExpressionParser::new(tokens, &scope).parse()
+}
+
+pub fn evaluate_milkdrop_equations(
+    equations: &str,
+    variables: &BTreeMap<String, MilkdropValue>,
+) -> Result<BTreeMap<String, MilkdropValue>, String> {
+    let mut scope = variables
+        .iter()
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    for statement in equations
+        .split(';')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let Some((name, operator, expression)) = split_milkdrop_assignment(statement) else {
+            let _ = evaluate_milkdrop_expression(statement, &scope)?;
+            continue;
+        };
+        let current = milkdrop_number(&scope, &name);
+        let next = evaluate_milkdrop_expression(expression, &scope)?;
+        let value = match operator {
+            "=" => next,
+            "+=" => current + next,
+            "-=" => current - next,
+            "*=" => current * next,
+            "/=" => {
+                if next == 0.0 {
+                    0.0
+                } else {
+                    current / next
+                }
+            }
+            _ => next,
+        };
+        scope.insert(name, MilkdropValue::Number(value));
+    }
+    Ok(scope)
+}
+
+fn split_milkdrop_assignment(statement: &str) -> Option<(String, &'static str, &str)> {
+    for operator in ["+=", "-=", "*=", "/=", "="] {
+        if let Some((raw_name, expression)) = statement.split_once(operator) {
+            let name = raw_name.trim();
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
+                && name
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            {
+                return Some((name.to_ascii_lowercase(), operator, expression.trim()));
+            }
+        }
+    }
+    None
+}
+
 #[cfg(target_arch = "wasm32")]
 fn toggle_rust_milkdrop_visualizer(
     window: &web_sys::Window,
@@ -12071,6 +13048,215 @@ mod tests {
         assert!(frame.wave_color.0 >= 95);
         assert!(frame.wave_color.1 >= 120);
         assert!(frame.wave_color.2 >= 200);
+    }
+
+    #[test]
+    fn rust_milkdrop_preset_parser_matches_js_fixture_shapes() {
+        let parsed = parse_milkdrop_preset_set(
+            r#"
+            // comments are ignored
+            [preset00]
+            name=slskr smoke preset
+            fRating=4.0
+            fGammaAdj=1.35
+            zoom=1.01
+            rot=0
+            per_frame_1=q1 = bass_att * 0.2;
+            per_frame_2=zoom = zoom + q1;
+            per_pixel_1=rot = rot + rad * 0.01;
+            warp_shader=shader_body {
+            warp_shader_1=  ret = texture(sampler_main, uv).xyz;
+            warp_shader_2=}
+            comp_shader=shader_body { ret = vec3(q1); }
+            shape00_enabled=1
+            shape00_sides=5
+            shape00_init1=q2=0;
+            shape00_per_frame1=q2=q2+0.1;
+            sprite00_enabled=1
+            sprite00_image=logo.png
+            sprite00_init1=q3=0.2;
+            sprite00_per_frame1=x=0.5+q3;
+            wavecode_0_enabled=1
+            wavecode_0_samples=512
+            wavecode_0_per_point1=x=sample;
+            "#,
+            false,
+        );
+        let preset = &parsed.presets[0];
+        assert_eq!(parsed.format, "milk");
+        assert_eq!(preset.title, "slskr smoke preset");
+        assert_eq!(
+            preset.base_values.get("fgammaadj"),
+            Some(&MilkdropValue::Number(1.35))
+        );
+        assert_eq!(
+            preset.equations.per_frame,
+            "q1 = bass_att * 0.2;\nzoom = zoom + q1;"
+        );
+        assert_eq!(preset.equations.per_pixel, "rot = rot + rad * 0.01;");
+        assert!(preset.warp_shader.contains("texture(sampler_main, uv)"));
+        assert_eq!(preset.comp_shader, "shader_body { ret = vec3(q1); }");
+        assert_eq!(
+            preset.shapes[0].base_values.get("enabled"),
+            Some(&MilkdropValue::Number(1.0))
+        );
+        assert_eq!(
+            preset.shapes[0].base_values.get("sides"),
+            Some(&MilkdropValue::Number(5.0))
+        );
+        assert_eq!(preset.shapes[0].equations.init, "q2=0;");
+        assert_eq!(preset.shapes[0].equations.frame, "q2=q2+0.1;");
+        assert_eq!(
+            preset.sprites[0].base_values.get("image"),
+            Some(&MilkdropValue::Text("logo.png".to_string()))
+        );
+        assert_eq!(preset.waves[0].equations.point, "x=sample;");
+    }
+
+    #[test]
+    fn rust_milkdrop_expression_vm_matches_js_compatibility_cases() {
+        let mut vars = BTreeMap::new();
+        vars.insert("bass_att".to_string(), MilkdropValue::Number(2.0));
+        assert_eq!(
+            evaluate_milkdrop_expression("pow(bass_att, 2) + sqr(3)", &vars).unwrap(),
+            13.0
+        );
+        vars.insert("treb".to_string(), MilkdropValue::Number(2.0));
+        assert_eq!(
+            evaluate_milkdrop_expression("if(above(treb, 1.5), sin(0), 7)", &vars).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression("div(10, 0) + sqrt(-1)", &BTreeMap::new()).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression("sin(pi/2)+log(e)+log10(100)", &BTreeMap::new())
+                .unwrap()
+                .round(),
+            4.0
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression("(7 & 3) + (4 | 1) + (7 ^ 3)", &BTreeMap::new()).unwrap(),
+            12.0
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression("(1 << 3) + (8 >> 1)", &BTreeMap::new()).unwrap(),
+            12.0
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression("~0 + !0 + !2", &BTreeMap::new()).unwrap(),
+            0.0
+        );
+
+        let mut equation_vars = BTreeMap::new();
+        equation_vars.insert("bass_att".to_string(), MilkdropValue::Number(3.0));
+        equation_vars.insert("treb_att".to_string(), MilkdropValue::Number(1.0));
+        equation_vars.insert("wave_r".to_string(), MilkdropValue::Number(0.8));
+        equation_vars.insert("zoom".to_string(), MilkdropValue::Number(1.0));
+        let scope = evaluate_milkdrop_equations(
+            "q1 = bass_att * 0.2; zoom += q1; q33 = if(below(treb_att, 2), 7, 9); wave_r *= 0.5;",
+            &equation_vars,
+        )
+        .unwrap();
+        assert_eq!(
+            scope.get("q1"),
+            Some(&MilkdropValue::Number(0.6000000000000001))
+        );
+        assert_eq!(scope.get("q33"), Some(&MilkdropValue::Number(7.0)));
+        assert_eq!(scope.get("wave_r"), Some(&MilkdropValue::Number(0.4)));
+        assert!(matches!(
+            evaluate_milkdrop_expression("megabuf(1)", &BTreeMap::new()),
+            Err(error) if error.contains("Unsupported MilkDrop function")
+        ));
+    }
+
+    #[test]
+    fn rust_milkdrop_expression_vm_samples_fft_data() {
+        let mut vars = BTreeMap::new();
+        vars.insert(
+            "frequency_data".to_string(),
+            MilkdropValue::Text("0,128,255,64".to_string()),
+        );
+        assert_eq!(
+            evaluate_milkdrop_expression("get_fft(0.5)", &vars).unwrap(),
+            1.0
+        );
+        vars.insert(
+            "frequency_data".to_string(),
+            MilkdropValue::Text("0,255,0,0".to_string()),
+        );
+        vars.insert("sample_rate".to_string(), MilkdropValue::Number(44100.0));
+        assert_eq!(
+            evaluate_milkdrop_expression("get_fft_hz(5512.5)", &vars).unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_fragment_parser_and_serializer_match_js_shapes() {
+        let fragment = parse_milkdrop_fragment(
+            r#"
+            [shape]
+            sides=7
+            rad=0.22
+            r=1
+            per_frame_1=ang=time;
+            "#,
+            "star.shape",
+            "",
+        );
+        assert_eq!(fragment.fragment_type, "shape");
+        assert_eq!(
+            fragment.entries[0].base_values.get("enabled"),
+            Some(&MilkdropValue::Number(1.0))
+        );
+        assert_eq!(
+            fragment.entries[0].base_values.get("sides"),
+            Some(&MilkdropValue::Number(7.0))
+        );
+        assert_eq!(fragment.entries[0].equations.frame, "ang=time;");
+        assert!(serialize_milkdrop_fragment(&fragment.entries[0], "shape")
+            .contains("per_frame_1=ang=time;"));
+
+        let wave = parse_milkdrop_fragment(
+            "samples=64\nspectrum=1\nper_point_1=x=i;\nper_point_2=y=sample;",
+            "spectrum.wave",
+            "",
+        );
+        assert_eq!(wave.fragment_type, "wave");
+        assert_eq!(
+            wave.entries[0].base_values.get("samples"),
+            Some(&MilkdropValue::Number(64.0))
+        );
+        assert_eq!(wave.entries[0].equations.point, "x=i;\ny=sample;");
+
+        let prefixed = parse_milkdrop_fragment(
+            "shape00_enabled=1\nshape00_sides=4\nshape00_per_frame1=rad=0.25+0.05*sin(time);",
+            "prefixed.shape",
+            "",
+        );
+        assert_eq!(
+            prefixed.entries[0].base_values.get("sides"),
+            Some(&MilkdropValue::Number(4.0))
+        );
+        assert_eq!(
+            prefixed.entries[0].equations.frame,
+            "rad=0.25+0.05*sin(time);"
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_preset_serializer_keeps_custom_primitives() {
+        let parsed = parse_milkdrop_preset_set(
+            "name=Serializable\nwave_r=1\nshape00_enabled=1\nshape00_sides=5\nwavecode_0_enabled=1\nwavecode_0_samples=16\nwavecode_0_per_point1=x=i;",
+            false,
+        );
+        let serialized = serialize_milkdrop_preset_set(&parsed);
+        assert!(serialized.contains("name=Serializable"));
+        assert!(serialized.contains("shape00_sides=5"));
+        assert!(serialized.contains("wavecode_0_samples=16"));
+        assert!(serialized.contains("wavecode_0_per_point_1=x=i;"));
     }
 
     #[test]
