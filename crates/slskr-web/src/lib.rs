@@ -13826,6 +13826,34 @@ pub struct RustMilkdropWebGpuFrameBatches {
     pub textured_vertices: Vec<f64>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RustMilkdropWebGpuCompositeBatch {
+    pub blend_alpha: f64,
+    pub composite_mode: String,
+    pub filled_first_vertex: usize,
+    pub filled_vertex_count: usize,
+    pub index: usize,
+    pub line_first_vertex: usize,
+    pub line_vertex_count: usize,
+    pub point_first_vertex: usize,
+    pub point_vertex_count: usize,
+    pub textured_batch_count: usize,
+    pub textured_batch_first: usize,
+    pub textured_first_vertex: usize,
+    pub textured_vertex_count: usize,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RustMilkdropWebGpuFrameSetBatches {
+    pub composite_batches: Vec<RustMilkdropWebGpuCompositeBatch>,
+    pub filled_vertices: Vec<f64>,
+    pub line_vertices: Vec<f64>,
+    pub point_vertices: Vec<f64>,
+    pub textured_batches: Vec<RustMilkdropWebGpuTexturedBatch>,
+    pub textured_vertices: Vec<f64>,
+}
+
 fn create_repeated_milkdrop_colors(vertex_count: usize, color: [f64; 4]) -> Vec<f64> {
     let mut colors = Vec::with_capacity(vertex_count * 4);
     for _ in 0..vertex_count {
@@ -13924,6 +13952,64 @@ pub fn create_rust_milkdrop_webgpu_frame_batches(
     batches
 }
 
+pub fn create_rust_milkdrop_webgpu_frame_set_batches(
+    frame_set: &RustMilkdropFrameSet,
+) -> RustMilkdropWebGpuFrameSetBatches {
+    let mut batches = RustMilkdropWebGpuFrameSetBatches::default();
+    for entry in &frame_set.entries {
+        let entry_batches = create_rust_milkdrop_webgpu_frame_batches(&entry.frame);
+        let filled_first_vertex = batches.filled_vertices.len() / 6;
+        let line_first_vertex = batches.line_vertices.len() / 6;
+        let point_first_vertex = batches.point_vertices.len() / 6;
+        let textured_first_vertex = batches.textured_vertices.len() / 8;
+        let textured_batch_first = batches.textured_batches.len();
+        let textured_primitive_offset = batches.textured_batches.len();
+
+        let filled_vertex_count = entry_batches.filled_vertices.len() / 6;
+        let line_vertex_count = entry_batches.line_vertices.len() / 6;
+        let point_vertex_count = entry_batches.point_vertices.len() / 6;
+        let textured_vertex_count = entry_batches.textured_vertices.len() / 8;
+        let textured_batch_count = entry_batches.textured_batches.len();
+
+        batches
+            .filled_vertices
+            .extend(entry_batches.filled_vertices);
+        batches.line_vertices.extend(entry_batches.line_vertices);
+        batches.point_vertices.extend(entry_batches.point_vertices);
+        batches
+            .textured_vertices
+            .extend(entry_batches.textured_vertices);
+        batches
+            .textured_batches
+            .extend(entry_batches.textured_batches.into_iter().map(|batch| {
+                RustMilkdropWebGpuTexturedBatch {
+                    first_vertex: batch.first_vertex + textured_first_vertex,
+                    primitive_index: batch.primitive_index + textured_primitive_offset,
+                    vertex_count: batch.vertex_count,
+                }
+            }));
+        batches
+            .composite_batches
+            .push(RustMilkdropWebGpuCompositeBatch {
+                blend_alpha: entry.blend_alpha,
+                composite_mode: entry.composite_mode.clone(),
+                filled_first_vertex,
+                filled_vertex_count,
+                index: entry.index,
+                line_first_vertex,
+                line_vertex_count,
+                point_first_vertex,
+                point_vertex_count,
+                textured_batch_count,
+                textured_batch_first,
+                textured_first_vertex,
+                textured_vertex_count,
+                title: entry.title.clone(),
+            });
+    }
+    batches
+}
+
 fn rounded_milkdrop_buffer_sample(values: &[f64], count: usize) -> Vec<f64> {
     values
         .iter()
@@ -13964,6 +14050,7 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
             )
         });
     let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
+    let frame_set_batches = create_rust_milkdrop_webgpu_frame_set_batches(&frame_set);
     let textured_batches = batches
         .textured_batches
         .iter()
@@ -13972,6 +14059,28 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
                 "firstVertex": batch.first_vertex,
                 "primitiveIndex": batch.primitive_index,
                 "vertexCount": batch.vertex_count,
+            })
+        })
+        .collect::<Vec<_>>();
+    let composite_batches = frame_set_batches
+        .composite_batches
+        .iter()
+        .map(|batch| {
+            serde_json::json!({
+                "blendAlpha": batch.blend_alpha,
+                "compositeMode": batch.composite_mode,
+                "filledFirstVertex": batch.filled_first_vertex,
+                "filledVertexCount": batch.filled_vertex_count,
+                "index": batch.index,
+                "lineFirstVertex": batch.line_first_vertex,
+                "lineVertexCount": batch.line_vertex_count,
+                "pointFirstVertex": batch.point_first_vertex,
+                "pointVertexCount": batch.point_vertex_count,
+                "texturedBatchCount": batch.textured_batch_count,
+                "texturedBatchFirst": batch.textured_batch_first,
+                "texturedFirstVertex": batch.textured_first_vertex,
+                "texturedVertexCount": batch.textured_vertex_count,
+                "title": batch.title,
             })
         })
         .collect::<Vec<_>>();
@@ -14027,6 +14136,14 @@ pub fn rust_milkdrop_webgpu_batch_summary_json(
             "texturedFloats": batches.textured_vertices.len(),
             "texturedSample": rounded_milkdrop_buffer_sample(&batches.textured_vertices, 24),
             "texturedVertices": batches.textured_vertices.len() / 8,
+        },
+        "packedFrameSet": {
+            "compositeBatches": composite_batches,
+            "filledVertices": frame_set_batches.filled_vertices.len() / 6,
+            "lineVertices": frame_set_batches.line_vertices.len() / 6,
+            "pointVertices": frame_set_batches.point_vertices.len() / 6,
+            "texturedBatches": frame_set_batches.textured_batches.len(),
+            "texturedVertices": frame_set_batches.textured_vertices.len() / 8,
         },
     })
     .to_string()
@@ -19619,6 +19736,71 @@ mod tests {
     }
 
     #[test]
+    fn rust_milkdrop_webgpu_frame_set_batches_keep_composite_offsets() {
+        let frame_set = rust_milkdrop_frame_set_from_source(
+            r#"
+            [preset00]
+            name=Primary
+            shape00_enabled=1
+            shape00_sides=3
+            shape00_rad=0.2
+            shape00_r=0.1
+            shape00_g=0.2
+            shape00_b=0.3
+            [preset01]
+            name=Secondary
+            blend_alpha=0.4
+            composite_mode=additive
+            wavecode_0_enabled=1
+            wavecode_0_samples=3
+            shape00_enabled=1
+            shape00_sides=3
+            shape00_rad=0.2
+            shape00_textured=1
+            sprite00_enabled=1
+            sprite00_w=0.2
+            sprite00_h=0.1
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+        let batches = create_rust_milkdrop_webgpu_frame_set_batches(&frame_set);
+
+        assert_eq!(batches.composite_batches.len(), 2);
+        assert_eq!(batches.composite_batches[0].index, 0);
+        assert_eq!(batches.composite_batches[0].blend_alpha, 1.0);
+        assert_eq!(batches.composite_batches[0].composite_mode, "alpha");
+        assert!(batches.composite_batches[0].filled_vertex_count > 0);
+        assert_eq!(batches.composite_batches[1].index, 1);
+        assert_eq!(batches.composite_batches[1].blend_alpha, 0.4);
+        assert_eq!(batches.composite_batches[1].composite_mode, "additive");
+        assert!(batches.composite_batches[1].line_vertex_count > 0);
+        assert_eq!(batches.composite_batches[1].textured_batch_count, 2);
+        assert_eq!(
+            batches.composite_batches[1].filled_first_vertex,
+            batches.composite_batches[0].filled_first_vertex
+                + batches.composite_batches[0].filled_vertex_count
+        );
+        assert_eq!(
+            batches.composite_batches[1].textured_first_vertex,
+            batches.composite_batches[0].textured_first_vertex
+                + batches.composite_batches[0].textured_vertex_count
+        );
+        assert_eq!(
+            batches.composite_batches[1].textured_batch_first,
+            batches.composite_batches[0].textured_batch_first
+                + batches.composite_batches[0].textured_batch_count
+        );
+        assert_eq!(
+            batches.textured_batches[batches.composite_batches[1].textured_batch_first]
+                .first_vertex,
+            batches.composite_batches[1].textured_first_vertex
+        );
+    }
+
+    #[test]
     fn rust_milkdrop_validation_reports_secondary_milk2_errors() {
         let error = validate_rust_milkdrop_import(
             r#"
@@ -19677,6 +19859,11 @@ mod tests {
         assert_eq!(value["backend"], "webgpu");
         assert_eq!(value["frameSet"]["presetCount"], 1);
         assert_eq!(value["frameSet"]["entries"][0]["title"], "WebGPU summary");
+        assert_eq!(value["packedFrameSet"]["compositeBatches"][0]["index"], 0);
+        assert_eq!(
+            value["packedFrameSet"]["filledVertices"],
+            value["packed"]["filledVertices"]
+        );
         assert_eq!(value["frame"]["q1"], 1.0);
         assert_eq!(value["frame"]["texturedPrimitives"], 2);
         assert!(value["packed"]["filledVertices"].as_u64().unwrap() >= 15);
