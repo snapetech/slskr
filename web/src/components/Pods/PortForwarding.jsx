@@ -143,8 +143,8 @@ class PortForwarding extends Component {
           };
         } catch (error) {
           console.error(
-            `Failed to fetch stats for port ${forwarding.localPort}:`,
-            error,
+            'Failed to fetch forwarding stats',
+            { error, localPort: forwarding.localPort },
           );
           return null;
         }
@@ -190,7 +190,10 @@ class PortForwarding extends Component {
           totalBandwidth,
         };
       } catch (error) {
-        console.error(`Failed to fetch status for pod ${pod.podId}:`, error);
+        console.error('Failed to fetch pod status', {
+          error,
+          podId: pod.podId,
+        });
         return {
           activeTunnels: 0,
           lastActivity: Date.now(),
