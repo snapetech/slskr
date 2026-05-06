@@ -11636,12 +11636,32 @@ fn create_rust_milkdrop_scope(
     scope
 }
 
+fn rust_milkdrop_sample_text(values: &[f64]) -> String {
+    values
+        .iter()
+        .map(|value| format!("{:.6}", value.clamp(-1.0, 1.0)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 pub fn rust_milkdrop_frame_from_source(
     source: &str,
     time_seconds: f64,
     bass: f64,
     mid: f64,
     treble: f64,
+) -> RustMilkdropFrame {
+    rust_milkdrop_frame_from_source_with_audio(source, time_seconds, bass, mid, treble, &[], &[])
+}
+
+pub fn rust_milkdrop_frame_from_source_with_audio(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+    waveform: &[f64],
+    spectrum: &[f64],
 ) -> RustMilkdropFrame {
     let parsed = parse_milkdrop_preset_set(source, false);
     let Some(preset_document) = parsed.presets.first() else {
@@ -11654,6 +11674,18 @@ pub fn rust_milkdrop_frame_from_source(
         );
     };
     let mut scope = create_rust_milkdrop_scope(preset_document, time_seconds, bass, mid, treble);
+    if !waveform.is_empty() {
+        scope.insert(
+            "waveform_data".to_string(),
+            MilkdropValue::Text(rust_milkdrop_sample_text(waveform)),
+        );
+    }
+    if !spectrum.is_empty() {
+        scope.insert(
+            "frequency_data".to_string(),
+            MilkdropValue::Text(rust_milkdrop_sample_text(spectrum)),
+        );
+    }
     if !preset_document.equations.init.trim().is_empty() {
         if let Ok(next_scope) = evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
         {
@@ -11689,6 +11721,7 @@ pub fn rust_milkdrop_frame_from_source(
         bass,
         mid,
         treble,
+        waveform,
         [wave_r, wave_g, wave_b],
     );
     RustMilkdropFrame {
@@ -12471,16 +12504,23 @@ fn create_rust_milkdrop_frame_primitives(
     bass: f64,
     mid: f64,
     treble: f64,
+    waveform: &[f64],
     fallback_color: [f64; 3],
 ) -> Vec<RustMilkdropPrimitive> {
-    let samples = create_rust_milkdrop_audio_samples(time_seconds, bass, mid, treble, 192);
+    let generated_samples =
+        create_rust_milkdrop_audio_samples(time_seconds, bass, mid, treble, 192);
+    let samples = if waveform.is_empty() {
+        generated_samples.as_slice()
+    } else {
+        waveform
+    };
     let mut primitives = Vec::new();
     for wave in &preset.waves {
         let evaluated = evaluate_milkdrop_wave_state(wave, frame_scope);
         if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
             continue;
         }
-        let vertices = create_milkdrop_custom_wave_vertices(&evaluated, &samples, frame_scope);
+        let vertices = create_milkdrop_custom_wave_vertices(&evaluated, samples, frame_scope);
         if vertices.len() < 4 {
             continue;
         }
@@ -14189,26 +14229,28 @@ fn start_rust_milkdrop_visualizer(
                 }
             }
         }
-        let bands = analyzer_for_frame
+        let audio = analyzer_for_frame
             .borrow()
             .as_ref()
-            .map(|analyzer| analyzer.bands(time))
-            .unwrap_or_else(|| RustMilkdropAudioBands::synthetic(time));
-        let frame = rust_milkdrop_frame_from_source(
+            .map(|analyzer| analyzer.snapshot(time))
+            .unwrap_or_else(|| RustMilkdropAudioSnapshot::synthetic(time));
+        let frame = rust_milkdrop_frame_from_source_with_audio(
             &preset_source,
             time,
-            bands.bass,
-            bands.mid,
-            bands.treble,
+            audio.bands.bass,
+            audio.bands.mid,
+            audio.bands.treble,
+            &audio.waveform,
+            &audio.spectrum,
         );
         renderer.render(&frame, time);
         if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
             status.set_text_content(Some(&format!(
                 "MilkDrop running: {} bass {:.0}% mid {:.0}% treble {:.0}% / {} shapes / {} waves",
-                bands.source,
-                bands.bass * 100.0,
-                bands.mid * 100.0,
-                bands.treble * 100.0,
+                audio.source,
+                audio.bands.bass * 100.0,
+                audio.bands.mid * 100.0,
+                audio.bands.treble * 100.0,
                 frame.shape_count,
                 frame.waveform_count
             )));
@@ -14380,8 +14422,9 @@ enum RustMilkdropRenderer {
 struct RustMilkdropAudioAnalyzer {
     _context: web_sys::AudioContext,
     analyser: web_sys::AnalyserNode,
-    bins: RefCell<Vec<u8>>,
+    frequency_bins: RefCell<Vec<u8>>,
     _source: web_sys::MediaElementAudioSourceNode,
+    waveform_bins: RefCell<Vec<u8>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -14393,28 +14436,30 @@ impl RustMilkdropAudioAnalyzer {
         analyser.set_fft_size(1024);
         source.connect_with_audio_node(&analyser)?;
         analyser.connect_with_audio_node(&context.destination())?;
-        let bins = RefCell::new(vec![0; analyser.frequency_bin_count() as usize]);
+        let frequency_bins = RefCell::new(vec![0; analyser.frequency_bin_count() as usize]);
+        let waveform_bins = RefCell::new(vec![0; analyser.fft_size() as usize]);
         Ok(Self {
             _context: context,
             analyser,
-            bins,
+            frequency_bins,
             _source: source,
+            waveform_bins,
         })
     }
 
-    fn bands(&self, time: f64) -> RustMilkdropAudioBands {
-        let mut bins = self.bins.borrow_mut();
-        self.analyser.get_byte_frequency_data(&mut bins);
-        let length = bins.len();
+    fn snapshot(&self, time: f64) -> RustMilkdropAudioSnapshot {
+        let mut frequency_bins = self.frequency_bins.borrow_mut();
+        self.analyser.get_byte_frequency_data(&mut frequency_bins);
+        let length = frequency_bins.len();
         if length == 0 {
-            return RustMilkdropAudioBands::synthetic(time);
+            return RustMilkdropAudioSnapshot::synthetic(time);
         }
         let band = |start: usize, end: usize| -> f64 {
             let end = end.min(length).max(start + 1);
             let mut total = 0.0;
             let mut count = 0.0;
             for index in start..end {
-                total += bins[index] as f64 / 255.0;
+                total += frequency_bins[index] as f64 / 255.0;
                 count += 1.0;
             }
             if count == 0.0 {
@@ -14423,11 +14468,49 @@ impl RustMilkdropAudioAnalyzer {
                 total / count
             }
         };
-        RustMilkdropAudioBands {
+        let spectrum = frequency_bins
+            .iter()
+            .map(|value| *value as f64 / 255.0)
+            .collect::<Vec<_>>();
+        let bands = RustMilkdropAudioBands {
             bass: band(0, length / 8),
             mid: band(length / 8, length / 3),
             treble: band(length / 3, length),
             source: "audio",
+        };
+        drop(frequency_bins);
+        let mut waveform_bins = self.waveform_bins.borrow_mut();
+        self.analyser.get_byte_time_domain_data(&mut waveform_bins);
+        let waveform = waveform_bins
+            .iter()
+            .map(|value| (*value as f64 - 128.0) / 128.0)
+            .collect::<Vec<_>>();
+        RustMilkdropAudioSnapshot {
+            bands,
+            source: "audio",
+            spectrum,
+            waveform,
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, PartialEq)]
+struct RustMilkdropAudioSnapshot {
+    bands: RustMilkdropAudioBands,
+    source: &'static str,
+    spectrum: Vec<f64>,
+    waveform: Vec<f64>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RustMilkdropAudioSnapshot {
+    fn synthetic(time: f64) -> Self {
+        Self {
+            bands: RustMilkdropAudioBands::synthetic(time),
+            source: "synthetic",
+            spectrum: Vec::new(),
+            waveform: Vec::new(),
         }
     }
 }
@@ -15550,6 +15633,39 @@ mod tests {
         assert!((frame.zoom - 1.2).abs() < 0.0001);
         assert!((frame.rotation - 0.245).abs() < 0.0001);
         assert!((frame.dx - 0.05).abs() < 0.0001);
+    }
+
+    #[test]
+    fn rust_milkdrop_runtime_uses_audio_samples_for_custom_waves() {
+        let frame = rust_milkdrop_frame_from_source_with_audio(
+            r#"
+            name=Audio reactive
+            wave_r=0.2
+            wave_g=0.3
+            wave_b=0.4
+            per_frame_1=wave_r=get_fft(0.5);
+            wavecode_0_enabled=1
+            wavecode_0_samples=3
+            wavecode_0_per_point1=x=i;
+            wavecode_0_per_point2=y=0.5+sample*0.5;
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+            &[-1.0, 0.0, 1.0],
+            &[0.0, 0.5, 1.0],
+        );
+        assert_eq!(frame.wave_color.0, 127);
+        let wave = frame
+            .primitives
+            .iter()
+            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::LineStrip)
+            .expect("custom wave primitive");
+        assert_eq!(wave.vertices.len(), 6);
+        assert!((wave.vertices[1] + 1.0).abs() < 0.0001);
+        assert!(wave.vertices[3].abs() < 0.0001);
+        assert!((wave.vertices[5] - 1.0).abs() < 0.0001);
     }
 
     #[test]
