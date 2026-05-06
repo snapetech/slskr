@@ -6441,7 +6441,7 @@ fn player_footer_html() -> String {
 }
 
 fn rust_milkdrop_panel_html() -> String {
-    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><input id="slskr-milkdrop-preset-input" type="file" accept=".milk,.milk2,.txt,text/plain" multiple hidden><input id="slskr-milkdrop-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
+    r#"<section class="slskr-milkdrop-panel" id="slskr-rust-milkdrop" hidden data-slskr-milkdrop-running="false"><header><div><strong>MilkDrop</strong><span id="slskr-milkdrop-preset">slskr native grid smoke</span></div><div class="slskr-milkdrop-actions"><button type="button" data-slskr-milkdrop-action="previous">Previous</button><button type="button" data-slskr-milkdrop-action="preset">Next</button><button type="button" data-slskr-milkdrop-action="import">Import</button><button type="button" data-slskr-milkdrop-action="texture">Texture</button><button type="button" data-slskr-milkdrop-action="pack">Pack</button><button type="button" data-slskr-milkdrop-action="reset">Reset</button><button type="button" data-slskr-milkdrop-action="external">External</button><button type="button" data-slskr-milkdrop-action="close">Close</button></div></header><div class="slskr-milkdrop-library"><input id="slskr-milkdrop-search" aria-label="Search native MilkDrop presets" placeholder="Search preset library"><button type="button" data-slskr-milkdrop-action="search">Search</button><input id="slskr-milkdrop-preset-input" type="file" accept=".milk,.milk2,.txt,text/plain" multiple hidden><input id="slskr-milkdrop-texture-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><input id="slskr-milkdrop-pack-input" type="file" accept=".milk,.milk2,.txt,text/plain,image/png,image/jpeg,image/webp,image/gif" multiple webkitdirectory hidden><span id="slskr-milkdrop-library-status">3 bundled presets</span><span id="slskr-milkdrop-textures">0 texture assets</span></div><canvas id="slskr-milkdrop-canvas" width="960" height="360" aria-label="MilkDrop visualizer"></canvas><footer><span id="slskr-milkdrop-status">Visualizer ready</span><span id="slskr-milkdrop-renderer">Renderer checking</span></footer></section>"#.to_string()
 }
 
 pub fn shell_html() -> String {
@@ -16827,6 +16827,7 @@ fn start_rust_milkdrop_visualizer(
         Rc::new(RefCell::new(Vec::new()));
     mount_rust_milkdrop_preset_input(document, imported_presets.clone())?;
     mount_rust_milkdrop_texture_input(document, texture_assets.clone())?;
+    mount_rust_milkdrop_pack_input(document, imported_presets.clone(), texture_assets.clone())?;
     mount_rust_milkdrop_buttons(
         window,
         document,
@@ -17021,6 +17022,16 @@ fn mount_rust_milkdrop_buttons(
                                 &document,
                                 texture_assets.clone(),
                             );
+                        }
+                    }
+                    "pack" => {
+                        if let Some(input) = document
+                            .get_element_by_id("slskr-milkdrop-pack-input")
+                            .and_then(|element| {
+                                element.dyn_into::<web_sys::HtmlInputElement>().ok()
+                            })
+                        {
+                            input.click();
                         }
                     }
                     _ => cycle_rust_milkdrop_preset(&document, &imported_presets),
@@ -17322,6 +17333,29 @@ fn import_rust_milkdrop_texture_asset(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_import_file_name(file: &web_sys::File) -> String {
+    js_sys::Reflect::get(file.as_ref(), &JsValue::from_str("webkitRelativePath"))
+        .ok()
+        .and_then(|value| value.as_string())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| file.name())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_rust_milkdrop_preset_file_name(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    lower.ends_with(".milk") || lower.ends_with(".milk2") || lower.ends_with(".txt")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_rust_milkdrop_texture_file_name(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".webp", ".gif"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn mount_rust_milkdrop_preset_input(
     document: &web_sys::Document,
     imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
@@ -17356,7 +17390,7 @@ fn mount_rust_milkdrop_preset_input(
                 let Some(file) = files.item(index) else {
                     continue;
                 };
-                let file_name = file.name();
+                let file_name = rust_milkdrop_import_file_name(&file);
                 let Ok(reader) = web_sys::FileReader::new() else {
                     set_player_status(
                         &document_for_change,
@@ -17447,6 +17481,150 @@ fn store_rust_milkdrop_imported_preset(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn read_rust_milkdrop_preset_file(
+    document: &web_sys::Document,
+    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    file: &web_sys::File,
+    file_name: &str,
+) {
+    let Ok(reader) = web_sys::FileReader::new() else {
+        set_player_status(document, "Preset import needs FileReader support");
+        return;
+    };
+    let document_for_load = document.clone();
+    let imports_for_load = imported_presets.clone();
+    let file_name = file_name.to_string();
+    let reader_for_load = reader.clone();
+    let onload = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+        let Some(source) = reader_for_load
+            .result()
+            .ok()
+            .and_then(|value| value.as_string())
+        else {
+            set_player_status(&document_for_load, "Preset file could not be read");
+            return;
+        };
+        store_rust_milkdrop_imported_preset(
+            &document_for_load,
+            imports_for_load.clone(),
+            &file_name,
+            &source,
+        );
+    }));
+    reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+    onload.forget();
+    let _ = reader.read_as_text(file);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_rust_milkdrop_texture_file(
+    document: &web_sys::Document,
+    texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
+    file: &web_sys::File,
+    file_name: &str,
+) {
+    let Ok(reader) = web_sys::FileReader::new() else {
+        set_player_status(document, "Texture import needs FileReader support");
+        return;
+    };
+    let document_for_load = document.clone();
+    let assets_for_load = texture_assets.clone();
+    let file_name = file_name.to_string();
+    let reader_for_load = reader.clone();
+    let onload = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+        let Some(data_url) = reader_for_load
+            .result()
+            .ok()
+            .and_then(|value| value.as_string())
+        else {
+            set_player_status(&document_for_load, "Texture file could not be read");
+            return;
+        };
+        store_rust_milkdrop_texture_asset(
+            &document_for_load,
+            assets_for_load.clone(),
+            &file_name,
+            &data_url,
+        );
+    }));
+    reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+    onload.forget();
+    let _ = reader.read_as_data_url(file);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_rust_milkdrop_pack_input(
+    document: &web_sys::Document,
+    imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>>,
+    texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
+) -> Result<(), JsValue> {
+    let Some(input) = document
+        .get_element_by_id("slskr-milkdrop-pack-input")
+        .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+    else {
+        return Ok(());
+    };
+    if input.has_attribute("data-slskr-mounted") {
+        return Ok(());
+    }
+    input.set_attribute("data-slskr-mounted", "true")?;
+    let document_for_change = document.clone();
+    let imports_for_change = imported_presets.clone();
+    let assets_for_change = texture_assets.clone();
+    let callback =
+        Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |event: web_sys::Event| {
+            let Some(input) = event
+                .current_target()
+                .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+            else {
+                return;
+            };
+            let Some(files) = input.files() else {
+                return;
+            };
+            if files.length() == 0 {
+                return;
+            }
+            let mut readable = 0u32;
+            for index in 0..files.length() {
+                let Some(file) = files.item(index) else {
+                    continue;
+                };
+                let file_name = rust_milkdrop_import_file_name(&file);
+                if is_rust_milkdrop_preset_file_name(&file_name) {
+                    readable += 1;
+                    read_rust_milkdrop_preset_file(
+                        &document_for_change,
+                        imports_for_change.clone(),
+                        &file,
+                        &file_name,
+                    );
+                } else if is_rust_milkdrop_texture_file_name(&file_name) {
+                    readable += 1;
+                    read_rust_milkdrop_texture_file(
+                        &document_for_change,
+                        assets_for_change.clone(),
+                        &file,
+                        &file_name,
+                    );
+                }
+            }
+            set_player_status(
+                &document_for_change,
+                &format!(
+                    "Reading {} MilkDrop pack file{}",
+                    readable,
+                    if readable == 1 { "" } else { "s" }
+                ),
+            );
+            input.set_value("");
+        }));
+    input.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())?;
+    callback.forget();
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
 fn mount_rust_milkdrop_texture_input(
     document: &web_sys::Document,
     texture_assets: Rc<RefCell<BTreeMap<String, String>>>,
@@ -17481,7 +17659,7 @@ fn mount_rust_milkdrop_texture_input(
                 let Some(file) = files.item(index) else {
                     continue;
                 };
-                let file_name = file.name();
+                let file_name = rust_milkdrop_import_file_name(&file);
                 let Ok(reader) = web_sys::FileReader::new() else {
                     set_player_status(
                         &document_for_change,
@@ -19459,6 +19637,9 @@ mod tests {
         assert!(html.contains("data-slskr-milkdrop-action=\"import\""));
         assert!(html.contains("slskr-milkdrop-preset-input"));
         assert!(html.contains("accept=\".milk,.milk2,.txt,text/plain\""));
+        assert!(html.contains("data-slskr-milkdrop-action=\"pack\""));
+        assert!(html.contains("slskr-milkdrop-pack-input"));
+        assert!(html.contains("webkitdirectory hidden"));
         assert!(html.contains("data-slskr-milkdrop-action=\"texture\""));
         assert!(html.contains("slskr-milkdrop-texture-input"));
         assert!(html.contains("multiple hidden"));
