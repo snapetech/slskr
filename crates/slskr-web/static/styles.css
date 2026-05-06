@@ -859,8 +859,32 @@ body {
   gap: 8px;
 }
 
-.slskr-milkdrop-library input {
+.slskr-milkdrop-editor {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.slskr-milkdrop-library input,
+.slskr-milkdrop-editor input {
   min-width: 220px;
+}
+
+.slskr-milkdrop-editor select {
+  max-width: 160px;
+}
+
+#slskr-milkdrop-debug {
+  background: #05070a;
+  border: 1px solid #263a4a;
+  border-radius: 6px;
+  color: #c6d0ca;
+  font-size: 12px;
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px;
 }
 
 .slskr-milkdrop-actions button[aria-pressed="true"] {
