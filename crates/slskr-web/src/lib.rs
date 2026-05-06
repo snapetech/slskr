@@ -16791,6 +16791,9 @@ struct RustMilkdropImportedPreset {
 const RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY: &str = "slskr.rustMilkdropImportedPresets";
 
 #[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_TEXTURE_ASSETS_STORAGE_KEY: &str = "slskr.rustMilkdropTextureAssets";
+
+#[cfg(target_arch = "wasm32")]
 fn toggle_rust_milkdrop_visualizer(
     window: &web_sys::Window,
     document: &web_sys::Document,
@@ -16825,7 +16828,7 @@ fn start_rust_milkdrop_visualizer(
     panel.set_attribute("data-slskr-milkdrop-running", "true")?;
 
     let texture_assets: Rc<RefCell<BTreeMap<String, String>>> =
-        Rc::new(RefCell::new(BTreeMap::new()));
+        Rc::new(RefCell::new(load_rust_milkdrop_texture_assets(window)));
     let imported_presets: Rc<RefCell<Vec<RustMilkdropImportedPreset>>> =
         Rc::new(RefCell::new(load_rust_milkdrop_imported_presets(window)));
     mount_rust_milkdrop_preset_input(document, imported_presets.clone())?;
@@ -16842,7 +16845,7 @@ fn start_rust_milkdrop_visualizer(
         .get_element_by_id("slskr-milkdrop-canvas")
         .ok_or_else(|| JsValue::from_str("Rust MilkDrop canvas is missing"))?
         .dyn_into()?;
-    let renderer = Rc::new(rust_milkdrop_renderer(&canvas, texture_assets)?);
+    let renderer = Rc::new(rust_milkdrop_renderer(&canvas, texture_assets.clone())?);
     let analyzer = Rc::new(RefCell::new(
         player_audio_element(document)
             .and_then(|audio| RustMilkdropAudioAnalyzer::new(&audio).ok()),
@@ -16853,6 +16856,7 @@ fn start_rust_milkdrop_visualizer(
     if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
         label.set_text_content(Some(renderer.label()));
     }
+    update_rust_milkdrop_texture_status(document, &texture_assets);
     set_rust_milkdrop_active_preset(
         document,
         &panel,
@@ -17268,6 +17272,57 @@ fn persist_rust_milkdrop_imported_presets(
     let _ = storage.set_item(
         RUST_MILKDROP_IMPORTED_PRESETS_STORAGE_KEY,
         &serde_json::Value::Array(items).to_string(),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_rust_milkdrop_texture_assets(window: &web_sys::Window) -> BTreeMap<String, String> {
+    let Some(storage) = window.local_storage().ok().flatten() else {
+        return BTreeMap::new();
+    };
+    let Some(raw) = storage
+        .get_item(RUST_MILKDROP_TEXTURE_ASSETS_STORAGE_KEY)
+        .ok()
+        .flatten()
+    else {
+        return BTreeMap::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return BTreeMap::new();
+    };
+    let Some(map) = value.as_object() else {
+        return BTreeMap::new();
+    };
+    map.iter()
+        .filter_map(|(name, value)| {
+            let data_url = value.as_str()?;
+            if name.trim().is_empty() || !data_url.starts_with("data:image/") {
+                return None;
+            }
+            Some((name.clone(), data_url.to_string()))
+        })
+        .take(100)
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_rust_milkdrop_texture_assets(
+    document: &web_sys::Document,
+    texture_assets: &Rc<RefCell<BTreeMap<String, String>>>,
+) {
+    let Some(window) = document.default_view() else {
+        return;
+    };
+    let Some(storage) = window.local_storage().ok().flatten() else {
+        return;
+    };
+    let mut map = serde_json::Map::new();
+    for (name, data_url) in texture_assets.borrow().iter().take(100) {
+        map.insert(name.clone(), serde_json::Value::String(data_url.clone()));
+    }
+    let _ = storage.set_item(
+        RUST_MILKDROP_TEXTURE_ASSETS_STORAGE_KEY,
+        &serde_json::Value::Object(map).to_string(),
     );
 }
 
@@ -17805,11 +17860,23 @@ fn store_rust_milkdrop_texture_asset(
         for alias in &aliases {
             assets.insert(alias.clone(), data_url.to_string());
         }
-        if let Some(label) = document.get_element_by_id("slskr-milkdrop-textures") {
-            label.set_text_content(Some(&format!("{} texture assets", assets.len())));
-        }
     }
+    persist_rust_milkdrop_texture_assets(document, &texture_assets);
+    update_rust_milkdrop_texture_status(document, &texture_assets);
     set_player_status(document, "MilkDrop texture imported");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_rust_milkdrop_texture_status(
+    document: &web_sys::Document,
+    texture_assets: &Rc<RefCell<BTreeMap<String, String>>>,
+) {
+    if let Some(label) = document.get_element_by_id("slskr-milkdrop-textures") {
+        label.set_text_content(Some(&format!(
+            "{} texture assets",
+            texture_assets.borrow().len()
+        )));
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
