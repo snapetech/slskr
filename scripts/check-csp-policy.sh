@@ -5,8 +5,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
+csp_scan_paths=(crates/slskr/src crates/slskr-web/static)
 
-if rg -n "Content-Security-Policy: .*'unsafe-inline'|script-src .*'unsafe-inline'|style-src .*'unsafe-inline'" crates/slskr/src crates/slskr-web/static web/build/index.html; then
+if [[ -f web/build/index.html ]]; then
+  csp_scan_paths+=(web/build/index.html)
+fi
+
+if rg -n "Content-Security-Policy: .*'unsafe-inline'|script-src .*'unsafe-inline'|style-src .*'unsafe-inline'" "${csp_scan_paths[@]}"; then
   printf 'csp policy failed: broad unsafe-inline CSP allowance is present in served source/build files\n' >&2
   status=1
 fi
@@ -26,7 +31,7 @@ if ! rg -q "script-src 'self' 'wasm-unsafe-eval'" crates/slskr/src/main.rs; then
   status=1
 fi
 
-wasm_exception_count="$(rg -n "script-src 'self' 'wasm-unsafe-eval'" crates/slskr/src crates/slskr-web/static web/build/index.html | grep -v "assert!" | wc -l | tr -d ' ')"
+wasm_exception_count="$(rg -n "script-src 'self' 'wasm-unsafe-eval'" "${csp_scan_paths[@]}" | grep -v "assert!" | wc -l | tr -d ' ')"
 if [[ "$wasm_exception_count" != "1" ]]; then
   printf 'csp policy failed: wasm-unsafe-eval should appear only in the scoped served policy\n' >&2
   status=1
