@@ -77,7 +77,7 @@ fi
 safe_version="$(printf '%s' "$version" | tr '/ :' '---')"
 
 if [[ -z "$target" ]]; then
-  target="$(rustc -Vv | awk '/^host:/ { print $2; exit }')"
+  target="$(rustc -Vv | awk '/^host:/ { print $2 }')"
 fi
 
 binary_name="slskr"
