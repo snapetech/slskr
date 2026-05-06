@@ -11525,9 +11525,16 @@ pub struct RustMilkdropPrimitive {
     pub vertices: Vec<f64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RustMilkdropTexturedPrimitiveMode {
+    Quad,
+    TriangleFan,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RustMilkdropTexturedPrimitive {
     pub color: [f64; 4],
+    pub mode: RustMilkdropTexturedPrimitiveMode,
     pub uvs: Vec<f64>,
     pub vertices: Vec<f64>,
 }
@@ -13382,6 +13389,118 @@ pub fn create_rust_milkdrop_webgpu_screen_border_vertices(
     vertices
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RustMilkdropWebGpuTexturedBatch {
+    pub first_vertex: usize,
+    pub primitive_index: usize,
+    pub vertex_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RustMilkdropWebGpuFrameBatches {
+    pub filled_vertices: Vec<f64>,
+    pub line_vertices: Vec<f64>,
+    pub point_vertices: Vec<f64>,
+    pub textured_batches: Vec<RustMilkdropWebGpuTexturedBatch>,
+    pub textured_vertices: Vec<f64>,
+}
+
+fn create_repeated_milkdrop_colors(vertex_count: usize, color: [f64; 4]) -> Vec<f64> {
+    let mut colors = Vec::with_capacity(vertex_count * 4);
+    for _ in 0..vertex_count {
+        colors.extend_from_slice(&color);
+    }
+    colors
+}
+
+pub fn create_rust_milkdrop_webgpu_frame_batches(
+    frame: &RustMilkdropFrame,
+) -> RustMilkdropWebGpuFrameBatches {
+    let mut batches = RustMilkdropWebGpuFrameBatches::default();
+    for primitive in &frame.primitives {
+        match primitive.mode {
+            RustMilkdropPrimitiveMode::Triangles => {
+                batches
+                    .filled_vertices
+                    .extend(create_rust_milkdrop_webgpu_triangle_list_vertices(
+                        &primitive.vertices,
+                        primitive.color,
+                    ));
+            }
+            RustMilkdropPrimitiveMode::TriangleFan => {
+                batches
+                    .filled_vertices
+                    .extend(create_rust_milkdrop_webgpu_triangle_fan_vertices(
+                        &primitive.vertices,
+                        &create_repeated_milkdrop_colors(
+                            primitive.vertices.len() / 2,
+                            primitive.color,
+                        ),
+                        primitive.color,
+                    ));
+            }
+            RustMilkdropPrimitiveMode::Lines => {
+                batches
+                    .line_vertices
+                    .extend(create_rust_milkdrop_webgpu_line_list_vertices(
+                        &primitive.vertices,
+                        primitive.color,
+                    ));
+            }
+            RustMilkdropPrimitiveMode::LineStrip => {
+                batches
+                    .line_vertices
+                    .extend(create_rust_milkdrop_webgpu_line_segment_vertices(
+                        &primitive.vertices,
+                        primitive.color,
+                    ));
+            }
+            RustMilkdropPrimitiveMode::Points => {
+                batches
+                    .point_vertices
+                    .extend(create_rust_milkdrop_webgpu_line_list_vertices(
+                        &primitive.vertices,
+                        primitive.color,
+                    ));
+            }
+        }
+    }
+
+    for (primitive_index, primitive) in frame.textured_primitives.iter().enumerate() {
+        let vertices = match primitive.mode {
+            RustMilkdropTexturedPrimitiveMode::Quad => {
+                create_rust_milkdrop_webgpu_textured_quad_vertices(
+                    &primitive.vertices,
+                    &primitive.uvs,
+                    primitive.color,
+                )
+            }
+            RustMilkdropTexturedPrimitiveMode::TriangleFan => {
+                create_rust_milkdrop_webgpu_textured_triangle_fan_vertices(
+                    &primitive.vertices,
+                    &primitive.uvs,
+                    &create_repeated_milkdrop_colors(primitive.vertices.len() / 2, primitive.color),
+                    primitive.color,
+                )
+            }
+        };
+        if vertices.is_empty() {
+            continue;
+        }
+        let first_vertex = batches.textured_vertices.len() / 8;
+        let vertex_count = vertices.len() / 8;
+        batches.textured_vertices.extend(vertices);
+        batches
+            .textured_batches
+            .push(RustMilkdropWebGpuTexturedBatch {
+                first_vertex,
+                primitive_index,
+                vertex_count,
+            });
+    }
+    batches
+}
+
 fn append_milkdrop_quad(vertices: &mut Vec<f64>, left: f64, bottom: f64, right: f64, top: f64) {
     vertices.extend_from_slice(&[
         left, bottom, right, bottom, left, top, left, top, right, bottom, right, top,
@@ -13676,6 +13795,7 @@ fn create_rust_milkdrop_frame_textured_primitives(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
                     clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
                 ],
+                mode: RustMilkdropTexturedPrimitiveMode::TriangleFan,
                 uvs,
                 vertices,
             });
@@ -13693,6 +13813,7 @@ fn create_rust_milkdrop_frame_textured_primitives(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
                     clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
                 ],
+                mode: RustMilkdropTexturedPrimitiveMode::Quad,
                 uvs,
                 vertices,
             });
@@ -13861,6 +13982,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                             )),
                             clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
                         ],
+                        mode: RustMilkdropTexturedPrimitiveMode::TriangleFan,
                         uvs,
                         vertices: fill_vertices,
                     });
@@ -13919,6 +14041,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["b"], fallback_color[2])),
                     clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 1.0)),
                 ],
+                mode: RustMilkdropTexturedPrimitiveMode::Quad,
                 uvs,
                 vertices,
             });
@@ -16638,11 +16761,14 @@ impl RustMilkdropWebGlRenderer {
             );
             self.gl
                 .uniform1f(self.u_textured_alpha.as_ref(), primitive.color[3] as f32);
-            self.gl.draw_arrays(
-                web_sys::WebGl2RenderingContext::TRIANGLE_FAN,
-                0,
-                (vertices.len() / 2) as i32,
-            );
+            let draw_mode = match primitive.mode {
+                RustMilkdropTexturedPrimitiveMode::Quad
+                | RustMilkdropTexturedPrimitiveMode::TriangleFan => {
+                    web_sys::WebGl2RenderingContext::TRIANGLE_FAN
+                }
+            };
+            self.gl
+                .draw_arrays(draw_mode, 0, (vertices.len() / 2) as i32);
         }
         self.gl
             .active_texture(web_sys::WebGl2RenderingContext::TEXTURE0);
@@ -18422,6 +18548,80 @@ mod tests {
         assert_eq!(textured_sprite.len(), 48);
         assert_eq!(
             rounded_vec(&textured_sprite[..8]),
+            vec![-0.2, -0.1, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4]
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_webgpu_frame_batches_pack_runtime_primitives() {
+        let frame = rust_milkdrop_frame_from_source(
+            r#"
+            name=WebGPU frame
+            ob_size=0.1
+            ob_r=1
+            ob_g=0.2
+            ob_b=0.3
+            ob_a=0.4
+            mv_x=2
+            mv_y=1
+            mv_r=0.1
+            mv_g=0.2
+            mv_b=0.3
+            mv_a=0.75
+            mv_l=0.1
+            shape00_enabled=1
+            shape00_sides=3
+            shape00_rad=0.25
+            shape00_r=0.1
+            shape00_g=0.2
+            shape00_b=0.3
+            shape00_a=0.4
+            shape01_enabled=1
+            shape01_sides=3
+            shape01_rad=0.25
+            shape01_r=0.2
+            shape01_g=0.3
+            shape01_b=0.4
+            shape01_a=0.5
+            shape01_textured=1
+            sprite00_enabled=1
+            sprite00_x=0.5
+            sprite00_y=0.5
+            sprite00_w=0.2
+            sprite00_h=0.1
+            sprite00_r=0.1
+            sprite00_g=0.2
+            sprite00_b=0.3
+            sprite00_a=0.4
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+        assert!(frame
+            .textured_primitives
+            .iter()
+            .any(|primitive| primitive.mode == RustMilkdropTexturedPrimitiveMode::TriangleFan));
+        assert!(frame
+            .textured_primitives
+            .iter()
+            .any(|primitive| primitive.mode == RustMilkdropTexturedPrimitiveMode::Quad));
+
+        let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
+
+        assert!(batches.filled_vertices.len() >= 48);
+        assert!(batches.line_vertices.len() >= 24);
+        assert_eq!(batches.textured_batches.len(), 2);
+        assert_eq!(batches.textured_batches[0].first_vertex, 0);
+        assert_eq!(batches.textured_batches[0].vertex_count, 9);
+        assert_eq!(batches.textured_batches[1].first_vertex, 9);
+        assert_eq!(batches.textured_batches[1].vertex_count, 6);
+        assert_eq!(batches.textured_vertices.len(), 120);
+        assert_eq!(
+            rounded_vec(
+                &batches.textured_vertices[batches.textured_batches[1].first_vertex * 8..][..8]
+            ),
             vec![-0.2, -0.1, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4]
         );
     }
