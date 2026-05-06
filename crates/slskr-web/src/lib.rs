@@ -14148,13 +14148,31 @@ impl RustMilkdropRenderer {
 #[cfg(target_arch = "wasm32")]
 struct RustMilkdropWebGlRenderer {
     buffer: web_sys::WebGlBuffer,
+    feedback_targets: RefCell<RustMilkdropFeedbackTargets>,
     gl: web_sys::WebGl2RenderingContext,
     program: web_sys::WebGlProgram,
     u_color: Option<web_sys::WebGlUniformLocation>,
     u_counts: Option<web_sys::WebGlUniformLocation>,
+    u_display_only: Option<web_sys::WebGlUniformLocation>,
+    u_feedback: Option<web_sys::WebGlUniformLocation>,
     u_motion: Option<web_sys::WebGlUniformLocation>,
+    u_previous_frame: Option<web_sys::WebGlUniformLocation>,
     u_resolution: Option<web_sys::WebGlUniformLocation>,
     u_time: Option<web_sys::WebGlUniformLocation>,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct RustMilkdropFeedbackTargets {
+    height: i32,
+    read_index: usize,
+    targets: [RustMilkdropFeedbackTarget; 2],
+    width: i32,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct RustMilkdropFeedbackTarget {
+    framebuffer: web_sys::WebGlFramebuffer,
+    texture: web_sys::WebGlTexture,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -14217,14 +14235,23 @@ impl RustMilkdropWebGlRenderer {
                 0,
             );
         }
+        let feedback_targets = RefCell::new(create_rust_milkdrop_feedback_targets(
+            &gl,
+            gl.drawing_buffer_width().max(1),
+            gl.drawing_buffer_height().max(1),
+        )?);
 
         Ok(Self {
             u_color: gl.get_uniform_location(&program, "u_color"),
             u_counts: gl.get_uniform_location(&program, "u_counts"),
+            u_display_only: gl.get_uniform_location(&program, "u_displayOnly"),
+            u_feedback: gl.get_uniform_location(&program, "u_feedback"),
             u_motion: gl.get_uniform_location(&program, "u_motion"),
+            u_previous_frame: gl.get_uniform_location(&program, "u_previousFrame"),
             u_resolution: gl.get_uniform_location(&program, "u_resolution"),
             u_time: gl.get_uniform_location(&program, "u_time"),
             buffer,
+            feedback_targets,
             gl,
             program,
         })
@@ -14238,8 +14265,59 @@ impl RustMilkdropWebGlRenderer {
         );
         let drawing_width = self.gl.drawing_buffer_width().max(1);
         let drawing_height = self.gl.drawing_buffer_height().max(1);
+        let mut targets = self.feedback_targets.borrow_mut();
+        if targets.width != drawing_width || targets.height != drawing_height {
+            if let Ok(next_targets) =
+                create_rust_milkdrop_feedback_targets(&self.gl, drawing_width, drawing_height)
+            {
+                *targets = next_targets;
+            }
+        }
+        let read_index = targets.read_index;
+        let write_index = 1 - read_index;
+
+        self.gl
+            .active_texture(web_sys::WebGl2RenderingContext::TEXTURE0);
+        self.gl.bind_texture(
+            web_sys::WebGl2RenderingContext::TEXTURE_2D,
+            Some(&targets.targets[read_index].texture),
+        );
+        self.gl.bind_framebuffer(
+            web_sys::WebGl2RenderingContext::FRAMEBUFFER,
+            Some(&targets.targets[write_index].framebuffer),
+        );
+        self.draw_feedback_quad(frame, time, drawing_width, drawing_height, false);
+
+        self.gl
+            .bind_framebuffer(web_sys::WebGl2RenderingContext::FRAMEBUFFER, None);
+        self.gl.bind_texture(
+            web_sys::WebGl2RenderingContext::TEXTURE_2D,
+            Some(&targets.targets[write_index].texture),
+        );
+        self.draw_feedback_quad(frame, time, drawing_width, drawing_height, true);
+        targets.read_index = write_index;
+    }
+
+    fn draw_feedback_quad(
+        &self,
+        frame: &RustMilkdropFrame,
+        time: f64,
+        drawing_width: i32,
+        drawing_height: i32,
+        display_only: bool,
+    ) {
         self.gl.viewport(0, 0, drawing_width, drawing_height);
+        self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+        self.gl
+            .clear(web_sys::WebGl2RenderingContext::COLOR_BUFFER_BIT);
         let (r, g, b) = frame.wave_color;
+        let feedback = (1.0 - frame.background_alpha).clamp(0.0, 0.985) as f32;
+        self.gl.uniform1i(self.u_previous_frame.as_ref(), 0);
+        self.gl.uniform1f(
+            self.u_display_only.as_ref(),
+            if display_only { 1.0 } else { 0.0 },
+        );
+        self.gl.uniform1f(self.u_feedback.as_ref(), feedback);
         self.gl.uniform2f(
             self.u_resolution.as_ref(),
             drawing_width as f32,
@@ -14251,7 +14329,7 @@ impl RustMilkdropWebGlRenderer {
             r as f32 / 255.0,
             g as f32 / 255.0,
             b as f32 / 255.0,
-            (1.0 - frame.background_alpha).clamp(0.0, 1.0) as f32,
+            feedback,
         );
         self.gl.uniform4f(
             self.u_motion.as_ref(),
@@ -14268,6 +14346,94 @@ impl RustMilkdropWebGlRenderer {
         self.gl
             .draw_arrays(web_sys::WebGl2RenderingContext::TRIANGLE_STRIP, 0, 4);
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn create_rust_milkdrop_feedback_targets(
+    gl: &web_sys::WebGl2RenderingContext,
+    width: i32,
+    height: i32,
+) -> Result<RustMilkdropFeedbackTargets, JsValue> {
+    let width = width.max(1);
+    let height = height.max(1);
+    Ok(RustMilkdropFeedbackTargets {
+        height,
+        read_index: 0,
+        targets: [
+            create_rust_milkdrop_feedback_target(gl, width, height)?,
+            create_rust_milkdrop_feedback_target(gl, width, height)?,
+        ],
+        width,
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn create_rust_milkdrop_feedback_target(
+    gl: &web_sys::WebGl2RenderingContext,
+    width: i32,
+    height: i32,
+) -> Result<RustMilkdropFeedbackTarget, JsValue> {
+    let texture = gl
+        .create_texture()
+        .ok_or_else(|| JsValue::from_str("WebGL feedback texture allocation failed"))?;
+    gl.bind_texture(web_sys::WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_MIN_FILTER,
+        web_sys::WebGl2RenderingContext::LINEAR as i32,
+    );
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_MAG_FILTER,
+        web_sys::WebGl2RenderingContext::LINEAR as i32,
+    );
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_WRAP_S,
+        web_sys::WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
+    );
+    gl.tex_parameteri(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        web_sys::WebGl2RenderingContext::TEXTURE_WRAP_T,
+        web_sys::WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
+    );
+    gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        0,
+        web_sys::WebGl2RenderingContext::RGBA as i32,
+        width,
+        height,
+        0,
+        web_sys::WebGl2RenderingContext::RGBA,
+        web_sys::WebGl2RenderingContext::UNSIGNED_BYTE,
+        None,
+    )?;
+
+    let framebuffer = gl
+        .create_framebuffer()
+        .ok_or_else(|| JsValue::from_str("WebGL feedback framebuffer allocation failed"))?;
+    gl.bind_framebuffer(
+        web_sys::WebGl2RenderingContext::FRAMEBUFFER,
+        Some(&framebuffer),
+    );
+    gl.framebuffer_texture_2d(
+        web_sys::WebGl2RenderingContext::FRAMEBUFFER,
+        web_sys::WebGl2RenderingContext::COLOR_ATTACHMENT0,
+        web_sys::WebGl2RenderingContext::TEXTURE_2D,
+        Some(&texture),
+        0,
+    );
+    let status = gl.check_framebuffer_status(web_sys::WebGl2RenderingContext::FRAMEBUFFER);
+    if status != web_sys::WebGl2RenderingContext::FRAMEBUFFER_COMPLETE {
+        return Err(JsValue::from_str(
+            "WebGL feedback framebuffer is incomplete",
+        ));
+    }
+
+    Ok(RustMilkdropFeedbackTarget {
+        framebuffer,
+        texture,
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -14339,6 +14505,9 @@ uniform float u_time;
 uniform vec4 u_color;
 uniform vec4 u_motion;
 uniform vec2 u_counts;
+uniform sampler2D u_previousFrame;
+uniform float u_feedback;
+uniform float u_displayOnly;
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -14360,7 +14529,11 @@ void main() {
   vec3 tint = mix(u_color.rgb * 0.24, u_color.rgb, max(rings * 0.62, spokes * 0.42));
   tint += vec3(1.0, 0.72, 0.32) * shapePulse * 0.35;
   tint += vec3(0.65, 0.85, 1.0) * wave * 0.08 * max(u_counts.y, 1.0);
-  outColor = vec4(tint, 1.0);
+  vec2 feedbackUv = v_uv - u_motion.zw * 0.18;
+  feedbackUv = (feedbackUv - vec2(0.5)) / max(u_motion.y, 0.001) + vec2(0.5);
+  vec3 previous = texture(u_previousFrame, clamp(feedbackUv, vec2(0.001), vec2(0.999))).rgb;
+  vec3 composited = mix(tint, previous * 0.996, clamp(u_feedback, 0.0, 0.985));
+  outColor = vec4(mix(composited, texture(u_previousFrame, v_uv).rgb, step(0.5, u_displayOnly)), 1.0);
 }
 "#;
 
