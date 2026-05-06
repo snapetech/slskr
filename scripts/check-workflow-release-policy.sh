@@ -67,6 +67,22 @@ if ! rg -n -F 'scripts/run-security-scans.sh' .github/workflows scripts/run-rele
   status=1
 fi
 
+for expected in \
+  'name: Live Parity' \
+  'workflow_dispatch:' \
+  'schedule:' \
+  'node scripts/audit-rust-web-ui.mjs' \
+  'scripts/run-slskd-api-compat-smoke.sh' \
+  'SLSKR_SLSKD_API_SMOKE_DIR: target/slskd-api-smoke' \
+  'SLSKR_SLSKD_API_SMOKE_TOKEN:' \
+  'target/ux-audit/**' \
+  'target/slskd-api-smoke/**'; do
+  if ! rg -n -F "$expected" .github/workflows/live-parity.yml >/dev/null; then
+    printf 'workflow release policy check failed: live parity workflow token missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
 if rg -n 'go install "github.com/rhysd/actionlint/cmd/actionlint@latest"|go install github.com/rhysd/actionlint/cmd/actionlint@latest' .github/workflows; then
   printf 'workflow release policy check failed: actionlint install must stay pinned\n' >&2
   status=1

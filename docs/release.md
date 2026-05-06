@@ -21,6 +21,11 @@ a local daemon and may install the Python `slskd-api` package:
 SLSKR_RUN_SLSKD_API_COMPAT_SMOKE=1 scripts/run-release-gate.sh
 ```
 
+CI also runs a lighter scheduled/manual `Live Parity` workflow. That workflow
+executes the Rust web UI headless parity audit and the hermetic local
+`slskd_api` automation compatibility smoke, then uploads the Rust UI screenshots,
+web bundle, and daemon log as artifacts.
+
 ## Local Archive
 
 Build the host archive:

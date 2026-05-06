@@ -1,0 +1,56 @@
+name: Live Parity
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-parity-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rust-ui-and-slskd-api:
+    name: Rust UI and slskd API parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # Swatinem/rust-cache@v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install system tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+          cargo install wasm-bindgen-cli --locked
+      - name: Install web dependencies
+        run: npm --prefix web ci
+      - name: Rust web UI headless parity audit
+        run: node scripts/audit-rust-web-ui.mjs
+      - name: slskd API automation compatibility smoke
+        env:
+          SLSKR_SLSKD_API_SMOKE_DIR: target/slskd-api-smoke
+          SLSKR_SLSKD_API_SMOKE_TOKEN: live-parity-${{ github.run_id }}-${{ github.run_attempt }}
+        run: scripts/run-slskd-api-compat-smoke.sh
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact@v4
+        with:
+          name: live-parity-${{ github.run_id }}
+          path: |
+            target/ux-audit/**
+            target/slskr-web/**
+            target/slskd-api-smoke/**
+          if-no-files-found: ignore
