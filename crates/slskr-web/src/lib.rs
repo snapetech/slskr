@@ -11424,9 +11424,13 @@ impl Default for RustMilkdropPreset {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RustMilkdropFrame {
     pub background_alpha: f64,
+    pub dx: f64,
+    pub dy: f64,
+    pub shape_count: usize,
     pub rotation: f64,
     pub wave_color: (u8, u8, u8),
     pub wave_radius: f64,
+    pub waveform_count: usize,
     pub zoom: f64,
 }
 
@@ -11476,6 +11480,9 @@ pub fn rust_milkdrop_frame(
     let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
     RustMilkdropFrame {
         background_alpha: clamp_range(1.0 - preset.decay, 0.01, 0.5),
+        dx: 0.0,
+        dy: 0.0,
+        shape_count: 0,
         rotation: preset.rot + (time_seconds * 0.37).sin() * 0.035 + (treble - 0.5) * 0.05,
         wave_color: (
             ((preset.wave_r + bass * 0.35) * 255.0).min(255.0) as u8,
@@ -11487,15 +11494,154 @@ pub fn rust_milkdrop_frame(
             0.12,
             0.68,
         ),
+        waveform_count: 0,
         zoom: clamp_range(preset.zoom + (pulse - 0.5) * 0.035, 0.5, 1.8),
+    }
+}
+
+fn milkdrop_scope_number(scope: &BTreeMap<String, MilkdropValue>, key: &str, fallback: f64) -> f64 {
+    scope
+        .get(key)
+        .and_then(MilkdropValue::as_number)
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+}
+
+fn milkdrop_base_number(values: &BTreeMap<String, MilkdropValue>, key: &str, fallback: f64) -> f64 {
+    values
+        .get(key)
+        .and_then(MilkdropValue::as_number)
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+}
+
+fn create_rust_milkdrop_scope(
+    preset: &MilkdropPresetDocument,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+) -> BTreeMap<String, MilkdropValue> {
+    let mut scope = preset.base_values.clone();
+    for index in 1..=64 {
+        scope
+            .entry(format!("q{index}"))
+            .or_insert(MilkdropValue::Number(0.0));
+    }
+    scope.insert("bass".to_string(), MilkdropValue::Number(bass));
+    scope.insert("bass_att".to_string(), MilkdropValue::Number(bass));
+    scope.insert("mid".to_string(), MilkdropValue::Number(mid));
+    scope.insert("mid_att".to_string(), MilkdropValue::Number(mid));
+    scope.insert("treb".to_string(), MilkdropValue::Number(treble));
+    scope.insert("treb_att".to_string(), MilkdropValue::Number(treble));
+    scope.insert("time".to_string(), MilkdropValue::Number(time_seconds));
+    scope.insert(
+        "frame".to_string(),
+        MilkdropValue::Number((time_seconds * 60.0).floor()),
+    );
+    scope.insert("fps".to_string(), MilkdropValue::Number(60.0));
+    scope.insert(
+        "wave_r".to_string(),
+        MilkdropValue::Number(milkdrop_base_number(&preset.base_values, "wave_r", 0.7)),
+    );
+    scope.insert(
+        "wave_g".to_string(),
+        MilkdropValue::Number(milkdrop_base_number(&preset.base_values, "wave_g", 0.7)),
+    );
+    scope.insert(
+        "wave_b".to_string(),
+        MilkdropValue::Number(milkdrop_base_number(&preset.base_values, "wave_b", 0.7)),
+    );
+    scope
+}
+
+pub fn rust_milkdrop_frame_from_source(
+    source: &str,
+    time_seconds: f64,
+    bass: f64,
+    mid: f64,
+    treble: f64,
+) -> RustMilkdropFrame {
+    let parsed = parse_milkdrop_preset_set(source, false);
+    let Some(preset_document) = parsed.presets.first() else {
+        return rust_milkdrop_frame(
+            &RustMilkdropPreset::default(),
+            time_seconds,
+            bass,
+            mid,
+            treble,
+        );
+    };
+    let mut scope = create_rust_milkdrop_scope(preset_document, time_seconds, bass, mid, treble);
+    if !preset_document.equations.init.trim().is_empty() {
+        if let Ok(next_scope) = evaluate_milkdrop_equations(&preset_document.equations.init, &scope)
+        {
+            scope = next_scope;
+        }
+    }
+    if !preset_document.equations.per_frame.trim().is_empty() {
+        if let Ok(next_scope) =
+            evaluate_milkdrop_equations(&preset_document.equations.per_frame, &scope)
+        {
+            scope = next_scope;
+        }
+    }
+    let fallback = parse_rust_milkdrop_preset(source);
+    let wave_r = clamp_unit(milkdrop_scope_number(&scope, "wave_r", fallback.wave_r));
+    let wave_g = clamp_unit(milkdrop_scope_number(&scope, "wave_g", fallback.wave_g));
+    let wave_b = clamp_unit(milkdrop_scope_number(&scope, "wave_b", fallback.wave_b));
+    let wave_scale = clamp_range(
+        milkdrop_scope_number(&scope, "wave_scale", fallback.wave_scale),
+        0.2,
+        3.0,
+    );
+    let pulse = (time_seconds * 1.7).sin() * 0.5 + 0.5;
+    RustMilkdropFrame {
+        background_alpha: clamp_range(
+            1.0 - milkdrop_scope_number(&scope, "decay", fallback.decay),
+            0.01,
+            0.5,
+        ),
+        dx: clamp_range(milkdrop_scope_number(&scope, "dx", 0.0), -0.5, 0.5),
+        dy: clamp_range(milkdrop_scope_number(&scope, "dy", 0.0), -0.5, 0.5),
+        shape_count: preset_document
+            .shapes
+            .iter()
+            .filter(|shape| milkdrop_base_number(&shape.base_values, "enabled", 0.0) > 0.0)
+            .count(),
+        rotation: clamp_range(
+            milkdrop_scope_number(&scope, "rot", fallback.rot),
+            -0.5,
+            0.5,
+        ) + (treble - 0.5) * 0.02,
+        wave_color: (
+            (wave_r * 255.0).min(255.0) as u8,
+            (wave_g * 255.0).min(255.0) as u8,
+            (wave_b * 255.0).min(255.0) as u8,
+        ),
+        wave_radius: clamp_range(
+            0.18 + wave_scale * 0.09 + bass * 0.12 + pulse * 0.04,
+            0.12,
+            0.68,
+        ),
+        waveform_count: preset_document
+            .waves
+            .iter()
+            .filter(|wave| milkdrop_base_number(&wave.base_values, "enabled", 0.0) > 0.0)
+            .count(),
+        zoom: clamp_range(
+            milkdrop_scope_number(&scope, "zoom", fallback.zoom),
+            0.001,
+            1.8,
+        ),
     }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const RUST_MILKDROP_PRESETS: [&str; 3] = [
-    "name=slskr native warp\ndecay=0.89\nwave_r=0.16\nwave_g=0.58\nwave_b=0.92\nwave_a=0.86\nwave_scale=1.25\nzoom=1.02\nrot=0.012",
-    "name=slskr amber tunnel\ndecay=0.86\nwave_r=0.92\nwave_g=0.52\nwave_b=0.18\nwave_a=0.82\nwave_scale=1.55\nzoom=1.05\nrot=-0.018",
-    "name=slskr green pulse\ndecay=0.91\nwave_r=0.20\nwave_g=0.86\nwave_b=0.44\nwave_a=0.78\nwave_scale=1.1\nzoom=0.98\nrot=0.028",
+    "name=slskr native grid smoke\ndecay=0.91\nwave_r=0.12\nwave_g=0.64\nwave_b=0.88\nwave_a=0.86\nwave_scale=1.2\nzoom=1\nrot=0\nper_frame_1=wave_r=0.35+0.25*bass_att;\nper_frame_2=wave_g=0.45+0.2*mid_att;\nper_frame_3=wave_b=0.55+0.2*treb_att;\nper_frame_4=rot=0.01*sin(time*0.7);\nper_frame_5=zoom=1+0.03*sin(time*0.5);\nper_frame_6=dx=0.015*sin(time*0.6);\nper_frame_7=dy=0.015*cos(time*0.5);\nshape00_enabled=1\nshape00_sides=5\nshape00_rad=0.18\nwavecode_0_enabled=1\nwavecode_0_samples=96",
+    "name=slskr amber tunnel\ndecay=0.86\nwave_r=0.92\nwave_g=0.52\nwave_b=0.18\nwave_a=0.82\nwave_scale=1.55\nzoom=1.05\nrot=-0.018\nper_frame_1=wave_r=0.65+0.25*bass_att;\nper_frame_2=wave_g=0.32+0.2*mid_att;\nper_frame_3=rot=-0.025*sin(time*0.3);\nshape00_enabled=1\nshape00_sides=3\nshape01_enabled=1\nshape01_sides=6\nwavecode_0_enabled=1",
+    "name=slskr green pulse\ndecay=0.91\nwave_r=0.20\nwave_g=0.86\nwave_b=0.44\nwave_a=0.78\nwave_scale=1.1\nzoom=0.98\nrot=0.028\nper_frame_1=wave_g=0.55+0.35*mid_att;\nper_frame_2=wave_b=0.30+0.35*treb_att;\nper_frame_3=zoom=0.98+0.04*sin(time);\nwavecode_0_enabled=1\nwavecode_1_enabled=1",
 ];
 
 pub fn rust_milkdrop_preset_name(source: &str) -> String {
@@ -11949,6 +12095,207 @@ pub fn serialize_milkdrop_preset_set(parsed: &MilkdropPresetSet) -> String {
         rendered_presets.push(lines.join("\n"));
     }
     format!("{}\n", rendered_presets.join("\n"))
+}
+
+fn is_milkdrop_q_variable(key: &str) -> bool {
+    key.strip_prefix('q')
+        .and_then(|rest| rest.parse::<usize>().ok())
+        .is_some_and(|index| (1..=64).contains(&index))
+}
+
+fn persist_milkdrop_scoped_values(
+    base_values: &BTreeMap<String, MilkdropValue>,
+    scope: &BTreeMap<String, MilkdropValue>,
+    allowed_keys: &[&str],
+) -> BTreeMap<String, MilkdropValue> {
+    let mut next = base_values.clone();
+    for (key, value) in scope {
+        if allowed_keys.contains(&key.as_str()) || is_milkdrop_q_variable(key) {
+            next.insert(key.clone(), value.clone());
+        }
+    }
+    next
+}
+
+const MILKDROP_SHAPE_VALUE_KEYS: &[&str] = &[
+    "a",
+    "a2",
+    "additive",
+    "ang",
+    "b",
+    "b2",
+    "badditive",
+    "benabled",
+    "border_a",
+    "border_b",
+    "border_g",
+    "border_r",
+    "enabled",
+    "g",
+    "g2",
+    "numsides",
+    "r",
+    "r2",
+    "rad",
+    "radius",
+    "sides",
+    "tex",
+    "tex_ang",
+    "texang",
+    "tex_name",
+    "texname",
+    "tex_zoom",
+    "texzoom",
+    "texture",
+    "textured",
+    "thickoutline",
+    "x",
+    "y",
+];
+
+const MILKDROP_SPRITE_VALUE_KEYS: &[&str] = &[
+    "a",
+    "additive",
+    "ang",
+    "b",
+    "badditive",
+    "benabled",
+    "enabled",
+    "file",
+    "filename",
+    "g",
+    "h",
+    "height",
+    "image",
+    "img",
+    "r",
+    "tex",
+    "tex_name",
+    "texname",
+    "texture",
+    "w",
+    "width",
+    "x",
+    "y",
+];
+
+const MILKDROP_WAVE_VALUE_KEYS: &[&str] = &[
+    "a",
+    "additive",
+    "b",
+    "badditive",
+    "bdrawthick",
+    "benabled",
+    "bspectrum",
+    "bthick",
+    "busedots",
+    "dots",
+    "enabled",
+    "g",
+    "nsamples",
+    "r",
+    "samples",
+    "scaling",
+    "spectrum",
+    "thick",
+];
+
+fn evaluate_milkdrop_entry_state(
+    entry: &MilkdropIndexedEntry,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+    allowed_keys: &[&str],
+) -> MilkdropIndexedEntry {
+    let mut scope = frame_scope.clone();
+    scope.extend(entry.base_values.clone());
+    if !entry.equations.init.trim().is_empty() {
+        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.init, &scope) {
+            scope = next_scope;
+        }
+    }
+    if !entry.equations.frame.trim().is_empty() {
+        if let Ok(next_scope) = evaluate_milkdrop_equations(&entry.equations.frame, &scope) {
+            scope = next_scope;
+        }
+    }
+    MilkdropIndexedEntry {
+        base_values: persist_milkdrop_scoped_values(&entry.base_values, &scope, allowed_keys),
+        equations: entry.equations.clone(),
+    }
+}
+
+pub fn evaluate_milkdrop_shape_state(
+    shape: &MilkdropIndexedEntry,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+) -> MilkdropIndexedEntry {
+    evaluate_milkdrop_entry_state(shape, frame_scope, MILKDROP_SHAPE_VALUE_KEYS)
+}
+
+pub fn evaluate_milkdrop_sprite_state(
+    sprite: &MilkdropIndexedEntry,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+) -> MilkdropIndexedEntry {
+    evaluate_milkdrop_entry_state(sprite, frame_scope, MILKDROP_SPRITE_VALUE_KEYS)
+}
+
+pub fn evaluate_milkdrop_wave_state(
+    wave: &MilkdropIndexedEntry,
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+) -> MilkdropIndexedEntry {
+    evaluate_milkdrop_entry_state(wave, frame_scope, MILKDROP_WAVE_VALUE_KEYS)
+}
+
+fn milkdrop_entry_number(entry: &MilkdropIndexedEntry, keys: &[&str], fallback: f64) -> f64 {
+    keys.iter()
+        .find_map(|key| {
+            entry
+                .base_values
+                .get(*key)
+                .and_then(MilkdropValue::as_number)
+        })
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+}
+
+pub fn create_milkdrop_custom_wave_vertices(
+    wave: &MilkdropIndexedEntry,
+    samples: &[f64],
+    frame_scope: &BTreeMap<String, MilkdropValue>,
+) -> Vec<f64> {
+    let sample_count = milkdrop_entry_number(wave, &["samples", "nsamples"], samples.len() as f64)
+        .floor()
+        .max(1.0) as usize;
+    let mut vertices = Vec::with_capacity(sample_count * 2);
+    for index in 0..sample_count {
+        let sample_index = if sample_count <= 1 {
+            0
+        } else {
+            (index * samples.len().saturating_sub(1)) / sample_count.saturating_sub(1)
+        };
+        let mut sample = samples.get(sample_index).copied().unwrap_or_default();
+        if sample > 1.0 {
+            sample /= 255.0;
+        }
+        let i = if sample_count <= 1 {
+            0.0
+        } else {
+            index as f64 / (sample_count - 1) as f64
+        };
+        let mut point_scope = frame_scope.clone();
+        point_scope.extend(wave.base_values.clone());
+        point_scope.insert("i".to_string(), MilkdropValue::Number(i));
+        point_scope.insert("sample".to_string(), MilkdropValue::Number(sample));
+        if !wave.equations.point.trim().is_empty() {
+            if let Ok(next_scope) = evaluate_milkdrop_equations(&wave.equations.point, &point_scope)
+            {
+                point_scope = next_scope;
+            }
+        }
+        let x = milkdrop_scope_number(&point_scope, "x", i) * 2.0 - 1.0;
+        let y = milkdrop_scope_number(&point_scope, "y", sample) * 2.0 - 1.0;
+        vertices.push(x);
+        vertices.push(y);
+    }
+    vertices
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -13109,19 +13456,20 @@ fn start_rust_milkdrop_visualizer(
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0);
         let preset_source = RUST_MILKDROP_PRESETS[preset_index % RUST_MILKDROP_PRESETS.len()];
-        let preset = parse_rust_milkdrop_preset(preset_source);
         let time = time_ms / 1000.0;
         let bass = (time * 1.9).sin() * 0.5 + 0.5;
         let mid = (time * 1.17 + 1.3).sin() * 0.5 + 0.5;
         let treble = (time * 2.7 + 0.4).sin() * 0.5 + 0.5;
-        let frame = rust_milkdrop_frame(&preset, time, bass, mid, treble);
+        let frame = rust_milkdrop_frame_from_source(preset_source, time, bass, mid, treble);
         render_rust_milkdrop_frame(&context, &canvas, &frame, time);
         if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
             status.set_text_content(Some(&format!(
-                "MilkDrop running: bass {:.0}% mid {:.0}% treble {:.0}%",
+                "MilkDrop running: bass {:.0}% mid {:.0}% treble {:.0}% / {} shapes / {} waves",
                 bass * 100.0,
                 mid * 100.0,
-                treble * 100.0
+                treble * 100.0,
+                frame.shape_count,
+                frame.waveform_count
             )));
         }
         if let Some(callback) = animation_handle.borrow().as_ref() {
@@ -13229,8 +13577,8 @@ fn render_rust_milkdrop_frame(
     context.fill_rect(0.0, 0.0, width, height);
 
     let (r, g, b) = frame.wave_color;
-    let center_x = width / 2.0;
-    let center_y = height / 2.0;
+    let center_x = width * (0.5 + frame.dx);
+    let center_y = height * (0.5 + frame.dy);
     let base = width.min(height) * frame.wave_radius * frame.zoom;
     context.save();
     let _ = context.translate(center_x, center_y);
@@ -13267,23 +13615,44 @@ fn render_rust_milkdrop_frame(
         let _ = context.arc(0.0, 0.0, ring_radius, 0.0, std::f64::consts::TAU);
         context.stroke();
     }
+    for shape in 0..frame.shape_count.min(6) {
+        let sides = 3 + (shape % 5);
+        let radius = base * (0.16 + shape as f64 * 0.035);
+        let spin = time * (0.4 + shape as f64 * 0.09);
+        context.begin_path();
+        for side in 0..=sides {
+            let angle = spin + side as f64 / sides as f64 * std::f64::consts::TAU;
+            let x = radius * angle.cos();
+            let y = radius * angle.sin();
+            if side == 0 {
+                context.move_to(x, y);
+            } else {
+                context.line_to(x, y);
+            }
+        }
+        context.set_stroke_style_str(&format!("rgba({r}, {g}, {b}, 0.42)"));
+        context.stroke();
+    }
     context.restore();
 
     context.set_stroke_style_str("rgba(216, 232, 225, 0.36)");
     context.set_line_width(1.5);
-    context.begin_path();
-    for index in 0..128 {
-        let x = width * index as f64 / 127.0;
-        let amp =
-            (time * 5.0 + index as f64 * 0.19).sin() * (0.25 + 0.18 * (time * 2.0).sin().abs());
-        let y = height * (0.82 + amp * 0.28);
-        if index == 0 {
-            context.move_to(x, y);
-        } else {
-            context.line_to(x, y);
+    for wave in 0..frame.waveform_count.max(1).min(3) {
+        context.begin_path();
+        for index in 0..128 {
+            let x = width * index as f64 / 127.0;
+            let amp = (time * (5.0 + wave as f64) + index as f64 * 0.19).sin()
+                * (0.18 + 0.08 * wave as f64 + 0.18 * (time * 2.0).sin().abs());
+            let baseline = 0.78 - wave as f64 * 0.16;
+            let y = height * (baseline + amp * 0.28);
+            if index == 0 {
+                context.move_to(x, y);
+            } else {
+                context.line_to(x, y);
+            }
         }
+        context.stroke();
     }
-    context.stroke();
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -13605,6 +13974,42 @@ mod tests {
         assert!(frame.wave_color.0 >= 95);
         assert!(frame.wave_color.1 >= 120);
         assert!(frame.wave_color.2 >= 200);
+    }
+
+    #[test]
+    fn rust_milkdrop_runtime_evaluates_parsed_frame_equations() {
+        let frame = rust_milkdrop_frame_from_source(
+            r#"
+            name=Runtime
+            decay=0.88
+            wave_r=0.1
+            wave_g=0.2
+            wave_b=0.3
+            wave_scale=1.2
+            zoom=1
+            per_frame_1=wave_r = min(1, wave_r + bass_att * 0.2);
+            per_frame_2=wave_g = 0.4 + mid_att * 0.2;
+            per_frame_3=wave_b = 0.5 + treb_att * 0.2;
+            per_frame_4=zoom = 1.2;
+            per_frame_5=rot = 0.25;
+            per_frame_6=dx = 0.05;
+            shape00_enabled=1
+            shape01_enabled=1
+            wavecode_0_enabled=1
+            "#,
+            2.0,
+            2.0,
+            0.5,
+            0.25,
+        );
+        assert_eq!(frame.wave_color.0, 127);
+        assert_eq!(frame.wave_color.1, 127);
+        assert_eq!(frame.wave_color.2, 140);
+        assert_eq!(frame.shape_count, 2);
+        assert_eq!(frame.waveform_count, 1);
+        assert!((frame.zoom - 1.2).abs() < 0.0001);
+        assert!((frame.rotation - 0.245).abs() < 0.0001);
+        assert!((frame.dx - 0.05).abs() < 0.0001);
     }
 
     #[test]
@@ -13944,6 +14349,108 @@ mod tests {
             create_translated_milkdrop_wgsl_shader("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);"),
             ""
         );
+    }
+
+    #[test]
+    fn rust_milkdrop_primitive_state_evaluators_match_js_runtime() {
+        let mut shape = MilkdropIndexedEntry::default();
+        shape
+            .base_values
+            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+        shape
+            .base_values
+            .insert("r".to_string(), MilkdropValue::Number(0.2));
+        shape
+            .base_values
+            .insert("rad".to_string(), MilkdropValue::Number(0.1));
+        shape.equations.init = "q1=0.2;".to_string();
+        shape.equations.frame = "rad=rad+q1+bass_att*0.1; r=min(1,r+0.3);".to_string();
+
+        let mut frame_scope = BTreeMap::new();
+        frame_scope.insert("bass_att".to_string(), MilkdropValue::Number(2.0));
+        frame_scope.insert("time".to_string(), MilkdropValue::Number(9.0));
+        let evaluated_shape = evaluate_milkdrop_shape_state(&shape, &frame_scope);
+        assert_eq!(
+            evaluated_shape.base_values.get("rad"),
+            Some(&MilkdropValue::Number(0.5))
+        );
+        assert_eq!(
+            evaluated_shape.base_values.get("r"),
+            Some(&MilkdropValue::Number(0.5))
+        );
+        assert_eq!(
+            evaluated_shape.base_values.get("q1"),
+            Some(&MilkdropValue::Number(0.2))
+        );
+        assert!(!evaluated_shape.base_values.contains_key("bass_att"));
+        assert!(!evaluated_shape.base_values.contains_key("time"));
+
+        let mut sprite = MilkdropIndexedEntry::default();
+        sprite
+            .base_values
+            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+        sprite
+            .base_values
+            .insert("w".to_string(), MilkdropValue::Number(0.1));
+        sprite.equations.init = "q1=0.2;".to_string();
+        sprite.equations.frame = "w=w+q1+bass_att*0.1;".to_string();
+        let evaluated_sprite = evaluate_milkdrop_sprite_state(&sprite, &frame_scope);
+        assert_eq!(
+            evaluated_sprite.base_values.get("w"),
+            Some(&MilkdropValue::Number(0.5))
+        );
+        assert_eq!(
+            evaluated_sprite.base_values.get("q1"),
+            Some(&MilkdropValue::Number(0.2))
+        );
+        assert!(!evaluated_sprite.base_values.contains_key("bass_att"));
+    }
+
+    #[test]
+    fn rust_milkdrop_custom_wave_vertices_match_js_point_mapping() {
+        let mut wave = MilkdropIndexedEntry::default();
+        wave.base_values
+            .insert("enabled".to_string(), MilkdropValue::Number(1.0));
+        wave.base_values
+            .insert("samples".to_string(), MilkdropValue::Number(3.0));
+        wave.equations.init = "q1=0.2;".to_string();
+        wave.equations.frame = "a=q1+0.3;".to_string();
+        wave.equations.point = "x=i; y=0.5+sample*0.25;".to_string();
+        let mut frame_scope = BTreeMap::new();
+        frame_scope.insert("bass_att".to_string(), MilkdropValue::Number(3.0));
+
+        let evaluated_wave = evaluate_milkdrop_wave_state(&wave, &frame_scope);
+        let vertices =
+            create_milkdrop_custom_wave_vertices(&evaluated_wave, &[-1.0, 0.0, 1.0], &frame_scope);
+        assert_eq!(
+            evaluated_wave.base_values.get("a"),
+            Some(&MilkdropValue::Number(0.5))
+        );
+        assert_eq!(
+            evaluated_wave.base_values.get("q1"),
+            Some(&MilkdropValue::Number(0.2))
+        );
+        assert_eq!(vertices.len(), 6);
+        assert!((vertices[0] + 1.0).abs() < 0.0001);
+        assert!((vertices[1] + 0.5).abs() < 0.0001);
+        assert!(vertices[2].abs() < 0.0001);
+        assert!(vertices[3].abs() < 0.0001);
+        assert!((vertices[4] - 1.0).abs() < 0.0001);
+        assert!((vertices[5] - 0.5).abs() < 0.0001);
+
+        let mut spectrum_wave = MilkdropIndexedEntry::default();
+        spectrum_wave
+            .base_values
+            .insert("samples".to_string(), MilkdropValue::Number(3.0));
+        spectrum_wave.equations.point = "x=i; y=sample;".to_string();
+        let spectrum_vertices = create_milkdrop_custom_wave_vertices(
+            &spectrum_wave,
+            &[0.0, 128.0, 255.0],
+            &BTreeMap::new(),
+        );
+        assert!((spectrum_vertices[1] + 1.0).abs() < 0.0001);
+        assert!((spectrum_vertices[3] - ((128.0 / 255.0) * 2.0 - 1.0)).abs() < 0.0001);
+        assert!((spectrum_vertices[5] - 1.0).abs() < 0.0001);
     }
 
     #[test]
