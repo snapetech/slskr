@@ -13925,17 +13925,9 @@ fn start_rust_milkdrop_visualizer(
         .get_element_by_id("slskr-milkdrop-canvas")
         .ok_or_else(|| JsValue::from_str("Rust MilkDrop canvas is missing"))?
         .dyn_into()?;
-    let context: web_sys::CanvasRenderingContext2d = canvas
-        .get_context("2d")?
-        .ok_or_else(|| JsValue::from_str("2D canvas is unavailable"))?
-        .dyn_into()?;
-    let webgl_available = canvas.get_context("webgl2")?.is_some();
-    if let Some(renderer) = document.get_element_by_id("slskr-milkdrop-renderer") {
-        renderer.set_text_content(Some(if webgl_available {
-            "WebGL2 available / Rust renderer active"
-        } else {
-            "Canvas renderer active"
-        }));
+    let renderer = Rc::new(rust_milkdrop_renderer(&canvas)?);
+    if let Some(label) = document.get_element_by_id("slskr-milkdrop-renderer") {
+        label.set_text_content(Some(renderer.label()));
     }
     let animation_handle: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
         Rc::new(RefCell::new(None));
@@ -13960,7 +13952,7 @@ fn start_rust_milkdrop_visualizer(
         let mid = (time * 1.17 + 1.3).sin() * 0.5 + 0.5;
         let treble = (time * 2.7 + 0.4).sin() * 0.5 + 0.5;
         let frame = rust_milkdrop_frame_from_source(&preset_source, time, bass, mid, treble);
-        render_rust_milkdrop_frame(&context, &canvas, &frame, time);
+        renderer.render(&frame, time);
         if let Some(status) = document_for_frame.get_element_by_id("slskr-milkdrop-status") {
             status.set_text_content(Some(&format!(
                 "MilkDrop running: bass {:.0}% mid {:.0}% treble {:.0}% / {} shapes / {} waves",
@@ -14126,7 +14118,254 @@ fn cycle_rust_milkdrop_preset(document: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_rust_milkdrop_frame(
+enum RustMilkdropRenderer {
+    WebGl(RustMilkdropWebGlRenderer),
+    Canvas {
+        canvas: web_sys::HtmlCanvasElement,
+        context: web_sys::CanvasRenderingContext2d,
+    },
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RustMilkdropRenderer {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::WebGl(_) => "Rust WebGL2 renderer active",
+            Self::Canvas { .. } => "Canvas renderer fallback active",
+        }
+    }
+
+    fn render(&self, frame: &RustMilkdropFrame, time: f64) {
+        match self {
+            Self::WebGl(renderer) => renderer.render(frame, time),
+            Self::Canvas { canvas, context } => {
+                render_rust_milkdrop_canvas_frame(context, canvas, frame, time);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct RustMilkdropWebGlRenderer {
+    buffer: web_sys::WebGlBuffer,
+    gl: web_sys::WebGl2RenderingContext,
+    program: web_sys::WebGlProgram,
+    u_color: Option<web_sys::WebGlUniformLocation>,
+    u_counts: Option<web_sys::WebGlUniformLocation>,
+    u_motion: Option<web_sys::WebGlUniformLocation>,
+    u_resolution: Option<web_sys::WebGlUniformLocation>,
+    u_time: Option<web_sys::WebGlUniformLocation>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_renderer(
+    canvas: &web_sys::HtmlCanvasElement,
+) -> Result<RustMilkdropRenderer, JsValue> {
+    if let Some(context) = canvas.get_context("webgl2")? {
+        if let Ok(gl) = context.dyn_into::<web_sys::WebGl2RenderingContext>() {
+            if let Ok(renderer) = RustMilkdropWebGlRenderer::new(gl) {
+                return Ok(RustMilkdropRenderer::WebGl(renderer));
+            }
+        }
+    }
+    let context: web_sys::CanvasRenderingContext2d = canvas
+        .get_context("2d")?
+        .ok_or_else(|| JsValue::from_str("2D canvas is unavailable"))?
+        .dyn_into()?;
+    Ok(RustMilkdropRenderer::Canvas {
+        canvas: canvas.clone(),
+        context,
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RustMilkdropWebGlRenderer {
+    fn new(gl: web_sys::WebGl2RenderingContext) -> Result<Self, JsValue> {
+        let vertex_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::VERTEX_SHADER,
+            RUST_MILKDROP_WEBGL_VERTEX_SHADER,
+        )?;
+        let fragment_shader = compile_rust_milkdrop_shader(
+            &gl,
+            web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
+            RUST_MILKDROP_WEBGL_FRAGMENT_SHADER,
+        )?;
+        let program = link_rust_milkdrop_program(&gl, &vertex_shader, &fragment_shader)?;
+        gl.use_program(Some(&program));
+
+        let buffer = gl
+            .create_buffer()
+            .ok_or_else(|| JsValue::from_str("WebGL buffer allocation failed"))?;
+        gl.bind_buffer(web_sys::WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
+        let vertices =
+            js_sys::Float32Array::from(&[-1.0_f32, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0][..]);
+        gl.buffer_data_with_array_buffer_view(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            &vertices,
+            web_sys::WebGl2RenderingContext::STATIC_DRAW,
+        );
+        let position = gl.get_attrib_location(&program, "position");
+        if position >= 0 {
+            gl.enable_vertex_attrib_array(position as u32);
+            gl.vertex_attrib_pointer_with_i32(
+                position as u32,
+                2,
+                web_sys::WebGl2RenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+        }
+
+        Ok(Self {
+            u_color: gl.get_uniform_location(&program, "u_color"),
+            u_counts: gl.get_uniform_location(&program, "u_counts"),
+            u_motion: gl.get_uniform_location(&program, "u_motion"),
+            u_resolution: gl.get_uniform_location(&program, "u_resolution"),
+            u_time: gl.get_uniform_location(&program, "u_time"),
+            buffer,
+            gl,
+            program,
+        })
+    }
+
+    fn render(&self, frame: &RustMilkdropFrame, time: f64) {
+        self.gl.use_program(Some(&self.program));
+        self.gl.bind_buffer(
+            web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+            Some(&self.buffer),
+        );
+        let drawing_width = self.gl.drawing_buffer_width().max(1);
+        let drawing_height = self.gl.drawing_buffer_height().max(1);
+        self.gl.viewport(0, 0, drawing_width, drawing_height);
+        let (r, g, b) = frame.wave_color;
+        self.gl.uniform2f(
+            self.u_resolution.as_ref(),
+            drawing_width as f32,
+            drawing_height as f32,
+        );
+        self.gl.uniform1f(self.u_time.as_ref(), time as f32);
+        self.gl.uniform4f(
+            self.u_color.as_ref(),
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            (1.0 - frame.background_alpha).clamp(0.0, 1.0) as f32,
+        );
+        self.gl.uniform4f(
+            self.u_motion.as_ref(),
+            frame.rotation as f32,
+            frame.zoom as f32,
+            frame.dx as f32,
+            frame.dy as f32,
+        );
+        self.gl.uniform2f(
+            self.u_counts.as_ref(),
+            frame.shape_count as f32,
+            frame.waveform_count as f32,
+        );
+        self.gl
+            .draw_arrays(web_sys::WebGl2RenderingContext::TRIANGLE_STRIP, 0, 4);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn compile_rust_milkdrop_shader(
+    gl: &web_sys::WebGl2RenderingContext,
+    shader_type: u32,
+    source: &str,
+) -> Result<web_sys::WebGlShader, JsValue> {
+    let shader = gl
+        .create_shader(shader_type)
+        .ok_or_else(|| JsValue::from_str("WebGL shader allocation failed"))?;
+    gl.shader_source(&shader, source);
+    gl.compile_shader(&shader);
+    if gl
+        .get_shader_parameter(&shader, web_sys::WebGl2RenderingContext::COMPILE_STATUS)
+        .as_bool()
+        .unwrap_or(false)
+    {
+        Ok(shader)
+    } else {
+        Err(JsValue::from_str(
+            &gl.get_shader_info_log(&shader)
+                .unwrap_or_else(|| "MilkDrop WebGL shader compile failed".to_string()),
+        ))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn link_rust_milkdrop_program(
+    gl: &web_sys::WebGl2RenderingContext,
+    vertex_shader: &web_sys::WebGlShader,
+    fragment_shader: &web_sys::WebGlShader,
+) -> Result<web_sys::WebGlProgram, JsValue> {
+    let program = gl
+        .create_program()
+        .ok_or_else(|| JsValue::from_str("WebGL program allocation failed"))?;
+    gl.attach_shader(&program, vertex_shader);
+    gl.attach_shader(&program, fragment_shader);
+    gl.link_program(&program);
+    if gl
+        .get_program_parameter(&program, web_sys::WebGl2RenderingContext::LINK_STATUS)
+        .as_bool()
+        .unwrap_or(false)
+    {
+        Ok(program)
+    } else {
+        Err(JsValue::from_str(
+            &gl.get_program_info_log(&program)
+                .unwrap_or_else(|| "MilkDrop WebGL program link failed".to_string()),
+        ))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_WEBGL_VERTEX_SHADER: &str = r#"#version 300 es
+in vec2 position;
+out vec2 v_uv;
+void main() {
+  v_uv = position * 0.5 + vec2(0.5);
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+const RUST_MILKDROP_WEBGL_FRAGMENT_SHADER: &str = r#"#version 300 es
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec4 u_color;
+uniform vec4 u_motion;
+uniform vec2 u_counts;
+in vec2 v_uv;
+out vec4 outColor;
+
+mat2 rotate2d(float angle) {
+  float s = sin(angle);
+  float c = cos(angle);
+  return mat2(c, -s, s, c);
+}
+
+void main() {
+  vec2 centered = v_uv - vec2(0.5) - u_motion.zw;
+  vec2 warped = rotate2d(u_motion.x + u_time * 0.035) * centered / max(u_motion.y, 0.001);
+  float radius = length(warped);
+  float angle = atan(warped.y, warped.x);
+  float rings = 0.5 + 0.5 * sin(radius * 42.0 - u_time * 3.0 + u_counts.x * 0.35);
+  float spokes = 0.5 + 0.5 * cos(angle * (5.0 + u_counts.y) + u_time * 1.7);
+  float wave = 0.5 + 0.5 * sin((v_uv.x + v_uv.y) * 18.0 + u_time * 4.0);
+  float shapePulse = smoothstep(0.24, 0.0, abs(radius - (0.18 + 0.025 * u_counts.x)));
+  vec3 tint = mix(u_color.rgb * 0.24, u_color.rgb, max(rings * 0.62, spokes * 0.42));
+  tint += vec3(1.0, 0.72, 0.32) * shapePulse * 0.35;
+  tint += vec3(0.65, 0.85, 1.0) * wave * 0.08 * max(u_counts.y, 1.0);
+  outColor = vec4(tint, 1.0);
+}
+"#;
+
+#[cfg(target_arch = "wasm32")]
+fn render_rust_milkdrop_canvas_frame(
     context: &web_sys::CanvasRenderingContext2d,
     canvas: &web_sys::HtmlCanvasElement,
     frame: &RustMilkdropFrame,

@@ -1521,6 +1521,7 @@ dependencies = [
 name = "slskr-web"
 version = "0.0.0"
 dependencies = [
+ "js-sys",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
