@@ -11512,8 +11512,10 @@ pub struct RustMilkdropFrame {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RustMilkdropPrimitiveMode {
     LineStrip,
+    Lines,
     Points,
     TriangleFan,
+    Triangles,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -12715,6 +12717,106 @@ pub fn create_milkdrop_sprite_texture_uvs(sprite: &MilkdropIndexedEntry) -> Vec<
     vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 }
 
+fn append_milkdrop_quad(vertices: &mut Vec<f64>, left: f64, bottom: f64, right: f64, top: f64) {
+    vertices.extend_from_slice(&[
+        left, bottom, right, bottom, left, top, left, top, right, bottom, right, top,
+    ]);
+}
+
+pub fn create_milkdrop_screen_border_vertices(size: f64, inset: f64) -> Vec<f64> {
+    let safe_inset = inset.clamp(0.0, 0.95);
+    let extent = (1.0 - safe_inset).max(0.0);
+    let thickness = (size * 2.0).clamp(0.0, extent);
+    if extent <= 0.0 || thickness <= 0.0 {
+        return Vec::new();
+    }
+    let outer_left = -extent;
+    let outer_right = extent;
+    let outer_bottom = -extent;
+    let outer_top = extent;
+    let inner_left = outer_left + thickness;
+    let inner_right = outer_right - thickness;
+    let inner_bottom = outer_bottom + thickness;
+    let inner_top = outer_top - thickness;
+    if inner_left >= inner_right || inner_bottom >= inner_top {
+        return vec![
+            outer_left,
+            outer_bottom,
+            outer_right,
+            outer_bottom,
+            outer_right,
+            outer_top,
+            outer_left,
+            outer_bottom,
+            outer_right,
+            outer_top,
+            outer_left,
+            outer_top,
+        ];
+    }
+    let mut vertices = Vec::with_capacity(48);
+    append_milkdrop_quad(
+        &mut vertices,
+        outer_left,
+        outer_bottom,
+        outer_right,
+        inner_bottom,
+    );
+    append_milkdrop_quad(&mut vertices, outer_left, inner_top, outer_right, outer_top);
+    append_milkdrop_quad(
+        &mut vertices,
+        outer_left,
+        inner_bottom,
+        inner_left,
+        inner_top,
+    );
+    append_milkdrop_quad(
+        &mut vertices,
+        inner_right,
+        inner_bottom,
+        outer_right,
+        inner_top,
+    );
+    vertices
+}
+
+pub fn create_milkdrop_motion_vector_vertices(scope: &BTreeMap<String, MilkdropValue>) -> Vec<f64> {
+    let columns = milkdrop_scope_number(scope, "mv_x", 0.0)
+        .floor()
+        .clamp(0.0, 128.0) as usize;
+    let rows = milkdrop_scope_number(scope, "mv_y", 0.0)
+        .floor()
+        .clamp(0.0, 128.0) as usize;
+    if columns < 1 || rows < 1 {
+        return Vec::new();
+    }
+    let delta_x = milkdrop_scope_number(scope, "mv_dx", 0.02);
+    let delta_y = milkdrop_scope_number(scope, "mv_dy", 0.02);
+    let length = milkdrop_scope_number(scope, "mv_l", 0.05).max(0.0);
+    let mut vertices = Vec::with_capacity(columns * rows * 4);
+    for row in 0..rows {
+        for column in 0..columns {
+            let x = if columns == 1 {
+                0.0
+            } else {
+                column as f64 / (columns - 1) as f64 * 2.0 - 1.0
+            };
+            let y = if rows == 1 {
+                0.0
+            } else {
+                row as f64 / (rows - 1) as f64 * 2.0 - 1.0
+            };
+            vertices.extend_from_slice(&[
+                x,
+                y,
+                x + delta_x * length * 2.0,
+                y + delta_y * length * 2.0,
+            ]);
+        }
+    }
+    vertices
+}
+
 fn create_rust_milkdrop_audio_samples(
     time_seconds: f64,
     bass: f64,
@@ -12751,6 +12853,72 @@ fn create_rust_milkdrop_frame_primitives(
         waveform
     };
     let mut primitives = Vec::new();
+    for (prefix, inset, fallback_alpha) in [
+        ("ob", 0.0, 0.0),
+        (
+            "ib",
+            clamp_unit(milkdrop_scope_number(frame_scope, "ob_size", 0.0)) * 2.0,
+            0.0,
+        ),
+    ] {
+        let size = milkdrop_scope_number(frame_scope, &format!("{prefix}_size"), 0.0);
+        let vertices = create_milkdrop_screen_border_vertices(size, inset);
+        let alpha = clamp_unit(milkdrop_scope_number(
+            frame_scope,
+            &format!("{prefix}_a"),
+            fallback_alpha,
+        ));
+        if vertices.len() >= 6 && alpha > 0.0 {
+            primitives.push(RustMilkdropPrimitive {
+                color: [
+                    clamp_unit(milkdrop_scope_number(
+                        frame_scope,
+                        &format!("{prefix}_r"),
+                        fallback_color[0],
+                    )),
+                    clamp_unit(milkdrop_scope_number(
+                        frame_scope,
+                        &format!("{prefix}_g"),
+                        fallback_color[1],
+                    )),
+                    clamp_unit(milkdrop_scope_number(
+                        frame_scope,
+                        &format!("{prefix}_b"),
+                        fallback_color[2],
+                    )),
+                    alpha,
+                ],
+                mode: RustMilkdropPrimitiveMode::Triangles,
+                vertices,
+            });
+        }
+    }
+    let motion_vertices = create_milkdrop_motion_vector_vertices(frame_scope);
+    let motion_alpha = clamp_unit(milkdrop_scope_number(frame_scope, "mv_a", 0.8));
+    if motion_vertices.len() >= 4 && motion_alpha > 0.0 {
+        primitives.push(RustMilkdropPrimitive {
+            color: [
+                clamp_unit(milkdrop_scope_number(
+                    frame_scope,
+                    "mv_r",
+                    fallback_color[0],
+                )),
+                clamp_unit(milkdrop_scope_number(
+                    frame_scope,
+                    "mv_g",
+                    fallback_color[1],
+                )),
+                clamp_unit(milkdrop_scope_number(
+                    frame_scope,
+                    "mv_b",
+                    fallback_color[2],
+                )),
+                motion_alpha,
+            ],
+            mode: RustMilkdropPrimitiveMode::Lines,
+            vertices: motion_vertices,
+        });
+    }
     for wave in &preset.waves {
         let evaluated = evaluate_milkdrop_wave_state(wave, frame_scope);
         if !milkdrop_entry_flag(&evaluated, &["enabled", "benabled"]) {
@@ -15455,10 +15623,12 @@ impl RustMilkdropWebGlRenderer {
             );
             let mode = match primitive.mode {
                 RustMilkdropPrimitiveMode::LineStrip => web_sys::WebGl2RenderingContext::LINE_STRIP,
+                RustMilkdropPrimitiveMode::Lines => web_sys::WebGl2RenderingContext::LINES,
                 RustMilkdropPrimitiveMode::Points => web_sys::WebGl2RenderingContext::POINTS,
                 RustMilkdropPrimitiveMode::TriangleFan => {
                     web_sys::WebGl2RenderingContext::TRIANGLE_FAN
                 }
+                RustMilkdropPrimitiveMode::Triangles => web_sys::WebGl2RenderingContext::TRIANGLES,
             };
             self.gl.draw_arrays(mode, 0, (vertices.len() / 2) as i32);
         }
@@ -16028,6 +16198,21 @@ fn render_rust_milkdrop_canvas_primitives(
                 context.set_line_width(1.5);
                 context.stroke();
             }
+            RustMilkdropPrimitiveMode::Lines => {
+                context.set_stroke_style_str(&color);
+                context.set_line_width(1.0);
+                for line in primitive.vertices.chunks(4) {
+                    if line.len() < 4 {
+                        continue;
+                    }
+                    let (x1, y1) = rust_milkdrop_clip_to_canvas(&line[0..2], width, height);
+                    let (x2, y2) = rust_milkdrop_clip_to_canvas(&line[2..4], width, height);
+                    context.begin_path();
+                    context.move_to(x1, y1);
+                    context.line_to(x2, y2);
+                    context.stroke();
+                }
+            }
             RustMilkdropPrimitiveMode::Points => {
                 context.set_fill_style_str(&color);
                 for vertex in primitive.vertices.chunks(2) {
@@ -16050,6 +16235,23 @@ fn render_rust_milkdrop_canvas_primitives(
                 context.close_path();
                 context.set_fill_style_str(&color);
                 context.fill();
+            }
+            RustMilkdropPrimitiveMode::Triangles => {
+                context.set_fill_style_str(&color);
+                for triangle in primitive.vertices.chunks(6) {
+                    if triangle.len() < 6 {
+                        continue;
+                    }
+                    context.begin_path();
+                    let (x1, y1) = rust_milkdrop_clip_to_canvas(&triangle[0..2], width, height);
+                    let (x2, y2) = rust_milkdrop_clip_to_canvas(&triangle[2..4], width, height);
+                    let (x3, y3) = rust_milkdrop_clip_to_canvas(&triangle[4..6], width, height);
+                    context.move_to(x1, y1);
+                    context.line_to(x2, y2);
+                    context.line_to(x3, y3);
+                    context.close_path();
+                    context.fill();
+                }
             }
         }
     }
@@ -17046,6 +17248,48 @@ mod tests {
         assert!(mesh.source_uvs[0] < 0.25);
         assert!(mesh.source_uvs[2] > 0.1);
         assert!(mesh.source_uvs[4] > 0.45);
+    }
+
+    #[test]
+    fn rust_milkdrop_borders_and_motion_vectors_match_js_geometry() {
+        let frame = rust_milkdrop_frame_from_source(
+            r#"
+            name=Overlay primitives
+            wave_r=0.5
+            wave_g=0.6
+            wave_b=0.7
+            ob_size=0.05
+            ob_a=0.8
+            ib_size=0.025
+            ib_a=0.5
+            mv_x=2
+            mv_y=2
+            mv_dx=0.1
+            mv_dy=0.2
+            mv_l=0.5
+            mv_a=0.75
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+        let borders = frame
+            .primitives
+            .iter()
+            .filter(|primitive| primitive.mode == RustMilkdropPrimitiveMode::Triangles)
+            .collect::<Vec<_>>();
+        assert_eq!(borders.len(), 2);
+        assert_eq!(borders[0].vertices.len(), 48);
+        assert_eq!(borders[1].vertices.len(), 48);
+        let motion = frame
+            .primitives
+            .iter()
+            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::Lines)
+            .expect("motion vectors");
+        assert_eq!(motion.vertices.len(), 16);
+        assert_eq!(&motion.vertices[0..4], &[-1.0, -1.0, -0.9, -0.8]);
+        assert!((motion.color[3] - 0.75).abs() < 0.0001);
     }
 
     #[test]
