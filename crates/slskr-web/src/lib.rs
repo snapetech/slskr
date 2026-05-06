@@ -11543,6 +11543,7 @@ pub enum RustMilkdropPrimitiveMode {
 pub struct RustMilkdropPrimitive {
     pub color: [f64; 4],
     pub mode: RustMilkdropPrimitiveMode,
+    pub vertex_colors: Vec<f64>,
     pub vertices: Vec<f64>,
 }
 
@@ -13464,14 +13465,16 @@ pub fn create_rust_milkdrop_webgpu_frame_batches(
                     ));
             }
             RustMilkdropPrimitiveMode::TriangleFan => {
+                let vertex_colors = if primitive.vertex_colors.is_empty() {
+                    create_repeated_milkdrop_colors(primitive.vertices.len() / 2, primitive.color)
+                } else {
+                    primitive.vertex_colors.clone()
+                };
                 batches
                     .filled_vertices
                     .extend(create_rust_milkdrop_webgpu_triangle_fan_vertices(
                         &primitive.vertices,
-                        &create_repeated_milkdrop_colors(
-                            primitive.vertices.len() / 2,
-                            primitive.color,
-                        ),
+                        &vertex_colors,
                         primitive.color,
                     ));
             }
@@ -13808,6 +13811,7 @@ fn create_rust_milkdrop_frame_primitives(
                 waveform_alpha,
             ],
             mode: RustMilkdropPrimitiveMode::LineStrip,
+            vertex_colors: Vec::new(),
             vertices: waveform_vertices,
         });
     }
@@ -13847,6 +13851,7 @@ fn create_rust_milkdrop_frame_primitives(
                     alpha,
                 ],
                 mode: RustMilkdropPrimitiveMode::Triangles,
+                vertex_colors: Vec::new(),
                 vertices,
             });
         }
@@ -13874,6 +13879,7 @@ fn create_rust_milkdrop_frame_primitives(
                 motion_alpha,
             ],
             mode: RustMilkdropPrimitiveMode::Lines,
+            vertex_colors: Vec::new(),
             vertices: motion_vertices,
         });
     }
@@ -13898,6 +13904,7 @@ fn create_rust_milkdrop_frame_primitives(
             } else {
                 RustMilkdropPrimitiveMode::LineStrip
             },
+            vertex_colors: Vec::new(),
             vertices,
         });
     }
@@ -13916,6 +13923,7 @@ fn create_rust_milkdrop_frame_primitives(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
                 ],
                 mode: RustMilkdropPrimitiveMode::TriangleFan,
+                vertex_colors: create_milkdrop_shape_fill_colors(&evaluated, fallback_color),
                 vertices: fill_vertices,
             });
         }
@@ -13941,6 +13949,7 @@ fn create_rust_milkdrop_frame_primitives(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["border_a"], 0.85)),
                 ],
                 mode: RustMilkdropPrimitiveMode::LineStrip,
+                vertex_colors: Vec::new(),
                 vertices: outline_vertices,
             });
         }
@@ -14035,6 +14044,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                 waveform_alpha,
             ],
             mode: RustMilkdropPrimitiveMode::LineStrip,
+            vertex_colors: Vec::new(),
             vertices: waveform_vertices,
         });
     }
@@ -14075,6 +14085,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                     alpha,
                 ],
                 mode: RustMilkdropPrimitiveMode::Triangles,
+                vertex_colors: Vec::new(),
                 vertices,
             });
         }
@@ -14103,6 +14114,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                 motion_alpha,
             ],
             mode: RustMilkdropPrimitiveMode::Lines,
+            vertex_colors: Vec::new(),
             vertices: motion_vertices,
         });
     }
@@ -14135,6 +14147,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
             } else {
                 RustMilkdropPrimitiveMode::LineStrip
             },
+            vertex_colors: Vec::new(),
             vertices,
         });
     }
@@ -14184,6 +14197,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                         clamp_unit(milkdrop_entry_number(&evaluated, &["a"], 0.6)),
                     ],
                     mode: RustMilkdropPrimitiveMode::TriangleFan,
+                    vertex_colors: create_milkdrop_shape_fill_colors(&evaluated, fallback_color),
                     vertices: fill_vertices,
                 });
             }
@@ -14210,6 +14224,7 @@ fn create_rust_milkdrop_frame_primitives_and_textures_stateful(
                     clamp_unit(milkdrop_entry_number(&evaluated, &["border_a"], 0.85)),
                 ],
                 mode: RustMilkdropPrimitiveMode::LineStrip,
+                vertex_colors: Vec::new(),
                 vertices: outline_vertices,
             });
         }
@@ -16237,6 +16252,7 @@ struct RustMilkdropWebGlRenderer {
     feedback_targets: RefCell<RustMilkdropFeedbackTargets>,
     gl: web_sys::WebGl2RenderingContext,
     primitive_buffer: web_sys::WebGlBuffer,
+    primitive_color_buffer: web_sys::WebGlBuffer,
     primitive_program: web_sys::WebGlProgram,
     procedural_texture: web_sys::WebGlTexture,
     program: web_sys::WebGlProgram,
@@ -16250,7 +16266,6 @@ struct RustMilkdropWebGlRenderer {
     u_feedback: Option<web_sys::WebGlUniformLocation>,
     u_motion: Option<web_sys::WebGlUniformLocation>,
     u_previous_frame: Option<web_sys::WebGlUniformLocation>,
-    u_primitive_color: Option<web_sys::WebGlUniformLocation>,
     u_primitive_point_size: Option<web_sys::WebGlUniformLocation>,
     u_resolution: Option<web_sys::WebGlUniformLocation>,
     u_textured_alpha: Option<web_sys::WebGlUniformLocation>,
@@ -16385,6 +16400,9 @@ impl RustMilkdropWebGlRenderer {
         let primitive_buffer = gl
             .create_buffer()
             .ok_or_else(|| JsValue::from_str("WebGL primitive buffer allocation failed"))?;
+        let primitive_color_buffer = gl
+            .create_buffer()
+            .ok_or_else(|| JsValue::from_str("WebGL primitive color buffer allocation failed"))?;
         let textured_position_buffer = gl
             .create_buffer()
             .ok_or_else(|| JsValue::from_str("WebGL textured position buffer allocation failed"))?;
@@ -16411,7 +16429,6 @@ impl RustMilkdropWebGlRenderer {
             u_feedback: gl.get_uniform_location(&program, "u_feedback"),
             u_motion: gl.get_uniform_location(&program, "u_motion"),
             u_previous_frame: gl.get_uniform_location(&program, "u_previousFrame"),
-            u_primitive_color: gl.get_uniform_location(&primitive_program, "u_primitiveColor"),
             u_primitive_point_size: gl
                 .get_uniform_location(&primitive_program, "u_primitivePointSize"),
             u_resolution: gl.get_uniform_location(&program, "u_resolution"),
@@ -16430,6 +16447,7 @@ impl RustMilkdropWebGlRenderer {
             feedback_targets,
             gl,
             primitive_buffer,
+            primitive_color_buffer,
             primitive_program,
             procedural_texture,
             program,
@@ -16806,6 +16824,9 @@ impl RustMilkdropWebGlRenderer {
         let position = self
             .gl
             .get_attrib_location(&self.primitive_program, "position");
+        let color = self
+            .gl
+            .get_attrib_location(&self.primitive_program, "color");
         if position >= 0 {
             self.gl.enable_vertex_attrib_array(position as u32);
             self.gl.vertex_attrib_pointer_with_i32(
@@ -16832,13 +16853,34 @@ impl RustMilkdropWebGlRenderer {
                 &vertex_array,
                 web_sys::WebGl2RenderingContext::DYNAMIC_DRAW,
             );
-            self.gl.uniform4f(
-                self.u_primitive_color.as_ref(),
-                primitive.color[0] as f32,
-                primitive.color[1] as f32,
-                primitive.color[2] as f32,
-                primitive.color[3] as f32,
+            let vertex_count = vertices.len() / 2;
+            let colors = if primitive.vertex_colors.len() == vertex_count * 4 {
+                primitive.vertex_colors.clone()
+            } else {
+                create_repeated_milkdrop_colors(vertex_count, primitive.color)
+            };
+            let colors = colors.iter().map(|value| *value as f32).collect::<Vec<_>>();
+            let color_array = js_sys::Float32Array::from(colors.as_slice());
+            self.gl.bind_buffer(
+                web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+                Some(&self.primitive_color_buffer),
             );
+            self.gl.buffer_data_with_array_buffer_view(
+                web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
+                &color_array,
+                web_sys::WebGl2RenderingContext::DYNAMIC_DRAW,
+            );
+            if color >= 0 {
+                self.gl.enable_vertex_attrib_array(color as u32);
+                self.gl.vertex_attrib_pointer_with_i32(
+                    color as u32,
+                    4,
+                    web_sys::WebGl2RenderingContext::FLOAT,
+                    false,
+                    0,
+                    0,
+                );
+            }
             self.gl.uniform1f(
                 self.u_primitive_point_size.as_ref(),
                 if primitive.mode == RustMilkdropPrimitiveMode::Points {
@@ -16856,7 +16898,7 @@ impl RustMilkdropWebGlRenderer {
                 }
                 RustMilkdropPrimitiveMode::Triangles => web_sys::WebGl2RenderingContext::TRIANGLES,
             };
-            self.gl.draw_arrays(mode, 0, (vertices.len() / 2) as i32);
+            self.gl.draw_arrays(mode, 0, vertex_count as i32);
         }
         self.gl.disable(web_sys::WebGl2RenderingContext::BLEND);
         self.gl.use_program(Some(&self.program));
@@ -17216,11 +17258,11 @@ void main() {
 #[cfg(target_arch = "wasm32")]
 const RUST_MILKDROP_PRIMITIVE_VERTEX_SHADER: &str = r#"#version 300 es
 in vec2 position;
-uniform vec4 u_primitiveColor;
+in vec4 color;
 uniform float u_primitivePointSize;
 out vec4 v_color;
 void main() {
-  v_color = u_primitiveColor;
+  v_color = color;
   gl_PointSize = u_primitivePointSize;
   gl_Position = vec4(position, 0.0, 1.0);
 }
@@ -18859,6 +18901,51 @@ mod tests {
                 &batches.textured_vertices[batches.textured_batches[1].first_vertex * 8..][..8]
             ),
             vec![-0.2, -0.1, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4]
+        );
+    }
+
+    #[test]
+    fn rust_milkdrop_shape_fill_vertex_colors_match_js_edges() {
+        let frame = rust_milkdrop_frame_from_source(
+            r#"
+            name=Shape edge colors
+            wave_a=0
+            shape00_enabled=1
+            shape00_sides=3
+            shape00_rad=0.25
+            shape00_r=0.1
+            shape00_g=0.2
+            shape00_b=0.3
+            shape00_a=0.4
+            shape00_r2=0.4
+            shape00_g2=0.5
+            shape00_b2=0.6
+            shape00_a2=0.2
+            "#,
+            1.0,
+            0.1,
+            0.2,
+            0.3,
+        );
+        let shape = frame
+            .primitives
+            .iter()
+            .find(|primitive| primitive.mode == RustMilkdropPrimitiveMode::TriangleFan)
+            .expect("shape fill primitive");
+
+        assert_eq!(
+            rounded_vec(&shape.vertex_colors[..8]),
+            vec![0.1, 0.2, 0.3, 0.4, 0.4, 0.5, 0.6, 0.2]
+        );
+
+        let batches = create_rust_milkdrop_webgpu_frame_batches(&frame);
+        assert_eq!(
+            rounded_vec(&batches.filled_vertices[2..6]),
+            vec![0.1, 0.2, 0.3, 0.4]
+        );
+        assert_eq!(
+            rounded_vec(&batches.filled_vertices[8..12]),
+            vec![0.4, 0.5, 0.6, 0.2]
         );
     }
 
