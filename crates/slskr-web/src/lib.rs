@@ -17054,7 +17054,7 @@ fn cycle_rust_milkdrop_preset(document: &web_sys::Document) {
 
 #[cfg(target_arch = "wasm32")]
 enum RustMilkdropRenderer {
-    WebGl(RustMilkdropWebGlRenderer),
+    WebGl(RustMilkdropWebGlRendererSet),
     Canvas {
         canvas: web_sys::HtmlCanvasElement,
         context: web_sys::CanvasRenderingContext2d,
@@ -17193,11 +17193,7 @@ impl RustMilkdropRenderer {
             return;
         }
         match self {
-            Self::WebGl(renderer) => {
-                for entry in &frame_set.entries {
-                    renderer.render(&entry.frame, time);
-                }
-            }
+            Self::WebGl(renderer_set) => renderer_set.render_frame_set(frame_set, time),
             Self::Canvas { canvas, context } => {
                 for (index, entry) in frame_set.entries.iter().enumerate() {
                     context.save();
@@ -17220,6 +17216,12 @@ impl RustMilkdropRenderer {
 }
 
 #[cfg(target_arch = "wasm32")]
+struct RustMilkdropWebGlRendererSet {
+    gl: web_sys::WebGl2RenderingContext,
+    renderers: RefCell<Vec<RustMilkdropWebGlRenderer>>,
+}
+
+#[cfg(target_arch = "wasm32")]
 struct RustMilkdropWebGlRenderer {
     buffer: web_sys::WebGlBuffer,
     feedback_targets: RefCell<RustMilkdropFeedbackTargets>,
@@ -17238,6 +17240,7 @@ struct RustMilkdropWebGlRenderer {
     u_display_only: Option<web_sys::WebGlUniformLocation>,
     u_feedback: Option<web_sys::WebGlUniformLocation>,
     u_motion: Option<web_sys::WebGlUniformLocation>,
+    u_output_alpha: Option<web_sys::WebGlUniformLocation>,
     u_previous_frame: Option<web_sys::WebGlUniformLocation>,
     u_primitive_point_size: Option<web_sys::WebGlUniformLocation>,
     u_resolution: Option<web_sys::WebGlUniformLocation>,
@@ -17280,7 +17283,7 @@ fn rust_milkdrop_renderer(
 ) -> Result<RustMilkdropRenderer, JsValue> {
     if let Some(context) = canvas.get_context("webgl2")? {
         if let Ok(gl) = context.dyn_into::<web_sys::WebGl2RenderingContext>() {
-            if let Ok(renderer) = RustMilkdropWebGlRenderer::new(gl) {
+            if let Ok(renderer) = RustMilkdropWebGlRendererSet::new(gl) {
                 return Ok(RustMilkdropRenderer::WebGl(renderer));
             }
         }
@@ -17293,6 +17296,45 @@ fn rust_milkdrop_renderer(
         canvas: canvas.clone(),
         context,
     })
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RustMilkdropWebGlRendererSet {
+    fn new(gl: web_sys::WebGl2RenderingContext) -> Result<Self, JsValue> {
+        Ok(Self {
+            gl,
+            renderers: RefCell::new(Vec::new()),
+        })
+    }
+
+    fn render_frame_set(&self, frame_set: &RustMilkdropFrameSet, time: f64) {
+        if frame_set.entries.is_empty() || !self.ensure_renderer_count(frame_set.entries.len()) {
+            return;
+        }
+        let renderers = self.renderers.borrow();
+        for (index, entry) in frame_set.entries.iter().enumerate() {
+            if let Some(renderer) = renderers.get(index) {
+                renderer.render_with_options(
+                    &entry.frame,
+                    time,
+                    index == 0,
+                    &entry.composite_mode,
+                    entry.blend_alpha,
+                );
+            }
+        }
+    }
+
+    fn ensure_renderer_count(&self, count: usize) -> bool {
+        let mut renderers = self.renderers.borrow_mut();
+        while renderers.len() < count {
+            let Ok(renderer) = RustMilkdropWebGlRenderer::new(self.gl.clone()) else {
+                return false;
+            };
+            renderers.push(renderer);
+        }
+        true
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -17401,6 +17443,7 @@ impl RustMilkdropWebGlRenderer {
             u_display_only: gl.get_uniform_location(&program, "u_displayOnly"),
             u_feedback: gl.get_uniform_location(&program, "u_feedback"),
             u_motion: gl.get_uniform_location(&program, "u_motion"),
+            u_output_alpha: gl.get_uniform_location(&program, "u_outputAlpha"),
             u_previous_frame: gl.get_uniform_location(&program, "u_previousFrame"),
             u_primitive_point_size: gl
                 .get_uniform_location(&primitive_program, "u_primitivePointSize"),
@@ -17431,7 +17474,14 @@ impl RustMilkdropWebGlRenderer {
         })
     }
 
-    fn render(&self, frame: &RustMilkdropFrame, time: f64) {
+    fn render_with_options(
+        &self,
+        frame: &RustMilkdropFrame,
+        time: f64,
+        clear_screen: bool,
+        composite_mode: &str,
+        output_alpha: f64,
+    ) {
         self.gl.use_program(Some(&self.program));
         self.gl.bind_buffer(
             web_sys::WebGl2RenderingContext::ARRAY_BUFFER,
@@ -17471,7 +17521,7 @@ impl RustMilkdropWebGlRenderer {
                 drawing_height,
             );
         } else {
-            self.draw_feedback_quad(frame, time, drawing_width, drawing_height, false);
+            self.draw_feedback_quad(frame, time, drawing_width, drawing_height, false, 1.0);
         }
         self.draw_textured_primitives(frame);
         self.draw_primitives(frame);
@@ -17482,7 +17532,30 @@ impl RustMilkdropWebGlRenderer {
             web_sys::WebGl2RenderingContext::TEXTURE_2D,
             Some(&targets.targets[write_index].texture),
         );
-        self.draw_feedback_quad(frame, time, drawing_width, drawing_height, true);
+        if clear_screen {
+            self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+            self.gl
+                .clear(web_sys::WebGl2RenderingContext::COLOR_BUFFER_BIT);
+        }
+        let output_alpha = clamp_unit(output_alpha) as f32;
+        let should_blend = !clear_screen || output_alpha < 1.0;
+        if should_blend {
+            self.gl.enable(web_sys::WebGl2RenderingContext::BLEND);
+            let (source_factor, destination_factor) =
+                rust_milkdrop_webgl_composite_blend_factors(composite_mode);
+            self.gl.blend_func(source_factor, destination_factor);
+        }
+        self.draw_feedback_quad(
+            frame,
+            time,
+            drawing_width,
+            drawing_height,
+            true,
+            output_alpha,
+        );
+        if should_blend {
+            self.gl.disable(web_sys::WebGl2RenderingContext::BLEND);
+        }
         targets.read_index = write_index;
     }
 
@@ -17721,6 +17794,7 @@ impl RustMilkdropWebGlRenderer {
         drawing_width: i32,
         drawing_height: i32,
         display_only: bool,
+        output_alpha: f32,
     ) {
         self.gl.use_program(Some(&self.program));
         self.gl.bind_buffer(
@@ -17740,9 +17814,11 @@ impl RustMilkdropWebGlRenderer {
             );
         }
         self.gl.viewport(0, 0, drawing_width, drawing_height);
-        self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
-        self.gl
-            .clear(web_sys::WebGl2RenderingContext::COLOR_BUFFER_BIT);
+        if !display_only {
+            self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+            self.gl
+                .clear(web_sys::WebGl2RenderingContext::COLOR_BUFFER_BIT);
+        }
         let (r, g, b) = frame.wave_color;
         let feedback = (1.0 - frame.background_alpha).clamp(0.0, 0.985) as f32;
         self.gl.uniform1i(self.u_previous_frame.as_ref(), 0);
@@ -17751,6 +17827,8 @@ impl RustMilkdropWebGlRenderer {
             if display_only { 1.0 } else { 0.0 },
         );
         self.gl.uniform1f(self.u_feedback.as_ref(), feedback);
+        self.gl
+            .uniform1f(self.u_output_alpha.as_ref(), output_alpha);
         self.gl.uniform2f(
             self.u_resolution.as_ref(),
             drawing_width as f32,
@@ -17981,6 +18059,28 @@ impl RustMilkdropWebGlRenderer {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn rust_milkdrop_webgl_composite_blend_factors(mode: &str) -> (u32, u32) {
+    match mode {
+        "additive" => (
+            web_sys::WebGl2RenderingContext::SRC_ALPHA,
+            web_sys::WebGl2RenderingContext::ONE,
+        ),
+        "screen" => (
+            web_sys::WebGl2RenderingContext::ONE,
+            web_sys::WebGl2RenderingContext::ONE_MINUS_SRC_COLOR,
+        ),
+        "multiply" => (
+            web_sys::WebGl2RenderingContext::DST_COLOR,
+            web_sys::WebGl2RenderingContext::ZERO,
+        ),
+        _ => (
+            web_sys::WebGl2RenderingContext::SRC_ALPHA,
+            web_sys::WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
+        ),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn create_rust_milkdrop_feedback_targets(
     gl: &web_sys::WebGl2RenderingContext,
     width: i32,
@@ -18199,6 +18299,7 @@ uniform vec2 u_counts;
 uniform sampler2D u_previousFrame;
 uniform float u_feedback;
 uniform float u_displayOnly;
+uniform float u_outputAlpha;
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -18224,7 +18325,7 @@ void main() {
   feedbackUv = (feedbackUv - vec2(0.5)) / max(u_motion.y, 0.001) + vec2(0.5);
   vec3 previous = texture(u_previousFrame, clamp(feedbackUv, vec2(0.001), vec2(0.999))).rgb;
   vec3 composited = mix(tint, previous * 0.996, clamp(u_feedback, 0.0, 0.985));
-  outColor = vec4(mix(composited, texture(u_previousFrame, v_uv).rgb, step(0.5, u_displayOnly)), 1.0);
+  outColor = vec4(mix(composited, texture(u_previousFrame, v_uv).rgb, step(0.5, u_displayOnly)), u_outputAlpha);
 }
 "#;
 
