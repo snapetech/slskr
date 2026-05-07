@@ -1322,7 +1322,7 @@ dependencies = [
 [[package]]
 name = "rustymilk-core"
 version = "0.1.0"
-source = "git+https://github.com/snapetech/RustyMilk?branch=main#7c7635880013143f21d3517176a0a50f8d3e1f55"
+source = "git+https://github.com/snapetech/RustyMilk?branch=main#5587bffed945e3650a9361204f1d6d570d7b6c57"
 dependencies = [
  "serde_json",
 ]
@@ -1330,7 +1330,7 @@ dependencies = [
 [[package]]
 name = "rustymilk-wasm"
 version = "0.1.0"
-source = "git+https://github.com/snapetech/RustyMilk?branch=main#7c7635880013143f21d3517176a0a50f8d3e1f55"
+source = "git+https://github.com/snapetech/RustyMilk?branch=main#5587bffed945e3650a9361204f1d6d570d7b6c57"
 dependencies = [
  "js-sys",
  "rustymilk-core",
