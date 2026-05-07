@@ -11,7 +11,7 @@ The canonical multi-phase tracker for the upgrade work itself lives in `../slskN
 - `bug-council-behavior-pinning.md` — verbatim copy.
 - `bug-council-negative-space.md` — slskR-adapted, declares slskR's wire-frame and protocol boundaries.
 - `scripts/check-council-negative-space.sh` — slskR-adapted gate.
-- slskNet.Runtime's current canonical analyzer cycle now includes calibrated `CSL0001` through `CSL0008` semantic lenses for allocation, loop-bound, stream-position, file-path, timeout, endpoint, enum/status, and slice-bound sinks, plus multi-seed adversarial corpora. The Rust follow-up phases below should use the same calibration rule before treating zero findings as meaningful.
+- slskNet.Runtime's current canonical analyzer cycle now includes calibrated `CSL0001` through `CSL0016` semantic lenses for allocation, loop-bound, stream-position, file-path, timeout, endpoint, enum/status, slice-bound, diagnostic/log-line, outbound message, cache-key, crypto-trust, dynamic-execution, parser-runtime, resource-capacity, and buffer-operation sinks, plus multi-seed adversarial corpora. The Rust follow-up phases below should use the same calibration rule before treating zero findings as meaningful.
 
 ## What is intentionally not mirrored
 
