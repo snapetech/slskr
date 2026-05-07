@@ -35,4 +35,4 @@ The canonical multi-phase tracker for the upgrade work itself lives in `../slskN
 
 1. Read this tracker; identify the first non-Done row.
 2. Run `scripts/run-bug-council-all-phases.sh` (or the compatibility alias `scripts/run-council-bughunt.sh`). If it exits with pending phases, pick the first pending row and implement it.
-3. Use `docs/dev/council-bughunt-playbook.md` for adjudication rules. Green gates alone are not a bughunt result.
+3. Use `docs/dev/council-bughunt-playbook.md` for adjudication and commit-wording rules. Green gates alone are not a bughunt result.

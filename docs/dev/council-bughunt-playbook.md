@@ -35,3 +35,9 @@ When a class has candidates:
 7. Run sibling search before closing the class.
 
 Do not stop after one confirmed bug unless the whole class has been adjudicated.
+
+## Commit Wording
+
+Fix commits must describe the slskR change, bug class, or user-visible
+hardening. Do not mention council, bughunt, scanners, agents, or other discovery tooling in commit messages. The inventory and ledger can record how a
+bug was found; commit history should read as normal maintenance and fix history.

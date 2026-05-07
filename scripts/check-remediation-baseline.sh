@@ -49,6 +49,11 @@ if [[ ! -f docs/dev/bug-council-active-backlog.md ]]; then
   exit 1
 fi
 
+if ! tr '\n' ' ' < docs/dev/council-bughunt-playbook.md | rg -q -F 'Do not mention council, bughunt, scanners, agents, or other discovery tooling in commit messages'; then
+  printf 'Missing commit wording policy in docs/dev/council-bughunt-playbook.md\n' >&2
+  exit 1
+fi
+
 for gate in "${GATES[@]}"; do
   run_gate "$gate"
 done
