@@ -29,6 +29,7 @@ GATES=(
   scripts/check-council-loop.sh
   scripts/check-bug-council-all-phases.sh
   scripts/check-council-negative-space.sh
+  scripts/check-council-active-backlog.sh
   scripts/check-rust-protocol-taint-lens.sh
   scripts/check-rust-protocol-adversarial-corpus.sh
   scripts/check-shell-script-hygiene.sh
@@ -42,6 +43,11 @@ run_gate() {
   printf '\n==> %s\n' "$gate"
   "$gate"
 }
+
+if [[ ! -f docs/dev/bug-council-active-backlog.md ]]; then
+  printf 'Missing council active backlog: docs/dev/bug-council-active-backlog.md\n' >&2
+  exit 1
+fi
 
 for gate in "${GATES[@]}"; do
   run_gate "$gate"

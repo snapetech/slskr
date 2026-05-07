@@ -12,6 +12,7 @@ printf '==> Fresh candidate inventory\n'
 scripts/run-council-scan.sh | tee "$scan_out"
 
 printf '\n==> Process gates\n'
+scripts/check-council-active-backlog.sh
 scripts/check-council-loop.sh
 scripts/check-council-negative-space.sh
 
@@ -28,3 +29,4 @@ if rg -n '^\| [0-9]+ \| .* \| Pending \|' docs/dev/bug-council-phases.md; then
 fi
 
 printf '\nAll slskR bug council phases passed. Candidate counts saved to %s.\n' "$scan_out"
+printf 'Council verdict boundary: this is not proof of no bugs. It means the current calibrated lenses, active backlog, process gates, and adversarial corpus passed.\n'

@@ -29,6 +29,7 @@ The canonical multi-phase tracker for the upgrade work itself lives in `../slskN
 | 5 | Multi-seed adversarial protocol corpus | Done | (agent) | `crates/slskr-protocol/tests/adversarial.rs` runs known hostile corpus inputs and multiple deterministic random seeds through frame/message decoders; `scripts/check-rust-protocol-adversarial-corpus.sh` gates the corpus and test execution. |
 | 6 | Council bughunt entrypoint | Done | (agent) | `scripts/run-council-bughunt.sh` delegates to the all-phases runner so legacy muscle memory cannot skip a council phase. |
 | 7 | All-phases council runner | Done | (agent) | `scripts/run-bug-council-all-phases.sh` runs fresh candidate counts, process gates, calibrated semantic lenses, adversarial protocol corpus, and pending-phase checks in one command; `scripts/check-bug-council-all-phases.sh` is wired into remediation so partial runners regress loudly. |
+| 8 | Active backlog pile gate | Done | (agent) | `docs/dev/bug-council-active-backlog.md` records every current council scan class with count/status, `scripts/check-council-active-backlog.sh` fails on stale or untriaged rows, and the all-phases runner invokes it every cycle. |
 
 ## How to resume
 

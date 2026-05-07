@@ -44,6 +44,7 @@ if [ ! -x "$runner" ]; then
 fi
 
 require_literal "run-council-scan.sh" "$runner"
+require_literal "check-council-active-backlog.sh" "$runner"
 require_literal "check-council-loop.sh" "$runner"
 require_literal "check-council-negative-space.sh" "$runner"
 require_literal "check-rust-protocol-taint-lens.sh" "$runner"
@@ -51,6 +52,7 @@ require_literal "check-rust-protocol-adversarial-corpus.sh" "$runner"
 require_literal "Pending" "$runner"
 
 require_literal 'scripts/check-bug-council-all-phases.sh' "$repo_root/scripts/check-remediation-baseline.sh"
+require_literal "bug-council-active-backlog.md" "$repo_root/scripts/check-remediation-baseline.sh"
 
 assert_phase_done "Mirror council process docs"
 assert_phase_done "Severity/confidence retrofit"
@@ -59,6 +61,7 @@ assert_phase_done "Rust loop-bound"
 assert_phase_done "Multi-seed adversarial"
 assert_phase_done "Council bughunt entrypoint"
 assert_phase_done "All-phases council runner"
+assert_phase_done "Active backlog"
 
 if [ "$failed" -ne 0 ]; then
   exit 1
