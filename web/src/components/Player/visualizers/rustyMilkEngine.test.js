@@ -61,7 +61,7 @@ describe('createRustyMilkEngine', () => {
         return rustEngine;
       }
     }
-    globalThis.__slskrRustyMilkModule = {
+    globalThis.__rustyMilkModule = {
       RustyMilkEngine: RustyMilkEngineMock,
     };
   });
