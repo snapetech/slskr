@@ -6572,8 +6572,8 @@ impl WasmRustyMilkEngine {
             .to_string();
         let texture_assets = Rc::new(RefCell::new(BTreeMap::new()));
         let renderer = rustymilk_renderer(&canvas, texture_assets.clone())?;
-        let title = validate_rustymilk_import(&source)
-            .unwrap_or_else(|_| rustymilk_preset_name(&source));
+        let title =
+            validate_rustymilk_import(&source).unwrap_or_else(|_| rustymilk_preset_name(&source));
         Ok(Self {
             canvas,
             renderer,
@@ -6717,7 +6717,10 @@ impl WasmRustyMilkEngine {
     }
 
     #[wasm_bindgen(js_name = randomizePresetParameters)]
-    pub fn randomize_preset_parameters(&mut self, texture_assets_json: &str) -> Result<String, JsValue> {
+    pub fn randomize_preset_parameters(
+        &mut self,
+        texture_assets_json: &str,
+    ) -> Result<String, JsValue> {
         let mut parsed = self.parsed_source();
         let Some(target) = parsed.presets.first_mut() else {
             return Ok("null".to_string());
@@ -6802,11 +6805,13 @@ impl WasmRustyMilkEngine {
         let parsed = self.parsed_source();
         let primary = parsed.presets.first();
         let web_gpu_status = serde_json::from_str::<serde_json::Value>(web_gpu_status_json)
-            .unwrap_or_else(|_| serde_json::json!({
-                "available": false,
-                "backend": "rust-webgl2",
-                "reason": "not checked"
-            }));
+            .unwrap_or_else(|_| {
+                serde_json::json!({
+                    "available": false,
+                    "backend": "rust-webgl2",
+                    "reason": "not checked"
+                })
+            });
         serde_json::json!({
             "format": parsed.format,
             "parameters": self.preset_parameter_summary_value(),
@@ -6902,12 +6907,11 @@ impl WasmRustyMilkEngine {
 
     fn preset_parameter_summary_value(&self) -> serde_json::Value {
         let parsed = self.parsed_source();
-        let values = parsed
-            .presets
-            .first()
-            .map(|preset| &preset.base_values);
+        let values = parsed.presets.first().map(|preset| &preset.base_values);
         let mut summary = serde_json::Map::new();
-        for key in ["decay", "zoom", "rot", "wave_r", "wave_g", "wave_b", "wave_a"] {
+        for key in [
+            "decay", "zoom", "rot", "wave_r", "wave_g", "wave_b", "wave_a",
+        ] {
             if let Some(value) = values
                 .and_then(|values| values.get(key))
                 .and_then(RustyMilkValue::as_number)
@@ -6966,7 +6970,11 @@ fn rustymilk_fragment_entry_label(
     index: usize,
     requested_type: &str,
 ) -> String {
-    let prefix = if requested_type == "wave" { "Wave" } else { "Shape" };
+    let prefix = if requested_type == "wave" {
+        "Wave"
+    } else {
+        "Shape"
+    };
     for key in ["name", "label", "tex_name", "texname", "texture", "image"] {
         let value = entry
             .base_values
@@ -10922,14 +10930,12 @@ fn mount_player_controls(
                     }
                     if action == "visualizer" {
                         match toggle_rustymilk_visualizer(&window, &document) {
-                            Ok(()) => {
-                                set_player_status(&document, "RustyMilk visualizer ready")
-                            }
+                            Ok(()) => set_player_status(&document, "RustyMilk visualizer ready"),
                             Err(error) => set_player_status(
                                 &document,
-                                &error.as_string().unwrap_or_else(|| {
-                                    "RustyMilk visualizer failed".to_string()
-                                }),
+                                &error
+                                    .as_string()
+                                    .unwrap_or_else(|| "RustyMilk visualizer failed".to_string()),
                             ),
                         }
                         return;
@@ -12090,8 +12096,7 @@ fn start_rustymilk_visualizer(
         .dyn_into()?;
     let renderer = Rc::new(rustymilk_renderer(&canvas, texture_assets.clone())?);
     let analyzer = Rc::new(RefCell::new(
-        player_audio_element(document)
-            .and_then(|audio| RustyMilkAudioAnalyzer::new(&audio).ok()),
+        player_audio_element(document).and_then(|audio| RustyMilkAudioAnalyzer::new(&audio).ok()),
     ));
     let input_state = Rc::new(RefCell::new(RustyMilkInputState::default()));
     mount_rustymilk_mouse_input(&canvas, input_state.clone())?;
@@ -12290,11 +12295,7 @@ fn mount_rustymilk_buttons(
                         {
                             input.click();
                         } else {
-                            import_rustymilk_preset(
-                                &window,
-                                &document,
-                                imported_presets.clone(),
-                            );
+                            import_rustymilk_preset(&window, &document, imported_presets.clone());
                         }
                     }
                     "clear" => clear_rustymilk_library(
@@ -12314,11 +12315,9 @@ fn mount_rustymilk_buttons(
                         &imported_presets,
                         &favorite_presets,
                     ),
-                    "playlist" => cycle_rustymilk_playlist(
-                        &document,
-                        &imported_presets,
-                        &favorite_presets,
-                    ),
+                    "playlist" => {
+                        cycle_rustymilk_playlist(&document, &imported_presets, &favorite_presets)
+                    }
                     "rename-playlist" => rename_rustymilk_playlist(&window, &document),
                     "clear-playlist" => clear_rustymilk_playlist_filter(
                         &document,
@@ -12434,9 +12433,7 @@ fn mount_rustymilk_buttons(
                             input.click();
                         }
                     }
-                    _ => {
-                        cycle_rustymilk_preset(&document, &imported_presets, &favorite_presets)
-                    }
+                    _ => cycle_rustymilk_preset(&document, &imported_presets, &favorite_presets),
                 }
             },
         ));
@@ -12781,20 +12778,12 @@ fn set_rustymilk_active_preset(
             index,
         )));
     }
-    update_rustymilk_library_controls(
-        document,
-        panel,
-        imported_presets,
-        favorite_presets,
-        index,
-    );
+    update_rustymilk_library_controls(document, panel, imported_presets, favorite_presets, index);
     set_player_status(document, status);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rustymilk_imported_presets(
-    window: &web_sys::Window,
-) -> Vec<RustyMilkImportedPreset> {
+fn load_rustymilk_imported_presets(window: &web_sys::Window) -> Vec<RustyMilkImportedPreset> {
     let Some(storage) = window.local_storage().ok().flatten() else {
         return Vec::new();
     };
@@ -12942,11 +12931,7 @@ fn load_rustymilk_simple_setting(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rustymilk_simple_setting(
-    document: &web_sys::Document,
-    storage_key: &str,
-    value: &str,
-) {
+fn persist_rustymilk_simple_setting(document: &web_sys::Document, storage_key: &str, value: &str) {
     let Some(window) = document.default_view() else {
         return;
     };
@@ -13004,9 +12989,7 @@ fn load_rustymilk_playlists(window: &web_sys::Window) -> Vec<RustyMilkPlaylist> 
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_rustymilk_playlists_from_document(
-    panel: &web_sys::Element,
-) -> Vec<RustyMilkPlaylist> {
+fn load_rustymilk_playlists_from_document(panel: &web_sys::Element) -> Vec<RustyMilkPlaylist> {
     panel
         .owner_document()
         .and_then(|document| document.default_view())
@@ -13015,10 +12998,7 @@ fn load_rustymilk_playlists_from_document(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_rustymilk_playlists(
-    document: &web_sys::Document,
-    playlists: &[RustyMilkPlaylist],
-) {
+fn persist_rustymilk_playlists(document: &web_sys::Document, playlists: &[RustyMilkPlaylist]) {
     let Some(window) = document.default_view() else {
         return;
     };
@@ -13307,13 +13287,7 @@ fn toggle_rustymilk_favorite(
         }
     };
     persist_rustymilk_favorite_presets(document, &favorite_presets);
-    update_rustymilk_library_controls(
-        document,
-        &panel,
-        imported_presets,
-        &favorite_presets,
-        index,
-    );
+    update_rustymilk_library_controls(document, &panel, imported_presets, &favorite_presets, index);
     set_player_status(
         document,
         if added {
@@ -13419,8 +13393,7 @@ fn remove_rustymilk_active_preset(
         favorite_presets.borrow_mut().remove(&key);
         persist_rustymilk_imported_presets(document, &imported_presets);
         persist_rustymilk_favorite_presets(document, favorite_presets);
-        let next =
-            index.min(rustymilk_preset_count(&panel, &imported_presets).saturating_sub(1));
+        let next = index.min(rustymilk_preset_count(&panel, &imported_presets).saturating_sub(1));
         set_rustymilk_active_preset(
             document,
             &panel,
@@ -13574,7 +13547,10 @@ fn cycle_rustymilk_playlist(
             &format!("RustyMilk playlist: {}", playlist.name),
         );
     } else {
-        set_player_status(document, "Active RustyMilk playlist has no matching presets");
+        set_player_status(
+            document,
+            "Active RustyMilk playlist has no matching presets",
+        );
     }
 }
 
@@ -14648,12 +14624,7 @@ impl RustyMilkRenderer {
                     if index == 0 {
                         render_rustymilk_canvas_frame(context, canvas, &entry.frame, time);
                     } else {
-                        render_rustymilk_canvas_overlay_frame(
-                            context,
-                            canvas,
-                            &entry.frame,
-                            time,
-                        );
+                        render_rustymilk_canvas_overlay_frame(context, canvas, &entry.frame, time);
                     }
                     context.restore();
                 }
@@ -14846,8 +14817,7 @@ impl RustyMilkWebGlRenderer {
             web_sys::WebGl2RenderingContext::FRAGMENT_SHADER,
             RUSTYMILK_WARP_GRID_FRAGMENT_SHADER,
         )?;
-        let warp_program =
-            link_rustymilk_program(&gl, &warp_vertex_shader, &warp_fragment_shader)?;
+        let warp_program = link_rustymilk_program(&gl, &warp_vertex_shader, &warp_fragment_shader)?;
 
         let buffer = gl
             .create_buffer()
@@ -15128,8 +15098,7 @@ impl RustyMilkWebGlRenderer {
             source,
         )
         .ok()?;
-        let program =
-            link_rustymilk_program(&self.gl, &vertex_shader, &fragment_shader).ok()?;
+        let program = link_rustymilk_program(&self.gl, &vertex_shader, &fragment_shader).ok()?;
         *self.translated_program.borrow_mut() = Some(RustyMilkTranslatedProgram {
             program: program.clone(),
             source: source.to_string(),
@@ -15440,8 +15409,7 @@ impl RustyMilkWebGlRenderer {
             let Some(data_url) = data_url else {
                 continue;
             };
-            let Ok(texture) = create_rustymilk_texture_from_data_url(&self.gl, &data_url)
-            else {
+            let Ok(texture) = create_rustymilk_texture_from_data_url(&self.gl, &data_url) else {
                 continue;
             };
             self.named_textures
@@ -16611,8 +16579,7 @@ mod tests {
         assert_eq!(frame.shape_count, 2);
         assert_eq!(frame.waveform_count, 1);
         assert!(frame.primitives.iter().any(|primitive| {
-            primitive.mode == RustyMilkPrimitiveMode::TriangleFan
-                && primitive.vertices.len() >= 8
+            primitive.mode == RustyMilkPrimitiveMode::TriangleFan && primitive.vertices.len() >= 8
         }));
         assert!(frame.primitives.iter().any(|primitive| {
             primitive.mode == RustyMilkPrimitiveMode::LineStrip && primitive.vertices.len() >= 4
@@ -17083,7 +17050,10 @@ mod tests {
         let second = evaluate_rustymilk_equations("q1=rand(1000);", &second_vars).unwrap();
         assert_ne!(
             q1,
-            second.get("q1").and_then(RustyMilkValue::as_number).unwrap()
+            second
+                .get("q1")
+                .and_then(RustyMilkValue::as_number)
+                .unwrap()
         );
     }
 
@@ -17286,7 +17256,8 @@ mod tests {
         assert!(textured.contains("@group(0) @binding(3) var shaderTexture0: texture_2d<f32>;"));
         assert!(textured.contains("textureSample(shaderTexture0, shaderTextureSampler, uv).rgb"));
         assert!(
-            analyze_rustymilk_webgpu_shader_support("ret = tex2D(sampler_noise, uv).rgb;").supported
+            analyze_rustymilk_webgpu_shader_support("ret = tex2D(sampler_noise, uv).rgb;")
+                .supported
         );
         let ternary =
             create_translated_rustymilk_wgsl_shader("ret = q1 > 0.5 ? vec3(1.0) : vec3(0.0);");
@@ -17627,20 +17598,15 @@ mod tests {
             false,
         );
         let preset = &parsed.presets[0];
-        let borders = create_rustymilk_webgpu_screen_border_vertices(
-            &preset.base_values,
-            [0.7, 0.7, 0.7],
-        );
+        let borders =
+            create_rustymilk_webgpu_screen_border_vertices(&preset.base_values, [0.7, 0.7, 0.7]);
         assert_eq!(borders.len(), 288);
         assert_eq!(rounded_vec(&borders[2..6]), vec![1.0, 0.2, 0.3, 0.4]);
-        let motion = create_rustymilk_webgpu_motion_vector_vertices(
-            &preset.base_values,
-            [0.7, 0.7, 0.7],
-        );
+        let motion =
+            create_rustymilk_webgpu_motion_vector_vertices(&preset.base_values, [0.7, 0.7, 0.7]);
         assert_eq!(motion.len(), 24);
         assert_eq!(rounded_vec(&motion[2..6]), vec![0.1, 0.2, 0.3, 0.75]);
-        let fills =
-            create_rustymilk_webgpu_shape_fill_vertices(&preset.shapes, [0.7, 0.7, 0.7]);
+        let fills = create_rustymilk_webgpu_shape_fill_vertices(&preset.shapes, [0.7, 0.7, 0.7]);
         assert_eq!(fills.len(), 54);
         assert_eq!(rounded_vec(&fills[2..6]), vec![0.1, 0.2, 0.3, 0.4]);
         assert_eq!(rounded_vec(&fills[8..12]), vec![0.4, 0.5, 0.6, 0.2]);
@@ -17650,10 +17616,8 @@ mod tests {
             rounded_vec(&sprites[..6]),
             vec![-0.2, -0.1, 0.1, 0.2, 0.3, 0.4]
         );
-        let textured_sprite = create_rustymilk_webgpu_textured_sprite_vertices(
-            &preset.sprites[0],
-            [1.0, 1.0, 1.0],
-        );
+        let textured_sprite =
+            create_rustymilk_webgpu_textured_sprite_vertices(&preset.sprites[0], [1.0, 1.0, 1.0]);
         assert_eq!(textured_sprite.len(), 48);
         assert_eq!(
             rounded_vec(&textured_sprite[..8]),
@@ -18226,7 +18190,8 @@ mod tests {
             webgpu_gap.webgpu_shader_sections,
             vec!["comp_shader".to_string()]
         );
-        let summary = summarize_rustymilk_compatibility_matrix(&[entry, webgpu_ternary, webgpu_gap]);
+        let summary =
+            summarize_rustymilk_compatibility_matrix(&[entry, webgpu_ternary, webgpu_gap]);
         assert_eq!(summary.total_count, 3);
         assert_eq!(summary.webgpu_supported_count, 2);
         assert_eq!(summary.webgpu_unsupported_count, 1);
