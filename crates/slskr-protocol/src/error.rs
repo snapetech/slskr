@@ -28,6 +28,8 @@ pub enum DecodeError {
     },
     #[error("trailing bytes after decode: {0}")]
     TrailingBytes(usize),
+    #[error("invalid compressed payload for {0}")]
+    InvalidCompressedPayload(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

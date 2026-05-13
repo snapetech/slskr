@@ -14,8 +14,9 @@ host_endpoint_route_added=0
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 run_user="$(id -un)"
-host_veth="v-${namespace}h"
-ns_veth="v-${namespace}n"
+veth_id="$(printf '%s' "$namespace" | cksum | awk '{ printf "%08x", $1 }')"
+host_veth="v${veth_id:0:11}h"
+ns_veth="v${veth_id:0:11}n"
 wg_name="wg0"
 if [[ -n "${SLSKR_NETNS_HOST_IP:-}" || -n "${SLSKR_NETNS_IP:-}" || -n "${SLSKR_NETNS_SUBNET:-}" ]]; then
     host_ip="${SLSKR_NETNS_HOST_IP:-10.213.0.1}"
@@ -35,6 +36,7 @@ cleanup() {
     fi
     sudo ip netns pids "$namespace" 2>/dev/null | xargs -r sudo kill 2>/dev/null || true
     sudo ip netns del "$namespace" 2>/dev/null || true
+    sudo rm -rf "/etc/netns/$namespace" 2>/dev/null || true
     sudo ip link del "$host_veth" 2>/dev/null || true
     if [[ "$host_endpoint_route_added" == "1" && -n "${endpoint_ip:-}" ]]; then
         sudo ip route del "$endpoint_ip/32" 2>/dev/null || true
@@ -100,6 +102,8 @@ trap cleanup EXIT
 install_host_endpoint_route
 
 sudo ip netns add "$namespace"
+sudo mkdir -p "/etc/netns/$namespace"
+printf 'nameserver %s\n' "$gateway" | sudo tee "/etc/netns/$namespace/resolv.conf" >/dev/null
 sudo ip link add "$host_veth" type veth peer name "$ns_veth"
 sudo ip link set "$ns_veth" netns "$namespace"
 sudo ip addr add "$host_ip/24" dev "$host_veth"

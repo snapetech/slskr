@@ -9512,10 +9512,19 @@ async fn route_http_request_with_headers(
                 .and_then(|p| p.strip_suffix("/endpoint"))
                 .map(decoded_path_segment)
                 .unwrap_or_else(|| "unknown".to_owned());
-            let json = format!(
-                "{{\"username\":\"{}\",\"addressFamily\":\"IPv4\",\"address\":\"0.0.0.0\",\"port\":0}}",
-                json_escape(&username)
-            );
+            let json = if let Some(address) = test_user_endpoint_peer_address(state, &username) {
+                format!(
+                    "{{\"username\":\"{}\",\"addressFamily\":\"IPv4\",\"address\":\"{}\",\"port\":{}}}",
+                    json_escape(&username),
+                    address.ip,
+                    address.port
+                )
+            } else {
+                format!(
+                    "{{\"username\":\"{}\",\"addressFamily\":\"IPv4\",\"address\":\"0.0.0.0\",\"port\":0}}",
+                    json_escape(&username)
+                )
+            };
             Ok(routing::ok_response(json))
         }
 
@@ -17863,6 +17872,30 @@ async fn handle_plain_peer_messages(
             }
         }
     }
+    if matches!(message, PeerMessage::GetShareFileList) {
+        update_listeners(state, |snapshot| {
+            snapshot.share_list_requests += 1;
+            snapshot.last_event = Some("share_list_request".to_owned());
+        })
+        .await;
+        let entries = {
+            let shares = state.shares.read().await;
+            shares.entries.clone()
+        };
+        peer.send(&PeerMessage::SharedFileListResponse(
+            build_shared_file_list_payload(&entries)?,
+        ))
+        .await
+        .map_err(|error| format!("peer response send failed: {error}"))?;
+        update_listeners(state, |snapshot| {
+            snapshot.share_list_responses += 1;
+            snapshot.last_event = Some("share_list_response".to_owned());
+            snapshot.last_error = None;
+        })
+        .await;
+        time::sleep(Duration::from_secs(2)).await;
+        return Ok(());
+    }
     handle_peer_message(state, message, |response| async move {
         peer.send(&response)
             .await
@@ -22639,10 +22672,21 @@ fn build_folder_contents_payload(entries: &[FileEntry], folder: &str) -> Result<
 fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<BrowseEntry>, String> {
     let decompressed = decompress_zlib_payload(payload).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(&decompressed);
+    let mut entries = Vec::new();
+    parse_shared_file_list_section(&mut reader, &mut entries)?;
+    while !reader.is_empty() {
+        parse_shared_file_list_section(&mut reader, &mut entries)?;
+    }
+    Ok(entries)
+}
+
+fn parse_shared_file_list_section(
+    reader: &mut Reader<'_>,
+    entries: &mut Vec<BrowseEntry>,
+) -> Result<(), String> {
     let folder_count = reader
         .read_bounded_count("shared folders", 8)
         .map_err(|error| error.to_string())?;
-    let mut entries = Vec::new();
     for _ in 0..folder_count {
         let folder = reader.read_string().map_err(|error| error.to_string())?;
         let file_count = reader
@@ -22669,8 +22713,7 @@ fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<BrowseEntry>, St
             }
         }
     }
-    reader.finish().map_err(|error| error.to_string())?;
-    Ok(entries)
+    Ok(())
 }
 
 fn parse_folder_file_list_payload(

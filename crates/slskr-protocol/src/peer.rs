@@ -3,6 +3,8 @@ use crate::{
     frame::MessageFrame,
     primitives::{Reader, Writer},
 };
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use std::io::{Read, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -233,7 +235,7 @@ impl PeerMessage {
                 query: reader.read_string()?,
             },
             PeerCode::FileSearchResponse => {
-                Self::FileSearchResponse(decode_search_response(&mut reader)?)
+                Self::FileSearchResponse(decode_search_response_payload(&frame.payload)?)
             }
             PeerCode::UserInfoRequest => Self::UserInfoRequest,
             PeerCode::UserInfoResponse => Self::UserInfoResponse(decode_user_info(&mut reader)?),
@@ -315,8 +317,10 @@ impl PeerMessage {
                 PeerCode::FileSearchRequest
             }
             Self::FileSearchResponse(value) => {
-                encode_search_response(&mut writer, value)?;
-                PeerCode::FileSearchResponse
+                let mut inner = Writer::new();
+                encode_search_response(&mut inner, value)?;
+                let payload = compress_zlib(&inner.into_inner())?;
+                return Ok(MessageFrame::new(PeerCode::FileSearchResponse.as_u32(), payload));
             }
             Self::RoomInvitation(payload) => {
                 return Ok(MessageFrame::new(
@@ -477,6 +481,14 @@ fn decode_search_response(reader: &mut Reader<'_>) -> Result<FileSearchResponse,
     })
 }
 
+fn decode_search_response_payload(payload: &[u8]) -> Result<FileSearchResponse, DecodeError> {
+    let decompressed = decompress_zlib(payload)?;
+    let mut reader = Reader::new(&decompressed);
+    let response = decode_search_response(&mut reader)?;
+    reader.finish()?;
+    Ok(response)
+}
+
 fn encode_search_response(
     writer: &mut Writer,
     value: &FileSearchResponse,
@@ -489,6 +501,29 @@ fn encode_search_response(
     writer.write_u32_le(value.queue_length);
     writer.write_u32_le(value.unknown);
     encode_file_entries(writer, &value.private_results)
+}
+
+fn decompress_zlib(payload: &[u8]) -> Result<Vec<u8>, DecodeError> {
+    let mut decoder = ZlibDecoder::new(payload);
+    let mut output = Vec::new();
+    decoder
+        .read_to_end(&mut output)
+        .map_err(|_| DecodeError::InvalidCompressedPayload("file search response"))?;
+    Ok(output)
+}
+
+fn compress_zlib(payload: &[u8]) -> Result<Vec<u8>, EncodeError> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(payload)
+        .map_err(|_| EncodeError::LengthOverflow {
+            field: "zlib payload",
+            length: payload.len(),
+        })?;
+    encoder.finish().map_err(|_| EncodeError::LengthOverflow {
+        field: "zlib payload",
+        length: payload.len(),
+    })
 }
 
 fn decode_file_entries(reader: &mut Reader<'_>) -> Result<Vec<FileEntry>, DecodeError> {

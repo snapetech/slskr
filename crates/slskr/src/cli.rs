@@ -41,6 +41,7 @@ where
         Some("indirect-peer-probe") => indirect_peer_probe().await,
         Some("plain-peer-probe") => plain_peer_probe().await,
         Some("browse-peer-probe") => browse_peer_probe().await,
+        Some("search-peer-probe") => search_peer_probe().await,
         Some("download-peer-probe") => download_peer_probe().await,
         Some("private-message-probe") => private_message_probe().await,
         Some("room-message-probe") => room_message_probe().await,
@@ -94,6 +95,7 @@ where
             Some("peer-address") => vec!["peer-address-probe"],
             Some("plain-peer") => vec!["plain-peer-probe"],
             Some("browse-peer") => vec!["browse-peer-probe"],
+            Some("search-peer") => vec!["search-peer-probe"],
             Some("download-peer") => vec!["download-peer-probe"],
             Some("private-message") => vec!["private-message-probe"],
             Some("room-message") => vec!["room-message-probe"],
@@ -127,6 +129,7 @@ fn usage() -> &'static str {
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe peer-address
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe plain-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe browse-peer
+  SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> SLSK_SEARCH_QUERY=<query> slskr probe search-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> SLSK_DOWNLOAD_FILENAME='Share\\File.txt' slskr probe download-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_MESSAGE_USERNAME=<user2> SLSK_MESSAGE_PASSWORD=<pass2> slskr probe private-message
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr probe room-message
@@ -617,6 +620,62 @@ async fn browse_peer_probe() -> Result<(), String> {
         redact_username(&peer_username),
         payload.len(),
         preview
+    );
+    Ok(())
+}
+
+async fn search_peer_probe() -> Result<(), String> {
+    let username = required_env_any(&["SLSK_USERNAME"])?;
+    let password = required_env_any(&["SLSK_PASSWORD"])?;
+    let peer_username = required_env_any(&["SLSK_SEARCH_PEER_USERNAME", "SLSK_PEER_USERNAME"])?;
+    let query = required_env_any(&["SLSK_SEARCH_QUERY"])?;
+    let expected = optional_env("SLSK_SEARCH_EXPECTED").unwrap_or_else(|| query.clone());
+    let server_address =
+        std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
+    let timeout = Duration::from_secs(env_u64("SLSK_SEARCH_PROBE_TIMEOUT_SECONDS", 20)?);
+    let token = env_u32("SLSK_SEARCH_TOKEN", 0x51ab_5001)?;
+
+    let address = resolve_peer_address(
+        &username,
+        &password,
+        &peer_username,
+        &server_address,
+        timeout,
+    )
+    .await?;
+    let port = peer_regular_port(&address)?;
+    let host = optional_env("SLSK_SEARCH_HOST_OVERRIDE").unwrap_or_else(|| address.ip.to_string());
+    let mut peer = connect_plain_peer_messages(&username, &host, port, timeout).await?;
+    peer.send(&PeerMessage::FileSearchRequest {
+        token,
+        query: query.clone(),
+    })
+    .await
+    .map_err(|error| format!("search request failed: {error}"))?;
+    let response = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "search response timed out".to_owned())?
+        .map_err(|error| format!("search response failed: {error}"))?;
+    let PeerMessage::FileSearchResponse(response) = response else {
+        return Err(format!("unexpected search response: {response:?}"));
+    };
+    let found = response
+        .results
+        .iter()
+        .chain(response.private_results.iter())
+        .any(|entry| entry.filename.contains(&expected));
+    if !found {
+        return Err(format!(
+            "search response missing expected fixture; expected={expected}; results={:?}; private_results={:?}",
+            response.results, response.private_results
+        ));
+    }
+
+    println!(
+        "search peer probe completed; peer={}; results={}; private_results={}",
+        redact_username(&peer_username),
+        response.results.len(),
+        response.private_results.len()
     );
     Ok(())
 }

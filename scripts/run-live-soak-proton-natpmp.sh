@@ -5,6 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 credential_file="${SLSKR_SOAK_CREDENTIAL_FILE:-$repo_root/.secrets/live-soak-account.env}"
 log_file="${1:-$repo_root/target/live-soak/live-soak-proton-natpmp-$(date +%Y%m%d-%H%M%S).log}"
 
+if [[ ! -f "$credential_file" && -f "$repo_root/.secrets/pool-listener-account.env" ]]; then
+    credential_file="$repo_root/.secrets/pool-listener-account.env"
+fi
+
 gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
 lifetime="${PROTON_NATPMP_LIFETIME:-60}"
 renew_seconds="${PROTON_NATPMP_RENEW_SECONDS:-45}"

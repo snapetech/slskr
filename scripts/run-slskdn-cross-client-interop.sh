@@ -77,6 +77,25 @@ process.stdin.on('end', () => {
 " "$expression"
 }
 
+json_find_string() {
+  local needle="$1"
+  node -e "
+const needle = process.argv[1];
+let data = '';
+process.stdin.on('data', chunk => data += chunk);
+process.stdin.on('end', () => {
+  const root = JSON.parse(data);
+  const visit = value => {
+    if (typeof value === 'string') return value.includes(needle);
+    if (Array.isArray(value)) return value.some(visit);
+    if (value && typeof value === 'object') return Object.values(value).some(visit);
+    return false;
+  };
+  process.exit(visit(root) ? 0 : 1);
+});
+" "$needle"
+}
+
 auth_get() {
   local url="$1"
   curl -fsS -H "Authorization: Bearer $api_token" -H "X-API-Key: integration-test" "$url"
@@ -105,6 +124,47 @@ try_request() {
     echo "$label failed: $output" >&2
   fi
   return "$status"
+}
+
+record_check() {
+  local check="$1"
+  local status="$2"
+  local detail="$3"
+  printf '%s\t%s\t%s\t%s\n' "$(date -Is)" "$check" "$status" "$detail" | tee -a "$result_file"
+}
+
+wait_json_contains() {
+  local label="$1"
+  local url="$2"
+  local needle="$3"
+  local deadline=$((SECONDS + timeout_seconds))
+  local body=""
+  while ((SECONDS < deadline)); do
+    if body="$(auth_get "$url" 2>/dev/null)" && printf '%s' "$body" | json_find_string "$needle" 2>/dev/null; then
+      record_check "$label" ok "matched=$needle"
+      return 0
+    fi
+    sleep 2
+  done
+  record_check "$label" fail "timeout waiting for $needle last=${body:-none}"
+  return 1
+}
+
+wait_raw_contains() {
+  local label="$1"
+  local url="$2"
+  local needle="$3"
+  local deadline=$((SECONDS + timeout_seconds))
+  local body=""
+  while ((SECONDS < deadline)); do
+    if body="$(auth_get "$url" 2>/dev/null)" && [[ "$body" == *"$needle"* ]]; then
+      record_check "$label" ok "matched=$needle"
+      return 0
+    fi
+    sleep 2
+  done
+  record_check "$label" fail "timeout waiting for $needle last=${body:-none}"
+  return 1
 }
 
 url_escape() {
@@ -236,8 +296,8 @@ slskdn_app="$work_dir/slskdn-app"
 slskdn_share="$slskdn_app/shares"
 mkdir -p "$slskr_state" "$slskr_share" "$slskdn_app/config" "$slskdn_app/downloads" "$slskdn_app/incomplete" "$slskdn_share"
 
-slskr_fixture_name="slskr-to-slskdn-$(date -u +%Y%m%d%H%M%S).bin"
-slskdn_fixture_name="slskdn-to-slskr-$(date -u +%Y%m%d%H%M%S).bin"
+slskr_fixture_name="slskr-to-slskdn-$(date -u +%Y%m%d%H%M%S).flac"
+slskdn_fixture_name="slskdn-to-slskr-$(date -u +%Y%m%d%H%M%S).flac"
 printf 'slskr fixture %s\n' "$(date -u +%FT%TZ)" >"$slskr_share/$slskr_fixture_name"
 printf 'slskdn fixture %s\n' "$(date -u +%FT%TZ)" >"$slskdn_share/$slskdn_fixture_name"
 slskr_fixture_size="$(wc -c <"$slskr_share/$slskr_fixture_name" | tr -d ' ')"
@@ -285,6 +345,7 @@ shares:
 feature:
   identityFriends: true
   collectionsSharing: true
+  streaming: true
 soulseek:
   address: $server_host
   port: $server_port
@@ -428,6 +489,156 @@ probe_peer_address() {
 
 printf 'timestamp\tcheck\tstatus\tdetail\n' >"$result_file"
 
+run_runtime_protocol_checks() {
+  local session listeners app endpoint escaped_slskr escaped_slskdn
+  session="$(auth_get "http://127.0.0.1:$slskr_http_port/api/v0/session")"
+  if [[ "$(printf '%s' "$session" | json_get state 2>/dev/null || true)" == "connected" ]]; then
+    record_check runtime-slskr-session ok "state=connected"
+  else
+    record_check runtime-slskr-session fail "$session"
+    return 1
+  fi
+
+  listeners="$(auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners")"
+  if [[ "$listeners" == *"$slskr_listen_port"* ]]; then
+    record_check network-slskr-listener ok "port=$slskr_listen_port"
+  else
+    record_check network-slskr-listener fail "$listeners"
+    return 1
+  fi
+
+  app="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/application")"
+  if [[ "$(printf '%s' "$app" | json_get server.isLoggedIn 2>/dev/null || true)" == "true" ]]; then
+    record_check runtime-slskdn-session ok "server.isLoggedIn=true"
+  else
+    record_check runtime-slskdn-session fail "$app"
+    return 1
+  fi
+  if [[ "$app" == *"$slskdn_fixture_name"* || "$app" == *"\"files\":1"* ]]; then
+    record_check runtime-slskdn-shares ok "fixture=$slskdn_fixture_name"
+  else
+    record_check runtime-slskdn-shares fail "$app"
+    return 1
+  fi
+
+  escaped_slskr="$(url_escape "$slskr_username")"
+  escaped_slskdn="$(url_escape "$slskdn_username")"
+  endpoint="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/endpoint")"
+  if [[ "$endpoint" == *"$slskr_listen_port"* ]]; then
+    record_check network-slskdn-resolves-slskr ok "endpoint=$endpoint"
+  else
+    record_check network-slskdn-resolves-slskr fail "$endpoint"
+    return 1
+  fi
+
+  endpoint="$(auth_get "http://127.0.0.1:$slskr_http_port/api/v0/users/$escaped_slskdn/endpoint")"
+  if [[ "$endpoint" == *"$slskdn_listen_port"* ]]; then
+    record_check network-slskr-resolves-slskdn ok "endpoint=$endpoint"
+  else
+    record_check network-slskr-resolves-slskdn fail "$endpoint"
+    return 1
+  fi
+}
+
+run_browse_interop_checks() {
+  local escaped_slskr escaped_slskdn body
+  escaped_slskr="$(url_escape "$slskr_username")"
+  escaped_slskdn="$(url_escape "$slskdn_username")"
+
+  body="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/browse")"
+  if printf '%s' "$body" | json_find_string "$slskr_fixture_name" 2>/dev/null; then
+    record_check protocol-slskdn-browses-slskr ok "fixture=$slskr_fixture_name"
+  else
+    record_check protocol-slskdn-browses-slskr fail "$body"
+    return 1
+  fi
+
+  auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/users/$escaped_slskdn/browse/request" '{}' >/dev/null
+  wait_json_contains protocol-slskr-browses-slskdn "http://127.0.0.1:$slskr_http_port/api/v0/users/$escaped_slskdn/browse" "$slskdn_fixture_name"
+}
+
+run_search_interop_checks() {
+  local escaped_slskr escaped_slskdn
+  escaped_slskr="$(url_escape "$slskr_username")"
+  escaped_slskdn="$(url_escape "$slskdn_username")"
+
+  SLSK_USERNAME="$slskr_username" \
+  SLSK_PASSWORD="$slskr_password" \
+  SLSK_SERVER="$server_endpoint" \
+  SLSK_PEER_USERNAME="$slskdn_username" \
+  SLSK_SEARCH_QUERY="$slskdn_fixture_name" \
+  SLSK_SEARCH_EXPECTED="$slskdn_fixture_name" \
+  SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
+  SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
+    timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1
+  record_check protocol-slskr-searches-slskdn ok "query=$slskdn_fixture_name"
+
+  SLSK_USERNAME="$slskdn_username" \
+  SLSK_PASSWORD="$slskdn_password" \
+  SLSK_SERVER="$server_endpoint" \
+  SLSK_PEER_USERNAME="$slskr_username" \
+  SLSK_SEARCH_QUERY="$slskr_fixture_name" \
+  SLSK_SEARCH_EXPECTED="$slskr_fixture_name" \
+  SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
+  SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
+    timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1
+  record_check protocol-slskdn-searches-slskr ok "query=$slskr_fixture_name"
+
+  auth_get "http://127.0.0.1:$slskr_http_port/api/v0/users/$escaped_slskdn/browse/status" >>"$diag_file" 2>&1 || true
+  auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/browse/status" >>"$diag_file" 2>&1 || true
+}
+
+run_message_interop_checks() {
+  local escaped_slskr escaped_slskdn slskr_message slskdn_message
+  escaped_slskr="$(url_escape "$slskr_username")"
+  escaped_slskdn="$(url_escape "$slskdn_username")"
+  slskr_message="slskr-to-slskdn-message-$(date -u +%Y%m%d%H%M%S)"
+  slskdn_message="slskdn-to-slskr-message-$(date -u +%Y%m%d%H%M%S)"
+
+  auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/messages" "{\"username\":\"$slskdn_username\",\"body\":\"$slskr_message\"}" >/dev/null
+  wait_json_contains protocol-slskr-message-dispatch "http://127.0.0.1:$slskr_http_port/api/v0/messages/$escaped_slskdn" "$slskr_message"
+
+  auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/conversations/$escaped_slskr" "\"$slskdn_message\"" >/dev/null
+  record_check protocol-slskdn-message-dispatch ok "target=$slskr_username"
+
+  SLSK_USERNAME="$slskr_username" \
+  SLSK_PASSWORD="$slskr_password" \
+  SLSK_MESSAGE_USERNAME="$slskdn_username" \
+  SLSK_MESSAGE_PASSWORD="$slskdn_password" \
+  SLSK_SERVER="$server_endpoint" \
+  SLSK_MESSAGE_PROBE_TIMEOUT_SECONDS=30 \
+    timeout 60 cargo run -q -p slskr -- probe private-message >>"$diag_file" 2>&1
+  record_check protocol-private-message-server-roundtrip ok "sender=$slskr_username receiver=$slskdn_username"
+}
+
+run_mesh_runtime_checks() {
+  local health stats transport ticket
+  health="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/health")"
+  record_check runtime-slskdn-mesh-health ok "$(printf '%s' "$health" | tr '\n\t' '  ')"
+
+  stats="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/stats")"
+  record_check runtime-slskdn-mesh-stats ok "$(printf '%s' "$stats" | tr '\n\t' '  ')"
+
+  transport="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/transport")"
+  record_check network-slskdn-mesh-transport ok "$(printf '%s' "$transport" | tr '\n\t' '  ')"
+
+  ticket="$(auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/mesh-streams/tickets" "{\"contentId\":\"interop-content\",\"peerId\":\"$slskr_username\",\"filename\":\"Interop/Test.flac\",\"expectedSize\":0}")"
+  if [[ "$ticket" == *"\"source\":\"mesh\""* && "$ticket" == *"streamUrl"* ]]; then
+    record_check runtime-slskdn-mesh-stream-ticket ok "$ticket"
+  else
+    record_check runtime-slskdn-mesh-stream-ticket fail "$ticket"
+    return 1
+  fi
+
+  ticket="$(auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/mesh-streams/tickets" "{\"contentId\":\"interop-content\",\"filename\":\"Interop/Test.flac\",\"peerId\":\"$slskdn_username\"}")"
+  if [[ "$ticket" == *"streamUrl"* ]]; then
+    record_check runtime-slskr-mesh-stream-ticket ok "$ticket"
+  else
+    record_check runtime-slskr-mesh-stream-ticket fail "$ticket"
+    return 1
+  fi
+}
+
 probe_peer_address slskr "$slskr_username" || true
 probe_peer_address slskdn "$slskdn_username" || true
 
@@ -489,8 +700,13 @@ record_final_diagnostics() {
 }
 
 status=0
+run_runtime_protocol_checks || status=1
+run_browse_interop_checks || status=1
 run_slskr_to_slskdn_download || status=1
 run_slskdn_to_slskr_download || status=1
+run_search_interop_checks || status=1
+run_message_interop_checks || status=1
+run_mesh_runtime_checks || status=1
 record_final_diagnostics
 
 if ((soak_seconds > 0)); then
