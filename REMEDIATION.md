@@ -434,7 +434,7 @@ existing rows; add a new dated entry.
 - **2026-05-04** — Phase 8.1–8.3 complete. README/PLAN/docs now describe the
   current single-node daemon reality: plain WebSocket events, partial web UI,
   default-off SQLite search persistence, configurable rate limits, and descoped
-  SignalR/GraphQL/SSE/distributed-theater surfaces.
+  SignalR/GraphQL/SSE/distributed compatibility surfaces.
 - **2026-05-13** — Phase 8.4 complete. Deleted the archived prior-agent doc
   lake after the one-week cooldown elapsed.
 - **2026-05-04** — Follow-up cleanup. Removed the remaining fake SSE route

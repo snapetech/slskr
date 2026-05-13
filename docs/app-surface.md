@@ -246,7 +246,7 @@ report 290/290 canonical WebUI routes, the share TSV mirror is toggleable, the
 event APIs share one topic taxonomy, and SQLite write-through/hydration covers
 the current compatibility stores.
 
-Open app-surface work is now production hardening rather than route scaffolding:
+Open app-surface work is now production hardening rather than endpoint enumeration:
 
 - decide when default-off SQLite persistence is ready to become the default,
   including migration/backfill policy, operator rollback guidance, and soak
