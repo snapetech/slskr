@@ -2069,6 +2069,37 @@ impl TransferQueue {
             .cloned()
     }
 
+    fn accept_pending_remote_upload_request(
+        &mut self,
+        username: &str,
+        filename: &str,
+        token: u32,
+        size: Option<u64>,
+    ) -> Option<TransferEntry> {
+        let entry = self.entries.iter_mut().find(|entry| {
+            entry.direction == 0
+                && entry.peer_username.as_deref() == Some(username)
+                && entry.filename == filename
+                && entry.local_path.is_some()
+                && entry.status == "queued"
+                && entry.reason.as_deref().map(is_remote_queue_response).unwrap_or(false)
+        })?;
+        entry.token = token;
+        if size.is_some() {
+            entry.size = size;
+        }
+        entry.status = "accepted".to_owned();
+        entry.reason = None;
+        entry.updated_at = unix_timestamp();
+        if let Err(error) = append_transfer_event(&self.events_path, entry) {
+            self.events_error = Some(error);
+        }
+        let entry = entry.clone();
+        self.persist_state();
+        self.updated_at = unix_timestamp();
+        Some(entry)
+    }
+
     fn active_count_excluding(&self, id: Option<u64>) -> usize {
         self.entries
             .iter()
@@ -17791,7 +17822,11 @@ async fn handle_inbound_file_transfer(
         transfers.update_status(transfer.id, "in_progress", None, None);
     }
 
-    let result = upload_file_transfer_with_connection(state, &transfer, &mut file).await;
+    let result = if transfer.direction == 0 {
+        download_file_transfer_with_connection(state, &transfer, &mut file).await
+    } else {
+        upload_file_transfer_with_connection(state, &transfer, &mut file).await
+    };
     let (status, bytes_transferred, size, reason) = match result {
         Ok((bytes_transferred, size)) => ("succeeded", bytes_transferred, Some(size), None),
         Err(error) => (
@@ -17820,6 +17855,12 @@ async fn handle_plain_peer_messages(
                     return Ok(());
                 }
             }
+        } else if request.direction == 1 {
+            if let Some(username) = peer_username.as_deref() {
+                if handle_queued_upload_request(state, &mut peer, username, request).await? {
+                    return Ok(());
+                }
+            }
         }
     }
     handle_peer_message(state, message, |response| async move {
@@ -17828,6 +17869,41 @@ async fn handle_plain_peer_messages(
             .map_err(|error| format!("peer response send failed: {error}"))
     })
     .await
+}
+
+async fn handle_queued_upload_request(
+    state: &AppState,
+    peer: &mut PeerMessageConnection<TcpStream>,
+    username: &str,
+    request: &TransferRequest,
+) -> Result<bool, String> {
+    if !state.config.transfer_allow_inbound || !transfer_capacity_available(state, None).await {
+        return Ok(false);
+    }
+    let accepted = {
+        let mut transfers = state.transfers.write().await;
+        transfers.accept_pending_remote_upload_request(
+            username,
+            &request.filename,
+            request.token,
+            request.size,
+        )
+    };
+    let Some(accepted) = accepted else {
+        return Ok(false);
+    };
+    peer.send(&PeerMessage::TransferResponse(TransferResponse::Allowed {
+        token: request.token,
+        size: accepted.size,
+    }))
+    .await
+    .map_err(|error| format!("queued upload response send failed: {error}"))?;
+    update_listeners(state, |snapshot| {
+        snapshot.last_event = Some("transfer_queued_upload_accepted".to_owned());
+        snapshot.last_error = None;
+    })
+    .await;
+    Ok(true)
 }
 
 async fn handle_queued_download_request(
@@ -18437,6 +18513,44 @@ async fn connect_session(
         update_session(state, |snapshot| {
             snapshot.state = "error";
             snapshot.last_error = Some(format!("set wait port failed: {error}"));
+            snapshot.supporter = None;
+        })
+        .await;
+        return false;
+    }
+    if let Err(error) = new_session
+        .send_server_message(ServerMessage::SetStatus { status: 2 })
+        .await
+    {
+        update_session(state, |snapshot| {
+            snapshot.state = "error";
+            snapshot.last_error = Some(format!("set status failed: {error}"));
+            snapshot.supporter = None;
+        })
+        .await;
+        return false;
+    }
+    let (folders, files) = {
+        let shares = state.shares.read().await;
+        let files = u32::try_from(shares.entries.len()).unwrap_or(u32::MAX);
+        let folders = u32::try_from(
+            shares
+                .entries
+                .iter()
+                .map(|entry| virtual_folder(&entry.filename))
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+        )
+        .unwrap_or(u32::MAX);
+        (folders, files)
+    };
+    if let Err(error) = new_session
+        .send_server_message(ServerMessage::SharedFoldersFiles { folders, files })
+        .await
+    {
+        update_session(state, |snapshot| {
+            snapshot.state = "error";
+            snapshot.last_error = Some(format!("share count update failed: {error}"));
             snapshot.supporter = None;
         })
         .await;

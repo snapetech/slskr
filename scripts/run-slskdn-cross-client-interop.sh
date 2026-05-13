@@ -24,8 +24,12 @@ timeout_seconds="${SLSKR_CROSS_CLIENT_TIMEOUT_SECONDS:-240}"
 soak_seconds="${SLSKR_CROSS_CLIENT_SOAK_SECONDS:-30}"
 work_dir="${SLSKR_CROSS_CLIENT_WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskdn-interop.XXXXXX")}"
 output_dir="${SLSKR_INTEROP_OUTPUT_DIR:-$repo_root/target/live-interop}"
+server_host="${SLSKR_CROSS_CLIENT_SERVER_HOST:-${SLSK_SERVER_ADDRESS:-vps.slsknet.org}}"
+server_port="${SLSKR_CROSS_CLIENT_SERVER_PORT:-${SLSK_SERVER_PORT:-2271}}"
+server_endpoint="${SLSKR_CROSS_CLIENT_SERVER:-$server_host:$server_port}"
 mkdir -p "$work_dir" "$output_dir"
 result_file="$output_dir/slskr-slskdn-cross-client-interop.tsv"
+diag_file="$work_dir/diagnostics.log"
 
 pick_free_port() {
   node -e "const net=require('net'); const s=net.createServer(); s.listen(0,'127.0.0.1',()=>{console.log(s.address().port); s.close();});"
@@ -176,10 +180,49 @@ discover_slskdn_binary() {
   return 1
 }
 
+slskdn_binary_has_endpoint_overrides() {
+  local binary="$1"
+  local dll="${binary}.dll"
+  if grep -Fq "SLSKDN_TEST_USER_ENDPOINT_OVERRIDES" < <(strings "$binary" 2>/dev/null); then
+    return 0
+  fi
+  if grep -Fq "SLSKDN_TEST_USER_ENDPOINT_OVERRIDES" < <(strings -el "$binary" 2>/dev/null); then
+    return 0
+  fi
+  if [[ -f "$dll" ]] && grep -Fq "SLSKDN_TEST_USER_ENDPOINT_OVERRIDES" < <(strings "$dll" 2>/dev/null); then
+    return 0
+  fi
+  if [[ -f "$dll" ]] && grep -Fq "SLSKDN_TEST_USER_ENDPOINT_OVERRIDES" < <(strings -el "$dll" 2>/dev/null); then
+    return 0
+  fi
+  return 1
+}
+
+build_slskdn_binary() {
+  local slskdn_root="$repo_root/../slskdn"
+  local project="$slskdn_root/src/slskd/slskd.csproj"
+  if [[ ! -f "$project" ]]; then
+    return 1
+  fi
+  echo "building slskdN interop binary with endpoint override support" >&2
+  dotnet build "$project" -c Release >/dev/null
+}
+
 slskdn_binary="$(discover_slskdn_binary || true)"
 if [[ -z "$slskdn_binary" ]]; then
   echo "slskdN binary not found; set SLSKDN_BINARY_PATH or build ../slskdn" >&2
   exit 2
+fi
+if ! slskdn_binary_has_endpoint_overrides "$slskdn_binary"; then
+  build_slskdn_binary || {
+    echo "slskdN binary lacks SLSKDN_TEST_USER_ENDPOINT_OVERRIDES support and rebuild failed" >&2
+    exit 2
+  }
+  slskdn_binary="$(discover_slskdn_binary || true)"
+  if [[ -z "$slskdn_binary" ]] || ! slskdn_binary_has_endpoint_overrides "$slskdn_binary"; then
+    echo "rebuilt slskdN binary still lacks SLSKDN_TEST_USER_ENDPOINT_OVERRIDES support" >&2
+    exit 2
+  fi
 fi
 
 slskr_http_port="$(pick_port)"
@@ -220,6 +263,7 @@ cleanup() {
 trap cleanup EXIT
 
 cat >"$slskdn_app/config/slskd.yml" <<YAML
+debug: true
 web:
   port: $slskdn_http_port
   address: 127.0.0.1
@@ -242,8 +286,9 @@ feature:
   identityFriends: true
   collectionsSharing: true
 soulseek:
-  address: ${SLSK_SERVER_ADDRESS:-vps.slsknet.org}
-  port: ${SLSK_SERVER_PORT:-2271}
+  address: $server_host
+  port: $server_port
+  diagnostic_level: debug
   username: "$slskdn_username"
   password: "$slskdn_password"
   listen_ip_address: 0.0.0.0
@@ -253,6 +298,7 @@ flags:
 YAML
 
 (
+  export SLSK_SERVER="$server_endpoint"
   export SLSKR_HTTP_BIND="127.0.0.1:$slskr_http_port"
   export SLSKR_STATE_DIR="$slskr_state"
   export SLSK_USERNAME="$slskr_username"
@@ -278,6 +324,14 @@ slskr_pid="$!"
   exec "$slskdn_binary" --config "$slskdn_app/config/slskd.yml" --app-dir "$slskdn_app"
 ) >"$slskdn_log" 2>&1 &
 slskdn_pid="$!"
+
+{
+  printf 'server_endpoint=%s\n' "$server_endpoint"
+  printf 'slskr_http=127.0.0.1:%s slskr_listen=127.0.0.1:%s\n' "$slskr_http_port" "$slskr_listen_port"
+  printf 'slskdn_http=127.0.0.1:%s slskdn_listen=127.0.0.1:%s\n' "$slskdn_http_port" "$slskdn_listen_port"
+  printf 'slskr_endpoint_override=%s=127.0.0.1:%s\n' "$slskdn_username" "$slskdn_listen_port"
+  printf 'slskdn_endpoint_override=%s=127.0.0.1:%s\n' "$slskr_username" "$slskr_listen_port"
+} >"$diag_file"
 
 wait_slskr_connected() {
   local deadline=$((SECONDS + timeout_seconds))
@@ -316,6 +370,17 @@ wait_slskdn_connected() {
 wait_slskr_connected
 wait_slskdn_connected
 
+{
+  printf '\n[session]\n'
+  auth_get "http://127.0.0.1:$slskr_http_port/api/v0/session" || true
+  printf '\n[listeners]\n'
+  auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners" || true
+  printf '\n[slskdn-application]\n'
+  auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/application" || true
+  printf '\n[slskdn-endpoint:slskr]\n'
+  auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$slskr_username/endpoint" || true
+} >>"$diag_file" 2>&1
+
 try_request slskr-share-rescan auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/shares/rescan" '{}' >/dev/null || true
 try_request slskdn-share-rescan auth_put_empty "http://127.0.0.1:$slskdn_http_port/api/v0/shares" >/dev/null \
   || try_request slskdn-share-rescan-post auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/shares" '{}' >/dev/null \
@@ -339,7 +404,32 @@ wait_for_file() {
   return 1
 }
 
+probe_peer_address() {
+  local label="$1"
+  local peer_username="$2"
+  if [[ -z "$upstream_username" || -z "$upstream_password" ]]; then
+    printf '[peer-address:%s] skipped: no upstream probe credentials\n' "$label" >>"$diag_file"
+    return 0
+  fi
+  {
+    printf '\n[peer-address:%s]\n' "$label"
+    SLSK_USERNAME="$upstream_username" \
+    SLSK_PASSWORD="$upstream_password" \
+    SLSK_SERVER="$server_endpoint" \
+    SLSK_PEER_USERNAME="$peer_username" \
+    SLSK_PEER_ADDRESS_PROBE_ATTEMPTS=1 \
+    SLSK_PEER_ADDRESS_PROBE_TIMEOUT_SECONDS=15 \
+      timeout 45 cargo run -q -p slskr -- probe peer-address
+  } >>"$diag_file" 2>&1 || {
+    printf '[peer-address:%s] failed\n' "$label" >>"$diag_file"
+    return 1
+  }
+}
+
 printf 'timestamp\tcheck\tstatus\tdetail\n' >"$result_file"
+
+probe_peer_address slskr "$slskr_username" || true
+probe_peer_address slskdn "$slskdn_username" || true
 
 run_slskdn_to_slskr_download() {
   local created transfer_id status bytes transfer_json download_path
@@ -387,9 +477,21 @@ run_slskr_to_slskdn_download() {
   return 1
 }
 
+record_final_diagnostics() {
+  {
+    printf '\n[final-session]\n'
+    auth_get "http://127.0.0.1:$slskr_http_port/api/v0/session" || true
+    printf '\n[final-listeners]\n'
+    auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners" || true
+    printf '\n[final-slskdn-endpoint:slskr]\n'
+    auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$slskr_username/endpoint" || true
+  } >>"$diag_file" 2>&1
+}
+
 status=0
 run_slskr_to_slskdn_download || status=1
 run_slskdn_to_slskr_download || status=1
+record_final_diagnostics
 
 if ((soak_seconds > 0)); then
   sleep "$soak_seconds"

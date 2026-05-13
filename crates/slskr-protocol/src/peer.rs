@@ -245,7 +245,7 @@ impl PeerMessage {
                 let direction = reader.read_u32_le()?;
                 let token = reader.read_u32_le()?;
                 let filename = reader.read_string()?;
-                let size = if direction == 1 && !reader.is_empty() {
+                let size = if !reader.is_empty() {
                     Some(reader.read_u64_le()?)
                 } else {
                     None
@@ -574,4 +574,34 @@ fn encode_transfer_response(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transfer_request_decodes_optional_size_for_download_direction() {
+        let mut writer = Writer::new();
+        writer.write_u32_le(0);
+        writer.write_u32_le(123);
+        writer.write_string("shares\\file.bin").unwrap();
+        writer.write_u64_le(456);
+
+        let decoded = PeerMessage::decode(MessageFrame::new(
+            PeerCode::TransferRequest.as_u32(),
+            writer.into_inner(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            decoded,
+            PeerMessage::TransferRequest(TransferRequest {
+                direction: 0,
+                token: 123,
+                filename: "shares\\file.bin".to_owned(),
+                size: Some(456),
+            })
+        );
+    }
 }
