@@ -1,7 +1,8 @@
 use slskr_client::{
     search::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
-        SearchTarget, ShareIndex, TimedSearchResults,
+        SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
+        WishlistSearchSchedulerOptions,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -132,6 +133,85 @@ fn search_results_reject_non_search_message() {
         .unwrap_err();
 
     assert!(matches!(error, ClientError::UnexpectedSearchMessage(_)));
+}
+
+#[test]
+fn wishlist_scheduler_uses_server_interval_with_positive_guards() {
+    assert!(matches!(
+        WishlistSearchSchedulerOptions::new(Duration::ZERO, None),
+        Err(ClientError::InvalidInterval {
+            field: "minimum_interval"
+        })
+    ));
+    assert!(matches!(
+        WishlistSearchSchedulerOptions::new(Duration::from_secs(1), Some(Duration::ZERO)),
+        Err(ClientError::InvalidInterval {
+            field: "override_interval"
+        })
+    ));
+
+    let options = WishlistSearchSchedulerOptions::new(Duration::from_secs(30), None).unwrap();
+    let mut scheduler = WishlistSearchScheduler::new(
+        [" rare ".to_owned(), "".to_owned(), "mix".to_owned()],
+        options,
+    )
+    .unwrap();
+
+    assert_eq!(scheduler.interval(), Duration::from_secs(30));
+    assert!(scheduler.apply_server_message(&ServerMessage::WishlistInterval { seconds: 120 }));
+    assert_eq!(scheduler.interval(), Duration::from_secs(120));
+    assert!(!scheduler.apply_server_message(&ServerMessage::ServerPing));
+    assert_eq!(
+        scheduler.next_search_message(7),
+        Some(ServerMessage::WishlistSearch(SearchRequest {
+            token: 7,
+            query: "rare".to_owned(),
+        }))
+    );
+    assert_eq!(
+        scheduler.next_search_message(8),
+        Some(ServerMessage::WishlistSearch(SearchRequest {
+            token: 8,
+            query: "mix".to_owned(),
+        }))
+    );
+}
+
+#[test]
+fn wishlist_scheduler_override_wins_but_respects_minimum() {
+    let options =
+        WishlistSearchSchedulerOptions::new(Duration::from_secs(30), Some(Duration::from_secs(5)))
+            .unwrap();
+    let mut scheduler = WishlistSearchScheduler::new(["rare".to_owned()], options).unwrap();
+
+    scheduler.apply_server_message(&ServerMessage::WishlistInterval { seconds: 120 });
+    assert_eq!(scheduler.interval(), Duration::from_secs(30));
+}
+
+#[test]
+fn wishlist_scheduler_replaces_terms_without_losing_server_interval() {
+    let options = WishlistSearchSchedulerOptions::new(Duration::from_secs(30), None).unwrap();
+    let mut scheduler =
+        WishlistSearchScheduler::new(["first".to_owned(), "second".to_owned()], options).unwrap();
+    scheduler.apply_server_message(&ServerMessage::WishlistInterval { seconds: 120 });
+
+    assert_eq!(
+        scheduler.next_search_message(1),
+        Some(ServerMessage::WishlistSearch(SearchRequest {
+            token: 1,
+            query: "first".to_owned(),
+        }))
+    );
+
+    scheduler.replace_terms(["third".to_owned()]);
+    assert_eq!(scheduler.interval(), Duration::from_secs(120));
+    assert_eq!(
+        scheduler.next_search_message(2),
+        Some(ServerMessage::WishlistSearch(SearchRequest {
+            token: 2,
+            query: "third".to_owned(),
+        }))
+    );
 }
 
 #[test]

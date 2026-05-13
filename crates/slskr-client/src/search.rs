@@ -29,6 +29,108 @@ pub enum SearchTarget {
     Wishlist,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WishlistSearchSchedulerOptions {
+    pub minimum_interval: Duration,
+    pub override_interval: Option<Duration>,
+}
+
+impl WishlistSearchSchedulerOptions {
+    pub fn new(
+        minimum_interval: Duration,
+        override_interval: Option<Duration>,
+    ) -> Result<Self, ClientError> {
+        if minimum_interval.is_zero() {
+            return Err(ClientError::InvalidInterval {
+                field: "minimum_interval",
+            });
+        }
+        if override_interval.is_some_and(|duration| duration.is_zero()) {
+            return Err(ClientError::InvalidInterval {
+                field: "override_interval",
+            });
+        }
+        Ok(Self {
+            minimum_interval,
+            override_interval,
+        })
+    }
+
+    #[must_use]
+    pub fn next_interval(&self, server_interval: Option<Duration>) -> Duration {
+        self.override_interval
+            .or(server_interval)
+            .unwrap_or(self.minimum_interval)
+            .max(self.minimum_interval)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WishlistSearchScheduler {
+    terms: Vec<String>,
+    options: WishlistSearchSchedulerOptions,
+    server_interval: Option<Duration>,
+    next_index: usize,
+}
+
+impl WishlistSearchScheduler {
+    pub fn new(
+        terms: impl IntoIterator<Item = String>,
+        options: WishlistSearchSchedulerOptions,
+    ) -> Result<Self, ClientError> {
+        let mut normalized = Vec::new();
+        for term in terms {
+            let term = term.trim().to_owned();
+            if !term.is_empty() {
+                normalized.push(term);
+            }
+        }
+        Ok(Self {
+            terms: normalized,
+            options,
+            server_interval: None,
+            next_index: 0,
+        })
+    }
+
+    pub fn replace_terms(&mut self, terms: impl IntoIterator<Item = String>) {
+        let mut normalized = Vec::new();
+        for term in terms {
+            let term = term.trim().to_owned();
+            if !term.is_empty() {
+                normalized.push(term);
+            }
+        }
+        self.terms = normalized;
+        if self.next_index >= self.terms.len() {
+            self.next_index = 0;
+        }
+    }
+
+    pub fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
+        if let ServerMessage::WishlistInterval { seconds } = message {
+            self.server_interval = Some(Duration::from_secs(u64::from(*seconds)));
+            true
+        } else {
+            false
+        }
+    }
+
+    #[must_use]
+    pub fn interval(&self) -> Duration {
+        self.options.next_interval(self.server_interval)
+    }
+
+    pub fn next_search_message(&mut self, token: u32) -> Option<ServerMessage> {
+        let query = self.terms.get(self.next_index)?.clone();
+        self.next_index = (self.next_index + 1) % self.terms.len();
+        Some(ServerMessage::WishlistSearch(SearchRequest {
+            token,
+            query,
+        }))
+    }
+}
+
 #[derive(Debug)]
 pub struct SearchDispatcher<S> {
     server: ServerSession<S>,

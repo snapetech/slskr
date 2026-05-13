@@ -12,6 +12,8 @@ pub enum InitCode {
 }
 
 impl InitCode {
+    pub const ALL: &'static [Self] = &[Self::PierceFirewall, Self::PeerInit];
+
     #[must_use]
     pub const fn as_u8(self) -> u8 {
         self as u8

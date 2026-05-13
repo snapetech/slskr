@@ -6437,7 +6437,7 @@ pub fn route_page_html(path: &str) -> String {
         .join(""),
     };
     format!(
-        r#"<section class="slskr-route-page" data-route="{path}"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-status">{chips}</div></header>{toolbar}<div class="slskr-route-summary"><h3>Overview</h3><ul id="slskr-route-summary">{summary}</ul></div><section class="slskr-work-area"><header><div><h3>Workspace</h3><span id="slskr-live-status" aria-live="polite">Workflow data refreshes from the daemon</span></div><div class="slskr-live-controls"><button type="button" data-slskr-refresh-route>Refresh</button><button type="button" data-slskr-focus-filter>Filter</button><button type="button" data-slskr-clear-filters>Clear filters</button></div></header><div id="slskr-page-data" class="slskr-page-data">{page_data}</div><p id="slskr-action-status" aria-live="polite"></p><div id="slskr-toast-region" class="slskr-toast-region" aria-live="polite"></div></section><details class="slskr-diagnostics"><summary>Developer</summary><div class="slskr-route-actions"><h3>Action wiring</h3><ul id="slskr-route-actions">{actions}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data">{route_data}</ul></div></details></section>"#,
+        r#"<section class="slskr-route-page" data-route="{path}" data-slskr-refresh-scope="active-route"><header class="slskr-page-header"><div><p class="slskr-kicker">{surface}</p><h2>{title}</h2><p>{description}</p></div><div class="slskr-page-status">{chips}</div></header>{toolbar}<div class="slskr-route-summary"><h3>Overview</h3><ul id="slskr-route-summary">{summary}</ul></div><section class="slskr-work-area" data-slskr-lazy-workspace="true"><header><div><h3>Workspace</h3><span id="slskr-live-status" aria-live="polite">Workflow data refreshes from the daemon</span></div><div class="slskr-live-controls"><button type="button" data-slskr-refresh-route>Refresh</button><button type="button" data-slskr-focus-filter>Filter</button><button type="button" data-slskr-clear-filters>Clear filters</button></div></header><div id="slskr-page-data" class="slskr-page-data" data-slskr-live-state="pending">{page_data}</div><p id="slskr-action-status" aria-live="polite"></p><div id="slskr-toast-region" class="slskr-toast-region" aria-live="polite"></div></section><details class="slskr-diagnostics" data-slskr-lazy-diagnostics="true"><summary>Developer</summary><div class="slskr-route-actions"><h3>Action wiring</h3><ul id="slskr-route-actions">{actions}</ul></div><div class="slskr-route-columns"><div><h3>Route Shape</h3><ul>{routes}</ul></div><div><h3>API Surface</h3><ul>{endpoints}</ul></div></div><div class="slskr-route-live"><h3>Raw Probe Status</h3><ul id="slskr-route-data" data-slskr-live-state="pending">{route_data}</ul></div></details></section>"#,
         path = escape_html(path),
         surface = escape_html(page.surface),
         title = escape_html(page.title),
@@ -16482,6 +16482,9 @@ mod tests {
         assert!(html.contains("Downloads"));
         assert!(html.contains("/api/v0/transfers/downloads"));
         assert!(html.contains("data-route=\"/downloads\""));
+        assert!(html.contains("data-slskr-refresh-scope=\"active-route\""));
+        assert!(html.contains("data-slskr-lazy-workspace=\"true\""));
+        assert!(html.contains("data-slskr-lazy-diagnostics=\"true\""));
         assert!(html.contains("slskr-route-data"));
         assert!(html.contains("Workspace"));
         assert!(html.contains("Download queue"));
@@ -16495,6 +16498,44 @@ mod tests {
         assert!(html.contains("data-slskr-focus-filter"));
         assert!(html.contains("data-slskr-clear-filters"));
         assert!(html.contains("slskr-live-status"));
+    }
+
+    #[test]
+    fn active_route_refresh_contract_keeps_hidden_panes_lazy() {
+        let shell = shell_html();
+        assert_eq!(
+            shell
+                .matches("data-slskr-refresh-scope=\"active-route\"")
+                .count(),
+            1,
+            "the shell should render one active route instead of pre-rendering every route pane"
+        );
+        assert_eq!(
+            shell.matches("id=\"slskr-route-data\"").count(),
+            1,
+            "only the active route should own live probe status"
+        );
+        assert_eq!(
+            shell.matches("id=\"slskr-page-data\"").count(),
+            1,
+            "only the active route should own live workspace data"
+        );
+        assert!(shell.contains("data-slskr-lazy-workspace=\"true\""));
+        assert!(shell.contains("data-slskr-lazy-diagnostics=\"true\""));
+        assert!(shell.contains("id=\"slskr-rust-rustymilk\" hidden"));
+        assert!(shell.contains("data-slskr-rustymilk-running=\"false\""));
+        assert!(
+            !shell.contains("setInterval("),
+            "initial shell markup should not register polling loops for hidden panes"
+        );
+
+        for path in ["/searches", "/downloads", "/messages", "/browse", "/system"] {
+            let page = route_page_html(path);
+            assert!(
+                page.contains("data-slskr-live-state=\"pending\""),
+                "{path} should render pending live data until the active route refresh runs"
+            );
+        }
     }
 
     #[test]

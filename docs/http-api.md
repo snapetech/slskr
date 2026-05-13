@@ -132,12 +132,66 @@ Get list of supported capabilities/features.
     "file-transfer"
   ],
   "storage": [
-    "share-index-tsv"
+    "share-index-sqlite",
+    "share-index-tsv",
+    "transfer-events-sqlite",
+    "transfer-events-tsv",
+    "transfer-state-json"
   ]
 }
 ```
 
 ### Storage Compatibility Listings
+
+#### `GET /api/v0/files/{root}`
+
+List one configured share-root label using virtual share paths only. Local host
+paths are never included in the response. The default response preserves the
+flat root file listing used by existing automation clients, and also includes
+immediate directory summaries for folder navigation.
+
+**Query Parameters:**
+- `folder`, `path`, or `prefix` (optional): virtual subfolder under the root.
+- `recursive` (optional): `true` to include descendant files for the selected
+  folder.
+- `q` (optional): case-insensitive virtual path search.
+- `extension` (optional): file extension filter.
+- `limit` (optional): maximum file entries to emit.
+- `offset` (optional): file entry pagination offset.
+
+**Response:**
+```json
+{
+  "label": "Music",
+  "folder": "Artist",
+  "recursive": false,
+  "entries": [
+    {
+      "type": "file",
+      "path": "Track.flac",
+      "virtual_path": "Music/Artist/Track.flac",
+      "size": 42000000,
+      "extension": "flac"
+    }
+  ],
+  "directories": [
+    {
+      "type": "directory",
+      "name": "Album",
+      "path": "Album",
+      "virtual_path": "Music/Artist/Album",
+      "file_count": 12,
+      "total_bytes": 504000000
+    }
+  ],
+  "count": 42,
+  "filtered_count": 1,
+  "directory_count": 1,
+  "total_bytes": 42000000,
+  "offset": 0,
+  "limit": 50
+}
+```
 
 #### `GET /api/v0/files/downloads/directories`
 #### `GET /api/v0/files/incomplete/directories`
@@ -276,7 +330,8 @@ List recent searches with the slskr metadata envelope used by the dashboard.
 
 #### `POST /api/searches`
 
-Create a new search.
+Create a new search. When persistence is enabled, the search row is written to
+SQLite and rehydrated on restart.
 
 **Request Body:**
 ```json
@@ -288,6 +343,15 @@ Create a new search.
 ```
 
 **Response:** `201 Created` with search details
+
+#### Search Mutation Persistence
+
+`POST /api/searches/{id}/complete`, `POST /api/searches/{id}/cancel`,
+`POST /api/searches/{id}/fail`, `POST /api/searches/{id}/expire`,
+`PUT /api/searches/{id}`, `POST /api/search-responses`,
+`POST /api/searches/prune`, `DELETE /api/searches/{id}`, and
+`DELETE /api/searches` mutate the in-memory projection and write through to
+SQLite when persistence is enabled.
 
 #### `GET /api/searches/{id}`
 
@@ -351,7 +415,8 @@ Get messages from a specific user.
 
 #### `POST /api/messages`
 
-Send a message to a user.
+Send a message to a user. When persistence is enabled, the message projection
+is written to SQLite and rehydrated on restart.
 
 **Request Body:**
 ```json
@@ -365,7 +430,8 @@ Send a message to a user.
 
 #### `PUT /api/messages/{id}/acknowledge`
 
-Mark message as acknowledged.
+Mark message as acknowledged. When persistence is enabled, the acknowledgement
+state is written to SQLite and rehydrated on restart.
 
 **Response:** `204 No Content`
 
@@ -404,7 +470,8 @@ List all transfers (uploads and downloads).
 
 #### `POST /api/transfers`
 
-Initiate a new transfer.
+Initiate a new transfer. When persistence is enabled, the transfer row is
+written to SQLite and updated by later lifecycle mutations.
 
 **Request Body:**
 ```json
@@ -425,9 +492,19 @@ Get transfer details.
 
 #### `DELETE /api/transfers/{id}`
 
-Cancel a transfer.
+Cancel a transfer. The cancellation writes through to SQLite when persistence
+is enabled.
 
 **Response:** `204 No Content`
+
+#### Transfer Mutation Persistence
+
+`POST /api/transfers/{id}/start`, `POST /api/transfers/{id}/retry`,
+`POST /api/transfers/{id}/progress`, `POST /api/transfers/{id}/complete`,
+slskd-compatible download enqueue/cancel/prune routes, and replacement routes
+mutate the transfer projection and write through to SQLite when persistence is
+enabled. `transfer-state.json` remains the reloadable transfer projection used
+for restart-safe queued/resume state.
 
 ### Rooms
 
@@ -467,13 +544,15 @@ Get room details and user list.
 
 #### `POST /api/rooms/{name}`
 
-Join a room.
+Join a room. When persistence is enabled, the room subscription projection is
+written to SQLite and rehydrated on restart.
 
 **Response:** `201 Created` with room details
 
 #### `DELETE /api/rooms/{name}`
 
-Leave a room.
+Leave a room. When persistence is enabled, the room subscription is marked
+unsubscribed in SQLite.
 
 **Response:** `204 No Content`
 
@@ -481,23 +560,41 @@ Leave a room.
 
 #### `GET /api/browse/{username}`
 
-Browse user's shared files.
+Browse a user's cached shared files. The slskd-compatible route returns
+directory groups with stable total and filtered counts so clients can page
+without inferring totals from the current page length.
 
 **Query Parameters:**
 - `folder` (optional): Folder path to browse
+- `q` (optional): Case-insensitive directory or filename filter
 - `limit` (optional): Max results
 - `offset` (optional): Pagination offset
 
 **Response:**
 ```json
 {
-  "entries": [
+  "directories": [
     {
-      "filename": "Artist - Song.flac",
-      "size": 50000000,
-      "extension": "flac"
+      "name": "Artist",
+      "fileCount": 2,
+      "filteredFileCount": 1,
+      "totalBytes": 50000000,
+      "files": [
+        {
+          "filename": "Artist/Song.flac",
+          "size": 50000000,
+          "extension": "flac"
+        }
+      ]
     }
-  ]
+  ],
+  "directoryCount": 4,
+  "filteredDirectoryCount": 1,
+  "fileCount": 12,
+  "filteredFileCount": 1,
+  "totalBytes": 50000000,
+  "offset": 0,
+  "limit": 50
 }
 ```
 
@@ -559,10 +656,14 @@ Mark browse request as acknowledged.
 
 #### `GET /api/events`
 
-Get historical events as a slskd-compatible top-level array.
+Get historical events as a slskd-compatible top-level array. When SQLite
+persistence is enabled, recent event rows hydrate on startup and new events
+write through to the durable `events` table.
 
 **Query Parameters:**
 - `kind` (optional): Event kind filter
+- `topic` (optional): Event topic filter, using the same topic taxonomy as `/api/events/ws`
+- `q` (optional): Case-insensitive kind, topic, resource, or detail search
 - `limit` (optional): Max events (default: 50)
 - `offset` (optional): Pagination offset
 
@@ -570,11 +671,21 @@ Get historical events as a slskd-compatible top-level array.
 ```json
 [
   {
-    "id": 1,
+    "id": "1",
+    "timestamp": "1777973673",
+    "topic": "searches",
     "type": "search.started",
-    "kind": "search.started",
     "resource": "1",
-    "createdAt": 1777973673
+    "detail": "query=ambient",
+    "data": "{\"id\":1,\"kind\":\"search.started\",\"topic\":\"searches\",\"resource\":\"1\",\"detail\":\"query=ambient\",\"created_at\":1777973673}",
+    "payload": {
+      "id": 1,
+      "kind": "search.started",
+      "topic": "searches",
+      "resource": "1",
+      "detail": "query=ambient",
+      "created_at": 1777973673
+    }
   }
 ]
 ```
@@ -657,7 +768,45 @@ GET /api/messages?limit=20&offset=0
 WebSocket event streaming is available at `/api/events/ws`. Browser clients
 authenticate with the `slskr.api-token.<percent-encoded-token>` subprotocol;
 non-browser clients may also use the normal bearer authorization path. Polling
-with `/api/events` remains available for compatibility clients.
+with `/api/events` remains available for compatibility clients. WebSocket
+frames and historical event APIs share the same `topic` values for application,
+searches, transfers, messages, rooms, users, shares, browse, listeners, relay,
+bridge, mesh, security, federation, Solid, integrations, media, player, system,
+and settings workflows.
+
+## Database Maintenance
+
+#### `GET /api/v0/database/stats`
+#### `GET /api/database/stats`
+#### `GET /api/admin/database/stats`
+
+Return live persisted SQLite counts and current in-memory projection counts,
+including share index, event log, transfer event trail, user, browse, social/security,
+wishlist/contact/sharegroup/share-grant, collection, library, destination,
+now-playing, webhook, and pending OAuth-state stores. When runtime compatibility
+state has been persisted, the response also includes `runtimeState`.
+When persistence is disabled, the response still reports projection counts and
+marks the persisted database as disabled.
+
+#### `POST /api/v0/database/cleanup`
+#### `POST /api/database/cleanup`
+#### `POST /api/admin/database/cleanup`
+
+Clean old persisted message rows and prune terminal transfer projections.
+
+**Request Body:**
+```json
+{
+  "days": 30
+}
+```
+
+#### `POST /api/v0/database/vacuum`
+#### `POST /api/database/vacuum`
+#### `POST /api/admin/database/vacuum`
+
+Run SQLite `VACUUM` when persistence is enabled. When persistence is disabled,
+the route returns a structured skipped result instead of a hard-coded success.
 
 ## Performance Considerations
 
@@ -718,9 +867,20 @@ Monitor these key metrics:
   metadata.
 - Compatibility shells that are not active in this runtime keep their endpoint
   paths and stable response shapes, but may return empty arrays or
-  `compatibility_acknowledgement` objects. This applies to logs, bridge config
-  acknowledgements, bans, share-grant token/backfill helpers, and MusicBrainz
-  release-radar subscription helpers.
+  `compatibility_acknowledgement` objects. Runtime options acknowledgements
+  remain non-persistent. Bridge start/stop/config aliases, logs,
+  profile invite/cache warm/backfill/SongID/Lidarr operation counters,
+  unconfigured Lidarr wanted/sync/import fallbacks, destination validation,
+  listening-party content helpers, share-grant token/backfill helpers, profile
+  updates, and MusicBrainz release-radar subscription helpers now project or
+  mutate local slskr stores where equivalent state exists. Collections,
+  collection items, library items, user records, browse cache records,
+  destination records, now-playing records, wishlist items, contacts, share
+  groups and members, share grants, user notes, liked/hated interests, and
+  username/IP bans write through to SQLite when persistence is enabled.
+  Pending OAuth callback states also write through to SQLite and are consumed
+  after a valid callback or pruned after expiry. Webhook configuration changes
+  and queued delivery logs write through to SQLite and hydrate on restart.
 
 ## Testing
 

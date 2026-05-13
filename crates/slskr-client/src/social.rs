@@ -2,6 +2,47 @@ use std::collections::{HashMap, HashSet};
 
 use slskr_protocol::server::{PrivateMessage, ServerMessage, UserStatus, WatchedUser};
 
+use crate::ClientError;
+
+pub const MAX_PRIVATE_MESSAGE_RECIPIENTS: usize = 100;
+
+pub fn private_message_users_command<I, S>(
+    usernames: I,
+    message: impl Into<String>,
+) -> Result<ServerMessage, ClientError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut seen = HashSet::new();
+    let mut recipients = Vec::new();
+
+    for username in usernames {
+        let username = username.into().trim().to_owned();
+        if username.is_empty() {
+            return Err(ClientError::BlankMessageRecipient);
+        }
+        if seen.insert(username.to_ascii_lowercase()) {
+            recipients.push(username);
+        }
+    }
+
+    if recipients.is_empty() {
+        return Err(ClientError::EmptyMessageRecipients);
+    }
+    if recipients.len() > MAX_PRIVATE_MESSAGE_RECIPIENTS {
+        return Err(ClientError::TooManyMessageRecipients {
+            count: recipients.len(),
+            max: MAX_PRIVATE_MESSAGE_RECIPIENTS,
+        });
+    }
+
+    Ok(ServerMessage::MessageUsers {
+        usernames: recipients,
+        message: message.into(),
+    })
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UserWatchState {
     watched: HashMap<String, WatchedUser>,

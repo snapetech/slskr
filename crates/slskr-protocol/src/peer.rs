@@ -35,6 +35,34 @@ pub enum PeerCode {
 }
 
 impl PeerCode {
+    pub const ALL: &'static [Self] = &[
+        Self::PrivateMessage,
+        Self::GetShareFileList,
+        Self::SharedFileListResponse,
+        Self::FileSearchRequest,
+        Self::FileSearchResponse,
+        Self::RoomInvitation,
+        Self::CancelledQueuedTransfer,
+        Self::UserInfoRequest,
+        Self::UserInfoResponse,
+        Self::SendConnectToken,
+        Self::MoveDownloadToTop,
+        Self::FolderContentsRequest,
+        Self::FolderContentsResponse,
+        Self::TransferRequest,
+        Self::TransferResponse,
+        Self::PlaceholdUpload,
+        Self::QueueUpload,
+        Self::PlaceInQueueResponse,
+        Self::UploadFailed,
+        Self::ExactFileSearchRequest,
+        Self::QueuedDownloads,
+        Self::IndirectFileSearchRequest,
+        Self::UploadDenied,
+        Self::PlaceInQueueRequest,
+        Self::UploadQueueNotification,
+    ];
+
     #[must_use]
     pub const fn as_u32(self) -> u32 {
         self as u32

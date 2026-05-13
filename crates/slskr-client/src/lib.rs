@@ -1,5 +1,6 @@
 #![doc = "Async Soulseek client orchestration."]
 
+pub mod capabilities;
 pub mod connection;
 pub mod distributed_tree;
 pub mod error;
@@ -9,6 +10,7 @@ pub mod filters;
 pub mod io;
 pub mod listener;
 pub mod manager;
+pub mod mesh;
 pub mod peer_cache;
 pub mod peer_connect;
 pub mod search;

@@ -41,6 +41,28 @@ pub enum WebhookEvent {
     ConfigChanged,
 }
 
+impl WebhookEvent {
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value.trim() {
+            "search.created" => Some(WebhookEvent::SearchCreated),
+            "search.completed" => Some(WebhookEvent::SearchCompleted),
+            "transfer.started" => Some(WebhookEvent::TransferStarted),
+            "transfer.completed" => Some(WebhookEvent::TransferCompleted),
+            "transfer.failed" => Some(WebhookEvent::TransferFailed),
+            "message.received" => Some(WebhookEvent::MessageReceived),
+            "message.sent" => Some(WebhookEvent::MessageSent),
+            "user.connected" => Some(WebhookEvent::UserConnected),
+            "user.disconnected" => Some(WebhookEvent::UserDisconnected),
+            "room.joined" => Some(WebhookEvent::RoomJoined),
+            "room.left" => Some(WebhookEvent::RoomLeft),
+            "apikey.created" => Some(WebhookEvent::ApiKeyCreated),
+            "apikey.revoked" => Some(WebhookEvent::ApiKeyRevoked),
+            "config.changed" => Some(WebhookEvent::ConfigChanged),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for WebhookEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -256,6 +278,14 @@ impl WebhookManager {
         WebhookManager {
             webhooks: HashMap::new(),
         }
+    }
+
+    pub fn from_webhooks(webhooks: Vec<Webhook>) -> Self {
+        let mut manager = Self::new();
+        for webhook in webhooks.into_iter().take(MAX_WEBHOOKS) {
+            manager.webhooks.insert(webhook.id.clone(), webhook);
+        }
+        manager
     }
 
     /// Register webhook

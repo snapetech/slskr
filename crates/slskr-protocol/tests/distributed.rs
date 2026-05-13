@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use slskr_protocol::{
     distributed::{DistributedCode, DistributedMessage, DistributedSearch},
     frame::{InitFrame, MessageFrame},
@@ -11,6 +13,22 @@ fn distributed_codes_map_known_values() {
         Ok(DistributedCode::EmbeddedMessage)
     );
     assert_eq!(DistributedCode::try_from(8), Err(8));
+}
+
+#[test]
+fn distributed_code_inventory_is_complete_and_unique() {
+    let mut seen = HashSet::new();
+
+    for code in DistributedCode::ALL {
+        assert!(
+            seen.insert(code.as_u8()),
+            "duplicate distributed code {}",
+            code.as_u8()
+        );
+        assert_eq!(DistributedCode::try_from(code.as_u8()), Ok(*code));
+    }
+
+    assert_eq!(DistributedCode::ALL.len(), 6);
 }
 
 #[test]

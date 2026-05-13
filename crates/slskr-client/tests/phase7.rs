@@ -5,7 +5,10 @@ use slskr_client::{
         compress_zlib_payload, decompress_peer_share_payload, decompress_zlib_payload,
         decompress_zlib_payload_with_limit,
     },
-    social::{PrivateMessageInbox, RoomState, UserWatchState},
+    social::{
+        private_message_users_command, PrivateMessageInbox, RoomState, UserWatchState,
+        MAX_PRIVATE_MESSAGE_RECIPIENTS,
+    },
     ClientError,
 };
 use slskr_protocol::{
@@ -164,6 +167,38 @@ fn private_message_inbox_returns_ack_messages() {
     assert!(inbox
         .apply_server_message(&ServerMessage::ServerPing)
         .is_none());
+}
+
+#[test]
+fn multi_user_private_message_command_dedupes_and_validates_recipients() {
+    let command = private_message_users_command(["Alice", "alice", " Bob "], "hello").unwrap();
+
+    assert_eq!(
+        command,
+        ServerMessage::MessageUsers {
+            usernames: vec!["Alice".to_owned(), "Bob".to_owned()],
+            message: "hello".to_owned(),
+        }
+    );
+
+    assert!(matches!(
+        private_message_users_command(Vec::<String>::new(), "hello"),
+        Err(ClientError::EmptyMessageRecipients)
+    ));
+    assert!(matches!(
+        private_message_users_command(["alice", " "], "hello"),
+        Err(ClientError::BlankMessageRecipient)
+    ));
+
+    let too_many = (0..=MAX_PRIVATE_MESSAGE_RECIPIENTS)
+        .map(|index| format!("user-{index}"))
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        private_message_users_command(too_many, "hello"),
+        Err(ClientError::TooManyMessageRecipients { count, max })
+            if count == MAX_PRIVATE_MESSAGE_RECIPIENTS + 1
+                && max == MAX_PRIVATE_MESSAGE_RECIPIENTS
+    ));
 }
 
 #[test]

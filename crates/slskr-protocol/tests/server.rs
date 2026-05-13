@@ -344,6 +344,13 @@ fn private_message_and_error_messages_round_trip() {
             Direction::ClientToServer,
         ),
         (
+            ServerMessage::MessageUsers {
+                usernames: vec!["alice".to_owned(), "bob".to_owned()],
+                message: "hello group".to_owned(),
+            },
+            Direction::ClientToServer,
+        ),
+        (
             ServerMessage::CantConnectToPeerRequest {
                 token: 42,
                 username: "peer".to_owned(),

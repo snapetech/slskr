@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use slskr_protocol::{
     frame::MessageFrame,
     peer::{
@@ -14,6 +16,22 @@ fn peer_codes_map_known_values() {
         Ok(PeerCode::UploadQueueNotification)
     );
     assert_eq!(PeerCode::try_from(99), Err(99));
+}
+
+#[test]
+fn peer_code_inventory_is_complete_and_unique() {
+    let mut seen = HashSet::new();
+
+    for code in PeerCode::ALL {
+        assert!(
+            seen.insert(code.as_u32()),
+            "duplicate peer code {}",
+            code.as_u32()
+        );
+        assert_eq!(PeerCode::try_from(code.as_u32()), Ok(*code));
+    }
+
+    assert_eq!(PeerCode::ALL.len(), 25);
 }
 
 #[test]

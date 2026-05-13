@@ -129,6 +129,14 @@ pub fn conflict_response(message: &str) -> HttpResponse {
     }
 }
 
+pub fn service_unavailable_response(message: &str) -> HttpResponse {
+    HttpResponse {
+        status: "503 Service Unavailable",
+        content_type: "application/json",
+        body: format!("{{\"error\":\"{}\"}}", crate::config::json_escape(message)),
+    }
+}
+
 pub fn not_implemented_response(message: &str) -> HttpResponse {
     HttpResponse {
         status: "501 Not Implemented",

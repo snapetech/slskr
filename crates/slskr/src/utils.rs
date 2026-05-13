@@ -337,6 +337,13 @@ pub fn user_browse_fail_path(path: &str) -> Option<&str> {
         .filter(|username| !username.is_empty() && !username.contains('/'))
 }
 
+pub fn user_browse_cancel_path(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/users/")
+        .or_else(|| path.strip_prefix("/api/v0/users/"))?
+        .strip_suffix("/browse/cancel")
+        .filter(|username| !username.is_empty() && !username.contains('/'))
+}
+
 pub fn user_stats_request_path(path: &str) -> Option<&str> {
     path.strip_prefix("/api/users/")
         .or_else(|| path.strip_prefix("/api/v0/users/"))?

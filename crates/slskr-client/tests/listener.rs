@@ -6,7 +6,7 @@ use slskr_client::{
     },
     listener::{demux_incoming, demux_obfuscated_incoming, IncomingConnection, Listener},
 };
-use slskr_protocol::{init::InitMessage, peer::PeerMessage};
+use slskr_protocol::{distributed::DistributedMessage, init::InitMessage, peer::PeerMessage};
 use tokio::io::duplex;
 use tokio::net::TcpStream;
 
@@ -110,6 +110,77 @@ async fn demuxes_obfuscated_peer_message_connection() {
         panic!("expected obfuscated peer messages");
     };
     assert_eq!(peer.receive().await.unwrap(), message);
+}
+
+#[tokio::test]
+async fn demuxes_obfuscated_distributed_peer_init_and_preserves_stream() {
+    let (mut client, server) = duplex(512);
+    let init = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "D".to_owned(),
+        token: 0,
+    };
+    write_obfuscated_init_frame(&mut client, &init.encode().unwrap())
+        .await
+        .unwrap();
+    slskr_client::stream::DistributedConnection::new(client)
+        .send(&DistributedMessage::Ping)
+        .await
+        .unwrap();
+
+    let incoming = demux_obfuscated_incoming(server).await.unwrap();
+    let IncomingConnection::PeerInit {
+        username,
+        kind,
+        token,
+        stream,
+    } = incoming
+    else {
+        panic!("expected distributed peer init");
+    };
+    assert_eq!(username, "peer");
+    assert_eq!(kind, ConnectionKind::Distributed);
+    assert_eq!(token, 0);
+
+    let mut distributed = slskr_client::stream::DistributedConnection::new(stream);
+    assert_eq!(
+        distributed.receive().await.unwrap(),
+        DistributedMessage::Ping
+    );
+}
+
+#[tokio::test]
+async fn demuxes_obfuscated_file_transfer_peer_init_and_preserves_stream() {
+    let (mut client, server) = duplex(512);
+    let init = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "F".to_owned(),
+        token: 0,
+    };
+    write_obfuscated_init_frame(&mut client, &init.encode().unwrap())
+        .await
+        .unwrap();
+    slskr_client::file_transfer::FileTransferConnection::new(client)
+        .send_token(123)
+        .await
+        .unwrap();
+
+    let incoming = demux_obfuscated_incoming(server).await.unwrap();
+    let IncomingConnection::PeerInit {
+        username,
+        kind,
+        token,
+        stream,
+    } = incoming
+    else {
+        panic!("expected file-transfer peer init");
+    };
+    assert_eq!(username, "peer");
+    assert_eq!(kind, ConnectionKind::FileTransfer);
+    assert_eq!(token, 0);
+
+    let mut file = slskr_client::file_transfer::FileTransferConnection::new(stream);
+    assert_eq!(file.receive_token().await.unwrap(), 123);
 }
 
 #[tokio::test]

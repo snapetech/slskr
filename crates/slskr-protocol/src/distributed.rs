@@ -16,6 +16,15 @@ pub enum DistributedCode {
 }
 
 impl DistributedCode {
+    pub const ALL: &'static [Self] = &[
+        Self::Ping,
+        Self::Search,
+        Self::BranchLevel,
+        Self::BranchRoot,
+        Self::ChildDepth,
+        Self::EmbeddedMessage,
+    ];
+
     #[must_use]
     pub const fn as_u8(self) -> u8 {
         self as u8

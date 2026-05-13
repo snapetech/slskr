@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use slskr_protocol::{frame::InitFrame, init::InitCode, InitMessage};
 
 #[test]
@@ -5,6 +7,22 @@ fn init_codes_map_known_values() {
     assert_eq!(InitCode::try_from(0), Ok(InitCode::PierceFirewall));
     assert_eq!(InitCode::try_from(1), Ok(InitCode::PeerInit));
     assert_eq!(InitCode::try_from(2), Err(2));
+}
+
+#[test]
+fn init_code_inventory_is_complete_and_unique() {
+    let mut seen = HashSet::new();
+
+    for code in InitCode::ALL {
+        assert!(
+            seen.insert(code.as_u8()),
+            "duplicate init code {}",
+            code.as_u8()
+        );
+        assert_eq!(InitCode::try_from(code.as_u8()), Ok(*code));
+    }
+
+    assert_eq!(InitCode::ALL.len(), 2);
 }
 
 #[test]

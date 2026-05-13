@@ -206,24 +206,12 @@ fn event_frame_json(record: &EventRecord) -> String {
     let data = record.json();
     format!(
         "{{\"topic\":\"{}\",\"id\":{},\"type\":\"{}\",\"data\":{},\"timestamp\":{}}}",
-        topic_for_kind(record.kind),
+        record.topic(),
         record.id,
         record.kind,
         data,
         record.created_at,
     )
-}
-
-fn topic_for_kind(kind: &str) -> &'static str {
-    match kind.split('.').next().unwrap_or(kind) {
-        "search" => "searches",
-        "transfer" => "transfers",
-        "message" => "messages",
-        "room" => "rooms",
-        "user" => "users",
-        "session" => "application",
-        _ => "application",
-    }
 }
 
 async fn write_ping_frame<W>(writer: &mut W) -> Result<(), String>

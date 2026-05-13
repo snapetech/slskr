@@ -33,6 +33,16 @@ pub enum ClientError {
     UnexpectedTransferMessage(Box<slskr_protocol::peer::PeerMessage>),
     #[error("unexpected search message: {0:?}")]
     UnexpectedSearchMessage(Box<slskr_protocol::peer::PeerMessage>),
+    #[error("private message recipient list must not be empty")]
+    EmptyMessageRecipients,
+    #[error("private message recipient must not be blank")]
+    BlankMessageRecipient,
+    #[error("private message recipient count {count} exceeds maximum {max}")]
+    TooManyMessageRecipients { count: usize, max: usize },
+    #[error("{field} interval must be positive")]
+    InvalidInterval { field: &'static str },
+    #[error("capability exchange failed: {0}")]
+    CapabilityExchange(String),
     #[error("login rejected: {reason}{detail}")]
     LoginRejected { reason: String, detail: String },
     #[error("unexpected server message: {0:?}")]

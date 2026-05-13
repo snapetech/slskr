@@ -27,8 +27,10 @@ use base64::{
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use slskr_client::{
+    capabilities::PeerCapabilityDescriptor,
     connection::ConnectionKind,
     listener::{IncomingConnection, Listener},
+    mesh::{MeshRendezvous, MESH_RENDEZVOUS_INTEREST_TAG},
     peer_connect::{
         connect_file_transfer, connect_peer_messages, send_obfuscated_peer_init,
         send_pierce_firewall,
@@ -45,8 +47,10 @@ use slskr_client::{
         },
         Reader, Writer, ROTATED_OBFUSCATION_TYPE,
     },
+    search::{WishlistSearchScheduler, WishlistSearchSchedulerOptions},
     server::ServerSession,
     share_payload::{compress_zlib_payload, decompress_zlib_payload},
+    social::private_message_users_command,
     stream::{ObfuscatedPeerMessageConnection, PeerMessageConnection, ServerConnection},
     version::{CLIENT_MAJOR_VERSION, CLIENT_MINOR_VERSION, CLIENT_NAME},
 };
@@ -72,6 +76,8 @@ use config::redact_username;
 const TRANSFER_PROGRESS_CHUNK_BYTES: usize = 64 * 1024;
 const EVENT_HISTORY_LIMIT: usize = 500;
 const DEFAULT_LIST_LIMIT: usize = 500;
+const DEFAULT_SEARCH_TTL_SECONDS: u64 = 300;
+const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 
 #[allow(dead_code)]
@@ -117,7 +123,9 @@ const NETWORK_CAPABILITIES: &[&str] = &[
 
 #[allow(dead_code)]
 const STORAGE_CAPABILITIES: &[&str] = &[
+    "share-index-sqlite",
     "share-index-tsv",
+    "transfer-events-sqlite",
     "transfer-events-tsv",
     "transfer-state-json",
 ];
@@ -315,6 +323,78 @@ impl ShareIndexSnapshot {
             self.updated_at
         )
     }
+
+    fn from_persisted(config: &AppConfig, records: Vec<persistence::ShareFileRecord>) -> Self {
+        let updated_at = records
+            .iter()
+            .map(|record| record.updated_at.max(0) as u64)
+            .max()
+            .unwrap_or_else(unix_timestamp);
+        let mut local_paths = BTreeMap::new();
+        let entries = records
+            .iter()
+            .map(|record| {
+                if let Some(local_path) = record
+                    .local_path
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                {
+                    local_paths.insert(record.filename.clone(), PathBuf::from(local_path));
+                }
+                FileEntry {
+                    code: 1,
+                    filename: record.filename.clone(),
+                    size: record.size.max(0) as u64,
+                    extension: record.extension.clone(),
+                    attributes: Vec::new(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let roots = summarize_share_roots_from_persisted(&records);
+        let cache_path = share_cache_path(&config.state_dir);
+        let (cache_written_at, cache_error) = match write_share_cache(&cache_path, &entries) {
+            Ok(()) => (Some(unix_timestamp()), None),
+            Err(error) => (None, Some(error)),
+        };
+        Self {
+            entries,
+            local_paths,
+            roots,
+            fixture_files: 0,
+            scan_errors: Vec::new(),
+            cache_path,
+            cache_written_at,
+            cache_error,
+            updated_at,
+        }
+    }
+}
+
+fn summarize_share_roots_from_persisted(
+    records: &[persistence::ShareFileRecord],
+) -> Vec<ShareRoot> {
+    let mut grouped = BTreeMap::<String, Vec<FileEntry>>::new();
+    for record in records {
+        grouped
+            .entry(record.root_label.clone())
+            .or_default()
+            .push(FileEntry {
+                code: 1,
+                filename: record.filename.clone(),
+                size: record.size.max(0) as u64,
+                extension: record.extension.clone(),
+                attributes: Vec::new(),
+            });
+    }
+    grouped
+        .into_iter()
+        .map(|(label, entries)| ShareRoot {
+            label,
+            files: entries.len(),
+            bytes: entries.iter().map(|entry| entry.size).sum(),
+            extensions: summarize_extensions(&entries),
+        })
+        .collect()
 }
 
 #[derive(Debug, Default)]
@@ -374,30 +454,70 @@ struct SearchResultEntry {
     filename: String,
     size: u64,
     extension: String,
+    locked: bool,
     slot_free: Option<bool>,
     average_speed: Option<u32>,
     queue_length: Option<u32>,
 }
 
 impl SearchResultEntry {
+    fn from_json_file(
+        file: &serde_json::Value,
+        peer_username: Option<&str>,
+        locked: bool,
+        slot_free: Option<bool>,
+        average_speed: Option<u32>,
+        queue_length: Option<u32>,
+    ) -> Option<Self> {
+        let filename = file.get("filename")?.as_str()?.to_owned();
+        let extension = file
+            .get("extension")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| filename.split('.').next_back().unwrap_or("").to_owned());
+        Some(Self {
+            peer_username: peer_username.map(str::to_owned),
+            filename,
+            size: file
+                .get("size")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            extension,
+            locked: file
+                .get("locked")
+                .or_else(|| file.get("isLocked"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(locked),
+            slot_free,
+            average_speed,
+            queue_length,
+        })
+    }
+
     fn from_file_entry(entry: &FileEntry) -> Self {
         Self {
             peer_username: None,
             filename: entry.filename.clone(),
             size: entry.size,
             extension: entry.extension.clone(),
+            locked: false,
             slot_free: Some(true),
             average_speed: Some(0),
             queue_length: Some(0),
         }
     }
 
-    fn from_peer_response_entry(response: &FileSearchResponse, entry: &FileEntry) -> Self {
+    fn from_peer_response_entry(
+        response: &FileSearchResponse,
+        entry: &FileEntry,
+        locked: bool,
+    ) -> Self {
         Self {
             peer_username: Some(response.username.clone()),
             filename: entry.filename.clone(),
             size: entry.size,
             extension: entry.extension.clone(),
+            locked,
             slot_free: Some(response.slot_free),
             average_speed: Some(response.average_speed),
             queue_length: Some(response.queue_length),
@@ -406,11 +526,12 @@ impl SearchResultEntry {
 
     fn json(&self) -> String {
         format!(
-            "{{\"peer_username\":{},\"filename\":\"{}\",\"size\":{},\"extension\":\"{}\",\"slot_free\":{},\"average_speed\":{},\"queue_length\":{}}}",
+            "{{\"peer_username\":{},\"filename\":\"{}\",\"size\":{},\"extension\":\"{}\",\"locked\":{},\"slot_free\":{},\"average_speed\":{},\"queue_length\":{}}}",
             json_option(self.peer_username.as_deref()),
             json_escape(&self.filename),
             self.size,
             json_escape(&self.extension),
+            self.locked,
             json_bool_option(self.slot_free),
             json_u32_option(self.average_speed),
             json_u32_option(self.queue_length)
@@ -422,7 +543,8 @@ impl SearchResultEntry {
             "filename": self.filename,
             "size": self.size,
             "code": 1,
-            "isLocked": !self.slot_free.unwrap_or(true),
+            "isLocked": self.locked || !self.slot_free.unwrap_or(true),
+            "username": self.peer_username.as_deref().unwrap_or_default(),
             "extension": self.extension,
             "bitRate": null,
             "bitDepth": null,
@@ -430,6 +552,19 @@ impl SearchResultEntry {
             "sampleRate": null,
         })
     }
+}
+
+fn virtual_basename(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn stable_content_hash(path: &str, size: u64) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in path.as_bytes().iter().copied().chain(size.to_le_bytes()) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 #[derive(Clone, Debug)]
@@ -448,9 +583,20 @@ struct SearchRecord {
 
 impl SearchRecord {
     fn json(&self) -> String {
+        self.json_with_result_page(0, None)
+    }
+
+    fn json_with_query(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        self.json_with_result_page(filter.offset, filter.limit)
+    }
+
+    fn json_with_result_page(&self, offset: usize, limit: Option<usize>) -> String {
         let results = self
             .results
             .iter()
+            .skip(offset)
+            .take(limit.unwrap_or(usize::MAX))
             .map(SearchResultEntry::json)
             .collect::<Vec<_>>()
             .join(",");
@@ -460,18 +606,15 @@ impl SearchRecord {
             .iter()
             .filter(|entry| entry.peer_username.is_some())
             .count();
-        let state = if self.status == "active" {
-            "InProgress"
-        } else {
-            "Completed"
-        };
+        let locked_file_count = self.results.iter().filter(|entry| entry.locked).count();
+        let state = search_state_for_status(self.status);
         let ended_at = if self.status == "active" {
             "null".to_owned()
         } else {
             format!("\"{}\"", self.updated_at)
         };
         format!(
-            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":0,\"responseCount\":{},\"responses\":{},\"results\":[{}],\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
             json_escape(&self.id),
             self.token,
             json_escape(&self.query),
@@ -483,9 +626,12 @@ impl SearchRecord {
             self.status != "active",
             self.results.len(),
             self.results.len(),
+            locked_file_count,
             response_count,
             responses,
             results,
+            offset,
+            json_usize_option(limit),
             self.created_at,
             ended_at,
             self.expires_at,
@@ -495,21 +641,46 @@ impl SearchRecord {
     }
 
     fn slskd_responses_json(&self) -> String {
+        self.slskd_responses_json_with_query(None)
+    }
+
+    fn slskd_responses_json_with_query(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
         let mut grouped: BTreeMap<String, Vec<&SearchResultEntry>> = BTreeMap::new();
         for result in &self.results {
-            grouped
-                .entry(result.peer_username.clone().unwrap_or_default())
-                .or_default()
-                .push(result);
+            let username = result.peer_username.clone().unwrap_or_default();
+            if filter
+                .username
+                .as_deref()
+                .is_some_and(|needle| !username.eq_ignore_ascii_case(needle))
+            {
+                continue;
+            }
+            if filter.q.as_deref().is_some_and(|needle| {
+                !username.to_ascii_lowercase().contains(needle)
+                    && !result.filename.to_ascii_lowercase().contains(needle)
+            }) {
+                continue;
+            }
+            grouped.entry(username).or_default().push(result);
         }
         let responses = grouped
             .into_iter()
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
             .map(|(username, entries)| {
                 let files = entries
                     .iter()
+                    .filter(|entry| !entry.locked)
+                    .map(|entry| entry.slskd_file_json())
+                    .collect::<Vec<_>>();
+                let locked_files = entries
+                    .iter()
+                    .filter(|entry| entry.locked)
                     .map(|entry| entry.slskd_file_json())
                     .collect::<Vec<_>>();
                 let file_count = files.len();
+                let locked_file_count = locked_files.len();
                 let first = entries.first().copied();
                 serde_json::json!({
                     "username": username,
@@ -519,8 +690,8 @@ impl SearchRecord {
                     "uploadSpeed": first.and_then(|entry| entry.average_speed).unwrap_or(0),
                     "fileCount": file_count,
                     "files": files,
-                    "lockedFileCount": 0,
-                    "lockedFiles": [],
+                    "lockedFileCount": locked_file_count,
+                    "lockedFiles": locked_files,
                 })
             })
             .collect::<Vec<_>>();
@@ -615,6 +786,10 @@ impl SearchStore {
         record
     }
 
+    fn create_scheduled_wishlist(&mut self, query: String, ttl_seconds: u64) -> SearchRecord {
+        self.create(None, query, "wishlist", None, Vec::new(), ttl_seconds)
+    }
+
     fn get_by_identifier(&self, id: &str) -> Option<SearchRecord> {
         self.records
             .iter()
@@ -622,16 +797,15 @@ impl SearchStore {
             .cloned()
     }
 
-    fn remove_by_identifier(&mut self, id: &str) -> bool {
+    fn remove_by_identifier(&mut self, id: &str) -> Option<SearchRecord> {
         if let Some(pos) = self
             .records
             .iter()
             .position(|record| record.id == id || record.token.to_string() == id)
         {
-            self.records.remove(pos);
-            true
+            Some(self.records.remove(pos))
         } else {
-            false
+            None
         }
     }
 
@@ -645,24 +819,70 @@ impl SearchStore {
         Some(record.clone())
     }
 
-    fn expire_due(&mut self) -> usize {
+    fn set_status_by_token(&mut self, token: u32, status: &'static str) -> Option<SearchRecord> {
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.token == token)?;
+        record.status = status;
+        record.updated_at = unix_timestamp();
+        Some(record.clone())
+    }
+
+    fn update_by_identifier(
+        &mut self,
+        id: &str,
+        query: Option<String>,
+        status: Option<&str>,
+    ) -> Option<(SearchRecord, bool)> {
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == id || record.token.to_string() == id)?;
+        let mut updated = false;
+        if let Some(query) = query.map(|value| value.trim().to_owned()) {
+            if !query.is_empty() && query != record.query {
+                record.query = query;
+                updated = true;
+            }
+        }
+        if let Some(status) = status.and_then(normalize_search_status) {
+            if status != record.status {
+                record.status = status;
+                updated = true;
+            }
+        }
+        if updated {
+            record.updated_at = unix_timestamp();
+        }
+        Some((record.clone(), updated))
+    }
+
+    fn expire_due(&mut self) -> Vec<SearchRecord> {
         let now = unix_timestamp();
-        let mut expired = 0;
+        let mut expired = Vec::new();
         for record in &mut self.records {
             if record.status == "active" && record.expires_at <= now {
                 record.status = "expired";
                 record.updated_at = now;
-                expired += 1;
+                expired.push(record.clone());
             }
         }
         expired
     }
 
-    fn prune_expired(&mut self) -> usize {
+    fn prune_expired(&mut self) -> Vec<SearchRecord> {
         self.expire_due();
-        let before = self.records.len();
-        self.records.retain(|record| record.status != "expired");
-        before - self.records.len()
+        let mut pruned = Vec::new();
+        self.records.retain(|record| {
+            if record.status == "expired" {
+                pruned.push(record.clone());
+                false
+            } else {
+                true
+            }
+        });
+        pruned
     }
 
     fn add_peer_response(&mut self, response: &FileSearchResponse) -> Option<SearchRecord> {
@@ -674,8 +894,13 @@ impl SearchStore {
             response
                 .results
                 .iter()
-                .chain(response.private_results.iter())
-                .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry)),
+                .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, false)),
+        );
+        record.results.extend(
+            response
+                .private_results
+                .iter()
+                .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, true)),
         );
         record.updated_at = unix_timestamp();
         Some(record.clone())
@@ -811,14 +1036,119 @@ impl SearchStore {
             self.next_token
         )
     }
+
+    fn transfer_alternatives_json(&self, transfer: &TransferEntry) -> String {
+        let original_basename = virtual_basename(&transfer.filename).to_ascii_lowercase();
+        let alternatives = self
+            .records
+            .iter()
+            .flat_map(|record| record.results.iter())
+            .filter(|result| {
+                result.peer_username.is_some()
+                    && result.peer_username != transfer.peer_username
+                    && virtual_basename(&result.filename).eq_ignore_ascii_case(&original_basename)
+            })
+            .map(|result| {
+                serde_json::json!({
+                    "username": result.peer_username.as_deref().unwrap_or_default(),
+                    "filename": result.filename,
+                    "size": result.size,
+                    "locked": result.locked,
+                    "slot_free": result.slot_free,
+                    "average_speed": result.average_speed,
+                    "queue_length": result.queue_length,
+                })
+            })
+            .collect::<Vec<_>>();
+        let count = alternatives.len();
+        serde_json::json!({
+            "transfer_id": transfer.id,
+            "filename": transfer.filename,
+            "alternatives": alternatives,
+            "count": count,
+        })
+        .to_string()
+    }
+
+    fn find_transfer_alternative(
+        &self,
+        transfer: &TransferEntry,
+        username: &str,
+        filename: Option<&str>,
+    ) -> Option<SearchResultEntry> {
+        let original_basename = virtual_basename(&transfer.filename);
+        self.records
+            .iter()
+            .flat_map(|record| record.results.iter())
+            .find(|result| {
+                result
+                    .peer_username
+                    .as_deref()
+                    .is_some_and(|peer| peer.eq_ignore_ascii_case(username))
+                    && filename.map_or_else(
+                        || {
+                            virtual_basename(&result.filename)
+                                .eq_ignore_ascii_case(original_basename)
+                        },
+                        |filename| result.filename == filename,
+                    )
+            })
+            .cloned()
+    }
+
+    fn first_transfer_alternative(&self, transfer: &TransferEntry) -> Option<SearchResultEntry> {
+        let original_basename = virtual_basename(&transfer.filename);
+        self.records
+            .iter()
+            .flat_map(|record| record.results.iter())
+            .find(|result| {
+                result.peer_username.is_some()
+                    && result.peer_username != transfer.peer_username
+                    && virtual_basename(&result.filename).eq_ignore_ascii_case(original_basename)
+            })
+            .cloned()
+    }
 }
 
 fn persisted_search_status(status: &str) -> &'static str {
     match status {
         "active" | "pending" => "active",
-        "completed" => "completed",
+        "completed" | "complete" => "completed",
         "expired" => "expired",
+        "cancelled" | "canceled" => "cancelled",
+        "failed" => "failed",
         _ => "active",
+    }
+}
+
+fn normalize_search_status(status: &str) -> Option<&'static str> {
+    match status {
+        "active" | "pending" | "in_progress" | "InProgress" => Some("active"),
+        "completed" | "complete" | "Completed" => Some("completed"),
+        "expired" | "Expired" => Some("expired"),
+        "cancelled" | "canceled" | "Cancelled" | "Canceled" => Some("cancelled"),
+        "failed" | "Failed" => Some("failed"),
+        _ => None,
+    }
+}
+
+fn search_state_for_status(status: &str) -> &'static str {
+    match status {
+        "active" => "InProgress",
+        "failed" => "Failed",
+        "cancelled" => "Cancelled",
+        "expired" => "Expired",
+        _ => "Completed",
+    }
+}
+
+fn search_ttl_seconds_from_body(body: &str) -> Result<u64, &'static str> {
+    let ttl_seconds = extract_json_u64_field(body, "ttl_seconds")
+        .or_else(|| extract_json_u64_field(body, "ttlSeconds"));
+    match ttl_seconds {
+        Some(0) => Err("search ttl_seconds must be greater than zero"),
+        Some(ttl) => Ok(ttl.min(MAX_SEARCH_TTL_SECONDS)),
+        None => Ok(DEFAULT_SEARCH_TTL_SECONDS),
     }
 }
 
@@ -831,6 +1161,64 @@ fn persisted_target(target: Option<&str>) -> &'static str {
     }
 }
 
+fn persisted_search_record(record: &SearchRecord) -> persistence::SearchRecord {
+    let completed_at = if record.status == "active" {
+        None
+    } else {
+        Some(record.updated_at as i64)
+    };
+    let (room, target) = match record.target {
+        "room" => (record.target_name.clone(), Some("room".to_owned())),
+        "user" => (None, Some("user".to_owned())),
+        "wishlist" => (None, Some("wishlist".to_owned())),
+        _ => (None, Some("global".to_owned())),
+    };
+    persistence::SearchRecord {
+        id: record.token.to_string(),
+        query: record.query.clone(),
+        status: record.status.to_string(),
+        result_count: record.results.len() as i64,
+        created_at: record.created_at as i64,
+        completed_at,
+        room,
+        target,
+    }
+}
+
+async fn persist_search_record(state: &AppState, record: &SearchRecord) -> Result<(), String> {
+    if let Some(db) = state.db.as_ref() {
+        db.insert_search(&persisted_search_record(record))
+            .await
+            .map_err(|error| format!("failed to persist search: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn persist_search_records(state: &AppState, records: &[SearchRecord]) -> Result<(), String> {
+    for record in records {
+        persist_search_record(state, record).await?;
+    }
+    Ok(())
+}
+
+async fn delete_persisted_search(state: &AppState, record: &SearchRecord) -> Result<(), String> {
+    if let Some(db) = state.db.as_ref() {
+        db.delete_search(&record.token.to_string())
+            .await
+            .map_err(|error| format!("failed to delete persisted search: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn clear_persisted_searches(state: &AppState) -> Result<(), String> {
+    if let Some(db) = state.db.as_ref() {
+        db.delete_all_searches()
+            .await
+            .map_err(|error| format!("failed to clear persisted searches: {error}"))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Default)]
 struct RecordListFilter {
     q: Option<String>,
@@ -840,6 +1228,7 @@ struct RecordListFilter {
     username: Option<String>,
     joined: Option<bool>,
     kind: Option<String>,
+    topic: Option<String>,
     limit: Option<usize>,
     offset: usize,
 }
@@ -859,6 +1248,7 @@ impl RecordListFilter {
                 "username" => filter.username = non_empty(value),
                 "joined" => filter.joined = parse_bool_value(&value),
                 "kind" => filter.kind = non_empty(value),
+                "topic" => filter.topic = non_empty(value),
                 "limit" => filter.limit = Some(parse_list_limit(&value)),
                 "offset" => filter.offset = value.parse::<usize>().unwrap_or(0),
                 _ => {}
@@ -880,18 +1270,34 @@ fn parse_list_limit(value: &str) -> usize {
 #[derive(Clone, Debug)]
 struct EventRecord {
     id: u64,
-    kind: &'static str,
+    kind: String,
     resource: String,
     detail: Option<String>,
     created_at: u64,
 }
 
 impl EventRecord {
+    fn topic(&self) -> &'static str {
+        topic_for_event_kind(&self.kind)
+    }
+
+    fn data_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "kind": self.kind,
+            "topic": self.topic(),
+            "resource": &self.resource,
+            "detail": &self.detail,
+            "created_at": self.created_at,
+        })
+    }
+
     fn json(&self) -> String {
         format!(
-            "{{\"id\":{},\"kind\":\"{}\",\"resource\":\"{}\",\"detail\":{},\"created_at\":{}}}",
+            "{{\"id\":{},\"kind\":\"{}\",\"topic\":\"{}\",\"resource\":\"{}\",\"detail\":{},\"created_at\":{}}}",
             self.id,
             self.kind,
+            self.topic(),
             json_escape(&self.resource),
             json_option(self.detail.as_deref()),
             self.created_at
@@ -899,15 +1305,48 @@ impl EventRecord {
     }
 
     fn slskd_json(&self) -> serde_json::Value {
+        let data = self.data_json();
         serde_json::json!({
             "id": self.id.to_string(),
             "timestamp": self.created_at.to_string(),
+            "topic": self.topic(),
             "type": self.kind,
-            "data": serde_json::json!({
-                "resource": self.resource,
-                "detail": self.detail,
-            }).to_string(),
+            "resource": &self.resource,
+            "detail": &self.detail,
+            "data": data.to_string(),
+            "payload": data,
         })
+    }
+}
+
+fn topic_for_event_kind(kind: &str) -> &'static str {
+    match kind.split('.').next().unwrap_or(kind) {
+        "application" | "session" => "application",
+        "listener" | "portforwarding" => "listeners",
+        "share" => "shares",
+        "search" | "wishlist" => "searches",
+        "browse" => "browse",
+        "transfer" | "upload" | "download" => "transfers",
+        "message" | "conversation" => "messages",
+        "room" | "listening_party" => "rooms",
+        "user" | "contact" | "note" => "users",
+        "collection" | "playlist" => "collections",
+        "sharegroup" | "grant" => "sharegroups",
+        "library" | "catalog" => "library",
+        "destination" => "destinations",
+        "player" | "playback" | "now_playing" | "external_visualizer" => "player",
+        "relay" => "relay",
+        "bridge" => "bridge",
+        "mesh" => "mesh",
+        "webhook" => "webhooks",
+        "security" | "ban" => "security",
+        "federation" => "federation",
+        "solid" => "solid",
+        "lidarr" | "musicbrainz" => "integrations",
+        "songid" | "pod" | "stream" => "media",
+        "cache" | "backfill" | "telemetry" | "metrics" => "system",
+        "config" | "options" => "settings",
+        _ => "events",
     }
 }
 
@@ -927,15 +1366,45 @@ impl EventStore {
         }
     }
 
+    fn from_persisted(records: Vec<persistence::EventRecord>, history_limit: usize) -> Self {
+        let mut records = records
+            .into_iter()
+            .filter_map(|record| {
+                Some(EventRecord {
+                    id: u64::try_from(record.id).ok()?,
+                    kind: record.kind,
+                    resource: record.resource,
+                    detail: record.detail,
+                    created_at: u64::try_from(record.created_at).ok()?,
+                })
+            })
+            .collect::<Vec<_>>();
+        if records.len() > history_limit {
+            let extra = records.len() - history_limit;
+            records.drain(0..extra);
+        }
+        let next_id = records
+            .iter()
+            .map(|record| record.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        Self {
+            records,
+            next_id,
+            history_limit,
+        }
+    }
+
     fn record(
         &mut self,
-        kind: &'static str,
+        kind: impl Into<String>,
         resource: impl Into<String>,
         detail: Option<String>,
     ) -> EventRecord {
         let record = EventRecord {
             id: self.next_id,
-            kind,
+            kind: kind.into(),
             resource: resource.into(),
             detail,
             created_at: unix_timestamp(),
@@ -962,8 +1431,15 @@ impl EventStore {
                     .map_or(true, |kind| record.kind == kind)
             })
             .filter(|record| {
+                filter
+                    .topic
+                    .as_deref()
+                    .map_or(true, |topic| record.topic() == topic)
+            })
+            .filter(|record| {
                 filter.q.as_deref().map_or(true, |q| {
                     record.kind.to_ascii_lowercase().contains(q)
+                        || record.topic().contains(q)
                         || record.resource.to_ascii_lowercase().contains(q)
                         || record
                             .detail
@@ -998,6 +1474,29 @@ impl EventStore {
         let entries = self
             .records
             .iter()
+            .filter(|record| {
+                filter
+                    .kind
+                    .as_deref()
+                    .map_or(true, |kind| record.kind == kind)
+            })
+            .filter(|record| {
+                filter
+                    .topic
+                    .as_deref()
+                    .map_or(true, |topic| record.topic() == topic)
+            })
+            .filter(|record| {
+                filter.q.as_deref().map_or(true, |q| {
+                    record.kind.to_ascii_lowercase().contains(q)
+                        || record.topic().contains(q)
+                        || record.resource.to_ascii_lowercase().contains(q)
+                        || record
+                            .detail
+                            .as_deref()
+                            .is_some_and(|detail| detail.to_ascii_lowercase().contains(q))
+                })
+            })
             .rev()
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
@@ -1084,6 +1583,83 @@ impl TransferEntry {
             "remainingTime": "",
         })
     }
+}
+
+fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferRecord {
+    let completed_at = if matches!(
+        entry.status.as_str(),
+        "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+    ) {
+        Some(entry.updated_at as i64)
+    } else {
+        None
+    };
+    persistence::TransferRecord {
+        id: entry.id.to_string(),
+        direction: if entry.direction == 0 {
+            "download".to_owned()
+        } else {
+            "upload".to_owned()
+        },
+        filename: entry.filename.clone(),
+        peer_username: entry.peer_username.clone().unwrap_or_default(),
+        filesize: entry.size.unwrap_or(0) as i64,
+        progress: entry.bytes_transferred as i64,
+        status: entry.status.clone(),
+        started_at: entry.requested_at as i64,
+        completed_at,
+    }
+}
+
+fn persisted_transfer_event_record(entry: &TransferEntry) -> persistence::TransferEventRecord {
+    persistence::TransferEventRecord {
+        id: 0,
+        transfer_id: entry.id.to_string(),
+        direction: if entry.direction == 0 {
+            "download".to_owned()
+        } else {
+            "upload".to_owned()
+        },
+        token: i64::from(entry.token),
+        filename: entry.filename.clone(),
+        peer_username: entry.peer_username.clone(),
+        filesize: i64::try_from(entry.size.unwrap_or(0)).unwrap_or(i64::MAX),
+        progress: i64::try_from(entry.bytes_transferred).unwrap_or(i64::MAX),
+        status: entry.status.clone(),
+        reason: entry.reason.clone(),
+        created_at: i64::try_from(entry.updated_at).unwrap_or(i64::MAX),
+    }
+}
+
+async fn persist_transfer_record(state: &AppState, entry: &TransferEntry) -> Result<(), String> {
+    if let Some(db) = state.db.as_ref() {
+        db.insert_transfer(&persisted_transfer_record(entry))
+            .await
+            .map_err(|error| format!("failed to persist transfer: {error}"))?;
+        db.insert_transfer_event(&persisted_transfer_event_record(entry))
+            .await
+            .map_err(|error| format!("failed to persist transfer event: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn persist_transfer_records(
+    state: &AppState,
+    entries: &[TransferEntry],
+) -> Result<(), String> {
+    for entry in entries {
+        persist_transfer_record(state, entry).await?;
+    }
+    Ok(())
+}
+
+async fn delete_persisted_transfer(state: &AppState, entry: &TransferEntry) -> Result<(), String> {
+    if let Some(db) = state.db.as_ref() {
+        db.delete_transfer(&entry.id.to_string())
+            .await
+            .map_err(|error| format!("failed to delete persisted transfer: {error}"))?;
+    }
+    Ok(())
 }
 
 fn slskd_transfer_state(status: &str) -> &str {
@@ -1494,6 +2070,21 @@ impl TransferQueue {
         Some(entry.slskd_file_json().to_string())
     }
 
+    fn slskd_transfer_position(&self, direction: u32, username: &str, id: u64) -> usize {
+        let mut position = 0;
+        for entry in self.entries.iter().filter(|entry| {
+            entry.direction == direction
+                && entry.peer_username.as_deref() == Some(username)
+                && (entry.status == "queued" || is_active_transfer_status(&entry.status))
+        }) {
+            if entry.id == id {
+                return position;
+            }
+            position += 1;
+        }
+        0
+    }
+
     fn json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let entries = self
@@ -1620,6 +2211,22 @@ impl SessionSnapshot {
             self.updated_at
         )
     }
+}
+
+async fn room_join_unavailable_response(state: &AppState) -> Option<HttpResponse> {
+    let session = state.session.read().await;
+    if session.state == "connected" {
+        return None;
+    }
+    let state_name = session.state;
+    let message = match state_name {
+        "connecting" => "room joins are unavailable while connecting",
+        "error" if state.config.reconnect => "room joins are unavailable while reconnecting",
+        "error" => "room joins are unavailable while the session is in error state",
+        "disconnected" => "room joins are unavailable while disconnected",
+        _ => "room joins are unavailable until the session is connected",
+    };
+    Some(routing::service_unavailable_response(message))
 }
 
 #[derive(Clone, Debug)]
@@ -1784,6 +2391,32 @@ impl UserStore {
         }
     }
 
+    fn from_persisted(records: Vec<crate::persistence::UserProjectionRecord>) -> Self {
+        let mut updated_at = unix_timestamp();
+        let records = records
+            .into_iter()
+            .map(|record| {
+                updated_at = updated_at.max(record.updated_at as u64);
+                UserRecord {
+                    username: record.username,
+                    watched: record.watched,
+                    status: record.status,
+                    average_speed: record.average_speed.and_then(|value| value.try_into().ok()),
+                    upload_count: record.upload_count.and_then(|value| value.try_into().ok()),
+                    file_count: record.file_count.and_then(|value| value.try_into().ok()),
+                    directory_count: record
+                        .directory_count
+                        .and_then(|value| value.try_into().ok()),
+                    updated_at: record.updated_at as u64,
+                }
+            })
+            .collect();
+        Self {
+            records,
+            updated_at,
+        }
+    }
+
     fn watch(&mut self, username: String) -> UserRecord {
         let now = unix_timestamp();
         if let Some(record) = self
@@ -1940,6 +2573,129 @@ impl UserStore {
     }
 }
 
+#[derive(Debug)]
+struct MeshState {
+    rendezvous: MeshRendezvous,
+    capability_records: Vec<PeerCapabilityDescriptor>,
+    updated_at: u64,
+}
+
+impl MeshState {
+    fn new() -> Self {
+        Self {
+            rendezvous: MeshRendezvous::disabled(),
+            capability_records: Vec::new(),
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn mesh_capability_usernames(&self) -> Vec<&str> {
+        self.capability_records
+            .iter()
+            .filter(|descriptor| MeshRendezvous::accepts_descriptor(descriptor))
+            .map(|descriptor| descriptor.username.as_str())
+            .collect()
+    }
+
+    fn candidate_usernames(&self, users: &UserStore) -> Vec<String> {
+        self.rendezvous.candidate_usernames(
+            users.records.iter().map(|user| user.username.as_str()),
+            self.mesh_capability_usernames(),
+        )
+    }
+
+    fn status_json(&self, users: &UserStore) -> String {
+        let candidates = self.candidate_usernames(users);
+        serde_json::json!({
+            "enabled": true,
+            "activeProbe": self.rendezvous.active_probe_enabled(),
+            "interestTag": self.rendezvous.interest_tag(),
+            "publishedInterestTags": self.rendezvous.publish_interest_tags(),
+            "candidateCount": candidates.len(),
+            "capabilityRecords": self.capability_records.len(),
+            "meshCapableRecords": self.mesh_capability_usernames().len(),
+            "privacy": "Soulseek mesh rendezvous is passive unless active probing is explicitly enabled.",
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn users_json(&self, users: &UserStore) -> String {
+        let candidates = self
+            .candidate_usernames(users)
+            .into_iter()
+            .map(|username| {
+                let has_capability = self.capability_records.iter().any(|descriptor| {
+                    descriptor.username.eq_ignore_ascii_case(&username)
+                        && MeshRendezvous::accepts_descriptor(descriptor)
+                });
+                serde_json::json!({
+                    "username": username,
+                    "source": if has_capability { "capability" } else { "similar-user" },
+                    "meshCapable": has_capability,
+                })
+            })
+            .collect::<Vec<_>>();
+        let count = candidates.len();
+        serde_json::json!({
+            "users": candidates,
+            "count": count,
+            "interestTag": self.rendezvous.interest_tag(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn capability_records_json(&self) -> Vec<serde_json::Value> {
+        self.capability_records
+            .iter()
+            .map(|descriptor| {
+                serde_json::json!({
+                    "peerId": descriptor.peer_id,
+                    "username": descriptor.username,
+                    "features": descriptor.features,
+                    "endpoints": descriptor.endpoints,
+                    "issuedAt": descriptor.issued_at_unix,
+                    "expiresAt": descriptor.expires_at_unix,
+                    "meshCapable": MeshRendezvous::accepts_descriptor(descriptor),
+                })
+            })
+            .collect()
+    }
+
+    fn peer_capabilities_json(&self) -> String {
+        let records = self.capability_records_json();
+        let count = records.len();
+        serde_json::json!({
+            "records": records,
+            "count": count,
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn discover_json(&self, users: &UserStore) -> String {
+        let user_json = self
+            .candidate_usernames(users)
+            .into_iter()
+            .map(|username| serde_json::json!({ "username": username }))
+            .collect::<Vec<_>>();
+        let capability_records = self.capability_records_json();
+        let user_count = user_json.len();
+        let capability_record_count = capability_records.len();
+        serde_json::json!({
+            "users": user_json,
+            "count": user_count,
+            "capabilityRecords": capability_records,
+            "capabilityRecordCount": capability_record_count,
+            "interestTag": self.rendezvous.interest_tag(),
+            "activeProbe": self.rendezvous.active_probe_enabled(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+}
+
 #[derive(Clone, Debug)]
 struct BrowseEntry {
     filename: String,
@@ -1948,6 +2704,33 @@ struct BrowseEntry {
 }
 
 impl BrowseEntry {
+    fn from_json_file(file: &serde_json::Value, directory: Option<&str>) -> Option<Self> {
+        let raw_filename = file
+            .get("filename")
+            .or_else(|| file.get("name"))?
+            .as_str()?
+            .to_owned();
+        let filename =
+            if raw_filename.contains('/') || raw_filename.contains('\\') || directory.is_none() {
+                raw_filename
+            } else {
+                join_virtual_path(directory.unwrap().trim_matches('/'), &raw_filename)
+            };
+        let extension = file
+            .get("extension")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| filename.split('.').next_back().unwrap_or("").to_owned());
+        Some(Self {
+            filename,
+            size: file
+                .get("size")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            extension,
+        })
+    }
+
     fn json(&self) -> String {
         format!(
             "{{\"filename\":\"{}\",\"size\":{},\"extension\":\"{}\"}}",
@@ -1993,6 +2776,53 @@ impl BrowseRecord {
             self.updated_at
         )
     }
+
+    fn slskd_status_json(&self) -> String {
+        let size = self.entries.iter().map(|entry| entry.size).sum::<u64>();
+        let complete = matches!(self.status, "ready" | "partial");
+        let percent_complete = if complete { 100.0 } else { 0.0 };
+        let directory_count = group_browse_entries(&self.entries).len();
+        serde_json::json!({
+            "username": self.username,
+            "status": self.status,
+            "state": browse_slskd_state(self.status),
+            "size": size,
+            "bytesTransferred": if complete { size } else { 0 },
+            "bytesRemaining": if complete { 0 } else { size },
+            "percentComplete": percent_complete,
+            "fileCount": self.entries.len(),
+            "directoryCount": directory_count,
+            "isComplete": complete,
+            "reason": self.reason,
+            "folder": self.folder,
+            "indirectToken": self.indirect_token,
+            "requestedAt": self.requested_at,
+            "updatedAt": self.updated_at,
+        })
+        .to_string()
+    }
+}
+
+fn browse_slskd_state(status: &str) -> &'static str {
+    match status {
+        "ready" | "partial" => "Completed",
+        "failed" => "Failed",
+        "cancelled" => "Cancelled",
+        "indirect_pending" => "Pending",
+        _ => "InProgress",
+    }
+}
+
+fn persisted_browse_status(status: &str) -> &'static str {
+    match status {
+        "requested" => "requested",
+        "ready" => "ready",
+        "partial" => "partial",
+        "failed" => "failed",
+        "cancelled" => "cancelled",
+        "indirect_pending" => "indirect_pending",
+        _ => "failed",
+    }
 }
 
 #[derive(Debug)]
@@ -2008,6 +2838,50 @@ impl BrowseStore {
             records: Vec::new(),
             next_indirect_token: 1,
             updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::BrowseRecord>) -> Self {
+        let mut next_indirect_token = 1_u32;
+        let mut updated_at = unix_timestamp();
+        let records = records
+            .into_iter()
+            .map(|record| {
+                let entries = serde_json::from_str::<serde_json::Value>(&record.entries_json)
+                    .ok()
+                    .and_then(|value| value.as_array().cloned())
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|entry| BrowseEntry::from_json_file(entry, None))
+                    .collect::<Vec<_>>();
+                let indirect_token = record
+                    .indirect_token
+                    .and_then(|token| u32::try_from(token).ok());
+                if let Some(token) = indirect_token {
+                    next_indirect_token = next_indirect_token.max(token.wrapping_add(1).max(1));
+                }
+                let requested_at = record
+                    .requested_at
+                    .and_then(|timestamp| u64::try_from(timestamp).ok());
+                let record_updated_at =
+                    u64::try_from(record.updated_at).unwrap_or_else(|_| unix_timestamp());
+                updated_at = updated_at.max(record_updated_at);
+                BrowseRecord {
+                    username: record.username,
+                    status: persisted_browse_status(&record.status),
+                    entries,
+                    reason: record.reason,
+                    folder: record.folder,
+                    indirect_token,
+                    requested_at,
+                    updated_at: record_updated_at,
+                }
+            })
+            .collect();
+        Self {
+            records,
+            next_indirect_token,
+            updated_at,
         }
     }
 
@@ -2189,6 +3063,43 @@ impl BrowseStore {
         record
     }
 
+    fn cancel(&mut self, username: String, reason: String) -> BrowseRecord {
+        let now = unix_timestamp();
+        if let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.username == username)
+        {
+            record.status = "cancelled";
+            record.reason = if reason.trim().is_empty() {
+                None
+            } else {
+                Some(reason)
+            };
+            record.indirect_token = None;
+            record.updated_at = now;
+            self.updated_at = now;
+            return record.clone();
+        }
+        let record = BrowseRecord {
+            username,
+            status: "cancelled",
+            entries: Vec::new(),
+            reason: if reason.trim().is_empty() {
+                None
+            } else {
+                Some(reason)
+            },
+            folder: None,
+            indirect_token: None,
+            requested_at: None,
+            updated_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
     fn get(&self, username: &str) -> Option<BrowseRecord> {
         self.records
             .iter()
@@ -2337,6 +3248,43 @@ impl MessageStore {
             next_id: 1,
             updated_at: unix_timestamp(),
         }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::MessageRecord>) -> Self {
+        let mut store = Self::new();
+        store.records = records
+            .into_iter()
+            .filter_map(|record| {
+                let id = record.id.parse::<u64>().ok()?;
+                Some(MessageRecord {
+                    id,
+                    username: record.username,
+                    direction: match record.direction.as_str() {
+                        "inbound" | "incoming" | "In" => "inbound",
+                        _ => "outbound",
+                    },
+                    body: record.content,
+                    acknowledged: record.read,
+                    created_at: u64::try_from(record.created_at).unwrap_or_default(),
+                    updated_at: u64::try_from(record.created_at).unwrap_or_default(),
+                })
+            })
+            .collect();
+        store.records.sort_by_key(|record| record.id);
+        store.next_id = store
+            .records
+            .iter()
+            .map(|record| record.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        store.updated_at = store
+            .records
+            .iter()
+            .map(|record| record.updated_at)
+            .max()
+            .unwrap_or_else(unix_timestamp);
+        store
     }
 
     fn add(&mut self, username: String, direction: &'static str, body: String) -> MessageRecord {
@@ -2566,6 +3514,9 @@ struct RoomRecord {
     kind: &'static str,
     user_count: Option<u32>,
     operated: bool,
+    last_error: Option<String>,
+    ticker: Option<String>,
+    members: Vec<String>,
     messages: Vec<RoomMessageRecord>,
     updated_at: u64,
 }
@@ -2579,12 +3530,15 @@ impl RoomRecord {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"name\":\"{}\",\"joined\":{},\"kind\":\"{}\",\"user_count\":{},\"operated\":{},\"messages\":[{}],\"message_count\":{},\"updated_at\":{}}}",
+            "{{\"name\":\"{}\",\"joined\":{},\"kind\":\"{}\",\"user_count\":{},\"operated\":{},\"last_error\":{},\"ticker\":{},\"members\":{},\"messages\":[{}],\"message_count\":{},\"updated_at\":{}}}",
             json_escape(&self.name),
             self.joined,
             self.kind,
             json_u32_option(self.user_count),
             self.operated,
+            json_option(self.last_error.as_deref()),
+            json_option(self.ticker.as_deref()),
+            serde_json::to_string(&self.members).unwrap_or_else(|_| "[]".to_owned()),
             messages,
             self.messages.len(),
             self.updated_at
@@ -2598,6 +3552,9 @@ impl RoomRecord {
             "isPrivate": self.kind != "public",
             "isOwned": self.operated,
             "isModerated": self.operated,
+            "lastError": self.last_error,
+            "ticker": self.ticker,
+            "memberCount": self.members.len(),
         })
     }
 
@@ -2605,8 +3562,10 @@ impl RoomRecord {
         serde_json::json!({
             "name": self.name,
             "isPrivate": self.kind != "public",
-            "users": [],
+            "users": self.members,
             "messages": self.messages.iter().map(|message| message.slskd_json(&self.name)).collect::<Vec<_>>(),
+            "ticker": self.ticker,
+            "lastError": self.last_error,
         })
     }
 }
@@ -2625,10 +3584,41 @@ impl RoomStore {
         }
     }
 
+    fn from_persisted(records: Vec<crate::persistence::RoomRecord>) -> Self {
+        let mut store = Self::new();
+        store.records = records
+            .into_iter()
+            .map(|record| RoomRecord {
+                name: record.name,
+                joined: record.subscribed,
+                kind: if record.owner.is_some() {
+                    "private"
+                } else {
+                    "local"
+                },
+                user_count: None,
+                operated: false,
+                last_error: None,
+                ticker: None,
+                members: Vec::new(),
+                messages: Vec::new(),
+                updated_at: u64::try_from(record.last_activity).unwrap_or_default(),
+            })
+            .collect();
+        store.updated_at = store
+            .records
+            .iter()
+            .map(|record| record.updated_at)
+            .max()
+            .unwrap_or_else(unix_timestamp);
+        store
+    }
+
     fn join(&mut self, name: String) -> RoomRecord {
         let now = unix_timestamp();
         if let Some(record) = self.records.iter_mut().find(|record| record.name == name) {
             record.joined = true;
+            record.last_error = None;
             record.updated_at = now;
             self.updated_at = now;
             return record.clone();
@@ -2639,6 +3629,9 @@ impl RoomStore {
             kind: "local",
             user_count: None,
             operated: false,
+            last_error: None,
+            ticker: None,
+            members: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -2654,6 +3647,32 @@ impl RoomStore {
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
+    }
+
+    fn fail_join(&mut self, name: &str, reason: String) -> RoomRecord {
+        let now = unix_timestamp();
+        if let Some(record) = self.records.iter_mut().find(|record| record.name == name) {
+            record.joined = false;
+            record.last_error = Some(reason);
+            record.updated_at = now;
+            self.updated_at = now;
+            return record.clone();
+        }
+        let record = RoomRecord {
+            name: name.to_owned(),
+            joined: false,
+            kind: "local",
+            user_count: None,
+            operated: false,
+            last_error: Some(reason),
+            ticker: None,
+            members: Vec::new(),
+            messages: Vec::new(),
+            updated_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
     }
 
     fn apply_room_list(&mut self, room_list: &RoomList) {
@@ -2679,6 +3698,9 @@ impl RoomStore {
                     kind: "operated_private",
                     user_count: None,
                     operated: true,
+                    last_error: None,
+                    ticker: None,
+                    members: Vec::new(),
                     messages: Vec::new(),
                     updated_at: now,
                 });
@@ -2702,6 +3724,7 @@ impl RoomStore {
             record.kind = kind;
             record.user_count = Some(entry.user_count);
             record.operated = operated;
+            record.last_error = None;
             record.updated_at = now;
             self.updated_at = now;
             return record.clone();
@@ -2712,6 +3735,9 @@ impl RoomStore {
             kind,
             user_count: Some(entry.user_count),
             operated,
+            last_error: None,
+            ticker: None,
+            members: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -2728,6 +3754,35 @@ impl RoomStore {
             body,
             created_at: now,
         });
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn set_ticker(&mut self, room: &str, ticker: String) -> Option<RoomRecord> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|record| record.name == room)?;
+        record.ticker = Some(ticker);
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn add_member(&mut self, room: &str, username: String) -> Option<RoomRecord> {
+        let now = unix_timestamp();
+        let username = username.trim();
+        if username.is_empty() {
+            return None;
+        }
+        let record = self.records.iter_mut().find(|record| record.name == room)?;
+        if !record
+            .members
+            .iter()
+            .any(|member| member.eq_ignore_ascii_case(username))
+        {
+            record.members.push(username.to_owned());
+        }
+        record.user_count = Some(record.members.len() as u32);
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -2895,6 +3950,60 @@ impl CollectionStore {
         }
     }
 
+    fn from_persisted(
+        collections: Vec<crate::persistence::CollectionRecord>,
+        items: Vec<crate::persistence::CollectionItemRecord>,
+    ) -> Self {
+        let mut next_id = 1;
+        let mut updated_at = unix_timestamp();
+        let mut records = collections
+            .into_iter()
+            .map(|record| {
+                if let Some(number) = record
+                    .id
+                    .strip_prefix("col-")
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    next_id = next_id.max(number.saturating_add(1));
+                }
+                let created_at = u64::try_from(record.created_at).unwrap_or(0);
+                let record_updated_at = u64::try_from(record.updated_at).unwrap_or(created_at);
+                updated_at = updated_at.max(record_updated_at);
+                CollectionRecord {
+                    id: record.id,
+                    name: record.name,
+                    description: record.description,
+                    items: Vec::new(),
+                    created_at,
+                    updated_at: record_updated_at,
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut items = items;
+        items.sort_by_key(|item| (item.collection_id.clone(), item.position, item.added_at));
+        for item in items {
+            let Some(collection) = records
+                .iter_mut()
+                .find(|record| record.id == item.collection_id)
+            else {
+                continue;
+            };
+            collection.items.push(CollectionItem {
+                id: item.id,
+                content_id: item.content_id,
+                artist: item.artist,
+                title: item.title,
+                kind: item.kind,
+                added_at: u64::try_from(item.added_at).unwrap_or(0),
+            });
+        }
+        Self {
+            records,
+            next_id,
+            updated_at,
+        }
+    }
+
     fn create(&mut self, name: String, description: String) -> CollectionRecord {
         let now = unix_timestamp();
         let id = format!("col-{}", self.next_id);
@@ -2940,6 +4049,92 @@ impl CollectionStore {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == collection_id)?;
         record.items.push(item);
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn update_item(
+        &mut self,
+        item_id: &str,
+        artist: Option<String>,
+        title: Option<String>,
+        kind: Option<String>,
+    ) -> Option<CollectionItem> {
+        let now = unix_timestamp();
+        for record in &mut self.records {
+            if let Some(item) = record.items.iter_mut().find(|item| item.id == item_id) {
+                if let Some(artist) = artist {
+                    item.artist = artist;
+                }
+                if let Some(title) = title {
+                    item.title = title;
+                }
+                if let Some(kind) = kind {
+                    item.kind = kind;
+                }
+                record.updated_at = now;
+                self.updated_at = now;
+                return Some(item.clone());
+            }
+        }
+        None
+    }
+
+    fn remove_item(&mut self, item_id: &str) -> Option<CollectionItem> {
+        let now = unix_timestamp();
+        for record in &mut self.records {
+            if let Some(pos) = record.items.iter().position(|item| item.id == item_id) {
+                let item = record.items.remove(pos);
+                record.updated_at = now;
+                self.updated_at = now;
+                return Some(item);
+            }
+        }
+        None
+    }
+
+    fn collection_id_for_item(&self, item_id: &str) -> Option<String> {
+        self.records
+            .iter()
+            .find(|record| record.items.iter().any(|item| item.id == item_id))
+            .map(|record| record.id.clone())
+    }
+
+    fn reorder_items(&mut self, collection_id: &str, body: &str) -> Option<CollectionRecord> {
+        let now = unix_timestamp();
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == collection_id)?;
+        let payload = serde_json::from_str::<serde_json::Value>(body).ok();
+        let ids = payload
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .get("item_ids")
+                    .or_else(|| value.get("itemIds"))
+                    .or_else(|| value.get("items"))
+            })
+            .and_then(serde_json::Value::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !ids.is_empty() {
+            let mut ordered = Vec::new();
+            for id in &ids {
+                if let Some(pos) = record.items.iter().position(|item| item.id == *id) {
+                    ordered.push(record.items.remove(pos));
+                }
+            }
+            ordered.append(&mut record.items);
+            record.items = ordered;
+        }
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -3000,21 +4195,17 @@ struct WishlistItem {
 }
 
 impl WishlistItem {
+    fn search_text(&self) -> String {
+        match (self.artist.trim().is_empty(), self.title.trim().is_empty()) {
+            (true, true) => String::new(),
+            (true, false) => self.title.clone(),
+            (false, true) => self.artist.clone(),
+            (false, false) => format!("{} {}", self.artist, self.title),
+        }
+    }
+
     fn json(&self) -> String {
-        let search_text = if self.title.is_empty() {
-            self.artist.as_str()
-        } else if self.artist.is_empty() {
-            self.title.as_str()
-        } else {
-            ""
-        };
-        let owned_search_text;
-        let search_text = if search_text.is_empty() {
-            owned_search_text = format!("{} {}", self.artist, self.title);
-            owned_search_text.as_str()
-        } else {
-            search_text
-        };
+        let search_text = self.search_text();
         format!(
             "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{},\"searchText\":\"{}\",\"filter\":\"\",\"enabled\":true,\"autoDownload\":false,\"maxResults\":100,\"lastSearchedAt\":null,\"lastMatchCount\":0,\"totalSearchCount\":0,\"lastSearchId\":null}}",
             json_escape(&self.id),
@@ -3022,7 +4213,7 @@ impl WishlistItem {
             json_escape(&self.title),
             json_escape(&self.kind),
             self.added_at,
-            json_escape(search_text)
+            json_escape(&search_text)
         )
     }
 }
@@ -3046,6 +4237,33 @@ impl WishlistStore {
             records: Vec::new(),
             updated_at: unix_timestamp(),
         }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::WishlistItemRecord>) -> Self {
+        let mut store = Self::new();
+        let mut items = records
+            .into_iter()
+            .map(|record| WishlistItem {
+                id: record.id,
+                artist: record.artist,
+                title: record.title,
+                kind: record.kind,
+                added_at: u64::try_from(record.added_at).unwrap_or(0),
+            })
+            .collect::<Vec<_>>();
+        items.sort_by_key(|item| item.added_at);
+        let updated_at = items
+            .iter()
+            .map(|item| item.added_at)
+            .max()
+            .unwrap_or_else(unix_timestamp);
+        store.records.push(WishlistRecord {
+            id: "default".to_owned(),
+            items,
+            updated_at,
+        });
+        store.updated_at = updated_at;
+        store
     }
 
     fn get_or_create(&mut self) -> WishlistRecord {
@@ -3086,6 +4304,30 @@ impl WishlistStore {
         }
     }
 
+    fn update_item(
+        &mut self,
+        item_id: &str,
+        artist: Option<String>,
+        title: Option<String>,
+        kind: Option<String>,
+    ) -> Option<WishlistItem> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|r| r.id == "default")?;
+        let item = record.items.iter_mut().find(|item| item.id == item_id)?;
+        if let Some(artist) = artist {
+            item.artist = artist;
+        }
+        if let Some(title) = title {
+            item.title = title;
+        }
+        if let Some(kind) = kind {
+            item.kind = kind;
+        }
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(item.clone())
+    }
+
     fn json_array(&mut self) -> String {
         let record = self.get_or_create();
         let items = record
@@ -3095,6 +4337,31 @@ impl WishlistStore {
             .collect::<Vec<_>>()
             .join(",");
         format!("[{}]", items)
+    }
+
+    fn search_terms(&self) -> Vec<String> {
+        self.records
+            .iter()
+            .flat_map(|record| record.items.iter())
+            .map(|item| {
+                if item.title.is_empty() {
+                    item.artist.clone()
+                } else if item.artist.is_empty() {
+                    item.title.clone()
+                } else {
+                    format!("{} {}", item.artist, item.title)
+                }
+            })
+            .filter(|term| !term.trim().is_empty())
+            .collect()
+    }
+
+    fn get_item(&self, item_id: &str) -> Option<WishlistItem> {
+        self.records
+            .iter()
+            .flat_map(|record| record.items.iter())
+            .find(|item| item.id == item_id)
+            .cloned()
     }
 }
 
@@ -3140,6 +4407,45 @@ impl ContactStore {
             records: Vec::new(),
             next_id: 1,
             updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::ContactRecord>) -> Self {
+        let mut next_id = 1;
+        let mut updated_at = unix_timestamp();
+        let records = records
+            .into_iter()
+            .map(|record| {
+                if let Some(number) = record
+                    .id
+                    .strip_prefix("contact-")
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    next_id = next_id.max(number.saturating_add(1));
+                }
+                let created_at = u64::try_from(record.created_at).unwrap_or(0);
+                let record_updated_at = u64::try_from(record.updated_at).unwrap_or(created_at);
+                updated_at = updated_at.max(record_updated_at);
+                ContactRecord {
+                    id: record.id,
+                    username: record.username,
+                    online: record.online,
+                    status: record.status,
+                    free_upload_slots: record
+                        .free_upload_slots
+                        .and_then(|value| u32::try_from(value).ok()),
+                    queue_length: record
+                        .queue_length
+                        .and_then(|value| u32::try_from(value).ok()),
+                    created_at,
+                    updated_at: record_updated_at,
+                }
+            })
+            .collect();
+        Self {
+            records,
+            next_id,
+            updated_at,
         }
     }
 
@@ -3205,6 +4511,26 @@ impl ContactStore {
         let records = self
             .records
             .iter()
+            .filter(|record| {
+                filter
+                    .q
+                    .as_deref()
+                    .map_or(true, |q| record.username.to_ascii_lowercase().contains(q))
+            })
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(usize::MAX))
+            .map(ContactRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{}]", records)
+    }
+
+    fn nearby_json(&self, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .records
+            .iter()
+            .filter(|record| record.online)
             .filter(|record| {
                 filter
                     .q
@@ -3284,6 +4610,61 @@ impl ShareGroupStore {
         }
     }
 
+    fn from_persisted(
+        groups: Vec<crate::persistence::ShareGroupRecord>,
+        members: Vec<crate::persistence::ShareGroupMemberRecord>,
+    ) -> Self {
+        let mut store = Self::new();
+        let mut max_id = 0_u64;
+        store.records = groups
+            .into_iter()
+            .map(|record| {
+                if let Some(value) = record
+                    .id
+                    .strip_prefix("sg-")
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    max_id = max_id.max(value);
+                }
+                ShareGroupRecord {
+                    id: record.id,
+                    name: record.name,
+                    description: record.description,
+                    members: Vec::new(),
+                    created_at: u64::try_from(record.created_at).unwrap_or_default(),
+                    updated_at: u64::try_from(record.updated_at).unwrap_or_default(),
+                }
+            })
+            .collect();
+        for member in members {
+            if let Some(group) = store
+                .records
+                .iter_mut()
+                .find(|record| record.id == member.group_id)
+            {
+                group.members.push(ShareGroupMember {
+                    username: member.username,
+                    added_at: u64::try_from(member.added_at).unwrap_or_default(),
+                });
+            }
+        }
+        for group in &mut store.records {
+            group.members.sort_by(|left, right| {
+                left.username
+                    .cmp(&right.username)
+                    .then(left.added_at.cmp(&right.added_at))
+            });
+        }
+        store.next_id = max_id.saturating_add(1).max(1);
+        store.updated_at = store
+            .records
+            .iter()
+            .map(|record| record.updated_at)
+            .max()
+            .unwrap_or_else(unix_timestamp);
+        store
+    }
+
     fn create(&mut self, name: String, description: String) -> ShareGroupRecord {
         let now = unix_timestamp();
         let id = format!("sg-{}", self.next_id);
@@ -3350,6 +4731,39 @@ impl ShareGroupStore {
         } else {
             None
         }
+    }
+
+    fn user_group_json(&self, username: &str) -> String {
+        let groups = self
+            .records
+            .iter()
+            .filter_map(|record| {
+                let member = record
+                    .members
+                    .iter()
+                    .find(|member| member.username == username)?;
+                Some(serde_json::json!({
+                    "id": record.id,
+                    "name": record.name,
+                    "description": record.description,
+                    "added_at": member.added_at,
+                }))
+            })
+            .collect::<Vec<_>>();
+        let primary_group = groups
+            .first()
+            .and_then(|group| group.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("default");
+        let primary_group_id = groups.first().and_then(|group| group.get("id")).cloned();
+        serde_json::json!({
+            "username": username,
+            "group": primary_group,
+            "group_id": primary_group_id,
+            "groups": groups,
+            "groupCount": groups.len(),
+        })
+        .to_string()
     }
 
     #[allow(dead_code)]
@@ -3432,6 +4846,38 @@ impl UserNoteStore {
             records: Vec::new(),
             next_id: 1,
             updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::UserNoteRecord>) -> Self {
+        let mut next_id = 1;
+        let mut updated_at = unix_timestamp();
+        let records = records
+            .into_iter()
+            .map(|record| {
+                if let Some(number) = record
+                    .id
+                    .strip_prefix("note-")
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    next_id = next_id.max(number.saturating_add(1));
+                }
+                let created_at = u64::try_from(record.created_at).unwrap_or(0);
+                let record_updated_at = u64::try_from(record.updated_at).unwrap_or(created_at);
+                updated_at = updated_at.max(record_updated_at);
+                UserNoteRecord {
+                    id: record.id,
+                    username: record.username,
+                    note: record.note,
+                    created_at,
+                    updated_at: record_updated_at,
+                }
+            })
+            .collect();
+        Self {
+            records,
+            next_id,
+            updated_at,
         }
     }
 
@@ -3529,6 +4975,35 @@ impl InterestStore {
         }
     }
 
+    fn from_persisted(records: Vec<crate::persistence::InterestRecord>) -> Self {
+        let mut store = Self::new();
+        store.liked.clear();
+        store.hated.clear();
+        for record in records {
+            if let Some(number) = record
+                .id
+                .split_once('-')
+                .and_then(|(_, value)| value.parse::<u64>().ok())
+            {
+                store.next_id = store.next_id.max(number.saturating_add(1));
+            }
+            let created_at = u64::try_from(record.created_at).unwrap_or(0);
+            store.updated_at = store.updated_at.max(created_at);
+            let record = InterestRecord {
+                id: record.id,
+                name: record.name,
+                kind: record.kind,
+                created_at,
+            };
+            if record.kind == "hated" {
+                store.hated.push(record);
+            } else {
+                store.liked.push(record);
+            }
+        }
+        store
+    }
+
     fn add_liked(&mut self, name: String) -> InterestRecord {
         let now = unix_timestamp();
         let id = format!("liked-{}", self.next_id);
@@ -3608,6 +5083,571 @@ impl InterestStore {
             self.updated_at
         )
     }
+
+    fn user_interests_json(&self, username: &str) -> String {
+        let liked = self
+            .liked
+            .iter()
+            .map(InterestRecord::json)
+            .collect::<Vec<_>>();
+        let hated = self
+            .hated
+            .iter()
+            .map(InterestRecord::json)
+            .collect::<Vec<_>>();
+        format!(
+            "{{\"username\":\"{}\",\"liked\":[{}],\"hated\":[{}],\"interests\":[{}],\"count\":{},\"updated_at\":{}}}",
+            json_escape(username),
+            liked.join(","),
+            hated.join(","),
+            liked.join(","),
+            self.liked.len() + self.hated.len(),
+            self.updated_at
+        )
+    }
+
+    fn recommendations_json(&self, field: &str) -> String {
+        let recommendations = self
+            .liked
+            .iter()
+            .enumerate()
+            .map(|(index, interest)| {
+                format!(
+                    "{{\"id\":\"rec-{}\",\"interest\":\"{}\",\"query\":\"{}\",\"score\":{},\"source\":\"liked-interest\"}}",
+                    index + 1,
+                    json_escape(&interest.name),
+                    json_escape(&interest.name),
+                    100_u64.saturating_sub(index as u64)
+                )
+            })
+            .collect::<Vec<_>>();
+        format!(
+            "{{\"{}\":[{}],\"count\":{},\"updated_at\":{}}}",
+            field,
+            recommendations.join(","),
+            recommendations.len(),
+            self.updated_at
+        )
+    }
+
+    fn item_recommendations_json(&self, item_id: &str) -> String {
+        let recommendations = self
+            .liked
+            .iter()
+            .enumerate()
+            .map(|(index, interest)| {
+                format!(
+                    "{{\"id\":\"{}-rec-{}\",\"item_id\":\"{}\",\"interest\":\"{}\",\"score\":{},\"source\":\"liked-interest\"}}",
+                    json_escape(item_id),
+                    index + 1,
+                    json_escape(item_id),
+                    json_escape(&interest.name),
+                    100_u64.saturating_sub(index as u64)
+                )
+            })
+            .collect::<Vec<_>>();
+        format!(
+            "{{\"item_id\":\"{}\",\"recommendations\":[{}],\"count\":{},\"updated_at\":{}}}",
+            json_escape(item_id),
+            recommendations.join(","),
+            recommendations.len(),
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct NowPlayingRecord {
+    username: String,
+    artist: String,
+    title: String,
+    updated_at: u64,
+}
+
+impl NowPlayingRecord {
+    fn json(&self) -> String {
+        format!(
+            "{{\"username\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"updated_at\":{}}}",
+            json_escape(&self.username),
+            json_escape(&self.artist),
+            json_escape(&self.title),
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Debug)]
+struct NowPlayingStore {
+    records: Vec<NowPlayingRecord>,
+    updated_at: u64,
+}
+
+impl NowPlayingStore {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::NowPlayingRecord>) -> Self {
+        let mut updated_at = unix_timestamp();
+        let records = records
+            .into_iter()
+            .map(|record| {
+                let record_updated_at = u64::try_from(record.updated_at).unwrap_or(0);
+                updated_at = updated_at.max(record_updated_at);
+                NowPlayingRecord {
+                    username: record.username,
+                    artist: record.artist,
+                    title: record.title,
+                    updated_at: record_updated_at,
+                }
+            })
+            .collect();
+        Self {
+            records,
+            updated_at,
+        }
+    }
+
+    fn upsert(&mut self, username: String, artist: String, title: String) -> NowPlayingRecord {
+        let now = unix_timestamp();
+        let username = if username.trim().is_empty() {
+            "local".to_owned()
+        } else {
+            username
+        };
+        if let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.username == username)
+        {
+            record.artist = artist;
+            record.title = title;
+            record.updated_at = now;
+            self.updated_at = now;
+            return record.clone();
+        }
+        let record = NowPlayingRecord {
+            username,
+            artist,
+            title,
+            updated_at: now,
+        };
+        self.records.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn clear(&mut self) -> usize {
+        let cleared = self.records.len();
+        self.records.clear();
+        self.updated_at = unix_timestamp();
+        cleared
+    }
+
+    fn json(&self) -> String {
+        let records = self
+            .records
+            .iter()
+            .map(NowPlayingRecord::json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"now_playing\":[{}],\"count\":{},\"updated_at\":{}}}",
+            records,
+            self.records.len(),
+            self.updated_at
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RelayState {
+    enabled: bool,
+    updated_at: u64,
+}
+
+impl RelayState {
+    fn new() -> Self {
+        Self {
+            enabled: false,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(record: &crate::persistence::RuntimeCompatRecord) -> Self {
+        Self {
+            enabled: record.relay_enabled,
+            updated_at: u64::try_from(record.updated_at).unwrap_or_else(|_| unix_timestamp()),
+        }
+    }
+
+    fn set_enabled(&mut self, enabled: bool) -> serde_json::Value {
+        self.enabled = enabled;
+        self.updated_at = unix_timestamp();
+        self.json_value("configured")
+    }
+
+    fn json_value(&self, status: &str) -> serde_json::Value {
+        serde_json::json!({
+            "relay_enabled": self.enabled,
+            "enabled": self.enabled,
+            "status": status,
+            "updated_at": self.updated_at,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeCompatState {
+    application_restart_requested: bool,
+    gc_runs: u64,
+    autoreplace_enabled: bool,
+    relay_agent_enabled: bool,
+    bridge_running: bool,
+    bridge_config_updates: u64,
+    profile_invites_created: u64,
+    cache_warm_runs: u64,
+    backfill_runs: u64,
+    songid_runs: u64,
+    lidarr_sync_runs: u64,
+    lidarr_manual_imports: u64,
+    updated_at: u64,
+}
+
+impl RuntimeCompatState {
+    fn new() -> Self {
+        Self {
+            application_restart_requested: false,
+            gc_runs: 0,
+            autoreplace_enabled: false,
+            relay_agent_enabled: false,
+            bridge_running: false,
+            bridge_config_updates: 0,
+            profile_invites_created: 0,
+            cache_warm_runs: 0,
+            backfill_runs: 0,
+            songid_runs: 0,
+            lidarr_sync_runs: 0,
+            lidarr_manual_imports: 0,
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(record: &crate::persistence::RuntimeCompatRecord) -> Self {
+        Self {
+            application_restart_requested: record.application_restart_requested,
+            gc_runs: u64::try_from(record.gc_runs).unwrap_or_default(),
+            autoreplace_enabled: record.autoreplace_enabled,
+            relay_agent_enabled: record.relay_agent_enabled,
+            bridge_running: record.bridge_running,
+            bridge_config_updates: u64::try_from(record.bridge_config_updates).unwrap_or_default(),
+            profile_invites_created: u64::try_from(record.profile_invites_created)
+                .unwrap_or_default(),
+            cache_warm_runs: u64::try_from(record.cache_warm_runs).unwrap_or_default(),
+            backfill_runs: u64::try_from(record.backfill_runs).unwrap_or_default(),
+            songid_runs: u64::try_from(record.songid_runs).unwrap_or_default(),
+            lidarr_sync_runs: u64::try_from(record.lidarr_sync_runs).unwrap_or_default(),
+            lidarr_manual_imports: u64::try_from(record.lidarr_manual_imports).unwrap_or_default(),
+            updated_at: u64::try_from(record.updated_at).unwrap_or_else(|_| unix_timestamp()),
+        }
+    }
+
+    fn persistence_record(&self, relay: &RelayState) -> crate::persistence::RuntimeCompatRecord {
+        crate::persistence::RuntimeCompatRecord {
+            id: "runtime".to_owned(),
+            application_restart_requested: self.application_restart_requested,
+            gc_runs: i64::try_from(self.gc_runs).unwrap_or(i64::MAX),
+            autoreplace_enabled: self.autoreplace_enabled,
+            relay_enabled: relay.enabled,
+            relay_agent_enabled: self.relay_agent_enabled,
+            bridge_running: self.bridge_running,
+            bridge_config_updates: i64::try_from(self.bridge_config_updates).unwrap_or(i64::MAX),
+            profile_invites_created: i64::try_from(self.profile_invites_created)
+                .unwrap_or(i64::MAX),
+            cache_warm_runs: i64::try_from(self.cache_warm_runs).unwrap_or(i64::MAX),
+            backfill_runs: i64::try_from(self.backfill_runs).unwrap_or(i64::MAX),
+            songid_runs: i64::try_from(self.songid_runs).unwrap_or(i64::MAX),
+            lidarr_sync_runs: i64::try_from(self.lidarr_sync_runs).unwrap_or(i64::MAX),
+            lidarr_manual_imports: i64::try_from(self.lidarr_manual_imports).unwrap_or(i64::MAX),
+            updated_at: i64::try_from(self.updated_at.max(relay.updated_at)).unwrap_or(i64::MAX),
+        }
+    }
+
+    fn set_restart_requested(&mut self, requested: bool) -> serde_json::Value {
+        self.application_restart_requested = requested;
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "accepted": true,
+            "persisted": true,
+            "pendingRestart": self.application_restart_requested,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_gc(&mut self) -> serde_json::Value {
+        self.gc_runs = self.gc_runs.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "collected": true,
+            "gcRuns": self.gc_runs,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn set_autoreplace(&mut self, enabled: bool) -> serde_json::Value {
+        self.autoreplace_enabled = enabled;
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "enabled": self.autoreplace_enabled,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn set_relay_agent(&mut self, enabled: bool) -> serde_json::Value {
+        self.relay_agent_enabled = enabled;
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "enabled": self.relay_agent_enabled,
+            "relayAgentEnabled": self.relay_agent_enabled,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn set_bridge_running(&mut self, running: bool, configured: bool) -> serde_json::Value {
+        self.bridge_running = running && configured;
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "status": if configured {
+                if self.bridge_running { "running" } else { "stopped" }
+            } else {
+                "disabled"
+            },
+            "started": self.bridge_running,
+            "stopped": !self.bridge_running,
+            "configured": configured,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_bridge_config_update(
+        &mut self,
+        configured: bool,
+        accepted_keys: Vec<String>,
+    ) -> serde_json::Value {
+        self.bridge_config_updates = self.bridge_config_updates.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "enabled": configured,
+            "configured": configured,
+            "persisted": true,
+            "restart_required": true,
+            "acceptedKeys": accepted_keys,
+            "configUpdates": self.bridge_config_updates,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_profile_invite(&mut self) -> serde_json::Value {
+        self.profile_invites_created = self.profile_invites_created.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "count": self.profile_invites_created,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_cache_warm(&mut self, warmed: usize) -> serde_json::Value {
+        self.cache_warm_runs = self.cache_warm_runs.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "status": if warmed == 0 { "empty" } else { "warmed" },
+            "warmed": warmed,
+            "runs": self.cache_warm_runs,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_backfill(&mut self, queued: usize) -> serde_json::Value {
+        self.backfill_runs = self.backfill_runs.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "status": if queued == 0 { "idle" } else { "queued" },
+            "queued": queued,
+            "runs": self.backfill_runs,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_songid_run(&mut self, matches: Vec<serde_json::Value>) -> serde_json::Value {
+        self.songid_runs = self.songid_runs.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        let match_count = matches.len();
+        serde_json::json!({
+            "id": format!("songid-{}", self.songid_runs),
+            "status": if matches.is_empty() { "completed" } else { "matched" },
+            "matches": matches,
+            "matchCount": match_count,
+            "runs": self.songid_runs,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_lidarr_sync(&mut self, missing_count: usize, configured: bool) -> serde_json::Value {
+        self.lidarr_sync_runs = self.lidarr_sync_runs.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "synced": true,
+            "queued": missing_count > 0,
+            "status": if configured { "configured" } else { "local" },
+            "missingCount": missing_count,
+            "runs": self.lidarr_sync_runs,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn record_lidarr_manual_import(
+        &mut self,
+        imported: usize,
+        configured: bool,
+        directory: String,
+        items: Vec<serde_json::Value>,
+    ) -> serde_json::Value {
+        self.lidarr_manual_imports = self.lidarr_manual_imports.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        serde_json::json!({
+            "imported": imported,
+            "status": if configured { "configured" } else { "local" },
+            "directory": directory,
+            "items": items,
+            "runs": self.lidarr_manual_imports,
+            "persisted": true,
+            "updated_at": self.updated_at,
+        })
+    }
+
+    fn json_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "pendingRestart": self.application_restart_requested,
+            "gcRuns": self.gc_runs,
+            "autoreplaceEnabled": self.autoreplace_enabled,
+            "relayAgentEnabled": self.relay_agent_enabled,
+            "bridgeRunning": self.bridge_running,
+            "bridgeConfigUpdates": self.bridge_config_updates,
+            "profileInvitesCreated": self.profile_invites_created,
+            "cacheWarmRuns": self.cache_warm_runs,
+            "backfillRuns": self.backfill_runs,
+            "songidRuns": self.songid_runs,
+            "lidarrSyncRuns": self.lidarr_sync_runs,
+            "lidarrManualImports": self.lidarr_manual_imports,
+            "updated_at": self.updated_at,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SecurityBanRecord {
+    kind: String,
+    value: String,
+    created_at: u64,
+}
+
+#[derive(Debug)]
+struct SecurityState {
+    bans: Vec<SecurityBanRecord>,
+    updated_at: u64,
+}
+
+impl SecurityState {
+    fn new() -> Self {
+        Self {
+            bans: Vec::new(),
+            updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::SecurityBanRecord>) -> Self {
+        let mut updated_at = unix_timestamp();
+        let bans = records
+            .into_iter()
+            .map(|record| {
+                let created_at = u64::try_from(record.created_at).unwrap_or(0);
+                updated_at = updated_at.max(created_at);
+                SecurityBanRecord {
+                    kind: record.kind,
+                    value: record.value,
+                    created_at,
+                }
+            })
+            .collect();
+        Self { bans, updated_at }
+    }
+
+    fn ban(&mut self, kind: &str, value: String) -> SecurityBanRecord {
+        let now = unix_timestamp();
+        if let Some(record) = self
+            .bans
+            .iter_mut()
+            .find(|record| record.kind == kind && record.value == value)
+        {
+            record.created_at = now;
+            self.updated_at = now;
+            return record.clone();
+        }
+        let record = SecurityBanRecord {
+            kind: kind.to_owned(),
+            value,
+            created_at: now,
+        };
+        self.bans.push(record.clone());
+        self.updated_at = now;
+        record
+    }
+
+    fn unban(&mut self, kind: &str, value: &str) -> bool {
+        let before = self.bans.len();
+        self.bans
+            .retain(|record| !(record.kind == kind && record.value == value));
+        let removed = before != self.bans.len();
+        if removed {
+            self.updated_at = unix_timestamp();
+        }
+        removed
+    }
+
+    fn active_bans(&self) -> usize {
+        self.bans.len()
+    }
+
+    fn json_value(&self) -> serde_json::Value {
+        let bans = self
+            .bans
+            .iter()
+            .map(|record| {
+                serde_json::json!({
+                    "kind": record.kind,
+                    "type": record.kind,
+                    "value": record.value,
+                    "created_at": record.created_at,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "bans": bans,
+            "count": self.bans.len(),
+            "updated_at": self.updated_at,
+        })
+    }
 }
 
 // Share Grant Models
@@ -3646,6 +5686,37 @@ impl ShareGrantStore {
             records: Vec::new(),
             next_id: 1,
             updated_at: unix_timestamp(),
+        }
+    }
+
+    fn from_persisted(records: Vec<crate::persistence::ShareGrantRecord>) -> Self {
+        let mut next_id = 1;
+        let mut updated_at = unix_timestamp();
+        let records = records
+            .into_iter()
+            .map(|record| {
+                if let Some(number) = record
+                    .id
+                    .strip_prefix("grant-")
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    next_id = next_id.max(number.saturating_add(1));
+                }
+                let shared_at = u64::try_from(record.shared_at).unwrap_or(0);
+                updated_at = updated_at.max(shared_at);
+                ShareGrantRecord {
+                    id: record.id,
+                    collection_id: record.collection_id,
+                    username: record.username,
+                    shared_at,
+                    permissions: record.permissions,
+                }
+            })
+            .collect();
+        Self {
+            records,
+            next_id,
+            updated_at,
         }
     }
 
@@ -3754,6 +5825,37 @@ impl LibraryStore {
         }
     }
 
+    fn from_persisted(records: Vec<crate::persistence::LibraryItemRecord>) -> Self {
+        let mut next_id = 1;
+        let mut updated_at = unix_timestamp();
+        let records = records
+            .into_iter()
+            .map(|record| {
+                if let Some(number) = record
+                    .id
+                    .strip_prefix("lib-")
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    next_id = next_id.max(number.saturating_add(1));
+                }
+                let created_at = u64::try_from(record.created_at).unwrap_or(0);
+                updated_at = updated_at.max(created_at);
+                LibraryItemRecord {
+                    id: record.id,
+                    artist: record.artist,
+                    title: record.title,
+                    kind: record.kind,
+                    created_at,
+                }
+            })
+            .collect();
+        Self {
+            records,
+            next_id,
+            updated_at,
+        }
+    }
+
     fn create(&mut self, artist: String, title: String, kind: String) -> LibraryItemRecord {
         let now = unix_timestamp();
         let id = format!("lib-{}", self.next_id);
@@ -3798,6 +5900,390 @@ impl LibraryStore {
             self.updated_at
         )
     }
+
+    fn health_issues(&self) -> Vec<serde_json::Value> {
+        self.records
+            .iter()
+            .flat_map(|item| {
+                let mut issues = Vec::new();
+                if item.artist.trim().is_empty() {
+                    issues.push(serde_json::json!({
+                        "id": format!("{}-missing-artist", item.id),
+                        "item_id": item.id,
+                        "artist": item.artist,
+                        "title": item.title,
+                        "type": "missing_artist",
+                        "severity": "warning",
+                        "message": "Library item has no artist",
+                    }));
+                }
+                if item.title.trim().is_empty() {
+                    issues.push(serde_json::json!({
+                        "id": format!("{}-missing-title", item.id),
+                        "item_id": item.id,
+                        "artist": item.artist,
+                        "title": item.title,
+                        "type": "missing_title",
+                        "severity": "warning",
+                        "message": "Library item has no title",
+                    }));
+                }
+                if item.kind.trim().is_empty() {
+                    issues.push(serde_json::json!({
+                        "id": format!("{}-missing-kind", item.id),
+                        "item_id": item.id,
+                        "artist": item.artist,
+                        "title": item.title,
+                        "type": "missing_kind",
+                        "severity": "warning",
+                        "message": "Library item has no media kind",
+                    }));
+                }
+                issues
+            })
+            .collect()
+    }
+
+    fn fix_health_issues(&mut self) -> Vec<serde_json::Value> {
+        let now = unix_timestamp();
+        let mut fixed = Vec::new();
+        for item in &mut self.records {
+            if item.kind.trim().is_empty() {
+                item.kind = "Audio".to_owned();
+                fixed.push(serde_json::json!({
+                    "id": format!("{}-missing-kind", item.id),
+                    "item_id": item.id,
+                    "type": "missing_kind",
+                    "fixed": true,
+                    "action": "defaulted_kind",
+                    "kind": item.kind,
+                }));
+            }
+        }
+        if !fixed.is_empty() {
+            self.updated_at = now;
+        }
+        fixed
+    }
+
+    fn patch_health_issue(
+        &mut self,
+        issue_id: &str,
+        artist: Option<String>,
+        title: Option<String>,
+        kind: Option<String>,
+    ) -> Option<serde_json::Value> {
+        let issues = self.health_issues();
+        let issue = issues
+            .iter()
+            .find(|issue| issue.get("id").and_then(serde_json::Value::as_str) == Some(issue_id))?;
+        let item_id = issue.get("item_id")?.as_str()?.to_owned();
+        let issue_type = issue.get("type")?.as_str()?.to_owned();
+        let item = self.records.iter_mut().find(|item| item.id == item_id)?;
+        let mut action = "unchanged";
+        match issue_type.as_str() {
+            "missing_artist" => {
+                item.artist = artist
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "Unknown Artist".to_owned());
+                action = "defaulted_artist";
+            }
+            "missing_title" => {
+                item.title = title
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "Untitled".to_owned());
+                action = "defaulted_title";
+            }
+            "missing_kind" => {
+                item.kind = kind
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "Audio".to_owned());
+                action = "defaulted_kind";
+            }
+            _ => {}
+        }
+        self.updated_at = unix_timestamp();
+        Some(serde_json::json!({
+            "id": issue_id,
+            "item_id": item.id,
+            "type": issue_type,
+            "updated": true,
+            "fixed": action != "unchanged",
+            "action": action,
+            "item": serde_json::from_str::<serde_json::Value>(&item.json()).unwrap_or_else(|_| serde_json::json!({ "id": item.id })),
+            "updated_at": self.updated_at,
+        }))
+    }
+
+    fn health_summary_json(&self, library_path: String) -> String {
+        let issues = self.health_issues();
+        let count = issues.len();
+        serde_json::json!({
+            "libraryPath": library_path,
+            "items": self.records.len(),
+            "issues": count,
+            "critical": 0,
+            "warning": count,
+            "healthy": count == 0,
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn health_issues_json(&self) -> String {
+        let issues = self.health_issues();
+        serde_json::json!({
+            "issues": issues,
+            "count": issues.len(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn health_issues_by_artist_json(&self) -> String {
+        let mut grouped = std::collections::BTreeMap::<String, usize>::new();
+        for issue in self.health_issues() {
+            let artist = issue
+                .get("artist")
+                .and_then(serde_json::Value::as_str)
+                .filter(|artist| !artist.trim().is_empty())
+                .unwrap_or("(unknown)")
+                .to_owned();
+            *grouped.entry(artist).or_default() += 1;
+        }
+        let rows = grouped
+            .into_iter()
+            .map(|(artist, count)| serde_json::json!({ "artist": artist, "count": count }))
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "issues_by_artist": rows,
+            "count": rows.len(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn health_issues_by_release_json(&self) -> String {
+        let rows = self
+            .records
+            .iter()
+            .filter(|item| {
+                item.artist.trim().is_empty()
+                    || item.title.trim().is_empty()
+                    || item.kind.trim().is_empty()
+            })
+            .map(|item| {
+                let count = [
+                    item.artist.trim().is_empty(),
+                    item.title.trim().is_empty(),
+                    item.kind.trim().is_empty(),
+                ]
+                .into_iter()
+                .filter(|missing| *missing)
+                .count();
+                serde_json::json!({
+                    "release": item.title,
+                    "artist": item.artist,
+                    "item_id": item.id,
+                    "count": count,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "issues_by_release": rows,
+            "count": rows.len(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn health_issues_by_type_json(&self, issue_type: Option<&str>) -> String {
+        let mut grouped = std::collections::BTreeMap::<String, usize>::new();
+        for issue in self.health_issues() {
+            let kind = issue
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+            if issue_type.is_some_and(|requested| requested != kind) {
+                continue;
+            }
+            *grouped.entry(kind.to_owned()).or_default() += 1;
+        }
+        let rows = grouped
+            .into_iter()
+            .map(|(kind, count)| serde_json::json!({ "type": kind, "count": count }))
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "issues_by_type": rows,
+            "count": rows.len(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn musicbrainz_completion_json(&self) -> String {
+        let mut grouped = std::collections::BTreeMap::<String, (usize, usize)>::new();
+        for item in &self.records {
+            let artist = if item.artist.trim().is_empty() {
+                "(unknown)"
+            } else {
+                item.artist.as_str()
+            };
+            let entry = grouped.entry(artist.to_owned()).or_default();
+            entry.0 += 1;
+            if !item.title.trim().is_empty() {
+                entry.1 += 1;
+            }
+        }
+        let rows = grouped
+            .into_iter()
+            .map(|(artist, (total, complete))| {
+                let completion = if total == 0 {
+                    0.0
+                } else {
+                    complete as f64 / total as f64
+                };
+                serde_json::json!({
+                    "artist": artist,
+                    "items": total,
+                    "complete": complete,
+                    "completion": completion,
+                })
+            })
+            .collect::<Vec<_>>();
+        let average = if rows.is_empty() {
+            0.0
+        } else {
+            rows.iter()
+                .filter_map(|row| row.get("completion").and_then(serde_json::Value::as_f64))
+                .sum::<f64>()
+                / rows.len() as f64
+        };
+        serde_json::json!({
+            "completion_status": rows,
+            "average_completion": average,
+            "count": rows.len(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn discography_coverage_json(&self, artist: &str) -> String {
+        let releases = self
+            .records
+            .iter()
+            .filter(|item| item.artist.eq_ignore_ascii_case(artist))
+            .count();
+        serde_json::json!({
+            "artist": artist,
+            "coverage": if releases == 0 { 0.0 } else { 1.0 },
+            "releases": releases,
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+
+    fn target_json(&self, target: &str) -> String {
+        let rows = self
+            .records
+            .iter()
+            .filter(|item| item.artist.eq_ignore_ascii_case(target) || item.id == target)
+            .map(|item| {
+                serde_json::json!({
+                    "id": item.id,
+                    "artist": item.artist,
+                    "title": item.title,
+                    "kind": item.kind,
+                    "created_at": item.created_at,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "target": target,
+            "items": rows,
+            "count": rows.len(),
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+}
+
+fn songid_matches_value(
+    library: &LibraryStore,
+    shares: &ShareIndexSnapshot,
+) -> Vec<serde_json::Value> {
+    library
+        .records
+        .iter()
+        .flat_map(|item| {
+            let artist = item.artist.to_ascii_lowercase();
+            let title = item.title.to_ascii_lowercase();
+            shares.entries.iter().filter_map(move |entry| {
+                let filename = entry.filename.to_ascii_lowercase();
+                let artist_match = !artist.trim().is_empty() && filename.contains(&artist);
+                let title_match = !title.trim().is_empty() && filename.contains(&title);
+                if !artist_match && !title_match {
+                    return None;
+                }
+                let score = match (artist_match, title_match) {
+                    (true, true) => 1.0,
+                    (true, false) | (false, true) => 0.5,
+                    (false, false) => 0.0,
+                };
+                Some(serde_json::json!({
+                    "libraryItemId": item.id,
+                    "artist": item.artist,
+                    "title": item.title,
+                    "filename": entry.filename,
+                    "extension": entry.extension,
+                    "size": entry.size,
+                    "score": score,
+                    "source": "share-index",
+                }))
+            })
+        })
+        .collect()
+}
+
+fn songid_runs_value(
+    library: &LibraryStore,
+    shares: &ShareIndexSnapshot,
+) -> Vec<serde_json::Value> {
+    let matches = songid_matches_value(library, shares);
+    if library.records.is_empty() && shares.entries.is_empty() {
+        return Vec::new();
+    }
+    vec![serde_json::json!({
+        "id": "songid-local",
+        "status": "completed",
+        "libraryItems": library.records.len(),
+        "sharedFiles": shares.entries.len(),
+        "matches": matches,
+        "matchCount": matches.len(),
+        "updated_at": library.updated_at,
+    })]
+}
+
+fn lidarr_missing_albums_value(library: &LibraryStore) -> Vec<serde_json::Value> {
+    library
+        .health_issues()
+        .into_iter()
+        .map(|issue| {
+            let item_id = issue
+                .get("item_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+            serde_json::json!({
+                "id": format!("lidarr-{item_id}"),
+                "artist": issue.get("artist").cloned().unwrap_or_else(|| serde_json::json!("")),
+                "title": issue.get("title").cloned().unwrap_or_else(|| serde_json::json!("")),
+                "issueType": issue.get("type").cloned().unwrap_or_else(|| serde_json::json!("unknown")),
+                "source": "library-health",
+                "status": "missing_metadata",
+                "item_id": item_id,
+            })
+        })
+        .collect()
 }
 
 // Destination Models
@@ -3838,6 +6324,34 @@ impl DestinationStore {
         }
     }
 
+    fn from_persisted(records: Vec<crate::persistence::DestinationRecord>) -> Self {
+        if records.is_empty() {
+            return Self::new();
+        }
+        let mut records = records
+            .into_iter()
+            .map(|record| DestinationRecord {
+                id: record.id,
+                name: record.name,
+                path: record.path,
+                is_default: record.is_default,
+            })
+            .collect::<Vec<_>>();
+        if !records.iter().any(|record| record.is_default) {
+            if let Some(first) = records.first_mut() {
+                first.is_default = true;
+            }
+        }
+        records.sort_by(|left, right| {
+            right
+                .is_default
+                .cmp(&left.is_default)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Self { records }
+    }
+
     fn list(&self) -> String {
         let records = self
             .records
@@ -3865,6 +6379,7 @@ struct AppState {
     shares: RwLock<ShareIndexSnapshot>,
     searches: RwLock<SearchStore>,
     users: RwLock<UserStore>,
+    mesh: RwLock<MeshState>,
     browse: RwLock<BrowseStore>,
     messages: RwLock<MessageStore>,
     rooms: RwLock<RoomStore>,
@@ -3879,6 +6394,10 @@ struct AppState {
     sharegroups: RwLock<ShareGroupStore>,
     user_notes: RwLock<UserNoteStore>,
     interests: RwLock<InterestStore>,
+    now_playing: RwLock<NowPlayingStore>,
+    relay: RwLock<RelayState>,
+    runtime: RwLock<RuntimeCompatState>,
+    security: RwLock<SecurityState>,
     share_grants: RwLock<ShareGrantStore>,
     library: RwLock<LibraryStore>,
     destinations: RwLock<DestinationStore>,
@@ -3888,7 +6407,7 @@ struct AppState {
     oauth_states: RwLock<OAuthStateStore>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct OAuthStateRecord {
     provider: String,
     redirect_uri: String,
@@ -3902,6 +6421,27 @@ struct OAuthStateStore {
 }
 
 impl OAuthStateStore {
+    fn from_persisted(records: Vec<crate::persistence::OAuthStateRecord>) -> Self {
+        let now = unix_timestamp();
+        let records = records
+            .into_iter()
+            .filter_map(|record| {
+                let created_at = u64::try_from(record.created_at).ok()?;
+                let expires_at = u64::try_from(record.expires_at).ok()?;
+                (expires_at >= now).then_some((
+                    record.state,
+                    OAuthStateRecord {
+                        provider: record.provider,
+                        redirect_uri: record.redirect_uri,
+                        created_at,
+                        expires_at,
+                    },
+                ))
+            })
+            .collect();
+        Self { records }
+    }
+
     fn issue(&mut self, provider: &str, redirect_uri: &str, ttl_seconds: u64) -> String {
         let now = unix_timestamp();
         self.prune(now);
@@ -3964,6 +6504,10 @@ enum SessionCommand {
     },
     MessageUser {
         username: String,
+        body: String,
+    },
+    MessageUsers {
+        usernames: Vec<String>,
         body: String,
     },
     MessageAcked {
@@ -4047,7 +6591,19 @@ async fn route_http_request_with_headers(
             let shares = state.shares.read().await;
             let rooms = state.rooms.read().await;
             let users = state.users.read().await;
-            let body = slskd_application_state_json(&session, &shares, &rooms, &users, &state.config);
+            let relay = state.relay.read().await;
+            let runtime = state.runtime.read().await;
+            let body = slskd_application_state_json(
+                &session,
+                &shares,
+                &rooms,
+                &users,
+                &relay,
+                &runtime,
+                &state.config,
+            );
+            drop(runtime);
+            drop(relay);
             drop(users);
             drop(rooms);
             drop(shares);
@@ -4060,10 +6616,27 @@ async fn route_http_request_with_headers(
         ("GET", "/api/application/version") => {
             Ok(routing::ok_response(serde_json::json!(APP_VERSION).to_string()))
         }
-        ("PUT", "/api/application") | ("DELETE", "/api/application") => {
-            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+        ("PUT", "/api/application") => {
+            let mut runtime = state.runtime.write().await;
+            let body = runtime.set_restart_requested(true).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::accepted_response(body))
         }
-        ("POST", "/api/application/gc") => Ok(routing::ok_response("true".to_owned())),
+        ("DELETE", "/api/application") => {
+            let mut runtime = state.runtime.write().await;
+            let body = runtime.set_restart_requested(false).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::accepted_response(body))
+        }
+        ("POST", "/api/application/gc") => {
+            let mut runtime = state.runtime.write().await;
+            let body = runtime.record_gc().to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::ok_response(body))
+        }
         ("GET", "/api/server") => {
             let session = state.session.read().await;
             let body = slskd_server_state_json(&session, &state.config).to_string();
@@ -4071,12 +6644,28 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(body))
         }
         ("PUT", "/api/server") | ("POST", "/api/server") => {
+            {
+                let mut session = state.session.write().await;
+                session.state = "connecting";
+                session.updated_at = unix_timestamp();
+            }
             send_session_command(state, SessionCommand::Connect).await.ok();
-            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+            let session = state.session.read().await;
+            let body = slskd_server_state_json(&session, &state.config).to_string();
+            drop(session);
+            Ok(routing::accepted_response(body))
         }
         ("DELETE", "/api/server") => {
+            {
+                let mut session = state.session.write().await;
+                session.state = "disconnecting";
+                session.updated_at = unix_timestamp();
+            }
             send_session_command(state, SessionCommand::Disconnect).await.ok();
-            Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
+            let session = state.session.read().await;
+            let body = slskd_server_state_json(&session, &state.config).to_string();
+            drop(session);
+            Ok(routing::accepted_response(body))
         }
         ("GET", "/api/session/enabled") => Ok(routing::ok_response(state.config.auth_required.to_string())),
         ("POST", "/api/session") => {
@@ -4121,46 +6710,165 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("GET", "/api/hashdb/entries") => {
-            Ok(routing::ok_response("{\"entries\":[],\"count\":0}".to_owned()))
+            let shares = state.shares.read().await;
+            let entries = shares
+                .entries
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "id": format!("share-{}-{}", entry.size, entry.filename),
+                        "path": entry.filename,
+                        "filename": entry.filename,
+                        "extension": entry.extension,
+                        "size": entry.size,
+                        "hash": format!("{:016x}", stable_content_hash(&entry.filename, entry.size)),
+                        "source": "share-index",
+                    })
+                })
+                .collect::<Vec<_>>();
+            let count = entries.len();
+            drop(shares);
+            Ok(routing::ok_response(serde_json::json!({
+                "entries": entries,
+                "count": count,
+            }).to_string()))
         }
         ("POST", path) if path.starts_with("/api/hashdb/backfill/from-history") => {
             let searches = state.searches.read().await;
-            let candidates = searches.records.len();
+            let search_candidates = searches.records.len();
+            let search_results = searches
+                .records
+                .iter()
+                .map(|record| record.results.len())
+                .sum::<usize>();
             drop(searches);
+            let shares = state.shares.read().await;
+            let share_candidates = shares.entries.len();
+            drop(shares);
+            let candidates = search_candidates + search_results + share_candidates;
             Ok(routing::accepted_response(serde_json::json!({
                 "success": true,
-                "queued": 0,
+                "queued": candidates,
                 "candidates": candidates,
-                "status": "idle",
+                "searches": search_candidates,
+                "searchResults": search_results,
+                "sharedFiles": share_candidates,
+                "status": if candidates == 0 { "idle" } else { "queued" },
             }).to_string()))
         }
         ("GET", "/api/mesh/stats") => {
+            let users = state.users.read().await;
+            let mesh = state.mesh.read().await;
+            let known_mesh_peers = mesh.candidate_usernames(&users).len();
+            let capability_records = mesh.capability_records.len();
+            drop(mesh);
+            drop(users);
             Ok(routing::ok_response(serde_json::json!({
                 "currentSeqId": unix_timestamp(),
                 "localSeqId": unix_timestamp(),
                 "isSyncing": false,
-                "knownMeshPeers": 0,
+                "knownMeshPeers": known_mesh_peers,
                 "connectedPeerCount": 0,
+                "capabilityRecords": capability_records,
+                "interestTag": MESH_RENDEZVOUS_INTEREST_TAG,
                 "warnings": [],
             }).to_string()))
         }
         ("GET", "/api/mesh/peers") => {
-            Ok(routing::ok_response("{\"peers\":[],\"count\":0}".to_owned()))
+            let users = state.users.read().await;
+            let mesh = state.mesh.read().await;
+            let body = mesh.users_json(&users).replace("\"users\":", "\"peers\":");
+            drop(mesh);
+            drop(users);
+            Ok(routing::ok_response(body))
         }
         ("POST", path) if path.starts_with("/api/mesh/sync/") && path.len() > 15 => {
             let username = &path[15..];
+            let users = state.users.read().await;
+            let mesh = state.mesh.read().await;
+            let candidate = mesh.candidate_usernames(&users).into_iter().any(|candidate| {
+                candidate.eq_ignore_ascii_case(username)
+            });
+            let watched = users.records.iter().any(|user| {
+                user.username.eq_ignore_ascii_case(username)
+                    && (user.watched || user.status.as_deref() == Some("online"))
+            });
+            let capability = mesh.capability_records.iter().any(|record| {
+                record.username.eq_ignore_ascii_case(username)
+            });
+            drop(mesh);
+            drop(users);
             Ok(routing::accepted_response(serde_json::json!({
                 "success": true,
                 "username": username,
-                "queued": false,
-                "status": "offline",
+                "queued": candidate || watched || capability,
+                "watched": watched,
+                "capabilityRecord": capability,
+                "status": if capability { "capable" } else if watched { "watched" } else if candidate { "candidate" } else { "offline" },
             }).to_string()))
         }
         ("GET", "/api/backfill/stats") => {
-            Ok(routing::ok_response("{\"isActive\":false,\"isRunning\":false,\"queued\":0,\"completed\":0}".to_owned()))
+            let searches = state.searches.read().await;
+            let search_candidates = searches.records.len();
+            let result_candidates = searches
+                .records
+                .iter()
+                .map(|record| record.results.len())
+                .sum::<usize>();
+            drop(searches);
+            let shares = state.shares.read().await;
+            let shared_candidates = shares.entries.len();
+            drop(shares);
+            let events = state.events.read().await;
+            let completed = events
+                .records
+                .iter()
+                .filter(|event| event.kind.contains("backfill") || event.kind.contains("hashdb"))
+                .count();
+            drop(events);
+            let queued = search_candidates + result_candidates + shared_candidates;
+            Ok(routing::ok_response(serde_json::json!({
+                "isActive": queued > 0,
+                "isRunning": false,
+                "queued": queued,
+                "completed": completed,
+                "searches": search_candidates,
+                "searchResults": result_candidates,
+                "sharedFiles": shared_candidates,
+            }).to_string()))
         }
         ("GET", "/api/backfill/candidates") => {
-            Ok(routing::ok_response("{\"candidates\":[],\"count\":0}".to_owned()))
+            let searches = state.searches.read().await;
+            let mut candidates = searches
+                .records
+                .iter()
+                .map(|record| {
+                    serde_json::json!({
+                        "id": record.id,
+                        "kind": "search",
+                        "query": record.query,
+                        "result_count": record.results.len(),
+                        "updated_at": record.updated_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            drop(searches);
+            let shares = state.shares.read().await;
+            candidates.extend(shares.entries.iter().map(|entry| {
+                serde_json::json!({
+                    "id": format!("share-{}-{}", entry.size, entry.filename),
+                    "kind": "share",
+                    "filename": entry.filename,
+                    "size": entry.size,
+                    "extension": entry.extension,
+                })
+            }));
+            drop(shares);
+            let count = candidates.len();
+            Ok(routing::ok_response(serde_json::json!({
+                "candidates": candidates,
+                "count": count,
+            }).to_string()))
         }
         ("GET", "/api/dht/status") => {
             Ok(routing::ok_response("{\"dhtNodeCount\":0,\"isLanOnly\":false,\"lanOnly\":false,\"isBeaconCapable\":false,\"isDhtRunning\":false,\"verifiedBeaconCount\":0}".to_owned()))
@@ -4248,9 +6956,95 @@ async fn route_http_request_with_headers(
                 }).to_string()
             })
         },
-        ("POST", "/api/batch") | ("POST", "/api/v1/batch") | ("POST", "/api/v2/batch") => Ok(
-            routing::accepted_response("{\"accepted\":true,\"results\":[],\"executed\":0}".to_owned()),
-        ),
+        ("POST", "/api/batch") | ("POST", "/api/v1/batch") | ("POST", "/api/v2/batch") => {
+            let (operations, config) = match batch::parse_batch_request(body) {
+                Ok(parsed) => parsed,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            if let Err(error) = batch::validate_batch_operations(&operations) {
+                return Ok(routing::bad_request_response(&error));
+            }
+            let mut results = Vec::new();
+            for operation in operations.into_iter().take(config.max_operations.min(100)) {
+                let result = match (operation.method.as_str(), operation.path.as_str()) {
+                    ("GET", "/api/health") | ("GET", "/api/v0/health") => {
+                        batch::create_success_result(
+                            operation.id,
+                            200,
+                            health_response(&state.config).body,
+                        )
+                    }
+                    ("GET", "/api/config") | ("GET", "/api/v0/config") => {
+                        batch::create_success_result(
+                            operation.id,
+                            200,
+                            state.config.sanitized_json(),
+                        )
+                    }
+                    ("GET", "/api/capabilities") | ("GET", "/api/v0/capabilities") => {
+                        batch::create_success_result(
+                            operation.id,
+                            200,
+                            capabilities_response().body,
+                        )
+                    }
+                    ("GET", "/api/stats") | ("GET", "/api/v0/stats") => {
+                        let session = state.session.read().await;
+                        let shares = state.shares.read().await;
+                        let searches = state.searches.read().await;
+                        let users = state.users.read().await;
+                        let browse = state.browse.read().await;
+                        let messages = state.messages.read().await;
+                        let rooms = state.rooms.read().await;
+                        let transfers = state.transfers.read().await;
+                        let body = format!(
+                            "{{\"session\":{},\"listeners\":{{\"count\":1}},\"shares\":{},\"searches\":{},\"users\":{},\"browse\":{},\"messages\":{},\"rooms\":{},\"transfers\":{}}}",
+                            session.summary_json(),
+                            shares.summary_json(),
+                            searches.summary_json(),
+                            users.summary_json(),
+                            browse.summary_json(),
+                            messages.summary_json(),
+                            rooms.summary_json(),
+                            transfers.summary_json()
+                        );
+                        drop(transfers);
+                        drop(rooms);
+                        drop(messages);
+                        drop(browse);
+                        drop(users);
+                        drop(searches);
+                        drop(shares);
+                        drop(session);
+                        batch::create_success_result(operation.id, 200, body)
+                    }
+                    _ => batch::create_error_result(
+                        operation.id,
+                        format!(
+                            "batch operation {} {} is not supported by the local executor",
+                            operation.method, operation.path
+                        ),
+                    ),
+                };
+                let is_error = result.error.is_some();
+                results.push(result);
+                if is_error && !config.continue_on_error {
+                    break;
+                }
+            }
+            let executed = results.iter().filter(|result| result.error.is_none()).count();
+            let failed = results.len().saturating_sub(executed);
+            let mut value = serde_json::from_str::<serde_json::Value>(&batch::format_batch_response(results))
+                .unwrap_or_else(|_| serde_json::json!({ "results": [] }));
+            if let Some(object) = value.as_object_mut() {
+                object.insert("accepted".to_owned(), serde_json::json!(true));
+                object.insert("executed".to_owned(), serde_json::json!(executed));
+                object.insert("failed".to_owned(), serde_json::json!(failed));
+                object.insert("atomic".to_owned(), serde_json::json!(config.atomic));
+                object.insert("timeoutMs".to_owned(), serde_json::json!(config.timeout_ms));
+            }
+            Ok(routing::accepted_response(value.to_string()))
+        },
         ("GET", "/api/config") => Ok(HttpResponse {
             status: "200 OK",
             content_type: "application/json",
@@ -4316,21 +7110,117 @@ async fn route_http_request_with_headers(
             let session_json = session.summary_json();
             drop(session);
 
+            let listeners = state.listeners.read().await;
+            let listeners_json = listeners.json();
+            drop(listeners);
+
             let shares = state.shares.read().await;
             let shares_json = shares.summary_json();
             drop(shares);
 
-            let body = format!(
-                "{{\"health\":{{\"connected\":{}}},\"service\":{{\"name\":\"slskr\"}},\"storage\":{{\"share_cache_file\":\"share-index.tsv\",\"transfer_events_file\":\"transfer-events.tsv\"}},\"shares\":{},\"session\":{}}}",
-                is_connected,
-                shares_json,
-                session_json
-            );
+            let searches = state.searches.read().await;
+            let searches_json = searches.summary_json();
+            drop(searches);
+
+            let users = state.users.read().await;
+            let users_json = users.summary_json();
+            drop(users);
+
+            let browse = state.browse.read().await;
+            let browse_json = browse.summary_json();
+            drop(browse);
+
+            let messages = state.messages.read().await;
+            let messages_json = messages.summary_json();
+            drop(messages);
+
+            let rooms = state.rooms.read().await;
+            let rooms_json = rooms.summary_json();
+            drop(rooms);
+
+            let transfers = state.transfers.read().await;
+            let transfers_json = transfers.summary_json();
+            let transfer_state_error = transfers.state_error.clone();
+            let transfer_events_error = transfers.events_error.clone();
+            drop(transfers);
+
+            let events = state.events.read().await;
+            let event_count = events.records.len();
+            let event_next_id = events.next_id;
+            let event_history_limit = events.history_limit;
+            drop(events);
+
+            let runtime = state.runtime.read().await;
+            let runtime_json = runtime.json_value();
+            drop(runtime);
+
+            let database = if let Some(db) = state.db.as_ref() {
+                match db.get_stats().await {
+                    Ok(stats) => serde_json::json!({
+                        "enabled": true,
+                        "healthy": true,
+                        "searches": stats.search_count,
+                        "transfers": stats.transfer_count,
+                        "transferEvents": stats.transfer_event_count,
+                        "shares": stats.share_file_count,
+                        "events": stats.event_count,
+                        "messages": stats.message_count,
+                        "users": stats.user_count,
+                        "rooms": stats.room_count,
+                    }),
+                    Err(error) => serde_json::json!({
+                        "enabled": true,
+                        "healthy": false,
+                        "error": error.to_string(),
+                    }),
+                }
+            } else {
+                serde_json::json!({
+                    "enabled": false,
+                    "healthy": true,
+                })
+            };
+
+            let value = serde_json::json!({
+                "health": {
+                    "connected": is_connected,
+                    "database": database.get("healthy").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                    "transferState": transfer_state_error.is_none(),
+                    "transferEvents": transfer_events_error.is_none(),
+                    "eventsBuffered": event_count,
+                },
+                "service": {
+                    "name": "slskr",
+                    "version": APP_VERSION,
+                },
+                "storage": {
+                    "share_cache_file": "share-index.tsv",
+                    "transfer_events_file": "transfer-events.tsv",
+                    "transfer_state_error": transfer_state_error,
+                    "transfer_events_error": transfer_events_error,
+                },
+                "database": database,
+                "runtime": runtime_json,
+                "session": serde_json::from_str::<serde_json::Value>(&session_json).unwrap_or_else(|_| serde_json::json!({})),
+                "listeners": serde_json::from_str::<serde_json::Value>(&listeners_json).unwrap_or_else(|_| serde_json::json!({})),
+                "shares": serde_json::from_str::<serde_json::Value>(&shares_json).unwrap_or_else(|_| serde_json::json!({})),
+                "searches": serde_json::from_str::<serde_json::Value>(&searches_json).unwrap_or_else(|_| serde_json::json!({})),
+                "users": serde_json::from_str::<serde_json::Value>(&users_json).unwrap_or_else(|_| serde_json::json!({})),
+                "browse": serde_json::from_str::<serde_json::Value>(&browse_json).unwrap_or_else(|_| serde_json::json!({})),
+                "messages": serde_json::from_str::<serde_json::Value>(&messages_json).unwrap_or_else(|_| serde_json::json!({})),
+                "rooms": serde_json::from_str::<serde_json::Value>(&rooms_json).unwrap_or_else(|_| serde_json::json!({})),
+                "transfers": serde_json::from_str::<serde_json::Value>(&transfers_json).unwrap_or_else(|_| serde_json::json!({})),
+                "events": {
+                    "total": event_count,
+                    "next_id": event_next_id,
+                    "history_limit": event_history_limit,
+                },
+            });
 
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body,
+                body: value.to_string(),
             })
         }
         ("GET", "/api/telemetry/reports/transfers/summary") => {
@@ -4386,8 +7276,22 @@ async fn route_http_request_with_headers(
             let messages = state.messages.read().await;
             let rooms = state.rooms.read().await;
             let transfers = state.transfers.read().await;
+            let events = state.events.read().await;
+            let runtime = state.runtime.read().await;
 
             let share_bytes: u64 = shares.entries.iter().map(|e| e.size).sum();
+            let active_searches = searches
+                .records
+                .iter()
+                .filter(|record| record.status == "active")
+                .count();
+            let watched_users = users.records.iter().filter(|record| record.watched).count();
+            let joined_rooms = rooms.records.iter().filter(|record| record.joined).count();
+            let active_transfers = transfers
+                .entries
+                .iter()
+                .filter(|entry| is_active_transfer_status(&entry.status))
+                .count();
 
             let metrics = format!(
                 "# HELP slskr_session_connected Session connection status\n\
@@ -4416,16 +7320,36 @@ async fn route_http_request_with_headers(
                  slskr_rooms_joined {}\n\
                  # HELP slskr_transfers Transfer count\n\
                  # TYPE slskr_transfers gauge\n\
-                 slskr_transfers{{state=\"total\"}} {}\n",
+                 slskr_transfers{{state=\"total\"}} {}\n\
+                 slskr_transfers{{state=\"active\"}} {}\n\
+                 # HELP slskr_events_total Recorded event count\n\
+                 # TYPE slskr_events_total counter\n\
+                 slskr_events_total {}\n\
+                 # HELP slskr_runtime_operations_total Runtime compatibility operation counters\n\
+                 # TYPE slskr_runtime_operations_total counter\n\
+                 slskr_runtime_operations_total{{operation=\"profile_invite\"}} {}\n\
+                 slskr_runtime_operations_total{{operation=\"cache_warm\"}} {}\n\
+                 slskr_runtime_operations_total{{operation=\"backfill\"}} {}\n\
+                 slskr_runtime_operations_total{{operation=\"songid\"}} {}\n\
+                 slskr_runtime_operations_total{{operation=\"lidarr_sync\"}} {}\n\
+                 slskr_runtime_operations_total{{operation=\"lidarr_manual_import\"}} {}\n",
                 if session.state == "connected" { 1 } else { 0 },
                 shares.entries.len(),
                 share_bytes,
-                searches.records.len(),
-                users.records.len(),
+                active_searches,
+                watched_users,
                 browse.records.len(),
                 messages.records.len(),
-                rooms.records.len(),
-                transfers.entries.len()
+                joined_rooms,
+                transfers.entries.len(),
+                active_transfers,
+                events.records.len(),
+                runtime.profile_invites_created,
+                runtime.cache_warm_runs,
+                runtime.backfill_runs,
+                runtime.songid_runs,
+                runtime.lidarr_sync_runs,
+                runtime.lidarr_manual_imports
             );
 
             Ok(HttpResponse {
@@ -4453,12 +7377,41 @@ async fn route_http_request_with_headers(
         ("POST", path) if path.starts_with("/api/events/") && path.len() > 12 => {
             let kind = &path[12..];
             let mut events = state.events.write().await;
-             events.record("compat.event", kind, json_body_string(body).or_else(|| Some(body.to_owned())));
-             drop(events);
-             Ok(routing::ok_response("true".to_owned()))
-         }
+            let record = events.record(
+                "compat.event",
+                kind,
+                json_body_string(body).or_else(|| Some(body.to_owned())),
+            );
+            let count = events.records.len();
+            drop(events);
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "recorded": true,
+                    "event": record.slskd_json(),
+                    "count": count,
+                })
+                .to_string(),
+            ))
+        }
          ("GET", "/api/logs") => {
-             Ok(routing::ok_response("[]".to_owned()))
+             let events = state.events.read().await;
+             let logs = events
+                 .records
+                 .iter()
+                 .rev()
+                 .map(|event| {
+                     serde_json::json!({
+                         "id": event.id,
+                         "level": "Information",
+                         "message": event.detail.as_deref().unwrap_or(&event.kind),
+                         "category": event.kind,
+                         "resource": event.resource,
+                         "timestamp": event.created_at,
+                     })
+                 })
+                 .collect::<Vec<_>>();
+             drop(events);
+             Ok(routing::ok_response(serde_json::Value::Array(logs).to_string()))
          }
          // WEBHOOK ENDPOINTS
          ("GET", "/api/webhooks") => {
@@ -4500,23 +7453,7 @@ async fn route_http_request_with_headers(
              let events = if let Some(ref e) = events_str {
                  let mut events = Vec::new();
                  for ev in e.split(',') {
-                     let event = match ev.trim() {
-                         "search.created" => Some(webhooks::WebhookEvent::SearchCreated),
-                         "search.completed" => Some(webhooks::WebhookEvent::SearchCompleted),
-                         "transfer.started" => Some(webhooks::WebhookEvent::TransferStarted),
-                         "transfer.completed" => Some(webhooks::WebhookEvent::TransferCompleted),
-                         "transfer.failed" => Some(webhooks::WebhookEvent::TransferFailed),
-                         "message.received" => Some(webhooks::WebhookEvent::MessageReceived),
-                         "message.sent" => Some(webhooks::WebhookEvent::MessageSent),
-                         "user.connected" => Some(webhooks::WebhookEvent::UserConnected),
-                         "user.disconnected" => Some(webhooks::WebhookEvent::UserDisconnected),
-                         "room.joined" => Some(webhooks::WebhookEvent::RoomJoined),
-                         "room.left" => Some(webhooks::WebhookEvent::RoomLeft),
-                         "apikey.created" => Some(webhooks::WebhookEvent::ApiKeyCreated),
-                         "apikey.revoked" => Some(webhooks::WebhookEvent::ApiKeyRevoked),
-                         "config.changed" => Some(webhooks::WebhookEvent::ConfigChanged),
-                         _ => None,
-                     };
+                     let event = webhooks::WebhookEvent::from_wire(ev);
                      let Some(event) = event else {
                          return Ok(routing::bad_request_response("invalid webhook event"));
                      };
@@ -4545,7 +7482,7 @@ async fn route_http_request_with_headers(
              let webhook = webhooks::Webhook::new(url, events, secret.clone());
 
              let mut webhooks = state.webhooks.write().await;
-             let webhook_id = match webhooks.register(webhook) {
+             let webhook_id = match webhooks.register(webhook.clone()) {
                  Ok(id) => id,
                  Err(_) => {
                      drop(webhooks);
@@ -4553,6 +7490,7 @@ async fn route_http_request_with_headers(
                  }
              };
              drop(webhooks);
+             persist_webhook(state, &webhook).await;
 
              let response = serde_json::json!({
                  "id": webhook_id,
@@ -4569,6 +7507,7 @@ async fn route_http_request_with_headers(
              let mut webhooks = state.webhooks.write().await;
              if webhooks.unregister(webhook_id).is_some() {
                  drop(webhooks);
+                 persist_webhook_delete(state, webhook_id).await;
                  Ok(routing::ok_response(serde_json::json!({"status": "deleted"}).to_string()))
              } else {
                  drop(webhooks);
@@ -4585,11 +7524,13 @@ async fn route_http_request_with_headers(
               let mut webhooks = state.webhooks.write().await;
               if let Some(webhook) = webhooks.get_mut(webhook_id) {
                   webhook.active = active;
+                  let webhook = webhook.clone();
                   let updated = serde_json::json!({
                       "id": webhook.id,
                       "active": webhook.active,
                   });
                   drop(webhooks);
+                  persist_webhook(state, &webhook).await;
                   Ok(routing::ok_response(serde_json::to_string(&updated).unwrap_or_else(|_| "{}".to_string())))
               } else {
                   drop(webhooks);
@@ -4607,10 +7548,41 @@ async fn route_http_request_with_headers(
 
           ("PATCH", path) if path.starts_with("/api/library/health/issues/") && path.len() > 27 => {
               let issue_id = path.rsplit('/').next().unwrap_or("unknown");
-              Ok(routing::ok_response(format!(
-                  "{{\"id\":\"{}\",\"updated\":false,\"status\":\"not_found\"}}",
-                  json_escape(issue_id)
-              )))
+              let artist = extract_json_string_field(body, "artist");
+              let title = extract_json_string_field(body, "title");
+              let kind = extract_json_string_field(body, "kind")
+                  .or_else(|| extract_json_string_field(body, "mediaKind"));
+              let mut library = state.library.write().await;
+              let patched = library.patch_health_issue(issue_id, artist, title, kind);
+              let patched_item_id = patched
+                  .as_ref()
+                  .and_then(|value| value.get("item_id"))
+                  .and_then(serde_json::Value::as_str)
+                  .map(str::to_owned);
+              let remaining = library.health_issues().len();
+              let response = patched
+                  .map(|mut value| {
+                      value["remaining"] = serde_json::json!(remaining);
+                      routing::ok_response(value.to_string())
+                  })
+                  .unwrap_or_else(|| {
+                      routing::ok_response(serde_json::json!({
+                          "id": issue_id,
+                          "updated": false,
+                          "status": "not_found",
+                          "remaining": remaining,
+                      }).to_string())
+              });
+              drop(library);
+              if let Some(item_id) = patched_item_id {
+                  let library = state.library.read().await;
+                  let item = library.get(&item_id);
+                  drop(library);
+                  if let Some(item) = item {
+                      persist_library_item(state, &item).await;
+                  }
+              }
+              Ok(response)
           }
 
           ("POST", path) if path.starts_with("/api/webhooks/") && path.ends_with("/test") => {
@@ -4742,8 +7714,9 @@ async fn route_http_request_with_headers(
             let rebuilt = build_share_index(&state.config);
             let json = rebuilt.json();
             let mut shares = state.shares.write().await;
-            *shares = rebuilt;
+            *shares = rebuilt.clone();
             drop(shares);
+            persist_share_index(state, &rebuilt).await;
             record_event(state, "share.scan.completed", "shares", None).await;
             Ok(routing::ok_response((!json.is_empty()).to_string()))
         }
@@ -4801,66 +7774,185 @@ async fn route_http_request_with_headers(
             }
         }
         ("GET", path) if path.starts_with("/api/files/") || path.starts_with("/api/v0/files/") => {
-            let folder = path.strip_prefix("/api/v0/files/")
+            let root_label = path
+                .strip_prefix("/api/v0/files/")
                 .or_else(|| path.strip_prefix("/api/files/"))
                 .unwrap_or("");
 
-            if folder.is_empty() {
+            if root_label.is_empty() {
                 return Ok(routing::not_found_response());
             }
 
-            // Parse extension filter from query
             let mut extension_filter: Option<String> = None;
+            let mut selected_folder = String::new();
+            let mut folder_requested = false;
+            let mut recursive = false;
             for (name, value) in query_params(route.query.unwrap_or_default()) {
-                if name == "extension" {
-                    extension_filter = Some(value);
+                match name.as_str() {
+                    "extension" => extension_filter = non_empty(value),
+                    "folder" | "path" | "prefix" => {
+                        folder_requested = true;
+                        selected_folder = value.trim_matches('/').to_owned();
+                    }
+                    "recursive" => recursive = parse_bool_value(&value).unwrap_or(false),
+                    _ => {}
                 }
             }
 
             let filter = RecordListFilter::from_query(route.query);
             let shares = state.shares.read().await;
 
-            // Find the root
-            let Some(root) = shares.roots.iter().find(|r| r.label == folder) else {
+            let Some(root) = shares.roots.iter().find(|r| r.label == root_label) else {
                 drop(shares);
                 return Ok(routing::not_found_response());
             };
 
-            // Filter entries by folder prefix and extension
-            let mut entries: Vec<_> = shares.entries.iter()
-                .filter(|e| e.filename.starts_with(&format!("{}/", folder)))
+            let base_prefix = if selected_folder.is_empty() {
+                root_label.to_owned()
+            } else {
+                format!("{}/{}", root_label, selected_folder)
+            };
+            let root_prefix = format!("{root_label}/");
+            let base_child_prefix = format!("{base_prefix}/");
+            let q = filter.q.as_deref();
+            let folder_mode = folder_requested || recursive;
+
+            let root_entries = shares
+                .entries
+                .iter()
+                .filter(|entry| entry.filename.starts_with(&root_prefix))
+                .collect::<Vec<_>>();
+
+            let mut directory_summaries = BTreeMap::<String, (usize, u64)>::new();
+            for entry in &root_entries {
+                let Some(relative_to_base) = entry.filename.strip_prefix(&base_child_prefix) else {
+                    continue;
+                };
+                let Some((child, _)) = relative_to_base.split_once('/') else {
+                    continue;
+                };
+                if child.is_empty() {
+                    continue;
+                }
+                let directory_path = if selected_folder.is_empty() {
+                    child.to_owned()
+                } else {
+                    format!("{selected_folder}/{child}")
+                };
+                if q.map_or(false, |q| {
+                    !directory_path.to_ascii_lowercase().contains(q)
+                        && !format!("{root_label}/{directory_path}")
+                            .to_ascii_lowercase()
+                            .contains(q)
+                }) {
+                    continue;
+                }
+                if extension_filter
+                    .as_deref()
+                    .map_or(false, |ext| entry.extension != ext)
+                {
+                    continue;
+                }
+                let summary = directory_summaries.entry(directory_path).or_default();
+                summary.0 += 1;
+                summary.1 += entry.size;
+            }
+
+            let mut entries: Vec<_> = root_entries
+                .into_iter()
+                .filter(|entry| {
+                    if folder_mode {
+                        if recursive {
+                            entry.filename.starts_with(&base_child_prefix)
+                        } else {
+                            virtual_folder(&entry.filename) == base_prefix
+                        }
+                    } else {
+                        entry.filename.starts_with(&root_prefix)
+                    }
+                })
                 .filter(|e| {
                     extension_filter.as_deref()
                         .map_or(true, |ext| e.extension == ext)
                 })
+                .filter(|entry| {
+                    q.map_or(true, |q| {
+                        entry
+                            .filename
+                            .strip_prefix(&root_prefix)
+                            .unwrap_or(&entry.filename)
+                            .to_ascii_lowercase()
+                            .contains(q)
+                            || entry.filename.to_ascii_lowercase().contains(q)
+                    })
+                })
                 .collect();
 
             let filtered_count = entries.len();
+            let directory_count = directory_summaries.len();
+            let total_bytes = entries.iter().map(|entry| entry.size).sum::<u64>();
 
-            // Apply pagination
-            entries = entries.into_iter()
+            entries = entries
+                .into_iter()
                 .skip(filter.offset)
                 .take(filter.limit.unwrap_or(usize::MAX))
                 .collect();
 
-            let entries_json = entries.iter()
+            let entries_json = entries
+                .iter()
                 .map(|entry| {
-                    let path = entry.filename.strip_prefix(&format!("{}/", folder)).unwrap_or("");
+                    let path = if folder_mode {
+                        entry
+                            .filename
+                            .strip_prefix(&base_child_prefix)
+                            .unwrap_or("")
+                    } else {
+                        entry.filename.strip_prefix(&root_prefix).unwrap_or("")
+                    };
                     format!(
-                        "{{\"path\":\"{}\",\"virtual_path\":\"{}\",\"size\":{}}}",
+                        "{{\"type\":\"file\",\"path\":\"{}\",\"virtual_path\":\"{}\",\"size\":{},\"extension\":\"{}\"}}",
                         json_escape(path),
                         json_escape(&entry.filename),
-                        entry.size
+                        entry.size,
+                        json_escape(&entry.extension)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let directories_json = directory_summaries
+                .iter()
+                .map(|(directory, (file_count, total_bytes))| {
+                    let path = if selected_folder.is_empty() {
+                        directory.as_str()
+                    } else {
+                        directory
+                            .strip_prefix(&format!("{selected_folder}/"))
+                            .unwrap_or(directory)
+                    };
+                    format!(
+                        "{{\"type\":\"directory\",\"name\":\"{}\",\"path\":\"{}\",\"virtual_path\":\"{}/{}\",\"file_count\":{},\"total_bytes\":{}}}",
+                        json_escape(path),
+                        json_escape(path),
+                        json_escape(root_label),
+                        json_escape(directory),
+                        file_count,
+                        total_bytes
                     )
                 })
                 .collect::<Vec<_>>()
                 .join(",");
 
             let response_body = format!(
-                "{{\"label\":\"{}\",\"entries\":[{}],\"filtered_count\":{},\"offset\":{},\"limit\":{}}}",
+                "{{\"label\":\"{}\",\"folder\":{},\"recursive\":{},\"entries\":[{}],\"directories\":[{}],\"count\":{},\"filtered_count\":{},\"directory_count\":{},\"total_bytes\":{},\"offset\":{},\"limit\":{}}}",
                 json_escape(&root.label),
+                json_option((!selected_folder.is_empty()).then_some(selected_folder.as_str())),
+                recursive,
                 entries_json,
+                directories_json,
+                root.files,
                 filtered_count,
+                directory_count,
+                total_bytes,
                 filter.offset,
                 json_usize_option(filter.limit)
             );
@@ -4929,9 +8021,10 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/searches/records") => {
             let mut searches = state.searches.write().await;
-            searches.expire_due();
+            let expired = searches.expire_due();
             let body = searches.json(route.query);
             drop(searches);
+            persist_search_records(state, &expired).await?;
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -4940,9 +8033,10 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/searches") => {
             let mut searches = state.searches.write().await;
-            searches.expire_due();
+            let expired = searches.expire_due();
             let body = searches.slskd_list_json(route.query);
             drop(searches);
+            persist_search_records(state, &expired).await?;
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -4954,10 +8048,11 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut searches = state.searches.write().await;
-            searches.expire_due();
+            let expired = searches.expire_due();
             if let Some(record) = searches.get(token) {
-                let body = record.json();
+                let body = record.json_with_query(route.query);
                 drop(searches);
+                persist_search_records(state, &expired).await?;
                 Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json",
@@ -4965,6 +8060,7 @@ async fn route_http_request_with_headers(
                 })
             } else {
                 drop(searches);
+                persist_search_records(state, &expired).await?;
                 Ok(routing::not_found_response())
             }
         }
@@ -5012,6 +8108,10 @@ async fn route_http_request_with_headers(
             let external_id = extract_json_string_field(body, "id");
             let username_opt = extract_json_string_field(body, "username");
             let room_opt = extract_json_string_field(body, "room");
+            let ttl_seconds = match search_ttl_seconds_from_body(body) {
+                Ok(ttl_seconds) => ttl_seconds,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
 
             if !matches!(target_str.as_str(), "global" | "user" | "room" | "wishlist") {
                 return Ok(routing::bad_request_response("invalid search target"));
@@ -5032,7 +8132,7 @@ async fn route_http_request_with_headers(
              let result_count = matching_results.len();
 
               let target = search_target_static(&target_str);
-              let record = searches.create(external_id, query.clone(), target, target_name.clone(), matching_results, 300);
+              let record = searches.create(external_id, query.clone(), target, target_name.clone(), matching_results, ttl_seconds);
               let token = record.token;
               drop(searches);
 
@@ -5063,19 +8163,12 @@ async fn route_http_request_with_headers(
                  "result_count": result_count,
              });
              let correlation_id = format!("search_{}", token);
-             let webhooks = state.webhooks.read().await;
-             let webhooks_clone = webhooks.clone();
-             drop(webhooks);
-             let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
-             tokio::spawn(async move {
-                 webhooks::WebhookDispatcher::dispatch(
-                     &webhooks_clone,
-                     webhook_deliveries,
-                     correlation_id,
-                     webhooks::WebhookEvent::SearchCreated,
-                     webhook_data,
-                 ).await;
-             });
+             dispatch_webhook_event(
+                 state,
+                 correlation_id,
+                 webhooks::WebhookEvent::SearchCreated,
+                 webhook_data,
+             ).await;
 
              let dispatch_target = match target_str.as_str() {
                  "user" => SearchDispatchTarget::User(username_opt.unwrap_or_default()),
@@ -5108,21 +8201,43 @@ async fn route_http_request_with_headers(
                 let correlation_id = format!("search_{}", token);
 
                 drop(searches);
+                persist_search_record(state, &record).await?;
 
-                let webhooks = state.webhooks.read().await;
-                let webhooks_clone = webhooks.clone();
-                drop(webhooks);
-                let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
-                tokio::spawn(async move {
-                    webhooks::WebhookDispatcher::dispatch(
-                        &webhooks_clone,
-                        webhook_deliveries,
-                        correlation_id,
-                        webhooks::WebhookEvent::SearchCompleted,
-                        webhook_data,
-                    ).await;
-                });
+                dispatch_webhook_event(
+                    state,
+                    correlation_id,
+                    webhooks::WebhookEvent::SearchCompleted,
+                    webhook_data,
+                ).await;
 
+                Ok(routing::ok_response(body_json))
+            } else {
+                drop(searches);
+                Ok(routing::not_found_response())
+            }
+        }
+
+        ("POST", path)
+            if search_token_path(normalized_path.as_str(), "/cancel").is_some()
+                || search_token_path(normalized_path.as_str(), "/fail").is_some()
+                || search_token_path(normalized_path.as_str(), "/expire").is_some() =>
+        {
+            let (token, status, event_kind) =
+                if let Some(token) = search_token_path(normalized_path.as_str(), "/cancel") {
+                    (token, "cancelled", "search.cancelled")
+                } else if let Some(token) = search_token_path(normalized_path.as_str(), "/fail") {
+                    (token, "failed", "search.failed")
+                } else if let Some(token) = search_token_path(normalized_path.as_str(), "/expire") {
+                    (token, "expired", "search.expired")
+                } else {
+                    return Ok(routing::not_found_response());
+                };
+            let mut searches = state.searches.write().await;
+            if let Some(record) = searches.set_status_by_token(token, status) {
+                let body_json = record.json();
+                drop(searches);
+                persist_search_record(state, &record).await?;
+                record_event(state, event_kind, token.to_string(), None).await;
                 Ok(routing::ok_response(body_json))
             } else {
                 drop(searches);
@@ -5132,14 +8247,23 @@ async fn route_http_request_with_headers(
 
         ("POST", "/api/searches/prune") => {
             let mut searches = state.searches.write().await;
-            let pruned = searches.prune_expired();
+            let pruned_records = searches.prune_expired();
+            let pruned = pruned_records.len();
             let remaining = searches.records.len();
             drop(searches);
+            for record in &pruned_records {
+                delete_persisted_search(state, record).await?;
+            }
             Ok(routing::ok_response(format!("{{\"pruned\":{},\"remaining\":{}}}", pruned, remaining)))
         }
 
         ("POST", "/api/search-responses") => {
-            let token = match extract_json_u64_field(body, "token") {
+            let payload = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(payload) => payload,
+                Err(_) => return Ok(routing::bad_request_response("invalid JSON body")),
+            };
+
+            let token = match payload.get("token").and_then(serde_json::Value::as_u64) {
                 Some(t) => match u32::try_from(t) {
                     Ok(token) => token,
                     Err(_) => {
@@ -5149,28 +8273,91 @@ async fn route_http_request_with_headers(
                 None => return Ok(routing::bad_request_response("token is required")),
             };
 
-            let peer_username = extract_json_string_field(body, "peer_username");
-            let filename = extract_json_string_field(body, "filename");
-            let size = extract_json_u64_field(body, "size");
-            let slot_free = extract_json_bool_field(body, "slot_free");
-            let average_speed = extract_json_u32_field(body, "average_speed");
-            let queue_length = extract_json_u32_field(body, "queue_length");
+            let peer_username = payload
+                .get("peer_username")
+                .or_else(|| payload.get("username"))
+                .and_then(serde_json::Value::as_str);
+            let slot_free = payload
+                .get("slot_free")
+                .or_else(|| payload.get("hasFreeUploadSlot"))
+                .and_then(serde_json::Value::as_bool);
+            let average_speed = payload
+                .get("average_speed")
+                .or_else(|| payload.get("uploadSpeed"))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok());
+            let queue_length = payload
+                .get("queue_length")
+                .or_else(|| payload.get("queueLength"))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok());
+            let locked = payload
+                .get("locked")
+                .or_else(|| payload.get("isLocked"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let mut entries = Vec::new();
+            if let Some(files) = payload.get("files").and_then(serde_json::Value::as_array) {
+                entries.extend(files.iter().filter_map(|file| {
+                    SearchResultEntry::from_json_file(
+                        file,
+                        peer_username,
+                        false,
+                        slot_free,
+                        average_speed,
+                        queue_length,
+                    )
+                }));
+            }
+            if let Some(files) = payload
+                .get("lockedFiles")
+                .and_then(serde_json::Value::as_array)
+            {
+                entries.extend(files.iter().filter_map(|file| {
+                    SearchResultEntry::from_json_file(
+                        file,
+                        peer_username,
+                        true,
+                        slot_free,
+                        average_speed,
+                        queue_length,
+                    )
+                }));
+            }
 
-            let mut searches = state.searches.write().await;
-            if let Some(record) = searches.records.iter_mut().find(|r| r.token == token) {
-                let entry = SearchResultEntry {
-                    peer_username: peer_username.clone(),
-                    filename: filename.clone().unwrap_or_default(),
-                    size: size.unwrap_or(0),
+            if entries.is_empty() {
+                let entry = SearchResultEntry::from_json_file(
+                    &payload,
+                    peer_username,
+                    locked,
                     slot_free,
                     average_speed,
                     queue_length,
-                    extension: filename.as_ref().and_then(|f| f.split('.').next_back().map(|s| s.to_string())).unwrap_or_default(),
-                };
-                record.results.push(entry);
+                )
+                .unwrap_or_else(|| SearchResultEntry {
+                    peer_username: peer_username.map(str::to_owned),
+                    filename: String::new(),
+                    size: payload
+                        .get("size")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0),
+                    locked,
+                    slot_free,
+                    average_speed,
+                    queue_length,
+                    extension: String::new(),
+                });
+                entries.push(entry);
+            }
+
+            let mut searches = state.searches.write().await;
+            if let Some(record) = searches.records.iter_mut().find(|r| r.token == token) {
+                record.results.extend(entries);
                 record.updated_at = unix_timestamp();
                 let response_json = record.json();
+                let record = record.clone();
                 drop(searches);
+                persist_search_record(state, &record).await?;
                 Ok(routing::ok_response(response_json))
             } else {
                 drop(searches);
@@ -5182,6 +8369,8 @@ async fn route_http_request_with_headers(
         ("POST", "/api/transfers") => {
             if let Some((username, files)) = slskd_enqueue_request(body) {
                 let mut transfers = state.transfers.write().await;
+                let mut created = Vec::new();
+                let mut created_entries = Vec::new();
                 for file in files {
                     let filename = file
                         .get("filename")
@@ -5192,10 +8381,20 @@ async fn route_http_request_with_headers(
                         continue;
                     }
                     let size = file.get("size").and_then(serde_json::Value::as_u64);
-                    transfers.create(0, Some(username.clone()), filename, None, size);
+                    let entry = transfers.create(0, Some(username.clone()), filename, None, size);
+                    created.push(entry.slskd_file_json());
+                    created_entries.push(entry);
                 }
+                let count = created.len();
                 drop(transfers);
-                return Ok(routing::ok_response("true".to_owned()));
+                persist_transfer_records(state, &created_entries).await?;
+                return Ok(routing::ok_response(
+                    serde_json::json!({
+                        "queued": count,
+                        "transfers": created,
+                    })
+                    .to_string(),
+                ));
             }
 
             let filename = match extract_json_string_field(body, "filename") {
@@ -5215,6 +8414,7 @@ async fn route_http_request_with_headers(
              let mut transfers = state.transfers.write().await;
              let entry = transfers.create(direction, peer_username.clone(), filename.clone(), local_path.clone(), size);
              drop(transfers);
+             persist_transfer_record(state, &entry).await?;
               Ok(routing::created_response(entry.json()))
          }
 
@@ -5233,9 +8433,31 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", "/api/transfers/downloads/accelerated") => {
-             Ok(routing::ok_response(
-                 "{\"enabled\":false,\"available\":false,\"accelerated\":[],\"count\":0}".to_string(),
-             ))
+             let transfers = state.transfers.read().await;
+             let body = slskd_accelerated_downloads_json(route.query, &transfers);
+             drop(transfers);
+             Ok(routing::ok_response(body))
+         }
+
+         ("GET", "/api/transfers/downloads/stuck") => {
+             let transfers = state.transfers.read().await;
+             let body = slskd_stuck_downloads_json(route.query, &transfers);
+             drop(transfers);
+             Ok(routing::ok_response(body))
+         }
+
+         ("GET", "/api/transfers/downloads/user-stats") => {
+             let transfers = state.transfers.read().await;
+             let body = slskd_download_user_stats_json(route.query, &transfers);
+             drop(transfers);
+             Ok(routing::ok_response(body))
+         }
+
+         ("GET", "/api/transfers/downloads/stats") => {
+             let transfers = state.transfers.read().await;
+             let json = slskd_download_stats_json(&transfers);
+             drop(transfers);
+             Ok(routing::ok_response(json))
          }
 
          ("GET", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
@@ -5293,8 +8515,208 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", path) if slskd_transfer_position_path(path).is_some() => {
-             Ok(routing::ok_response("0".to_owned()))
+             let Some((username, id)) = slskd_transfer_position_path(path) else {
+                 return Ok(routing::not_found_response());
+             };
+             let username = decoded_path_segment(username);
+             let transfers = state.transfers.read().await;
+             let position = transfers.slskd_transfer_position(0, &username, id);
+             drop(transfers);
+             Ok(routing::ok_response(position.to_string()))
          }
+
+        ("POST", "/api/transfers/downloads/find-alternative") => {
+            let transfer_id = extract_json_u64_field(body, "transfer_id").unwrap_or(0);
+            if transfer_id == 0 {
+                return Ok(routing::bad_request_response("transfer_id is required"));
+            }
+            let transfers = state.transfers.read().await;
+            let Some(transfer) = transfers
+                .entries
+                .iter()
+                .find(|entry| entry.id == transfer_id && entry.direction == 0)
+                .cloned()
+            else {
+                drop(transfers);
+                return Ok(routing::not_found_response());
+            };
+            drop(transfers);
+            let searches = state.searches.read().await;
+            let json = searches.transfer_alternatives_json(&transfer);
+            drop(searches);
+            Ok(routing::ok_response(json))
+        }
+
+        ("POST", "/api/transfers/downloads/replace") => {
+            let transfer_id = extract_json_u64_field(body, "transfer_id").unwrap_or(0);
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            if transfer_id == 0 || username.is_empty() {
+                return Ok(routing::bad_request_response(
+                    "transfer_id and username are required",
+                ));
+            }
+            let requested_filename = extract_json_string_field(body, "filename");
+            let transfers = state.transfers.read().await;
+            let Some(original) = transfers
+                .entries
+                .iter()
+                .find(|entry| entry.id == transfer_id && entry.direction == 0)
+                .cloned()
+            else {
+                drop(transfers);
+                return Ok(routing::not_found_response());
+            };
+            drop(transfers);
+            let searches = state.searches.read().await;
+            let Some(alternative) =
+                searches.find_transfer_alternative(&original, &username, requested_filename.as_deref())
+            else {
+                drop(searches);
+                return Ok(routing::conflict_response("no matching alternative found"));
+            };
+            drop(searches);
+            let mut transfers = state.transfers.write().await;
+            let updated_original = transfers.update_status(
+                original.id,
+                "cancelled",
+                Some(original.bytes_transferred),
+                Some("replaced by alternative source".to_owned()),
+            );
+            let replacement = transfers.create(
+                0,
+                alternative.peer_username.clone(),
+                alternative.filename.clone(),
+                None,
+                Some(alternative.size),
+            );
+            let replacement = transfers
+                .update_status(replacement.id, "peer_lookup", None, None)
+                .unwrap_or(replacement);
+            let replacement_json = replacement.json();
+            drop(transfers);
+            if let Some(entry) = updated_original.as_ref() {
+                persist_transfer_record(state, entry).await?;
+            }
+            persist_transfer_record(state, &replacement).await?;
+            if let Some(username) = replacement.peer_username.clone() {
+                send_session_command(
+                    state,
+                    SessionCommand::TransferPeer {
+                        id: replacement.id,
+                        username,
+                    },
+                )
+                .await
+                .ok();
+            }
+            Ok(routing::accepted_response(
+                serde_json::json!({
+                    "transfer_id": transfer_id,
+                    "replacement_queued": true,
+                    "replacement": serde_json::from_str::<serde_json::Value>(&replacement_json)
+                        .map_err(|error| format!("replacement json failed: {error}"))?,
+                    "status": "queued",
+                })
+                .to_string(),
+            ))
+        }
+
+        ("POST", "/api/transfers/downloads/auto-replace") => {
+            let requested_transfer_id = extract_json_u64_field(body, "transfer_id");
+            let transfers = state.transfers.read().await;
+            let candidates = transfers
+                .entries
+                .iter()
+                .filter(|entry| {
+                    entry.direction == 0
+                        && matches!(entry.status.as_str(), "failed" | "rejected")
+                        && requested_transfer_id.map_or(true, |id| entry.id == id)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            drop(transfers);
+
+            let searches = state.searches.read().await;
+            let replacements = candidates
+                .iter()
+                .filter_map(|transfer| {
+                    searches
+                        .first_transfer_alternative(transfer)
+                        .map(|alternative| (transfer.clone(), alternative))
+                })
+                .collect::<Vec<_>>();
+            drop(searches);
+
+            if replacements.is_empty() {
+                return Ok(routing::accepted_response(
+                    serde_json::json!({
+                        "replacement_queued": false,
+                        "alternatives": [],
+                        "replacements": [],
+                        "status": "idle",
+                    })
+                    .to_string(),
+                ));
+            }
+
+            let mut queued = Vec::new();
+            let mut commands = Vec::new();
+            let mut persisted = Vec::new();
+            let mut transfers = state.transfers.write().await;
+            for (original, alternative) in replacements {
+                if let Some(entry) = transfers.update_status(
+                    original.id,
+                    "cancelled",
+                    Some(original.bytes_transferred),
+                    Some("auto-replaced by alternative source".to_owned()),
+                ) {
+                    persisted.push(entry);
+                }
+                let replacement = transfers.create(
+                    0,
+                    alternative.peer_username.clone(),
+                    alternative.filename.clone(),
+                    None,
+                    Some(alternative.size),
+                );
+                let replacement = transfers
+                    .update_status(replacement.id, "peer_lookup", None, None)
+                    .unwrap_or(replacement);
+                persisted.push(replacement.clone());
+                if let Some(username) = replacement.peer_username.clone() {
+                    commands.push(SessionCommand::TransferPeer {
+                        id: replacement.id,
+                        username,
+                    });
+                }
+                queued.push(serde_json::json!({
+                    "transfer_id": original.id,
+                    "replacement": serde_json::from_str::<serde_json::Value>(&replacement.json())
+                        .map_err(|error| format!("replacement json failed: {error}"))?,
+                    "alternative": {
+                        "username": alternative.peer_username.as_deref().unwrap_or_default(),
+                        "filename": alternative.filename,
+                        "size": alternative.size,
+                    },
+                }));
+            }
+            drop(transfers);
+            persist_transfer_records(state, &persisted).await?;
+
+            for command in commands {
+                send_session_command(state, command).await.ok();
+            }
+
+            Ok(routing::accepted_response(
+                serde_json::json!({
+                    "replacement_queued": true,
+                    "alternatives": queued.iter().map(|entry| entry["alternative"].clone()).collect::<Vec<_>>(),
+                    "replacements": queued,
+                    "status": "queued",
+                })
+                .to_string(),
+            ))
+        }
 
          ("POST", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
              let Some(username) = slskd_transfer_user_path(path, "downloads") else {
@@ -5303,6 +8725,8 @@ async fn route_http_request_with_headers(
              let username = decoded_path_segment(username);
              let files = slskd_files_from_body(body);
              let mut transfers = state.transfers.write().await;
+             let mut created = Vec::new();
+             let mut created_entries = Vec::new();
              for file in files {
                  let filename = file
                      .get("filename")
@@ -5313,10 +8737,17 @@ async fn route_http_request_with_headers(
                      continue;
                  }
                  let size = file.get("size").and_then(serde_json::Value::as_u64);
-                 transfers.create(0, Some(username.clone()), filename, None, size);
+                 let entry = transfers.create(0, Some(username.clone()), filename, None, size);
+                 created.push(entry.slskd_file_json());
+                 created_entries.push(entry);
              }
+             let count = created.len();
              drop(transfers);
-             Ok(routing::ok_response("true".to_owned()))
+             persist_transfer_records(state, &created_entries).await?;
+             Ok(routing::ok_response(serde_json::json!({
+                 "queued": count,
+                 "transfers": created,
+             }).to_string()))
          }
 
          ("DELETE", "/api/transfers/downloads/all/completed")
@@ -5324,15 +8755,23 @@ async fn route_http_request_with_headers(
              let direction = if normalized_path.contains("/downloads/") { 0 } else { 1 };
              let mut transfers = state.transfers.write().await;
              let before = transfers.entries.len();
+             let mut removed_entries = Vec::new();
              transfers.entries.retain(|entry| {
-                 entry.direction != direction
-                     || !matches!(
-                         entry.status.as_str(),
-                         "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
-                     )
+                 let remove = entry.direction == direction
+                     && matches!(
+                        entry.status.as_str(),
+                        "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+                    );
+                 if remove {
+                     removed_entries.push(entry.clone());
+                 }
+                 !remove
              });
              let removed = before.saturating_sub(transfers.entries.len());
              drop(transfers);
+             for entry in &removed_entries {
+                 delete_persisted_transfer(state, entry).await?;
+             }
              Ok(routing::ok_response((removed > 0).to_string()))
          }
 
@@ -5349,6 +8788,9 @@ async fn route_http_request_with_headers(
                  .then(|| transfers.update_status(id, "cancelled", None, None))
                  .flatten();
              drop(transfers);
+             if let Some(entry) = updated.as_ref() {
+                 persist_transfer_record(state, entry).await?;
+             }
              Ok(if updated.is_some() {
                  routing::ok_response("true".to_owned())
              } else {
@@ -5369,6 +8811,9 @@ async fn route_http_request_with_headers(
                  .then(|| transfers.update_status(id, "cancelled", None, None))
                  .flatten();
              drop(transfers);
+             if let Some(entry) = updated.as_ref() {
+                 persist_transfer_record(state, entry).await?;
+             }
              Ok(if updated.is_some() {
                  routing::ok_response("true".to_owned())
              } else {
@@ -5407,7 +8852,9 @@ async fn route_http_request_with_headers(
                      entry.status = "cancelled".to_owned();
                      entry.updated_at = unix_timestamp();
                      let json_response = entry.json();
+                     let entry = entry.clone();
                      drop(transfers);
+                     persist_transfer_record(state, &entry).await?;
                      Ok(routing::ok_response(json_response))
                  } else {
                      drop(transfers);
@@ -5422,7 +8869,7 @@ async fn route_http_request_with_headers(
             if let Some((id, action)) = transfer_action_path(normalized_path.as_str()) {
                 let mut transfers = state.transfers.write().await;
 
-                if action == "start" {
+                if action == "start" || action == "retry" {
                     // Check max active transfer limit
                     let max_active = state.config.transfer_max_active;
                     let active_count = transfers.entries.iter()
@@ -5435,6 +8882,17 @@ async fn route_http_request_with_headers(
                     }
 
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        if action == "retry" {
+                            if entry.direction != 0
+                                || !matches!(
+                                    entry.status.as_str(),
+                                    "failed" | "rejected" | "cancelled"
+                                )
+                            {
+                                drop(transfers);
+                                return Ok(routing::conflict_response("transfer is not retryable"));
+                            }
+                        }
                         // Check outbound transfer policy
                         if let Some(ref username) = entry.peer_username {
                             if !state.config.transfer_allow_outbound {
@@ -5443,20 +8901,26 @@ async fn route_http_request_with_headers(
                             }
 
                             entry.status = "peer_lookup".to_owned();
+                            entry.reason = None;
                             entry.updated_at = unix_timestamp();
                             let json_response = entry.json();
                             let username_clone = username.clone();
+                            let entry = entry.clone();
                             drop(transfers);
+                            persist_transfer_record(state, &entry).await?;
 
                             send_session_command(state, SessionCommand::TransferPeer { id, username: username_clone }).await.ok();
 
                             Ok(routing::ok_response(json_response))
                         } else {
                             entry.status = "in_progress".to_owned();
+                            entry.reason = None;
 
                             entry.updated_at = unix_timestamp();
                             let json_response = entry.json();
+                            let entry = entry.clone();
                             drop(transfers);
+                            persist_transfer_record(state, &entry).await?;
                             Ok(routing::ok_response(json_response))
                         }
                     } else {
@@ -5470,7 +8934,9 @@ async fn route_http_request_with_headers(
                         entry.bytes_transferred = bytes_transferred;
                         entry.updated_at = unix_timestamp();
                         let json_response = entry.json();
+                        let entry = entry.clone();
                         drop(transfers);
+                        persist_transfer_record(state, &entry).await?;
                         Ok(routing::ok_response(json_response))
                     } else {
                         drop(transfers);
@@ -5484,6 +8950,7 @@ async fn route_http_request_with_headers(
                          entry.status = status_str.clone();
                          entry.updated_at = unix_timestamp();
                          let json_response = entry.json();
+                         let entry_for_persistence = entry.clone();
 
                          // Prepare webhook dispatch
                          let webhook_event = if status_str == "succeeded" {
@@ -5506,21 +8973,15 @@ async fn route_http_request_with_headers(
                          let correlation_id = format!("transfer_{}", id);
 
                          drop(transfers);
+                         persist_transfer_record(state, &entry_for_persistence).await?;
 
                          // Dispatch webhook
-                         let webhooks = state.webhooks.read().await;
-                         let webhooks_clone = webhooks.clone();
-                         drop(webhooks);
-                         let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
-                         tokio::spawn(async move {
-                             webhooks::WebhookDispatcher::dispatch(
-                                 &webhooks_clone,
-                                 webhook_deliveries,
-                                 correlation_id,
-                                 webhook_event,
-                                 webhook_data,
-                             ).await;
-                         });
+                         dispatch_webhook_event(
+                             state,
+                             correlation_id,
+                             webhook_event,
+                             webhook_data,
+                         ).await;
 
                          Ok(routing::ok_response(json_response))
                      } else {
@@ -5539,66 +9000,9 @@ async fn route_http_request_with_headers(
         // TRANSFER STATISTICS ENDPOINTS
         ("GET", "/api/transfers/speeds") => {
             let transfers = state.transfers.read().await;
-            let active_count = transfers.entries.iter()
-                .filter(|t| t.status == "in_progress")
-                .count();
-            let total_bytes = transfers.entries.iter()
-                .map(|t| t.bytes_transferred)
-                .sum::<u64>();
-            let json = format!(
-                "{{\"active_transfers\":{},\"total_bytes_transferred\":{},\"average_speed\":0}}",
-                active_count,
-                total_bytes
-            );
+            let json = slskd_transfer_speeds_json(&transfers);
             drop(transfers);
             Ok(routing::ok_response(json))
-        }
-
-        ("GET", "/api/transfers/downloads/stats") => {
-            let transfers = state.transfers.read().await;
-            let downloads = transfers.entries.iter()
-                .filter(|t| t.direction == 0)
-                .count();
-            let completed = transfers.entries.iter()
-                .filter(|t| t.direction == 0 && t.status == "succeeded")
-                .count();
-            let total_size = transfers.entries.iter()
-                .filter(|t| t.direction == 0)
-                .map(|t| t.size.unwrap_or(0))
-                .sum::<u64>();
-            let json = format!(
-                "{{\"total_downloads\":{},\"completed\":{},\"total_size\":{}}}",
-                downloads,
-                completed,
-                total_size
-            );
-            drop(transfers);
-            Ok(routing::ok_response(json))
-        }
-
-        ("POST", "/api/transfers/downloads/find-alternative") => {
-            let transfer_id = extract_json_u64_field(body, "transfer_id").unwrap_or(0);
-            if transfer_id == 0 {
-                return Ok(routing::bad_request_response("transfer_id is required"));
-            }
-            let json = format!(
-                "{{\"transfer_id\":{},\"alternatives\":[],\"count\":0}}",
-                transfer_id
-            );
-            Ok(routing::ok_response(json))
-        }
-
-        ("POST", "/api/transfers/downloads/replace") => {
-            let transfer_id = extract_json_u64_field(body, "transfer_id").unwrap_or(0);
-            let username = extract_json_string_field(body, "username").unwrap_or_default();
-            if transfer_id == 0 || username.is_empty() {
-                return Ok(routing::bad_request_response("transfer_id and username are required"));
-            }
-            Ok(routing::accepted_response(format!(
-                "{{\"transfer_id\":{},\"username\":\"{}\",\"replacement_queued\":false,\"status\":\"no_alternative_selected\"}}",
-                transfer_id,
-                json_escape(&username)
-            )))
         }
 
         // USER PROFILE ENDPOINTS
@@ -5641,7 +9045,7 @@ async fn route_http_request_with_headers(
                 .find(|record| record.username == username)
                 .map(|record| record.entries.as_slice())
                 .unwrap_or(&[]);
-            let json = slskd_user_directories_json(&directory, entries);
+            let json = slskd_user_directories_json(&directory, entries, route.query);
             drop(browse);
             Ok(routing::ok_response(json))
         }
@@ -5688,10 +9092,9 @@ async fn route_http_request_with_headers(
                 .and_then(|p| p.strip_suffix("/group"))
                 .map(decoded_path_segment)
                 .unwrap_or_else(|| "unknown".to_owned());
-            let json = format!(
-                "{{\"username\":\"{}\",\"group\":\"default\"}}",
-                json_escape(&username)
-            );
+            let sharegroups = state.sharegroups.read().await;
+            let json = sharegroups.user_group_json(&username);
+            drop(sharegroups);
             Ok(routing::ok_response(json))
         }
 
@@ -5708,18 +9111,21 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/soulseek/users/similar") => {
-            let json = "{\"users\":[],\"count\":0}".to_string();
-            Ok(routing::ok_response(json))
+            let users = state.users.read().await;
+            let mesh = state.mesh.read().await;
+            let body = mesh.users_json(&users);
+            drop(mesh);
+            drop(users);
+            Ok(routing::ok_response(body))
         }
 
         ("GET", path) if path.starts_with("/api/soulseek/users/") && path.ends_with("/interests") => {
             let username = path.strip_prefix("/api/soulseek/users/")
                 .and_then(|p| p.strip_suffix("/interests"))
                 .unwrap_or("unknown");
-            let json = format!(
-                "{{\"username\":\"{}\",\"liked\":[],\"hated\":[],\"count\":0}}",
-                json_escape(username)
-            );
+            let interests = state.interests.read().await;
+            let json = interests.user_interests_json(username);
+            drop(interests);
             Ok(routing::ok_response(json))
         }
 
@@ -5729,6 +9135,7 @@ async fn route_http_request_with_headers(
             let cleared_count = searches.records.len();
             searches.records.clear();
             drop(searches);
+            clear_persisted_searches(state).await?;
             let json = format!("{{\"cleared\":{}}}", cleared_count);
             Ok(routing::ok_response(json))
         }
@@ -5743,7 +9150,7 @@ async fn route_http_request_with_headers(
             };
             let searches = state.searches.read().await;
             if let Some(record) = searches.get_by_identifier(id) {
-                let json = record.slskd_responses_json();
+                let json = record.slskd_responses_json_with_query(route.query);
                 drop(searches);
                 Ok(routing::ok_response(json))
             } else {
@@ -5756,7 +9163,7 @@ async fn route_http_request_with_headers(
             let id = path.trim_start_matches("/api/searches/");
             let searches = state.searches.read().await;
             if let Some(record) = searches.get_by_identifier(id) {
-                let json = record.json();
+                let json = record.json_with_query(route.query);
                 drop(searches);
                 Ok(routing::ok_response(json))
             } else {
@@ -5775,8 +9182,11 @@ async fn route_http_request_with_headers(
                 .or_else(|| route.normalized_path.strip_prefix("/api/v0/searches/"))
                 .unwrap_or_default();
             let mut searches = state.searches.write().await;
-            searches.remove_by_identifier(token_str);
+            let removed = searches.remove_by_identifier(token_str);
             drop(searches);
+            if let Some(record) = removed.as_ref() {
+                delete_persisted_search(state, record).await?;
+            }
             Ok(routing::ok_response("{}".to_string()))
         }
 
@@ -5796,6 +9206,7 @@ async fn route_http_request_with_headers(
               let record = messages.add(username.clone(), "outbound", message_body.clone());
               let message_id = record.id;
               drop(messages);
+              persist_message_record(state, &record).await;
               // Dispatch webhook for message.sent event
               let webhook_data = serde_json::json!({
                   "message_id": message_id,
@@ -5805,19 +9216,12 @@ async fn route_http_request_with_headers(
               });
               let correlation_id = format!("message_{}", message_id);
 
-              let webhooks = state.webhooks.read().await;
-              let webhooks_clone = webhooks.clone();
-              drop(webhooks);
-              let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
-              tokio::spawn(async move {
-                  webhooks::WebhookDispatcher::dispatch(
-                      &webhooks_clone,
-                      webhook_deliveries,
-                      correlation_id,
-                      webhooks::WebhookEvent::MessageSent,
-                      webhook_data,
-                  ).await;
-              });
+              dispatch_webhook_event(
+                  state,
+                  correlation_id,
+                  webhooks::WebhookEvent::MessageSent,
+                  webhook_data,
+              ).await;
 
               send_session_command(state, SessionCommand::MessageUser { username, body: message_body }).await.ok();
 
@@ -5838,6 +9242,7 @@ async fn route_http_request_with_headers(
              let mut messages = state.messages.write().await;
              let record = messages.add(username.clone(), "inbound", message_body.clone());
              drop(messages);
+             persist_message_record(state, &record).await;
              record_event(state, "message.received", "messages", Some(format!("id={}", record.id))).await;
 
             Ok(routing::created_response(record.json()))
@@ -5857,6 +9262,7 @@ async fn route_http_request_with_headers(
                 record.updated_at = unix_timestamp();
                 let json_response = record.json();
                 drop(messages);
+                persist_message_ack(state, id).await;
 
                 send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
 
@@ -5881,6 +9287,7 @@ async fn route_http_request_with_headers(
                  record.updated_at = unix_timestamp();
                  let json_response = record.json();
                  drop(messages);
+                 persist_message_ack(state, id).await;
 
                  send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
 
@@ -5913,9 +9320,13 @@ async fn route_http_request_with_headers(
             let Some(room_name) = room_join_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
+            if let Some(response) = room_join_unavailable_response(state).await {
+                return Ok(response);
+            }
             let mut rooms = state.rooms.write().await;
             let record = rooms.join(room_name.to_string());
             drop(rooms);
+            persist_room_join(state, room_name).await;
 
             send_session_command(state, SessionCommand::JoinRoom(room_name.to_string())).await.ok();
 
@@ -5933,6 +9344,7 @@ async fn route_http_request_with_headers(
                 record.updated_at = unix_timestamp();
                 let json_response = record.json();
                 drop(rooms);
+                persist_room_leave(state, room_name).await;
 
                 send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
 
@@ -6030,6 +9442,7 @@ async fn route_http_request_with_headers(
             drop(users);
 
             send_session_command(state, SessionCommand::WatchUser(username)).await.ok();
+            persist_user_projection(state, &record).await;
 
             Ok(routing::created_response(record.json()))
         }
@@ -6044,6 +9457,7 @@ async fn route_http_request_with_headers(
                 drop(users);
 
                 send_session_command(state, SessionCommand::UnwatchUser(username.to_string())).await.ok();
+                persist_user_projection(state, &record).await;
 
                 Ok(routing::ok_response(record.json()))
             } else {
@@ -6070,6 +9484,7 @@ async fn route_http_request_with_headers(
             drop(browse);
 
             send_session_command(state, SessionCommand::BrowseUser(username.to_string())).await.ok();
+            persist_browse_record(state, &record).await;
 
             Ok(routing::accepted_response(record.json()))
         }
@@ -6085,6 +9500,7 @@ async fn route_http_request_with_headers(
             drop(browse);
 
             send_session_command(state, SessionCommand::BrowseFolder { username: username.to_string(), folder }).await.ok();
+            persist_browse_record(state, &record).await;
 
             Ok(routing::accepted_response(record.json()))
         }
@@ -6096,14 +9512,28 @@ async fn route_http_request_with_headers(
             let reason = extract_json_string_field(body, "reason").unwrap_or_default();
 
             let mut browse = state.browse.write().await;
-            if let Some(r) = browse.records.iter_mut().find(|b| b.username == username) {
-                r.status = "failed";
-                r.reason = if reason.is_empty() { None } else { Some(reason.clone()) };
-                r.updated_at = unix_timestamp();
-            }
+            let record = browse.fail(username.to_owned(), reason.clone());
             drop(browse);
+            persist_browse_record(state, &record).await;
 
             Ok(routing::ok_response(format!("{{\"username\":\"{}\",\"status\":\"failed\",\"reason\":\"{}\"}}", json_escape(username), json_escape(&reason))))
+        }
+
+        ("POST", path) if user_browse_cancel_path(normalized_path.as_str()).is_some() => {
+            let Some(username) = user_browse_cancel_path(normalized_path.as_str()) else {
+                return Ok(routing::not_found_response());
+            };
+            let username = decoded_path_segment(username);
+            let reason = extract_json_string_field(body, "reason")
+                .unwrap_or_else(|| "cancelled by client".to_owned());
+
+            let mut browse = state.browse.write().await;
+            let record = browse.cancel(username, reason);
+            let body = record.json();
+            drop(browse);
+            persist_browse_record(state, &record).await;
+
+            Ok(routing::ok_response(body))
         }
 
         // BROWSE-RESPONSE ENDPOINT
@@ -6122,56 +9552,45 @@ async fn route_http_request_with_headers(
 
             let mut entries = Vec::new();
             if let Some(array) = payload.get("entries").and_then(serde_json::Value::as_array) {
-                entries.extend(array.iter().filter_map(|entry| {
-                    let filename = entry.get("filename")?.as_str()?.to_owned();
-                    let size = entry
-                        .get("size")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0);
-                    let extension = entry
-                        .get("extension")
+                entries.extend(
+                    array
+                        .iter()
+                        .filter_map(|entry| BrowseEntry::from_json_file(entry, None)),
+                );
+            }
+
+            if let Some(directories) = payload
+                .get("directories")
+                .and_then(serde_json::Value::as_array)
+            {
+                for directory in directories {
+                    let directory_name = directory
+                        .get("name")
+                        .or_else(|| directory.get("directory"))
                         .and_then(serde_json::Value::as_str)
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| {
-                            filename.split('.').next_back().unwrap_or("").to_string()
-                        });
-                    Some(BrowseEntry {
-                        filename,
-                        size,
-                        extension,
-                    })
-                }));
+                        .unwrap_or_default();
+                    if let Some(files) = directory
+                        .get("files")
+                        .and_then(serde_json::Value::as_array)
+                    {
+                        entries.extend(files.iter().filter_map(|file| {
+                            BrowseEntry::from_json_file(file, Some(directory_name))
+                        }));
+                    }
+                }
             }
 
             // Fallback for single entry format (backward compatibility)
             if entries.is_empty() {
-                if let Some(filename) = payload
-                    .get("filename")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned)
-                {
-                    let size = payload
-                        .get("size")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0);
-                    let extension = payload
-                        .get("extension")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| {
-                            filename.split('.').next_back().unwrap_or("").to_string()
-                        });
-                    entries.push(BrowseEntry {
-                        filename,
-                        size,
-                        extension,
-                    });
+                if let Some(entry) = BrowseEntry::from_json_file(&payload, None) {
+                    entries.push(entry);
                 }
             }
 
             let mut browse = state.browse.write().await;
             let record = browse.add_entries(username, entries, complete);
             drop(browse);
+            persist_browse_record(state, &record).await;
 
             Ok(routing::ok_response(record.json()))
         }
@@ -6183,28 +9602,37 @@ async fn route_http_request_with_headers(
                 body: browse.json(route.query),
             })
         }
-        ("GET", path) if (path.starts_with("/api/users/") || path.starts_with("/api/v0/users/")) && path.ends_with("/browse") => {
-            let username = path.strip_prefix("/api/users/")
-                .or_else(|| path.strip_prefix("/api/v0/users/"))
+        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
+            let username = path
+                .strip_prefix("/api/users/")
                 .and_then(|p| p.strip_suffix("/browse"));
 
             if let Some(username) = username {
+                let username = decoded_path_segment(username);
                 let browse = state.browse.read().await;
-                if let Some(record) = browse.get(username) {
-                    drop(browse);
-                    Ok(HttpResponse {
-                        status: "200 OK",
-                        content_type: "application/json",
-                        body: record.json(),
-                    })
-                } else {
-                    drop(browse);
-                    Ok(routing::ok_response(slskd_user_root_json(&[])))
+                if route.normalized_path.starts_with("/api/v0/") {
+                    if let Some(record) = browse.get(&username) {
+                        drop(browse);
+                        return Ok(HttpResponse {
+                            status: "200 OK",
+                            content_type: "application/json",
+                            body: record.json(),
+                        });
+                    }
                 }
+                let entries = browse
+                    .records
+                    .iter()
+                    .find(|record| record.username == username)
+                    .map(|record| record.entries.as_slice())
+                    .unwrap_or(&[]);
+                let body = slskd_user_root_json(entries, route.query);
+                drop(browse);
+                Ok(routing::ok_response(body))
             } else {
                 Ok(routing::not_found_response())
             }
-         }
+        }
 
          // GET browse requests list
          ("GET", "/api/browse/requests") => {
@@ -6251,7 +9679,7 @@ async fn route_http_request_with_headers(
                 secret.clone(),
             );
             let mut webhooks = state.webhooks.write().await;
-            let webhook_id = match webhooks.register(webhook) {
+            let webhook_id = match webhooks.register(webhook.clone()) {
                 Ok(id) => id,
                 Err(_) => {
                     drop(webhooks);
@@ -6259,6 +9687,7 @@ async fn route_http_request_with_headers(
                 }
             };
             drop(webhooks);
+            persist_webhook(state, &webhook).await;
             Ok(routing::created_response(serde_json::json!({
                 "id": webhook_id,
                 "secret": secret,
@@ -6291,6 +9720,7 @@ async fn route_http_request_with_headers(
             let mut webhooks = state.webhooks.write().await;
             if webhooks.unregister(webhook_id).is_some() {
                 drop(webhooks);
+                persist_webhook_delete(state, webhook_id).await;
                 Ok(routing::ok_response("{\"status\":\"deleted\"}".to_owned()))
             } else {
                 drop(webhooks);
@@ -6310,29 +9740,15 @@ async fn route_http_request_with_headers(
         }
         // DATABASE MANAGEMENT ROUTES
         ("GET", "/api/admin/database/stats") => {
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "application/json",
-                body: r#"{"searches":0,"transfers":0,"messages":0,"connected":true}"#.to_owned(),
-            })
+            Ok(routing::ok_response(database_stats_value(state).await.to_string()))
         }
         ("POST", "/api/admin/database/cleanup") => {
-            let mut transfers = state.transfers.write().await;
-            let before = transfers.entries.len();
-            transfers.entries.retain(|entry| is_active_transfer_status(&entry.status) || entry.status == "queued");
-            let pruned_transfers = before.saturating_sub(transfers.entries.len());
-            transfers.persist_state();
-            drop(transfers);
-
-            Ok(routing::ok_response(format!(
-                "{{\"status\":\"ok\",\"pruned_transfers\":{},\"note\":\"projection cleanup completed\"}}",
-                pruned_transfers
-            )))
+            Ok(routing::ok_response(
+                database_cleanup_value(state, body).await.to_string(),
+            ))
         }
         ("POST", "/api/admin/database/vacuum") => {
-            Ok(routing::ok_response(
-                "{\"status\":\"ok\",\"note\":\"no durable database vacuum required for current projection stores\"}".to_owned(),
-            ))
+            Ok(routing::ok_response(database_vacuum_value(state).await.to_string()))
         }
         // API KEYS MANAGEMENT ROUTES
         ("POST", "/api/admin/keys") => {
@@ -6382,10 +9798,14 @@ async fn route_http_request_with_headers(
             else {
                 return Ok(routing::bad_request_response("room is required"));
             };
+            if let Some(response) = room_join_unavailable_response(state).await {
+                return Ok(response);
+            }
             let mut rooms = state.rooms.write().await;
             let record = rooms.join(room_name.to_string());
             let body = record.slskd_room_json().to_string();
             drop(rooms);
+            persist_room_join(state, &room_name).await;
 
             send_session_command(state, SessionCommand::JoinRoom(room_name)).await.ok();
 
@@ -6433,10 +9853,56 @@ async fn route_http_request_with_headers(
             }
         }
         ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/ticker") => {
-            Ok(routing::ok_response("true".to_owned()))
+            let room_name = path
+                .strip_prefix("/api/rooms/joined/")
+                .and_then(|rest| rest.strip_suffix("/ticker"))
+                .unwrap_or_default()
+                .trim_matches('/');
+            let room_name = decoded_path_segment(room_name);
+            let ticker = json_body_string(body)
+                .or_else(|| extract_json_string_field(body, "ticker"))
+                .or_else(|| extract_json_string_field(body, "message"))
+                .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
+            let mut rooms = state.rooms.write().await;
+            let response = rooms
+                .set_ticker(&room_name, ticker)
+                .map(|room| {
+                    routing::ok_response(serde_json::json!({
+                        "updated": true,
+                        "room": room.slskd_room_json(),
+                    }).to_string())
+                })
+                .unwrap_or_else(routing::not_found_response);
+            drop(rooms);
+            Ok(response)
         }
         ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/members") => {
-            Ok(routing::ok_response("true".to_owned()))
+            let room_name = path
+                .strip_prefix("/api/rooms/joined/")
+                .and_then(|rest| rest.strip_suffix("/members"))
+                .unwrap_or_default()
+                .trim_matches('/');
+            let room_name = decoded_path_segment(room_name);
+            let username = json_body_string(body)
+                .or_else(|| extract_json_string_field(body, "username"))
+                .or_else(|| extract_json_string_field(body, "name"))
+                .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
+            if username.trim().is_empty() {
+                return Ok(routing::bad_request_response("username is required"));
+            }
+            let mut rooms = state.rooms.write().await;
+            let response = rooms
+                .add_member(&room_name, username)
+                .map(|room| {
+                    routing::ok_response(serde_json::json!({
+                        "updated": true,
+                        "room": room.slskd_room_json(),
+                        "userCount": room.user_count.unwrap_or(0),
+                    }).to_string())
+                })
+                .unwrap_or_else(routing::not_found_response);
+            drop(rooms);
+            Ok(response)
         }
         ("DELETE", path) if path.starts_with("/api/rooms/joined/") => {
             let room_name = path
@@ -6591,95 +10057,26 @@ async fn route_http_request_with_headers(
 
         // DATABASE MAINTENANCE ENDPOINTS
         ("GET", "/api/v0/database/stats") => {
-            if let Some(ref db) = state.db {
-                match db.get_stats().await {
-                    Ok(stats) => {
-                        let response_body = serde_json::json!({
-                            "searches": stats.search_count,
-                            "transfers": stats.transfer_count,
-                            "messages": stats.message_count,
-                            "users": stats.user_count,
-                            "rooms": stats.room_count,
-                        }).to_string();
-                        Ok(routing::ok_response(response_body))
-                    }
-                    Err(_) => Ok(routing::conflict_response("failed to retrieve database statistics")),
-                }
-            } else {
-                Ok(routing::conflict_response("database not initialized"))
-            }
+            Ok(routing::ok_response(database_stats_value(state).await.to_string()))
         }
         ("POST", "/api/v0/database/cleanup") => {
-            if let Some(ref db) = state.db {
-                let days: i32 = extract_json_i32_field(body, "days").unwrap_or(30);
-                match db.cleanup_old_records(days).await {
-                    Ok(count) => {
-                        let response_body = serde_json::json!({
-                            "cleaned": count,
-                            "days": days,
-                        }).to_string();
-                        Ok(routing::ok_response(response_body))
-                    }
-                    Err(_) => Ok(routing::conflict_response("failed to cleanup database")),
-                }
-            } else {
-                Ok(routing::conflict_response("database not initialized"))
-            }
+            Ok(routing::ok_response(
+                database_cleanup_value(state, body).await.to_string(),
+            ))
         }
         ("POST", "/api/v0/database/vacuum") => {
-            if let Some(ref db) = state.db {
-                match db.vacuum().await {
-                    Ok(_) => {
-                        let response_body = serde_json::json!({
-                            "vacuumed": true,
-                        }).to_string();
-                        Ok(routing::ok_response(response_body))
-                    }
-                    Err(_) => Ok(routing::conflict_response("failed to vacuum database")),
-                }
-            } else {
-                Ok(routing::conflict_response("database not initialized"))
-            }
+            Ok(routing::ok_response(database_vacuum_value(state).await.to_string()))
         }
         ("GET", "/api/database/stats") => {
-            let response_body = if let Some(ref db) = state.db {
-                match db.get_stats().await {
-                    Ok(stats) => serde_json::json!({
-                        "searches": stats.search_count,
-                        "transfers": stats.transfer_count,
-                        "messages": stats.message_count,
-                        "users": stats.user_count,
-                        "rooms": stats.room_count,
-                    })
-                    .to_string(),
-                    Err(_) => serde_json::json!({
-                        "searches": 0,
-                        "transfers": 0,
-                        "messages": 0,
-                        "users": 0,
-                        "rooms": 0,
-                    })
-                    .to_string(),
-                }
-            } else {
-                serde_json::json!({
-                    "searches": 0,
-                    "transfers": 0,
-                    "messages": 0,
-                    "users": 0,
-                    "rooms": 0,
-                })
-                .to_string()
-            };
-            Ok(routing::ok_response(response_body))
+            Ok(routing::ok_response(database_stats_value(state).await.to_string()))
         }
         ("POST", "/api/database/cleanup") => {
             Ok(routing::ok_response(
-                "{\"cleaned\":0,\"days\":30}".to_owned(),
+                database_cleanup_value(state, body).await.to_string(),
             ))
         }
         ("POST", "/api/database/vacuum") => {
-            Ok(routing::ok_response("{\"vacuumed\":false}".to_owned()))
+            Ok(routing::ok_response(database_vacuum_value(state).await.to_string()))
         }
 
         // COLLECTIONS ENDPOINTS
@@ -6690,7 +10087,26 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/shared") => {
-            Ok(routing::ok_response("[]".to_string()))
+            let shares = state.shares.read().await;
+            let entries = shares
+                .roots
+                .iter()
+                .map(|root| {
+                    serde_json::json!({
+                        "id": root.label,
+                        "alias": root.label,
+                        "name": root.label,
+                        "raw": root.label,
+                        "remotePath": root.label,
+                        "localPath": root.label,
+                        "files": root.files,
+                        "bytes": root.bytes,
+                        "isExcluded": false,
+                    })
+                })
+                .collect::<Vec<_>>();
+            drop(shares);
+            Ok(routing::ok_response(serde_json::Value::Array(entries).to_string()))
         }
         ("POST", "/api/collections") => {
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
@@ -6699,6 +10115,7 @@ async fn route_http_request_with_headers(
             let record = collections.create(name, description);
             let json = record.json();
             drop(collections);
+            persist_collection(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/collections/") && !path.ends_with("/items") && path.matches('/').count() == 3 => {
@@ -6727,6 +10144,7 @@ async fn route_http_request_with_headers(
             if let Some(record) = collections.update(id, name, description) {
                 let json = record.json();
                 drop(collections);
+                persist_collection(state, &record).await;
                 Ok(routing::ok_response(json))
             } else {
                 drop(collections);
@@ -6742,6 +10160,7 @@ async fn route_http_request_with_headers(
             let deleted = collections.delete(id);
             drop(collections);
             if deleted {
+                persist_collection_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -6797,6 +10216,7 @@ async fn route_http_request_with_headers(
             if let Some(_record) = collections.add_item(id, item.clone()) {
                 let json = item.json();
                 drop(collections);
+                persist_collection_item(state, id, &item).await;
                 Ok(routing::created_response(json))
             } else {
                 drop(collections);
@@ -6809,19 +10229,18 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             }
             let mut collections = state.collections.write().await;
-            let mut found = false;
-            for record in &mut collections.records {
-                if let Some(pos) = record.items.iter().position(|i| i.id == item_id) {
-                    record.items.remove(pos);
-                    record.updated_at = unix_timestamp();
-                    found = true;
-                    break;
-                }
-            }
-            drop(collections);
-            if found {
-                Ok(routing::ok_response("{}".to_string()))
+            if let Some(item) = collections.remove_item(item_id) {
+                let json = serde_json::json!({
+                    "deleted": true,
+                    "item": serde_json::from_str::<serde_json::Value>(&item.json())
+                        .unwrap_or_else(|_| serde_json::json!({ "id": item_id })),
+                })
+                .to_string();
+                drop(collections);
+                persist_collection_item_delete(state, item_id).await;
+                Ok(routing::ok_response(json))
             } else {
+                drop(collections);
                 Ok(routing::not_found_response())
             }
         }
@@ -6832,26 +10251,20 @@ async fn route_http_request_with_headers(
             }
             let artist = extract_json_string_field(body, "artist");
             let title = extract_json_string_field(body, "title");
+            let kind = extract_json_string_field(body, "kind")
+                .or_else(|| extract_json_string_field(body, "mediaKind"));
 
             let mut collections = state.collections.write().await;
-            let mut found = false;
-            for record in &mut collections.records {
-                if let Some(item) = record.items.iter_mut().find(|i| i.id == item_id) {
-                    if let Some(a) = artist {
-                        item.artist = a;
-                    }
-                    if let Some(t) = title {
-                        item.title = t;
-                    }
-                    record.updated_at = unix_timestamp();
-                    found = true;
-                    break;
+            let collection_id = collections.collection_id_for_item(item_id);
+            if let Some(item) = collections.update_item(item_id, artist, title, kind) {
+                let json = item.json();
+                drop(collections);
+                if let Some(collection_id) = collection_id {
+                    persist_collection_item(state, &collection_id, &item).await;
                 }
-            }
-            drop(collections);
-            if found {
-                Ok(routing::ok_response("{}".to_string()))
+                Ok(routing::ok_response(json))
             } else {
+                drop(collections);
                 Ok(routing::not_found_response())
             }
         }
@@ -6870,6 +10283,7 @@ async fn route_http_request_with_headers(
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
 
             let mut wishlist = state.wishlist.write().await;
+            wishlist.get_or_create();
             let item_id = format!("wish-{}", unix_timestamp());
             let item = WishlistItem {
                 id: item_id,
@@ -6881,6 +10295,7 @@ async fn route_http_request_with_headers(
             if let Some(_record) = wishlist.add_item(item.clone()) {
                 let json = item.json();
                 drop(wishlist);
+                persist_wishlist_item(state, &item).await;
                 Ok(routing::created_response(json))
             } else {
                 drop(wishlist);
@@ -6890,9 +10305,17 @@ async fn route_http_request_with_headers(
         ("DELETE", path) if path.starts_with("/api/wishlist/") && path.len() > 14 => {
             let item_id = &path[14..];
             let mut wishlist = state.wishlist.write().await;
-            if wishlist.remove_item(item_id).is_some() {
+            if let Some(record) = wishlist.remove_item(item_id) {
+                let json = serde_json::json!({
+                    "deleted": true,
+                    "item_id": item_id,
+                    "remaining": record.items.len(),
+                    "updated_at": record.updated_at,
+                })
+                .to_string();
                 drop(wishlist);
-                Ok(routing::ok_response("{}".to_string()))
+                persist_wishlist_item_delete(state, item_id).await;
+                Ok(routing::ok_response(json))
             } else {
                 drop(wishlist);
                 Ok(routing::not_found_response())
@@ -6901,7 +10324,10 @@ async fn route_http_request_with_headers(
 
         // CONTACTS ENDPOINTS
         ("GET", "/api/contacts/nearby") => {
-            Ok(routing::ok_response("[]".to_string()))
+            let contacts = state.contacts.read().await;
+            let json = contacts.nearby_json(route.query);
+            drop(contacts);
+            Ok(routing::ok_response(json))
         }
         ("GET", "/api/contacts") => {
             let contacts = state.contacts.read().await;
@@ -6918,10 +10344,17 @@ async fn route_http_request_with_headers(
              let record = contacts.create(username);
              let json = record.json();
              drop(contacts);
+             persist_contact(state, &record).await;
              Ok(routing::created_response(json))
          }
          ("POST", "/api/contacts/from-discovery") => {
              let username = extract_json_string_field(body, "username").unwrap_or_default();
+             if !username.is_empty() {
+                 let mut contacts = state.contacts.write().await;
+                 let record = contacts.create(username.clone());
+                 drop(contacts);
+                 persist_contact(state, &record).await;
+             }
              let json = format!(
                  "{{\"username\":\"{}\",\"discovered\":true,\"added\":true}}",
                  json_escape(&username)
@@ -6930,6 +10363,12 @@ async fn route_http_request_with_headers(
          }
          ("POST", "/api/contacts/from-invite") => {
              let username = extract_json_string_field(body, "username").unwrap_or_default();
+             if !username.is_empty() {
+                 let mut contacts = state.contacts.write().await;
+                 let record = contacts.create(username.clone());
+                 drop(contacts);
+                 persist_contact(state, &record).await;
+             }
              let json = format!(
                  "{{\"username\":\"{}\",\"invited\":true,\"accepted\":true}}",
                  json_escape(&username)
@@ -6956,6 +10395,7 @@ async fn route_http_request_with_headers(
             if let Some(record) = contacts.update(id, username, online) {
                 let json = record.json();
                 drop(contacts);
+                persist_contact(state, &record).await;
                 Ok(routing::ok_response(json))
             } else {
                 drop(contacts);
@@ -6968,6 +10408,7 @@ async fn route_http_request_with_headers(
             let deleted = contacts.delete(id);
             drop(contacts);
             if deleted {
+                persist_contact_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -6988,6 +10429,7 @@ async fn route_http_request_with_headers(
             let record = sharegroups.create(name, description);
             let json = record.json();
             drop(sharegroups);
+            persist_share_group(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/sharegroups/") && !path.contains("/members") => {
@@ -7018,6 +10460,7 @@ async fn route_http_request_with_headers(
             if let Some(record) = sharegroups.update(id, name, description) {
                 let json = record.json();
                 drop(sharegroups);
+                persist_share_group(state, &record).await;
                 Ok(routing::ok_response(json))
             } else {
                 drop(sharegroups);
@@ -7034,6 +10477,7 @@ async fn route_http_request_with_headers(
             let deleted = sharegroups.delete(id);
             drop(sharegroups);
             if deleted {
+                persist_share_group_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -7070,13 +10514,24 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("username is required"));
             }
             let mut sharegroups = state.sharegroups.write().await;
-            if let Some(_record) = sharegroups.add_member(id, username.clone()) {
-                let json = format!(
-                    "{{\"username\":\"{}\",\"added_at\":{}}}",
-                    json_escape(&username),
-                    unix_timestamp()
-                );
+            if let Some(record) = sharegroups.add_member(id, username.clone()) {
+                let member = record
+                    .members
+                    .iter()
+                    .find(|member| member.username == username)
+                    .cloned();
+                let json = member
+                    .as_ref()
+                    .map(ShareGroupMember::json)
+                    .unwrap_or_else(|| {
+                        format!(
+                            "{{\"username\":\"{}\",\"added_at\":{}}}",
+                            json_escape(&username),
+                            unix_timestamp()
+                        )
+                    });
                 drop(sharegroups);
+                persist_share_group(state, &record).await;
                 Ok(routing::created_response(json))
             } else {
                 drop(sharegroups);
@@ -7094,8 +10549,10 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             }
             let mut sharegroups = state.sharegroups.write().await;
-            if sharegroups.remove_member(id, username).is_some() {
+            if let Some(record) = sharegroups.remove_member(id, username) {
                 drop(sharegroups);
+                persist_share_group_member_delete(state, id, username).await;
+                persist_share_group(state, &record).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 drop(sharegroups);
@@ -7120,6 +10577,7 @@ async fn route_http_request_with_headers(
             let record = notes.create(username, note);
             let json = record.json();
             drop(notes);
+            persist_user_note(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/users/notes/") && path.len() > 17 => {
@@ -7141,6 +10599,7 @@ async fn route_http_request_with_headers(
             if let Some(record) = notes.update(id, note) {
                 let json = record.json();
                 drop(notes);
+                persist_user_note(state, &record).await;
                 Ok(routing::ok_response(json))
             } else {
                 drop(notes);
@@ -7153,6 +10612,7 @@ async fn route_http_request_with_headers(
             let deleted = notes.delete(id);
             drop(notes);
             if deleted {
+                persist_user_note_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -7175,6 +10635,7 @@ async fn route_http_request_with_headers(
             let record = interests.add_liked(name);
             let json = record.json();
             drop(interests);
+            persist_interest(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("DELETE", path) if path.starts_with("/api/soulseek/interests/") && path.len() > 24 => {
@@ -7183,6 +10644,7 @@ async fn route_http_request_with_headers(
             let deleted = interests.remove_liked(id);
             drop(interests);
             if deleted {
+                persist_interest_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -7205,6 +10667,7 @@ async fn route_http_request_with_headers(
             let record = interests.add_hated(name);
             let json = record.json();
             drop(interests);
+            persist_interest(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("DELETE", path) if path.starts_with("/api/soulseek/hated-interests/") && path.len() > 30 => {
@@ -7213,6 +10676,7 @@ async fn route_http_request_with_headers(
             let deleted = interests.remove_hated(id);
             drop(interests);
             if deleted {
+                persist_interest_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -7236,6 +10700,7 @@ async fn route_http_request_with_headers(
             let record = grants.create(collection_id, username);
             let json = record.json();
             drop(grants);
+            persist_share_grant(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/share-grants/") && !path.starts_with("/api/share-grants/by-collection/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
@@ -7269,6 +10734,7 @@ async fn route_http_request_with_headers(
             if let Some(record) = grants.update(id, permissions) {
                 let json = record.json();
                 drop(grants);
+                persist_share_grant(state, &record).await;
                 Ok(routing::ok_response(json))
             } else {
                 drop(grants);
@@ -7281,6 +10747,7 @@ async fn route_http_request_with_headers(
             let deleted = grants.delete(id);
             drop(grants);
             if deleted {
+                persist_share_grant_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -7308,6 +10775,7 @@ async fn route_http_request_with_headers(
             let record = library.create(artist, title, kind);
             let json = record.json();
             drop(library);
+            persist_library_item(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/library/items/") && path.len() > 19 => {
@@ -7328,6 +10796,7 @@ async fn route_http_request_with_headers(
             let deleted = library.delete(id);
             drop(library);
             if deleted {
+                persist_library_item_delete(state, id).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -7358,27 +10827,40 @@ async fn route_http_request_with_headers(
                 .find(|record| record.username == username)
                 .map(|record| record.entries.as_slice())
                 .unwrap_or(&[]);
-            let body = slskd_user_root_json(entries);
+            let body = slskd_user_root_json(entries, route.query);
             drop(browse);
             Ok(routing::ok_response(body))
         }
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse/status") => {
             let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
             let browse = state.browse.read().await;
-            let size = browse
+            let body = browse
                 .records
                 .iter()
                 .find(|record| record.username == username)
-                .map(|record| record.entries.iter().map(|entry| entry.size).sum::<u64>())
-                .unwrap_or(0);
+                .map(BrowseRecord::slskd_status_json)
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "username": username,
+                        "status": "idle",
+                        "state": "NotStarted",
+                        "size": 0,
+                        "bytesTransferred": 0,
+                        "bytesRemaining": 0,
+                        "percentComplete": 0.0,
+                        "fileCount": 0,
+                        "directoryCount": 0,
+                        "isComplete": false,
+                        "reason": null,
+                        "folder": null,
+                        "indirectToken": null,
+                        "requestedAt": null,
+                        "updatedAt": null,
+                    })
+                    .to_string()
+                });
             drop(browse);
-            Ok(routing::ok_response(serde_json::json!({
-                "username": username,
-                "size": size,
-                "bytesTransferred": size,
-                "bytesRemaining": 0,
-                "percentComplete": 100.0,
-            }).to_string()))
+            Ok(routing::ok_response(body))
         }
         ("POST", path) if path.starts_with("/api/users/") && path.ends_with("/directory") => {
             let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
@@ -7392,23 +10874,61 @@ async fn route_http_request_with_headers(
                 .find(|record| record.username == username)
                 .map(|record| record.entries.as_slice())
                 .unwrap_or(&[]);
-            let body = slskd_user_directories_json(&directory, entries);
+            let body = slskd_user_directories_json(&directory, entries, route.query);
             drop(browse);
             Ok(routing::ok_response(body))
         }
 
         // ADDITIONAL MISSING USER ENDPOINTS (Phase 5)
         ("GET", "/api/profile/me") => {
-            let json = "{\"username\":\"guest\",\"description\":\"\",\"picture\":\"\",\"user_type\":\"normal\"}".to_string();
+            let session = state.session.read().await;
+            let username = session
+                .username
+                .clone()
+                .or_else(|| state.config.username.clone())
+                .unwrap_or_else(|| "local".to_owned());
+            let privileges_seconds = session.privileges_seconds.unwrap_or(0);
+            let connected = session.state == "connected";
+            drop(session);
+            let users = state.users.read().await;
+            let watched = users
+                .records
+                .iter()
+                .any(|user| user.username.eq_ignore_ascii_case(&username) && user.watched);
+            drop(users);
+            let json = serde_json::json!({
+                "username": username,
+                "description": "",
+                "picture": "",
+                "user_type": if privileges_seconds > 0 { "privileged" } else { "normal" },
+                "privilegesSeconds": privileges_seconds,
+                "connected": connected,
+                "watched": watched,
+            }).to_string();
             Ok(routing::ok_response(json))
         }
 
         ("GET", path) if path.starts_with("/api/profile/") && path.len() > 12 => {
             let username = decoded_path_segment(&path[12..]);
-            let json = format!(
-                "{{\"username\":\"{}\",\"description\":\"\",\"picture\":\"\",\"user_type\":\"normal\"}}",
-                json_escape(&username)
-            );
+            let users = state.users.read().await;
+            let user = users
+                .records
+                .iter()
+                .find(|user| user.username.eq_ignore_ascii_case(&username))
+                .cloned();
+            drop(users);
+            let json = serde_json::json!({
+                "username": username,
+                "description": "",
+                "picture": "",
+                "user_type": "normal",
+                "watched": user.as_ref().is_some_and(|user| user.watched),
+                "status": user.as_ref().and_then(|user| user.status.clone()).unwrap_or_else(|| "Unknown".to_owned()),
+                "averageSpeed": user.as_ref().and_then(|user| user.average_speed).unwrap_or(0),
+                "uploadCount": user.as_ref().and_then(|user| user.upload_count).unwrap_or(0),
+                "fileCount": user.as_ref().and_then(|user| user.file_count).unwrap_or(0),
+                "directoryCount": user.as_ref().and_then(|user| user.directory_count).unwrap_or(0),
+            }).to_string();
             Ok(routing::ok_response(json))
         }
 
@@ -7422,10 +10942,9 @@ async fn route_http_request_with_headers(
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
             let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
-            let json = format!(
-                "{{\"username\":\"{}\",\"group\":\"normal_users\",\"group_id\":1}}",
-                json_escape(&username)
-            );
+            let sharegroups = state.sharegroups.read().await;
+            let json = sharegroups.user_group_json(&username);
+            drop(sharegroups);
             Ok(routing::ok_response(json))
         }
 
@@ -7510,6 +11029,55 @@ async fn route_http_request_with_headers(
             drop(messages);
             Ok(routing::ok_response(body))
         }
+        ("POST", "/api/conversations/batch") => {
+            let usernames = match extract_json_string_array_field(body, "usernames")
+                .or_else(|| extract_json_string_array_field(body, "recipients"))
+            {
+                Some(usernames) => usernames,
+                None => {
+                    return Ok(routing::bad_request_response(
+                        "usernames/recipients array is required",
+                    ))
+                }
+            };
+            let message_body = match extract_json_string_field(body, "body")
+                .or_else(|| extract_json_string_field(body, "message"))
+            {
+                Some(body) => body,
+                None => return Ok(routing::bad_request_response("body/message is required")),
+            };
+            let command = match private_message_users_command(usernames, message_body.clone()) {
+                Ok(ServerMessage::MessageUsers { usernames, .. }) => usernames,
+                Ok(_) => return Ok(routing::bad_request_response("invalid message command")),
+                Err(error) => return Ok(routing::bad_request_response(&error.to_string())),
+            };
+
+            let mut messages = state.messages.write().await;
+            let records: Vec<_> = command
+                .iter()
+                .map(|username| messages.add(username.clone(), "outbound", message_body.clone()))
+                .collect();
+            drop(messages);
+
+            send_session_command(
+                state,
+                SessionCommand::MessageUsers {
+                    usernames: command.clone(),
+                    body: message_body,
+                },
+            )
+            .await
+            .ok();
+
+            Ok(routing::created_response(
+                serde_json::json!({
+                    "conversations": records.iter().map(MessageRecord::json).collect::<Vec<_>>(),
+                    "usernames": command,
+                    "count": records.len(),
+                })
+                .to_string(),
+            ))
+        }
         ("POST", path) if path_segment_after(path, "/api/conversations/").is_some() => {
             let Some(username) = path_segment_after(path, "/api/conversations/") else {
                 return Ok(routing::not_found_response());
@@ -7531,17 +11099,108 @@ async fn route_http_request_with_headers(
 
         // JOBS ENDPOINT
         ("GET", "/api/jobs") => {
-            Ok(routing::ok_response(
-                "{\"jobs\":[],\"limit\":20,\"offset\":0,\"total\":0,\"has_more\":false}".to_string(),
-            ))
+            let searches = state.searches.read().await;
+            let transfers = state.transfers.read().await;
+            let mut jobs = searches
+                .records
+                .iter()
+                .map(|record| {
+                    serde_json::json!({
+                        "id": record.id,
+                        "kind": "search",
+                        "status": record.status,
+                        "progress": if record.status == "completed" { 100 } else { 50 },
+                        "query": record.query,
+                        "created_at": record.created_at,
+                        "updated_at": record.updated_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            jobs.extend(transfers.entries.iter().map(|entry| {
+                let size = entry.size.unwrap_or(0);
+                let progress = if size == 0 {
+                    0
+                } else {
+                    ((entry.bytes_transferred.saturating_mul(100)) / size).min(100)
+                };
+                serde_json::json!({
+                    "id": format!("transfer-{}", entry.id),
+                    "kind": "transfer",
+                    "status": entry.status,
+                    "progress": progress,
+                    "filename": entry.filename,
+                    "created_at": entry.requested_at,
+                    "updated_at": entry.updated_at,
+                })
+            }));
+            let total = jobs.len();
+            drop(transfers);
+            drop(searches);
+            Ok(routing::ok_response(serde_json::json!({
+                "jobs": jobs,
+                "limit": 20,
+                "offset": 0,
+                "total": total,
+                "has_more": total > 20,
+            }).to_string()))
         }
         ("GET", path) if path.starts_with("/api/jobs/") && path.len() > 10 => {
             let job_id = &path[10..];
-            let json = format!(
-                "{{\"id\":\"{}\",\"status\":\"pending\",\"progress\":0}}",
-                json_escape(job_id)
-            );
-            Ok(routing::ok_response(json))
+            let searches = state.searches.read().await;
+            if let Some(record) = searches.get_by_identifier(job_id) {
+                let progress = if record.status == "completed" { 100 } else { 50 };
+                let body = serde_json::json!({
+                    "id": record.id,
+                    "kind": "search",
+                    "status": record.status,
+                    "progress": progress,
+                    "query": record.query,
+                    "target": record.target,
+                    "result_count": record.results.len(),
+                    "created_at": record.created_at,
+                    "updated_at": record.updated_at,
+                })
+                .to_string();
+                drop(searches);
+                return Ok(routing::ok_response(body));
+            }
+            drop(searches);
+
+            let transfer_id = job_id.strip_prefix("transfer-").unwrap_or(job_id);
+            let transfers = state.transfers.read().await;
+            let body = transfer_id
+                .parse::<u64>()
+                .ok()
+                .and_then(|id| transfers.entries.iter().find(|entry| entry.id == id))
+                .map(|entry| {
+                    let size = entry.size.unwrap_or(0);
+                    let progress = if size == 0 {
+                        0
+                    } else {
+                        ((entry.bytes_transferred.saturating_mul(100)) / size).min(100)
+                    };
+                    serde_json::json!({
+                        "id": format!("transfer-{}", entry.id),
+                        "kind": "transfer",
+                        "status": entry.status,
+                        "progress": progress,
+                        "filename": entry.filename,
+                        "bytesTransferred": entry.bytes_transferred,
+                        "size": size,
+                        "created_at": entry.requested_at,
+                        "updated_at": entry.updated_at,
+                    })
+                })
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "id": job_id,
+                        "status": "not_found",
+                        "progress": 0,
+                    })
+                })
+                .to_string();
+            drop(transfers);
+            Ok(routing::ok_response(body))
         }
 
         // LIBRARY HEALTH ENDPOINTS
@@ -7555,84 +11214,191 @@ async fn route_http_request_with_headers(
                         .map(|(_, value)| value)
                 })
                 .unwrap_or_default();
-            Ok(routing::ok_response(serde_json::json!({
-                "libraryPath": library_path,
-                "issues": 0,
-                "critical": 0,
-                "warning": 0,
-                "healthy": true,
-            }).to_string()))
+            let library = state.library.read().await;
+            let json = library.health_summary_json(library_path);
+            drop(library);
+            Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/health/issues") => {
-            let json = "{\"issues\":[],\"count\":0}".to_string();
+            let library = state.library.read().await;
+            let json = library.health_issues_json();
+            drop(library);
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/health/issues/by-artist") => {
-            let json = "{\"issues_by_artist\":[],\"count\":0}".to_string();
+            let library = state.library.read().await;
+            let json = library.health_issues_by_artist_json();
+            drop(library);
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/health/issues/by-release") => {
-            let json = "{\"issues_by_release\":[],\"count\":0}".to_string();
+            let library = state.library.read().await;
+            let json = library.health_issues_by_release_json();
+            drop(library);
             Ok(routing::ok_response(json))
         }
         ("GET", path) if path.starts_with("/api/library/health/issues/by-type") => {
-            let json = "{\"issues_by_type\":[],\"count\":0}".to_string();
+            let issue_type = path
+                .strip_prefix("/api/library/health/issues/by-type/")
+                .filter(|value| !value.is_empty());
+            let library = state.library.read().await;
+            let json = library.health_issues_by_type_json(issue_type);
+            drop(library);
             Ok(routing::ok_response(json))
         }
         ("GET", path) if path.starts_with("/api/library/health/scans/") && path.len() > 27 => {
             let scan_id = &path[27..];
-            let json = format!(
-                "{{\"id\":\"{}\",\"status\":\"completed\",\"issues_found\":0}}",
-                json_escape(scan_id)
-            );
-            Ok(routing::ok_response(json))
+            let library = state.library.read().await;
+            let issues = library.health_issues();
+            let body = serde_json::json!({
+                "id": scan_id,
+                "status": "completed",
+                "issues_found": issues.len(),
+                "issues": issues,
+                "updated_at": library.updated_at,
+            })
+            .to_string();
+            drop(library);
+            Ok(routing::ok_response(body))
         }
         ("POST", "/api/library/health/scans") => {
-            Ok(routing::accepted_response(format!(
-                "{{\"id\":\"scan-{}\",\"status\":\"completed\",\"issues_found\":0}}",
-                unix_timestamp()
-            )))
+            let library_path = extract_json_string_field(body, "libraryPath")
+                .or_else(|| extract_json_string_field(body, "path"))
+                .unwrap_or_default();
+            let library = state.library.read().await;
+            let issues = library.health_issues();
+            let scan_id = format!("scan-{}", unix_timestamp());
+            let response = serde_json::json!({
+                "id": scan_id,
+                "status": "completed",
+                "libraryPath": library_path,
+                "items": library.records.len(),
+                "issues_found": issues.len(),
+                "issues": issues,
+                "updated_at": library.updated_at,
+            })
+            .to_string();
+            drop(library);
+            Ok(routing::accepted_response(response))
         }
         ("POST", "/api/library/health/issues/fix") => {
-            Ok(routing::ok_response("{\"fixed\":0,\"issues\":[]}".to_owned()))
+            let mut library = state.library.write().await;
+            let fixable = library
+                .health_issues()
+                .into_iter()
+                .filter(|issue| {
+                    issue
+                        .get("type")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("missing_kind")
+                })
+                .count();
+            let fixed = library.fix_health_issues();
+            let records = library.records.clone();
+            let remaining = library.health_issues().len();
+            let updated_at = library.updated_at;
+            drop(library);
+            for record in &records {
+                persist_library_item(state, record).await;
+            }
+            Ok(routing::ok_response(serde_json::json!({
+                "fixed": fixed.len(),
+                "fixable": fixable,
+                "issues": fixed,
+                "remaining": remaining,
+                "persisted": true,
+                "updated_at": updated_at,
+            }).to_string()))
         }
 
         // CONFIGURATION ENDPOINTS
         ("GET", "/api/config/preferences") => {
-            let config_json = format!(
-                "{{\"auto_connect\":{},\"transfer_allow_outbound\":{},\"transfer_max_active\":{}}}",
-                state.config.auto_connect,
-                state.config.transfer_allow_outbound,
-                state.config.transfer_max_active
-            );
-            Ok(routing::ok_response(config_json))
+            let runtime = state.runtime.read().await;
+            let body = serde_json::json!({
+                "auto_connect": state.config.auto_connect,
+                "transfer_allow_outbound": state.config.transfer_allow_outbound,
+                "transfer_max_active": state.config.transfer_max_active,
+                "autoreplace_enabled": runtime.autoreplace_enabled,
+            }).to_string();
+            drop(runtime);
+            Ok(routing::ok_response(body))
         }
 
         ("PUT", "/api/config/preferences") => {
-            let config_json = format!(
-                "{{\"auto_connect\":{},\"transfer_allow_outbound\":{},\"transfer_max_active\":{},\"persisted\":false}}",
-                state.config.auto_connect,
-                state.config.transfer_allow_outbound,
-                state.config.transfer_max_active
-            );
-            Ok(routing::ok_response(config_json))
+            let mut runtime = state.runtime.write().await;
+            if let Some(enabled) = extract_json_bool_field(body, "autoreplace_enabled")
+                .or_else(|| extract_json_bool_field(body, "autoreplaceEnabled"))
+            {
+                runtime.set_autoreplace(enabled);
+            }
+            let response = serde_json::json!({
+                "auto_connect": state.config.auto_connect,
+                "transfer_allow_outbound": state.config.transfer_allow_outbound,
+                "transfer_max_active": state.config.transfer_max_active,
+                "autoreplace_enabled": runtime.autoreplace_enabled,
+                "persisted": true,
+                "updated_at": runtime.updated_at,
+            }).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::ok_response(response))
         }
 
         // ADDITIONAL MISSING PUT ENDPOINTS (Phase 5)
         ("PUT", "/api/autoreplace/disable") => {
-            Ok(routing::ok_response("{\"enabled\":false,\"persisted\":false}".to_owned()))
+            let mut runtime = state.runtime.write().await;
+            let body = runtime.set_autoreplace(false).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::ok_response(body))
         }
 
         ("PUT", "/api/autoreplace/enable") => {
-            Ok(routing::ok_response("{\"enabled\":true,\"persisted\":false}".to_owned()))
+            let mut runtime = state.runtime.write().await;
+            let body = runtime.set_autoreplace(true).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::ok_response(body))
         }
 
          // ADDITIONAL MISSING BRIDGE ENDPOINTS (Phase 6)
          ("GET", "/api/bridge/admin/clients") => {
              let bridge = &state.config.integrations.bridge;
-             let status = if bridge.enabled { "configured" } else { "disabled" };
+            let runtime = state.runtime.read().await;
+            let status = if runtime.bridge_running {
+                "running"
+            } else if bridge.enabled {
+                "configured"
+            } else {
+                "disabled"
+            };
+            let users = state.users.read().await;
+            let mesh = state.mesh.read().await;
+            let clients = mesh
+                .capability_records
+                .iter()
+                .map(|record| {
+                    format!(
+                        "{{\"username\":\"{}\",\"status\":\"capable\",\"source\":\"peer-capability\",\"updated_at\":{}}}",
+                        json_escape(&record.username),
+                        record.issued_at_unix
+                    )
+                })
+                .chain(users.records.iter().filter(|user| user.status.as_deref() == Some("online")).map(|user| {
+                    format!(
+                        "{{\"username\":\"{}\",\"status\":\"online\",\"source\":\"watched-user\",\"updated_at\":{}}}",
+                        json_escape(&user.username),
+                        user.updated_at
+                    )
+                }))
+                .collect::<Vec<_>>();
+            drop(mesh);
+            drop(users);
+            drop(runtime);
              let json = format!(
-                 "{{\"clients\":[],\"count\":0,\"status\":\"{}\",\"ready\":{}}}",
+                 "{{\"clients\":[{}],\"count\":{},\"status\":\"{}\",\"ready\":{}}}",
+                 clients.join(","),
+                 clients.len(),
                  status,
                  bridge.enabled
              );
@@ -7654,76 +11420,209 @@ async fn route_http_request_with_headers(
 
          ("GET", "/api/bridge/admin/dashboard") => {
              let bridge = &state.config.integrations.bridge;
+             let runtime = state.runtime.read().await;
+             let transfers = state.transfers.read().await;
+             let active_transfers = transfers
+                 .entries
+                 .iter()
+                 .filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested"))
+                 .count();
+             let bytes = transfers
+                 .entries
+                 .iter()
+                 .map(|entry| entry.bytes_transferred)
+                 .sum::<u64>();
              let json = format!(
-                 "{{\"active_clients\":0,\"transfers\":0,\"uptime_seconds\":0,\"enabled\":{},\"host\":\"{}\",\"port\":{}}}",
+                 "{{\"active_clients\":{},\"transfers\":{},\"active_transfers\":{},\"total_bytes\":{},\"uptime_seconds\":0,\"enabled\":{},\"running\":{},\"configUpdates\":{},\"host\":\"{}\",\"port\":{}}}",
+                 active_transfers,
+                 transfers.entries.len(),
+                 active_transfers,
+                 bytes,
                  bridge.enabled,
+                 runtime.bridge_running,
+                 runtime.bridge_config_updates,
                  json_escape(&bridge.host),
                  bridge.port
              );
+             drop(transfers);
+             drop(runtime);
              Ok(routing::ok_response(json))
          }
 
          ("GET", "/api/bridge/admin/stats") => {
              let bridge = &state.config.integrations.bridge;
+             let runtime = state.runtime.read().await;
+             let transfers = state.transfers.read().await;
+             let total_bytes = transfers
+                 .entries
+                 .iter()
+                 .map(|entry| entry.bytes_transferred)
+                 .sum::<u64>();
+             let active_sessions = transfers
+                 .entries
+                 .iter()
+                 .filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested"))
+                 .count();
              let json = format!(
-                 "{{\"total_requests\":0,\"total_bytes\":0,\"active_sessions\":0,\"enabled\":{}}}",
-                 bridge.enabled
+                 "{{\"total_requests\":{},\"total_bytes\":{},\"active_sessions\":{},\"enabled\":{},\"running\":{},\"configUpdates\":{}}}",
+                 transfers.entries.len(),
+                 total_bytes,
+                 active_sessions,
+                 bridge.enabled,
+                 runtime.bridge_running,
+                 runtime.bridge_config_updates
              );
+             drop(transfers);
+             drop(runtime);
              Ok(routing::ok_response(json))
          }
 
          ("GET", "/api/bridge/status") => {
              let bridge = &state.config.integrations.bridge;
+             let runtime = state.runtime.read().await;
+             let transfers = state.transfers.read().await;
+             let transfer_count = transfers.entries.len();
+             drop(transfers);
              let json = format!(
-                 "{{\"status\":\"{}\",\"version\":\"1.0.0\",\"uptime_seconds\":0,\"enabled\":{},\"configured\":{},\"host\":\"{}\",\"port\":{},\"next_action\":\"{}\"}}",
-                 if bridge.enabled { "configured" } else { "disabled" },
+                 "{{\"status\":\"{}\",\"version\":\"1.0.0\",\"uptime_seconds\":0,\"enabled\":{},\"configured\":{},\"running\":{},\"configUpdates\":{},\"host\":\"{}\",\"port\":{},\"transfers\":{},\"next_action\":\"{}\"}}",
+                 if runtime.bridge_running { "running" } else if bridge.enabled { "configured" } else { "disabled" },
                  bridge.enabled,
                  bridge.enabled,
+                 runtime.bridge_running,
+                 runtime.bridge_config_updates,
                  json_escape(&bridge.host),
                  bridge.port,
-                 if bridge.enabled { "start bridge service" } else { "enable bridge integration" }
+                 transfer_count,
+                 if runtime.bridge_running {
+                     "accept bridge traffic"
+                 } else if bridge.enabled {
+                     "start bridge service"
+                 } else {
+                     "enable bridge integration"
+                 }
              );
+             drop(runtime);
              Ok(routing::ok_response(json))
          }
 
          ("GET", path) if path.starts_with("/api/bridge/transfer/") && path.contains("/progress") => {
              let transfer_id = path.split('/').nth(4).unwrap_or("unknown");
-             let json = format!(
-                 "{{\"transfer_id\":\"{}\",\"progress\":0,\"status\":\"pending\"}}",
-                 json_escape(transfer_id)
-             );
+             let id = transfer_id.parse::<u64>().ok();
+             let transfers = state.transfers.read().await;
+             let json = id
+                 .and_then(|id| transfers.entries.iter().find(|entry| entry.id == id))
+                 .map(|entry| {
+                     let size = entry.size.unwrap_or(0);
+                     let progress = if size == 0 {
+                         0.0
+                     } else {
+                         (entry.bytes_transferred as f64 / size as f64) * 100.0
+                     };
+                     serde_json::json!({
+                         "transfer_id": transfer_id,
+                         "id": entry.id,
+                         "progress": progress,
+                         "status": entry.status,
+                         "state": slskd_transfer_state(&entry.status),
+                         "filename": entry.filename,
+                         "username": entry.peer_username,
+                         "bytesTransferred": entry.bytes_transferred,
+                         "size": size,
+                         "updated_at": entry.updated_at,
+                     })
+                     .to_string()
+                 })
+                 .unwrap_or_else(|| {
+                     serde_json::json!({
+                         "transfer_id": transfer_id,
+                         "progress": 0.0,
+                         "status": "pending",
+                         "state": "None",
+                         "bytesTransferred": 0,
+                         "size": 0,
+                     })
+                     .to_string()
+                 });
+             drop(transfers);
              Ok(routing::ok_response(json))
          }
 
          ("POST", "/api/bridge/start") => {
              let bridge = &state.config.integrations.bridge;
-             Ok(routing::accepted_response(format!(
-                 "{{\"status\":\"{}\",\"started\":{},\"next_action\":\"{}\"}}",
-                 if bridge.enabled { "configured" } else { "disabled" },
-                 bridge.enabled,
-                 if bridge.enabled { "connect external bridge process" } else { "enable bridge integration" }
-             )))
+             let mut runtime = state.runtime.write().await;
+             let mut value = runtime.set_bridge_running(true, bridge.enabled);
+             if let Some(object) = value.as_object_mut() {
+                 object.insert(
+                     "next_action".to_owned(),
+                     serde_json::json!(if bridge.enabled {
+                         "accept bridge traffic"
+                     } else {
+                         "enable bridge integration"
+                     }),
+                 );
+             }
+             let body = value.to_string();
+             drop(runtime);
+             persist_runtime_compat_state(state).await;
+             Ok(routing::accepted_response(body))
          }
 
          ("POST", "/api/bridge/stop") => {
              let bridge = &state.config.integrations.bridge;
-             Ok(routing::ok_response(format!(
-                 "{{\"status\":\"{}\",\"stopped\":true}}",
-                 if bridge.enabled { "configured" } else { "disabled" }
-             )))
+             let mut runtime = state.runtime.write().await;
+             let body = runtime.set_bridge_running(false, bridge.enabled).to_string();
+             drop(runtime);
+             persist_runtime_compat_state(state).await;
+             Ok(routing::ok_response(body))
          }
 
          ("PUT", "/api/bridge/admin/config") => {
              let bridge = &state.config.integrations.bridge;
-             Ok(routing::ok_response(format!(
-                 "{{\"enabled\":{},\"configured\":{},\"persisted\":false,\"restart_required\":true}}",
-                 bridge.enabled,
-                 bridge.enabled
-             )))
+             let accepted_keys = serde_json::from_str::<serde_json::Value>(body)
+                 .ok()
+                 .and_then(|value| {
+                     value
+                         .as_object()
+                         .map(|object| object.keys().cloned().collect::<Vec<_>>())
+                 })
+                 .unwrap_or_default();
+             let mut runtime = state.runtime.write().await;
+             let body = runtime
+                 .record_bridge_config_update(bridge.enabled, accepted_keys)
+                 .to_string();
+             drop(runtime);
+             persist_runtime_compat_state(state).await;
+             Ok(routing::ok_response(body))
          }
 
         ("PUT", path) if path.starts_with("/api/collections/") && path.contains("/items/reorder") => {
-            Ok(routing::ok_response("{\"reordered\":false,\"items\":[]}".to_owned()))
+            let collection_id = path
+                .strip_prefix("/api/collections/")
+                .and_then(|rest| rest.strip_suffix("/items/reorder"))
+                .unwrap_or_default();
+            let mut collections = state.collections.write().await;
+            if let Some(record) = collections.reorder_items(collection_id, body) {
+                let items = record
+                    .items
+                    .iter()
+                    .map(|item| {
+                        serde_json::from_str::<serde_json::Value>(&item.json())
+                            .unwrap_or_else(|_| serde_json::json!({ "id": item.id }))
+                })
+                .collect::<Vec<_>>();
+                let item_count = items.len();
+                drop(collections);
+                persist_collection(state, &record).await;
+                Ok(routing::ok_response(serde_json::json!({
+                    "reordered": true,
+                    "collection_id": collection_id,
+                    "items": items,
+                    "itemCount": item_count,
+                }).to_string()))
+            } else {
+                drop(collections);
+                Ok(routing::not_found_response())
+            }
         }
 
         ("PUT", path) if conversation_message_path(path).is_some() => {
@@ -7760,13 +11659,12 @@ async fn route_http_request_with_headers(
             let username = extract_json_string_field(body, "username").unwrap_or_default();
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
             let title = extract_json_string_field(body, "title").unwrap_or_default();
-            Ok(routing::ok_response(format!(
-                "{{\"username\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"updated_at\":{}}}",
-                json_escape(&username),
-                json_escape(&artist),
-                json_escape(&title),
-                unix_timestamp()
-            )))
+            let mut now_playing = state.now_playing.write().await;
+            let record = now_playing.upsert(username, artist, title);
+            let json = record.json();
+            drop(now_playing);
+            persist_now_playing(state, &record).await;
+            Ok(routing::ok_response(json))
         }
 
         ("PUT", "/api/options/yaml") => {
@@ -7777,39 +11675,146 @@ async fn route_http_request_with_headers(
         }
 
         ("PUT", "/api/profile/me") => {
-            Ok(routing::ok_response("{\"updated\":false,\"profile\":{}}".to_owned()))
+            let username = extract_json_string_field(body, "username")
+                .or_else(|| extract_json_string_field(body, "name"));
+            let privileges_seconds = extract_json_u32_field(body, "privilegesSeconds")
+                .or_else(|| extract_json_u32_field(body, "privileges_seconds"));
+            let connected = extract_json_bool_field(body, "connected");
+            let supporter = extract_json_bool_field(body, "supporter");
+            let mut session = state.session.write().await;
+            if let Some(username) = username.filter(|value| !value.trim().is_empty()) {
+                session.username = Some(username);
+            }
+            if let Some(privileges_seconds) = privileges_seconds {
+                session.privileges_seconds = Some(privileges_seconds);
+            }
+            if let Some(supporter) = supporter {
+                session.supporter = Some(supporter);
+            }
+            if let Some(connected) = connected {
+                session.state = if connected { "connected" } else { "disconnected" };
+                session.connected_at = if connected {
+                    session.connected_at.or_else(|| Some(unix_timestamp()))
+                } else {
+                    None
+                };
+            }
+            session.updated_at = unix_timestamp();
+            let username = session
+                .username
+                .clone()
+                .or_else(|| state.config.username.clone())
+                .unwrap_or_else(|| "local".to_owned());
+            let privileges_seconds = session.privileges_seconds.unwrap_or(0);
+            let connected = session.state == "connected";
+            let updated_at = session.updated_at;
+            drop(session);
+            let users = state.users.read().await;
+            let watched = users
+                .records
+                .iter()
+                .any(|user| user.username.eq_ignore_ascii_case(&username) && user.watched);
+            drop(users);
+            Ok(routing::ok_response(serde_json::json!({
+                "updated": true,
+                "persisted": true,
+                "profile": {
+                    "username": username,
+                    "description": "",
+                    "picture": "",
+                    "user_type": if privileges_seconds > 0 { "privileged" } else { "normal" },
+                    "privilegesSeconds": privileges_seconds,
+                    "connected": connected,
+                    "watched": watched,
+                    "updated_at": updated_at,
+                }
+            }).to_string()))
         }
 
         ("PUT", "/api/relay") => {
             let relay_enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
-            Ok(routing::ok_response(format!(
-                "{{\"relay_enabled\":{},\"status\":\"configured\"}}",
-                relay_enabled
-            )))
+            let mut relay = state.relay.write().await;
+            let json = relay.set_enabled(relay_enabled).to_string();
+            drop(relay);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::ok_response(json))
         }
 
         ("PUT", "/api/relay/agent") => {
-            Ok(routing::ok_response("true".to_owned()))
+            let enabled = extract_json_bool_field(body, "enabled").unwrap_or(true);
+            let mut runtime = state.runtime.write().await;
+            let json = runtime.set_relay_agent(enabled).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::ok_response(json))
         }
 
         ("PUT", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
-            let token = path.rsplit('/').next().unwrap_or("unknown");
-            Ok(routing::ok_response(format!(
-                "{{\"token\":\"{}\",\"updated\":false}}",
-                json_escape(token)
-            )))
+            let id = path.trim_start_matches("/api/searches/");
+            if id.is_empty() || id.contains('/') {
+                return Ok(routing::not_found_response());
+            }
+            let query = extract_json_string_field(body, "query")
+                .or_else(|| extract_json_string_field(body, "searchText"));
+            let status = extract_json_string_field(body, "status")
+                .or_else(|| extract_json_string_field(body, "state"))
+                .or_else(|| {
+                    extract_json_bool_field(body, "isComplete").map(|is_complete| {
+                        if is_complete {
+                            "completed".to_owned()
+                        } else {
+                            "active".to_owned()
+                        }
+                    })
+                });
+            let mut searches = state.searches.write().await;
+            match searches.update_by_identifier(id, query, status.as_deref()) {
+                Some((record, updated)) => {
+                    let mut value = serde_json::from_str::<serde_json::Value>(&record.json())
+                        .map_err(|error| format!("search json build failed: {error}"))?;
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("updated".to_owned(), serde_json::Value::Bool(updated));
+                    }
+                    drop(searches);
+                    persist_search_record(state, &record).await?;
+                    Ok(routing::ok_response(value.to_string()))
+                }
+                None => {
+                    drop(searches);
+                    Ok(routing::not_found_response())
+                }
+            }
         }
 
         ("PUT", "/api/transfers/downloads/accelerated") => {
-            Ok(routing::ok_response("{\"accelerated\":[],\"enabled\":false}".to_owned()))
+            let transfers = state.transfers.read().await;
+            let mut payload =
+                serde_json::from_str::<serde_json::Value>(&slskd_accelerated_downloads_json(
+                    route.query,
+                    &transfers,
+                ))
+                .map_err(|error| format!("accelerated json failed: {error}"))?;
+            drop(transfers);
+            payload["persisted"] = serde_json::Value::Bool(false);
+            Ok(routing::ok_response(payload.to_string()))
         }
 
         ("PUT", path) if path.starts_with("/api/wishlist/") && path.len() > 14 => {
             let item_id = path.rsplit('/').next().unwrap_or("unknown");
-            Ok(routing::ok_response(format!(
-                "{{\"item_id\":\"{}\",\"updated\":false}}",
-                json_escape(item_id)
-            )))
+            let artist = extract_json_string_field(body, "artist");
+            let title = extract_json_string_field(body, "title")
+                .or_else(|| extract_json_string_field(body, "searchText"));
+            let kind = extract_json_string_field(body, "kind");
+            let mut wishlist = state.wishlist.write().await;
+            if let Some(item) = wishlist.update_item(item_id, artist, title, kind) {
+                let json = item.json();
+                drop(wishlist);
+                persist_wishlist_item(state, &item).await;
+                Ok(routing::ok_response(json))
+            } else {
+                drop(wishlist);
+                Ok(routing::not_found_response())
+            }
         }
 
         // Generic :var pattern PUT endpoints (Phase 5)
@@ -7862,7 +11867,36 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/config/plugins") => {
-            let json = "{\"plugins\":[],\"count\":0}".to_string();
+            let plugins = serde_json::json!([
+                {
+                    "id": "spotify",
+                    "name": "Spotify",
+                    "enabled": state.config.integrations.spotify.enabled,
+                    "configured": state.config.integrations.spotify.configured(),
+                },
+                {
+                    "id": "lidarr",
+                    "name": "Lidarr",
+                    "enabled": state.config.integrations.lidarr.enabled,
+                    "configured": state.config.integrations.lidarr.configured(),
+                },
+                {
+                    "id": "external-visualizer",
+                    "name": "External Visualizer",
+                    "enabled": state.config.integrations.external_visualizer.launch_enabled,
+                    "configured": state.config.integrations.external_visualizer.configured(),
+                },
+                {
+                    "id": "bridge",
+                    "name": "Bridge",
+                    "enabled": state.config.integrations.bridge.enabled,
+                    "configured": state.config.integrations.bridge.enabled,
+                }
+            ]);
+            let json = serde_json::json!({
+                "plugins": plugins,
+                "count": plugins.as_array().map_or(0, Vec::len),
+            }).to_string();
             Ok(routing::ok_response(json))
         }
 
@@ -7881,10 +11915,33 @@ async fn route_http_request_with_headers(
         // ADMIN/SYSTEM ENDPOINTS
         ("GET", "/api/admin/stats") => {
             let transfers = state.transfers.read().await;
-            let json = format!(
-                "{{\"total_transfers\":{},\"active_transfers\":0,\"total_bytes\":0}}",
-                transfers.entries.len()
-            );
+            let total_bytes = transfers
+                .entries
+                .iter()
+                .map(|entry| entry.bytes_transferred)
+                .sum::<u64>();
+            let active_transfers = transfers
+                .entries
+                .iter()
+                .filter(|entry| matches!(entry.status.as_str(), "queued" | "requested" | "in_progress"))
+                .count();
+            let searches = state.searches.read().await;
+            let users = state.users.read().await;
+            let rooms = state.rooms.read().await;
+            let shares = state.shares.read().await;
+            let json = serde_json::json!({
+                "total_transfers": transfers.entries.len(),
+                "active_transfers": active_transfers,
+                "total_bytes": total_bytes,
+                "searches": searches.records.len(),
+                "users": users.records.len(),
+                "rooms": rooms.records.len(),
+                "shared_files": shares.entries.len(),
+            }).to_string();
+            drop(shares);
+            drop(rooms);
+            drop(users);
+            drop(searches);
             drop(transfers);
             Ok(routing::ok_response(json))
         }
@@ -7906,35 +11963,51 @@ async fn route_http_request_with_headers(
 
         // RECOMMENDATIONS & ANALYTICS ENDPOINTS
         ("GET", "/api/soulseek/recommendations") => {
-            let json = "{\"recommendations\":[],\"count\":0}".to_string();
+            let interests = state.interests.read().await;
+            let json = interests.recommendations_json("recommendations");
+            drop(interests);
             Ok(routing::ok_response(json))
         }
 
         ("GET", "/api/soulseek/recommendations/global") => {
-            let json = "{\"global_recommendations\":[],\"count\":0}".to_string();
+            let interests = state.interests.read().await;
+            let json = interests.recommendations_json("global_recommendations");
+            drop(interests);
             Ok(routing::ok_response(json))
         }
 
         ("GET", path) if path.starts_with("/api/soulseek/items/") && path.ends_with("/recommendations") => {
             let item_id = path.split('/').nth(4).unwrap_or("unknown");
-            let json = format!(
-                "{{\"item_id\":\"{}\",\"recommendations\":[],\"count\":0}}",
-                json_escape(item_id)
-            );
+            let interests = state.interests.read().await;
+            let json = interests.item_recommendations_json(item_id);
+            drop(interests);
             Ok(routing::ok_response(json))
         }
 
         ("GET", path) if path.starts_with("/api/soulseek/items/") && path.ends_with("/similar-users") => {
             let item_id = path.split('/').nth(4).unwrap_or("unknown");
-            let json = format!(
-                "{{\"item_id\":\"{}\",\"similar_users\":[],\"count\":0}}",
-                json_escape(item_id)
-            );
-            Ok(routing::ok_response(json))
-        }
-
-        ("GET", "/api/transfers/downloads/stuck") => {
-            let json = "{\"stuck\":[],\"count\":0}".to_string();
+            let users = state.users.read().await;
+            let similar_users = users
+                .records
+                .iter()
+                .filter(|user| user.watched || user.status.as_deref() == Some("online"))
+                .map(|user| {
+                    serde_json::json!({
+                        "username": user.username,
+                        "status": user.status,
+                        "watched": user.watched,
+                        "score": 1.0,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let count = similar_users.len();
+            drop(users);
+            let json = serde_json::json!({
+                "item_id": item_id,
+                "similar_users": similar_users,
+                "count": count,
+            })
+            .to_string();
             Ok(routing::ok_response(json))
         }
 
@@ -7947,63 +12020,224 @@ async fn route_http_request_with_headers(
         }
 
         ("POST", path) if path.starts_with("/api/relay/controller/files/") => {
-            Ok(routing::ok_response("true".to_owned()))
+            let token = decoded_path_segment(path.rsplit('/').next().unwrap_or_default());
+            let relay = state.relay.read().await;
+            let runtime = state.runtime.read().await;
+            let body = serde_json::json!({
+                "accepted": true,
+                "token": token,
+                "relay_enabled": relay.enabled,
+                "relayAgentEnabled": runtime.relay_agent_enabled,
+                "kind": "files",
+                "updated_at": runtime.updated_at.max(relay.updated_at),
+            }).to_string();
+            drop(runtime);
+            drop(relay);
+            Ok(routing::ok_response(body))
         }
 
         ("POST", path) if path.starts_with("/api/relay/controller/shares/") => {
-            Ok(routing::ok_response("true".to_owned()))
+            let token = decoded_path_segment(path.rsplit('/').next().unwrap_or_default());
+            let shares = state.shares.read().await;
+            let relay = state.relay.read().await;
+            let runtime = state.runtime.read().await;
+            let body = serde_json::json!({
+                "accepted": true,
+                "token": token,
+                "relay_enabled": relay.enabled,
+                "relayAgentEnabled": runtime.relay_agent_enabled,
+                "kind": "shares",
+                "shareCount": shares.entries.len(),
+                "rootCount": shares.roots.len(),
+                "updated_at": runtime.updated_at.max(relay.updated_at),
+            }).to_string();
+            drop(runtime);
+            drop(relay);
+            drop(shares);
+            Ok(routing::ok_response(body))
         }
-
-         ("GET", "/api/transfers/downloads/user-stats") => {
-             let json = "{\"users\":[],\"count\":0}".to_string();
-             Ok(routing::ok_response(json))
-         }
 
          // ADDITIONAL MISSING GET ENDPOINTS (Phase 5)
          ("GET", "/api/source-providers") => {
-             let json = "{\"providers\":[],\"count\":0}".to_string();
+             let providers = serde_json::json!([
+                 {
+                     "id": "soulseek",
+                     "name": "Soulseek",
+                     "enabled": true,
+                     "configured": true,
+                     "kind": "network"
+                 },
+                 {
+                     "id": "lidarr",
+                     "name": "Lidarr",
+                     "enabled": state.config.integrations.lidarr.enabled,
+                     "configured": state.config.integrations.lidarr.configured(),
+                     "kind": "metadata"
+                 },
+                 {
+                     "id": "spotify",
+                     "name": "Spotify",
+                     "enabled": state.config.integrations.spotify.enabled,
+                     "configured": state.config.integrations.spotify.configured(),
+                     "kind": "playlist"
+                 }
+             ]);
+             let json = serde_json::json!({
+                 "providers": providers,
+                 "count": providers.as_array().map_or(0, Vec::len),
+             })
+             .to_string();
              Ok(routing::ok_response(json))
          }
 
          ("GET", "/api/source-feeds") => {
-             Ok(routing::ok_response("[]".to_string()))
+             let wishlist = state.wishlist.read().await;
+             let items = wishlist
+                 .records
+                 .iter()
+                 .flat_map(|record| record.items.iter())
+                 .map(|item| {
+                     let item_json = serde_json::from_str::<serde_json::Value>(&item.json())
+                         .unwrap_or_else(|_| serde_json::json!({ "id": item.id }));
+                     serde_json::json!({
+                         "id": format!("wishlist-{}", item.id),
+                         "name": item.search_text(),
+                         "provider": "wishlist",
+                         "enabled": true,
+                         "items": [item_json],
+                     })
+                 })
+                 .collect::<Vec<_>>();
+             let count = items.len();
+             drop(wishlist);
+             Ok(routing::ok_response(serde_json::json!({
+                 "feeds": items,
+                 "count": count,
+             }).to_string()))
          }
 
          ("POST", "/api/source-feeds") => {
-             Ok(routing::created_response(format!(
-                 "{{\"id\":\"source-feed-{}\",\"enabled\":false,\"items\":[]}}",
-                 unix_timestamp()
-             )))
+             let name = extract_json_string_field(body, "name")
+                 .or_else(|| extract_json_string_field(body, "title"))
+                 .unwrap_or_else(|| "source feed".to_owned());
+             let raw = extract_json_string_field(body, "text")
+                 .or_else(|| extract_json_string_field(body, "content"))
+                 .or_else(|| extract_json_string_field(body, "playlist"))
+                 .unwrap_or_default();
+             let parsed_items = raw
+                 .lines()
+                 .map(str::trim)
+                 .filter(|line| !line.is_empty())
+                 .enumerate()
+                 .map(|(index, line)| {
+                     let (artist, title) = line
+                         .split_once(" - ")
+                         .map(|(artist, title)| (artist.trim().to_owned(), title.trim().to_owned()))
+                         .unwrap_or_else(|| (String::new(), line.to_owned()));
+                     WishlistItem {
+                         id: format!("source-feed-{}-{}", unix_timestamp(), index + 1),
+                         artist,
+                         title,
+                         kind: "SourceFeed".to_owned(),
+                         added_at: unix_timestamp(),
+                     }
+                 })
+                 .collect::<Vec<_>>();
+             let mut wishlist = state.wishlist.write().await;
+             wishlist.get_or_create();
+             let mut items = Vec::new();
+             let mut persisted_items = Vec::new();
+             for item in parsed_items {
+                 let value = serde_json::from_str::<serde_json::Value>(&item.json())
+                     .unwrap_or_else(|_| serde_json::json!({ "id": item.id }));
+                 wishlist.add_item(item.clone());
+                 persisted_items.push(item);
+                 items.push(value);
+             }
+             let count = items.len();
+             drop(wishlist);
+             for item in &persisted_items {
+                 persist_wishlist_item(state, item).await;
+             }
+             Ok(routing::created_response(serde_json::json!({
+                 "id": format!("source-feed-{}", unix_timestamp()),
+                 "name": name,
+                 "enabled": true,
+                 "items": items,
+                 "count": count,
+                 "provider": "manual",
+                 "persisted": true,
+             }).to_string()))
          }
 
          ("GET", "/api/songid/runs") => {
-             let json = "{\"runs\":[],\"count\":0}".to_string();
-             Ok(routing::ok_response(json))
+             let library = state.library.read().await;
+             let shares = state.shares.read().await;
+             let runs = songid_runs_value(&library, &shares);
+             let count = runs.len();
+             drop(shares);
+             drop(library);
+             Ok(routing::ok_response(serde_json::json!({
+                 "runs": runs,
+                 "count": count,
+             }).to_string()))
          }
 
          ("POST", "/api/songid/runs") => {
-             Ok(routing::accepted_response(format!(
-                 "{{\"id\":\"songid-{}\",\"status\":\"queued\",\"matches\":[]}}",
-                 unix_timestamp()
-             )))
+             let library = state.library.read().await;
+             let shares = state.shares.read().await;
+             let runs = songid_runs_value(&library, &shares);
+             let matches = runs
+                 .iter()
+                 .flat_map(|run| run.get("matches").and_then(serde_json::Value::as_array).cloned().unwrap_or_default())
+                 .collect::<Vec<_>>();
+             drop(shares);
+             drop(library);
+             let mut runtime = state.runtime.write().await;
+             let body = runtime.record_songid_run(matches).to_string();
+             drop(runtime);
+             persist_runtime_compat_state(state).await;
+             Ok(routing::accepted_response(body))
          }
 
          ("GET", path) if path.starts_with("/api/songid/runs/") && path.len() > 17 && !path.contains("/forensic-matrix") => {
              let run_id = &path[17..];
-             let json = format!(
-                 "{{\"id\":\"{}\",\"results\":[],\"count\":0}}",
-                 json_escape(run_id)
-             );
-             Ok(routing::ok_response(json))
+             let library = state.library.read().await;
+             let shares = state.shares.read().await;
+             let matches = songid_matches_value(&library, &shares);
+             let count = matches.len();
+             drop(shares);
+             drop(library);
+             Ok(routing::ok_response(serde_json::json!({
+                 "id": run_id,
+                 "results": matches,
+                 "count": count,
+             }).to_string()))
          }
 
          ("GET", path) if path.starts_with("/api/songid/runs/") && path.contains("/forensic-matrix") => {
              let run_id = path.split('/').nth(4).unwrap_or("unknown");
-             let json = format!(
-                 "{{\"run_id\":\"{}\",\"matrix\":[],\"count\":0}}",
-                 json_escape(run_id)
-             );
-             Ok(routing::ok_response(json))
+             let library = state.library.read().await;
+             let shares = state.shares.read().await;
+             let matrix = songid_matches_value(&library, &shares)
+                 .into_iter()
+                 .map(|match_value| {
+                     serde_json::json!({
+                         "libraryItemId": match_value.get("libraryItemId").cloned().unwrap_or(serde_json::Value::Null),
+                         "filename": match_value.get("filename").cloned().unwrap_or(serde_json::Value::Null),
+                         "score": match_value.get("score").cloned().unwrap_or_else(|| serde_json::json!(0.0)),
+                         "signals": ["artist", "title", "extension"],
+                     })
+                 })
+                 .collect::<Vec<_>>();
+             let count = matrix.len();
+             drop(shares);
+             drop(library);
+             Ok(routing::ok_response(serde_json::json!({
+                 "run_id": run_id,
+                 "matrix": matrix,
+                 "count": count,
+             }).to_string()))
          }
 
          ("GET", path) if path.starts_with("/api/soulseek/users/") && path.contains("/interests") && path.len() > 20 => {
@@ -8016,7 +12250,9 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", "/api/swarm/analytics/recommendations") => {
-             let json = "{\"recommendations\":[],\"count\":0}".to_string();
+             let interests = state.interests.read().await;
+             let json = interests.recommendations_json("recommendations");
+             drop(interests);
              Ok(routing::ok_response(json))
          }
 
@@ -8037,63 +12273,279 @@ async fn route_http_request_with_headers(
         }
 
           ("GET", "/api/telemetry/metrics/kpi") | ("GET", "/api/telemetry/metrics/kpis") => {
-              let json = "{\"kpis\":[],\"count\":0}".to_string();
-              Ok(routing::ok_response(json))
+              let transfers = state.transfers.read().await;
+              let total_bytes = transfers
+                  .entries
+                  .iter()
+                  .map(|entry| entry.bytes_transferred)
+                  .sum::<u64>();
+              let active_transfers = transfers
+                  .entries
+                  .iter()
+                  .filter(|entry| matches!(entry.status.as_str(), "queued" | "requested" | "in_progress"))
+                  .count();
+              let transfer_count = transfers.entries.len();
+              drop(transfers);
+              let searches = state.searches.read().await;
+              let search_count = searches.records.len();
+              let search_results = searches.records.iter().map(|record| record.results.len()).sum::<usize>();
+              drop(searches);
+              let shares = state.shares.read().await;
+              let shared_files = shares.entries.len();
+              let shared_bytes = shares.entries.iter().map(|entry| entry.size).sum::<u64>();
+              drop(shares);
+              let kpis = serde_json::json!([
+                  { "id": "transfers.total", "name": "Transfers", "value": transfer_count },
+                  { "id": "transfers.active", "name": "Active transfers", "value": active_transfers },
+                  { "id": "transfers.bytes", "name": "Transferred bytes", "value": total_bytes },
+                  { "id": "searches.total", "name": "Searches", "value": search_count },
+                  { "id": "searches.results", "name": "Search results", "value": search_results },
+                  { "id": "shares.files", "name": "Shared files", "value": shared_files },
+                  { "id": "shares.bytes", "name": "Shared bytes", "value": shared_bytes },
+              ]);
+              let count = kpis.as_array().map_or(0, Vec::len);
+              Ok(routing::ok_response(serde_json::json!({
+                  "kpis": kpis,
+                  "count": count,
+              }).to_string()))
           }
 
           // ADDITIONAL MISSING GET ENDPOINTS (Phase 6)
           ("GET", "/api/multisource/jobs") => {
-              let json = "{\"jobs\":[],\"count\":0}".to_string();
+              let transfers = state.transfers.read().await;
+              let jobs = transfers
+                  .entries
+                  .iter()
+                  .filter(|entry| entry.direction == 0)
+                  .map(|entry| {
+                      let size = entry.size.unwrap_or(0);
+                      let progress = if size == 0 {
+                          0.0
+                      } else {
+                          (entry.bytes_transferred as f64 / size as f64) * 100.0
+                      };
+                      serde_json::json!({
+                          "id": format!("transfer-{}", entry.id),
+                          "status": entry.status,
+                          "filename": entry.filename,
+                          "sources": entry.peer_username.as_deref().map(|peer| vec![peer]).unwrap_or_default(),
+                          "progress": progress,
+                          "bytesTransferred": entry.bytes_transferred,
+                          "size": size,
+                          "updated_at": entry.updated_at,
+                      })
+                  })
+                  .collect::<Vec<_>>();
+              let count = jobs.len();
+              drop(transfers);
+              let json = serde_json::json!({
+                  "jobs": jobs,
+                  "count": count,
+              }).to_string();
               Ok(routing::ok_response(json))
           }
 
           ("GET", "/api/pods") => {
-              Ok(routing::ok_response("[]".to_string()))
+              let rooms = state.rooms.read().await;
+              let users = state.users.read().await;
+              let pods = rooms
+                  .records
+                  .iter()
+                  .filter(|room| room.joined)
+                  .map(|room| {
+                      serde_json::json!({
+                          "id": format!("room-{}", room.name),
+                          "name": room.name,
+                          "kind": "room",
+                          "memberCount": room.user_count.unwrap_or(0),
+                          "messageCount": room.messages.len(),
+                          "status": "joined",
+                      })
+                  })
+                  .chain(users.records.iter().filter(|user| user.watched).map(|user| {
+                      serde_json::json!({
+                          "id": format!("user-{}", user.username),
+                          "name": user.username,
+                          "kind": "watched-user",
+                          "status": user.status.as_deref().unwrap_or("Unknown"),
+                      })
+                  }))
+                  .collect::<Vec<_>>();
+              drop(users);
+              drop(rooms);
+              Ok(routing::ok_response(serde_json::Value::Array(pods).to_string()))
           }
 
           ("GET", "/api/solid/status") => {
-              Ok(routing::ok_response("{\"enabled\":false}".to_string()))
+              let collections = state.collections.read().await;
+              let share_grants = state.share_grants.read().await;
+              let collection_count = collections.records.len();
+              let grant_count = share_grants.records.len();
+              drop(share_grants);
+              drop(collections);
+              Ok(routing::ok_response(serde_json::json!({
+                  "enabled": collection_count > 0 || grant_count > 0,
+                  "collections": collection_count,
+                  "shareGrants": grant_count,
+                  "status": if collection_count > 0 || grant_count > 0 { "local" } else { "empty" },
+              }).to_string()))
           }
 
           ("GET", "/api/federation/diagnostics") => {
-              Ok(routing::ok_response(
-                  "{\"status\":\"disabled\",\"checks\":[],\"warnings\":[],\"errors\":[]}".to_string(),
-              ))
+              let users = state.users.read().await;
+              let mesh = state.mesh.read().await;
+              let user_count = users.records.len();
+              let watched_users = users.records.iter().filter(|user| user.watched).count();
+              let mesh_capabilities = mesh.capability_records.len();
+              let items = mesh
+                  .capability_records
+                  .iter()
+                  .map(|record| {
+                      serde_json::json!({
+                          "username": record.username,
+                          "issuedAt": record.issued_at_unix,
+                          "expiresAt": record.expires_at_unix,
+                          "features": record.features.clone(),
+                          "endpoints": record.endpoints.clone(),
+                          "source": "peer-capability",
+                      })
+                  })
+                  .chain(users.records.iter().filter(|user| user.watched).map(|user| {
+                      serde_json::json!({
+                          "username": user.username,
+                          "status": user.status,
+                          "source": "watched-user",
+                      })
+                  }))
+                  .collect::<Vec<_>>();
+              let item_count = items.len();
+              let checks = vec![
+                  serde_json::json!({
+                      "id": "watched-users",
+                      "status": if users.records.is_empty() { "empty" } else { "ready" },
+                      "count": users.records.len(),
+                  }),
+                  serde_json::json!({
+                      "id": "mesh-capabilities",
+                      "status": if mesh.capability_records.is_empty() { "empty" } else { "ready" },
+                      "count": mesh.capability_records.len(),
+                  }),
+              ];
+              let ready = checks
+                  .iter()
+                  .any(|check| check.get("status").and_then(serde_json::Value::as_str) == Some("ready"));
+              drop(mesh);
+              drop(users);
+              Ok(routing::ok_response(serde_json::json!({
+                  "status": if ready { "ready" } else { "empty" },
+                  "checks": checks,
+                  "items": items,
+                  "itemCount": item_count,
+                  "counts": {
+                      "users": user_count,
+                      "watchedUsers": watched_users,
+                      "meshCapabilities": mesh_capabilities,
+                  },
+                  "warnings": [],
+                  "errors": [],
+              }).to_string()))
           }
 
           ("GET", "/api/security/dashboard") => {
+              let users = state.users.read().await;
+              let webhooks = state.webhooks.read().await;
+              let events = state.events.read().await;
+              let security = state.security.read().await;
+              let watched = users.records.iter().filter(|user| user.watched).count();
+              let suspicious = users
+                  .records
+                  .iter()
+                  .filter(|user| user.status.as_deref() == Some("offline") && user.watched)
+                  .count();
+              let webhook_count = webhooks.get_all().len();
+              let event_count = events.records.len();
+              let ban_count = security.active_bans();
+              let bans = security
+                  .json_value()
+                  .get("bans")
+                  .cloned()
+                  .unwrap_or_else(|| serde_json::json!([]));
+              drop(security);
+              drop(events);
+              drop(webhooks);
+              drop(users);
               Ok(routing::ok_response(serde_json::json!({
-                  "enabled": false,
-                  "status": "disabled",
+                  "enabled": true,
+                  "status": "local",
                   "stats": {
-                      "networkGuardStats": { "globalConnections": 0 },
-                      "reputationStats": { "totalPeers": 0 },
-                      "threatStats": { "activeThreats": 0 },
-                      "banStats": { "activeBans": 0 }
+                      "networkGuardStats": { "globalConnections": watched },
+                      "reputationStats": { "totalPeers": watched, "suspiciousPeers": suspicious },
+                      "threatStats": { "activeThreats": suspicious },
+                      "banStats": { "activeBans": ban_count }
                   },
-                  "events": [],
-                  "bans": []
+                  "events": event_count,
+                  "webhooks": webhook_count,
+                  "bans": bans
+              }).to_string()))
+          }
+
+          ("GET", "/api/security/status") => {
+              let users = state.users.read().await;
+              let events = state.events.read().await;
+              let security = state.security.read().await;
+              let watched = users.records.iter().filter(|user| user.watched).count();
+              let offline_watched = users
+                  .records
+                  .iter()
+                  .filter(|user| user.watched && user.status.as_deref() == Some("offline"))
+                  .count();
+              let event_count = events.records.len();
+              let ban_count = security.active_bans();
+              drop(security);
+              drop(events);
+              drop(users);
+              Ok(routing::ok_response(serde_json::json!({
+                  "enabled": true,
+                  "status": "local",
+                  "watchedPeers": watched,
+                  "suspiciousPeers": offline_watched,
+                  "activeBans": ban_count,
+                  "events": event_count,
               }).to_string()))
           }
 
           ("GET", "/api/soulseek/mesh-rendezvous/status") => {
-              Ok(routing::ok_response(serde_json::json!({
-                  "enabled": false,
-                  "interestTag": "slskr-mesh-v1",
-                  "privacy": "Soulseek mesh rendezvous is disabled."
-              }).to_string()))
+              let users = state.users.read().await;
+              let mesh = state.mesh.read().await;
+              let body = mesh.status_json(&users);
+              drop(mesh);
+              drop(users);
+              Ok(routing::ok_response(body))
           }
 
           ("GET", "/api/soulseek/mesh-rendezvous/users") => {
-              Ok(routing::ok_response("[]".to_string()))
+              let users = state.users.read().await;
+              let mesh = state.mesh.read().await;
+              let body = mesh.users_json(&users);
+              drop(mesh);
+              drop(users);
+              Ok(routing::ok_response(body))
           }
 
           ("GET", "/api/soulseek/mesh-rendezvous/discover") => {
-              Ok(routing::ok_response("{\"users\":[],\"capabilityRecords\":[]}".to_string()))
+              let users = state.users.read().await;
+              let mesh = state.mesh.read().await;
+              let body = mesh.discover_json(&users);
+              drop(mesh);
+              drop(users);
+              Ok(routing::ok_response(body))
           }
 
           ("GET", "/api/soulseek/peer-capabilities") => {
-              Ok(routing::ok_response("[]".to_string()))
+              let mesh = state.mesh.read().await;
+              let body = mesh.peer_capabilities_json();
+              drop(mesh);
+              Ok(routing::ok_response(body))
           }
 
           ("GET", "/api/mesh/transport") => {
@@ -8119,12 +12571,40 @@ async fn route_http_request_with_headers(
 
           ("GET", path) if path.starts_with("/api/multisource/jobs/") && path.len() > 22 => {
               let job_id = &path[22..];
-              Ok(routing::ok_response(serde_json::json!({
-                  "id": job_id,
-                  "status": "not_found",
-                  "sources": [],
-                  "progress": 0,
-              }).to_string()))
+              let transfer_id = job_id.strip_prefix("transfer-").unwrap_or(job_id);
+              let transfers = state.transfers.read().await;
+              let body = transfer_id
+                  .parse::<u64>()
+                  .ok()
+                  .and_then(|id| transfers.entries.iter().find(|entry| entry.id == id))
+                  .map(|entry| {
+                      let size = entry.size.unwrap_or(0);
+                      let progress = if size == 0 {
+                          0.0
+                      } else {
+                          (entry.bytes_transferred as f64 / size as f64) * 100.0
+                      };
+                      serde_json::json!({
+                          "id": job_id,
+                          "status": entry.status,
+                          "filename": entry.filename,
+                          "sources": entry.peer_username.as_deref().map(|peer| vec![peer]).unwrap_or_default(),
+                          "progress": progress,
+                          "bytesTransferred": entry.bytes_transferred,
+                          "size": size,
+                          "updated_at": entry.updated_at,
+                      })
+                  })
+                  .unwrap_or_else(|| {
+                      serde_json::json!({
+                          "id": job_id,
+                          "status": "not_found",
+                          "sources": [],
+                          "progress": 0,
+                      })
+                  });
+              drop(transfers);
+              Ok(routing::ok_response(body.to_string()))
           }
 
           ("GET", "/api/player/external-visualizer") => {
@@ -8155,23 +12635,82 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/discovery-graph") => {
-              Ok(routing::accepted_response(
-                  "{\"nodes\":[],\"edges\":[],\"count\":0,\"status\":\"empty\"}".to_owned(),
-              ))
+              let interests = state.interests.read().await;
+              let wishlist = state.wishlist.read().await;
+              let mut nodes = interests
+                  .liked
+                  .iter()
+                  .map(|interest| serde_json::json!({
+                      "id": interest.id,
+                      "label": interest.name,
+                      "kind": "interest",
+                  }))
+                  .collect::<Vec<_>>();
+              nodes.extend(wishlist.records.iter().flat_map(|record| {
+                  record.items.iter().map(|item| serde_json::json!({
+                      "id": item.id,
+                      "label": item.search_text(),
+                      "kind": "wishlist",
+                  }))
+              }));
+              let count = nodes.len();
+              drop(wishlist);
+              drop(interests);
+              Ok(routing::accepted_response(serde_json::json!({
+                  "nodes": nodes,
+                  "edges": [],
+                  "count": count,
+                  "status": if count == 0 { "empty" } else { "ready" },
+              }).to_string()))
           }
 
           ("POST", "/api/jobs/discography") => {
-              Ok(routing::accepted_response(format!(
-                  "{{\"id\":\"discography-{}\",\"status\":\"queued\",\"results\":[]}}",
-                  unix_timestamp()
-              )))
+              let artist = extract_json_string_field(body, "artist")
+                  .or_else(|| extract_json_string_field(body, "query"))
+                  .unwrap_or_else(|| "discography".to_owned());
+              let query = format!("{} discography", artist.trim()).trim().to_owned();
+              let mut searches = state.searches.write().await;
+              let record = searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS);
+              let response = serde_json::json!({
+                  "id": record.id,
+                  "search_id": record.id,
+                  "token": record.token,
+                  "status": "queued",
+                  "kind": "discography",
+                  "artist": artist,
+                  "query": record.query,
+                  "results": [],
+              }).to_string();
+              drop(searches);
+              Ok(routing::accepted_response(response))
           }
 
           ("POST", "/api/jobs/mb-release") => {
-              Ok(routing::accepted_response(format!(
-                  "{{\"id\":\"mb-release-{}\",\"status\":\"queued\",\"results\":[]}}",
-                  unix_timestamp()
-              )))
+              let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+              let title = extract_json_string_field(body, "title")
+                  .or_else(|| extract_json_string_field(body, "release"))
+                  .or_else(|| extract_json_string_field(body, "query"))
+                  .unwrap_or_else(|| "release".to_owned());
+              let query = [artist.as_str(), title.as_str()]
+                  .into_iter()
+                  .filter(|value| !value.trim().is_empty())
+                  .collect::<Vec<_>>()
+                  .join(" ");
+              let mut searches = state.searches.write().await;
+              let record = searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS);
+              let response = serde_json::json!({
+                  "id": record.id,
+                  "search_id": record.id,
+                  "token": record.token,
+                  "status": "queued",
+                  "kind": "mb-release",
+                  "artist": artist,
+                  "title": title,
+                  "query": record.query,
+                  "results": [],
+              }).to_string();
+              drop(searches);
+              Ok(routing::accepted_response(response))
           }
 
           ("POST", "/api/options/yaml/validate") => {
@@ -8182,33 +12721,122 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/source-feed-imports/preview") => {
-              Ok(routing::ok_response("{\"items\":[],\"count\":0,\"valid\":true}".to_owned()))
-          }
-
-          ("POST", "/api/transfers/downloads/auto-replace") => {
-              Ok(routing::accepted_response(
-                  "{\"replacement_queued\":false,\"alternatives\":[],\"status\":\"idle\"}".to_owned(),
-              ))
+              let raw = extract_json_string_field(body, "text")
+                  .or_else(|| extract_json_string_field(body, "content"))
+                  .or_else(|| extract_json_string_field(body, "playlist"))
+                  .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
+              let items = raw
+                  .lines()
+                  .map(str::trim)
+                  .filter(|line| !line.is_empty())
+                  .enumerate()
+                  .map(|(index, line)| {
+                      let (artist, title) = line
+                          .split_once(" - ")
+                          .map(|(artist, title)| (artist.trim(), title.trim()))
+                          .unwrap_or(("", line));
+                      serde_json::json!({
+                          "id": format!("preview-{}", index + 1),
+                          "artist": artist,
+                          "title": title,
+                          "searchText": line,
+                          "valid": !line.is_empty(),
+                      })
+                  })
+                  .collect::<Vec<_>>();
+              let count = items.len();
+              Ok(routing::ok_response(serde_json::json!({
+                  "items": items,
+                  "count": count,
+                  "valid": count > 0,
+              }).to_string()))
           }
 
           // TASTE RECOMMENDATIONS POST ENDPOINTS (Phase 6)
           ("POST", "/api/taste-recommendations") => {
-              let json = "{\"recommendations\":[],\"count\":0,\"status\":\"analyzing\"}".to_string();
+              let interests = state.interests.read().await;
+              let mut value = serde_json::from_str::<serde_json::Value>(
+                  &interests.recommendations_json("recommendations"),
+              )
+              .unwrap_or_else(|_| serde_json::json!({ "recommendations": [], "count": 0 }));
+              drop(interests);
+              value["status"] = serde_json::Value::String("analyzing".to_owned());
+              let json = value.to_string();
               Ok(routing::accepted_response(json))
           }
 
           ("POST", "/api/taste-recommendations/graph-preview") => {
-              let json = "{\"graph_data\":[],\"nodes\":0,\"edges\":0}".to_string();
+              let interests = state.interests.read().await;
+              let graph_data = interests
+                  .liked
+                  .iter()
+                  .map(|interest| {
+                      serde_json::json!({
+                          "id": interest.id,
+                          "label": interest.name,
+                          "kind": "interest",
+                      })
+                  })
+                  .collect::<Vec<_>>();
+              let nodes = graph_data.len();
+              drop(interests);
+              let json = serde_json::json!({
+                  "graph_data": graph_data,
+                  "nodes": nodes,
+                  "edges": 0,
+              }).to_string();
               Ok(routing::ok_response(json))
           }
 
           ("POST", "/api/taste-recommendations/release-radar") => {
-              let json = "{\"recommendations\":[],\"count\":0,\"status\":\"processing\"}".to_string();
+              let wishlist = state.wishlist.read().await;
+              let recommendations = wishlist
+                  .records
+                  .iter()
+                  .flat_map(|record| record.items.iter())
+                  .map(|item| {
+                      serde_json::json!({
+                          "id": item.id,
+                          "artist": item.artist,
+                          "title": item.title,
+                          "searchText": item.search_text(),
+                          "source": "wishlist",
+                      })
+                  })
+                  .collect::<Vec<_>>();
+              let count = recommendations.len();
+              drop(wishlist);
+              let json = serde_json::json!({
+                  "recommendations": recommendations,
+                  "count": count,
+                  "status": "processing",
+              }).to_string();
               Ok(routing::accepted_response(json))
           }
 
           ("POST", "/api/taste-recommendations/wishlist") => {
-              let json = "{\"recommendations\":[],\"count\":0,\"status\":\"processing\"}".to_string();
+              let wishlist = state.wishlist.read().await;
+              let recommendations = wishlist
+                  .records
+                  .iter()
+                  .flat_map(|record| record.items.iter())
+                  .map(|item| {
+                      serde_json::json!({
+                          "id": item.id,
+                          "query": item.search_text(),
+                          "artist": item.artist,
+                          "title": item.title,
+                          "source": "wishlist",
+                      })
+                  })
+                  .collect::<Vec<_>>();
+              let count = recommendations.len();
+              drop(wishlist);
+              let json = serde_json::json!({
+                  "recommendations": recommendations,
+                  "count": count,
+                  "status": "processing",
+              }).to_string();
               Ok(routing::accepted_response(json))
           }
 
@@ -8260,38 +12888,83 @@ async fn route_http_request_with_headers(
         }
 
           // BANS & BLOCKING ENDPOINTS
+        ("GET", path) if path.contains("/bans") => {
+            let security = state.security.read().await;
+            let json = security.json_value().to_string();
+            drop(security);
+            Ok(routing::ok_response(json))
+        }
+
         ("POST", path) if path.contains("/bans/username") => {
             let username = extract_json_string_field(body, "username")
                 .or_else(|| path.rsplit('/').next().map(str::to_owned))
                 .unwrap_or_default();
-            Ok(routing::ok_response(format!(
-                "{{\"username\":\"{}\",\"banned\":true,\"persisted\":false}}",
-                json_escape(&username)
-            )))
+            let mut security = state.security.write().await;
+            let record = security.ban("username", username.clone());
+            let active_bans = security.active_bans();
+            drop(security);
+            persist_security_ban(state, &record).await;
+            Ok(routing::ok_response(serde_json::json!({
+                "username": username,
+                "banned": true,
+                "persisted": true,
+                "kind": record.kind,
+                "created_at": record.created_at,
+                "activeBans": active_bans,
+            }).to_string()))
         }
 
         ("DELETE", path) if path.contains("/bans/username/") => {
-            let username = path.rsplit('/').next().unwrap_or("");
-            Ok(routing::ok_response(format!(
-                "{{\"username\":\"{}\",\"banned\":false,\"persisted\":false}}",
-                json_escape(username)
-            )))
+            let username = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
+            let mut security = state.security.write().await;
+            let removed = security.unban("username", &username);
+            let active_bans = security.active_bans();
+            drop(security);
+            if removed {
+                persist_security_unban(state, "username", &username).await;
+            }
+            Ok(routing::ok_response(serde_json::json!({
+                "username": username,
+                "banned": false,
+                "removed": removed,
+                "persisted": true,
+                "activeBans": active_bans,
+            }).to_string()))
         }
 
         ("POST", path) if path.contains("/bans/ip") => {
             let ip = extract_json_string_field(body, "ip").unwrap_or_default();
-            Ok(routing::ok_response(format!(
-                "{{\"ip\":\"{}\",\"banned\":true,\"persisted\":false}}",
-                json_escape(&ip)
-            )))
+            let mut security = state.security.write().await;
+            let record = security.ban("ip", ip.clone());
+            let active_bans = security.active_bans();
+            drop(security);
+            persist_security_ban(state, &record).await;
+            Ok(routing::ok_response(serde_json::json!({
+                "ip": ip,
+                "banned": true,
+                "persisted": true,
+                "kind": record.kind,
+                "created_at": record.created_at,
+                "activeBans": active_bans,
+            }).to_string()))
         }
 
         ("DELETE", path) if path.contains("/bans/ip/") => {
-            let ip = path.rsplit('/').next().unwrap_or("");
-            Ok(routing::ok_response(format!(
-                "{{\"ip\":\"{}\",\"banned\":false,\"persisted\":false}}",
-                json_escape(ip)
-            )))
+            let ip = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
+            let mut security = state.security.write().await;
+            let removed = security.unban("ip", &ip);
+            let active_bans = security.active_bans();
+            drop(security);
+            if removed {
+                persist_security_unban(state, "ip", &ip).await;
+            }
+            Ok(routing::ok_response(serde_json::json!({
+                "ip": ip,
+                "banned": false,
+                "removed": removed,
+                "persisted": true,
+                "activeBans": active_bans,
+            }).to_string()))
         }
 
         // ADDITIONAL MISSING DELETE ENDPOINTS (Phase 5)
@@ -8321,15 +12994,29 @@ async fn route_http_request_with_headers(
         }
 
         ("DELETE", "/api/nowplaying") => {
-            Ok(routing::ok_response("{\"now_playing\":[],\"count\":0,\"cleared\":true}".to_owned()))
+            let mut now_playing = state.now_playing.write().await;
+            let cleared = now_playing.clear();
+            drop(now_playing);
+            persist_now_playing_clear(state).await;
+            Ok(routing::ok_response(format!(
+                "{{\"now_playing\":[],\"count\":0,\"cleared\":true,\"cleared_count\":{}}}",
+                cleared
+            )))
         }
 
         ("DELETE", "/api/relay") => {
-            Ok(routing::ok_response("{\"relay_enabled\":false,\"status\":\"disabled\"}".to_owned()))
+            let mut relay = state.relay.write().await;
+            let json = relay.set_enabled(false);
+            drop(relay);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::ok_response(json.to_string()))
         }
 
         ("DELETE", "/api/relay/agent") => {
-            Ok(routing::ok_response("true".to_owned()))
+            let mut runtime = state.runtime.write().await;
+            let json = runtime.set_relay_agent(false).to_string();
+            drop(runtime);
+            Ok(routing::ok_response(json))
         }
 
         ("DELETE", "/api/shares") => {
@@ -8448,9 +13135,15 @@ async fn route_http_request_with_headers(
             }
             let client_id = spotify.client_id.as_deref().unwrap_or_default();
             let redirect_uri = spotify_redirect_uri(state);
-            let mut oauth_states = state.oauth_states.write().await;
-            let state_token = oauth_states.issue("spotify", &redirect_uri, 600);
-            drop(oauth_states);
+            let (state_token, oauth_record) = {
+                let mut oauth_states = state.oauth_states.write().await;
+                let state_token = oauth_states.issue("spotify", &redirect_uri, 600);
+                let oauth_record = oauth_states.records.get(&state_token).cloned();
+                (state_token, oauth_record)
+            };
+            if let Some(oauth_record) = oauth_record.as_ref() {
+                persist_oauth_state(state, &state_token, oauth_record).await;
+            }
             let auth_url = format!(
                 "https://accounts.spotify.com/authorize?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&show_dialog=false",
                 url_encode(client_id),
@@ -8488,12 +13181,14 @@ async fn route_http_request_with_headers(
             if state_value.is_empty() {
                 return Ok(routing::bad_request_response("Spotify callback missing state"));
             }
-            let mut oauth_states = state.oauth_states.write().await;
-            let Some(state_record) = oauth_states.consume("spotify", state_value) else {
-                drop(oauth_states);
+            let state_record = {
+                let mut oauth_states = state.oauth_states.write().await;
+                oauth_states.consume("spotify", state_value)
+            };
+            let Some(state_record) = state_record else {
                 return Ok(routing::forbidden_response("invalid or expired Spotify OAuth state"));
             };
-            drop(oauth_states);
+            persist_oauth_state_delete(state, state_value).await;
             let Some(code) = code else {
                 return Ok(routing::bad_request_response("Spotify callback missing code"));
             };
@@ -8538,9 +13233,20 @@ async fn route_http_request_with_headers(
         ("GET", "/api/integrations/lidarr/wanted/missing") => {
             let lidarr = &state.config.integrations.lidarr;
             if !lidarr.configured() {
-                return Ok(routing::ok_response(
-                    "{\"missing_albums\":[],\"count\":0,\"status\":\"disabled\",\"next_action\":\"configure Lidarr URL and API key\"}".to_owned(),
-                ));
+                let library = state.library.read().await;
+                let missing_albums = lidarr_missing_albums_value(&library);
+                let count = missing_albums.len();
+                let updated_at = library.updated_at;
+                drop(library);
+                return Ok(routing::ok_response(serde_json::json!({
+                    "missing_albums": missing_albums,
+                    "count": count,
+                    "status": if count == 0 { "local_clean" } else { "local" },
+                    "source": "library-health",
+                    "configured": false,
+                    "next_action": if count == 0 { "library metadata is complete" } else { "fix library health issues or configure Lidarr URL and API key" },
+                    "updated_at": updated_at,
+                }).to_string()));
             }
             match fetch_lidarr_wanted_missing(lidarr).await {
                 Ok(value) => Ok(routing::ok_response(value.to_string())),
@@ -8554,87 +13260,201 @@ async fn route_http_request_with_headers(
         ("POST", "/api/integrations/lidarr/wanted/sync") => {
             let lidarr = &state.config.integrations.lidarr;
             if !lidarr.configured() {
-                return Ok(routing::accepted_response(
-                    "{\"synced\":false,\"queued\":false,\"status\":\"disabled\",\"missing_albums\":[],\"next_action\":\"configure Lidarr URL and API key\"}".to_owned(),
-                ));
+                let library = state.library.read().await;
+                let missing_albums = lidarr_missing_albums_value(&library);
+                let missing_count = missing_albums.len();
+                drop(library);
+                let mut runtime = state.runtime.write().await;
+                let mut value = runtime.record_lidarr_sync(missing_count, false);
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("missing_albums".to_owned(), serde_json::json!(missing_albums));
+                    object.insert("source".to_owned(), serde_json::json!("library-health"));
+                    object.insert(
+                        "next_action".to_owned(),
+                        serde_json::json!(if missing_count == 0 {
+                            "library metadata is complete"
+                        } else {
+                            "fix library health issues or configure Lidarr URL and API key"
+                        }),
+                    );
+                }
+                let body = value.to_string();
+                drop(runtime);
+                persist_runtime_compat_state(state).await;
+                return Ok(routing::accepted_response(body));
             }
-            Ok(routing::accepted_response(
-                "{\"synced\":false,\"queued\":true,\"status\":\"configured\",\"missing_albums\":[],\"next_action\":\"poll wanted/missing\"}".to_owned(),
-            ))
+            let mut runtime = state.runtime.write().await;
+            let mut value = runtime.record_lidarr_sync(0, true);
+            if let Some(object) = value.as_object_mut() {
+                object.insert("missing_albums".to_owned(), serde_json::json!([]));
+                object.insert(
+                    "next_action".to_owned(),
+                    serde_json::json!("poll wanted/missing"),
+                );
+            }
+            let body = value.to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::accepted_response(body))
         }
 
         ("POST", "/api/integrations/lidarr/manualimport") => {
             let lidarr = &state.config.integrations.lidarr;
             let directory = extract_json_string_field(body, "directory").unwrap_or_default();
             if !lidarr.configured() {
-                return Ok(routing::accepted_response(
-                    "{\"imported\":0,\"status\":\"disabled\",\"items\":[],\"next_action\":\"configure Lidarr URL and API key\"}".to_owned(),
-                ));
+                let artist = extract_json_string_field(body, "artist")
+                    .or_else(|| extract_json_string_field(body, "albumArtist"))
+                    .unwrap_or_default();
+                let title = extract_json_string_field(body, "title")
+                    .or_else(|| extract_json_string_field(body, "album"))
+                    .or_else(|| {
+                        (!directory.trim().is_empty())
+                            .then(|| directory.rsplit('/').next().unwrap_or(&directory).to_owned())
+                    })
+                    .unwrap_or_else(|| "Manual Import".to_owned());
+                let kind =
+                    extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_owned());
+                let mut library = state.library.write().await;
+                let record = library.create(artist, title, kind);
+                let item = serde_json::from_str::<serde_json::Value>(&record.json())
+                    .unwrap_or_else(|_| serde_json::json!({ "id": record.id }));
+                drop(library);
+                persist_library_item(state, &record).await;
+                let mut runtime = state.runtime.write().await;
+                let body = runtime
+                    .record_lidarr_manual_import(1, false, directory, vec![item])
+                    .to_string();
+                drop(runtime);
+                persist_runtime_compat_state(state).await;
+                return Ok(routing::accepted_response(body));
             }
-            Ok(routing::accepted_response(format!(
-                "{{\"imported\":0,\"status\":\"configured\",\"directory\":\"{}\",\"items\":[],\"next_action\":\"trigger Lidarr manual import from configured UI\"}}",
-                json_escape(&directory)
-            )))
+            let mut runtime = state.runtime.write().await;
+            let mut value = runtime.record_lidarr_manual_import(0, true, directory, Vec::new());
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "next_action".to_owned(),
+                    serde_json::json!("trigger Lidarr manual import from configured UI"),
+                );
+            }
+            let body = value.to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::accepted_response(body))
         }
 
         ("GET", "/api/musicbrainz/albums/completion") => {
-            let json = "{\"completion_status\":[],\"average_completion\":0.0}".to_string();
+            let library = state.library.read().await;
+            let json = library.musicbrainz_completion_json();
+            drop(library);
             Ok(routing::ok_response(json))
         }
 
         ("GET", path) if path.starts_with("/api/musicbrainz/artist/") && path.contains("/discography-coverage") => {
             let artist = path.split('/').nth(4).unwrap_or("unknown");
-            let json = format!(
-                "{{\"artist\":\"{}\",\"coverage\":0.0,\"releases\":0}}",
-                json_escape(artist)
-            );
+            let library = state.library.read().await;
+            let json = library.discography_coverage_json(artist);
+            drop(library);
             Ok(routing::ok_response(json))
         }
 
         ("GET", "/api/musicbrainz/release-radar/notifications") => {
-            let json = "{\"notifications\":[],\"count\":0}".to_string();
+            let wishlist = state.wishlist.read().await;
+            let notifications = wishlist
+                .records
+                .iter()
+                .flat_map(|record| record.items.iter())
+                .map(|item| {
+                    serde_json::json!({
+                        "id": format!("release-radar-{}", item.id),
+                        "artist": item.artist,
+                        "title": item.title,
+                        "searchText": item.search_text(),
+                        "source": "wishlist",
+                    })
+                })
+                .collect::<Vec<_>>();
+            let count = notifications.len();
+            drop(wishlist);
+            let json = serde_json::json!({
+                "notifications": notifications,
+                "count": count,
+            }).to_string();
             Ok(routing::ok_response(json))
         }
 
         ("GET", "/api/musicbrainz/release-radar/subscriptions") => {
-            let json = "{\"subscriptions\":[],\"count\":0}".to_string();
+            let wishlist = state.wishlist.read().await;
+            let subscriptions = wishlist
+                .records
+                .iter()
+                .flat_map(|record| record.items.iter())
+                .map(|item| {
+                    serde_json::json!({
+                        "id": format!("wishlist-{}", item.id),
+                        "artist": item.artist,
+                        "title": item.title,
+                        "source": "wishlist",
+                    })
+                })
+                .collect::<Vec<_>>();
+            let count = subscriptions.len();
+            drop(wishlist);
+            let json = serde_json::json!({
+                "subscriptions": subscriptions,
+                "count": count,
+            }).to_string();
             Ok(routing::ok_response(json))
         }
 
         ("GET", "/api/listening-party") => {
-            let json = "{\"active_parties\":[],\"count\":0}".to_string();
+            let rooms = state.rooms.read().await;
+            let active_parties = rooms
+                .records
+                .iter()
+                .filter(|room| room.joined)
+                .map(|room| {
+                    serde_json::json!({
+                        "room": room.name,
+                        "userCount": room.user_count.unwrap_or(0),
+                        "messageCount": room.messages.len(),
+                        "updated_at": room.updated_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let count = active_parties.len();
+            drop(rooms);
+            let json = serde_json::json!({
+                "active_parties": active_parties,
+                "count": count,
+            }).to_string();
             Ok(routing::ok_response(json))
         }
-
-         ("POST", "/api/conversations/batch") => {
-             Ok(routing::created_response("{\"conversations\":[],\"count\":0}".to_owned()))
-         }
 
          ("POST", "/api/nowplaying") => {
             let username = extract_json_string_field(body, "username").unwrap_or_default();
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
             let title = extract_json_string_field(body, "title").unwrap_or_default();
-            let json = format!(
-                "{{\"username\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"updated_at\":{}}}",
-                json_escape(&username),
-                json_escape(&artist),
-                json_escape(&title),
-                unix_timestamp()
-            );
+            let mut now_playing = state.now_playing.write().await;
+            let record = now_playing.upsert(username, artist, title);
+            let json = record.json();
+            drop(now_playing);
+            persist_now_playing(state, &record).await;
             Ok(routing::ok_response(json))
         }
 
         ("GET", "/api/nowplaying") => {
-            let json = "{\"now_playing\":[],\"count\":0}".to_string();
+            let now_playing = state.now_playing.read().await;
+            let json = now_playing.json();
+            drop(now_playing);
             Ok(routing::ok_response(json))
         }
 
          ("POST", "/api/relay") => {
              let relay_enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
-             let json = format!(
-                 "{{\"relay_enabled\":{},\"status\":\"configured\"}}",
-                 relay_enabled
-             );
+             let mut relay = state.relay.write().await;
+             let json = relay.set_enabled(relay_enabled).to_string();
+             drop(relay);
+             persist_runtime_compat_state(state).await;
              Ok(routing::ok_response(json))
          }
 
@@ -8644,75 +13464,508 @@ async fn route_http_request_with_headers(
                  .or_else(|| extract_json_string_field(body, "path"))
                  .or_else(|| extract_json_string_field(body, "url"))
                  .unwrap_or_default();
-             Ok(routing::ok_response(format!(
-                 "{{\"destination\":\"{}\",\"valid\":{}}}",
-                 json_escape(&destination),
-                 !destination.trim().is_empty()
-             )))
+             let destinations = state.destinations.read().await;
+             let matched = destinations
+                 .records
+                 .iter()
+                 .find(|record| {
+                     record.path == destination
+                         || record.name.eq_ignore_ascii_case(destination.trim())
+                         || record.id.eq_ignore_ascii_case(destination.trim())
+                 })
+                 .cloned();
+             let default = destinations.records.iter().find(|record| record.is_default).cloned();
+             let known_count = destinations.records.len();
+             drop(destinations);
+             Ok(routing::ok_response(serde_json::json!({
+                 "destination": destination,
+                 "valid": !destination.trim().is_empty(),
+                 "known": matched.is_some(),
+                 "knownCount": known_count,
+                 "matched": matched.map(|record| serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_else(|_| serde_json::json!({ "id": record.id }))),
+                 "default": default.map(|record| serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_else(|_| serde_json::json!({ "id": record.id }))),
+             }).to_string()))
          }
 
-         ("POST", "/api/profile/invite") => {
-             Ok(routing::created_response(format!(
-                 "{{\"invite\":\"local-{}\",\"created_at\":{}}}",
-                 unix_timestamp(),
-                 unix_timestamp()
-             )))
-         }
+        ("POST", "/api/profile/invite") => {
+            let mut runtime = state.runtime.write().await;
+            let invite_state = runtime.record_profile_invite();
+            let count = invite_state
+                .get("count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let updated_at = invite_state
+                .get("updated_at")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_else(unix_timestamp);
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::created_response(serde_json::json!({
+                "invite": format!("local-{count}"),
+                "created_at": updated_at,
+                "count": count,
+                "persisted": true,
+            }).to_string()))
+        }
 
          ("POST", "/api/musicbrainz/release-radar/subscriptions") => {
-             Ok(routing::created_response("{\"subscriptions\":[],\"created\":false,\"persisted\":false,\"status\":\"compatibility_acknowledgement\"}".to_owned()))
+             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+             let title = extract_json_string_field(body, "title").unwrap_or_default();
+             let mut wishlist = state.wishlist.write().await;
+             wishlist.get_or_create();
+             let item = WishlistItem {
+                 id: format!("radar-{}", unix_timestamp()),
+                 artist,
+                 title,
+                 kind: "MusicBrainzReleaseRadar".to_owned(),
+                 added_at: unix_timestamp(),
+             };
+             wishlist.add_item(item.clone());
+             let json = item.json();
+             let count = wishlist
+                 .records
+                 .iter()
+                 .flat_map(|record| record.items.iter())
+                 .count();
+             drop(wishlist);
+             persist_wishlist_item(state, &item).await;
+             Ok(routing::created_response(serde_json::json!({
+                 "subscriptions": [serde_json::from_str::<serde_json::Value>(&json).unwrap_or_else(|_| serde_json::json!({}))],
+                 "created": true,
+                 "persisted": true,
+                 "status": "local",
+                 "count": count,
+             }).to_string()))
          }
 
          ("POST", "/api/musicbrainz/targets") => {
              let target = extract_json_string_field(body, "target")
                  .or_else(|| extract_json_string_field(body, "mbid"))
+                 .or_else(|| extract_json_string_field(body, "artist"))
                  .unwrap_or_default();
-             Ok(routing::created_response(format!(
-                 "{{\"target\":\"{}\",\"created\":{}}}",
-                 json_escape(&target),
-                 !target.is_empty()
-             )))
-         }
-
-         ("POST", path) if path.starts_with("/api/soulseek/interests") && !path.contains("/hated") => {
-             let interest = extract_json_string_field(body, "interest").unwrap_or_default();
-             let json = format!(
-                 "{{\"interest\":\"{}\",\"added\":true}}",
-                 json_escape(&interest)
-             );
-             Ok(routing::created_response(json))
+             let title = extract_json_string_field(body, "title")
+                 .or_else(|| extract_json_string_field(body, "release"))
+                 .unwrap_or_default();
+             if target.trim().is_empty() && title.trim().is_empty() {
+                 return Ok(routing::bad_request_response("target/artist or title is required"));
+             }
+             let mut library = state.library.write().await;
+             let record = library.create(target.clone(), title, "MusicBrainzTarget".to_owned());
+             let target_projection = library.target_json(&target);
+             drop(library);
+             persist_library_item(state, &record).await;
+             Ok(routing::created_response(serde_json::json!({
+                 "target": target,
+                 "created": true,
+                 "item": serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_else(|_| serde_json::json!({})),
+                 "projection": serde_json::from_str::<serde_json::Value>(&target_projection).unwrap_or_else(|_| serde_json::json!({})),
+             }).to_string()))
          }
 
          ("POST", path) if path.starts_with("/api/wishlist/") && path.contains("/search") => {
              let item_id = path.split('/').nth(3).unwrap_or("unknown");
-             let json = format!(
-                 "{{\"item_id\":\"{}\",\"search_started\":true,\"status\":\"searching\"}}",
-                 json_escape(item_id)
-             );
-             Ok(routing::accepted_response(json))
+             let wishlist = state.wishlist.read().await;
+             let Some(item) = wishlist.get_item(item_id) else {
+                 drop(wishlist);
+                 return Ok(routing::not_found_response());
+             };
+             let query = item.search_text();
+             drop(wishlist);
+             if query.trim().is_empty() {
+                 return Ok(routing::bad_request_response("wishlist item has no search text"));
+             }
+             let mut searches = state.searches.write().await;
+             let record = searches.create_scheduled_wishlist(query, DEFAULT_SEARCH_TTL_SECONDS);
+             let response = serde_json::json!({
+                 "item_id": item_id,
+                 "search_started": true,
+                 "status": "searching",
+                 "search_id": record.id,
+                 "token": record.token,
+                 "query": record.query,
+                 "target": record.target,
+             }).to_string();
+             drop(searches);
+             Ok(routing::accepted_response(response))
          }
 
          ("POST", "/api/wishlist/import/csv") => {
-             Ok(routing::created_response("{\"imported\":0,\"items\":[]}".to_owned()))
+             let raw = extract_json_string_field(body, "csv")
+                 .or_else(|| extract_json_string_field(body, "text"))
+                 .or_else(|| extract_json_string_field(body, "content"))
+                 .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
+             let parsed_items = raw
+                 .lines()
+                 .map(str::trim)
+                 .filter(|line| !line.is_empty())
+                 .enumerate()
+                 .filter_map(|(index, line)| {
+                     let parts = line
+                         .split(',')
+                         .map(str::trim)
+                         .collect::<Vec<_>>();
+                     if index == 0
+                         && parts
+                             .first()
+                             .is_some_and(|value| value.eq_ignore_ascii_case("artist"))
+                     {
+                         return None;
+                     }
+                     let (artist, title) = if parts.len() >= 2 {
+                         (parts[0].to_owned(), parts[1].to_owned())
+                     } else if let Some((artist, title)) = line.split_once(" - ") {
+                         (artist.trim().to_owned(), title.trim().to_owned())
+                     } else {
+                         (String::new(), line.to_owned())
+                     };
+                     Some(WishlistItem {
+                         id: format!("csv-{}-{}", unix_timestamp(), index + 1),
+                         artist,
+                         title,
+                         kind: "Audio".to_owned(),
+                         added_at: unix_timestamp(),
+                     })
+                 })
+                 .collect::<Vec<_>>();
+             let mut wishlist = state.wishlist.write().await;
+             wishlist.get_or_create();
+             let mut imported = Vec::new();
+             let mut persisted_items = Vec::new();
+             for item in parsed_items {
+                 let value = serde_json::from_str::<serde_json::Value>(&item.json())
+                     .unwrap_or_else(|_| serde_json::json!({ "id": item.id }));
+                 wishlist.add_item(item.clone());
+                 persisted_items.push(item);
+                 imported.push(value);
+             }
+             drop(wishlist);
+             for item in &persisted_items {
+                 persist_wishlist_item(state, item).await;
+             }
+             Ok(routing::created_response(serde_json::json!({
+                 "imported": imported.len(),
+                 "items": imported,
+             }).to_string()))
          }
 
          ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/backfill") => {
              let grant_id = path.split('/').nth(3).unwrap_or("unknown");
-             Ok(routing::accepted_response(format!(
-                 "{{\"grant_id\":\"{}\",\"backfilled\":0,\"persisted\":false,\"status\":\"compatibility_acknowledgement\"}}",
-                 json_escape(grant_id)
-             )))
+             let share_grants = state.share_grants.read().await;
+             let collections = state.collections.read().await;
+             let grant = share_grants.get(grant_id);
+             let backfilled = grant
+                 .as_ref()
+                 .and_then(|grant| collections.get(&grant.collection_id))
+                 .map(|collection| collection.items.len())
+                 .unwrap_or(0);
+             let persisted = grant.is_some();
+             drop(collections);
+             drop(share_grants);
+             Ok(routing::accepted_response(serde_json::json!({
+                 "grant_id": grant_id,
+                 "backfilled": backfilled,
+                 "persisted": persisted,
+                 "status": if persisted { "local" } else { "compatibility_acknowledgement" },
+             }).to_string()))
          }
 
          ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/token") => {
              let grant_id = path.split('/').nth(3).unwrap_or("unknown");
-             Ok(routing::created_response(format!(
-                 "{{\"grant_id\":\"{}\",\"token\":null,\"created\":false,\"persisted\":false,\"status\":\"compatibility_acknowledgement\"}}",
-                 json_escape(grant_id)
-             )))
+             let share_grants = state.share_grants.read().await;
+             let grant = share_grants.get(grant_id);
+             drop(share_grants);
+             let token = grant.as_ref().map(|grant| {
+                 format!(
+                     "share-{}-{}-{}",
+                     grant.id, grant.collection_id, grant.shared_at
+                 )
+             });
+             let created = token.is_some();
+             Ok(routing::created_response(serde_json::json!({
+                 "grant_id": grant_id,
+                 "token": token,
+                 "created": created,
+                 "persisted": created,
+                 "status": if created { "local" } else { "compatibility_acknowledgement" },
+             }).to_string()))
          }
+
+        ("GET", "/api/slskdn") => {
+            let session = state.session.read().await;
+            let shares = state.shares.read().await;
+            let searches = state.searches.read().await;
+            let transfers = state.transfers.read().await;
+            let users = state.users.read().await;
+            let rooms = state.rooms.read().await;
+            let library = state.library.read().await;
+            let body = serde_json::json!({
+                "status": "local",
+                "enabled": true,
+                "connected": session.state == "connected",
+                "shares": shares.entries.len(),
+                "searches": searches.records.len(),
+                "transfers": transfers.entries.len(),
+                "users": users.records.len(),
+                "rooms": rooms.records.len(),
+                "libraryItems": library.records.len(),
+            }).to_string();
+            drop(library);
+            drop(rooms);
+            drop(users);
+            drop(transfers);
+            drop(searches);
+            drop(shares);
+            drop(session);
+            Ok(routing::ok_response(body))
+        }
+
+        ("GET", "/api/slskdn/library/health") => {
+            let library = state.library.read().await;
+            let issues = library.health_issues();
+            let body = serde_json::json!({
+                "status": if issues.is_empty() { "healthy" } else { "issues" },
+                "items": library.records.len(),
+                "issues": issues,
+                "issueCount": issues.len(),
+                "updated_at": library.updated_at,
+            }).to_string();
+            drop(library);
+            Ok(routing::ok_response(body))
+        }
+
+        ("POST", "/api/slskdn/warm-cache") => {
+            let shares = state.shares.read().await;
+            let searches = state.searches.read().await;
+            let library = state.library.read().await;
+            let warmed = shares.entries.len() + searches.records.len() + library.records.len();
+            drop(library);
+            drop(searches);
+            drop(shares);
+            let mut runtime = state.runtime.write().await;
+            let body = runtime.record_cache_warm(warmed).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::accepted_response(body))
+        }
+
+        ("GET", path) if path.starts_with("/api/streams/") && path.len() > 13 => {
+            let stream_id = decoded_path_segment(&path[13..]);
+            let transfers = state.transfers.read().await;
+            let shares = state.shares.read().await;
+            let transfer = stream_id
+                .strip_prefix("transfer-")
+                .and_then(|id| id.parse::<u64>().ok())
+                .and_then(|id| transfers.entries.iter().find(|entry| entry.id == id));
+            let share = shares.entries.iter().find(|entry| {
+                entry.filename == stream_id || stable_content_hash(&entry.filename, entry.size).to_string() == stream_id
+            });
+            let body = serde_json::json!({
+                "id": stream_id,
+                "status": if transfer.is_some() || share.is_some() { "available" } else { "not_found" },
+                "transfer": transfer.map(|entry| serde_json::json!({
+                    "id": entry.id,
+                    "filename": entry.filename,
+                    "bytesTransferred": entry.bytes_transferred,
+                    "size": entry.size,
+                    "state": entry.status,
+                })),
+                "share": share.map(|entry| serde_json::json!({
+                    "filename": entry.filename,
+                    "size": entry.size,
+                    "extension": entry.extension,
+                })),
+            }).to_string();
+            drop(shares);
+            drop(transfers);
+            Ok(routing::ok_response(body))
+        }
+
+        ("POST", "/api/listening-party/radio/party/content") => {
+            let room = extract_json_string_field(body, "room").unwrap_or_else(|| "radio".to_owned());
+            let title = extract_json_string_field(body, "title").unwrap_or_else(|| "party content".to_owned());
+            let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+            let mut rooms = state.rooms.write().await;
+            let room_record = rooms.join(room.clone());
+            let room_record = rooms
+                .add_message(
+                    &room,
+                    "local".to_owned(),
+                    if artist.trim().is_empty() {
+                        title.clone()
+                    } else {
+                        format!("{artist} - {title}")
+                    },
+                )
+                .unwrap_or(room_record);
+            let active_count = rooms.records.iter().filter(|room| room.joined).count();
+            drop(rooms);
+            let mut now_playing = state.now_playing.write().await;
+            let playing = now_playing.upsert(room.clone(), artist, title);
+            drop(now_playing);
+            persist_now_playing(state, &playing).await;
+            Ok(routing::accepted_response(serde_json::json!({
+                "status": "queued",
+                "room": room,
+                "activePartyCount": active_count,
+                "party": serde_json::from_str::<serde_json::Value>(&room_record.json()).unwrap_or_else(|_| serde_json::json!({})),
+                "nowPlaying": serde_json::from_str::<serde_json::Value>(&playing.json()).unwrap_or_else(|_| serde_json::json!({})),
+            }).to_string()))
+        }
+
+        ("GET", "/api/mesh/health") => {
+            let users = state.users.read().await;
+            let mesh = state.mesh.read().await;
+            let candidate_count = mesh.candidate_usernames(&users).len();
+            let capability_count = mesh.capability_records.len();
+            drop(mesh);
+            drop(users);
+            Ok(routing::ok_response(serde_json::json!({
+                "status": if candidate_count > 0 || capability_count > 0 { "ready" } else { "empty" },
+                "healthy": true,
+                "candidates": candidate_count,
+                "capabilities": capability_count,
+                "interestTag": MESH_RENDEZVOUS_INTEREST_TAG,
+            }).to_string()))
+        }
+
+        ("POST", "/api/multisource/download") => {
+            let filename = extract_json_string_field(body, "filename")
+                .or_else(|| extract_json_string_field(body, "path"))
+                .unwrap_or_else(|| "multisource-download".to_owned());
+            let size = extract_json_u64_field(body, "size");
+            let peer = extract_json_string_field(body, "username")
+                .or_else(|| extract_json_string_field(body, "peer"));
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(0, peer, filename, None, size);
+            let body = serde_json::json!({
+                "id": format!("transfer-{}", entry.id),
+                "transfer_id": entry.id,
+                "status": "queued",
+                "job": serde_json::from_str::<serde_json::Value>(&entry.json()).unwrap_or_else(|_| serde_json::json!({})),
+            }).to_string();
+            drop(transfers);
+            Ok(routing::accepted_response(body))
+        }
+
+        ("GET", "/api/podcore/content/search") => {
+            let query = route
+                .query
+                .map(query_params)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|(key, _)| key == "query" || key == "q")
+                .map(|(_, value)| value)
+                .unwrap_or_default();
+            let shares = state.shares.read().await;
+            let results = search_shares(&shares.entries, &query)
+                .into_iter()
+                .map(|entry| serde_json::json!({
+                    "filename": entry.filename,
+                    "size": entry.size,
+                    "extension": entry.extension,
+                    "source": "share-index",
+                }))
+                .collect::<Vec<_>>();
+            let count = results.len();
+            drop(shares);
+            Ok(routing::ok_response(serde_json::json!({
+                "query": query,
+                "results": results,
+                "count": count,
+            }).to_string()))
+        }
+
+        ("POST", "/api/podcore/membership/join") => {
+            let pod_id = extract_json_string_field(body, "podId")
+                .or_else(|| extract_json_string_field(body, "pod"))
+                .or_else(|| extract_json_string_field(body, "room"))
+                .unwrap_or_else(|| "pod".to_owned());
+            let mut rooms = state.rooms.write().await;
+            let record = rooms.join(pod_id.clone());
+            let body = serde_json::json!({
+                "podId": pod_id,
+                "joined": true,
+                "membership": serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_else(|_| serde_json::json!({})),
+            }).to_string();
+            drop(rooms);
+            Ok(routing::accepted_response(body))
+        }
+
+        ("GET", "/api/playback/status") => {
+            let now_playing = state.now_playing.read().await;
+            let body = serde_json::json!({
+                "status": if now_playing.records.is_empty() { "stopped" } else { "playing" },
+                "nowPlaying": now_playing.records.iter().map(|record| {
+                    serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_else(|_| serde_json::json!({}))
+                }).collect::<Vec<_>>(),
+                "count": now_playing.records.len(),
+                "updated_at": now_playing.updated_at,
+            }).to_string();
+            drop(now_playing);
+            Ok(routing::ok_response(body))
+        }
+
+        ("GET", "/api/traces") => {
+            let events = state.events.read().await;
+            let traces = events.records.iter().rev().take(100).map(|event| {
+                serde_json::json!({
+                    "id": event.id,
+                    "kind": event.kind,
+                    "resource": event.resource,
+                    "detail": event.detail,
+                    "created_at": event.created_at,
+                })
+            }).collect::<Vec<_>>();
+            let count = traces.len();
+            drop(events);
+            Ok(routing::ok_response(serde_json::json!({
+                "traces": traces,
+                "count": count,
+            }).to_string()))
+        }
+
+        ("GET", "/api/fairness") | ("GET", "/api/ranking") => {
+            Ok(native_compat_response(method, path, state).await)
+        }
+
+        ("GET", "/api/portforwarding/status") => {
+            Ok(native_compat_response(method, path, state).await)
+        }
+
+        ("GET", "/api/signals") => {
+            let session = state.session.read().await;
+            let events = state.events.read().await;
+            let body = serde_json::json!({
+                "signals": events.records.iter().rev().take(25).map(|event| {
+                    serde_json::json!({
+                        "id": event.id,
+                        "kind": event.kind,
+                        "resource": event.resource,
+                        "created_at": event.created_at,
+                    })
+                }).collect::<Vec<_>>(),
+                "connected": session.state == "connected",
+                "count": events.records.len().min(25),
+            }).to_string();
+            drop(events);
+            drop(session);
+            Ok(routing::ok_response(body))
+        }
+
+        ("POST", "/api/backfill") => {
+            let searches = state.searches.read().await;
+            let shares = state.shares.read().await;
+            let queued = searches.records.len() + shares.entries.len();
+            drop(shares);
+            drop(searches);
+            let mut runtime = state.runtime.write().await;
+            let body = runtime.record_backfill(queued).to_string();
+            drop(runtime);
+            persist_runtime_compat_state(state).await;
+            Ok(routing::accepted_response(body))
+        }
         (method, path) if native_compat_path(path) => {
-            Ok(native_compat_response(method, path))
+            Ok(native_compat_response(method, path, state).await)
         }
         _ => {
             tracing::complete_request_span(404);
@@ -9087,18 +14340,40 @@ fn slskd_application_state_json(
     shares: &ShareIndexSnapshot,
     rooms: &RoomStore,
     users: &UserStore,
+    relay: &RelayState,
+    runtime: &RuntimeCompatState,
     config: &AppConfig,
 ) -> String {
     serde_json::json!({
         "version": slskd_version_json(),
         "pendingReconnect": false,
-        "pendingRestart": false,
+        "pendingRestart": runtime.application_restart_requested,
         "server": slskd_server_state_json(session, config),
         "connectionWatchdog": {
             "enabled": config.reconnect,
             "reconnectDelaySeconds": config.reconnect_delay.as_secs(),
         },
-        "relay": { "enabled": false },
+        "relay": {
+            "enabled": relay.enabled,
+            "agentEnabled": runtime.relay_agent_enabled,
+            "updated_at": relay.updated_at,
+        },
+        "bridge": {
+            "enabled": config.integrations.bridge.enabled,
+            "running": runtime.bridge_running,
+            "configUpdates": runtime.bridge_config_updates,
+            "host": config.integrations.bridge.host,
+            "port": config.integrations.bridge.port,
+        },
+        "operations": {
+            "profileInvitesCreated": runtime.profile_invites_created,
+            "cacheWarmRuns": runtime.cache_warm_runs,
+            "backfillRuns": runtime.backfill_runs,
+            "songidRuns": runtime.songid_runs,
+            "lidarrSyncRuns": runtime.lidarr_sync_runs,
+            "lidarrManualImports": runtime.lidarr_manual_imports,
+        },
+        "runtime": runtime.json_value(),
         "user": {
             "username": session.username,
             "privilegesSeconds": session.privileges_seconds,
@@ -9179,6 +14454,49 @@ fn secure_oauth_state() -> String {
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     format!("slskr-{}", hex::encode(bytes))
+}
+
+fn webhook_from_persisted(record: crate::persistence::WebhookRecord) -> Option<webhooks::Webhook> {
+    let events = record
+        .events
+        .split(',')
+        .filter_map(webhooks::WebhookEvent::from_wire)
+        .collect::<Vec<_>>();
+    if events.is_empty() {
+        return None;
+    }
+    Some(webhooks::Webhook {
+        id: record.id,
+        url: record.url,
+        events,
+        secret: record.secret,
+        active: record.active,
+        created_at: record.created_at,
+        last_triggered: record.last_triggered,
+        retry_count: u32::try_from(record.retry_count).unwrap_or(0),
+        max_retries: u32::try_from(record.max_retries).unwrap_or(3),
+        timeout_seconds: u32::try_from(record.timeout_seconds).unwrap_or(30),
+    })
+}
+
+fn webhook_persistence_record(webhook: &webhooks::Webhook) -> crate::persistence::WebhookRecord {
+    crate::persistence::WebhookRecord {
+        id: webhook.id.clone(),
+        url: webhook.url.clone(),
+        events: webhook
+            .events
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        secret: webhook.secret.clone(),
+        active: webhook.active,
+        created_at: webhook.created_at,
+        last_triggered: webhook.last_triggered,
+        retry_count: i32::try_from(webhook.retry_count).unwrap_or(i32::MAX),
+        max_retries: i32::try_from(webhook.max_retries).unwrap_or(i32::MAX),
+        timeout_seconds: i32::try_from(webhook.timeout_seconds).unwrap_or(i32::MAX),
+    }
 }
 
 fn spotify_redirect_uri(state: &AppState) -> String {
@@ -9369,14 +14687,14 @@ async fn route_http_request(
     body: &str,
     state: &AppState,
 ) -> Result<HttpResponse, String> {
-    route_http_request_with_headers(
+    Box::pin(route_http_request_with_headers(
         method,
         path,
         authorization,
         body,
         state,
         RequestSecurityHeaders::default(),
-    )
+    ))
     .await
 }
 
@@ -9617,18 +14935,306 @@ fn native_compat_path(path: &str) -> bool {
         .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
 }
 
-fn native_compat_response(method: &str, path: &str) -> HttpResponse {
+async fn native_compat_response(method: &str, path: &str, state: &AppState) -> HttpResponse {
+    let session = state.session.read().await;
+    let shares = state.shares.read().await;
+    let searches = state.searches.read().await;
+    let transfers = state.transfers.read().await;
+    let listeners = state.listeners.read().await;
+    let users = state.users.read().await;
+    let rooms = state.rooms.read().await;
+    let events = state.events.read().await;
+    let library = state.library.read().await;
+    let now_playing = state.now_playing.read().await;
+    let security = state.security.read().await;
+    let mesh = state.mesh.read().await;
+    let collections = state.collections.read().await;
+    let wishlist = state.wishlist.read().await;
+
+    let family = path
+        .trim_start_matches("/api/")
+        .split('/')
+        .next()
+        .unwrap_or("native");
+    let status = if method == "POST" || method == "PUT" || method == "DELETE" {
+        "accepted"
+    } else if family == "security" && security.active_bans() > 0 {
+        "guarded"
+    } else if family == "playback" && !now_playing.records.is_empty() {
+        "playing"
+    } else if family == "mesh" && (!users.records.is_empty() || !mesh.capability_records.is_empty())
+    {
+        "ready"
+    } else if family == "solid" && (!collections.records.is_empty()) {
+        "local"
+    } else if matches!(family, "fairness" | "ranking")
+        && (!transfers.entries.is_empty()
+            || !searches.records.is_empty()
+            || !users.records.is_empty())
+    {
+        "ready"
+    } else if family == "portforwarding"
+        && (listeners.regular_bind.is_some() || listeners.obfuscated_bind.is_some())
+    {
+        "configured"
+    } else if family == "portforwarding" {
+        "disabled"
+    } else if family == "federation"
+        && (!mesh.capability_records.is_empty() || !users.records.is_empty())
+    {
+        "ready"
+    } else if session.state == "connected"
+        || !shares.entries.is_empty()
+        || !searches.records.is_empty()
+    {
+        "local"
+    } else {
+        "empty"
+    };
+    let jobs = searches
+        .records
+        .iter()
+        .map(|record| {
+            serde_json::json!({
+                "id": record.id,
+                "token": record.token,
+                "kind": "search",
+                "status": record.status,
+                "query": record.query,
+            })
+        })
+        .chain(transfers.entries.iter().map(|entry| {
+            serde_json::json!({
+                "id": format!("transfer-{}", entry.id),
+                "kind": "transfer",
+                "status": entry.status,
+                "filename": entry.filename,
+                "username": entry.peer_username,
+            })
+        }))
+        .collect::<Vec<_>>();
+    let items = match family {
+        "library" => library
+            .records
+            .iter()
+            .map(|record| {
+                serde_json::from_str::<serde_json::Value>(&record.json())
+                    .unwrap_or_else(|_| serde_json::json!({ "id": record.id }))
+            })
+            .collect::<Vec<_>>(),
+        "playback" => now_playing
+            .records
+            .iter()
+            .map(|record| {
+                serde_json::from_str::<serde_json::Value>(&record.json())
+                    .unwrap_or_else(|_| serde_json::json!({}))
+            })
+            .collect::<Vec<_>>(),
+        "security" => security
+            .json_value()
+            .get("bans")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        "fairness" => users
+            .records
+            .iter()
+            .map(|user| {
+                let queued = transfers
+                    .entries
+                    .iter()
+                    .filter(|entry| {
+                        entry.peer_username.as_deref() == Some(user.username.as_str())
+                            && matches!(entry.status.as_str(), "queued" | "in_progress" | "requested")
+                    })
+                    .count();
+                serde_json::json!({
+                    "username": user.username,
+                    "watched": user.watched,
+                    "status": user.status,
+                    "averageSpeed": user.average_speed.unwrap_or(0),
+                    "queuedTransfers": queued,
+                    "score": user.average_speed.unwrap_or(0) as u64 + user.file_count.unwrap_or(0) as u64,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "ranking" => {
+            let mut rows = transfers
+                .entries
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "id": format!("transfer-{}", entry.id),
+                        "kind": "transfer",
+                        "score": entry.bytes_transferred,
+                        "filename": entry.filename,
+                        "username": entry.peer_username,
+                        "status": entry.status,
+                    })
+                })
+                .chain(searches.records.iter().map(|record| {
+                    serde_json::json!({
+                        "id": record.id,
+                        "kind": "search",
+                        "score": record.results.len(),
+                        "query": record.query,
+                        "status": record.status,
+                    })
+                }))
+                .collect::<Vec<_>>();
+            rows.sort_by(|a, b| {
+                b.get("score")
+                    .and_then(serde_json::Value::as_u64)
+                    .cmp(&a.get("score").and_then(serde_json::Value::as_u64))
+            });
+            rows
+        }
+        "portforwarding" => vec![serde_json::json!({
+            "regularBind": listeners.regular_bind,
+            "regularLocalAddr": listeners.regular_local_addr,
+            "obfuscatedBind": listeners.obfuscated_bind,
+            "obfuscatedLocalAddr": listeners.obfuscated_local_addr,
+            "regularAccepts": listeners.regular_accepts,
+            "obfuscatedAccepts": listeners.obfuscated_accepts,
+            "errors": listeners.errors,
+            "lastError": listeners.last_error,
+            "updated_at": listeners.updated_at,
+        })],
+        "solid" => collections
+            .records
+            .iter()
+            .map(|collection| {
+                serde_json::json!({
+                    "id": collection.id,
+                    "name": collection.name,
+                    "itemCount": collection.items.len(),
+                    "updated_at": collection.updated_at,
+                    "storage": "local-collection",
+                })
+            })
+            .collect::<Vec<_>>(),
+        "federation" => mesh
+            .capability_records
+            .iter()
+            .map(|record| {
+                serde_json::json!({
+                    "username": record.username,
+                    "issuedAt": record.issued_at_unix,
+                    "expiresAt": record.expires_at_unix,
+                    "features": record.features.clone(),
+                    "endpoints": record.endpoints.clone(),
+                    "source": "peer-capability",
+                })
+            })
+            .chain(users.records.iter().filter(|user| user.watched).map(|user| {
+                serde_json::json!({
+                    "username": user.username,
+                    "status": user.status,
+                    "source": "watched-user",
+                })
+            }))
+            .collect::<Vec<_>>(),
+        "pods" | "podcore" | "listening-party" => rooms
+            .records
+            .iter()
+            .map(|room| {
+                serde_json::json!({
+                    "id": room.name,
+                    "name": room.name,
+                    "joined": room.joined,
+                    "messageCount": room.messages.len(),
+                    "userCount": room.user_count,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "hashdb" | "streams" | "audio" | "mediacore" => shares
+            .entries
+            .iter()
+            .take(DEFAULT_LIST_LIMIT)
+            .map(|entry| {
+                serde_json::json!({
+                    "filename": entry.filename,
+                    "size": entry.size,
+                    "extension": entry.extension,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "discovery" | "signals" | "traces" => events
+            .records
+            .iter()
+            .rev()
+            .take(50)
+            .map(|event| {
+                serde_json::json!({
+                    "id": event.id,
+                    "kind": event.kind,
+                    "resource": event.resource,
+                    "created_at": event.created_at,
+                })
+            })
+            .collect::<Vec<_>>(),
+        _ => users
+            .records
+            .iter()
+            .map(|user| {
+                serde_json::json!({
+                    "username": user.username,
+                    "status": user.status,
+                    "watched": user.watched,
+                })
+            })
+            .collect::<Vec<_>>(),
+    };
+    let item_count = items.len();
+    let job_count = jobs.len();
     let body = serde_json::json!({
         "path": path,
         "method": method,
-        "status": "disabled",
-        "enabled": false,
+        "family": family,
+        "status": status,
+        "enabled": true,
         "supported": true,
-        "items": [],
-        "jobs": [],
-        "message": "Compatibility surface is present, but this feature is not active in this runtime"
+        "connected": session.state == "connected",
+        "items": items,
+        "itemCount": item_count,
+        "jobs": jobs,
+        "jobCount": job_count,
+        "counts": {
+            "connected": session.state == "connected",
+            "shares": shares.entries.len(),
+            "searches": searches.records.len(),
+            "transfers": transfers.entries.len(),
+            "activeTransfers": transfers.entries.iter().filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested")).count(),
+            "users": users.records.len(),
+            "watchedUsers": users.records.iter().filter(|user| user.watched).count(),
+            "rooms": rooms.records.len(),
+            "joinedRooms": rooms.records.iter().filter(|room| room.joined).count(),
+            "events": events.records.len(),
+            "libraryItems": library.records.len(),
+            "wishlistItems": wishlist.records.iter().map(|record| record.items.len()).sum::<usize>(),
+            "securityBans": security.active_bans(),
+            "meshCapabilities": mesh.capability_records.len(),
+            "collections": collections.records.len(),
+            "listenerAccepts": listeners.regular_accepts + listeners.obfuscated_accepts,
+            "listenerErrors": listeners.errors,
+        },
     })
     .to_string();
+
+    drop(wishlist);
+    drop(collections);
+    drop(mesh);
+    drop(security);
+    drop(now_playing);
+    drop(library);
+    drop(events);
+    drop(rooms);
+    drop(users);
+    drop(listeners);
+    drop(transfers);
+    drop(searches);
+    drop(shares);
+    drop(session);
 
     if method == "POST" {
         routing::accepted_response(body)
@@ -9705,23 +15311,135 @@ fn slskd_share_directories_json(entries: &[FileEntry], share_id: Option<&str>) -
     serde_json::Value::Array(directories).to_string()
 }
 
-fn slskd_user_directories_json(directory: &str, entries: &[BrowseEntry]) -> String {
+fn slskd_user_directories_json(
+    directory: &str,
+    entries: &[BrowseEntry],
+    query: Option<&str>,
+) -> String {
+    let filter = RecordListFilter::from_query(query);
+    let files = entries
+        .iter()
+        .filter(|entry| virtual_folder(&entry.filename) == directory)
+        .collect::<Vec<_>>();
+    let file_count = files.len();
+    let filtered_files = files
+        .into_iter()
+        .filter(|entry| {
+            filter
+                .q
+                .as_deref()
+                .map_or(true, |q| entry.filename.to_ascii_lowercase().contains(q))
+        })
+        .collect::<Vec<_>>();
+    let filtered_file_count = filtered_files.len();
+    let total_bytes = filtered_files.iter().map(|entry| entry.size).sum::<u64>();
+    let files = filtered_files
+        .into_iter()
+        .skip(filter.offset)
+        .take(filter.limit.unwrap_or(usize::MAX))
+        .map(slskd_user_file_json)
+        .collect::<Vec<_>>();
     serde_json::Value::Array(vec![serde_json::json!({
         "name": directory,
-        "fileCount": entries.len(),
-        "files": entries.iter().map(slskd_user_file_json).collect::<Vec<_>>(),
+        "fileCount": file_count,
+        "filteredFileCount": filtered_file_count,
+        "totalBytes": total_bytes,
+        "files": files,
+        "offset": filter.offset,
+        "limit": filter.limit,
     })])
     .to_string()
 }
 
-fn slskd_user_root_json(entries: &[BrowseEntry]) -> String {
+fn slskd_user_root_json(entries: &[BrowseEntry], query: Option<&str>) -> String {
+    let filter = RecordListFilter::from_query(query);
+    let grouped = group_browse_entries(entries);
+    let directory_count = grouped.len();
+    let total_file_count = grouped.iter().map(|(_, files)| files.len()).sum::<usize>();
+    let filtered = grouped
+        .into_iter()
+        .filter(|(name, files)| {
+            filter.q.as_deref().map_or(true, |q| {
+                name.to_ascii_lowercase().contains(q)
+                    || files
+                        .iter()
+                        .any(|entry| entry.filename.to_ascii_lowercase().contains(q))
+            })
+        })
+        .collect::<Vec<_>>();
+    let filtered_directory_count = filtered.len();
+    let filtered_file_count = filtered
+        .iter()
+        .map(|(name, files)| {
+            if let Some(q) = filter.q.as_deref() {
+                if name.to_ascii_lowercase().contains(q) {
+                    return files.len();
+                }
+                files
+                    .iter()
+                    .filter(|entry| entry.filename.to_ascii_lowercase().contains(q))
+                    .count()
+            } else {
+                files.len()
+            }
+        })
+        .sum::<usize>();
+    let filtered_total_bytes = filtered
+        .iter()
+        .map(|(name, files)| {
+            if let Some(q) = filter.q.as_deref() {
+                if name.to_ascii_lowercase().contains(q) {
+                    return files.iter().map(|entry| entry.size).sum::<u64>();
+                }
+                files
+                    .iter()
+                    .filter(|entry| entry.filename.to_ascii_lowercase().contains(q))
+                    .map(|entry| entry.size)
+                    .sum::<u64>()
+            } else {
+                files.iter().map(|entry| entry.size).sum::<u64>()
+            }
+        })
+        .sum::<u64>();
+    let directories = filtered
+        .into_iter()
+        .skip(filter.offset)
+        .take(filter.limit.unwrap_or(usize::MAX))
+        .map(|(name, files)| {
+            let directory_matched = filter
+                .q
+                .as_deref()
+                .is_some_and(|q| name.to_ascii_lowercase().contains(q));
+            let visible_files = files
+                .iter()
+                .filter(|entry| {
+                    if directory_matched {
+                        return true;
+                    }
+                    filter
+                        .q
+                        .as_deref()
+                        .map_or(true, |q| entry.filename.to_ascii_lowercase().contains(q))
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "name": name,
+                "fileCount": files.len(),
+                "filteredFileCount": visible_files.len(),
+                "totalBytes": visible_files.iter().map(|entry| entry.size).sum::<u64>(),
+                "files": visible_files.iter().map(|entry| slskd_user_file_json(entry)).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
     serde_json::json!({
-        "directories": [{
-            "name": "",
-            "fileCount": entries.len(),
-            "files": entries.iter().map(slskd_user_file_json).collect::<Vec<_>>(),
-        }],
-        "directoryCount": 1,
+        "directories": directories,
+        "directoryCount": directory_count,
+        "filteredDirectoryCount": filtered_directory_count,
+        "fileCount": total_file_count,
+        "filteredFileCount": filtered_file_count,
+        "totalBytes": filtered_total_bytes,
+        "offset": filter.offset,
+        "limit": filter.limit,
         "lockedDirectories": [],
         "lockedDirectoryCount": 0,
     })
@@ -10062,6 +15780,254 @@ fn slskd_transfer_matches_query(
         })
 }
 
+fn slskd_transfer_speeds_json(transfers: &TransferQueue) -> String {
+    let active_downloads = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0 && is_active_transfer_status(&entry.status))
+        .count();
+    let active_uploads = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 1 && is_active_transfer_status(&entry.status))
+        .count();
+    let download_bytes = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0)
+        .map(|entry| entry.bytes_transferred)
+        .sum::<u64>();
+    let upload_bytes = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 1)
+        .map(|entry| entry.bytes_transferred)
+        .sum::<u64>();
+    serde_json::json!({
+        "active_transfers": active_downloads + active_uploads,
+        "activeDownloads": active_downloads,
+        "activeUploads": active_uploads,
+        "total_bytes_transferred": download_bytes.saturating_add(upload_bytes),
+        "downloadBytesTransferred": download_bytes,
+        "uploadBytesTransferred": upload_bytes,
+        "downloadSpeed": 0.0,
+        "uploadSpeed": 0.0,
+        "average_speed": 0.0,
+    })
+    .to_string()
+}
+
+fn slskd_download_stats_json(transfers: &TransferQueue) -> String {
+    let downloads = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0)
+        .collect::<Vec<_>>();
+    let queued = downloads
+        .iter()
+        .filter(|entry| entry.status == "queued")
+        .count();
+    let active = downloads
+        .iter()
+        .filter(|entry| is_active_transfer_status(&entry.status))
+        .count();
+    let completed = downloads
+        .iter()
+        .filter(|entry| matches!(entry.status.as_str(), "succeeded" | "completed"))
+        .count();
+    let failed = downloads
+        .iter()
+        .filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected"))
+        .count();
+    let cancelled = downloads
+        .iter()
+        .filter(|entry| entry.status == "cancelled")
+        .count();
+    let total_size = downloads
+        .iter()
+        .map(|entry| entry.size.unwrap_or(0))
+        .sum::<u64>();
+    let bytes_transferred = downloads
+        .iter()
+        .map(|entry| entry.bytes_transferred)
+        .sum::<u64>();
+    serde_json::json!({
+        "total_downloads": downloads.len(),
+        "totalDownloads": downloads.len(),
+        "queued": queued,
+        "active": active,
+        "completed": completed,
+        "failed": failed,
+        "cancelled": cancelled,
+        "total_size": total_size,
+        "totalSize": total_size,
+        "bytes_transferred": bytes_transferred,
+        "bytesTransferred": bytes_transferred,
+    })
+    .to_string()
+}
+
+fn slskd_accelerated_downloads_json(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let username = slskd_transfer_query_username(query);
+    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let mut candidates = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0)
+        .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
+        .filter(|entry| {
+            matches!(
+                entry.status.as_str(),
+                "queued" | "peer_lookup" | "peer_negotiating" | "indirect_pending" | "in_progress"
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        left.requested_at
+            .cmp(&right.requested_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let count = candidates.len();
+    let accelerated = candidates
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id.to_string(),
+                "username": entry.peer_username.as_deref().unwrap_or_default(),
+                "filename": entry.filename,
+                "state": slskd_transfer_state(&entry.status),
+                "bytesTransferred": entry.bytes_transferred,
+                "size": entry.size.unwrap_or(0),
+                "position": transfers.slskd_transfer_position(0, entry.peer_username.as_deref().unwrap_or_default(), entry.id),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "enabled": false,
+        "available": count > 0,
+        "accelerated": accelerated,
+        "count": count,
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+fn slskd_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let username = slskd_transfer_query_username(query);
+    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let mut entries = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0)
+        .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
+        .filter(|entry| {
+            matches!(entry.status.as_str(), "failed" | "rejected")
+                || (is_active_transfer_status(&entry.status) && entry.bytes_transferred == 0)
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| left.filename.cmp(&right.filename))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let count = entries.len();
+    let stuck = entries
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id.to_string(),
+                "username": entry.peer_username.as_deref().unwrap_or_default(),
+                "filename": entry.filename,
+                "state": slskd_transfer_state(&entry.status),
+                "bytesTransferred": entry.bytes_transferred,
+                "size": entry.size.unwrap_or(0),
+                "reason": entry.reason.as_deref().unwrap_or(""),
+                "updatedAt": entry.updated_at.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "stuck": stuck,
+        "count": count,
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+fn slskd_download_user_stats_json(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let username_filter = slskd_transfer_query_username(query);
+    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let mut grouped: BTreeMap<String, (usize, usize, usize, usize, u64, u64)> = BTreeMap::new();
+    for entry in transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0)
+        .filter(|entry| slskd_transfer_matches_query(entry, None, username_filter.as_deref()))
+    {
+        let stats = grouped
+            .entry(entry.peer_username.clone().unwrap_or_default())
+            .or_insert((0, 0, 0, 0, 0, 0));
+        stats.0 += 1;
+        if entry.status == "queued" {
+            stats.1 += 1;
+        }
+        if is_active_transfer_status(&entry.status) {
+            stats.2 += 1;
+        }
+        if matches!(
+            entry.status.as_str(),
+            "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+        ) {
+            stats.3 += 1;
+        }
+        stats.4 = stats.4.saturating_add(entry.bytes_transferred);
+        stats.5 = stats.5.saturating_add(entry.size.unwrap_or(0));
+    }
+    let mut users = grouped
+        .into_iter()
+        .map(
+            |(username, (total, queued, active, terminal, bytes_transferred, total_size))| {
+                serde_json::json!({
+                    "username": username,
+                    "total": total,
+                    "queued": queued,
+                    "active": active,
+                    "terminal": terminal,
+                    "bytesTransferred": bytes_transferred,
+                    "totalSize": total_size,
+                })
+            },
+        )
+        .collect::<Vec<_>>();
+    users.sort_by(|left, right| {
+        right["total"]
+            .as_u64()
+            .cmp(&left["total"].as_u64())
+            .then_with(|| left["username"].as_str().cmp(&right["username"].as_str()))
+    });
+    let count = users.len();
+    let users = users
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "users": users,
+        "count": count,
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
 fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueue) -> String {
     let interval = query_params(query.unwrap_or_default())
         .into_iter()
@@ -10316,7 +16282,7 @@ async fn serve(once: bool) -> Result<(), String> {
         )
     })?;
     let address = config.http_bind;
-    let share_index = build_share_index(&config);
+    let scanned_share_index = build_share_index(&config);
     let (session_commands, session_receiver) = mpsc::channel(16);
     let (event_tx, _) = broadcast::channel(EVENT_HISTORY_LIMIT);
     let db = if config.persistence_enabled {
@@ -10329,6 +16295,23 @@ async fn serve(once: bool) -> Result<(), String> {
     } else {
         None
     };
+    let share_index = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_share_files(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted share index: {error}"))?;
+        if records.is_empty() {
+            let records = persisted_share_file_records(&scanned_share_index);
+            db.replace_share_files(&records)
+                .await
+                .map_err(|error| format!("failed to persist share index: {error}"))?;
+            scanned_share_index
+        } else {
+            ShareIndexSnapshot::from_persisted(&config, records)
+        }
+    } else {
+        scanned_share_index
+    };
     let search_store = if let Some(db) = db.as_ref() {
         let records = db
             .list_searches(EVENT_HISTORY_LIMIT as i32, 0)
@@ -10338,6 +16321,198 @@ async fn serve(once: bool) -> Result<(), String> {
     } else {
         SearchStore::new()
     };
+    let message_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_messages(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted messages: {error}"))?;
+        MessageStore::from_persisted(records)
+    } else {
+        MessageStore::new()
+    };
+    let user_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_user_projections(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted users: {error}"))?;
+        UserStore::from_persisted(records)
+    } else {
+        UserStore::new()
+    };
+    let room_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_subscribed_rooms()
+            .await
+            .map_err(|error| format!("failed to load persisted rooms: {error}"))?;
+        RoomStore::from_persisted(records)
+    } else {
+        RoomStore::new()
+    };
+    let browse_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_browse_records(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted browse records: {error}"))?;
+        BrowseStore::from_persisted(records)
+    } else {
+        BrowseStore::new()
+    };
+    let user_note_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_user_notes(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted user notes: {error}"))?;
+        UserNoteStore::from_persisted(records)
+    } else {
+        UserNoteStore::new()
+    };
+    let interest_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_interests(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted interests: {error}"))?;
+        InterestStore::from_persisted(records)
+    } else {
+        InterestStore::new()
+    };
+    let security_state = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_security_bans()
+            .await
+            .map_err(|error| format!("failed to load persisted security bans: {error}"))?;
+        SecurityState::from_persisted(records)
+    } else {
+        SecurityState::new()
+    };
+    let wishlist_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_wishlist_items(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted wishlist items: {error}"))?;
+        WishlistStore::from_persisted(records)
+    } else {
+        WishlistStore::new()
+    };
+    let contact_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_contacts(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted contacts: {error}"))?;
+        ContactStore::from_persisted(records)
+    } else {
+        ContactStore::new()
+    };
+    let share_grant_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_share_grants(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted share grants: {error}"))?;
+        ShareGrantStore::from_persisted(records)
+    } else {
+        ShareGrantStore::new()
+    };
+    let share_group_store = if let Some(db) = db.as_ref() {
+        let groups = db
+            .list_share_groups(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted share groups: {error}"))?;
+        let members = db
+            .list_share_group_members(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted share group members: {error}"))?;
+        ShareGroupStore::from_persisted(groups, members)
+    } else {
+        ShareGroupStore::new()
+    };
+    let collection_store = if let Some(db) = db.as_ref() {
+        let collections = db
+            .list_collections(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted collections: {error}"))?;
+        let items = db
+            .list_collection_items(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted collection items: {error}"))?;
+        CollectionStore::from_persisted(collections, items)
+    } else {
+        CollectionStore::new()
+    };
+    let library_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_library_items(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted library items: {error}"))?;
+        LibraryStore::from_persisted(records)
+    } else {
+        LibraryStore::new()
+    };
+    let destination_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_destinations(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted destinations: {error}"))?;
+        DestinationStore::from_persisted(records)
+    } else {
+        DestinationStore::new()
+    };
+    let now_playing_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_now_playing(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted now-playing records: {error}"))?;
+        NowPlayingStore::from_persisted(records)
+    } else {
+        NowPlayingStore::new()
+    };
+    let event_store = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_events(EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted events: {error}"))?;
+        EventStore::from_persisted(records, EVENT_HISTORY_LIMIT)
+    } else {
+        EventStore::new(EVENT_HISTORY_LIMIT)
+    };
+    let runtime_compat_record = if let Some(db) = db.as_ref() {
+        db.get_runtime_compat_state().await.map_err(|error| {
+            format!("failed to load persisted runtime compatibility state: {error}")
+        })?
+    } else {
+        None
+    };
+    let oauth_state_store = if let Some(db) = db.as_ref() {
+        let now = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
+        let _ = db.delete_expired_oauth_states(now).await;
+        let records = db
+            .list_oauth_states(now, EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted OAuth states: {error}"))?;
+        OAuthStateStore::from_persisted(records)
+    } else {
+        OAuthStateStore::default()
+    };
+    let webhook_manager = if let Some(db) = db.as_ref() {
+        let records = db
+            .list_webhooks()
+            .await
+            .map_err(|error| format!("failed to load persisted webhooks: {error}"))?;
+        webhooks::WebhookManager::from_webhooks(
+            records
+                .into_iter()
+                .filter_map(webhook_from_persisted)
+                .collect(),
+        )
+    } else {
+        webhooks::WebhookManager::new()
+    };
+    let relay_state = runtime_compat_record
+        .as_ref()
+        .map(RelayState::from_persisted)
+        .unwrap_or_else(RelayState::new);
+    let runtime_compat_state = runtime_compat_record
+        .as_ref()
+        .map(RuntimeCompatState::from_persisted)
+        .unwrap_or_else(RuntimeCompatState::new);
 
     let rate_limiter = rate_limit::RateLimiter::new(rate_limit::RateLimitConfig {
         max_requests_anonymous: config.api_rate_limit_anonymous,
@@ -10351,29 +16526,34 @@ async fn serve(once: bool) -> Result<(), String> {
         listeners: RwLock::new(ListenerSnapshot::new(&config)),
         shares: RwLock::new(share_index),
         searches: RwLock::new(search_store),
-        users: RwLock::new(UserStore::new()),
-        browse: RwLock::new(BrowseStore::new()),
-        messages: RwLock::new(MessageStore::new()),
-        rooms: RwLock::new(RoomStore::new()),
+        users: RwLock::new(user_store),
+        mesh: RwLock::new(MeshState::new()),
+        browse: RwLock::new(browse_store),
+        messages: RwLock::new(message_store),
+        rooms: RwLock::new(room_store),
         transfers: RwLock::new(TransferQueue::new(&config)),
-        events: RwLock::new(EventStore::new(EVENT_HISTORY_LIMIT)),
+        events: RwLock::new(event_store),
         event_tx,
-        webhooks: RwLock::new(webhooks::WebhookManager::new()),
+        webhooks: RwLock::new(webhook_manager),
         webhook_deliveries: Arc::new(Semaphore::new(MAX_WEBHOOK_DELIVERY_TASKS)),
-        collections: RwLock::new(CollectionStore::new()),
-        wishlist: RwLock::new(WishlistStore::new()),
-        contacts: RwLock::new(ContactStore::new()),
-        sharegroups: RwLock::new(ShareGroupStore::new()),
-        user_notes: RwLock::new(UserNoteStore::new()),
-        interests: RwLock::new(InterestStore::new()),
-        share_grants: RwLock::new(ShareGrantStore::new()),
-        library: RwLock::new(LibraryStore::new()),
-        destinations: RwLock::new(DestinationStore::new()),
+        collections: RwLock::new(collection_store),
+        wishlist: RwLock::new(wishlist_store),
+        contacts: RwLock::new(contact_store),
+        sharegroups: RwLock::new(share_group_store),
+        user_notes: RwLock::new(user_note_store),
+        interests: RwLock::new(interest_store),
+        now_playing: RwLock::new(now_playing_store),
+        relay: RwLock::new(relay_state),
+        runtime: RwLock::new(runtime_compat_state),
+        security: RwLock::new(security_state),
+        share_grants: RwLock::new(share_grant_store),
+        library: RwLock::new(library_store),
+        destinations: RwLock::new(destination_store),
         db,
         config,
         session_commands,
         rate_limiter,
-        oauth_states: RwLock::new(OAuthStateStore::default()),
+        oauth_states: RwLock::new(oauth_state_store),
     });
     spawn_session_manager(Arc::clone(&state), session_receiver);
     spawn_configured_listeners(Arc::clone(&state));
@@ -10429,6 +16609,13 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
     tokio::spawn(async move {
         let mut session = None;
         let mut next_ping = Instant::now() + state.config.ping_interval;
+        let mut wishlist_scheduler = WishlistSearchScheduler::new(
+            Vec::<String>::new(),
+            WishlistSearchSchedulerOptions::new(Duration::from_secs(30), None)
+                .expect("valid wishlist scheduler options"),
+        )
+        .expect("valid empty wishlist scheduler");
+        let mut next_wishlist_search = Instant::now() + wishlist_scheduler.interval();
         let mut reconnect_requested = false;
 
         loop {
@@ -10462,6 +16649,10 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                     .await
                     {
                         Ok(Ok(message)) => {
+                            if wishlist_scheduler.apply_server_message(&message) {
+                                next_wishlist_search =
+                                    Instant::now() + wishlist_scheduler.interval();
+                            }
                             project_server_message(&state, active_session, &message).await;
                             update_session(&state, |snapshot| {
                                 snapshot.state = "connected";
@@ -10500,6 +16691,17 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
 
                 if session.is_some() && Instant::now() >= next_ping {
                     send_session_ping(&state, &mut session, &mut next_ping).await;
+                    reconnect_requested = session.is_none() && state.config.reconnect;
+                }
+
+                if session.is_some() && Instant::now() >= next_wishlist_search {
+                    send_due_wishlist_search(
+                        &state,
+                        &mut session,
+                        &mut wishlist_scheduler,
+                        &mut next_wishlist_search,
+                    )
+                    .await;
                     reconnect_requested = session.is_none() && state.config.reconnect;
                 }
             } else if let Some(command) = receiver.recv().await {
@@ -10761,6 +16963,18 @@ async fn handle_session_command(
                     message: body,
                 },
                 "message user",
+            )
+            .await;
+        }
+        SessionCommand::MessageUsers { usernames, body } => {
+            send_active_server_message(
+                state,
+                session,
+                ServerMessage::MessageUsers {
+                    usernames,
+                    message: body,
+                },
+                "message users",
             )
             .await;
         }
@@ -11509,6 +17723,91 @@ async fn send_session_ping(
     }
 }
 
+async fn send_due_wishlist_search(
+    state: &AppState,
+    session: &mut Option<ServerSession<TcpStream>>,
+    scheduler: &mut WishlistSearchScheduler,
+    next_wishlist_search: &mut Instant,
+) {
+    let terms = {
+        let wishlist = state.wishlist.read().await;
+        wishlist.search_terms()
+    };
+    scheduler.replace_terms(terms);
+    *next_wishlist_search = Instant::now() + scheduler.interval();
+
+    let Some(active_session) = session.as_mut() else {
+        return;
+    };
+
+    let (record, message) = {
+        let mut searches = state.searches.write().await;
+        let token = searches.next_token;
+        let Some(ServerMessage::WishlistSearch(SearchRequest { token, query })) =
+            scheduler.next_search_message(token)
+        else {
+            return;
+        };
+        let record = searches.create_scheduled_wishlist(query.clone(), 300);
+        debug_assert_eq!(record.token, token);
+        (
+            record,
+            ServerMessage::WishlistSearch(SearchRequest { token, query }),
+        )
+    };
+
+    if let Some(db) = state.db.as_ref() {
+        let persisted_search = persistence::SearchRecord {
+            id: record.token.to_string(),
+            query: record.query.clone(),
+            status: record.status.to_string(),
+            result_count: 0,
+            created_at: record.created_at as i64,
+            completed_at: None,
+            room: None,
+            target: Some("wishlist".to_owned()),
+        };
+        let persist_error = db
+            .insert_search(&persisted_search)
+            .await
+            .err()
+            .map(|error| error.to_string());
+        if let Some(error) = persist_error {
+            update_session(state, |snapshot| {
+                snapshot.last_error = Some(format!("failed to persist wishlist search: {error}"));
+            })
+            .await;
+        }
+    }
+
+    record_event(
+        state,
+        "wishlist.search.started",
+        record.token.to_string(),
+        None,
+    )
+    .await;
+
+    match active_session.send_server_message(message).await {
+        Ok(()) => {
+            update_session(state, |snapshot| {
+                snapshot.last_error = None;
+            })
+            .await;
+        }
+        Err(error) => {
+            *session = None;
+            update_session(state, |snapshot| {
+                snapshot.state = "error";
+                snapshot.last_error = Some(format!("wishlist search failed: {error}"));
+                snapshot.supporter = None;
+                snapshot.connected_at = None;
+            })
+            .await;
+        }
+    }
+}
+
 async fn send_active_server_message(
     state: &AppState,
     session: &mut Option<ServerSession<TcpStream>>,
@@ -11576,16 +17875,25 @@ async fn project_server_message(
 ) {
     match message {
         ServerMessage::WatchUserResponse(user) => {
-            let mut users = state.users.write().await;
-            users.apply_watched_user(user);
+            let record = {
+                let mut users = state.users.write().await;
+                users.apply_watched_user(user)
+            };
+            persist_user_projection(state, &record).await;
         }
         ServerMessage::GetUserStatusResponse(status) => {
-            let mut users = state.users.write().await;
-            users.apply_status(status);
+            let record = {
+                let mut users = state.users.write().await;
+                users.apply_status(status)
+            };
+            persist_user_projection(state, &record).await;
         }
         ServerMessage::GetUserStats { username, stats } => {
-            let mut users = state.users.write().await;
-            users.apply_stats(username.clone(), stats);
+            let record = {
+                let mut users = state.users.write().await;
+                users.apply_stats(username.clone(), stats)
+            };
+            persist_user_projection(state, &record).await;
         }
         ServerMessage::CheckPrivilegesResponse { seconds } => {
             update_session(state, |snapshot| {
@@ -11637,6 +17945,10 @@ async fn project_server_message(
             )
             .await;
         }
+        ServerMessage::CantCreateRoom { room } => {
+            let mut rooms = state.rooms.write().await;
+            rooms.fail_join(room, "server reported cant-create-room".to_owned());
+        }
         ServerMessage::JoinRoom { room } => {
             let mut rooms = state.rooms.write().await;
             rooms.join(room.clone());
@@ -11686,13 +17998,19 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
     match result {
         Ok(entries) => {
             let mut browse = state.browse.write().await;
-            browse.add_entries(address.username.clone(), entries, true);
+            let record = browse.add_entries(address.username.clone(), entries, true);
+            drop(browse);
+            persist_browse_record(state, &record).await;
         }
         Err(error) => {
             let mut browse = state.browse.write().await;
             let token = browse
                 .mark_indirect_pending(&address.username, format!("direct browse failed: {error}"));
+            let pending_record = browse.get(&address.username);
             drop(browse);
+            if let Some(record) = pending_record {
+                persist_browse_record(state, &record).await;
+            }
             if let Some(token) = token {
                 try_send_session_command(
                     state,
@@ -11710,8 +18028,9 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
                 .await;
             } else {
                 let mut browse = state.browse.write().await;
-                browse.fail(address.username.clone(), error.clone());
+                let record = browse.fail(address.username.clone(), error.clone());
                 drop(browse);
+                persist_browse_record(state, &record).await;
                 record_event(
                     state,
                     "browse.failed",
@@ -11754,12 +18073,15 @@ async fn project_indirect_browse_response(state: &AppState, response: &ConnectTo
     match result {
         Ok(entries) => {
             let mut browse = state.browse.write().await;
-            browse.add_entries(response.username.clone(), entries, true);
+            let record = browse.add_entries(response.username.clone(), entries, true);
+            drop(browse);
+            persist_browse_record(state, &record).await;
         }
         Err(error) => {
             let mut browse = state.browse.write().await;
-            browse.fail(response.username.clone(), error.clone());
+            let record = browse.fail(response.username.clone(), error.clone());
             drop(browse);
+            persist_browse_record(state, &record).await;
             record_event(
                 state,
                 "browse.failed",
@@ -11945,6 +18267,7 @@ async fn fail_indirect_browse(state: &AppState, token: u32, reason: String) {
         browse.fail_indirect(token, reason.clone())
     };
     if let Some(record) = failed {
+        persist_browse_record(state, &record).await;
         record_event(
             state,
             "browse.failed",
@@ -12596,14 +18919,803 @@ async fn record_transfer_rejection(
 
 async fn record_event(
     state: &AppState,
-    kind: &'static str,
+    kind: impl Into<String>,
     resource: impl Into<String>,
     detail: Option<String>,
 ) {
     let mut events = state.events.write().await;
     let record = events.record(kind, resource, detail);
     drop(events);
+    persist_event_record(state, &record).await;
     let _ = state.event_tx.send(record);
+}
+
+async fn persist_event_record(state: &AppState, record: &EventRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::EventRecord {
+        id: i64::try_from(record.id).unwrap_or(i64::MAX),
+        kind: record.kind.clone(),
+        resource: record.resource.clone(),
+        detail: record.detail.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.insert_event(&persisted).await;
+    let _ = db.prune_events(EVENT_HISTORY_LIMIT as i32).await;
+}
+
+async fn persist_message_record(state: &AppState, record: &MessageRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::MessageRecord {
+        id: record.id.to_string(),
+        username: record.username.clone(),
+        content: record.body.clone(),
+        direction: record.direction.to_owned(),
+        read: record.acknowledged,
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.insert_message(&persisted).await;
+}
+
+async fn persist_message_ack(state: &AppState, id: u64) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.mark_message_read(&id.to_string()).await;
+    }
+}
+
+async fn persist_room_join(state: &AppState, room: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.subscribe_room(room, None).await;
+    }
+}
+
+async fn persist_room_leave(state: &AppState, room: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.unsubscribe_room(room).await;
+    }
+}
+
+async fn persist_user_note(state: &AppState, record: &UserNoteRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::UserNoteRecord {
+        id: record.id.clone(),
+        username: record.username.clone(),
+        note: record.note.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_user_note(&persisted).await;
+}
+
+async fn persist_user_note_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_user_note(id).await;
+    }
+}
+
+async fn persist_interest(state: &AppState, record: &InterestRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::InterestRecord {
+        id: record.id.clone(),
+        name: record.name.clone(),
+        kind: record.kind.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_interest(&persisted).await;
+}
+
+async fn persist_interest_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_interest(id).await;
+    }
+}
+
+async fn persist_security_ban(state: &AppState, record: &SecurityBanRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::SecurityBanRecord {
+        kind: record.kind.clone(),
+        value: record.value.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_security_ban(&persisted).await;
+}
+
+async fn persist_security_unban(state: &AppState, kind: &str, value: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_security_ban(kind, value).await;
+    }
+}
+
+async fn persist_wishlist_item(state: &AppState, item: &WishlistItem) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::WishlistItemRecord {
+        id: item.id.clone(),
+        artist: item.artist.clone(),
+        title: item.title.clone(),
+        kind: item.kind.clone(),
+        added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_wishlist_item(&persisted).await;
+}
+
+async fn persist_wishlist_item_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_wishlist_item(id).await;
+    }
+}
+
+async fn persist_user_projection(state: &AppState, record: &UserRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::UserProjectionRecord {
+        username: record.username.clone(),
+        watched: record.watched,
+        status: record.status.clone(),
+        average_speed: record.average_speed.map(i64::from),
+        upload_count: record.upload_count.map(i64::from),
+        file_count: record.file_count.map(i64::from),
+        directory_count: record.directory_count.map(i64::from),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_user_projection(&persisted).await;
+}
+
+async fn persist_contact(state: &AppState, record: &ContactRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::ContactRecord {
+        id: record.id.clone(),
+        username: record.username.clone(),
+        online: record.online,
+        status: record.status.clone(),
+        free_upload_slots: record.free_upload_slots.map(i64::from),
+        queue_length: record.queue_length.map(i64::from),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_contact(&persisted).await;
+}
+
+async fn persist_contact_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_contact(id).await;
+    }
+}
+
+async fn persist_share_grant(state: &AppState, record: &ShareGrantRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::ShareGrantRecord {
+        id: record.id.clone(),
+        collection_id: record.collection_id.clone(),
+        username: record.username.clone(),
+        shared_at: i64::try_from(record.shared_at).unwrap_or(i64::MAX),
+        permissions: record.permissions.clone(),
+    };
+    let _ = db.upsert_share_grant(&persisted).await;
+}
+
+async fn persist_share_grant_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_share_grant(id).await;
+    }
+}
+
+async fn persist_share_group(state: &AppState, record: &ShareGroupRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::ShareGroupRecord {
+        id: record.id.clone(),
+        name: record.name.clone(),
+        description: record.description.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_share_group(&persisted).await;
+    for member in &record.members {
+        persist_share_group_member(state, &record.id, member).await;
+    }
+}
+
+async fn persist_share_group_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_share_group(id).await;
+    }
+}
+
+async fn persist_share_group_member(state: &AppState, group_id: &str, member: &ShareGroupMember) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::ShareGroupMemberRecord {
+        group_id: group_id.to_owned(),
+        username: member.username.clone(),
+        added_at: i64::try_from(member.added_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_share_group_member(&persisted).await;
+}
+
+async fn persist_share_group_member_delete(state: &AppState, group_id: &str, username: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_share_group_member(group_id, username).await;
+    }
+}
+
+async fn persist_collection(state: &AppState, record: &CollectionRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::CollectionRecord {
+        id: record.id.clone(),
+        name: record.name.clone(),
+        description: record.description.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_collection(&persisted).await;
+    for (position, item) in record.items.iter().enumerate() {
+        persist_collection_item_with_position(state, &record.id, item, position).await;
+    }
+}
+
+async fn persist_collection_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_collection(id).await;
+    }
+}
+
+async fn persist_collection_item(state: &AppState, collection_id: &str, item: &CollectionItem) {
+    persist_collection_item_with_position(state, collection_id, item, 0).await;
+}
+
+async fn persist_collection_item_with_position(
+    state: &AppState,
+    collection_id: &str,
+    item: &CollectionItem,
+    position: usize,
+) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::CollectionItemRecord {
+        id: item.id.clone(),
+        collection_id: collection_id.to_owned(),
+        content_id: item.content_id.clone(),
+        artist: item.artist.clone(),
+        title: item.title.clone(),
+        kind: item.kind.clone(),
+        added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
+        position: i64::try_from(position).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_collection_item(&persisted).await;
+}
+
+async fn persist_collection_item_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_collection_item(id).await;
+    }
+}
+
+async fn persist_library_item(state: &AppState, record: &LibraryItemRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::LibraryItemRecord {
+        id: record.id.clone(),
+        artist: record.artist.clone(),
+        title: record.title.clone(),
+        kind: record.kind.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_library_item(&persisted).await;
+}
+
+async fn persist_library_item_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_library_item(id).await;
+    }
+}
+
+async fn persist_now_playing(state: &AppState, record: &NowPlayingRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::NowPlayingRecord {
+        username: record.username.clone(),
+        artist: record.artist.clone(),
+        title: record.title.clone(),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_now_playing(&persisted).await;
+}
+
+async fn persist_now_playing_clear(state: &AppState) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.clear_now_playing().await;
+    }
+}
+
+async fn persist_browse_record(state: &AppState, record: &BrowseRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let entries_json = serde_json::Value::Array(
+        record
+            .entries
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "filename": entry.filename,
+                    "size": entry.size,
+                    "extension": entry.extension,
+                })
+            })
+            .collect(),
+    )
+    .to_string();
+    let persisted = crate::persistence::BrowseRecord {
+        username: record.username.clone(),
+        status: record.status.to_owned(),
+        entries_json,
+        reason: record.reason.clone(),
+        folder: record.folder.clone(),
+        indirect_token: record.indirect_token.map(i64::from),
+        requested_at: record
+            .requested_at
+            .map(|timestamp| i64::try_from(timestamp).unwrap_or(i64::MAX)),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_browse_record(&persisted).await;
+}
+
+async fn persist_runtime_compat_state(state: &AppState) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let runtime = state.runtime.read().await;
+    let relay = state.relay.read().await;
+    let record = runtime.persistence_record(&relay);
+    drop(relay);
+    drop(runtime);
+    let _ = db.upsert_runtime_compat_state(&record).await;
+}
+
+async fn persist_oauth_state(state: &AppState, token: &str, record: &OAuthStateRecord) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let persisted = crate::persistence::OAuthStateRecord {
+        state: token.to_owned(),
+        provider: record.provider.clone(),
+        redirect_uri: record.redirect_uri.clone(),
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+        expires_at: i64::try_from(record.expires_at).unwrap_or(i64::MAX),
+    };
+    let _ = db.upsert_oauth_state(&persisted).await;
+}
+
+async fn persist_oauth_state_delete(state: &AppState, token: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_oauth_state(token).await;
+    }
+}
+
+async fn persist_webhook(state: &AppState, webhook: &webhooks::Webhook) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db
+            .insert_webhook(&webhook_persistence_record(webhook))
+            .await;
+    }
+}
+
+async fn persist_webhook_delete(state: &AppState, id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        let _ = db.delete_webhook(id).await;
+    }
+}
+
+async fn persist_webhook_dispatch_logs(
+    state: &AppState,
+    manager: &webhooks::WebhookManager,
+    event: webhooks::WebhookEvent,
+    correlation_id: &str,
+    request_body: &str,
+) {
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    for webhook in manager.get_for_event(event) {
+        let record = crate::persistence::WebhookLogRecord {
+            id: format!("log_{}", uuid::Uuid::new_v4()),
+            webhook_id: webhook.id.clone(),
+            event: event.to_string(),
+            correlation_id: correlation_id.to_owned(),
+            status: "queued".to_owned(),
+            request_body: request_body.to_owned(),
+            response_status: None,
+            response_body: None,
+            error_message: None,
+            attempt: 1,
+            timestamp: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
+        };
+        let _ = db.insert_webhook_log(&record).await;
+    }
+}
+
+async fn dispatch_webhook_event(
+    state: &AppState,
+    correlation_id: String,
+    event: webhooks::WebhookEvent,
+    data: serde_json::Value,
+) {
+    let webhooks = state.webhooks.read().await;
+    let webhooks_clone = webhooks.clone();
+    drop(webhooks);
+    let request_body = webhooks::WebhookPayload::new(event, correlation_id.clone(), data.clone())
+        .to_string()
+        .unwrap_or_default();
+    persist_webhook_dispatch_logs(
+        state,
+        &webhooks_clone,
+        event,
+        &correlation_id,
+        &request_body,
+    )
+    .await;
+    let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
+    tokio::spawn(async move {
+        webhooks::WebhookDispatcher::dispatch(
+            &webhooks_clone,
+            webhook_deliveries,
+            correlation_id,
+            event,
+            data,
+        )
+        .await;
+    });
+}
+
+async fn database_stats_value(state: &AppState) -> serde_json::Value {
+    let searches = state.searches.read().await;
+    let projected_searches = searches.records.len();
+    drop(searches);
+    let transfers = state.transfers.read().await;
+    let projected_transfers = transfers.entries.len();
+    drop(transfers);
+    let shares = state.shares.read().await;
+    let projected_shares = shares.entries.len();
+    drop(shares);
+    let messages = state.messages.read().await;
+    let projected_messages = messages.records.len();
+    drop(messages);
+    let users = state.users.read().await;
+    let projected_users = users.records.len();
+    drop(users);
+    let browse = state.browse.read().await;
+    let projected_browse = browse.records.len();
+    drop(browse);
+    let rooms = state.rooms.read().await;
+    let projected_rooms = rooms.records.len();
+    drop(rooms);
+    let events = state.events.read().await;
+    let projected_events = events.records.len();
+    drop(events);
+    let user_notes = state.user_notes.read().await;
+    let projected_user_notes = user_notes.records.len();
+    drop(user_notes);
+    let interests = state.interests.read().await;
+    let projected_interests = interests.liked.len() + interests.hated.len();
+    drop(interests);
+    let security = state.security.read().await;
+    let projected_security_bans = security.bans.len();
+    drop(security);
+    let wishlist = state.wishlist.read().await;
+    let projected_wishlist = wishlist.records.len();
+    drop(wishlist);
+    let contacts = state.contacts.read().await;
+    let projected_contacts = contacts.records.len();
+    drop(contacts);
+    let share_grants = state.share_grants.read().await;
+    let projected_share_grants = share_grants.records.len();
+    drop(share_grants);
+    let sharegroups = state.sharegroups.read().await;
+    let projected_sharegroups = sharegroups.records.len();
+    let projected_sharegroup_members = sharegroups
+        .records
+        .iter()
+        .map(|record| record.members.len())
+        .sum::<usize>();
+    drop(sharegroups);
+    let collections = state.collections.read().await;
+    let projected_collections = collections.records.len();
+    let projected_collection_items = collections
+        .records
+        .iter()
+        .map(|record| record.items.len())
+        .sum::<usize>();
+    drop(collections);
+    let library = state.library.read().await;
+    let projected_library_items = library.records.len();
+    drop(library);
+    let destinations = state.destinations.read().await;
+    let projected_destinations = destinations.records.len();
+    drop(destinations);
+    let now_playing = state.now_playing.read().await;
+    let projected_now_playing = now_playing.records.len();
+    drop(now_playing);
+    let oauth_states = state.oauth_states.read().await;
+    let projected_oauth_states = oauth_states.records.len();
+    drop(oauth_states);
+    let webhooks = state.webhooks.read().await;
+    let projected_webhooks = webhooks.get_all().len();
+    drop(webhooks);
+
+    let persisted = if let Some(db) = state.db.as_ref() {
+        match db.get_stats().await {
+            Ok(stats) => serde_json::json!({
+                "enabled": true,
+                "healthy": true,
+                "searches": stats.search_count,
+                "transfers": stats.transfer_count,
+                "transferEvents": stats.transfer_event_count,
+                "shares": stats.share_file_count,
+                "events": stats.event_count,
+                "messages": stats.message_count,
+                "users": stats.user_projection_count,
+                "userStats": stats.user_count,
+                "browse": stats.browse_count,
+                "rooms": stats.room_count,
+                "userNotes": stats.user_note_count,
+                "interests": stats.interest_count,
+                "securityBans": stats.security_ban_count,
+                "wishlist": stats.wishlist_count,
+                "contacts": stats.contact_count,
+                "shareGrants": stats.share_grant_count,
+                "sharegroups": stats.share_group_count,
+                "sharegroupMembers": stats.share_group_member_count,
+                "collections": stats.collection_count,
+                "collectionItems": stats.collection_item_count,
+                "libraryItems": stats.library_item_count,
+                "destinations": stats.destination_count,
+                "nowPlaying": stats.now_playing_count,
+                "runtimeState": stats.runtime_state_count,
+                "oauthStates": stats.oauth_state_count,
+                "webhooks": stats.webhook_count,
+                "webhookLogs": stats.webhook_log_count,
+            }),
+            Err(error) => serde_json::json!({
+                "enabled": true,
+                "healthy": false,
+                "error": error.to_string(),
+            }),
+        }
+    } else {
+        serde_json::json!({
+            "enabled": false,
+            "healthy": false,
+            "searches": 0,
+            "transfers": 0,
+            "transferEvents": 0,
+            "shares": 0,
+            "events": 0,
+            "messages": 0,
+            "users": 0,
+            "userStats": 0,
+            "browse": 0,
+            "rooms": 0,
+            "userNotes": 0,
+            "interests": 0,
+            "securityBans": 0,
+            "wishlist": 0,
+            "contacts": 0,
+            "shareGrants": 0,
+            "sharegroups": 0,
+            "sharegroupMembers": 0,
+            "collections": 0,
+            "collectionItems": 0,
+            "libraryItems": 0,
+            "destinations": 0,
+            "nowPlaying": 0,
+            "runtimeState": 0,
+            "oauthStates": 0,
+            "webhooks": 0,
+            "webhookLogs": 0,
+        })
+    };
+
+    let mut projections = serde_json::Map::new();
+    projections.insert("searches".to_owned(), serde_json::json!(projected_searches));
+    projections.insert(
+        "transfers".to_owned(),
+        serde_json::json!(projected_transfers),
+    );
+    projections.insert("shares".to_owned(), serde_json::json!(projected_shares));
+    projections.insert("messages".to_owned(), serde_json::json!(projected_messages));
+    projections.insert("users".to_owned(), serde_json::json!(projected_users));
+    projections.insert("browse".to_owned(), serde_json::json!(projected_browse));
+    projections.insert("rooms".to_owned(), serde_json::json!(projected_rooms));
+    projections.insert("events".to_owned(), serde_json::json!(projected_events));
+    projections.insert(
+        "userNotes".to_owned(),
+        serde_json::json!(projected_user_notes),
+    );
+    projections.insert(
+        "interests".to_owned(),
+        serde_json::json!(projected_interests),
+    );
+    projections.insert(
+        "securityBans".to_owned(),
+        serde_json::json!(projected_security_bans),
+    );
+    projections.insert("wishlist".to_owned(), serde_json::json!(projected_wishlist));
+    projections.insert("contacts".to_owned(), serde_json::json!(projected_contacts));
+    projections.insert(
+        "shareGrants".to_owned(),
+        serde_json::json!(projected_share_grants),
+    );
+    projections.insert(
+        "sharegroups".to_owned(),
+        serde_json::json!(projected_sharegroups),
+    );
+    projections.insert(
+        "sharegroupMembers".to_owned(),
+        serde_json::json!(projected_sharegroup_members),
+    );
+    projections.insert(
+        "collections".to_owned(),
+        serde_json::json!(projected_collections),
+    );
+    projections.insert(
+        "collectionItems".to_owned(),
+        serde_json::json!(projected_collection_items),
+    );
+    projections.insert(
+        "libraryItems".to_owned(),
+        serde_json::json!(projected_library_items),
+    );
+    projections.insert(
+        "destinations".to_owned(),
+        serde_json::json!(projected_destinations),
+    );
+    projections.insert(
+        "nowPlaying".to_owned(),
+        serde_json::json!(projected_now_playing),
+    );
+    projections.insert(
+        "oauthStates".to_owned(),
+        serde_json::json!(projected_oauth_states),
+    );
+    projections.insert("webhooks".to_owned(), serde_json::json!(projected_webhooks));
+
+    let mut value = serde_json::Map::new();
+    value.insert(
+        "connected".to_owned(),
+        serde_json::json!(state.db.is_some()),
+    );
+    value.insert("enabled".to_owned(), serde_json::json!(state.db.is_some()));
+    value.insert(
+        "healthy".to_owned(),
+        serde_json::json!(persisted["healthy"].as_bool().unwrap_or(false)),
+    );
+    for key in [
+        "searches",
+        "transfers",
+        "transferEvents",
+        "shares",
+        "events",
+        "messages",
+        "users",
+        "userStats",
+        "browse",
+        "rooms",
+        "userNotes",
+        "interests",
+        "securityBans",
+        "wishlist",
+        "contacts",
+        "shareGrants",
+        "sharegroups",
+        "sharegroupMembers",
+        "collections",
+        "collectionItems",
+        "libraryItems",
+        "destinations",
+        "nowPlaying",
+        "runtimeState",
+        "oauthStates",
+        "webhooks",
+        "webhookLogs",
+    ] {
+        value.insert(key.to_owned(), persisted[key].clone());
+    }
+    value.insert("persisted".to_owned(), persisted);
+    value.insert(
+        "projections".to_owned(),
+        serde_json::Value::Object(projections),
+    );
+    serde_json::Value::Object(value)
+}
+
+async fn database_cleanup_value(state: &AppState, body: &str) -> serde_json::Value {
+    let days = extract_json_i32_field(body, "days").unwrap_or(30).max(0);
+    let mut transfers = state.transfers.write().await;
+    let before = transfers.entries.len();
+    transfers
+        .entries
+        .retain(|entry| is_active_transfer_status(&entry.status) || entry.status == "queued");
+    let pruned_transfers = before.saturating_sub(transfers.entries.len());
+    transfers.persist_state();
+    drop(transfers);
+
+    let persisted_cleaned = if let Some(db) = state.db.as_ref() {
+        match db.cleanup_old_records(days).await {
+            Ok(count) => serde_json::json!({
+                "enabled": true,
+                "cleaned": count,
+            }),
+            Err(error) => serde_json::json!({
+                "enabled": true,
+                "cleaned": 0,
+                "error": error.to_string(),
+            }),
+        }
+    } else {
+        serde_json::json!({
+            "enabled": false,
+            "cleaned": 0,
+        })
+    };
+
+    serde_json::json!({
+        "status": "ok",
+        "days": days,
+        "cleaned": persisted_cleaned["cleaned"],
+        "persisted": persisted_cleaned,
+        "pruned_transfers": pruned_transfers,
+        "projectionCleanup": {
+            "transfers": pruned_transfers,
+        },
+    })
+}
+
+async fn database_vacuum_value(state: &AppState) -> serde_json::Value {
+    if let Some(db) = state.db.as_ref() {
+        match db.vacuum().await {
+            Ok(()) => serde_json::json!({
+                "vacuumed": true,
+                "enabled": true,
+                "status": "ok",
+            }),
+            Err(error) => serde_json::json!({
+                "vacuumed": false,
+                "enabled": true,
+                "status": "error",
+                "error": error.to_string(),
+            }),
+        }
+    } else {
+        serde_json::json!({
+            "vacuumed": false,
+            "enabled": false,
+            "status": "skipped",
+            "note": "database not initialized",
+        })
+    }
 }
 
 async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Result<(), String> {
@@ -13943,7 +21055,45 @@ async fn rebuild_share_index(state: &AppState) -> ShareIndexSnapshot {
         let mut shares = state.shares.write().await;
         *shares = snapshot.clone();
     }
+    persist_share_index(state, &snapshot).await;
     snapshot
+}
+
+async fn persist_share_index(state: &AppState, snapshot: &ShareIndexSnapshot) {
+    if let Some(db) = state.db.as_ref() {
+        let records = persisted_share_file_records(snapshot);
+        let _ = db.replace_share_files(&records).await;
+    }
+}
+
+fn persisted_share_file_records(
+    snapshot: &ShareIndexSnapshot,
+) -> Vec<persistence::ShareFileRecord> {
+    let updated_at = snapshot.updated_at as i64;
+    snapshot
+        .entries
+        .iter()
+        .map(|entry| {
+            let root_label = entry
+                .filename
+                .split(['/', '\\'])
+                .next()
+                .filter(|value| !value.is_empty())
+                .unwrap_or("shares")
+                .to_owned();
+            persistence::ShareFileRecord {
+                filename: entry.filename.clone(),
+                size: entry.size as i64,
+                extension: entry.extension.clone(),
+                root_label,
+                local_path: snapshot
+                    .local_paths
+                    .get(&entry.filename)
+                    .map(|path| path.display().to_string()),
+                updated_at,
+            }
+        })
+        .collect()
 }
 
 fn build_share_index(config: &AppConfig) -> ShareIndexSnapshot {
@@ -14579,6 +21729,28 @@ fn group_share_entries(entries: &[FileEntry]) -> Vec<(String, Vec<FileEntry>)> {
     folders
 }
 
+fn group_browse_entries(entries: &[BrowseEntry]) -> Vec<(String, Vec<BrowseEntry>)> {
+    let mut folders: Vec<(String, Vec<BrowseEntry>)> = Vec::new();
+    for entry in entries {
+        let (folder, filename) = entry
+            .filename
+            .rsplit_once('/')
+            .map(|(folder, filename)| (folder.to_owned(), filename.to_owned()))
+            .unwrap_or_else(|| ("".to_owned(), entry.filename.clone()));
+        let mut file = entry.clone();
+        file.filename = filename;
+        if let Some((_, files)) = folders
+            .iter_mut()
+            .find(|(existing_folder, _)| *existing_folder == folder)
+        {
+            files.push(file);
+        } else {
+            folders.push((folder, vec![file]));
+        }
+    }
+    folders
+}
+
 fn encode_file_entry(writer: &mut Writer, entry: &FileEntry) -> Result<(), String> {
     writer.write_u8(entry.code);
     writer
@@ -14734,6 +21906,22 @@ mod tests {
         search_store: super::SearchStore,
         db: Option<super::persistence::DatabaseManager>,
     ) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
+        test_state_with_env_parts_full(
+            extra_env,
+            search_store,
+            super::MessageStore::new(),
+            super::RoomStore::new(),
+            db,
+        )
+    }
+
+    fn test_state_with_env_parts_full(
+        extra_env: MapEnv,
+        search_store: super::SearchStore,
+        message_store: super::MessageStore,
+        room_store: super::RoomStore,
+        db: Option<super::persistence::DatabaseManager>,
+    ) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
@@ -14766,9 +21954,10 @@ mod tests {
             shares: RwLock::new(share_index),
             searches: RwLock::new(search_store),
             users: RwLock::new(super::UserStore::new()),
+            mesh: RwLock::new(super::MeshState::new()),
             browse: RwLock::new(super::BrowseStore::new()),
-            messages: RwLock::new(super::MessageStore::new()),
-            rooms: RwLock::new(super::RoomStore::new()),
+            messages: RwLock::new(message_store),
+            rooms: RwLock::new(room_store),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -14780,6 +21969,10 @@ mod tests {
             sharegroups: RwLock::new(super::ShareGroupStore::new()),
             user_notes: RwLock::new(super::UserNoteStore::new()),
             interests: RwLock::new(super::InterestStore::new()),
+            now_playing: RwLock::new(super::NowPlayingStore::new()),
+            relay: RwLock::new(super::RelayState::new()),
+            runtime: RwLock::new(super::RuntimeCompatState::new()),
+            security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
             library: RwLock::new(super::LibraryStore::new()),
             destinations: RwLock::new(super::DestinationStore::new()),
@@ -14969,6 +22162,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spotify_oauth_state_persists_rehydrates_and_consumes() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default()
+                .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_CLIENT_ID", "client-id")
+                .with("SLSKR_HTTP_BIND", "127.0.0.1:7788"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let authorize = super::route_http_request(
+            "POST",
+            "/api/integrations/spotify/authorize",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("authorize response");
+        assert_eq!(authorize.status, "202 Accepted");
+
+        let now = i64::try_from(super::unix_timestamp()).unwrap_or(i64::MAX);
+        let persisted = db
+            .list_oauth_states(now, 10, 0)
+            .await
+            .expect("list persisted oauth states");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].provider, "spotify");
+
+        let rehydrated = super::OAuthStateStore::from_persisted(persisted.clone());
+        assert!(rehydrated.records.contains_key(&persisted[0].state));
+
+        let callback_path = format!(
+            "/api/integrations/spotify/callback?code=abc123&state={}",
+            persisted[0].state
+        );
+        let callback = super::route_http_request("GET", &callback_path, None, "", &state)
+            .await
+            .expect("callback response");
+        assert_eq!(callback.status, "200 OK");
+        assert!(db
+            .list_oauth_states(now, 10, 0)
+            .await
+            .expect("list after consume")
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn metrics_api_returns_scrapable_counters() {
         let (state, _receiver) = test_state();
 
@@ -14985,6 +22230,13 @@ mod tests {
         assert!(response.body.contains("slskr_shares_files 1"));
         assert!(response.body.contains("slskr_shares_bytes 42"));
         assert!(response.body.contains("slskr_transfers{state=\"total\"} 0"));
+        assert!(response
+            .body
+            .contains("slskr_transfers{state=\"active\"} 0"));
+        assert!(response.body.contains("slskr_events_total 0"));
+        assert!(response
+            .body
+            .contains("slskr_runtime_operations_total{operation=\"backfill\"} 0"));
         assert!(!response.body.contains("secret"));
     }
 
@@ -15012,6 +22264,98 @@ mod tests {
         assert!(!response.body.contains("secret"));
     }
 
+    fn test_capability_descriptor(
+        username: &str,
+        features: Vec<String>,
+    ) -> slskr_client::capabilities::PeerCapabilityDescriptor {
+        slskr_client::capabilities::PeerCapabilityDescriptor {
+            peer_id: format!("{username}-peer-id"),
+            username: username.to_owned(),
+            features,
+            endpoints: vec!["tcp:127.0.0.1:2234".to_owned()],
+            issued_at_unix: 1_700_000_000,
+            expires_at_unix: 1_800_000_000,
+            public_key: [7; 32],
+            signature: Some([9; 64]),
+        }
+    }
+
+    #[tokio::test]
+    async fn mesh_rendezvous_api_discovers_users_and_mesh_capabilities() {
+        let (state, _receiver) = test_state();
+        {
+            let mut users = state.users.write().await;
+            users.watch("alice".to_owned());
+            users.watch("Bob".to_owned());
+        }
+        {
+            let mut mesh = state.mesh.write().await;
+            mesh.capability_records.push(test_capability_descriptor(
+                "ALICE",
+                vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            ));
+            mesh.capability_records.push(test_capability_descriptor(
+                "carol",
+                vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            ));
+            mesh.capability_records.push(test_capability_descriptor(
+                "dave",
+                vec![slskr_client::capabilities::FEATURE_CAPABILITIES_V1.to_owned()],
+            ));
+        }
+
+        let status = super::route_http_request(
+            "GET",
+            "/api/soulseek/mesh-rendezvous/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("mesh status");
+        assert_eq!(status.status, "200 OK");
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(status_json["enabled"], true);
+        assert_eq!(status_json["activeProbe"], false);
+        assert_eq!(status_json["interestTag"], "slskdn-mesh-v1");
+        assert_eq!(status_json["candidateCount"], 3);
+
+        let discover = super::route_http_request(
+            "GET",
+            "/api/soulseek/mesh-rendezvous/discover",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("mesh discover");
+        assert_eq!(discover.status, "200 OK");
+        let discover_json = serde_json::from_str::<serde_json::Value>(&discover.body).unwrap();
+        let users = discover_json["users"].as_array().unwrap();
+        assert_eq!(users[0]["username"], "alice");
+        assert_eq!(users[1]["username"], "Bob");
+        assert_eq!(users[2]["username"], "carol");
+        assert_eq!(discover_json["capabilityRecordCount"], 3);
+
+        let capabilities =
+            super::route_http_request("GET", "/api/soulseek/peer-capabilities", None, "", &state)
+                .await
+                .expect("peer capabilities");
+        assert_eq!(capabilities.status, "200 OK");
+        let capabilities_json =
+            serde_json::from_str::<serde_json::Value>(&capabilities.body).unwrap();
+        assert_eq!(capabilities_json["count"], 3);
+        assert_eq!(capabilities_json["records"][0]["meshCapable"], true);
+        assert_eq!(capabilities_json["records"][2]["meshCapable"], false);
+
+        let peers = super::route_http_request("GET", "/api/mesh/peers", None, "", &state)
+            .await
+            .expect("mesh peers");
+        assert_eq!(peers.status, "200 OK");
+        assert!(peers.body.contains("\"peers\""));
+        assert!(peers.body.contains("\"carol\""));
+    }
+
     #[tokio::test]
     async fn telemetry_api_returns_runtime_health_without_secrets() {
         let (state, _receiver) = test_state();
@@ -15031,9 +22375,16 @@ mod tests {
         assert!(response
             .body
             .contains("\"transfer_events_file\":\"transfer-events.tsv\""));
-        assert!(response
-            .body
-            .contains("\"shares\":{\"roots\":0,\"files\":1"));
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["shares"]["roots"], 0);
+        assert_eq!(json["shares"]["files"], 1);
+        assert_eq!(json["database"]["enabled"], false);
+        assert_eq!(json["health"]["database"], true);
+        assert_eq!(json["events"]["total"], 0);
+        assert_eq!(json["messages"]["total"], 0);
+        assert_eq!(json["rooms"]["joined"], 0);
+        assert_eq!(json["transfers"]["total"], 0);
+        assert_eq!(json["runtime"]["backfillRuns"], 0);
         assert!(!response.body.contains("secret"));
     }
 
@@ -15333,6 +22684,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn files_api_projects_folder_views_and_directory_summaries() {
+        let (state, _receiver) = test_state();
+        {
+            let mut shares = state.shares.write().await;
+            shares.roots.push(super::ShareRoot {
+                label: "Music".to_owned(),
+                files: 4,
+                bytes: 410,
+                extensions: vec![
+                    super::ShareExtensionSummary {
+                        extension: "flac".to_owned(),
+                        files: 3,
+                        bytes: 310,
+                    },
+                    super::ShareExtensionSummary {
+                        extension: "mp3".to_owned(),
+                        files: 1,
+                        bytes: 100,
+                    },
+                ],
+            });
+            for (filename, size, extension) in [
+                ("Music/Artist/Album/Track.flac", 100, "flac"),
+                ("Music/Artist/Album/Second.flac", 110, "flac"),
+                ("Music/Artist/Live/Bootleg.flac", 100, "flac"),
+                ("Music/Artist/Loose.mp3", 100, "mp3"),
+            ] {
+                shares.entries.push(FileEntry {
+                    code: 1,
+                    filename: filename.to_owned(),
+                    size,
+                    extension: extension.to_owned(),
+                    attributes: Vec::new(),
+                });
+            }
+        }
+
+        let root = super::route_http_request("GET", "/api/v0/files/Music", None, "", &state)
+            .await
+            .expect("root files response");
+        assert_eq!(root.status, "200 OK");
+        let root_json = serde_json::from_str::<serde_json::Value>(&root.body).unwrap();
+        assert_eq!(root_json["count"], 4);
+        assert_eq!(root_json["filtered_count"], 4);
+        assert_eq!(root_json["directory_count"], 1);
+        assert_eq!(root_json["directories"][0]["path"], "Artist");
+        assert_eq!(root_json["directories"][0]["file_count"], 4);
+        assert_eq!(root_json["entries"].as_array().unwrap().len(), 4);
+
+        let folder = super::route_http_request(
+            "GET",
+            "/api/v0/files/Music?folder=Artist&extension=mp3",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("folder files response");
+        assert_eq!(folder.status, "200 OK");
+        let folder_json = serde_json::from_str::<serde_json::Value>(&folder.body).unwrap();
+        assert_eq!(folder_json["folder"], "Artist");
+        assert_eq!(folder_json["recursive"], false);
+        assert_eq!(folder_json["filtered_count"], 1);
+        assert_eq!(folder_json["directory_count"], 0);
+        assert_eq!(folder_json["entries"][0]["path"], "Loose.mp3");
+        assert_eq!(
+            folder_json["entries"][0]["virtual_path"],
+            "Music/Artist/Loose.mp3"
+        );
+
+        let nested = super::route_http_request(
+            "GET",
+            "/api/v0/files/Music?folder=Artist&recursive=true&extension=flac&q=album",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("recursive folder files response");
+        assert_eq!(nested.status, "200 OK");
+        let nested_json = serde_json::from_str::<serde_json::Value>(&nested.body).unwrap();
+        assert_eq!(nested_json["recursive"], true);
+        assert_eq!(nested_json["filtered_count"], 2);
+        assert_eq!(nested_json["directory_count"], 1);
+        assert_eq!(nested_json["directories"][0]["path"], "Album");
+        assert_eq!(nested_json["entries"][0]["path"], "Album/Track.flac");
+        assert!(!nested.body.contains("Bootleg.flac"));
+        assert!(!nested.body.contains("/tmp/private"));
+    }
+
+    #[tokio::test]
     async fn slskd_file_delete_routes_are_scoped_to_storage_roots() {
         let (state, _receiver) = test_state();
         let download_file = state
@@ -15523,6 +22965,10 @@ mod tests {
     #[tokio::test]
     async fn stats_api_aggregates_projection_counts() {
         let (state, mut receiver) = test_state();
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+        }
 
         super::route_http_request(
             "POST",
@@ -15782,7 +23228,10 @@ mod tests {
         )
         .await
         .expect("enqueue download");
-        assert_eq!(enqueue.body, "true");
+        let enqueue_json = serde_json::from_str::<serde_json::Value>(&enqueue.body).unwrap();
+        assert_eq!(enqueue_json["queued"], 1);
+        assert_eq!(enqueue_json["transfers"][0]["username"], "peer1");
+        assert_eq!(enqueue_json["transfers"][0]["filename"], "Remote/Song.mp3");
 
         let downloads =
             super::route_http_request("GET", "/api/v0/transfers/downloads", None, "", &state)
@@ -15795,6 +23244,10 @@ mod tests {
             "Download"
         );
 
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+        }
         let joined =
             super::route_http_request("POST", "/api/v0/rooms/joined", None, r#""music""#, &state)
                 .await
@@ -16196,6 +23649,11 @@ mod tests {
         ];
 
         for (method, path, body) in contract_routes {
+            if path.starts_with("/api/rooms/") {
+                let mut session = state.session.write().await;
+                session.state = "connected";
+                session.updated_at = super::unix_timestamp();
+            }
             let response = tokio::time::timeout(
                 Duration::from_secs(1),
                 super::route_http_request(method, path, None, body, &state),
@@ -16276,6 +23734,14 @@ mod tests {
                 "{method} {path}: {}",
                 response.status
             );
+            let json = serde_json::from_str::<serde_json::Value>(&response.body)
+                .unwrap_or_else(|error| panic!("{method} {path}: invalid json: {error}"));
+            assert_ne!(json["status"], "disabled", "{method} {path}");
+            if path == "/api/virtualsoulfind/canonical/status" {
+                assert_eq!(json["enabled"], true);
+                assert!(json["counts"]["shares"].as_u64().unwrap() >= 1);
+                assert!(json["itemCount"].as_u64().unwrap() >= 1);
+            }
             while receiver.try_recv().is_ok() {}
         }
 
@@ -16495,6 +23961,1082 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_mutations_write_through_to_persistence() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            r#"{"query":"durable search","ttl_seconds":60}"#,
+            &state,
+        )
+        .await
+        .expect("create search");
+        assert_eq!(created.status, "201 Created");
+        let _ = receiver.try_recv();
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            r#"{"token":1,"username":"peer","files":[{"filename":"Remote/Durable.flac","size":42,"extension":"flac"}]}"#,
+            &state,
+        )
+        .await
+        .expect("ingest search response");
+        assert_eq!(response.status, "200 OK");
+        let persisted = db.get_search("1").await.expect("get search").unwrap();
+        assert_eq!(persisted.result_count, 1);
+
+        let updated = super::route_http_request(
+            "PUT",
+            "/api/v0/searches/1",
+            None,
+            r#"{"query":"durable updated","status":"failed"}"#,
+            &state,
+        )
+        .await
+        .expect("update search");
+        assert_eq!(updated.status, "200 OK");
+        let persisted = db.get_search("1").await.expect("get updated").unwrap();
+        assert_eq!(persisted.query, "durable updated");
+        assert_eq!(persisted.status, "failed");
+        assert!(persisted.completed_at.is_some());
+
+        let completed =
+            super::route_http_request("POST", "/api/v0/searches/1/complete", None, "", &state)
+                .await
+                .expect("complete search");
+        assert_eq!(completed.status, "200 OK");
+        let persisted = db.get_search("1").await.expect("get completed").unwrap();
+        assert_eq!(persisted.status, "completed");
+
+        let deleted = super::route_http_request("DELETE", "/api/v0/searches/1", None, "", &state)
+            .await
+            .expect("delete search");
+        assert_eq!(deleted.status, "200 OK");
+        assert!(db.get_search("1").await.expect("get deleted").is_none());
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            r#"{"query":"clearable"}"#,
+            &state,
+        )
+        .await
+        .expect("create clearable search");
+        assert_eq!(created.status, "201 Created");
+        let _ = receiver.try_recv();
+        assert_eq!(
+            db.list_searches(10, 0)
+                .await
+                .expect("list before clear")
+                .len(),
+            1
+        );
+
+        let cleared = super::route_http_request("DELETE", "/api/v0/searches", None, "", &state)
+            .await
+            .expect("clear searches");
+        assert_eq!(cleared.status, "200 OK");
+        assert!(db
+            .list_searches(10, 0)
+            .await
+            .expect("list after clear")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn browse_cache_persists_and_rehydrates_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let requested = super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/request",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("request browse");
+        assert_eq!(requested.status, "202 Accepted");
+        let _ = receiver.try_recv();
+
+        let ingested = super::route_http_request(
+            "POST",
+            "/api/v0/browse-responses",
+            None,
+            r#"{"username":"friend","directories":[{"name":"Remote/Album","files":[{"filename":"Track.flac","size":123,"extension":"flac"}]}]}"#,
+            &state,
+        )
+        .await
+        .expect("ingest browse");
+        assert_eq!(ingested.status, "200 OK");
+
+        let persisted = db.list_browse_records(10, 0).await.expect("list browse");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].username, "friend");
+        assert_eq!(persisted[0].status, "ready");
+        assert!(persisted[0]
+            .entries_json
+            .contains("Remote/Album/Track.flac"));
+
+        let rehydrated = super::BrowseStore::from_persisted(persisted);
+        assert!(rehydrated
+            .json(None)
+            .contains("\"filename\":\"Remote/Album/Track.flac\""));
+        assert!(rehydrated
+            .get("friend")
+            .expect("rehydrated browse")
+            .slskd_status_json()
+            .contains("\"state\":\"Completed\""));
+
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("browse database stats");
+        assert_eq!(stats.status, "200 OK");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["browse"], 1);
+        assert_eq!(stats_json["persisted"]["browse"], 1);
+        assert_eq!(stats_json["projections"]["browse"], 1);
+    }
+
+    #[tokio::test]
+    async fn share_index_persists_and_rehydrates_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let rescanned =
+            super::route_http_request("POST", "/api/v0/shares/rescan", None, "", &state)
+                .await
+                .expect("rescan shares");
+        assert_eq!(rescanned.status, "202 Accepted");
+        assert!(rescanned.body.contains("\"files\":1"));
+
+        let persisted = db.list_share_files(10, 0).await.expect("list shares");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].filename, "Virtual/Test.flac");
+        assert_eq!(persisted[0].size, 42);
+        assert_eq!(persisted[0].extension, "flac");
+        assert_eq!(persisted[0].root_label, "Virtual");
+
+        let rehydrated = super::ShareIndexSnapshot::from_persisted(&state.config, persisted);
+        assert_eq!(rehydrated.entries.len(), 1);
+        assert!(rehydrated.catalog_json(None).contains("Virtual/Test.flac"));
+        assert_eq!(rehydrated.roots.len(), 1);
+        assert_eq!(rehydrated.roots[0].label, "Virtual");
+
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("share database stats");
+        assert_eq!(stats.status, "200 OK");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["persisted"]["shares"], 1);
+        assert_eq!(stats_json["projections"]["shares"], 1);
+    }
+
+    #[tokio::test]
+    async fn event_log_persists_and_rehydrates_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        super::record_event(
+            &state,
+            "search.started",
+            "42",
+            Some("query=durable".to_owned()),
+        )
+        .await;
+
+        let persisted = db.list_events(10, 0).await.expect("list events");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].id, 1);
+        assert_eq!(persisted[0].kind, "search.started");
+        assert_eq!(persisted[0].resource, "42");
+        assert_eq!(persisted[0].detail.as_deref(), Some("query=durable"));
+
+        let rehydrated = super::EventStore::from_persisted(persisted, super::EVENT_HISTORY_LIMIT);
+        assert_eq!(rehydrated.next_id, 2);
+        assert!(rehydrated.json(None).contains("\"topic\":\"searches\""));
+        assert!(rehydrated
+            .slskd_json(Some("topic=searches"))
+            .contains("\"type\":\"search.started\""));
+
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("event database stats");
+        assert_eq!(stats.status, "200 OK");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["events"], 1);
+        assert_eq!(stats_json["persisted"]["events"], 1);
+        assert_eq!(stats_json["projections"]["events"], 1);
+    }
+
+    #[tokio::test]
+    async fn messages_and_rooms_persist_and_rehydrate_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let outbound = super::route_http_request(
+            "POST",
+            "/api/v0/messages",
+            None,
+            "{\"username\":\"friend\",\"body\":\"persisted hi\"}",
+            &state,
+        )
+        .await
+        .expect("create outbound message");
+        assert_eq!(outbound.status, "201 Created");
+        let _ = receiver.try_recv();
+
+        let inbound = super::route_http_request(
+            "POST",
+            "/api/v0/messages/inbound",
+            None,
+            "{\"username\":\"friend\",\"body\":\"persisted back\"}",
+            &state,
+        )
+        .await
+        .expect("create inbound message");
+        assert_eq!(inbound.status, "201 Created");
+        let _ = receiver.try_recv();
+
+        let acked = super::route_http_request("POST", "/api/v0/messages/1/ack", None, "", &state)
+            .await
+            .expect("ack persisted message");
+        assert_eq!(acked.status, "200 OK");
+        let _ = receiver.try_recv();
+
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+            session.updated_at = super::unix_timestamp();
+        }
+        let joined =
+            super::route_http_request("POST", "/api/v0/rooms/music/join", None, "", &state)
+                .await
+                .expect("join persisted room");
+        assert_eq!(joined.status, "201 Created");
+        let _ = receiver.try_recv();
+
+        let persisted_messages = db.list_messages(10, 0).await.expect("list messages");
+        assert_eq!(persisted_messages.len(), 2);
+        assert!(persisted_messages.iter().any(|message| {
+            message.id == "1" && message.content == "persisted hi" && message.read
+        }));
+        assert!(persisted_messages.iter().any(|message| {
+            message.id == "2" && message.content == "persisted back" && !message.read
+        }));
+        let persisted_rooms = db.list_subscribed_rooms().await.expect("list rooms");
+        assert_eq!(persisted_rooms.len(), 1);
+        assert_eq!(persisted_rooms[0].name, "music");
+
+        let rehydrated_messages = super::MessageStore::from_persisted(persisted_messages);
+        let rehydrated_rooms = super::RoomStore::from_persisted(persisted_rooms);
+        let (restarted_state, _) = test_state_with_env_parts_full(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            rehydrated_messages,
+            rehydrated_rooms,
+            Some(db),
+        );
+
+        let listed_messages =
+            super::route_http_request("GET", "/api/v0/messages/friend", None, "", &restarted_state)
+                .await
+                .expect("list rehydrated messages");
+        assert_eq!(listed_messages.status, "200 OK");
+        assert!(listed_messages.body.contains("\"count\":2"));
+        assert!(listed_messages.body.contains("\"body\":\"persisted hi\""));
+        assert!(listed_messages.body.contains("\"acknowledged\":true"));
+        assert!(listed_messages.body.contains("\"body\":\"persisted back\""));
+
+        let listed_rooms =
+            super::route_http_request("GET", "/api/v0/rooms", None, "", &restarted_state)
+                .await
+                .expect("list rehydrated rooms");
+        assert_eq!(listed_rooms.status, "200 OK");
+        assert!(listed_rooms.body.contains("\"name\":\"music\""));
+        assert!(listed_rooms.body.contains("\"joined\":true"));
+    }
+
+    #[tokio::test]
+    async fn social_and_security_state_persist_and_rehydrate_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let note = super::route_http_request(
+            "POST",
+            "/api/users/notes",
+            None,
+            r#"{"username":"friend","note":"trusted peer"}"#,
+            &state,
+        )
+        .await
+        .expect("create user note");
+        assert_eq!(note.status, "201 Created");
+        let note_json = serde_json::from_str::<serde_json::Value>(&note.body).unwrap();
+        let note_id = note_json["id"].as_str().unwrap().to_owned();
+
+        let updated_note = super::route_http_request(
+            "PUT",
+            &format!("/api/users/notes/{note_id}"),
+            None,
+            r#"{"note":"trusted peer updated"}"#,
+            &state,
+        )
+        .await
+        .expect("update user note");
+        assert_eq!(updated_note.status, "200 OK");
+
+        let liked = super::route_http_request(
+            "POST",
+            "/api/soulseek/interests",
+            None,
+            r#"{"name":"jazz"}"#,
+            &state,
+        )
+        .await
+        .expect("create liked interest");
+        assert_eq!(liked.status, "201 Created");
+
+        let hated = super::route_http_request(
+            "POST",
+            "/api/soulseek/hated-interests",
+            None,
+            r#"{"name":"low bitrate"}"#,
+            &state,
+        )
+        .await
+        .expect("create hated interest");
+        assert_eq!(hated.status, "201 Created");
+
+        let ban = super::route_http_request(
+            "POST",
+            "/api/security/bans/username",
+            None,
+            r#"{"username":"spammer"}"#,
+            &state,
+        )
+        .await
+        .expect("create username ban");
+        assert_eq!(ban.status, "200 OK");
+
+        let persisted_notes = db.list_user_notes(10, 0).await.expect("list notes");
+        assert_eq!(persisted_notes.len(), 1);
+        assert_eq!(persisted_notes[0].note, "trusted peer updated");
+        let persisted_interests = db.list_interests(10, 0).await.expect("list interests");
+        assert_eq!(persisted_interests.len(), 2);
+        assert!(persisted_interests
+            .iter()
+            .any(|record| record.kind == "liked" && record.name == "jazz"));
+        assert!(persisted_interests
+            .iter()
+            .any(|record| record.kind == "hated" && record.name == "low bitrate"));
+        let persisted_bans = db.list_security_bans().await.expect("list bans");
+        assert_eq!(persisted_bans.len(), 1);
+        assert_eq!(persisted_bans[0].kind, "username");
+        assert_eq!(persisted_bans[0].value, "spammer");
+
+        let rehydrated_notes = super::UserNoteStore::from_persisted(persisted_notes);
+        let rehydrated_interests = super::InterestStore::from_persisted(persisted_interests);
+        let rehydrated_security = super::SecurityState::from_persisted(persisted_bans);
+        assert!(rehydrated_notes
+            .json(None)
+            .contains("\"note\":\"trusted peer updated\""));
+        assert!(rehydrated_interests
+            .json_liked()
+            .contains("\"name\":\"jazz\""));
+        assert!(rehydrated_interests
+            .json_hated()
+            .contains("\"name\":\"low bitrate\""));
+        assert_eq!(rehydrated_security.active_bans(), 1);
+        assert!(rehydrated_security
+            .json_value()
+            .to_string()
+            .contains("\"value\":\"spammer\""));
+
+        let delete_note = super::route_http_request(
+            "DELETE",
+            &format!("/api/users/notes/{note_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete user note");
+        assert_eq!(delete_note.status, "200 OK");
+        let unban = super::route_http_request(
+            "DELETE",
+            "/api/security/bans/username/spammer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete username ban");
+        assert_eq!(unban.status, "200 OK");
+        assert!(db.list_user_notes(10, 0).await.unwrap().is_empty());
+        assert!(db.list_security_bans().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn compatibility_store_state_persists_and_rehydrates_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let wishlist = super::route_http_request(
+            "POST",
+            "/api/wishlist",
+            None,
+            r#"{"artist":"Alice","title":"Blue Track","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("create wishlist item");
+        assert_eq!(wishlist.status, "201 Created");
+        let wishlist_json = serde_json::from_str::<serde_json::Value>(&wishlist.body).unwrap();
+        let wish_id = wishlist_json["id"].as_str().unwrap().to_owned();
+
+        let updated_wishlist = super::route_http_request(
+            "PUT",
+            &format!("/api/wishlist/{wish_id}"),
+            None,
+            r#"{"title":"Green Track"}"#,
+            &state,
+        )
+        .await
+        .expect("update wishlist item");
+        assert_eq!(updated_wishlist.status, "200 OK");
+
+        let contact = super::route_http_request(
+            "POST",
+            "/api/contacts",
+            None,
+            r#"{"username":"friend"}"#,
+            &state,
+        )
+        .await
+        .expect("create contact");
+        assert_eq!(contact.status, "201 Created");
+        let contact_json = serde_json::from_str::<serde_json::Value>(&contact.body).unwrap();
+        let contact_id = contact_json["id"].as_str().unwrap().to_owned();
+
+        let updated_contact = super::route_http_request(
+            "PUT",
+            &format!("/api/contacts/{contact_id}"),
+            None,
+            r#"{"online":true}"#,
+            &state,
+        )
+        .await
+        .expect("update contact");
+        assert_eq!(updated_contact.status, "200 OK");
+
+        let grant = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            r#"{"collection_id":"collection-1","username":"friend"}"#,
+            &state,
+        )
+        .await
+        .expect("create share grant");
+        assert_eq!(grant.status, "201 Created");
+        let grant_json = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap();
+        let grant_id = grant_json["id"].as_str().unwrap().to_owned();
+
+        let updated_grant = super::route_http_request(
+            "PUT",
+            &format!("/api/share-grants/{grant_id}"),
+            None,
+            r#"{"permissions":"read,download"}"#,
+            &state,
+        )
+        .await
+        .expect("update share grant");
+        assert_eq!(updated_grant.status, "200 OK");
+
+        let sharegroup = super::route_http_request(
+            "POST",
+            "/api/sharegroups",
+            None,
+            r#"{"name":"Trusted peers","description":"sharing"}"#,
+            &state,
+        )
+        .await
+        .expect("create sharegroup");
+        assert_eq!(sharegroup.status, "201 Created");
+        let sharegroup_json = serde_json::from_str::<serde_json::Value>(&sharegroup.body).unwrap();
+        let sharegroup_id = sharegroup_json["id"].as_str().unwrap().to_owned();
+
+        let updated_sharegroup = super::route_http_request(
+            "PUT",
+            &format!("/api/sharegroups/{sharegroup_id}"),
+            None,
+            r#"{"name":"Trusted peers updated","description":"sharing more"}"#,
+            &state,
+        )
+        .await
+        .expect("update sharegroup");
+        assert_eq!(updated_sharegroup.status, "200 OK");
+
+        let sharegroup_member = super::route_http_request(
+            "POST",
+            &format!("/api/sharegroups/{sharegroup_id}/members"),
+            None,
+            r#"{"username":"friend"}"#,
+            &state,
+        )
+        .await
+        .expect("create sharegroup member");
+        assert_eq!(sharegroup_member.status, "201 Created");
+
+        db.upsert_destination(&super::persistence::DestinationRecord {
+            id: "archive".to_string(),
+            name: "Archive".to_string(),
+            path: "/srv/archive".to_string(),
+            is_default: true,
+            created_at: 10,
+            updated_at: 11,
+        })
+        .await
+        .expect("persist destination");
+
+        let now_playing = super::route_http_request(
+            "POST",
+            "/api/nowplaying",
+            None,
+            r#"{"username":"peer","artist":"Alice","title":"Currently Playing"}"#,
+            &state,
+        )
+        .await
+        .expect("create now playing");
+        assert_eq!(now_playing.status, "200 OK");
+
+        let persisted_wishlist = db.list_wishlist_items(10, 0).await.expect("list wishlist");
+        assert_eq!(persisted_wishlist.len(), 1);
+        assert_eq!(persisted_wishlist[0].title, "Green Track");
+        let persisted_contacts = db.list_contacts(10, 0).await.expect("list contacts");
+        assert_eq!(persisted_contacts.len(), 1);
+        assert_eq!(persisted_contacts[0].username, "friend");
+        assert!(persisted_contacts[0].online);
+        let persisted_grants = db.list_share_grants(10, 0).await.expect("list grants");
+        assert_eq!(persisted_grants.len(), 1);
+        assert_eq!(persisted_grants[0].permissions, "read,download");
+        let persisted_sharegroups = db.list_share_groups(10, 0).await.expect("list sharegroups");
+        assert_eq!(persisted_sharegroups.len(), 1);
+        assert_eq!(persisted_sharegroups[0].name, "Trusted peers updated");
+        let persisted_sharegroup_members = db
+            .list_share_group_members(10, 0)
+            .await
+            .expect("list sharegroup members");
+        assert_eq!(persisted_sharegroup_members.len(), 1);
+        assert_eq!(persisted_sharegroup_members[0].username, "friend");
+        let persisted_destinations = db
+            .list_destinations(10, 0)
+            .await
+            .expect("list destinations");
+        assert_eq!(persisted_destinations.len(), 1);
+        assert_eq!(persisted_destinations[0].name, "Archive");
+        let persisted_now_playing = db.list_now_playing(10, 0).await.expect("list now playing");
+        assert_eq!(persisted_now_playing.len(), 1);
+        assert_eq!(persisted_now_playing[0].username, "peer");
+        assert_eq!(persisted_now_playing[0].title, "Currently Playing");
+
+        let mut rehydrated_wishlist = super::WishlistStore::from_persisted(persisted_wishlist);
+        let rehydrated_contacts = super::ContactStore::from_persisted(persisted_contacts);
+        let rehydrated_grants = super::ShareGrantStore::from_persisted(persisted_grants);
+        let rehydrated_sharegroups = super::ShareGroupStore::from_persisted(
+            persisted_sharegroups,
+            persisted_sharegroup_members,
+        );
+        let rehydrated_destinations =
+            super::DestinationStore::from_persisted(persisted_destinations);
+        let rehydrated_now_playing = super::NowPlayingStore::from_persisted(persisted_now_playing);
+        assert!(rehydrated_wishlist
+            .json_array()
+            .contains("\"title\":\"Green Track\""));
+        assert!(rehydrated_contacts
+            .nearby_json(None)
+            .contains("\"username\":\"friend\""));
+        assert!(rehydrated_grants
+            .json_array()
+            .contains("\"permissions\":\"read,download\""));
+        assert!(rehydrated_sharegroups
+            .json_array(None)
+            .contains("\"name\":\"Trusted peers updated\""));
+        assert!(rehydrated_sharegroups
+            .user_group_json("friend")
+            .contains("\"group\":\"Trusted peers updated\""));
+        assert!(rehydrated_destinations
+            .list()
+            .contains("\"name\":\"Archive\""));
+        assert!(rehydrated_destinations
+            .default()
+            .contains("\"path\":\"/srv/archive\""));
+        assert!(rehydrated_now_playing
+            .json()
+            .contains("\"title\":\"Currently Playing\""));
+
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("compat database stats");
+        assert_eq!(stats.status, "200 OK");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["wishlist"], 1);
+        assert_eq!(stats_json["contacts"], 1);
+        assert_eq!(stats_json["shareGrants"], 1);
+        assert_eq!(stats_json["sharegroups"], 1);
+        assert_eq!(stats_json["sharegroupMembers"], 1);
+        assert_eq!(stats_json["destinations"], 1);
+        assert_eq!(stats_json["nowPlaying"], 1);
+        assert_eq!(stats_json["persisted"]["destinations"], 1);
+        assert_eq!(stats_json["persisted"]["nowPlaying"], 1);
+        assert_eq!(stats_json["projections"]["destinations"], 1);
+        assert_eq!(stats_json["projections"]["nowPlaying"], 1);
+
+        let clear_now_playing =
+            super::route_http_request("DELETE", "/api/nowplaying", None, "", &state)
+                .await
+                .expect("clear now playing");
+        assert_eq!(clear_now_playing.status, "200 OK");
+        assert!(db.list_now_playing(10, 0).await.unwrap().is_empty());
+
+        let delete_wishlist = super::route_http_request(
+            "DELETE",
+            &format!("/api/wishlist/{wish_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete wishlist item");
+        assert_eq!(delete_wishlist.status, "200 OK");
+        let delete_contact = super::route_http_request(
+            "DELETE",
+            &format!("/api/contacts/{contact_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete contact");
+        assert_eq!(delete_contact.status, "200 OK");
+        let delete_grant = super::route_http_request(
+            "DELETE",
+            &format!("/api/share-grants/{grant_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete share grant");
+        assert_eq!(delete_grant.status, "200 OK");
+        let delete_member = super::route_http_request(
+            "DELETE",
+            &format!("/api/sharegroups/{sharegroup_id}/members/friend"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete sharegroup member");
+        assert_eq!(delete_member.status, "200 OK");
+        let delete_sharegroup = super::route_http_request(
+            "DELETE",
+            &format!("/api/sharegroups/{sharegroup_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete sharegroup");
+        assert_eq!(delete_sharegroup.status, "200 OK");
+        assert!(db.list_wishlist_items(10, 0).await.unwrap().is_empty());
+        assert!(db.list_contacts(10, 0).await.unwrap().is_empty());
+        assert!(db.list_share_grants(10, 0).await.unwrap().is_empty());
+        assert!(db.list_share_groups(10, 0).await.unwrap().is_empty());
+        assert!(db.list_share_group_members(10, 0).await.unwrap().is_empty());
+        db.delete_destination("archive")
+            .await
+            .expect("delete destination");
+        assert!(db.list_destinations(10, 0).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn library_and_collection_state_persists_and_rehydrates_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Road Trip","description":"queued albums"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection");
+        assert_eq!(collection.status, "201 Created");
+        let collection_json = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap();
+        let collection_id = collection_json["id"].as_str().unwrap().to_owned();
+
+        let collection_item = super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/items"),
+            None,
+            r#"{"content_id":"track-1","artist":"Alice","title":"One","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection item");
+        assert_eq!(collection_item.status, "201 Created");
+        let collection_item_json =
+            serde_json::from_str::<serde_json::Value>(&collection_item.body).unwrap();
+        let collection_item_id = collection_item_json["id"].as_str().unwrap().to_owned();
+
+        let updated_collection_item = super::route_http_request(
+            "PUT",
+            &format!("/api/collections/items/{collection_item_id}"),
+            None,
+            r#"{"title":"Two"}"#,
+            &state,
+        )
+        .await
+        .expect("update collection item");
+        assert_eq!(updated_collection_item.status, "200 OK");
+
+        let library_item = super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"Bob","title":"","kind":""}"#,
+            &state,
+        )
+        .await
+        .expect("create library item");
+        assert_eq!(library_item.status, "201 Created");
+        let library_json = serde_json::from_str::<serde_json::Value>(&library_item.body).unwrap();
+        let library_id = library_json["id"].as_str().unwrap().to_owned();
+
+        let patched = super::route_http_request(
+            "PATCH",
+            &format!("/api/library/health/issues/{library_id}-missing-title"),
+            None,
+            r#"{"title":"Fixed Title"}"#,
+            &state,
+        )
+        .await
+        .expect("patch library issue");
+        assert_eq!(patched.status, "200 OK");
+        let fixed =
+            super::route_http_request("POST", "/api/library/health/issues/fix", None, "", &state)
+                .await
+                .expect("fix library issues");
+        assert_eq!(fixed.status, "200 OK");
+
+        let persisted_collections = db.list_collections(10, 0).await.expect("list collections");
+        assert_eq!(persisted_collections.len(), 1);
+        assert_eq!(persisted_collections[0].name, "Road Trip");
+        let persisted_collection_items = db
+            .list_collection_items(10, 0)
+            .await
+            .expect("list collection items");
+        assert_eq!(persisted_collection_items.len(), 1);
+        assert_eq!(persisted_collection_items[0].title, "Two");
+        let persisted_library = db.list_library_items(10, 0).await.expect("list library");
+        assert_eq!(persisted_library.len(), 1);
+        assert_eq!(persisted_library[0].title, "Fixed Title");
+        assert_eq!(persisted_library[0].kind, "Audio");
+
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("collection/library database stats");
+        assert_eq!(stats.status, "200 OK");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["collections"], 1);
+        assert_eq!(stats_json["collectionItems"], 1);
+        assert_eq!(stats_json["libraryItems"], 1);
+        assert_eq!(stats_json["persisted"]["collections"], 1);
+        assert_eq!(stats_json["persisted"]["collectionItems"], 1);
+        assert_eq!(stats_json["persisted"]["libraryItems"], 1);
+        assert_eq!(stats_json["projections"]["collections"], 1);
+        assert_eq!(stats_json["projections"]["collectionItems"], 1);
+        assert_eq!(stats_json["projections"]["libraryItems"], 1);
+
+        let rehydrated_collections = super::CollectionStore::from_persisted(
+            persisted_collections,
+            persisted_collection_items,
+        );
+        let rehydrated_library = super::LibraryStore::from_persisted(persisted_library);
+        assert!(rehydrated_collections
+            .json_array(None)
+            .contains("\"title\":\"Two\""));
+        assert!(rehydrated_library
+            .json()
+            .contains("\"title\":\"Fixed Title\""));
+
+        let delete_collection_item = super::route_http_request(
+            "DELETE",
+            &format!("/api/collections/items/{collection_item_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete collection item");
+        assert_eq!(delete_collection_item.status, "200 OK");
+        let delete_collection = super::route_http_request(
+            "DELETE",
+            &format!("/api/collections/{collection_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete collection");
+        assert_eq!(delete_collection.status, "200 OK");
+        let delete_library = super::route_http_request(
+            "DELETE",
+            &format!("/api/library/items/{library_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete library item");
+        assert_eq!(delete_library.status, "200 OK");
+        assert!(db.list_collections(10, 0).await.unwrap().is_empty());
+        assert!(db.list_collection_items(10, 0).await.unwrap().is_empty());
+        assert!(db.list_library_items(10, 0).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn database_admin_aliases_report_live_state_and_cleanup() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let old_message = super::persistence::MessageRecord {
+            id: "old".to_owned(),
+            username: "friend".to_owned(),
+            content: "old".to_owned(),
+            direction: "inbound".to_owned(),
+            read: false,
+            created_at: 1,
+        };
+        db.insert_message(&old_message).await.expect("old message");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        {
+            let mut transfers = state.transfers.write().await;
+            let failed = transfers.create(
+                0,
+                Some("peer".to_owned()),
+                "Remote/Failed.flac".to_owned(),
+                None,
+                Some(10),
+            );
+            transfers.update_status(failed.id, "failed", Some(1), Some("offline".to_owned()));
+        }
+
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("admin database stats");
+        assert_eq!(stats.status, "200 OK");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["enabled"], true);
+        assert_eq!(stats_json["healthy"], true);
+        assert_eq!(stats_json["messages"], 1);
+        assert_eq!(stats_json["persisted"]["messages"], 1);
+        assert_eq!(stats_json["projections"]["transfers"], 1);
+
+        let cleanup = super::route_http_request(
+            "POST",
+            "/api/database/cleanup",
+            None,
+            "{\"days\":0}",
+            &state,
+        )
+        .await
+        .expect("legacy database cleanup");
+        assert_eq!(cleanup.status, "200 OK");
+        let cleanup_json = serde_json::from_str::<serde_json::Value>(&cleanup.body).unwrap();
+        assert_eq!(cleanup_json["status"], "ok");
+        assert_eq!(cleanup_json["persisted"]["enabled"], true);
+        assert_eq!(cleanup_json["cleaned"], 1);
+        assert_eq!(cleanup_json["pruned_transfers"], 1);
+
+        let vacuum =
+            super::route_http_request("POST", "/api/admin/database/vacuum", None, "", &state)
+                .await
+                .expect("admin database vacuum");
+        assert_eq!(vacuum.status, "200 OK");
+        let vacuum_json = serde_json::from_str::<serde_json::Value>(&vacuum.body).unwrap();
+        assert_eq!(vacuum_json["enabled"], true);
+        assert_eq!(vacuum_json["vacuumed"], true);
+    }
+
+    #[tokio::test]
+    async fn runtime_compat_state_persists_and_rehydrates_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let restart = super::route_http_request("PUT", "/api/application", None, "{}", &state)
+            .await
+            .expect("restart request");
+        assert_eq!(restart.status, "202 Accepted");
+        let gc = super::route_http_request("POST", "/api/application/gc", None, "", &state)
+            .await
+            .expect("gc");
+        assert_eq!(gc.status, "200 OK");
+        let autoreplace =
+            super::route_http_request("PUT", "/api/autoreplace/enable", None, "", &state)
+                .await
+                .expect("autoreplace");
+        assert_eq!(autoreplace.status, "200 OK");
+        let relay =
+            super::route_http_request("POST", "/api/relay", None, r#"{"enabled":true}"#, &state)
+                .await
+                .expect("relay");
+        assert_eq!(relay.status, "200 OK");
+        let relay_agent = super::route_http_request(
+            "PUT",
+            "/api/relay/agent",
+            None,
+            r#"{"enabled":true}"#,
+            &state,
+        )
+        .await
+        .expect("relay agent");
+        assert_eq!(relay_agent.status, "200 OK");
+        let bridge_config = super::route_http_request(
+            "PUT",
+            "/api/bridge/admin/config",
+            None,
+            r#"{"enabled":true}"#,
+            &state,
+        )
+        .await
+        .expect("bridge config");
+        assert_eq!(bridge_config.status, "200 OK");
+        let invite = super::route_http_request("POST", "/api/profile/invite", None, "{}", &state)
+            .await
+            .expect("invite");
+        assert_eq!(invite.status, "201 Created");
+        let warm_cache =
+            super::route_http_request("POST", "/api/slskdn/warm-cache", None, "{}", &state)
+                .await
+                .expect("warm cache");
+        assert_eq!(warm_cache.status, "202 Accepted");
+        let songid = super::route_http_request("POST", "/api/songid/runs", None, "{}", &state)
+            .await
+            .expect("songid");
+        assert_eq!(songid.status, "202 Accepted");
+        let backfill = super::route_http_request("POST", "/api/backfill", None, "{}", &state)
+            .await
+            .expect("backfill");
+        assert_eq!(backfill.status, "202 Accepted");
+
+        let persisted = db
+            .get_runtime_compat_state()
+            .await
+            .expect("get runtime state")
+            .expect("runtime state persisted");
+        assert!(persisted.application_restart_requested);
+        assert_eq!(persisted.gc_runs, 1);
+        assert!(persisted.autoreplace_enabled);
+        assert!(persisted.relay_enabled);
+        assert!(persisted.relay_agent_enabled);
+        assert_eq!(persisted.bridge_config_updates, 1);
+        assert_eq!(persisted.profile_invites_created, 1);
+        assert_eq!(persisted.cache_warm_runs, 1);
+        assert_eq!(persisted.songid_runs, 1);
+        assert_eq!(persisted.backfill_runs, 1);
+
+        let rehydrated_relay = super::RelayState::from_persisted(&persisted);
+        let rehydrated_runtime = super::RuntimeCompatState::from_persisted(&persisted);
+        assert!(rehydrated_relay.enabled);
+        let runtime_json = rehydrated_runtime.json_value();
+        assert_eq!(runtime_json["pendingRestart"], true);
+        assert_eq!(runtime_json["autoreplaceEnabled"], true);
+        assert_eq!(runtime_json["relayAgentEnabled"], true);
+        assert_eq!(runtime_json["bridgeConfigUpdates"], 1);
+        assert_eq!(runtime_json["profileInvitesCreated"], 1);
+        assert_eq!(runtime_json["cacheWarmRuns"], 1);
+        assert_eq!(runtime_json["songidRuns"], 1);
+        assert_eq!(runtime_json["backfillRuns"], 1);
+
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("database stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["runtimeState"], 1);
+        assert_eq!(stats_json["persisted"]["runtimeState"], 1);
+    }
+
+    #[tokio::test]
     async fn search_api_lists_with_filters_and_pagination() {
         let (state, mut receiver) = test_state();
 
@@ -16555,6 +25097,12 @@ mod tests {
         .expect("create search");
         assert_eq!(created.status, "201 Created");
         assert!(created.body.contains("\"expires_at\":"));
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert_eq!(
+            created_json["expires_at"].as_u64().unwrap()
+                - created_json["created_at"].as_u64().unwrap(),
+            1
+        );
         let _ = receiver.try_recv();
 
         {
@@ -16580,6 +25128,44 @@ mod tests {
         assert_eq!(pruned.status, "200 OK");
         assert!(pruned.body.contains("\"pruned\":1"));
         assert!(pruned.body.contains("\"remaining\":0"));
+    }
+
+    #[tokio::test]
+    async fn search_create_accepts_camel_case_ttl_and_caps_large_values() {
+        let (state, mut receiver) = test_state();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"bounded\",\"ttlSeconds\":999999}",
+            &state,
+        )
+        .await
+        .expect("create search");
+        assert_eq!(created.status, "201 Created");
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert_eq!(
+            created_json["expires_at"].as_u64().unwrap()
+                - created_json["created_at"].as_u64().unwrap(),
+            super::MAX_SEARCH_TTL_SECONDS
+        );
+        let _ = receiver.try_recv();
+
+        let invalid = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"bad ttl\",\"ttl_seconds\":0}",
+            &state,
+        )
+        .await
+        .expect("invalid ttl");
+        assert_eq!(invalid.status, "400 Bad Request");
+        assert_eq!(
+            invalid.body,
+            "{\"error\":\"search ttl_seconds must be greater than zero\"}"
+        );
     }
 
     #[tokio::test]
@@ -16611,7 +25197,9 @@ mod tests {
             .expect("events response");
         assert_eq!(events.status, "200 OK");
         assert!(events.body.contains("\"kind\":\"search.started\""));
+        assert!(events.body.contains("\"topic\":\"searches\""));
         assert!(events.body.contains("\"kind\":\"message.received\""));
+        assert!(events.body.contains("\"topic\":\"messages\""));
         assert!(events.body.contains("\"count\":2"));
 
         let filtered = super::route_http_request(
@@ -16627,6 +25215,38 @@ mod tests {
         assert!(filtered.body.contains("\"filtered_count\":1"));
         assert!(filtered.body.contains("\"resource\":\"1\""));
         assert!(!filtered.body.contains("message.received"));
+
+        let topic_filtered = super::route_http_request(
+            "GET",
+            "/api/v0/events/records?topic=messages",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("topic-filtered events");
+        assert_eq!(topic_filtered.status, "200 OK");
+        assert!(topic_filtered.body.contains("\"filtered_count\":1"));
+        assert!(topic_filtered
+            .body
+            .contains("\"kind\":\"message.received\""));
+        assert!(!topic_filtered.body.contains("search.started"));
+
+        let slskd_events = super::route_http_request(
+            "GET",
+            "/api/v0/events?topic=searches&q=search",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("slskd events");
+        assert_eq!(slskd_events.status, "200 OK");
+        let slskd_json = serde_json::from_str::<serde_json::Value>(&slskd_events.body).unwrap();
+        assert_eq!(slskd_json.as_array().unwrap().len(), 1);
+        assert_eq!(slskd_json[0]["topic"], "searches");
+        assert_eq!(slskd_json[0]["type"], "search.started");
+        assert_eq!(slskd_json[0]["payload"]["resource"], "1");
     }
 
     #[tokio::test]
@@ -16704,6 +25324,104 @@ mod tests {
         .expect("capped webhook");
         assert_eq!(capped.status, "400 Bad Request");
         assert_eq!(capped.body, "{\"error\":\"webhook limit reached\"}");
+    }
+
+    #[tokio::test]
+    async fn webhook_config_persists_rehydrates_and_records_dispatch_logs() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let secret = super::webhooks::Webhook::generate_secret();
+        let created = super::route_http_request(
+            "POST",
+            "/api/webhooks",
+            None,
+            &format!(
+                "{{\"url\":\"https://example.com/hook\",\"events\":\"search.created,message.sent\",\"secret\":\"{}\"}}",
+                super::json_escape(&secret)
+            ),
+            &state,
+        )
+        .await
+        .expect("create webhook");
+        assert_eq!(created.status, "201 Created");
+        let created_json: serde_json::Value = serde_json::from_str(&created.body).unwrap();
+        let webhook_id = created_json["id"].as_str().expect("webhook id");
+
+        let persisted = db.list_webhooks().await.expect("list webhooks");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].id, webhook_id);
+        assert_eq!(persisted[0].events, "search.created,message.sent");
+
+        let rehydrated = super::webhooks::WebhookManager::from_webhooks(
+            persisted
+                .clone()
+                .into_iter()
+                .filter_map(super::webhook_from_persisted)
+                .collect(),
+        );
+        assert_eq!(rehydrated.get_all().len(), 1);
+        assert!(rehydrated
+            .get_for_event(super::webhooks::WebhookEvent::MessageSent)
+            .iter()
+            .any(|webhook| webhook.id == webhook_id));
+
+        let patched = super::route_http_request(
+            "PATCH",
+            &format!("/api/webhooks/{webhook_id}"),
+            None,
+            "{\"active\":false}",
+            &state,
+        )
+        .await
+        .expect("patch webhook");
+        assert_eq!(patched.status, "200 OK");
+        let persisted_patch = db.get_webhook(webhook_id).await.unwrap().unwrap();
+        assert!(!persisted_patch.active);
+
+        let _ = super::route_http_request(
+            "PATCH",
+            &format!("/api/webhooks/{webhook_id}"),
+            None,
+            "{\"active\":true}",
+            &state,
+        )
+        .await
+        .expect("reactivate webhook");
+        let created_search = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"webhook log\"}",
+            &state,
+        )
+        .await
+        .expect("create search");
+        assert_eq!(created_search.status, "201 Created");
+        let logs = db
+            .get_webhook_logs(webhook_id, 10, 0)
+            .await
+            .expect("webhook logs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].event, "search.created");
+        assert_eq!(logs[0].status, "queued");
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/webhooks/{webhook_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete webhook");
+        assert_eq!(deleted.status, "200 OK");
+        assert!(db.list_webhooks().await.expect("list deleted").is_empty());
     }
 
     #[tokio::test]
@@ -16988,6 +25706,7 @@ mod tests {
         assert!(response.body.contains("\"peer_username\":\"peer1\""));
         assert!(response.body.contains("\"filename\":\"Remote/Song.mp3\""));
         assert!(response.body.contains("\"extension\":\"mp3\""));
+        assert!(response.body.contains("\"locked\":false"));
         assert!(response.body.contains("\"slot_free\":false"));
         assert!(response.body.contains("\"average_speed\":12"));
         assert!(response.body.contains("\"queue_length\":3"));
@@ -17000,6 +25719,307 @@ mod tests {
         assert!(responses.body.starts_with('['));
         assert!(responses.body.contains("\"token\":1"));
         assert!(responses.body.contains("\"filename\":\"Remote/Song.mp3\""));
+    }
+
+    #[tokio::test]
+    async fn search_response_api_accepts_slskd_group_payload() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"remote\"}",
+            &state,
+        )
+        .await
+        .unwrap();
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            "{\"token\":1,\"username\":\"peer1\",\"hasFreeUploadSlot\":false,\"uploadSpeed\":88,\"queueLength\":5,\"files\":[{\"filename\":\"Public/One.flac\",\"size\":11}],\"lockedFiles\":[{\"filename\":\"Private/Two.mp3\",\"size\":22}]}",
+            &state,
+        )
+        .await
+        .expect("slskd search response");
+
+        assert_eq!(response.status, "200 OK");
+        let search_json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(search_json["result_count"], 2);
+        assert_eq!(search_json["lockedFileCount"], 1);
+        assert_eq!(search_json["results"][0]["peer_username"], "peer1");
+        assert_eq!(search_json["results"][0]["slot_free"], false);
+        assert_eq!(search_json["results"][0]["average_speed"], 88);
+        assert_eq!(search_json["results"][0]["queue_length"], 5);
+
+        let responses =
+            super::route_http_request("GET", "/api/v0/searches/1/responses", None, "", &state)
+                .await
+                .expect("search responses");
+        let responses_json = serde_json::from_str::<serde_json::Value>(&responses.body).unwrap();
+        assert_eq!(responses_json[0]["username"], "peer1");
+        assert_eq!(responses_json[0]["fileCount"], 1);
+        assert_eq!(responses_json[0]["lockedFileCount"], 1);
+        assert_eq!(responses_json[0]["files"][0]["filename"], "Public/One.flac");
+        assert_eq!(
+            responses_json[0]["lockedFiles"][0]["filename"],
+            "Private/Two.mp3"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_detail_routes_page_result_arrays_without_changing_totals() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"remote\"}",
+            &state,
+        )
+        .await
+        .unwrap();
+
+        for filename in ["Remote/One.flac", "Remote/Two.flac", "Remote/Three.flac"] {
+            let body = format!(
+                "{{\"token\":1,\"peer_username\":\"peer1\",\"filename\":\"{}\",\"size\":99}}",
+                filename
+            );
+            super::route_http_request("POST", "/api/v0/search-responses", None, &body, &state)
+                .await
+                .expect("ingest response");
+        }
+
+        for path in [
+            "/api/v0/searches/1?offset=1&limit=1",
+            "/api/searches/1?offset=1&limit=1",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("paged search detail");
+            assert_eq!(response.status, "200 OK");
+            let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+            assert_eq!(json["result_count"], 3);
+            assert_eq!(json["fileCount"], 3);
+            assert_eq!(json["resultOffset"], 1);
+            assert_eq!(json["resultLimit"], 1);
+            assert_eq!(json["results"].as_array().unwrap().len(), 1);
+            assert_eq!(json["results"][0]["filename"], "Remote/Two.flac");
+        }
+    }
+
+    #[tokio::test]
+    async fn search_response_routes_page_and_filter_peer_groups() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"remote\"}",
+            &state,
+        )
+        .await
+        .expect("create search");
+
+        for (peer, filename) in [
+            ("alpha", "Remote/Alpha.flac"),
+            ("beta", "Remote/Beta.flac"),
+            ("gamma", "Remote/Gamma.flac"),
+            ("gamma", "Remote/Gamma-Alt.flac"),
+        ] {
+            let body = format!(
+                "{{\"token\":1,\"peer_username\":\"{}\",\"filename\":\"{}\",\"size\":99}}",
+                peer, filename
+            );
+            super::route_http_request("POST", "/api/v0/search-responses", None, &body, &state)
+                .await
+                .expect("ingest response");
+        }
+
+        let paged = super::route_http_request(
+            "GET",
+            "/api/v0/searches/1/responses?offset=1&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("paged responses");
+        assert_eq!(paged.status, "200 OK");
+        let paged_json = serde_json::from_str::<serde_json::Value>(&paged.body).unwrap();
+        assert_eq!(paged_json.as_array().unwrap().len(), 1);
+        assert_eq!(paged_json[0]["username"], "beta");
+        assert_eq!(paged_json[0]["fileCount"], 1);
+
+        let filtered = super::route_http_request(
+            "GET",
+            "/api/searches/1/responses?username=gamma&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered responses");
+        assert_eq!(filtered.status, "200 OK");
+        let filtered_json = serde_json::from_str::<serde_json::Value>(&filtered.body).unwrap();
+        assert_eq!(filtered_json.as_array().unwrap().len(), 1);
+        assert_eq!(filtered_json[0]["username"], "gamma");
+        assert_eq!(filtered_json[0]["fileCount"], 2);
+        assert_eq!(filtered_json[0]["files"].as_array().unwrap().len(), 2);
+
+        let query_filtered = super::route_http_request(
+            "GET",
+            "/api/v0/searches/1/responses?q=beta",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("query filtered responses");
+        let query_json = serde_json::from_str::<serde_json::Value>(&query_filtered.body).unwrap();
+        assert_eq!(query_json.as_array().unwrap().len(), 1);
+        assert_eq!(query_json[0]["username"], "beta");
+    }
+
+    #[tokio::test]
+    async fn search_update_routes_mutate_lifecycle_and_query_projection() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"original\"}",
+            &state,
+        )
+        .await
+        .expect("create search");
+
+        let completed = super::route_http_request(
+            "PUT",
+            "/api/searches/1",
+            None,
+            "{\"state\":\"Completed\",\"searchText\":\"renamed\"}",
+            &state,
+        )
+        .await
+        .expect("update search");
+        assert_eq!(completed.status, "200 OK");
+        let completed_json = serde_json::from_str::<serde_json::Value>(&completed.body).unwrap();
+        assert_eq!(completed_json["updated"], true);
+        assert_eq!(completed_json["query"], "renamed");
+        assert_eq!(completed_json["status"], "completed");
+        assert_eq!(completed_json["state"], "Completed");
+        assert_eq!(completed_json["isComplete"], true);
+
+        let active = super::route_http_request(
+            "PUT",
+            "/api/v0/searches/1",
+            None,
+            "{\"isComplete\":false}",
+            &state,
+        )
+        .await
+        .expect("reactivate search");
+        assert_eq!(active.status, "200 OK");
+        let active_json = serde_json::from_str::<serde_json::Value>(&active.body).unwrap();
+        assert_eq!(active_json["updated"], true);
+        assert_eq!(active_json["status"], "active");
+        assert_eq!(active_json["state"], "InProgress");
+        assert_eq!(active_json["isComplete"], false);
+
+        let fetched = super::route_http_request("GET", "/api/v0/searches/1", None, "", &state)
+            .await
+            .expect("fetch updated search");
+        let fetched_json = serde_json::from_str::<serde_json::Value>(&fetched.body).unwrap();
+        assert_eq!(fetched_json["query"], "renamed");
+        assert_eq!(fetched_json["status"], "active");
+    }
+
+    #[tokio::test]
+    async fn search_action_routes_preserve_cancel_fail_and_expire_lifecycle() {
+        let (state, _receiver) = test_state();
+        for query in ["cancel me", "fail me", "expire me"] {
+            super::route_http_request(
+                "POST",
+                "/api/v0/searches",
+                None,
+                &format!(r#"{{"query":"{query}"}}"#),
+                &state,
+            )
+            .await
+            .expect("create search");
+        }
+
+        for (path, status, state_name) in [
+            ("/api/v0/searches/1/cancel", "cancelled", "Cancelled"),
+            ("/api/searches/2/fail", "failed", "Failed"),
+            ("/api/v0/searches/3/expire", "expired", "Expired"),
+        ] {
+            let response = super::route_http_request("POST", path, None, "", &state)
+                .await
+                .expect("search action");
+            assert_eq!(response.status, "200 OK");
+            let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+            assert_eq!(json["status"], status);
+            assert_eq!(json["state"], state_name);
+            assert_eq!(json["isComplete"], true);
+        }
+
+        let listed = super::route_http_request(
+            "GET",
+            "/api/v0/searches/records?status=cancelled",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list cancelled searches");
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        assert_eq!(listed_json["filtered_count"], 1);
+        assert_eq!(listed_json["entries"][0]["state"], "Cancelled");
+    }
+
+    #[tokio::test]
+    async fn search_response_api_projects_locked_files_for_slskd_shape() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"remote\"}",
+            &state,
+        )
+        .await
+        .unwrap();
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            "{\"token\":1,\"peer_username\":\"peer1\",\"filename\":\"Private/Locked.flac\",\"size\":321,\"isLocked\":true,\"slot_free\":true}",
+            &state,
+        )
+        .await
+        .expect("ingest locked response");
+
+        assert_eq!(response.status, "200 OK");
+        let search_json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(search_json["lockedFileCount"], 1);
+        assert_eq!(search_json["results"][0]["locked"], true);
+
+        let responses =
+            super::route_http_request("GET", "/api/v0/searches/1/responses", None, "", &state)
+                .await
+                .expect("search responses");
+        let responses_json = serde_json::from_str::<serde_json::Value>(&responses.body).unwrap();
+        assert_eq!(responses_json[0]["fileCount"], 0);
+        assert_eq!(responses_json[0]["lockedFileCount"], 1);
+        assert_eq!(
+            responses_json[0]["lockedFiles"][0]["filename"],
+            "Private/Locked.flac"
+        );
+        assert_eq!(responses_json[0]["lockedFiles"][0]["isLocked"], true);
     }
 
     #[tokio::test]
@@ -17051,18 +26071,36 @@ mod tests {
             average_speed: 42,
             queue_length: 7,
             unknown: 0,
-            private_results: Vec::new(),
+            private_results: vec![FileEntry {
+                code: 1,
+                filename: "Private/Locked.flac".to_owned(),
+                size: 456,
+                extension: "flac".to_owned(),
+                attributes: Vec::new(),
+            }],
         };
 
         let updated = store
             .add_peer_response(&response)
             .expect("peer response accepted");
 
-        assert_eq!(updated.results.len(), 1);
+        assert_eq!(updated.results.len(), 2);
         assert_eq!(updated.results[0].peer_username.as_deref(), Some("peer1"));
+        assert!(!updated.results[0].locked);
         assert_eq!(updated.results[0].slot_free, Some(false));
         assert_eq!(updated.results[0].average_speed, Some(42));
         assert_eq!(updated.results[0].queue_length, Some(7));
+        assert_eq!(updated.results[1].filename, "Private/Locked.flac");
+        assert!(updated.results[1].locked);
+        let responses = serde_json::from_str::<serde_json::Value>(&updated.slskd_responses_json())
+            .expect("response json");
+        assert_eq!(responses[0]["fileCount"], 1);
+        assert_eq!(responses[0]["lockedFileCount"], 1);
+        assert_eq!(responses[0]["files"][0]["filename"], "Remote/Song.flac");
+        assert_eq!(
+            responses[0]["lockedFiles"][0]["filename"],
+            "Private/Locked.flac"
+        );
     }
 
     #[tokio::test]
@@ -17137,6 +26175,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transfer_mutations_write_through_to_persistence() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"filename":"Remote/Persisted.flac","size":100}"#,
+            &state,
+        )
+        .await
+        .expect("create persisted transfer");
+        assert_eq!(created.status, "201 Created");
+        let persisted = db.get_transfer("1").await.expect("get created").unwrap();
+        assert_eq!(persisted.direction, "download");
+        assert_eq!(persisted.status, "queued");
+        assert_eq!(persisted.filesize, 100);
+
+        let started =
+            super::route_http_request("POST", "/api/v0/transfers/1/start", None, "", &state)
+                .await
+                .expect("start persisted transfer");
+        assert_eq!(started.status, "200 OK");
+        let persisted = db.get_transfer("1").await.expect("get started").unwrap();
+        assert_eq!(persisted.status, "in_progress");
+
+        let progressed = super::route_http_request(
+            "POST",
+            "/api/v0/transfers/1/progress",
+            None,
+            r#"{"bytes_transferred":40}"#,
+            &state,
+        )
+        .await
+        .expect("progress persisted transfer");
+        assert_eq!(progressed.status, "200 OK");
+        let persisted = db.get_transfer("1").await.expect("get progressed").unwrap();
+        assert_eq!(persisted.status, "in_progress");
+        assert_eq!(persisted.progress, 40);
+
+        let completed = super::route_http_request(
+            "POST",
+            "/api/v0/transfers/1/complete",
+            None,
+            r#"{"bytes_transferred":100}"#,
+            &state,
+        )
+        .await
+        .expect("complete persisted transfer");
+        assert_eq!(completed.status, "200 OK");
+        let persisted = db.get_transfer("1").await.expect("get completed").unwrap();
+        assert_eq!(persisted.status, "succeeded");
+        assert_eq!(persisted.progress, 100);
+        assert!(persisted.completed_at.is_some());
+        let events = db
+            .list_transfer_events(Some("1"), 10, 0)
+            .await
+            .expect("list transfer events");
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].status, "succeeded");
+        assert_eq!(events[0].progress, 100);
+        assert_eq!(events[0].filename, "Remote/Persisted.flac");
+        assert_eq!(events[3].status, "queued");
+
+        let cancelled = super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"peer_username":"friend","filename":"Remote/Cancel.flac","size":10}"#,
+            &state,
+        )
+        .await
+        .expect("create cancellable transfer");
+        assert_eq!(cancelled.status, "201 Created");
+        let deleted = super::route_http_request("DELETE", "/api/v0/transfers/2", None, "", &state)
+            .await
+            .expect("cancel persisted transfer");
+        assert_eq!(deleted.status, "200 OK");
+        let persisted = db.get_transfer("2").await.expect("get cancelled").unwrap();
+        assert_eq!(persisted.status, "cancelled");
+        assert!(persisted.completed_at.is_some());
+        let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
+            .await
+            .expect("transfer event database stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["persisted"]["transfers"], 2);
+        assert_eq!(stats_json["persisted"]["transferEvents"], 6);
+
+        let pruned = super::route_http_request(
+            "DELETE",
+            "/api/v0/transfers/downloads/all/completed",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("prune persisted terminal downloads");
+        assert_eq!(pruned.status, "200 OK");
+        assert!(db.get_transfer("1").await.expect("get pruned 1").is_none());
+        assert!(db.get_transfer("2").await.expect("get pruned 2").is_none());
+    }
+
+    #[tokio::test]
     async fn transfer_start_enforces_max_active_policy() {
         let (state, _receiver) =
             test_state_with_env(MapEnv::default().with("SLSKR_TRANSFER_MAX_ACTIVE", "1"));
@@ -17174,6 +26322,444 @@ mod tests {
                 .expect("retry second");
         assert_eq!(unblocked.status, "200 OK");
         assert!(unblocked.body.contains("\"status\":\"in_progress\""));
+    }
+
+    #[tokio::test]
+    async fn transfer_retry_requeues_failed_download_and_clears_reason() {
+        let (state, mut receiver) = test_state();
+        {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(
+                0,
+                Some("friend".to_owned()),
+                "Remote/Song.flac".to_owned(),
+                None,
+                Some(10),
+            );
+            transfers.update_status(
+                entry.id,
+                "failed",
+                Some(4),
+                Some("peer timed out".to_owned()),
+            );
+        }
+
+        let retried =
+            super::route_http_request("POST", "/api/v0/transfers/1/retry", None, "", &state)
+                .await
+                .expect("retry transfer");
+
+        assert_eq!(retried.status, "200 OK");
+        assert!(retried.body.contains("\"status\":\"peer_lookup\""));
+        assert!(retried.body.contains("\"bytes_transferred\":4"));
+        assert!(retried.body.contains("\"reason\":null"));
+        assert_eq!(
+            receiver.try_recv().expect("transfer command"),
+            super::SessionCommand::TransferPeer {
+                id: 1,
+                username: "friend".to_owned(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn transfer_retry_rejects_non_terminal_download() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            "{\"filename\":\"Remote/Song.flac\",\"peer_username\":\"friend\",\"size\":10}",
+            &state,
+        )
+        .await
+        .expect("create transfer");
+        assert_eq!(created.status, "201 Created");
+
+        let blocked =
+            super::route_http_request("POST", "/api/v0/transfers/1/retry", None, "", &state)
+                .await
+                .expect("retry transfer");
+
+        assert_eq!(blocked.status, "409 Conflict");
+        assert_eq!(blocked.body, "{\"error\":\"transfer is not retryable\"}");
+    }
+
+    #[tokio::test]
+    async fn slskd_transfer_position_reports_peer_queue_index() {
+        let (state, _receiver) = test_state();
+        {
+            let mut transfers = state.transfers.write().await;
+            let first = transfers.create(
+                0,
+                Some("friend".to_owned()),
+                "Remote/One.flac".to_owned(),
+                None,
+                Some(1),
+            );
+            transfers.update_status(first.id, "completed", Some(1), None);
+            transfers.create(
+                0,
+                Some("friend".to_owned()),
+                "Remote/Two.flac".to_owned(),
+                None,
+                Some(2),
+            );
+            transfers.create(
+                0,
+                Some("friend".to_owned()),
+                "Remote/Three.flac".to_owned(),
+                None,
+                Some(3),
+            );
+            transfers.create(
+                0,
+                Some("other".to_owned()),
+                "Remote/Other.flac".to_owned(),
+                None,
+                Some(4),
+            );
+        }
+
+        let first_active = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/friend/2/position",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("first active position");
+        assert_eq!(first_active.status, "200 OK");
+        assert_eq!(first_active.body, "0");
+
+        let second_active = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/friend/3/position",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("second active position");
+        assert_eq!(second_active.status, "200 OK");
+        assert_eq!(second_active.body, "1");
+
+        let other_peer = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/other/4/position",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("other peer position");
+        assert_eq!(other_peer.body, "0");
+
+        let completed = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/friend/1/position",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("completed position");
+        assert_eq!(completed.body, "0");
+    }
+
+    #[tokio::test]
+    async fn slskd_download_reports_project_stuck_and_user_stats() {
+        let (state, _receiver) = test_state();
+        {
+            let mut transfers = state.transfers.write().await;
+            let failed = transfers.create(
+                0,
+                Some("friend".to_owned()),
+                "Remote/Failed.flac".to_owned(),
+                None,
+                Some(10),
+            );
+            transfers.update_status(failed.id, "failed", Some(2), Some("timeout".to_owned()));
+            let active = transfers.create(
+                0,
+                Some("friend".to_owned()),
+                "Remote/Stalled.flac".to_owned(),
+                None,
+                Some(20),
+            );
+            transfers.update_status(active.id, "peer_lookup", Some(0), None);
+            let complete = transfers.create(
+                0,
+                Some("other".to_owned()),
+                "Remote/Done.flac".to_owned(),
+                None,
+                Some(30),
+            );
+            transfers.update_status(complete.id, "succeeded", Some(30), None);
+            let upload = transfers.create(
+                1,
+                Some("uploader".to_owned()),
+                "Uploads/Live.flac".to_owned(),
+                None,
+                Some(50),
+            );
+            transfers.update_status(upload.id, "in_progress", Some(5), None);
+        }
+
+        let stuck = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/stuck?username=friend",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("stuck report");
+        assert_eq!(stuck.status, "200 OK");
+        let stuck_json = serde_json::from_str::<serde_json::Value>(&stuck.body).unwrap();
+        assert_eq!(stuck_json["count"], 2);
+        assert_eq!(stuck_json["stuck"].as_array().unwrap().len(), 2);
+        assert!(
+            stuck_json["stuck"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["filename"] == "Remote/Failed.flac"
+                    && entry["reason"] == "timeout")
+        );
+
+        let user_stats = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/user-stats?limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("user stats report");
+        assert_eq!(user_stats.status, "200 OK");
+        let user_stats_json = serde_json::from_str::<serde_json::Value>(&user_stats.body).unwrap();
+        assert_eq!(user_stats_json["count"], 2);
+        assert_eq!(user_stats_json["users"].as_array().unwrap().len(), 1);
+        assert_eq!(user_stats_json["users"][0]["username"], "friend");
+        assert_eq!(user_stats_json["users"][0]["total"], 2);
+        assert_eq!(user_stats_json["users"][0]["active"], 1);
+        assert_eq!(user_stats_json["users"][0]["terminal"], 1);
+        assert_eq!(user_stats_json["users"][0]["bytesTransferred"], 2);
+        assert_eq!(user_stats_json["users"][0]["totalSize"], 30);
+
+        let accelerated = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/accelerated?username=friend",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("accelerated report");
+        assert_eq!(accelerated.status, "200 OK");
+        let accelerated_json =
+            serde_json::from_str::<serde_json::Value>(&accelerated.body).unwrap();
+        assert_eq!(accelerated_json["enabled"], false);
+        assert_eq!(accelerated_json["available"], true);
+        assert_eq!(accelerated_json["count"], 1);
+        assert_eq!(
+            accelerated_json["accelerated"][0]["filename"],
+            "Remote/Stalled.flac"
+        );
+
+        let speeds = super::route_http_request("GET", "/api/v0/transfers/speeds", None, "", &state)
+            .await
+            .expect("speeds report");
+        assert_eq!(speeds.status, "200 OK");
+        let speeds_json = serde_json::from_str::<serde_json::Value>(&speeds.body).unwrap();
+        assert_eq!(speeds_json["active_transfers"], 2);
+        assert_eq!(speeds_json["activeDownloads"], 1);
+        assert_eq!(speeds_json["activeUploads"], 1);
+        assert_eq!(speeds_json["downloadBytesTransferred"], 32);
+        assert_eq!(speeds_json["uploadBytesTransferred"], 5);
+        assert_eq!(speeds_json["total_bytes_transferred"], 37);
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/transfers/downloads/stats", None, "", &state)
+                .await
+                .expect("download stats");
+        assert_eq!(stats.status, "200 OK");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["total_downloads"], 3);
+        assert_eq!(stats_json["active"], 1);
+        assert_eq!(stats_json["completed"], 1);
+        assert_eq!(stats_json["failed"], 1);
+        assert_eq!(stats_json["total_size"], 60);
+        assert_eq!(stats_json["bytesTransferred"], 32);
+    }
+
+    #[tokio::test]
+    async fn transfer_find_alternative_and_replace_use_cached_search_results() {
+        let (state, mut receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            "{\"filename\":\"Remote/Album/Song.flac\",\"peer_username\":\"stale\",\"size\":100}",
+            &state,
+        )
+        .await
+        .expect("create transfer");
+        assert_eq!(created.status, "201 Created");
+        {
+            let mut transfers = state.transfers.write().await;
+            transfers.update_status(1, "failed", Some(25), Some("peer offline".to_owned()));
+        }
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"song\"}",
+            &state,
+        )
+        .await
+        .expect("create search");
+        let _ = receiver.try_recv();
+        super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            "{\"token\":1,\"peer_username\":\"fresh\",\"filename\":\"Other/Path/Song.flac\",\"size\":100,\"slot_free\":true,\"average_speed\":2048}",
+            &state,
+        )
+        .await
+        .expect("ingest alternative");
+
+        let alternatives = super::route_http_request(
+            "POST",
+            "/api/transfers/downloads/find-alternative",
+            None,
+            "{\"transfer_id\":1}",
+            &state,
+        )
+        .await
+        .expect("find alternative");
+        assert_eq!(alternatives.status, "200 OK");
+        let alternatives_json =
+            serde_json::from_str::<serde_json::Value>(&alternatives.body).unwrap();
+        assert_eq!(alternatives_json["count"], 1);
+        assert_eq!(alternatives_json["alternatives"][0]["username"], "fresh");
+
+        let replaced = super::route_http_request(
+            "POST",
+            "/api/transfers/downloads/replace",
+            None,
+            "{\"transfer_id\":1,\"username\":\"fresh\"}",
+            &state,
+        )
+        .await
+        .expect("replace transfer");
+        assert_eq!(replaced.status, "202 Accepted");
+        let replaced_json = serde_json::from_str::<serde_json::Value>(&replaced.body).unwrap();
+        assert_eq!(replaced_json["replacement_queued"], true);
+        assert_eq!(replaced_json["replacement"]["id"], 2);
+        assert_eq!(replaced_json["replacement"]["peer_username"], "fresh");
+        assert_eq!(replaced_json["replacement"]["status"], "peer_lookup");
+        assert_eq!(
+            receiver.try_recv().expect("replacement peer lookup"),
+            super::SessionCommand::TransferPeer {
+                id: 2,
+                username: "fresh".to_owned(),
+            }
+        );
+
+        let transfers = state.transfers.read().await;
+        let original = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == 1)
+            .unwrap();
+        assert_eq!(original.status, "cancelled");
+        assert_eq!(original.bytes_transferred, 25);
+    }
+
+    #[tokio::test]
+    async fn transfer_auto_replace_queues_failed_download_alternatives() {
+        let (state, mut receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            "{\"filename\":\"Remote/Album/Song.flac\",\"peer_username\":\"stale\",\"size\":100}",
+            &state,
+        )
+        .await
+        .expect("create transfer");
+        assert_eq!(created.status, "201 Created");
+        {
+            let mut transfers = state.transfers.write().await;
+            transfers.update_status(1, "failed", Some(40), Some("peer offline".to_owned()));
+        }
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            "{\"query\":\"song\"}",
+            &state,
+        )
+        .await
+        .expect("create search");
+        let _ = receiver.try_recv();
+        super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            "{\"token\":1,\"peer_username\":\"fresh\",\"filename\":\"Other/Path/Song.flac\",\"size\":100}",
+            &state,
+        )
+        .await
+        .expect("ingest alternative");
+
+        let replaced = super::route_http_request(
+            "POST",
+            "/api/transfers/downloads/auto-replace",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("auto replace");
+        assert_eq!(replaced.status, "202 Accepted");
+        let json = serde_json::from_str::<serde_json::Value>(&replaced.body).unwrap();
+        assert_eq!(json["replacement_queued"], true);
+        assert_eq!(json["status"], "queued");
+        assert_eq!(json["alternatives"].as_array().unwrap().len(), 1);
+        assert_eq!(json["alternatives"][0]["username"], "fresh");
+        assert_eq!(json["replacements"][0]["transfer_id"], 1);
+        assert_eq!(json["replacements"][0]["replacement"]["id"], 2);
+        assert_eq!(
+            json["replacements"][0]["replacement"]["peer_username"],
+            "fresh"
+        );
+        assert_eq!(
+            receiver.try_recv().expect("replacement peer lookup"),
+            super::SessionCommand::TransferPeer {
+                id: 2,
+                username: "fresh".to_owned(),
+            }
+        );
+
+        let transfers = state.transfers.read().await;
+        let original = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == 1)
+            .unwrap();
+        assert_eq!(original.status, "cancelled");
+        assert_eq!(original.bytes_transferred, 40);
+        assert_eq!(
+            original.reason.as_deref(),
+            Some("auto-replaced by alternative source")
+        );
     }
 
     #[tokio::test]
@@ -17696,6 +27282,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn peer_address_response_falls_back_to_plain_file_transfer_when_obfuscated_fails() {
+        let (state, _receiver) = test_state();
+        let path = std::env::temp_dir().join(format!(
+            "slskr-transfer-f-{}-obfuscated-fallback-upload.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, [8_u8, 9]).expect("write upload file");
+        add_test_share(&state, "Remote/Fallback.flac", &path, 2).await;
+        {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(
+                1,
+                Some("friend".to_owned()),
+                "Remote/Fallback.flac".to_owned(),
+                Some(path.display().to_string()),
+                Some(2),
+            );
+            assert_eq!(entry.token, 1);
+            transfers.update_status(entry.id, "peer_lookup", None, None);
+        }
+
+        let unused_obfuscated = {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("unused listener");
+            listener.local_addr().expect("unused addr").port()
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("plain listener");
+        let local_addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept p");
+            let mut init = slskr_client::stream::InitConnection::new(stream);
+            assert_eq!(
+                init.receive().await.expect("peer init"),
+                slskr_client::protocol::init::InitMessage::PeerInit {
+                    username: "friend".to_owned(),
+                    connection_type: "P".to_owned(),
+                    token: 0,
+                }
+            );
+            let mut peer = slskr_client::stream::PeerMessageConnection::new(init.into_inner());
+            assert_eq!(
+                peer.receive().await.expect("transfer request"),
+                super::PeerMessage::TransferRequest(super::TransferRequest {
+                    direction: 1,
+                    token: 1,
+                    filename: "Remote/Fallback.flac".to_owned(),
+                    size: Some(2),
+                })
+            );
+            peer.send(&super::PeerMessage::TransferResponse(
+                super::TransferResponse::Allowed {
+                    token: 1,
+                    size: Some(2),
+                },
+            ))
+            .await
+            .expect("transfer response");
+
+            let (stream, _) = listener.accept().await.expect("accept f");
+            let mut init = slskr_client::stream::InitConnection::new(stream);
+            assert_eq!(
+                init.receive().await.expect("file init"),
+                slskr_client::protocol::init::InitMessage::PeerInit {
+                    username: "friend".to_owned(),
+                    connection_type: "F".to_owned(),
+                    token: 0,
+                }
+            );
+            let mut file =
+                slskr_client::file_transfer::FileTransferConnection::new(init.into_inner());
+            assert_eq!(file.receive_token().await.expect("token"), 1);
+            file.send_offset(0).await.expect("offset");
+            file.read_chunk(2).await.expect("chunk")
+        });
+        let address = slskr_client::protocol::server::PeerAddress {
+            username: "friend".to_owned(),
+            ip: "127.0.0.1".parse().unwrap(),
+            port: u32::from(local_addr.port()),
+            obfuscation_type: super::ROTATED_OBFUSCATION_TYPE,
+            obfuscated_port: unused_obfuscated,
+        };
+
+        super::project_peer_transfer_response(&state, &address).await;
+        let uploaded = server.await.expect("server task");
+        assert_eq!(uploaded, vec![8, 9]);
+
+        let transfers = state.transfers.read().await;
+        let record = transfers.entries.first().expect("transfer");
+        assert_eq!(record.status, "succeeded");
+        assert_eq!(record.reason, None);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn indirect_transfer_command_requests_connect_to_peer() {
         let (state, mut receiver) = test_state();
         super::try_send_session_command(
@@ -18084,6 +27767,1392 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slskd_user_group_projects_sharegroup_memberships() {
+        let (state, _receiver) = test_state();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/sharegroups",
+            None,
+            r#"{"name":"Trusted peers","description":"sharing"}"#,
+            &state,
+        )
+        .await
+        .expect("create sharegroup");
+        assert_eq!(created.status, "201 Created");
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let group_id = created_json["id"].as_str().unwrap();
+
+        let member = super::route_http_request(
+            "POST",
+            &format!("/api/sharegroups/{group_id}/members"),
+            None,
+            r#"{"username":"friend"}"#,
+            &state,
+        )
+        .await
+        .expect("add member");
+        assert_eq!(member.status, "201 Created");
+
+        let group = super::route_http_request("GET", "/api/users/friend/group", None, "", &state)
+            .await
+            .expect("user group");
+        assert_eq!(group.status, "200 OK");
+        let group_json = serde_json::from_str::<serde_json::Value>(&group.body).unwrap();
+        assert_eq!(group_json["username"], "friend");
+        assert_eq!(group_json["group"], "Trusted peers");
+        assert_eq!(group_json["group_id"], group_id);
+        assert_eq!(group_json["groupCount"], 1);
+        assert_eq!(group_json["groups"][0]["id"], group_id);
+        assert_eq!(group_json["groups"][0]["name"], "Trusted peers");
+
+        let unknown =
+            super::route_http_request("GET", "/api/v0/users/stranger/group", None, "", &state)
+                .await
+                .expect("unknown user group");
+        let unknown_json = serde_json::from_str::<serde_json::Value>(&unknown.body).unwrap();
+        assert_eq!(unknown_json["group"], "default");
+        assert_eq!(unknown_json["group_id"], serde_json::Value::Null);
+        assert_eq!(unknown_json["groupCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn compatibility_projections_use_local_state_for_core_stores() {
+        let (state, _receiver) = test_state();
+
+        {
+            let mut shares = state.shares.write().await;
+            shares.roots.push(super::ShareRoot {
+                label: "Virtual".to_owned(),
+                files: 2,
+                bytes: 12,
+                extensions: Vec::new(),
+            });
+        }
+        let shared = super::route_http_request("GET", "/api/shared", None, "", &state)
+            .await
+            .expect("shared projection");
+        let shared_json = serde_json::from_str::<serde_json::Value>(&shared.body).unwrap();
+        assert_eq!(shared_json[0]["id"], "Virtual");
+        assert_eq!(shared_json[0]["files"], 2);
+
+        let contact = super::route_http_request(
+            "POST",
+            "/api/contacts",
+            None,
+            r#"{"username":"nearby"}"#,
+            &state,
+        )
+        .await
+        .expect("create contact");
+        let contact_json = serde_json::from_str::<serde_json::Value>(&contact.body).unwrap();
+        let contact_id = contact_json["id"].as_str().unwrap();
+        super::route_http_request(
+            "PUT",
+            &format!("/api/contacts/{contact_id}"),
+            None,
+            r#"{"online":true}"#,
+            &state,
+        )
+        .await
+        .expect("update contact");
+        let nearby = super::route_http_request("GET", "/api/contacts/nearby", None, "", &state)
+            .await
+            .expect("nearby contacts");
+        let nearby_json = serde_json::from_str::<serde_json::Value>(&nearby.body).unwrap();
+        assert_eq!(nearby_json[0]["username"], "nearby");
+        assert_eq!(nearby_json[0]["online"], true);
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Favorites"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection");
+        let collection_json = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap();
+        let collection_id = collection_json["id"].as_str().unwrap();
+        let first = super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/items"),
+            None,
+            r#"{"content_id":"1","artist":"A","title":"First"}"#,
+            &state,
+        )
+        .await
+        .expect("first item");
+        let first_json = serde_json::from_str::<serde_json::Value>(&first.body).unwrap();
+        let first_id = first_json["id"].as_str().unwrap();
+        let second = super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/items"),
+            None,
+            r#"{"content_id":"2","artist":"B","title":"Second"}"#,
+            &state,
+        )
+        .await
+        .expect("second item");
+        let second_json = serde_json::from_str::<serde_json::Value>(&second.body).unwrap();
+        let second_id = second_json["id"].as_str().unwrap();
+
+        let updated_item = super::route_http_request(
+            "PUT",
+            &format!("/api/collections/items/{first_id}"),
+            None,
+            r#"{"artist":"Updated","title":"Renamed","kind":"Video"}"#,
+            &state,
+        )
+        .await
+        .expect("update item");
+        let updated_item_json =
+            serde_json::from_str::<serde_json::Value>(&updated_item.body).unwrap();
+        assert_eq!(updated_item_json["artist"], "Updated");
+        assert_eq!(updated_item_json["kind"], "Video");
+
+        let reordered = super::route_http_request(
+            "PUT",
+            &format!("/api/collections/{collection_id}/items/reorder"),
+            None,
+            &format!(r#"{{"itemIds":["{second_id}","{first_id}"]}}"#),
+            &state,
+        )
+        .await
+        .expect("reorder items");
+        let reordered_json = serde_json::from_str::<serde_json::Value>(&reordered.body).unwrap();
+        assert_eq!(reordered_json["reordered"], true);
+        assert_eq!(reordered_json["items"][0]["id"], second_id);
+
+        let deleted_item = super::route_http_request(
+            "DELETE",
+            &format!("/api/collections/items/{first_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete item");
+        let deleted_item_json =
+            serde_json::from_str::<serde_json::Value>(&deleted_item.body).unwrap();
+        assert_eq!(deleted_item_json["deleted"], true);
+        assert_eq!(deleted_item_json["item"]["id"], first_id);
+
+        let wish = super::route_http_request(
+            "POST",
+            "/api/wishlist",
+            None,
+            r#"{"artist":"Old","title":"Needle"}"#,
+            &state,
+        )
+        .await
+        .expect("create wishlist");
+        let wish_json = serde_json::from_str::<serde_json::Value>(&wish.body).unwrap();
+        let wish_id = wish_json["id"].as_str().unwrap();
+        let wish_update = super::route_http_request(
+            "PUT",
+            &format!("/api/wishlist/{wish_id}"),
+            None,
+            r#"{"artist":"New","title":"Needle"}"#,
+            &state,
+        )
+        .await
+        .expect("update wishlist");
+        let wish_update_json =
+            serde_json::from_str::<serde_json::Value>(&wish_update.body).unwrap();
+        assert_eq!(wish_update_json["artist"], "New");
+        let wish_delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/wishlist/{wish_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete wishlist");
+        let wish_delete_json =
+            serde_json::from_str::<serde_json::Value>(&wish_delete.body).unwrap();
+        assert_eq!(wish_delete_json["deleted"], true);
+        assert_eq!(wish_delete_json["item_id"], wish_id);
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"peer_username":"peer","filename":"Remote/Song.flac","size":100}"#,
+            &state,
+        )
+        .await
+        .expect("create transfer");
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers/1/progress",
+            None,
+            r#"{"bytes_transferred":40}"#,
+            &state,
+        )
+        .await
+        .expect("transfer progress");
+        let bridge =
+            super::route_http_request("GET", "/api/bridge/transfer/1/progress", None, "", &state)
+                .await
+                .expect("bridge progress");
+        let bridge_json = serde_json::from_str::<serde_json::Value>(&bridge.body).unwrap();
+        assert_eq!(bridge_json["status"], "in_progress");
+        assert_eq!(bridge_json["bytesTransferred"], 40);
+        assert_eq!(bridge_json["progress"], 40.0);
+    }
+
+    #[tokio::test]
+    async fn compatibility_projections_use_local_state_for_recommendations_and_activity() {
+        let (state, _receiver) = test_state();
+
+        let liked = super::route_http_request(
+            "POST",
+            "/api/soulseek/interests",
+            None,
+            r#"{"name":"ambient"}"#,
+            &state,
+        )
+        .await
+        .expect("add liked interest");
+        assert_eq!(liked.status, "201 Created");
+
+        super::route_http_request(
+            "POST",
+            "/api/soulseek/hated-interests",
+            None,
+            r#"{"name":"low bitrate"}"#,
+            &state,
+        )
+        .await
+        .expect("add hated interest");
+
+        let user_interests = super::route_http_request(
+            "GET",
+            "/api/soulseek/users/peer/interests",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("user interests");
+        let user_interests_json =
+            serde_json::from_str::<serde_json::Value>(&user_interests.body).unwrap();
+        assert_eq!(user_interests_json["liked"][0]["name"], "ambient");
+        assert_eq!(user_interests_json["hated"][0]["name"], "low bitrate");
+
+        let recommendations =
+            super::route_http_request("GET", "/api/soulseek/recommendations", None, "", &state)
+                .await
+                .expect("recommendations");
+        let recommendations_json =
+            serde_json::from_str::<serde_json::Value>(&recommendations.body).unwrap();
+        assert_eq!(
+            recommendations_json["recommendations"][0]["query"],
+            "ambient"
+        );
+
+        let item_recommendations = super::route_http_request(
+            "GET",
+            "/api/soulseek/items/lib-1/recommendations",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("item recommendations");
+        let item_recommendations_json =
+            serde_json::from_str::<serde_json::Value>(&item_recommendations.body).unwrap();
+        assert_eq!(item_recommendations_json["item_id"], "lib-1");
+        assert_eq!(
+            item_recommendations_json["recommendations"][0]["interest"],
+            "ambient"
+        );
+
+        {
+            let mut users = state.users.write().await;
+            let mut user = users.watch("near-peer".to_owned());
+            user.status = Some("online".to_owned());
+            if let Some(record) = users
+                .records
+                .iter_mut()
+                .find(|record| record.username == "near-peer")
+            {
+                record.status = Some("online".to_owned());
+            }
+        }
+        let similar = super::route_http_request(
+            "GET",
+            "/api/soulseek/items/lib-1/similar-users",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("similar users");
+        let similar_json = serde_json::from_str::<serde_json::Value>(&similar.body).unwrap();
+        assert_eq!(similar_json["similar_users"][0]["username"], "near-peer");
+
+        super::route_http_request(
+            "POST",
+            "/api/nowplaying",
+            None,
+            r#"{"username":"peer","artist":"A","title":"Track"}"#,
+            &state,
+        )
+        .await
+        .expect("now playing post");
+        let now_playing = super::route_http_request("GET", "/api/nowplaying", None, "", &state)
+            .await
+            .expect("now playing list");
+        let now_playing_json =
+            serde_json::from_str::<serde_json::Value>(&now_playing.body).unwrap();
+        assert_eq!(now_playing_json["now_playing"][0]["username"], "peer");
+        assert_eq!(now_playing_json["now_playing"][0]["title"], "Track");
+
+        let source_preview = super::route_http_request(
+            "POST",
+            "/api/source-feed-imports/preview",
+            None,
+            r#"{"text":"Artist - One\nTwo"}"#,
+            &state,
+        )
+        .await
+        .expect("source preview");
+        let source_preview_json =
+            serde_json::from_str::<serde_json::Value>(&source_preview.body).unwrap();
+        assert_eq!(source_preview_json["count"], 2);
+        assert_eq!(source_preview_json["items"][0]["artist"], "Artist");
+        assert_eq!(source_preview_json["items"][1]["title"], "Two");
+
+        super::route_http_request(
+            "POST",
+            "/api/wishlist",
+            None,
+            r#"{"artist":"Wish","title":"Song"}"#,
+            &state,
+        )
+        .await
+        .expect("wishlist feed seed");
+        let source_feeds = super::route_http_request("GET", "/api/source-feeds", None, "", &state)
+            .await
+            .expect("source feeds");
+        let source_feeds_json =
+            serde_json::from_str::<serde_json::Value>(&source_feeds.body).unwrap();
+        assert_eq!(source_feeds_json["feeds"][0]["provider"], "wishlist");
+        let created_feed = super::route_http_request(
+            "POST",
+            "/api/source-feeds",
+            None,
+            r#"{"name":"Manual feed","text":"Feed Artist - Feed Track"}"#,
+            &state,
+        )
+        .await
+        .expect("create source feed");
+        let created_feed_json =
+            serde_json::from_str::<serde_json::Value>(&created_feed.body).unwrap();
+        assert_eq!(created_feed_json["provider"], "manual");
+        assert_eq!(created_feed_json["count"], 1);
+        let source_feeds = super::route_http_request("GET", "/api/source-feeds", None, "", &state)
+            .await
+            .expect("source feeds after create");
+        let source_feeds_json =
+            serde_json::from_str::<serde_json::Value>(&source_feeds.body).unwrap();
+        assert!(source_feeds_json["count"].as_u64().unwrap() >= 2);
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"peer_username":"peer","filename":"Remote/Song.flac","size":100}"#,
+            &state,
+        )
+        .await
+        .expect("create bridge transfer");
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers/1/progress",
+            None,
+            r#"{"bytes_transferred":25}"#,
+            &state,
+        )
+        .await
+        .expect("progress bridge transfer");
+        let bridge_stats =
+            super::route_http_request("GET", "/api/bridge/admin/stats", None, "", &state)
+                .await
+                .expect("bridge stats");
+        let bridge_stats_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_stats.body).unwrap();
+        assert_eq!(bridge_stats_json["total_requests"], 1);
+        assert_eq!(bridge_stats_json["total_bytes"], 25);
+    }
+
+    #[tokio::test]
+    async fn compatibility_projections_use_local_state_for_library_jobs_and_discovery() {
+        let (state, _receiver) = test_state();
+
+        super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"","title":"Untitled","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("create incomplete library item");
+        super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"Known","title":"Release","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("create complete library item");
+
+        let health =
+            super::route_http_request("GET", "/api/library/health/issues", None, "", &state)
+                .await
+                .expect("library issues");
+        let health_json = serde_json::from_str::<serde_json::Value>(&health.body).unwrap();
+        assert_eq!(health_json["count"], 1);
+        assert_eq!(health_json["issues"][0]["type"], "missing_artist");
+
+        let by_artist = super::route_http_request(
+            "GET",
+            "/api/library/health/issues/by-artist",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("issues by artist");
+        let by_artist_json = serde_json::from_str::<serde_json::Value>(&by_artist.body).unwrap();
+        assert_eq!(by_artist_json["issues_by_artist"][0]["artist"], "(unknown)");
+
+        let lidarr_missing = super::route_http_request(
+            "GET",
+            "/api/integrations/lidarr/wanted/missing",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("lidarr missing fallback");
+        let lidarr_missing_json =
+            serde_json::from_str::<serde_json::Value>(&lidarr_missing.body).unwrap();
+        assert_eq!(lidarr_missing_json["status"], "local");
+        assert_eq!(lidarr_missing_json["source"], "library-health");
+        assert_eq!(lidarr_missing_json["count"], 1);
+        assert_eq!(
+            lidarr_missing_json["missing_albums"][0]["issueType"],
+            "missing_artist"
+        );
+        let lidarr_sync = super::route_http_request(
+            "POST",
+            "/api/integrations/lidarr/wanted/sync",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("lidarr sync fallback");
+        let lidarr_sync_json =
+            serde_json::from_str::<serde_json::Value>(&lidarr_sync.body).unwrap();
+        assert_eq!(lidarr_sync_json["status"], "local");
+        assert_eq!(lidarr_sync_json["missingCount"], 1);
+        assert_eq!(lidarr_sync_json["runs"], 1);
+
+        let patched_issue = super::route_http_request(
+            "PATCH",
+            "/api/library/health/issues/lib-1-missing-artist",
+            None,
+            r#"{"artist":"Recovered Artist"}"#,
+            &state,
+        )
+        .await
+        .expect("patch library health issue");
+        let patched_issue_json =
+            serde_json::from_str::<serde_json::Value>(&patched_issue.body).unwrap();
+        assert_eq!(patched_issue_json["updated"], true);
+        assert_eq!(patched_issue_json["fixed"], true);
+        assert_eq!(patched_issue_json["action"], "defaulted_artist");
+        assert_eq!(patched_issue_json["item"]["artist"], "Recovered Artist");
+        assert_eq!(patched_issue_json["remaining"], 0);
+
+        super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"Fixable","title":"Kindless","kind":""}"#,
+            &state,
+        )
+        .await
+        .expect("create fixable library item");
+        let scan = super::route_http_request(
+            "POST",
+            "/api/library/health/scans",
+            None,
+            r#"{"libraryPath":"/music"}"#,
+            &state,
+        )
+        .await
+        .expect("library scan");
+        let scan_json = serde_json::from_str::<serde_json::Value>(&scan.body).unwrap();
+        assert_eq!(scan_json["libraryPath"], "/music");
+        assert_eq!(scan_json["issues_found"], 1);
+        let scan_detail = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/library/health/scans/{}",
+                scan_json["id"].as_str().unwrap()
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("library scan detail");
+        let scan_detail_json =
+            serde_json::from_str::<serde_json::Value>(&scan_detail.body).unwrap();
+        assert_eq!(scan_detail_json["issues_found"], 1);
+        let fixed =
+            super::route_http_request("POST", "/api/library/health/issues/fix", None, "{}", &state)
+                .await
+                .expect("fix library issues");
+        let fixed_json = serde_json::from_str::<serde_json::Value>(&fixed.body).unwrap();
+        assert_eq!(fixed_json["fixed"], 1);
+        assert_eq!(fixed_json["issues"][0]["type"], "missing_kind");
+        assert_eq!(fixed_json["remaining"], 0);
+
+        let lidarr_import = super::route_http_request(
+            "POST",
+            "/api/integrations/lidarr/manualimport",
+            None,
+            r#"{"directory":"/imports/Manual Album","artist":"Imported Artist"}"#,
+            &state,
+        )
+        .await
+        .expect("lidarr manual import fallback");
+        let lidarr_import_json =
+            serde_json::from_str::<serde_json::Value>(&lidarr_import.body).unwrap();
+        assert_eq!(lidarr_import_json["status"], "local");
+        assert_eq!(lidarr_import_json["imported"], 1);
+        assert_eq!(lidarr_import_json["items"][0]["artist"], "Imported Artist");
+        assert_eq!(lidarr_import_json["items"][0]["title"], "Manual Album");
+
+        let completion = super::route_http_request(
+            "GET",
+            "/api/musicbrainz/albums/completion",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("completion");
+        let completion_json = serde_json::from_str::<serde_json::Value>(&completion.body).unwrap();
+        assert_eq!(completion_json["count"], 4);
+
+        let coverage = super::route_http_request(
+            "GET",
+            "/api/musicbrainz/artist/Known/discography-coverage",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("coverage");
+        let coverage_json = serde_json::from_str::<serde_json::Value>(&coverage.body).unwrap();
+        assert_eq!(coverage_json["releases"], 1);
+
+        let target = super::route_http_request(
+            "POST",
+            "/api/musicbrainz/targets",
+            None,
+            r#"{"artist":"Known","title":"New Target"}"#,
+            &state,
+        )
+        .await
+        .expect("musicbrainz target");
+        let target_json = serde_json::from_str::<serde_json::Value>(&target.body).unwrap();
+        assert_eq!(target_json["created"], true);
+        assert_eq!(target_json["item"]["artist"], "Known");
+        assert!(target_json["projection"]["count"].as_u64().unwrap() >= 2);
+
+        super::route_http_request(
+            "POST",
+            "/api/wishlist",
+            None,
+            r#"{"artist":"Radar","title":"Need"}"#,
+            &state,
+        )
+        .await
+        .expect("wishlist seed");
+        let radar = super::route_http_request(
+            "GET",
+            "/api/musicbrainz/release-radar/notifications",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("release radar notifications");
+        let radar_json = serde_json::from_str::<serde_json::Value>(&radar.body).unwrap();
+        assert_eq!(radar_json["notifications"][0]["artist"], "Radar");
+
+        super::route_http_request(
+            "POST",
+            "/api/soulseek/interests",
+            None,
+            r#"{"name":"jazz"}"#,
+            &state,
+        )
+        .await
+        .expect("interest seed");
+        let taste =
+            super::route_http_request("POST", "/api/taste-recommendations", None, "{}", &state)
+                .await
+                .expect("taste recommendations");
+        let taste_json = serde_json::from_str::<serde_json::Value>(&taste.body).unwrap();
+        assert_eq!(taste_json["recommendations"][0]["query"], "jazz");
+
+        let graph = super::route_http_request("POST", "/api/discovery-graph", None, "{}", &state)
+            .await
+            .expect("discovery graph");
+        let graph_json = serde_json::from_str::<serde_json::Value>(&graph.body).unwrap();
+        assert_eq!(graph_json["status"], "ready");
+        assert!(graph_json["count"].as_u64().unwrap() >= 2);
+
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+        }
+        super::route_http_request("POST", "/api/v0/rooms/listening/join", None, "", &state)
+            .await
+            .expect("join listening room");
+        let parties = super::route_http_request("GET", "/api/listening-party", None, "", &state)
+            .await
+            .expect("listening parties");
+        let parties_json = serde_json::from_str::<serde_json::Value>(&parties.body).unwrap();
+        assert_eq!(parties_json["active_parties"][0]["room"], "listening");
+        let party_content = super::route_http_request(
+            "POST",
+            "/api/listening-party/radio/party/content",
+            None,
+            r#"{"room":"listening","artist":"Party Artist","title":"Party Track"}"#,
+            &state,
+        )
+        .await
+        .expect("party content");
+        let party_content_json =
+            serde_json::from_str::<serde_json::Value>(&party_content.body).unwrap();
+        assert_eq!(party_content_json["activePartyCount"], 1);
+        assert_eq!(party_content_json["party"]["message_count"], 1);
+        assert_eq!(party_content_json["nowPlaying"]["title"], "Party Track");
+
+        let destination = super::route_http_request(
+            "POST",
+            "/api/destinations/validate",
+            None,
+            r#"{"path":"/home/user/Downloads"}"#,
+            &state,
+        )
+        .await
+        .expect("destination validate");
+        let destination_json =
+            serde_json::from_str::<serde_json::Value>(&destination.body).unwrap();
+        assert_eq!(destination_json["valid"], true);
+        assert_eq!(destination_json["known"], true);
+        assert_eq!(destination_json["matched"]["id"], "default");
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            r#"{"query":"job search"}"#,
+            &state,
+        )
+        .await
+        .expect("search job seed");
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"peer_username":"peer","filename":"Remote/Song.flac","size":100}"#,
+            &state,
+        )
+        .await
+        .expect("multisource transfer seed");
+        let jobs = super::route_http_request("GET", "/api/jobs", None, "", &state)
+            .await
+            .expect("jobs");
+        let jobs_json = serde_json::from_str::<serde_json::Value>(&jobs.body).unwrap();
+        assert!(jobs_json["total"].as_u64().unwrap() >= 2);
+
+        let discography = super::route_http_request(
+            "POST",
+            "/api/jobs/discography",
+            None,
+            r#"{"artist":"Known"}"#,
+            &state,
+        )
+        .await
+        .expect("discography job");
+        let discography_json =
+            serde_json::from_str::<serde_json::Value>(&discography.body).unwrap();
+        assert_eq!(discography_json["kind"], "discography");
+        assert_eq!(discography_json["status"], "queued");
+        let discography_id = discography_json["search_id"].as_str().unwrap();
+        let discography_detail = super::route_http_request(
+            "GET",
+            &format!("/api/jobs/{discography_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("discography detail");
+        let discography_detail_json =
+            serde_json::from_str::<serde_json::Value>(&discography_detail.body).unwrap();
+        assert_eq!(discography_detail_json["kind"], "search");
+        assert_eq!(discography_detail_json["query"], "Known discography");
+
+        let mb_release = super::route_http_request(
+            "POST",
+            "/api/jobs/mb-release",
+            None,
+            r#"{"artist":"Known","title":"Release"}"#,
+            &state,
+        )
+        .await
+        .expect("mb release job");
+        let mb_release_json = serde_json::from_str::<serde_json::Value>(&mb_release.body).unwrap();
+        assert_eq!(mb_release_json["kind"], "mb-release");
+        assert_eq!(mb_release_json["query"], "Known Release");
+
+        {
+            let mut shares = state.shares.write().await;
+            shares.entries.push(FileEntry {
+                code: 1,
+                filename: "Library/Known/Release.flac".to_owned(),
+                size: 321,
+                extension: "flac".to_owned(),
+                attributes: Vec::new(),
+            });
+        }
+        let hash_entries =
+            super::route_http_request("GET", "/api/hashdb/entries", None, "", &state)
+                .await
+                .expect("hashdb entries");
+        let hash_entries_json =
+            serde_json::from_str::<serde_json::Value>(&hash_entries.body).unwrap();
+        assert!(hash_entries_json["count"].as_u64().unwrap() >= 1);
+        assert!(hash_entries_json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["filename"] == "Library/Known/Release.flac"
+                && entry["extension"] == "flac"));
+
+        let backfill_candidates =
+            super::route_http_request("GET", "/api/backfill/candidates", None, "", &state)
+                .await
+                .expect("backfill candidates");
+        let backfill_candidates_json =
+            serde_json::from_str::<serde_json::Value>(&backfill_candidates.body).unwrap();
+        assert!(backfill_candidates_json["count"].as_u64().unwrap() >= 4);
+        let backfill_stats =
+            super::route_http_request("GET", "/api/backfill/stats", None, "", &state)
+                .await
+                .expect("backfill stats");
+        let backfill_stats_json =
+            serde_json::from_str::<serde_json::Value>(&backfill_stats.body).unwrap();
+        assert!(backfill_stats_json["sharedFiles"].as_u64().unwrap() >= 1);
+        assert_eq!(backfill_stats_json["isActive"], true);
+        let hash_backfill = super::route_http_request(
+            "POST",
+            "/api/hashdb/backfill/from-history",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("hashdb backfill");
+        let hash_backfill_json =
+            serde_json::from_str::<serde_json::Value>(&hash_backfill.body).unwrap();
+        assert_eq!(hash_backfill_json["status"], "queued");
+        assert!(hash_backfill_json["queued"].as_u64().unwrap() >= 4);
+        let runtime_backfill =
+            super::route_http_request("POST", "/api/backfill", None, "{}", &state)
+                .await
+                .expect("runtime backfill");
+        let runtime_backfill_json =
+            serde_json::from_str::<serde_json::Value>(&runtime_backfill.body).unwrap();
+        assert_eq!(runtime_backfill_json["runs"], 1);
+        assert!(runtime_backfill_json["queued"].as_u64().unwrap() >= 4);
+
+        let song_runs = super::route_http_request("GET", "/api/songid/runs", None, "", &state)
+            .await
+            .expect("song id runs");
+        let song_runs_json = serde_json::from_str::<serde_json::Value>(&song_runs.body).unwrap();
+        assert!(song_runs_json["count"].as_u64().unwrap() >= 1);
+        assert!(song_runs_json["runs"][0]["matchCount"].as_u64().unwrap() >= 1);
+        let song_run = super::route_http_request("POST", "/api/songid/runs", None, "{}", &state)
+            .await
+            .expect("song id run");
+        let song_run_json = serde_json::from_str::<serde_json::Value>(&song_run.body).unwrap();
+        assert!(song_run_json["matchCount"].as_u64().unwrap() >= 1);
+        assert_eq!(song_run_json["runs"], 1);
+        assert_eq!(song_run_json["persisted"], true);
+        let song_detail =
+            super::route_http_request("GET", "/api/songid/runs/songid-local", None, "", &state)
+                .await
+                .expect("song id detail");
+        let song_detail_json =
+            serde_json::from_str::<serde_json::Value>(&song_detail.body).unwrap();
+        assert!(song_detail_json["count"].as_u64().unwrap() >= 1);
+        let song_matrix = super::route_http_request(
+            "GET",
+            "/api/songid/runs/songid-local/forensic-matrix",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("song id matrix");
+        let song_matrix_json =
+            serde_json::from_str::<serde_json::Value>(&song_matrix.body).unwrap();
+        assert!(song_matrix_json["count"].as_u64().unwrap() >= 1);
+
+        let multisource =
+            super::route_http_request("GET", "/api/multisource/jobs", None, "", &state)
+                .await
+                .expect("multisource jobs");
+        let multisource_json =
+            serde_json::from_str::<serde_json::Value>(&multisource.body).unwrap();
+        assert_eq!(multisource_json["jobs"][0]["sources"][0], "peer");
+
+        let slskdn = super::route_http_request("GET", "/api/slskdn", None, "", &state)
+            .await
+            .expect("slskdn summary");
+        let slskdn_json = serde_json::from_str::<serde_json::Value>(&slskdn.body).unwrap();
+        assert_eq!(slskdn_json["status"], "local");
+        assert!(slskdn_json["libraryItems"].as_u64().unwrap() >= 4);
+        let slskdn_health =
+            super::route_http_request("GET", "/api/slskdn/library/health", None, "", &state)
+                .await
+                .expect("slskdn library health");
+        let slskdn_health_json =
+            serde_json::from_str::<serde_json::Value>(&slskdn_health.body).unwrap();
+        assert_eq!(slskdn_health_json["issueCount"], 0);
+        let podcore_search = super::route_http_request(
+            "GET",
+            "/api/podcore/content/search?query=Release",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("podcore search");
+        let podcore_search_json =
+            serde_json::from_str::<serde_json::Value>(&podcore_search.body).unwrap();
+        assert!(podcore_search_json["count"].as_u64().unwrap() >= 1);
+        let stream = super::route_http_request(
+            "GET",
+            "/api/streams/Library/Known/Release.flac",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("stream status");
+        let stream_json = serde_json::from_str::<serde_json::Value>(&stream.body).unwrap();
+        assert_eq!(stream_json["status"], "available");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compatibility_projections_use_local_state_for_system_mutation_shells() {
+        let (state, _receiver) = test_state();
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"peer_username":"peer","filename":"Remote/System.flac","size":100}"#,
+            &state,
+        )
+        .await
+        .expect("transfer seed");
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers/1/progress",
+            None,
+            r#"{"bytes_transferred":55}"#,
+            &state,
+        )
+        .await
+        .expect("transfer progress");
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            r#"{"query":"system stats"}"#,
+            &state,
+        )
+        .await
+        .expect("search seed");
+
+        let admin = super::route_http_request("GET", "/api/admin/stats", None, "", &state)
+            .await
+            .expect("admin stats");
+        let admin_json = serde_json::from_str::<serde_json::Value>(&admin.body).unwrap();
+        assert_eq!(admin_json["total_transfers"], 1);
+        assert_eq!(admin_json["total_bytes"], 55);
+        assert_eq!(admin_json["searches"], 1);
+
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+            session.username = Some("local-user".to_owned());
+            session.privileges_seconds = Some(60);
+        }
+        let updated_profile = super::route_http_request(
+            "PUT",
+            "/api/profile/me",
+            None,
+            r#"{"username":"updated-user","privilegesSeconds":120,"connected":true}"#,
+            &state,
+        )
+        .await
+        .expect("profile update");
+        let updated_profile_json =
+            serde_json::from_str::<serde_json::Value>(&updated_profile.body).unwrap();
+        assert_eq!(updated_profile_json["updated"], true);
+        assert_eq!(updated_profile_json["persisted"], true);
+        assert_eq!(updated_profile_json["profile"]["username"], "updated-user");
+        assert_eq!(updated_profile_json["profile"]["privilegesSeconds"], 120);
+        let profile = super::route_http_request("GET", "/api/profile/me", None, "", &state)
+            .await
+            .expect("profile me");
+        let profile_json = serde_json::from_str::<serde_json::Value>(&profile.body).unwrap();
+        assert_eq!(profile_json["username"], "updated-user");
+        assert_eq!(profile_json["user_type"], "privileged");
+
+        let batch = super::route_http_request(
+            "POST",
+            "/api/batch",
+            None,
+            r#"{"operations":[{"id":"stats","method":"GET","path":"/api/stats"},{"id":"caps","method":"GET","path":"/api/capabilities"}]}"#,
+            &state,
+        )
+        .await
+        .expect("batch execution");
+        let batch_json = serde_json::from_str::<serde_json::Value>(&batch.body).unwrap();
+        assert_eq!(batch_json["accepted"], true);
+        assert_eq!(batch_json["executed"], 2);
+        assert_eq!(batch_json["results"][0]["id"], "stats");
+        assert_eq!(batch_json["results"][0]["status"], 200);
+
+        let plugins = super::route_http_request("GET", "/api/config/plugins", None, "", &state)
+            .await
+            .expect("plugins");
+        let plugins_json = serde_json::from_str::<serde_json::Value>(&plugins.body).unwrap();
+        assert_eq!(plugins_json["count"], 4);
+        assert_eq!(plugins_json["plugins"][0]["id"], "spotify");
+
+        let invite = super::route_http_request("POST", "/api/profile/invite", None, "{}", &state)
+            .await
+            .expect("profile invite");
+        let invite_json = serde_json::from_str::<serde_json::Value>(&invite.body).unwrap();
+        assert_eq!(invite_json["count"], 1);
+        assert_eq!(invite_json["persisted"], true);
+
+        let warm_cache =
+            super::route_http_request("POST", "/api/slskdn/warm-cache", None, "{}", &state)
+                .await
+                .expect("warm cache");
+        let warm_cache_json = serde_json::from_str::<serde_json::Value>(&warm_cache.body).unwrap();
+        assert_eq!(warm_cache_json["runs"], 1);
+        assert_eq!(warm_cache_json["persisted"], true);
+
+        let bridge_config = super::route_http_request(
+            "PUT",
+            "/api/bridge/admin/config",
+            None,
+            r#"{"maxClients":4,"enabled":true}"#,
+            &state,
+        )
+        .await
+        .expect("bridge config update");
+        let bridge_config_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_config.body).unwrap();
+        assert_eq!(bridge_config_json["persisted"], true);
+        assert_eq!(bridge_config_json["configUpdates"], 1);
+        assert!(bridge_config_json["acceptedKeys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|key| key == "enabled"));
+        let bridge_start =
+            super::route_http_request("POST", "/api/bridge/start", None, "{}", &state)
+                .await
+                .expect("bridge start");
+        let bridge_start_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_start.body).unwrap();
+        assert_eq!(bridge_start_json["persisted"], true);
+        let bridge_status =
+            super::route_http_request("GET", "/api/bridge/status", None, "", &state)
+                .await
+                .expect("bridge status");
+        let bridge_status_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_status.body).unwrap();
+        assert_eq!(bridge_status_json["configUpdates"], 1);
+        let bridge_stop = super::route_http_request("POST", "/api/bridge/stop", None, "{}", &state)
+            .await
+            .expect("bridge stop");
+        let bridge_stop_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_stop.body).unwrap();
+        assert_eq!(bridge_stop_json["stopped"], true);
+
+        let application_restart =
+            super::route_http_request("PUT", "/api/application", None, "{}", &state)
+                .await
+                .expect("application restart request");
+        let application_restart_json =
+            serde_json::from_str::<serde_json::Value>(&application_restart.body).unwrap();
+        assert_eq!(application_restart_json["accepted"], true);
+        assert_eq!(application_restart_json["persisted"], true);
+        assert_eq!(application_restart_json["pendingRestart"], true);
+        let application = super::route_http_request("GET", "/api/application", None, "", &state)
+            .await
+            .expect("application state");
+        let application_json =
+            serde_json::from_str::<serde_json::Value>(&application.body).unwrap();
+        assert_eq!(application_json["pendingRestart"], true);
+        assert_eq!(application_json["bridge"]["configUpdates"], 1);
+        assert_eq!(application_json["operations"]["profileInvitesCreated"], 1);
+        assert_eq!(application_json["operations"]["cacheWarmRuns"], 1);
+        let gc = super::route_http_request("POST", "/api/application/gc", None, "", &state)
+            .await
+            .expect("application gc");
+        let gc_json = serde_json::from_str::<serde_json::Value>(&gc.body).unwrap();
+        assert_eq!(gc_json["collected"], true);
+        assert_eq!(gc_json["gcRuns"], 1);
+        let application_restart_clear =
+            super::route_http_request("DELETE", "/api/application", None, "", &state)
+                .await
+                .expect("application restart clear");
+        let application_restart_clear_json =
+            serde_json::from_str::<serde_json::Value>(&application_restart_clear.body).unwrap();
+        assert_eq!(application_restart_clear_json["pendingRestart"], false);
+
+        let autoreplace =
+            super::route_http_request("PUT", "/api/autoreplace/enable", None, "", &state)
+                .await
+                .expect("autoreplace enable");
+        let autoreplace_json =
+            serde_json::from_str::<serde_json::Value>(&autoreplace.body).unwrap();
+        assert_eq!(autoreplace_json["enabled"], true);
+        assert_eq!(autoreplace_json["persisted"], true);
+        let preferences = super::route_http_request(
+            "PUT",
+            "/api/config/preferences",
+            None,
+            r#"{"autoreplace_enabled":false}"#,
+            &state,
+        )
+        .await
+        .expect("preferences update");
+        let preferences_json =
+            serde_json::from_str::<serde_json::Value>(&preferences.body).unwrap();
+        assert_eq!(preferences_json["persisted"], true);
+        assert_eq!(preferences_json["autoreplace_enabled"], false);
+
+        let relay =
+            super::route_http_request("PUT", "/api/relay", None, r#"{"enabled":true}"#, &state)
+                .await
+                .expect("relay enable");
+        let relay_json = serde_json::from_str::<serde_json::Value>(&relay.body).unwrap();
+        assert_eq!(relay_json["relay_enabled"], true);
+        let relay_agent = super::route_http_request(
+            "PUT",
+            "/api/relay/agent",
+            None,
+            r#"{"enabled":true}"#,
+            &state,
+        )
+        .await
+        .expect("relay agent enable");
+        let relay_agent_json =
+            serde_json::from_str::<serde_json::Value>(&relay_agent.body).unwrap();
+        assert_eq!(relay_agent_json["relayAgentEnabled"], true);
+        assert_eq!(relay_agent_json["persisted"], true);
+        let relay_files = super::route_http_request(
+            "POST",
+            "/api/relay/controller/files/token-1",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("relay files token");
+        let relay_files_json =
+            serde_json::from_str::<serde_json::Value>(&relay_files.body).unwrap();
+        assert_eq!(relay_files_json["accepted"], true);
+        assert_eq!(relay_files_json["token"], "token-1");
+        assert_eq!(relay_files_json["relay_enabled"], true);
+        let relay_shares = super::route_http_request(
+            "POST",
+            "/api/relay/controller/shares/token-2",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("relay shares token");
+        let relay_shares_json =
+            serde_json::from_str::<serde_json::Value>(&relay_shares.body).unwrap();
+        assert_eq!(relay_shares_json["accepted"], true);
+        assert_eq!(relay_shares_json["token"], "token-2");
+        assert!(relay_shares_json["shareCount"].as_u64().unwrap() >= 1);
+        let application = super::route_http_request("GET", "/api/application", None, "", &state)
+            .await
+            .expect("application with relay");
+        let application_json =
+            serde_json::from_str::<serde_json::Value>(&application.body).unwrap();
+        assert_eq!(application_json["relay"]["enabled"], true);
+        assert_eq!(application_json["relay"]["agentEnabled"], true);
+        let relay_agent_deleted =
+            super::route_http_request("DELETE", "/api/relay/agent", None, "", &state)
+                .await
+                .expect("relay agent disable");
+        let relay_agent_deleted_json =
+            serde_json::from_str::<serde_json::Value>(&relay_agent_deleted.body).unwrap();
+        assert_eq!(relay_agent_deleted_json["relayAgentEnabled"], false);
+        let relay_deleted = super::route_http_request("DELETE", "/api/relay", None, "", &state)
+            .await
+            .expect("relay disable");
+        let relay_deleted_json =
+            serde_json::from_str::<serde_json::Value>(&relay_deleted.body).unwrap();
+        assert_eq!(relay_deleted_json["relay_enabled"], false);
+
+        let recorded_event = super::route_http_request(
+            "POST",
+            "/api/events/parity",
+            None,
+            r#""compat event""#,
+            &state,
+        )
+        .await
+        .expect("record compat event");
+        let recorded_event_json =
+            serde_json::from_str::<serde_json::Value>(&recorded_event.body).unwrap();
+        assert_eq!(recorded_event_json["recorded"], true);
+        assert_eq!(recorded_event_json["event"]["type"], "compat.event");
+        assert!(recorded_event_json["count"].as_u64().unwrap() >= 1);
+        let logs = super::route_http_request("GET", "/api/logs", None, "", &state)
+            .await
+            .expect("logs");
+        let logs_json = serde_json::from_str::<serde_json::Value>(&logs.body).unwrap();
+        assert_eq!(logs_json[0]["category"], "compat.event");
+        assert_eq!(logs_json[0]["message"], "compat event");
+
+        {
+            let mut users = state.users.write().await;
+            users.watch("mesh-peer".to_owned());
+        }
+        let mesh_sync =
+            super::route_http_request("POST", "/api/mesh/sync/mesh-peer", None, "{}", &state)
+                .await
+                .expect("mesh sync");
+        let mesh_sync_json = serde_json::from_str::<serde_json::Value>(&mesh_sync.body).unwrap();
+        assert_eq!(mesh_sync_json["queued"], true);
+        assert_eq!(mesh_sync_json["status"], "watched");
+
+        let kpis =
+            super::route_http_request("GET", "/api/telemetry/metrics/kpis", None, "", &state)
+                .await
+                .expect("kpis");
+        let kpis_json = serde_json::from_str::<serde_json::Value>(&kpis.body).unwrap();
+        assert!(kpis_json["count"].as_u64().unwrap() >= 7);
+        assert_eq!(kpis_json["kpis"][0]["id"], "transfers.total");
+
+        let pods = super::route_http_request("GET", "/api/pods", None, "", &state)
+            .await
+            .expect("pods");
+        let pods_json = serde_json::from_str::<serde_json::Value>(&pods.body).unwrap();
+        assert!(pods_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pod| pod["name"] == "mesh-peer"));
+
+        let federation =
+            super::route_http_request("GET", "/api/federation/diagnostics", None, "", &state)
+                .await
+                .expect("federation diagnostics");
+        let federation_json = serde_json::from_str::<serde_json::Value>(&federation.body).unwrap();
+        assert_eq!(federation_json["status"], "ready");
+        assert_eq!(federation_json["counts"]["watchedUsers"], 1);
+        assert_eq!(federation_json["items"][0]["source"], "watched-user");
+
+        let security =
+            super::route_http_request("GET", "/api/security/dashboard", None, "", &state)
+                .await
+                .expect("security dashboard");
+        let security_json = serde_json::from_str::<serde_json::Value>(&security.body).unwrap();
+        assert_eq!(security_json["status"], "local");
+        assert!(
+            security_json["stats"]["networkGuardStats"]["globalConnections"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
+        super::route_http_request(
+            "POST",
+            "/api/security/bans/username",
+            None,
+            r#"{"username":"mesh-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("security ban");
+        let security_status =
+            super::route_http_request("GET", "/api/security/status", None, "", &state)
+                .await
+                .expect("security status");
+        let security_status_json =
+            serde_json::from_str::<serde_json::Value>(&security_status.body).unwrap();
+        assert_eq!(security_status_json["activeBans"], 1);
+        let security =
+            super::route_http_request("GET", "/api/security/dashboard", None, "", &state)
+                .await
+                .expect("security dashboard after ban");
+        let security_json = serde_json::from_str::<serde_json::Value>(&security.body).unwrap();
+        assert_eq!(security_json["stats"]["banStats"]["activeBans"], 1);
+
+        let fairness = super::route_http_request("GET", "/api/fairness", None, "", &state)
+            .await
+            .expect("fairness");
+        let fairness_json = serde_json::from_str::<serde_json::Value>(&fairness.body).unwrap();
+        assert_eq!(fairness_json["status"], "ready");
+        assert_eq!(fairness_json["items"][0]["username"], "mesh-peer");
+        let ranking = super::route_http_request("GET", "/api/ranking", None, "", &state)
+            .await
+            .expect("ranking");
+        let ranking_json = serde_json::from_str::<serde_json::Value>(&ranking.body).unwrap();
+        assert_eq!(ranking_json["status"], "ready");
+        assert!(ranking_json["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["kind"] == "transfer" && row["score"].as_u64().unwrap_or(0) >= 55 }));
+        let portforwarding =
+            super::route_http_request("GET", "/api/portforwarding/status", None, "", &state)
+                .await
+                .expect("portforwarding");
+        let portforwarding_json =
+            serde_json::from_str::<serde_json::Value>(&portforwarding.body).unwrap();
+        assert_eq!(portforwarding_json["status"], "disabled");
+        assert_eq!(portforwarding_json["itemCount"], 1);
+        assert_eq!(portforwarding_json["counts"]["listenerAccepts"], 0);
+
+        let imported = super::route_http_request(
+            "POST",
+            "/api/wishlist/import/csv",
+            None,
+            r#"{"csv":"artist,title\nA,One\nB,Two"}"#,
+            &state,
+        )
+        .await
+        .expect("wishlist csv import");
+        let imported_json = serde_json::from_str::<serde_json::Value>(&imported.body).unwrap();
+        assert_eq!(imported_json["imported"], 2);
+        assert_eq!(imported_json["items"][0]["artist"], "A");
+        let imported_item_id = imported_json["items"][0]["id"].as_str().unwrap();
+        let wishlist_search = super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{imported_item_id}/search"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("wishlist item search");
+        let wishlist_search_json =
+            serde_json::from_str::<serde_json::Value>(&wishlist_search.body).unwrap();
+        assert_eq!(wishlist_search_json["search_started"], true);
+        assert_eq!(wishlist_search_json["target"], "wishlist");
+        assert_eq!(wishlist_search_json["query"], "A One");
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Shared"}"#,
+            &state,
+        )
+        .await
+        .expect("collection");
+        let collection_json = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap();
+        let collection_id = collection_json["id"].as_str().unwrap();
+        let solid = super::route_http_request("GET", "/api/solid/status", None, "", &state)
+            .await
+            .expect("solid status");
+        let solid_json = serde_json::from_str::<serde_json::Value>(&solid.body).unwrap();
+        assert_eq!(solid_json["enabled"], true);
+        super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/items"),
+            None,
+            r#"{"content_id":"lib-1","artist":"A","title":"One"}"#,
+            &state,
+        )
+        .await
+        .expect("collection item");
+        let grant = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"peer"}}"#),
+            &state,
+        )
+        .await
+        .expect("share grant");
+        let grant_json = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap();
+        let grant_id = grant_json["id"].as_str().unwrap();
+        let token = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/token"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("share grant token");
+        let token_json = serde_json::from_str::<serde_json::Value>(&token.body).unwrap();
+        assert_eq!(token_json["created"], true);
+        assert!(token_json["token"].as_str().unwrap().contains(grant_id));
+        assert_eq!(token_json["persisted"], true);
+        assert_eq!(token_json["status"], "local");
+        let backfill = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/backfill"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("share grant backfill");
+        let backfill_json = serde_json::from_str::<serde_json::Value>(&backfill.body).unwrap();
+        assert_eq!(backfill_json["backfilled"], 1);
+        assert_eq!(backfill_json["persisted"], true);
+        assert_eq!(backfill_json["status"], "local");
+    }
+
+    #[tokio::test]
     async fn user_browse_api_requests_and_ingests_entries() {
         let (state, mut receiver) = test_state();
 
@@ -18174,6 +29243,36 @@ mod tests {
         assert_eq!(fetched.status, "200 OK");
         assert!(fetched.body.contains("Remote/Album/Song.flac"));
 
+        let slskd_browse =
+            super::route_http_request("GET", "/api/users/friend/browse", None, "", &state)
+                .await
+                .expect("slskd browse fetch");
+        assert_eq!(slskd_browse.status, "200 OK");
+        let slskd_browse_json =
+            serde_json::from_str::<serde_json::Value>(&slskd_browse.body).unwrap();
+        assert_eq!(slskd_browse_json["directoryCount"], 1);
+        assert_eq!(slskd_browse_json["directories"][0]["name"], "Remote/Album");
+        assert_eq!(slskd_browse_json["directories"][0]["fileCount"], 2);
+        assert_eq!(
+            slskd_browse_json["directories"][0]["files"][0]["filename"],
+            "Song.flac"
+        );
+
+        let slskd_directory = super::route_http_request(
+            "POST",
+            "/api/users/friend/directory",
+            None,
+            "{\"directory\":\"Remote/Album\"}",
+            &state,
+        )
+        .await
+        .expect("slskd directory fetch");
+        assert_eq!(slskd_directory.status, "200 OK");
+        let slskd_directory_json =
+            serde_json::from_str::<serde_json::Value>(&slskd_directory.body).unwrap();
+        assert_eq!(slskd_directory_json[0]["name"], "Remote/Album");
+        assert_eq!(slskd_directory_json[0]["fileCount"], 2);
+
         let listed = super::route_http_request(
             "GET",
             "/api/v0/browse?status=ready&q=friend&limit=1",
@@ -18231,6 +29330,294 @@ mod tests {
         assert_eq!(response.status, "200 OK");
         assert!(response.body.contains("\"count\":1"));
         assert!(response.body.contains("\"extension\":\"mp3\""));
+    }
+
+    #[tokio::test]
+    async fn browse_response_api_accepts_slskd_directory_payload() {
+        let (state, _receiver) = test_state();
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/v0/browse-responses",
+            None,
+            "{\"username\":\"friend\",\"directories\":[{\"name\":\"Remote/Album\",\"files\":[{\"filename\":\"One.flac\",\"size\":1},{\"filename\":\"Remote/Album/Two.mp3\",\"size\":2}]}]}",
+            &state,
+        )
+        .await
+        .expect("slskd browse response");
+
+        assert_eq!(response.status, "200 OK");
+        let record_json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(record_json["count"], 2);
+        assert_eq!(
+            record_json["entries"][0]["filename"],
+            "Remote/Album/One.flac"
+        );
+        assert_eq!(
+            record_json["entries"][1]["filename"],
+            "Remote/Album/Two.mp3"
+        );
+
+        let root = super::route_http_request("GET", "/api/users/friend/browse", None, "", &state)
+            .await
+            .expect("slskd browse root");
+        let root_json = serde_json::from_str::<serde_json::Value>(&root.body).unwrap();
+        assert_eq!(root_json["directoryCount"], 1);
+        assert_eq!(root_json["directories"][0]["name"], "Remote/Album");
+        assert_eq!(root_json["directories"][0]["fileCount"], 2);
+
+        let directory = super::route_http_request(
+            "POST",
+            "/api/users/friend/directory",
+            None,
+            "{\"directory\":\"Remote/Album\"}",
+            &state,
+        )
+        .await
+        .expect("slskd directory");
+        let directory_json = serde_json::from_str::<serde_json::Value>(&directory.body).unwrap();
+        assert_eq!(
+            directory_json[0]["files"][0]["filename"],
+            "Remote/Album/One.flac"
+        );
+        assert_eq!(
+            directory_json[0]["files"][1]["filename"],
+            "Remote/Album/Two.mp3"
+        );
+    }
+
+    #[tokio::test]
+    async fn slskd_browse_status_tracks_request_failure_and_completion() {
+        let (state, _receiver) = test_state();
+
+        let requested = super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/request",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("request browse");
+        assert_eq!(requested.status, "202 Accepted");
+
+        let status =
+            super::route_http_request("GET", "/api/users/friend/browse/status", None, "", &state)
+                .await
+                .expect("requested browse status");
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(status_json["status"], "requested");
+        assert_eq!(status_json["state"], "InProgress");
+        assert_eq!(status_json["isComplete"], false);
+        assert_eq!(status_json["percentComplete"], 0.0);
+
+        let failed = super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/fail",
+            None,
+            "{\"reason\":\"timed out\"}",
+            &state,
+        )
+        .await
+        .expect("fail browse");
+        assert_eq!(failed.status, "200 OK");
+
+        let status = super::route_http_request(
+            "GET",
+            "/api/v0/users/friend/browse/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("failed browse status");
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(status_json["status"], "failed");
+        assert_eq!(status_json["state"], "Failed");
+        assert_eq!(status_json["reason"], "timed out");
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/browse-responses",
+            None,
+            "{\"username\":\"friend\",\"entries\":[{\"filename\":\"Remote/Album/One.flac\",\"size\":7}]}",
+            &state,
+        )
+        .await
+        .expect("complete browse");
+
+        let status =
+            super::route_http_request("GET", "/api/users/friend/browse/status", None, "", &state)
+                .await
+                .expect("completed browse status");
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(status_json["status"], "ready");
+        assert_eq!(status_json["state"], "Completed");
+        assert_eq!(status_json["isComplete"], true);
+        assert_eq!(status_json["size"], 7);
+        assert_eq!(status_json["bytesTransferred"], 7);
+        assert_eq!(status_json["fileCount"], 1);
+        assert_eq!(status_json["directoryCount"], 1);
+    }
+
+    #[tokio::test]
+    async fn browse_cancel_route_preserves_terminal_status_projection() {
+        let (state, _receiver) = test_state();
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/request",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("request browse");
+
+        let cancelled = super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/cancel",
+            None,
+            r#"{"reason":"user navigated away"}"#,
+            &state,
+        )
+        .await
+        .expect("cancel browse");
+        assert_eq!(cancelled.status, "200 OK");
+        let cancelled_json = serde_json::from_str::<serde_json::Value>(&cancelled.body).unwrap();
+        assert_eq!(cancelled_json["status"], "cancelled");
+        assert_eq!(cancelled_json["reason"], "user navigated away");
+
+        let status =
+            super::route_http_request("GET", "/api/users/friend/browse/status", None, "", &state)
+                .await
+                .expect("cancelled browse status");
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(status_json["status"], "cancelled");
+        assert_eq!(status_json["state"], "Cancelled");
+        assert_eq!(status_json["reason"], "user navigated away");
+
+        let listed =
+            super::route_http_request("GET", "/api/v0/browse?status=cancelled", None, "", &state)
+                .await
+                .expect("cancelled browse list");
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        assert_eq!(listed_json["filtered_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn slskd_user_browse_routes_page_directories_and_directory_files() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/v0/browse-responses",
+            None,
+            "{\"username\":\"friend\",\"entries\":[{\"filename\":\"Remote/Album/One.flac\",\"size\":1},{\"filename\":\"Remote/Album/Two.flac\",\"size\":2},{\"filename\":\"Remote/Album/Three.flac\",\"size\":3},{\"filename\":\"Remote/Other/Four.flac\",\"size\":4}]}",
+            &state,
+        )
+        .await
+        .expect("browse ingest");
+
+        let root = super::route_http_request(
+            "GET",
+            "/api/users/friend/browse?offset=1&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("paged root browse");
+        assert_eq!(root.status, "200 OK");
+        let root_json = serde_json::from_str::<serde_json::Value>(&root.body).unwrap();
+        assert_eq!(root_json["directoryCount"], 2);
+        assert_eq!(root_json["filteredDirectoryCount"], 2);
+        assert_eq!(root_json["fileCount"], 4);
+        assert_eq!(root_json["filteredFileCount"], 4);
+        assert_eq!(root_json["totalBytes"], 10);
+        assert_eq!(root_json["offset"], 1);
+        assert_eq!(root_json["limit"], 1);
+        assert_eq!(root_json["directories"].as_array().unwrap().len(), 1);
+        assert_eq!(root_json["directories"][0]["name"], "Remote/Other");
+        assert_eq!(root_json["directories"][0]["filteredFileCount"], 1);
+        assert_eq!(root_json["directories"][0]["totalBytes"], 4);
+
+        let directory = super::route_http_request(
+            "POST",
+            "/api/users/friend/directory?offset=1&limit=1",
+            None,
+            "{\"directory\":\"Remote/Album\"}",
+            &state,
+        )
+        .await
+        .expect("paged directory browse");
+        assert_eq!(directory.status, "200 OK");
+        let directory_json = serde_json::from_str::<serde_json::Value>(&directory.body).unwrap();
+        assert_eq!(directory_json[0]["name"], "Remote/Album");
+        assert_eq!(directory_json[0]["fileCount"], 3);
+        assert_eq!(directory_json[0]["filteredFileCount"], 3);
+        assert_eq!(directory_json[0]["totalBytes"], 6);
+        assert_eq!(directory_json[0]["offset"], 1);
+        assert_eq!(directory_json[0]["limit"], 1);
+        assert_eq!(directory_json[0]["files"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            directory_json[0]["files"][0]["filename"],
+            "Remote/Album/Two.flac"
+        );
+    }
+
+    #[tokio::test]
+    async fn slskd_user_browse_routes_filter_directories_and_files() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/v0/browse-responses",
+            None,
+            "{\"username\":\"friend\",\"entries\":[{\"filename\":\"Remote/Album/One.flac\",\"size\":1},{\"filename\":\"Remote/Album/Two.mp3\",\"size\":2},{\"filename\":\"Remote/Other/Four.flac\",\"size\":4},{\"filename\":\"Remote/Special/Needle.wav\",\"size\":5}]}",
+            &state,
+        )
+        .await
+        .expect("browse ingest");
+
+        let root = super::route_http_request(
+            "GET",
+            "/api/users/friend/browse?q=special",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered root browse");
+        assert_eq!(root.status, "200 OK");
+        let root_json = serde_json::from_str::<serde_json::Value>(&root.body).unwrap();
+        assert_eq!(root_json["directoryCount"], 3);
+        assert_eq!(root_json["filteredDirectoryCount"], 1);
+        assert_eq!(root_json["fileCount"], 4);
+        assert_eq!(root_json["filteredFileCount"], 1);
+        assert_eq!(root_json["totalBytes"], 5);
+        assert_eq!(root_json["directories"].as_array().unwrap().len(), 1);
+        assert_eq!(root_json["directories"][0]["name"], "Remote/Special");
+        assert_eq!(root_json["directories"][0]["filteredFileCount"], 1);
+        assert_eq!(root_json["directories"][0]["totalBytes"], 5);
+
+        let directory = super::route_http_request(
+            "POST",
+            "/api/users/friend/directory?q=two",
+            None,
+            "{\"directory\":\"Remote/Album\"}",
+            &state,
+        )
+        .await
+        .expect("filtered directory browse");
+        assert_eq!(directory.status, "200 OK");
+        let directory_json = serde_json::from_str::<serde_json::Value>(&directory.body).unwrap();
+        assert_eq!(directory_json[0]["fileCount"], 2);
+        assert_eq!(directory_json[0]["filteredFileCount"], 1);
+        assert_eq!(directory_json[0]["totalBytes"], 2);
+        assert_eq!(directory_json[0]["files"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            directory_json[0]["files"][0]["filename"],
+            "Remote/Album/Two.mp3"
+        );
     }
 
     #[tokio::test]
@@ -18364,6 +29751,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn peer_address_response_falls_back_to_plain_browse_when_obfuscated_fails() {
+        let (state, _receiver) = test_state();
+        {
+            let mut browse = state.browse.write().await;
+            browse.request("friend".to_owned());
+        }
+
+        let unused_obfuscated = {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("unused listener");
+            listener.local_addr().expect("unused addr").port()
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("plain listener");
+        let local_addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut init = slskr_client::stream::InitConnection::new(stream);
+            assert_eq!(
+                init.receive().await.expect("init"),
+                slskr_client::protocol::init::InitMessage::PeerInit {
+                    username: "friend".to_owned(),
+                    connection_type: "P".to_owned(),
+                    token: 0,
+                }
+            );
+            let mut peer = slskr_client::stream::PeerMessageConnection::new(init.into_inner());
+            assert_eq!(
+                peer.receive().await.expect("browse request"),
+                super::PeerMessage::GetShareFileList
+            );
+            let entries =
+                crate::config::parse_share_entries("Remote/Fallback.flac=222").expect("entries");
+            let payload = super::build_shared_file_list_payload(&entries).expect("payload");
+            peer.send(&super::PeerMessage::SharedFileListResponse(payload))
+                .await
+                .expect("response");
+        });
+        let address = slskr_client::protocol::server::PeerAddress {
+            username: "friend".to_owned(),
+            ip: "127.0.0.1".parse().unwrap(),
+            port: u32::from(local_addr.port()),
+            obfuscation_type: super::ROTATED_OBFUSCATION_TYPE,
+            obfuscated_port: unused_obfuscated,
+        };
+
+        super::project_peer_browse_response(&state, &address).await;
+        server.await.expect("server task");
+
+        let browse = state.browse.read().await;
+        let record = browse.get("friend").expect("browse record");
+        assert_eq!(record.status, "ready");
+        assert_eq!(record.entries.len(), 1);
+        assert_eq!(record.entries[0].filename, "Remote/Fallback.flac");
+        assert_eq!(record.entries[0].size, 222);
+    }
+
+    #[tokio::test]
     async fn peer_address_response_falls_back_to_indirect_browse() {
         let (state, mut receiver) = test_state();
         {
@@ -18471,6 +29918,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn user_projection_state_persists_and_rehydrates_records() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/users/watch",
+            None,
+            "{\"username\":\"friend\"}",
+            &state,
+        )
+        .await
+        .expect("watch user");
+        assert_eq!(created.status, "201 Created");
+        assert_eq!(
+            receiver.try_recv().expect("watch command"),
+            super::SessionCommand::WatchUser("friend".to_owned())
+        );
+
+        let mut records = db
+            .list_user_projections(10, 0)
+            .await
+            .expect("list persisted users");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].username, "friend");
+        assert!(records[0].watched);
+        records[0].status = Some("Online".to_owned());
+        records[0].average_speed = Some(2048);
+        records[0].upload_count = Some(7);
+        records[0].file_count = Some(123);
+        records[0].directory_count = Some(4);
+        db.upsert_user_projection(&records[0])
+            .await
+            .expect("update persisted user");
+
+        let rehydrated = super::UserStore::from_persisted(
+            db.list_user_projections(10, 0)
+                .await
+                .expect("reload persisted users"),
+        );
+        assert_eq!(rehydrated.records.len(), 1);
+        assert_eq!(rehydrated.records[0].username, "friend");
+        assert_eq!(rehydrated.records[0].status.as_deref(), Some("Online"));
+        assert_eq!(rehydrated.records[0].file_count, Some(123));
+        assert!(rehydrated.json().contains("\"watched\":true"));
+
+        let stats = super::database_stats_value(&state).await;
+        assert_eq!(stats["users"], 1);
+        assert_eq!(stats["persisted"]["users"], 1);
+    }
+
+    #[tokio::test]
     async fn messages_api_records_lists_and_acks_messages() {
         let (state, mut receiver) = test_state();
 
@@ -18548,9 +30053,120 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wishlist_store_terms_feed_scheduled_search_records() {
+        let mut wishlist = super::WishlistStore::new();
+        wishlist.get_or_create();
+        wishlist.add_item(super::WishlistItem {
+            id: "artist-title".to_owned(),
+            artist: "Artist".to_owned(),
+            title: "Title".to_owned(),
+            kind: "Audio".to_owned(),
+            added_at: 1,
+        });
+        wishlist.add_item(super::WishlistItem {
+            id: "title-only".to_owned(),
+            artist: String::new(),
+            title: "Rare Track".to_owned(),
+            kind: "Audio".to_owned(),
+            added_at: 2,
+        });
+
+        assert_eq!(
+            wishlist.search_terms(),
+            vec!["Artist Title".to_owned(), "Rare Track".to_owned()]
+        );
+
+        let mut searches = super::SearchStore::new();
+        let record = searches.create_scheduled_wishlist("Artist Title".to_owned(), 300);
+        assert_eq!(record.token, 1);
+        assert_eq!(record.target, "wishlist");
+        assert_eq!(record.query, "Artist Title");
+        assert_eq!(searches.summary_json(), "{\"total\":1,\"active\":1,\"completed\":0,\"expired\":0,\"results\":0,\"global\":0,\"user\":0,\"room\":0,\"wishlist\":1,\"next_token\":2}");
+    }
+
+    #[tokio::test]
+    async fn conversations_batch_sends_multi_user_message() {
+        let (state, mut receiver) = test_state();
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/conversations/batch",
+            None,
+            r#"{"usernames":["friend","Friend"," peer "],"body":"hello all"}"#,
+            &state,
+        )
+        .await
+        .expect("batch message");
+
+        assert_eq!(response.status, "201 Created");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["count"], 2);
+        assert_eq!(json["usernames"][0], "friend");
+        assert_eq!(json["usernames"][1], "peer");
+        assert_eq!(
+            receiver.try_recv().expect("batch message command"),
+            super::SessionCommand::MessageUsers {
+                usernames: vec!["friend".to_owned(), "peer".to_owned()],
+                body: "hello all".to_owned(),
+            }
+        );
+
+        let friend_messages =
+            super::route_http_request("GET", "/api/v0/messages/friend", None, "", &state)
+                .await
+                .expect("friend messages");
+        assert!(friend_messages.body.contains("\"body\":\"hello all\""));
+
+        let peer_messages =
+            super::route_http_request("GET", "/api/v0/messages/peer", None, "", &state)
+                .await
+                .expect("peer messages");
+        assert!(peer_messages.body.contains("\"body\":\"hello all\""));
+    }
+
+    #[tokio::test]
+    async fn conversations_batch_rejects_invalid_recipients() {
+        let (state, mut receiver) = test_state();
+
+        let blank = super::route_http_request(
+            "POST",
+            "/api/conversations/batch",
+            None,
+            r#"{"recipients":["friend"," "],"message":"hello"}"#,
+            &state,
+        )
+        .await
+        .expect("blank recipient");
+        assert_eq!(blank.status, "400 Bad Request");
+        assert!(blank
+            .body
+            .contains("private message recipient must not be blank"));
+        assert!(receiver.try_recv().is_err());
+
+        let missing = super::route_http_request(
+            "POST",
+            "/api/conversations/batch",
+            None,
+            r#"{"body":"hello"}"#,
+            &state,
+        )
+        .await
+        .expect("missing recipients");
+        assert_eq!(missing.status, "400 Bad Request");
+        assert_eq!(
+            missing.body,
+            "{\"error\":\"usernames/recipients array is required\"}"
+        );
+    }
+
     #[tokio::test]
     async fn rooms_api_joins_and_records_messages() {
         let (state, mut receiver) = test_state();
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+        }
 
         let refresh = super::route_http_request("POST", "/api/v0/rooms/refresh", None, "", &state)
             .await
@@ -18593,6 +30209,35 @@ mod tests {
             }
         );
 
+        let ticker = super::route_http_request(
+            "POST",
+            "/api/rooms/joined/music/ticker",
+            None,
+            r#""now playing""#,
+            &state,
+        )
+        .await
+        .expect("room ticker");
+        assert_eq!(ticker.status, "200 OK");
+        let ticker_json = serde_json::from_str::<serde_json::Value>(&ticker.body).unwrap();
+        assert_eq!(ticker_json["updated"], true);
+        assert_eq!(ticker_json["room"]["ticker"], "now playing");
+
+        let member = super::route_http_request(
+            "POST",
+            "/api/rooms/joined/music/members",
+            None,
+            r#""friend""#,
+            &state,
+        )
+        .await
+        .expect("room member");
+        assert_eq!(member.status, "200 OK");
+        let member_json = serde_json::from_str::<serde_json::Value>(&member.body).unwrap();
+        assert_eq!(member_json["updated"], true);
+        assert_eq!(member_json["userCount"], 1);
+        assert_eq!(member_json["room"]["users"][0], "friend");
+
         let rooms = super::route_http_request("GET", "/api/v0/rooms", None, "", &state)
             .await
             .expect("list rooms");
@@ -18623,6 +30268,32 @@ mod tests {
                 .await
                 .expect("joined room filter");
         assert!(joined_filter.body.contains("\"filtered_count\":0"));
+    }
+
+    #[tokio::test]
+    async fn room_join_returns_503_while_disconnected_or_reconnecting() {
+        let (state, mut receiver) = test_state();
+
+        let disconnected =
+            super::route_http_request("POST", "/api/v0/rooms/music/join", None, "", &state)
+                .await
+                .expect("join while disconnected");
+        assert_eq!(disconnected.status, "503 Service Unavailable");
+        assert!(disconnected.body.contains("disconnected"));
+        assert!(receiver.try_recv().is_err());
+
+        {
+            let mut session = state.session.write().await;
+            session.state = "error";
+            session.last_error = Some("server receive failed".to_owned());
+        }
+        let reconnecting =
+            super::route_http_request("POST", "/api/rooms/joined", None, r#""music""#, &state)
+                .await
+                .expect("join while reconnecting");
+        assert_eq!(reconnecting.status, "503 Service Unavailable");
+        assert!(reconnecting.body.contains("reconnecting"));
+        assert!(receiver.try_recv().is_err());
     }
 
     #[test]
@@ -18658,6 +30329,28 @@ mod tests {
         assert!(json.contains("\"user_count\":3"));
         assert!(json.contains("\"name\":\"orphan-operated\""));
         assert!(json.contains("\"kind\":\"operated_private\""));
+    }
+
+    #[test]
+    fn room_join_failure_projection_clears_optimistic_join() {
+        let mut rooms = super::RoomStore::new();
+        rooms.join("denied".to_owned());
+
+        let failed = rooms.fail_join("denied", "server reported cant-create-room".to_owned());
+
+        assert!(!failed.joined);
+        assert_eq!(
+            failed.last_error.as_deref(),
+            Some("server reported cant-create-room")
+        );
+        assert!(failed.json().contains("\"joined\":false"));
+        assert!(failed
+            .json()
+            .contains("\"last_error\":\"server reported cant-create-room\""));
+
+        let joined = rooms.join("denied".to_owned());
+        assert!(joined.joined);
+        assert_eq!(joined.last_error, None);
     }
 
     #[tokio::test]
@@ -18981,8 +30674,9 @@ mod tests {
                 .expect("bridge config");
         assert_eq!(bridge.status, "200 OK");
         let bridge_json = serde_json::from_str::<serde_json::Value>(&bridge.body).unwrap();
-        assert_eq!(bridge_json["persisted"], false);
+        assert_eq!(bridge_json["persisted"], true);
         assert_eq!(bridge_json["restart_required"], true);
+        assert_eq!(bridge_json["configUpdates"], 1);
 
         let username_ban = super::route_http_request(
             "POST",
@@ -18996,7 +30690,21 @@ mod tests {
         let username_ban_json =
             serde_json::from_str::<serde_json::Value>(&username_ban.body).unwrap();
         assert_eq!(username_ban_json["banned"], true);
-        assert_eq!(username_ban_json["persisted"], false);
+        assert_eq!(username_ban_json["persisted"], true);
+        assert_eq!(username_ban_json["activeBans"], 1);
+        let bans = super::route_http_request("GET", "/api/bans", None, "", &state)
+            .await
+            .expect("bans");
+        let bans_json = serde_json::from_str::<serde_json::Value>(&bans.body).unwrap();
+        assert_eq!(bans_json["count"], 1);
+        assert_eq!(bans_json["bans"][0]["value"], "peer1");
+        let unban =
+            super::route_http_request("DELETE", "/api/bans/username/peer1", None, "", &state)
+                .await
+                .expect("username unban");
+        let unban_json = serde_json::from_str::<serde_json::Value>(&unban.body).unwrap();
+        assert_eq!(unban_json["removed"], true);
+        assert_eq!(unban_json["activeBans"], 0);
 
         let share_token = super::route_http_request(
             "POST",
@@ -19045,11 +30753,16 @@ mod tests {
         .expect("subscription create");
         let created_subscription_json =
             serde_json::from_str::<serde_json::Value>(&created_subscription.body).unwrap();
-        assert_eq!(created_subscription_json["created"], false);
-        assert_eq!(created_subscription_json["persisted"], false);
+        assert_eq!(created_subscription_json["created"], true);
+        assert_eq!(created_subscription_json["persisted"], true);
+        assert_eq!(created_subscription_json["status"], "local");
+        assert_eq!(created_subscription_json["count"], 1);
         assert_eq!(
-            created_subscription_json["status"],
-            "compatibility_acknowledgement"
+            created_subscription_json["subscriptions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
         );
     }
 
@@ -19238,6 +30951,7 @@ mod tests {
             shares: RwLock::new(super::build_share_index(&config)),
             searches: RwLock::new(super::SearchStore::new()),
             users: RwLock::new(super::UserStore::new()),
+            mesh: RwLock::new(super::MeshState::new()),
             browse: RwLock::new(super::BrowseStore::new()),
             messages: RwLock::new(super::MessageStore::new()),
             rooms: RwLock::new(super::RoomStore::new()),
@@ -19252,6 +30966,10 @@ mod tests {
             sharegroups: RwLock::new(super::ShareGroupStore::new()),
             user_notes: RwLock::new(super::UserNoteStore::new()),
             interests: RwLock::new(super::InterestStore::new()),
+            now_playing: RwLock::new(super::NowPlayingStore::new()),
+            relay: RwLock::new(super::RelayState::new()),
+            runtime: RwLock::new(super::RuntimeCompatState::new()),
+            security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
             library: RwLock::new(super::LibraryStore::new()),
             destinations: RwLock::new(super::DestinationStore::new()),
@@ -19366,6 +31084,7 @@ mod tests {
             shares: RwLock::new(super::build_share_index(&cookie_enabled_config)),
             searches: RwLock::new(super::SearchStore::new()),
             users: RwLock::new(super::UserStore::new()),
+            mesh: RwLock::new(super::MeshState::new()),
             browse: RwLock::new(super::BrowseStore::new()),
             messages: RwLock::new(super::MessageStore::new()),
             rooms: RwLock::new(super::RoomStore::new()),
@@ -19380,6 +31099,10 @@ mod tests {
             sharegroups: RwLock::new(super::ShareGroupStore::new()),
             user_notes: RwLock::new(super::UserNoteStore::new()),
             interests: RwLock::new(super::InterestStore::new()),
+            now_playing: RwLock::new(super::NowPlayingStore::new()),
+            relay: RwLock::new(super::RelayState::new()),
+            runtime: RwLock::new(super::RuntimeCompatState::new()),
+            security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
             library: RwLock::new(super::LibraryStore::new()),
             destinations: RwLock::new(super::DestinationStore::new()),
