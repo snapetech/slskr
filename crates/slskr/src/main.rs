@@ -5403,6 +5403,9 @@ struct RuntimeCompatState {
     relay_agent_enabled: bool,
     bridge_running: bool,
     bridge_config_updates: u64,
+    options_updates: u64,
+    options_yaml_uploads: u64,
+    options_yaml_validations: u64,
     profile_invites_created: u64,
     cache_warm_runs: u64,
     backfill_runs: u64,
@@ -5421,6 +5424,9 @@ impl RuntimeCompatState {
             relay_agent_enabled: false,
             bridge_running: false,
             bridge_config_updates: 0,
+            options_updates: 0,
+            options_yaml_uploads: 0,
+            options_yaml_validations: 0,
             profile_invites_created: 0,
             cache_warm_runs: 0,
             backfill_runs: 0,
@@ -5439,6 +5445,10 @@ impl RuntimeCompatState {
             relay_agent_enabled: record.relay_agent_enabled,
             bridge_running: record.bridge_running,
             bridge_config_updates: u64::try_from(record.bridge_config_updates).unwrap_or_default(),
+            options_updates: u64::try_from(record.options_updates).unwrap_or_default(),
+            options_yaml_uploads: u64::try_from(record.options_yaml_uploads).unwrap_or_default(),
+            options_yaml_validations: u64::try_from(record.options_yaml_validations)
+                .unwrap_or_default(),
             profile_invites_created: u64::try_from(record.profile_invites_created)
                 .unwrap_or_default(),
             cache_warm_runs: u64::try_from(record.cache_warm_runs).unwrap_or_default(),
@@ -5460,6 +5470,10 @@ impl RuntimeCompatState {
             relay_agent_enabled: self.relay_agent_enabled,
             bridge_running: self.bridge_running,
             bridge_config_updates: i64::try_from(self.bridge_config_updates).unwrap_or(i64::MAX),
+            options_updates: i64::try_from(self.options_updates).unwrap_or(i64::MAX),
+            options_yaml_uploads: i64::try_from(self.options_yaml_uploads).unwrap_or(i64::MAX),
+            options_yaml_validations: i64::try_from(self.options_yaml_validations)
+                .unwrap_or(i64::MAX),
             profile_invites_created: i64::try_from(self.profile_invites_created)
                 .unwrap_or(i64::MAX),
             cache_warm_runs: i64::try_from(self.cache_warm_runs).unwrap_or(i64::MAX),
@@ -5547,6 +5561,24 @@ impl RuntimeCompatState {
             "configUpdates": self.bridge_config_updates,
             "updated_at": self.updated_at,
         })
+    }
+
+    fn record_options_update(&mut self) -> u64 {
+        self.options_updates = self.options_updates.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        self.options_updates
+    }
+
+    fn record_options_yaml_upload(&mut self) -> u64 {
+        self.options_yaml_uploads = self.options_yaml_uploads.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        self.options_yaml_uploads
+    }
+
+    fn record_options_yaml_validation(&mut self) -> u64 {
+        self.options_yaml_validations = self.options_yaml_validations.saturating_add(1);
+        self.updated_at = unix_timestamp();
+        self.options_yaml_validations
     }
 
     fn record_profile_invite(&mut self) -> serde_json::Value {
@@ -5639,6 +5671,9 @@ impl RuntimeCompatState {
             "relayAgentEnabled": self.relay_agent_enabled,
             "bridgeRunning": self.bridge_running,
             "bridgeConfigUpdates": self.bridge_config_updates,
+            "optionsUpdates": self.options_updates,
+            "optionsYamlUploads": self.options_yaml_uploads,
+            "optionsYamlValidations": self.options_yaml_validations,
             "profileInvitesCreated": self.profile_invites_created,
             "cacheWarmRuns": self.cache_warm_runs,
             "backfillRuns": self.backfill_runs,
@@ -7703,8 +7738,17 @@ async fn route_http_request_with_headers(
 
           // ADDITIONAL MISSING PATCH ENDPOINTS (Phase 5)
           ("PATCH", "/api/options") => {
-              match slskd_options_mutation_response(body) {
-                  Ok(json) => Ok(routing::ok_response(json)),
+              match slskd_options_mutation_response(body, 0, state.db.is_some()) {
+                  Ok(_) => {
+                      let mut runtime = state.runtime.write().await;
+                      let acknowledgements = runtime.record_options_update();
+                      drop(runtime);
+                      persist_runtime_compat_state(state).await;
+                      match slskd_options_mutation_response(body, acknowledgements, state.db.is_some()) {
+                          Ok(json) => Ok(routing::ok_response(json)),
+                          Err(error) => Ok(routing::bad_request_response(&error)),
+                      }
+                  }
                   Err(error) => Ok(routing::bad_request_response(&error)),
               }
           }
@@ -10126,7 +10170,10 @@ async fn route_http_request_with_headers(
         }
         // WEBUI PARITY: Options/Config read-write endpoints
         ("GET", "/api/options") => {
-            Ok(routing::ok_response(slskd_options_json(&state.config)))
+            let runtime = state.runtime.read().await;
+            let body = slskd_options_json(&state.config, &runtime, state.db.is_some());
+            drop(runtime);
+            Ok(routing::ok_response(body))
         }
         ("GET", "/api/options/startup") => {
             Ok(routing::ok_response(state.config.sanitized_json()))
@@ -10153,8 +10200,17 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("PUT", "/api/options") => {
-            match slskd_options_mutation_response(body) {
-                Ok(json) => Ok(routing::ok_response(json)),
+            match slskd_options_mutation_response(body, 0, state.db.is_some()) {
+                Ok(_) => {
+                    let mut runtime = state.runtime.write().await;
+                    let acknowledgements = runtime.record_options_update();
+                    drop(runtime);
+                    persist_runtime_compat_state(state).await;
+                    match slskd_options_mutation_response(body, acknowledgements, state.db.is_some()) {
+                        Ok(json) => Ok(routing::ok_response(json)),
+                        Err(error) => Ok(routing::bad_request_response(&error)),
+                    }
+                }
                 Err(error) => Ok(routing::bad_request_response(&error)),
             }
         }
@@ -11831,8 +11887,17 @@ async fn route_http_request_with_headers(
         }
 
         ("PUT", "/api/options/yaml") => {
-            match slskd_options_config_upload_response(body) {
-                Ok(json) => Ok(routing::ok_response(json)),
+            match slskd_options_config_upload_response(body, 0, state.db.is_some()) {
+                Ok(_) => {
+                    let mut runtime = state.runtime.write().await;
+                    let acknowledgements = runtime.record_options_yaml_upload();
+                    drop(runtime);
+                    persist_runtime_compat_state(state).await;
+                    match slskd_options_config_upload_response(body, acknowledgements, state.db.is_some()) {
+                        Ok(json) => Ok(routing::ok_response(json)),
+                        Err(error) => Ok(routing::bad_request_response(&error)),
+                    }
+                }
                 Err(error) => Ok(routing::bad_request_response(&error)),
             }
         }
@@ -12877,8 +12942,17 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/options/yaml/validate") => {
-              match slskd_options_config_validate_response(body) {
-                  Ok(response) => Ok(response),
+              match slskd_options_config_validate_response(body, 0, state.db.is_some()) {
+                  Ok(_) => {
+                      let mut runtime = state.runtime.write().await;
+                      let acknowledgements = runtime.record_options_yaml_validation();
+                      drop(runtime);
+                      persist_runtime_compat_state(state).await;
+                      match slskd_options_config_validate_response(body, acknowledgements, state.db.is_some()) {
+                          Ok(response) => Ok(response),
+                          Err(error) => Ok(routing::bad_request_response(&error)),
+                      }
+                  }
                   Err(error) => Ok(routing::bad_request_response(&error)),
               }
           }
@@ -14377,7 +14451,11 @@ fn slskd_version_json() -> serde_json::Value {
     })
 }
 
-fn slskd_options_json(config: &AppConfig) -> String {
+fn slskd_options_json(
+    config: &AppConfig,
+    runtime: &RuntimeCompatState,
+    acknowledgement_persistence_enabled: bool,
+) -> String {
     let options = serde_json::from_str::<serde_json::Value>(&config.sanitized_json())
         .unwrap_or_else(|_| serde_json::json!({}));
     serde_json::json!({
@@ -14389,8 +14467,19 @@ fn slskd_options_json(config: &AppConfig) -> String {
         "compatibility": {
             "surface": "slskd-options",
             "configFormat": "toml",
-            "mutationPersistence": "non-persisted compatibility acknowledgement",
+            "mutationPersistence": if acknowledgement_persistence_enabled {
+                "persisted compatibility acknowledgement"
+            } else {
+                "non-persisted compatibility acknowledgement"
+            },
             "readOnly": true,
+            "acknowledgements": {
+                "optionsUpdates": runtime.options_updates,
+                "optionsYamlUploads": runtime.options_yaml_uploads,
+                "optionsYamlValidations": runtime.options_yaml_validations,
+                "persisted": acknowledgement_persistence_enabled,
+                "updated_at": runtime.updated_at,
+            },
         },
         "nonPersistentMutationRoutes": [
             "/api/options",
@@ -14433,29 +14522,55 @@ fn slskd_options_config_body(body: &str) -> Result<String, String> {
     Ok(text.to_owned())
 }
 
-fn slskd_options_config_upload_response(body: &str) -> Result<String, String> {
+fn slskd_options_config_upload_response(
+    body: &str,
+    acknowledgements: u64,
+    acknowledgement_persistence_enabled: bool,
+) -> Result<String, String> {
     let text = slskd_options_config_body(body)?;
     Ok(serde_json::json!({
-        "persisted": false,
+        "persisted": acknowledgement_persistence_enabled,
+        "configPersisted": false,
         "restart_required": false,
         "runtimeMutationEnabled": false,
         "bytes": text.len(),
+        "acknowledgements": acknowledgements,
         "status": "compatibility_acknowledgement",
-        "message": "config upload is validated but not persisted by this runtime",
+        "message": if acknowledgement_persistence_enabled {
+            "config upload is validated and the compatibility acknowledgement is persisted by this runtime"
+        } else {
+            "config upload is validated but not persisted by this runtime"
+        },
     })
     .to_string())
 }
 
-fn slskd_options_config_validate_response(body: &str) -> Result<HttpResponse, String> {
+fn slskd_options_config_validate_response(
+    body: &str,
+    acknowledgements: u64,
+    acknowledgement_persistence_enabled: bool,
+) -> Result<HttpResponse, String> {
     let _ = slskd_options_config_body(body)?;
     Ok(HttpResponse {
         status: "200 OK",
-        content_type: "text/plain",
-        body: String::new(),
+        content_type: "application/json",
+        body: serde_json::json!({
+            "valid": true,
+            "persisted": acknowledgement_persistence_enabled,
+            "configPersisted": false,
+            "runtimeMutationEnabled": false,
+            "acknowledgements": acknowledgements,
+            "status": "compatibility_acknowledgement",
+        })
+        .to_string(),
     })
 }
 
-fn slskd_options_mutation_response(body: &str) -> Result<String, String> {
+fn slskd_options_mutation_response(
+    body: &str,
+    acknowledgements: u64,
+    acknowledgement_persistence_enabled: bool,
+) -> Result<String, String> {
     let payload = serde_json::from_str::<serde_json::Value>(body)
         .map_err(|error| format!("invalid options JSON: {error}"))?;
     let Some(object) = payload.as_object() else {
@@ -14464,15 +14579,25 @@ fn slskd_options_mutation_response(body: &str) -> Result<String, String> {
     let accepted_keys = object.keys().cloned().collect::<Vec<_>>();
     Ok(serde_json::json!({
         "status": "accepted",
-        "persisted": false,
+        "persisted": acknowledgement_persistence_enabled,
+        "configPersisted": false,
         "restart_required": false,
         "runtimeMutationEnabled": false,
         "acceptedKeys": accepted_keys,
+        "acknowledgements": acknowledgements,
         "note": "runtime option mutation is not enabled",
-        "message": "non-persisted compatibility acknowledgement",
+        "message": if acknowledgement_persistence_enabled {
+            "persisted compatibility acknowledgement"
+        } else {
+            "non-persisted compatibility acknowledgement"
+        },
         "compatibility": {
             "surface": "slskd-options",
-            "mutationPersistence": "none",
+            "mutationPersistence": if acknowledgement_persistence_enabled {
+                "runtime_compat_state"
+            } else {
+                "none"
+            },
         },
     })
     .to_string())
@@ -25280,6 +25405,40 @@ mod tests {
             .await
             .expect("backfill");
         assert_eq!(backfill.status, "202 Accepted");
+        let options =
+            super::route_http_request("PATCH", "/api/options", None, r#"{"theme":"dark"}"#, &state)
+                .await
+                .expect("options patch");
+        assert_eq!(options.status, "200 OK");
+        let options_json = serde_json::from_str::<serde_json::Value>(&options.body).unwrap();
+        assert_eq!(options_json["persisted"], true);
+        assert_eq!(options_json["configPersisted"], false);
+        assert_eq!(options_json["acknowledgements"], 1);
+        let options_upload =
+            super::route_http_request("PUT", "/api/options/yaml", None, r#""app: {}""#, &state)
+                .await
+                .expect("options upload");
+        assert_eq!(options_upload.status, "200 OK");
+        let options_upload_json =
+            serde_json::from_str::<serde_json::Value>(&options_upload.body).unwrap();
+        assert_eq!(options_upload_json["persisted"], true);
+        assert_eq!(options_upload_json["configPersisted"], false);
+        assert_eq!(options_upload_json["acknowledgements"], 1);
+        let options_validate = super::route_http_request(
+            "POST",
+            "/api/options/yaml/validate",
+            None,
+            r#""app: {}""#,
+            &state,
+        )
+        .await
+        .expect("options validate");
+        assert_eq!(options_validate.status, "200 OK");
+        let options_validate_json =
+            serde_json::from_str::<serde_json::Value>(&options_validate.body).unwrap();
+        assert_eq!(options_validate_json["valid"], true);
+        assert_eq!(options_validate_json["persisted"], true);
+        assert_eq!(options_validate_json["acknowledgements"], 1);
 
         let persisted = db
             .get_runtime_compat_state()
@@ -25292,6 +25451,9 @@ mod tests {
         assert!(persisted.relay_enabled);
         assert!(persisted.relay_agent_enabled);
         assert_eq!(persisted.bridge_config_updates, 1);
+        assert_eq!(persisted.options_updates, 1);
+        assert_eq!(persisted.options_yaml_uploads, 1);
+        assert_eq!(persisted.options_yaml_validations, 1);
         assert_eq!(persisted.profile_invites_created, 1);
         assert_eq!(persisted.cache_warm_runs, 1);
         assert_eq!(persisted.songid_runs, 1);
@@ -25305,6 +25467,9 @@ mod tests {
         assert_eq!(runtime_json["autoreplaceEnabled"], true);
         assert_eq!(runtime_json["relayAgentEnabled"], true);
         assert_eq!(runtime_json["bridgeConfigUpdates"], 1);
+        assert_eq!(runtime_json["optionsUpdates"], 1);
+        assert_eq!(runtime_json["optionsYamlUploads"], 1);
+        assert_eq!(runtime_json["optionsYamlValidations"], 1);
         assert_eq!(runtime_json["profileInvitesCreated"], 1);
         assert_eq!(runtime_json["cacheWarmRuns"], 1);
         assert_eq!(runtime_json["songidRuns"], 1);

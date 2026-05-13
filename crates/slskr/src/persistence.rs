@@ -290,6 +290,9 @@ pub struct RuntimeCompatRecord {
     pub relay_agent_enabled: bool,
     pub bridge_running: bool,
     pub bridge_config_updates: i64,
+    pub options_updates: i64,
+    pub options_yaml_uploads: i64,
+    pub options_yaml_validations: i64,
     pub profile_invites_created: i64,
     pub cache_warm_runs: i64,
     pub backfill_runs: i64,
@@ -671,6 +674,9 @@ impl<'r> FromRow<'r, SqliteRow> for RuntimeCompatRecord {
             relay_agent_enabled: row.try_get("relay_agent_enabled")?,
             bridge_running: row.try_get("bridge_running")?,
             bridge_config_updates: row.try_get("bridge_config_updates")?,
+            options_updates: row.try_get("options_updates")?,
+            options_yaml_uploads: row.try_get("options_yaml_uploads")?,
+            options_yaml_validations: row.try_get("options_yaml_validations")?,
             profile_invites_created: row.try_get("profile_invites_created")?,
             cache_warm_runs: row.try_get("cache_warm_runs")?,
             backfill_runs: row.try_get("backfill_runs")?,
@@ -1176,6 +1182,9 @@ impl DatabaseManager {
                 relay_agent_enabled INTEGER DEFAULT 0,
                 bridge_running INTEGER DEFAULT 0,
                 bridge_config_updates INTEGER NOT NULL,
+                options_updates INTEGER NOT NULL DEFAULT 0,
+                options_yaml_uploads INTEGER NOT NULL DEFAULT 0,
+                options_yaml_validations INTEGER NOT NULL DEFAULT 0,
                 profile_invites_created INTEGER NOT NULL,
                 cache_warm_runs INTEGER NOT NULL,
                 backfill_runs INTEGER NOT NULL,
@@ -1188,6 +1197,7 @@ impl DatabaseManager {
         )
         .execute(&self.pool)
         .await?;
+        self.ensure_runtime_compat_columns().await?;
 
         // Create pending OAuth states table
         query(
@@ -1361,6 +1371,22 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    async fn ensure_runtime_compat_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE runtime_compat_state ADD COLUMN options_updates INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE runtime_compat_state ADD COLUMN options_yaml_uploads INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE runtime_compat_state ADD COLUMN options_yaml_validations INTEGER NOT NULL DEFAULT 0",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                let message = error.to_string();
+                if !message.contains("duplicate column name") {
+                    return Err(Box::new(error));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2813,9 +2839,9 @@ impl DatabaseManager {
             INSERT OR REPLACE INTO runtime_compat_state
             (id, application_restart_requested, gc_runs, autoreplace_enabled, relay_enabled,
              relay_agent_enabled, bridge_running, bridge_config_updates, profile_invites_created,
-             cache_warm_runs, backfill_runs, songid_runs, lidarr_sync_runs, lidarr_manual_imports,
-             updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             options_updates, options_yaml_uploads, options_yaml_validations, cache_warm_runs,
+             backfill_runs, songid_runs, lidarr_sync_runs, lidarr_manual_imports, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&record.id)
@@ -2827,6 +2853,9 @@ impl DatabaseManager {
         .bind(record.bridge_running)
         .bind(record.bridge_config_updates)
         .bind(record.profile_invites_created)
+        .bind(record.options_updates)
+        .bind(record.options_yaml_uploads)
+        .bind(record.options_yaml_validations)
         .bind(record.cache_warm_runs)
         .bind(record.backfill_runs)
         .bind(record.songid_runs)

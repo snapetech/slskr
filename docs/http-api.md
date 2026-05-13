@@ -871,13 +871,15 @@ Monitor these key metrics:
 - Preserved slskd compatibility mutation routes can return successful
   acknowledgements without persisting runtime config. `/api/options`,
   `/api/options/yaml`, and `/api/options/yaml/validate` advertise this with
-  `runtimeMutationEnabled: false`, `persisted: false`, and compatibility
-  metadata.
+  `runtimeMutationEnabled: false`, `configPersisted: false`, and
+  compatibility metadata. When SQLite persistence is enabled the
+  acknowledgement counters themselves are written to the runtime compatibility
+  state and exposed as `persisted: true`.
 - Compatibility shells that are not active in this runtime keep their endpoint
   paths and stable response shapes, but may return empty arrays or
-  `compatibility_acknowledgement` objects. Runtime options acknowledgements
-  remain non-persistent. Bridge start/stop/config aliases, logs,
-  profile invite/cache warm/backfill/SongID/Lidarr operation counters,
+  `compatibility_acknowledgement` objects. Runtime options acknowledgements,
+  bridge start/stop/config aliases, logs, profile invite/cache
+  warm/backfill/SongID/Lidarr operation counters,
   unconfigured Lidarr wanted/sync/import fallbacks, destination validation,
   listening-party content helpers, share-grant token/backfill helpers, profile
   updates, and MusicBrainz release-radar subscription helpers now project or

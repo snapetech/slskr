@@ -51,10 +51,12 @@ This is a behavioral compatibility commitment rather than a source-code lineage 
 
 Compatibility acknowledgements are explicit where a preserved route is not a
 durable slskr feature. Options/config mutation aliases validate request shape
-and report `runtimeMutationEnabled: false` / `persisted: false`. Bridge
-start/stop/config aliases keep stable response shapes while updating durable
-runtime compatibility state. Profile invite, cache warm, backfill, SongID, and
-Lidarr operation counters surface through the same persisted runtime state.
+and report `runtimeMutationEnabled: false` / `configPersisted: false`; when
+SQLite persistence is enabled their acknowledgement counters also update the
+durable runtime compatibility state. Bridge start/stop/config aliases keep
+stable response shapes while updating durable runtime compatibility state.
+Profile invite, cache warm, backfill, SongID, and Lidarr operation counters
+surface through the same persisted runtime state.
 Pending OAuth callback states also write through to SQLite when persistence is
 enabled so short-lived authorization flows survive daemon restarts until their
 normal expiry. Webhook configuration and queued delivery log projections also
