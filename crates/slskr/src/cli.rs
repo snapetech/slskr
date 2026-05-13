@@ -30,10 +30,6 @@ use std::{ffi::OsString, fs, net::SocketAddr, path::PathBuf, time::Duration};
 use tokio::net::TcpStream;
 use tokio::time::{self, Instant};
 
-pub async fn run_from_env() -> Result<(), String> {
-    run_from_args(std::env::args_os().skip(1)).await
-}
-
 pub async fn run_from_args<I>(args: I) -> Result<(), String>
 where
     I: IntoIterator<Item = OsString>,
@@ -141,9 +137,7 @@ fn usage() -> &'static str {
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe metadata-relogin
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe negative-indirect
   SLSKR_A_USERNAME=<user> SLSKR_A_PASSWORD=<pass> SLSKR_B_USERNAME=<user> SLSKR_B_PASSWORD=<pass> slskr smoke local-peer
-  slskr smoke fixture-peer
-
-Legacy slskr-cli command names are still accepted during migration."
+  slskr smoke fixture-peer"
 }
 
 async fn peer_address_probe() -> Result<(), String> {
@@ -3351,7 +3345,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_commands_map_to_legacy_runner_names() {
+    fn grouped_commands_map_to_internal_runner_names() {
         assert_eq!(normalize(&["login", "smoke"]), ["login-smoke"]);
         assert_eq!(normalize(&["soak", "live"]), ["live-soak"]);
         assert_eq!(normalize(&["smoke", "local-peer"]), ["local-peer-smoke"]);
@@ -3362,7 +3356,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_runner_names_still_pass_through() {
+    fn internal_runner_names_still_pass_through() {
         assert_eq!(normalize(&["login-smoke"]), ["login-smoke"]);
         assert_eq!(normalize(&["plain-peer-probe"]), ["plain-peer-probe"]);
     }

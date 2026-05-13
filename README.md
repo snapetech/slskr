@@ -86,10 +86,9 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
 
 `slskr` is split into small crates and one browser workspace:
 
-- `crates/slskr`: the application binary, HTTP server, API routing, web UI serving, daemon orchestration, config loading, storage projections, auth, rate limiting, logging, telemetry, webhooks, and OpenAPI embedding.
+- `crates/slskr`: the application binary, HTTP server, API routing, web UI serving, daemon orchestration, config loading, storage projections, auth, rate limiting, logging, telemetry, webhooks, OpenAPI embedding, and built-in smoke/probe commands.
 - `crates/slskr-client`: async runtime for server sessions, peer connections, listeners, searches, browsing, social/user operations, transfers, stream handling, peer cache, distributed tree state, and live probes.
 - `crates/slskr-protocol`: protocol message types, binary codecs, frame parsing, primitives, peer/server/distributed/init messages, obfuscation helpers, and wire-format tests.
-- `crates/slskr-cli`: internal command runner used by smoke tests and interop probes while the public binary remains `slskr`.
 - `crates/slskr-web`: Rust/WASM browser UI served in release archives.
 - `web`: legacy React/Vite UI reference and test harness retained while parity code is migrated.
 - `client-ts`, `client-python`, `client-go`: generated or maintained API clients and examples for automation.
@@ -473,7 +472,6 @@ The expected release shape is one binary, one config file, one state directory, 
 ├── crates/
 │   ├── slskr/            # daemon, API, web serving, config, storage, telemetry
 │   ├── slskr-client/     # async session, peer, search, browse, transfer runtime
-│   ├── slskr-cli/        # smoke/probe command implementation
 │   ├── slskr-protocol/   # protocol messages, codecs, frames, obfuscation
 │   └── slskr-web/        # Rust/WASM web UI migration target
 ├── web/                  # React/Vite web UI

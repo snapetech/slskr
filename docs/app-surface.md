@@ -18,7 +18,7 @@
 - `slskr probe metadata-relogin`: peer metadata stability check.
 - `slskr probe negative-indirect`: explicit timeout/error behavior check.
 
-Legacy `slskr-cli` command names remain accepted while scripts and local operator habits migrate, but public docs should prefer `slskr`.
+Smoke/probe command implementations live inside the `slskr` binary crate, and public docs and scripts should call `slskr` directly.
 
 ## Daemon/API Direction
 
@@ -237,7 +237,7 @@ Target distribution shape:
 - one state directory
 - maintained systemd unit
 - optional container image
-- no public product dependency on `slskr-cli`
+- smoke/probe commands built into `slskr`
 
 ## Remaining Backfill
 
@@ -254,5 +254,3 @@ Target distribution shape:
 - add durable config and state beyond current SQLite share-index/event/search/transfer/user/browse/message/room/collection/library/destination/now-playing/wishlist/contact/sharegroup/share-grant/social/security/OAuth/webhook/runtime-compatibility state, options/config acknowledgement counters, transfer-state JSON, event TSVs, and live database maintenance aliases
 - expand API route tests as new `/api/v0/*` resources land
 - keep the Playwright/slskr harness build strategy current as repo layouts move
-- migrate scripts fully to `slskr` commands
-- remove or hide the legacy `slskr-cli` binary before public release

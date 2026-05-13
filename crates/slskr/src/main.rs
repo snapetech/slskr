@@ -1,4 +1,5 @@
 mod batch;
+mod cli;
 mod config;
 mod events_ws;
 mod http_server;
@@ -166,7 +167,7 @@ async fn run() -> Result<(), String> {
         return serve(once).await;
     }
 
-    slskr_cli::run_from_args(args).await
+    cli::run_from_args(args).await
 }
 
 #[derive(Clone, Debug)]

@@ -391,8 +391,7 @@ LoadTestProfile::stress()  // 2000 clients, 300 seconds
 
 ## 6. CLI Management Tool ✅
 
-**Location**: `crates/slskr-cli/src/admin_cli.rs`  
-**Lines**: 450+
+**Location**: planned `slskr` administrative subcommands
 
 ### Overview
 

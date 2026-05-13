@@ -1601,7 +1601,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "slskr-cli",
  "slskr-client",
  "sqlx-core",
  "sqlx-sqlite",
@@ -1611,15 +1610,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
-]
-
-[[package]]
-name = "slskr-cli"
-version = "0.0.0"
-dependencies = [
- "sha2",
- "slskr-client",
- "tokio",
 ]
 
 [[package]]

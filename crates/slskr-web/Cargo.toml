@@ -14,8 +14,8 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-rustymilk-core = { git = "https://github.com/snapetech/RustyMilk", branch = "main" }
-rustymilk-wasm = { git = "https://github.com/snapetech/RustyMilk", branch = "main" }
+rustymilk-core = { version = "0.1.0", git = "https://github.com/snapetech/RustyMilk", branch = "main" }
+rustymilk-wasm = { version = "0.1.0", git = "https://github.com/snapetech/RustyMilk", branch = "main" }
 serde_json = "1"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"

@@ -65,8 +65,7 @@ crates/
   slskr-client/     slskr-client API; tokio runtime;
                        connection managers; search, transfer,
                        distributed-tree orchestration
-  slskr-cli/        internal smoke/admin/probe command runner
-  slskr/            product binary: subcommands now, daemon/API/web UI next
+  slskr/            product binary: daemon/API/web UI plus smoke/probe subcommands
 ```
 
 The protocol/client split is the key invariant: `slskr-protocol` stays I/O-free so it can be unit-tested against captured byte fixtures, and so it is reusable by tooling (packet sniffers, fixture generators) without dragging in `tokio`. `slskr-client` is the embeddable runtime engine. The `slskr` app consumes that engine and is the only intended user-facing binary; its current subcommand surface wraps the smoke/probe runner, and the daemon/API/web UI will be built into the same package.
@@ -152,7 +151,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - Live interop. *(pending: verify against a real client on a reachable obfuscated port; Soulfind is a server simulator and cannot prove peer byte-level compatibility by itself)*
 
 ### Phase 8 — Hardening + release *(started)*
-- Product shape. *(done: external product is one runnable `slskr` app; internal crates remain `slskr-protocol`, `slskr-client`, and an internal `slskr-cli` command-runner crate during migration)*
+- Product shape. *(done: external product is one runnable `slskr` app; internal crates remain `slskr-protocol` and `slskr-client`; smoke/probe commands are built into the app crate)*
 - Pick + register a unique client-version band. *(started: local reserved band `8_800_000..=8_809_999`, default client version `175.8_800_001`; external registration still pending)*
 - Live connect to the real Soulseek server with that band. *(done: `slskr login smoke` succeeds with existing local credentials; command accepts `SLSK_USERNAME`/`SLSK_PASSWORD`)*
 - Controlled live-soak harness. *(done: `slskr soak live` binds a listener, advertises wait port, sends low-volume maintenance messages, optionally advertises a type-1 obfuscated listener, probes one peer or sends one explicit search, and redacts host/user details in output; bounded 10s live soak passed; `scripts/run-live-soak-24h.sh` starts the 24h obfuscated-listener soak)*
@@ -170,7 +169,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - App surface runbook. *(done initial cut: see `docs/app-surface.md` for command layout, HTTP shell, auth defaults, config direction, persistent TOML example, packaging target, and backfill list)*
 - Install/service runbook. *(done initial cut: see `docs/install.md` for build/install, config/state paths, user/system service units, container shape, and exposure rules)*
 - App/API parity backlog. *(started: `docs/legacy-port-harvest.md` captures config/API/service requirements and sequencing for the bundled app)*
-- CLI consolidation. *(done initial cut: probe/admin commands are exposed as `slskr` subcommands; legacy `slskr-cli` command names remain accepted during migration)*
+- CLI consolidation. *(done: smoke/probe commands are exposed as `slskr` subcommands and the standalone `slskr-cli` crate has been removed from the workspace)*
 - Public repo/package rename. *(pending: move public-facing metadata away from `slskr`; keep `slskr` as the user-visible app name and crate family)*
 - 24h soak test (search + transfer + distributed-tree health). *(running in tmux as `slskr-live-soak-proton` through Proton VPN NAT-PMP; public endpoint matrix is running separately as `slskr-proton-matrix`)*
 - License posture. *(done: project is AGPL-3.0-only from first public release, with stock AGPL text in `LICENSE` and concise project-specific notices in `NOTICE`; no third-party additional terms imported)*
@@ -208,7 +207,6 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - Broaden app browse execution with live public-network fixture coverage once reachable peer fixtures are available.
 - Build full daemon, API, and web UI into the new `slskr` app crate/binary.
 - Expand service/container docs into maintained release artifacts once packaging is selected.
-- Remove or fully privatize the legacy `slskr-cli` binary once scripts and operator workflows no longer need it.
 - Rename public repository and package metadata from `slskr` to `slskr` before publication.
 - Add end-user docs for install, first login, shares, search, transfers, rooms/messages, ports, NAT-PMP/UPnP behavior, and web UI auth.
 - Expand API contract tests as new daemon resources land.

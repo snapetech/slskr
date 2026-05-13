@@ -26,7 +26,7 @@ If you find yourself writing `FINAL_*.md`, `*_COMPLETION_*.md`, or
 | ----------------------------- | ---------- | ------------------------------------------------------------------- |
 | `crates/slskr-protocol`       | TRUST      | Real Soulseek wire codecs, 7 test files, all passing                |
 | `crates/slskr-client`         | TRUST      | Real session/listener/transfer runtime, 14 test files, all passing  |
-| `crates/slskr-cli`            | TRUST      | Real probe/admin commands the README documents                      |
+| `crates/slskr/src/cli.rs`     | TRUST      | Real smoke/probe commands the README documents                      |
 | `scripts/`                    | TRUST      | Live-soak and Proton matrix scripts are serious infra               |
 | `docs/` (most)                | TRUST      | `app-surface.md`, `install.md`, `legacy-port-harvest.md`, etc.      |
 | `crates/slskr` (bin)          | DISTRUST   | God-file `main.rs`, ~20 ghost modules, fake handlers                |
@@ -48,7 +48,7 @@ slskr parity notes:
    **— `slskr` (bin) delivers a hand-rolled HTTP server, but most of the
      "Phase 6/8/9/10/11/12" surface around it is decorative.**
 3. Probe-driven validation against live Soulseek (matrix runs, Proton NAT-PMP).
-   **— `slskr-cli` and `scripts/` deliver this.**
+   **— `slskr` smoke/probe subcommands and `scripts/` deliver this.**
 
 Out of scope (and explicitly to be removed if any artifact remains):
 distributed clustering, sharding, gRPC, HTTP/2 multiplexing, "500K req/sec"
@@ -358,7 +358,6 @@ Sum of DELETE column: **~7,500 LOC** going away in Phase 1.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slskr-client = { path = "../slskr-client" }
-slskr-cli    = { path = "../slskr-cli" }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time", "signal"] }
 toml = "0.8"
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }   # drop "postgres"

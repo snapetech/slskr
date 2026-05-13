@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if [[ "${1:-}" != "--skip-package" ]]; then
-  cargo package --workspace --no-verify
+  cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
 fi
 
 python3 - <<'PY'
@@ -21,9 +21,7 @@ package_dir = root / "target" / "package"
 packages = [
     ("slskr-protocol", root / "crates" / "slskr-protocol"),
     ("slskr-client", root / "crates" / "slskr-client"),
-    ("slskr-cli", root / "crates" / "slskr-cli"),
     ("slskr", root / "crates" / "slskr"),
-    ("slskr-web", root / "crates" / "slskr-web"),
 ]
 
 
@@ -106,9 +104,7 @@ with tempfile.TemporaryDirectory(prefix="slskr-package-verify-") as tmp:
 members = [
     "crates/slskr",
     "crates/slskr-client",
-    "crates/slskr-cli",
     "crates/slskr-protocol",
-    "crates/slskr-web",
 ]
 resolver = "2"
 

@@ -160,7 +160,7 @@ async fn handle_graphql(req: String) -> Result<String> {
 
 ## 6. CLI Tool Integration
 
-**Location**: `crates/slskr-cli/src/admin_cli.rs` (450 LOC)
+**Location**: planned `slskr` administrative subcommands
 
 ### Commands Available
 
