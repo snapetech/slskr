@@ -7176,17 +7176,20 @@ async fn route_http_request_with_headers(
             let transfers_stats = transfers.summary_json();
             drop(transfers);
 
-            let body = format!(
-                "{{\"session\":{},\"listeners\":{{\"count\":1}},\"shares\":{},\"searches\":{},\"users\":{},\"browse\":{},\"messages\":{},\"rooms\":{},\"transfers\":{}}}",
-                session_stats,
-                share_stats,
-                searches_stats,
-                users_stats,
-                browses_stats,
-                messages_stats,
-                rooms_stats,
-                transfers_stats
-            );
+            let database = database_stats_value(state).await;
+            let body = serde_json::json!({
+                "session": serde_json::from_str::<serde_json::Value>(&session_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "listeners": {"count": 1},
+                "shares": serde_json::from_str::<serde_json::Value>(&share_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "searches": serde_json::from_str::<serde_json::Value>(&searches_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "users": serde_json::from_str::<serde_json::Value>(&users_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "browse": serde_json::from_str::<serde_json::Value>(&browses_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "messages": serde_json::from_str::<serde_json::Value>(&messages_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "rooms": serde_json::from_str::<serde_json::Value>(&rooms_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "transfers": serde_json::from_str::<serde_json::Value>(&transfers_stats).unwrap_or_else(|_| serde_json::json!({})),
+                "database": database,
+            })
+            .to_string();
 
             Ok(HttpResponse {
                 status: "200 OK",
@@ -7244,38 +7247,17 @@ async fn route_http_request_with_headers(
             let runtime_json = runtime.json_value();
             drop(runtime);
 
-            let database = if let Some(db) = state.db.as_ref() {
-                match db.get_stats().await {
-                    Ok(stats) => serde_json::json!({
-                        "enabled": true,
-                        "healthy": true,
-                        "searches": stats.search_count,
-                        "searchResults": stats.search_result_count,
-                        "transfers": stats.transfer_count,
-                        "transferEvents": stats.transfer_event_count,
-                        "shares": stats.share_file_count,
-                        "events": stats.event_count,
-                        "messages": stats.message_count,
-                        "users": stats.user_count,
-                        "rooms": stats.room_count,
-                    }),
-                    Err(error) => serde_json::json!({
-                        "enabled": true,
-                        "healthy": false,
-                        "error": error.to_string(),
-                    }),
-                }
-            } else {
-                serde_json::json!({
-                    "enabled": false,
-                    "healthy": true,
-                })
-            };
+            let database = database_stats_value(state).await;
+            let projections = database
+                .get("projections")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
 
             let value = serde_json::json!({
                 "health": {
                     "connected": is_connected,
-                    "database": database.get("healthy").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                    "database": database.get("healthy").and_then(serde_json::Value::as_bool).unwrap_or(false)
+                        || !database.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(false),
                     "transferState": transfer_state_error.is_none(),
                     "transferEvents": transfer_events_error.is_none(),
                     "eventsBuffered": event_count,
@@ -7291,6 +7273,7 @@ async fn route_http_request_with_headers(
                     "transfer_events_error": transfer_events_error,
                 },
                 "database": database,
+                "projections": projections,
                 "runtime": runtime_json,
                 "session": serde_json::from_str::<serde_json::Value>(&session_json).unwrap_or_else(|_| serde_json::json!({})),
                 "listeners": serde_json::from_str::<serde_json::Value>(&listeners_json).unwrap_or_else(|_| serde_json::json!({})),
@@ -7358,31 +7341,92 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/metrics") => {
-            let session = state.session.read().await;
-            let _listeners = state.listeners.read().await;
-            let shares = state.shares.read().await;
-            let searches = state.searches.read().await;
-            let users = state.users.read().await;
-            let browse = state.browse.read().await;
-            let messages = state.messages.read().await;
-            let rooms = state.rooms.read().await;
-            let transfers = state.transfers.read().await;
-            let events = state.events.read().await;
+            let (session_connected, share_files, share_bytes) = {
+                let session = state.session.read().await;
+                let session_connected = if session.state == "connected" { 1 } else { 0 };
+                drop(session);
+                let _listeners = state.listeners.read().await;
+                drop(_listeners);
+                let shares = state.shares.read().await;
+                let share_files = shares.entries.len();
+                let share_bytes: u64 = shares.entries.iter().map(|e| e.size).sum();
+                (session_connected, share_files, share_bytes)
+            };
+            let active_searches = {
+                let searches = state.searches.read().await;
+                searches
+                    .records
+                    .iter()
+                    .filter(|record| record.status == "active")
+                    .count()
+            };
+            let watched_users = {
+                let users = state.users.read().await;
+                users.records.iter().filter(|record| record.watched).count()
+            };
+            let browse_count = {
+                let browse = state.browse.read().await;
+                browse.records.len()
+            };
+            let message_count = {
+                let messages = state.messages.read().await;
+                messages.records.len()
+            };
+            let joined_rooms = {
+                let rooms = state.rooms.read().await;
+                rooms.records.iter().filter(|record| record.joined).count()
+            };
+            let (transfer_count, active_transfers) = {
+                let transfers = state.transfers.read().await;
+                let active = transfers
+                    .entries
+                    .iter()
+                    .filter(|entry| is_active_transfer_status(&entry.status))
+                    .count();
+                (transfers.entries.len(), active)
+            };
+            let event_count = {
+                let events = state.events.read().await;
+                events.records.len()
+            };
             let runtime = state.runtime.read().await;
-
-            let share_bytes: u64 = shares.entries.iter().map(|e| e.size).sum();
-            let active_searches = searches
-                .records
-                .iter()
-                .filter(|record| record.status == "active")
-                .count();
-            let watched_users = users.records.iter().filter(|record| record.watched).count();
-            let joined_rooms = rooms.records.iter().filter(|record| record.joined).count();
-            let active_transfers = transfers
-                .entries
-                .iter()
-                .filter(|entry| is_active_transfer_status(&entry.status))
-                .count();
+            let runtime_profile_invites_created = runtime.profile_invites_created;
+            let runtime_cache_warm_runs = runtime.cache_warm_runs;
+            let runtime_backfill_runs = runtime.backfill_runs;
+            let runtime_songid_runs = runtime.songid_runs;
+            let runtime_lidarr_sync_runs = runtime.lidarr_sync_runs;
+            let runtime_lidarr_manual_imports = runtime.lidarr_manual_imports;
+            drop(runtime);
+            let database_stats = if let Some(db) = state.db.as_ref() {
+                db.get_stats().await.ok()
+            } else {
+                None
+            };
+            let database_enabled = if state.db.is_some() { 1 } else { 0 };
+            let persisted_searches = database_stats
+                .as_ref()
+                .map(|stats| stats.search_count)
+                .unwrap_or(0);
+            let persisted_search_results = database_stats
+                .as_ref()
+                .map(|stats| stats.search_result_count)
+                .unwrap_or(0);
+            let persisted_transfers = database_stats
+                .as_ref()
+                .map(|stats| stats.transfer_count)
+                .unwrap_or(0);
+            let persisted_transfer_events = database_stats
+                .as_ref()
+                .map(|stats| stats.transfer_event_count)
+                .unwrap_or(0);
+            let persisted_shares = database_stats
+                .as_ref()
+                .map(|stats| stats.share_file_count)
+                .unwrap_or(0);
+            let persisted_events = database_stats
+                .as_ref()
+                .map(|stats| stats.event_count)
+                .unwrap_or(0);
 
             let metrics = format!(
                 "# HELP slskr_session_connected Session connection status\n\
@@ -7423,24 +7467,42 @@ async fn route_http_request_with_headers(
                  slskr_runtime_operations_total{{operation=\"backfill\"}} {}\n\
                  slskr_runtime_operations_total{{operation=\"songid\"}} {}\n\
                  slskr_runtime_operations_total{{operation=\"lidarr_sync\"}} {}\n\
-                 slskr_runtime_operations_total{{operation=\"lidarr_manual_import\"}} {}\n",
-                if session.state == "connected" { 1 } else { 0 },
-                shares.entries.len(),
+                 slskr_runtime_operations_total{{operation=\"lidarr_manual_import\"}} {}\n\
+                 # HELP slskr_database_enabled SQLite persistence availability\n\
+                 # TYPE slskr_database_enabled gauge\n\
+                 slskr_database_enabled {}\n\
+                 # HELP slskr_database_rows Persisted SQLite row counts by store\n\
+                 # TYPE slskr_database_rows gauge\n\
+                 slskr_database_rows{{store=\"searches\"}} {}\n\
+                 slskr_database_rows{{store=\"search_results\"}} {}\n\
+                 slskr_database_rows{{store=\"transfers\"}} {}\n\
+                 slskr_database_rows{{store=\"transfer_events\"}} {}\n\
+                 slskr_database_rows{{store=\"shares\"}} {}\n\
+                 slskr_database_rows{{store=\"events\"}} {}\n",
+                session_connected,
+                share_files,
                 share_bytes,
                 active_searches,
                 watched_users,
-                browse.records.len(),
-                messages.records.len(),
+                browse_count,
+                message_count,
                 joined_rooms,
-                transfers.entries.len(),
+                transfer_count,
                 active_transfers,
-                events.records.len(),
-                runtime.profile_invites_created,
-                runtime.cache_warm_runs,
-                runtime.backfill_runs,
-                runtime.songid_runs,
-                runtime.lidarr_sync_runs,
-                runtime.lidarr_manual_imports
+                event_count,
+                runtime_profile_invites_created,
+                runtime_cache_warm_runs,
+                runtime_backfill_runs,
+                runtime_songid_runs,
+                runtime_lidarr_sync_runs,
+                runtime_lidarr_manual_imports,
+                database_enabled,
+                persisted_searches,
+                persisted_search_results,
+                persisted_transfers,
+                persisted_transfer_events,
+                persisted_shares,
+                persisted_events
             );
 
             Ok(HttpResponse {
@@ -22332,6 +22394,10 @@ mod tests {
             .body
             .contains("slskr_transfers{state=\"active\"} 0"));
         assert!(response.body.contains("slskr_events_total 0"));
+        assert!(response.body.contains("slskr_database_enabled 0"));
+        assert!(response
+            .body
+            .contains("slskr_database_rows{store=\"searches\"} 0"));
         assert!(response
             .body
             .contains("slskr_runtime_operations_total{operation=\"backfill\"} 0"));
@@ -23154,27 +23220,89 @@ mod tests {
             .expect("stats response");
 
         assert_eq!(stats.status, "200 OK");
-        assert!(stats.body.contains("\"shares\":{"));
-        assert!(stats.body.contains("\"files\":1"));
-        assert!(stats.body.contains("\"bytes\":42"));
-        assert!(stats
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["shares"]["files"], 1);
+        assert_eq!(stats_json["shares"]["bytes"], 42);
+        assert_eq!(stats_json["searches"]["total"], 1);
+        assert_eq!(stats_json["searches"]["active"], 1);
+        assert_eq!(stats_json["searches"]["results"], 1);
+        assert_eq!(stats_json["users"]["total"], 1);
+        assert_eq!(stats_json["users"]["watched"], 1);
+        assert_eq!(stats_json["browse"]["total"], 1);
+        assert_eq!(stats_json["browse"]["ready"], 1);
+        assert_eq!(stats_json["browse"]["files"], 1);
+        assert_eq!(stats_json["browse"]["bytes"], 123);
+        assert_eq!(stats_json["messages"]["total"], 1);
+        assert_eq!(stats_json["messages"]["inbound"], 1);
+        assert_eq!(stats_json["rooms"]["total"], 1);
+        assert_eq!(stats_json["rooms"]["joined"], 1);
+        assert_eq!(stats_json["rooms"]["messages"], 1);
+        assert_eq!(stats_json["transfers"]["total"], 1);
+        assert_eq!(stats_json["transfers"]["in_progress"], 1);
+        assert_eq!(stats_json["transfers"]["bytes_transferred"], 40);
+        assert_eq!(stats_json["database"]["enabled"], false);
+        assert_eq!(stats_json["database"]["projections"]["searches"], 1);
+        assert_eq!(stats_json["database"]["projections"]["transfers"], 1);
+    }
+
+    #[tokio::test]
+    async fn stats_metrics_and_telemetry_expose_persisted_health_counts() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            r#"{"query":"durable metrics"}"#,
+            &state,
+        )
+        .await
+        .expect("create search");
+        let _ = receiver.try_recv();
+        super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            r#"{"token":1,"username":"peer","files":[{"filename":"Remote/Metrics.flac","size":11}]}"#,
+            &state,
+        )
+        .await
+        .expect("ingest result");
+
+        let stats = super::route_http_request("GET", "/api/v0/stats", None, "", &state)
+            .await
+            .expect("stats response");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["database"]["enabled"], true);
+        assert_eq!(stats_json["database"]["searches"], 1);
+        assert_eq!(stats_json["database"]["searchResults"], 1);
+        assert_eq!(stats_json["database"]["projections"]["searches"], 1);
+
+        let metrics = super::route_http_request("GET", "/api/v0/metrics", None, "", &state)
+            .await
+            .expect("metrics response");
+        assert!(metrics.body.contains("slskr_database_enabled 1"));
+        assert!(metrics
             .body
-            .contains("\"searches\":{\"total\":1,\"active\":1"));
-        assert!(stats.body.contains("\"results\":1"));
-        assert!(stats.body.contains("\"users\":{\"total\":1,\"watched\":1"));
-        assert!(stats.body.contains(
-            "\"browse\":{\"total\":1,\"requested\":0,\"indirect_pending\":0,\"partial\":0,\"ready\":1,\"failed\":0,\"files\":1,\"bytes\":123"
-        ));
-        assert!(stats
+            .contains("slskr_database_rows{store=\"searches\"} 1"));
+        assert!(metrics
             .body
-            .contains("\"messages\":{\"total\":1,\"inbound\":1,\"outbound\":0"));
-        assert!(stats
-            .body
-            .contains("\"rooms\":{\"total\":1,\"joined\":1,\"messages\":1"));
-        assert!(stats
-            .body
-            .contains("\"transfers\":{\"total\":1,\"queued\":0,\"in_progress\":1"));
-        assert!(stats.body.contains("\"bytes_transferred\":40"));
+            .contains("slskr_database_rows{store=\"search_results\"} 1"));
+
+        let telemetry = super::route_http_request("GET", "/api/v0/telemetry", None, "", &state)
+            .await
+            .expect("telemetry response");
+        let telemetry_json = serde_json::from_str::<serde_json::Value>(&telemetry.body).unwrap();
+        assert_eq!(telemetry_json["database"]["searchResults"], 1);
+        assert_eq!(telemetry_json["projections"]["searches"], 1);
+        assert_eq!(telemetry_json["health"]["database"], true);
     }
 
     #[tokio::test]

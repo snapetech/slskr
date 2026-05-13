@@ -82,9 +82,9 @@ The first app shell exposes:
 - `POST /api/v0/capabilities/negotiate`: compare requested app capabilities against the daemon's current capability set and return accepted/unsupported lists
 - `GET /api/config`: sanitized daemon configuration; never includes credentials
 - `GET /api/v0/config`: versioned alias for sanitized daemon configuration
-- `GET /api/v0/stats`: compact aggregate counts for session, listeners, shares, searches, users, browse cache, messages, rooms, and transfers
-- `GET /api/v0/metrics`: Prometheus-style text counters/gauges for session, listeners, shares, searches, users, browse cache, messages, rooms, and transfers
-- `GET /api/v0/telemetry`: protected JSON runtime health snapshot with sanitized config flags, listener/session state, storage status, and projection counts
+- `GET /api/v0/stats`: compact aggregate counts for session, listeners, shares, searches, users, browse cache, messages, rooms, transfers, and durable database/projection health
+- `GET /api/v0/metrics`: Prometheus-style text counters/gauges for session, listeners, shares, searches, users, browse cache, messages, rooms, transfers, runtime operations, and persisted SQLite row counts
+- `GET /api/v0/telemetry`: protected JSON runtime health snapshot with sanitized config flags, listener/session state, storage status, database health, and projection counts
 - `GET /api/v0/events`: bounded event log for recent search, transfer, share, user, browse, message, room, listener, relay, bridge, mesh, security, library, integration, player, telemetry, and session workflows. Supports `kind`, `topic`, `q`, `limit`, and `offset` query parameters. When persistence is enabled, event rows hydrate from and write through to SQLite.
 - `GET /api/events/ws`: WebSocket event feed backed by the same event store and topic taxonomy as `/api/v0/events`. Frames include `topic`, `type`, structured `data`, and `timestamp`.
 - `GET /api/shares`: sanitized share-index status, root labels, file/byte counts, per-root extension summaries, scan errors, SQLite persistence status, and compatibility cache status
@@ -243,8 +243,8 @@ Target distribution shape:
 - finish `/api/v0/users` browse parity beyond direct/indirect peer `GetShareFileList`/`FolderContentsRequest` execution, peer-address command hook, persisted cache projection, failed/cancelled/partial/ready-state projection, flattened browse-result ingestion, and slskd-shaped directory paging/filtering/count metadata
 - finish durable compatibility-store persistence beyond current SQLite startup hydration and write-through for share index, event log, search lifecycle/result/delete state, transfer lifecycle state, user, browse cache, message create/ack, room join/leave, collection/library/destination/now-playing/wishlist/contact/sharegroup/share-grant state, user notes, interests, and username/IP bans
 - deepen `/api/v0/files/:root` only as new storage-management workflows require mutation support; read-side folder views now include immediate directory summaries, folder selection, recursive listing, filtering, and pagination without exposing local host paths
-- expand `/api/v0/stats` beyond projection counts as durable health metrics mature
-- expand `/api/v0/metrics` beyond current session/share/search/user/browse/message/room/transfer/event/runtime counters as durable process gauges mature
+- expand `/api/v0/stats` beyond current projection and durable database counts as long-running task health matures
+- expand `/api/v0/metrics` beyond current session/share/search/user/browse/message/room/transfer/event/runtime/database counters as durable process gauges mature
 - expand `/api/v0/telemetry` beyond current projection/runtime/database/storage health as long-running task health matures
 - expand event emitters for new mutating workflows as additional web UI views move to live updates; `/api/events`, `/api/events/records`, and `/api/events/ws` now share the same topic taxonomy and filters
 - broaden `/api/v0/transfers` real transfer execution with richer production policy; current implementation has reloadable projection state in `transfer-state.json`, SQLite-backed transfer rows and transition/progress event trail, restart-safe queued resume records for interrupted active transfers, local-path file metadata execution, configurable max-active transfer policy, inbound/outbound transfer allow switches, peer-message transfer negotiation, direct plain/obfuscated `F` streaming/resume, chunked progress events, requester-side indirect `F` fallback, inbound shared-file serving over direct or pierced `F` sockets, and live queued payload proof against adjacent daemons

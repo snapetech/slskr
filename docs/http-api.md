@@ -91,18 +91,25 @@ Retrieve current configuration (with sensitive values redacted).
 
 #### `GET /api/stats`
 
-Get aggregated statistics from all storage systems.
+Get aggregate runtime, projection, and durable database statistics.
 
 **Response:**
 ```json
 {
-  "total_size": 1000000,
-  "file_count": 100,
-  "uploads": 5,
-  "downloads": 3,
-  "transfer_speeds": {
-    "up": 100000,
-    "down": 200000
+  "session": {"state": "connected"},
+  "shares": {"files": 100, "bytes": 1000000},
+  "searches": {"total": 3, "active": 1, "results": 42},
+  "transfers": {"total": 5, "in_progress": 1},
+  "database": {
+    "enabled": true,
+    "healthy": true,
+    "searches": 3,
+    "searchResults": 42,
+    "transferEvents": 12,
+    "projections": {
+      "searches": 3,
+      "transfers": 5
+    }
   }
 }
 ```
