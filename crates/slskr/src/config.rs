@@ -895,7 +895,11 @@ fn parse_user_endpoint_overrides(
         return Ok(BTreeMap::new());
     };
     let mut overrides = BTreeMap::new();
-    for entry in value.split(';').map(str::trim).filter(|entry| !entry.is_empty()) {
+    for entry in value
+        .split(';')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
         let (username, endpoint) = entry.split_once('=').ok_or_else(|| {
             format!(
                 "invalid SLSKR_TEST_USER_ENDPOINT_OVERRIDES entry {entry:?}; expected user=host:port"
@@ -905,9 +909,10 @@ fn parse_user_endpoint_overrides(
         if username.is_empty() {
             return Err("SLSKR_TEST_USER_ENDPOINT_OVERRIDES contains an empty username".to_owned());
         }
-        let endpoint = endpoint.trim().parse::<SocketAddr>().map_err(|error| {
-            format!("invalid endpoint override for {username}: {error}")
-        })?;
+        let endpoint = endpoint
+            .trim()
+            .parse::<SocketAddr>()
+            .map_err(|error| format!("invalid endpoint override for {username}: {error}"))?;
         overrides.insert(username.to_owned(), endpoint);
     }
     Ok(overrides)

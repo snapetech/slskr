@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use flate2::{write::ZlibEncoder, Compression};
 use slskr_protocol::{
     frame::MessageFrame,
     peer::{
@@ -7,6 +8,7 @@ use slskr_protocol::{
         TransferRequest, TransferResponse, UserInfo,
     },
 };
+use std::io::Write;
 
 #[test]
 fn peer_codes_map_known_values() {
@@ -172,7 +174,7 @@ fn file_search_response_rejects_untrusted_count_without_preallocating() {
 
     let decoded = PeerMessage::decode(MessageFrame::new(
         PeerCode::FileSearchResponse.as_u32(),
-        payload,
+        zlib(payload),
     ));
     assert!(decoded.is_err());
 }
@@ -193,9 +195,55 @@ fn file_search_response_rejects_untrusted_attribute_count_without_looping() {
 
     let decoded = PeerMessage::decode(MessageFrame::new(
         PeerCode::FileSearchResponse.as_u32(),
-        payload,
+        zlib(payload),
     ));
     assert!(decoded.is_err());
+}
+
+#[test]
+fn file_search_response_ignores_optional_trailing_fields() {
+    let message = PeerMessage::FileSearchResponse(FileSearchResponse {
+        username: "peer".to_owned(),
+        token: 14,
+        results: vec![FileEntry {
+            code: 1,
+            filename: "Music/file.flac".to_owned(),
+            size: 1_000,
+            extension: String::new(),
+            attributes: Vec::new(),
+        }],
+        slot_free: true,
+        average_speed: 100,
+        queue_length: 0,
+        unknown: 0,
+        private_results: Vec::new(),
+    });
+    let encoded = message.encode().unwrap();
+    let mut payload = zlib_decode(&encoded.payload);
+    payload.extend_from_slice(b"optional-search-response-tail");
+
+    let decoded = PeerMessage::decode(MessageFrame::new(
+        PeerCode::FileSearchResponse.as_u32(),
+        zlib(payload),
+    ))
+    .unwrap();
+
+    assert_eq!(decoded, message);
+}
+
+fn zlib(payload: Vec<u8>) -> Vec<u8> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&payload).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn zlib_decode(payload: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+
+    let mut decoder = flate2::read::ZlibDecoder::new(payload);
+    let mut output = Vec::new();
+    decoder.read_to_end(&mut output).unwrap();
+    output
 }
 
 #[test]

@@ -562,27 +562,35 @@ run_search_interop_checks() {
   escaped_slskr="$(url_escape "$slskr_username")"
   escaped_slskdn="$(url_escape "$slskdn_username")"
 
-  SLSK_USERNAME="$slskr_username" \
-  SLSK_PASSWORD="$slskr_password" \
-  SLSK_SERVER="$server_endpoint" \
-  SLSK_PEER_USERNAME="$slskdn_username" \
-  SLSK_SEARCH_QUERY="$slskdn_fixture_name" \
-  SLSK_SEARCH_EXPECTED="$slskdn_fixture_name" \
-  SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
-  SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
-    timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1
-  record_check protocol-slskr-searches-slskdn ok "query=$slskdn_fixture_name"
+  if SLSK_USERNAME="$slskr_username" \
+    SLSK_PASSWORD="$slskr_password" \
+    SLSK_SERVER="$server_endpoint" \
+    SLSK_PEER_USERNAME="$slskdn_username" \
+    SLSK_SEARCH_QUERY="$slskdn_fixture_name" \
+    SLSK_SEARCH_EXPECTED="$slskdn_fixture_name" \
+    SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
+    SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
+      timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
+    record_check protocol-slskr-searches-slskdn ok "query=$slskdn_fixture_name"
+  else
+    record_check protocol-slskr-searches-slskdn fail "$(tail -n 1 "$diag_file")"
+    return 1
+  fi
 
-  SLSK_USERNAME="$slskdn_username" \
-  SLSK_PASSWORD="$slskdn_password" \
-  SLSK_SERVER="$server_endpoint" \
-  SLSK_PEER_USERNAME="$slskr_username" \
-  SLSK_SEARCH_QUERY="$slskr_fixture_name" \
-  SLSK_SEARCH_EXPECTED="$slskr_fixture_name" \
-  SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
-  SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
-    timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1
-  record_check protocol-slskdn-searches-slskr ok "query=$slskr_fixture_name"
+  if SLSK_USERNAME="$slskdn_username" \
+    SLSK_PASSWORD="$slskdn_password" \
+    SLSK_SERVER="$server_endpoint" \
+    SLSK_PEER_USERNAME="$slskr_username" \
+    SLSK_SEARCH_QUERY="$slskr_fixture_name" \
+    SLSK_SEARCH_EXPECTED="$slskr_fixture_name" \
+    SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
+    SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
+      timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
+    record_check protocol-slskdn-searches-slskr ok "query=$slskr_fixture_name"
+  else
+    record_check protocol-slskdn-searches-slskr fail "$(tail -n 1 "$diag_file")"
+    return 1
+  fi
 
   auth_get "http://127.0.0.1:$slskr_http_port/api/v0/users/$escaped_slskdn/browse/status" >>"$diag_file" 2>&1 || true
   auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/browse/status" >>"$diag_file" 2>&1 || true

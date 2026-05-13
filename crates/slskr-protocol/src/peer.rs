@@ -235,7 +235,9 @@ impl PeerMessage {
                 query: reader.read_string()?,
             },
             PeerCode::FileSearchResponse => {
-                Self::FileSearchResponse(decode_search_response_payload(&frame.payload)?)
+                return Ok(Self::FileSearchResponse(decode_search_response_payload(
+                    &frame.payload,
+                )?));
             }
             PeerCode::UserInfoRequest => Self::UserInfoRequest,
             PeerCode::UserInfoResponse => Self::UserInfoResponse(decode_user_info(&mut reader)?),
@@ -320,7 +322,10 @@ impl PeerMessage {
                 let mut inner = Writer::new();
                 encode_search_response(&mut inner, value)?;
                 let payload = compress_zlib(&inner.into_inner())?;
-                return Ok(MessageFrame::new(PeerCode::FileSearchResponse.as_u32(), payload));
+                return Ok(MessageFrame::new(
+                    PeerCode::FileSearchResponse.as_u32(),
+                    payload,
+                ));
             }
             Self::RoomInvitation(payload) => {
                 return Ok(MessageFrame::new(
@@ -484,9 +489,7 @@ fn decode_search_response(reader: &mut Reader<'_>) -> Result<FileSearchResponse,
 fn decode_search_response_payload(payload: &[u8]) -> Result<FileSearchResponse, DecodeError> {
     let decompressed = decompress_zlib(payload)?;
     let mut reader = Reader::new(&decompressed);
-    let response = decode_search_response(&mut reader)?;
-    reader.finish()?;
-    Ok(response)
+    decode_search_response(&mut reader)
 }
 
 fn encode_search_response(

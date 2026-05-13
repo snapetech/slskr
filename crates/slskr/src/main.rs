@@ -2082,7 +2082,11 @@ impl TransferQueue {
                 && entry.filename == filename
                 && entry.local_path.is_some()
                 && entry.status == "queued"
-                && entry.reason.as_deref().map(is_remote_queue_response).unwrap_or(false)
+                && entry
+                    .reason
+                    .as_deref()
+                    .map(is_remote_queue_response)
+                    .unwrap_or(false)
         })?;
         entry.token = token;
         if size.is_some() {
@@ -6607,8 +6611,7 @@ impl PreviewStreamTicketStore {
     }
 
     fn prune(&mut self, now: u64) {
-        self.records
-            .retain(|_, record| record.expires_at >= now);
+        self.records.retain(|_, record| record.expires_at >= now);
     }
 }
 
@@ -15531,9 +15534,8 @@ async fn create_preview_stream_ticket(
         .or_else(|| transfer.and_then(|entry| entry.size))
         .or_else(|| search_result.map(|entry| entry.size))
         .unwrap_or(requested_size);
-    let resolved_content_id = content_id.unwrap_or_else(|| {
-        stable_content_hash(&resolved_filename, resolved_size).to_string()
-    });
+    let resolved_content_id = content_id
+        .unwrap_or_else(|| stable_content_hash(&resolved_filename, resolved_size).to_string());
     let source = if share.is_some() {
         "local-share"
     } else if transfer.is_some() {
@@ -15579,11 +15581,7 @@ async fn create_preview_stream_ticket(
     Ok(body)
 }
 
-async fn open_preview_stream_ticket(
-    state: &AppState,
-    family: &str,
-    token: &str,
-) -> Option<String> {
+async fn open_preview_stream_ticket(state: &AppState, family: &str, token: &str) -> Option<String> {
     let mut tickets = state.stream_tickets.write().await;
     let ticket = tickets.get(token);
     drop(tickets);
@@ -15591,25 +15589,30 @@ async fn open_preview_stream_ticket(
     if ticket.family != family {
         return None;
     }
-    Some(serde_json::json!({
-        "ticket": token,
-        "status": "available",
-        "source": ticket.source,
-        "content_id": ticket.content_id,
-        "filename": ticket.filename,
-        "peer_username": ticket.peer_username,
-        "size": ticket.size,
-        "contentType": ticket.content_type,
-        "created_at": ticket.created_at,
-        "expires_at": ticket.expires_at,
-        "cacheControl": "no-store",
-        "acceptRanges": "none",
-    })
-    .to_string())
+    Some(
+        serde_json::json!({
+            "ticket": token,
+            "status": "available",
+            "source": ticket.source,
+            "content_id": ticket.content_id,
+            "filename": ticket.filename,
+            "peer_username": ticket.peer_username,
+            "size": ticket.size,
+            "contentType": ticket.content_type,
+            "created_at": ticket.created_at,
+            "expires_at": ticket.expires_at,
+            "cacheControl": "no-store",
+            "acceptRanges": "none",
+        })
+        .to_string(),
+    )
 }
 
 fn preview_stream_content_type(path: &str) -> &'static str {
-    match path.rsplit_once('.').map(|(_, extension)| extension.to_ascii_lowercase()) {
+    match path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+    {
         Some(extension) if extension == "flac" => "audio/flac",
         Some(extension) if extension == "mp3" => "audio/mpeg",
         Some(extension) if extension == "ogg" || extension == "oga" => "audio/ogg",
@@ -17754,7 +17757,9 @@ async fn handle_session_command(
 
 async fn handle_owned_incoming(state: Arc<AppState>, incoming: IncomingConnection<TcpStream>) {
     let result = match incoming {
-        IncomingConnection::PeerMessages(peer) => handle_plain_peer_messages(&state, peer, None).await,
+        IncomingConnection::PeerMessages(peer) => {
+            handle_plain_peer_messages(&state, peer, None).await
+        }
         IncomingConnection::ObfuscatedPeerMessages(peer) => {
             handle_obfuscated_peer_messages(&state, peer).await
         }
@@ -17763,7 +17768,10 @@ async fn handle_owned_incoming(state: Arc<AppState>, incoming: IncomingConnectio
             username,
             stream,
             ..
-        } => handle_plain_peer_messages(&state, PeerMessageConnection::new(stream), Some(username)).await,
+        } => {
+            handle_plain_peer_messages(&state, PeerMessageConnection::new(stream), Some(username))
+                .await
+        }
         IncomingConnection::FileTransfer(file) => {
             handle_inbound_file_transfer(&state, file, None).await
         }
@@ -19092,7 +19100,10 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
 }
 
 fn is_remote_queue_response(reason: &str) -> bool {
-    reason.trim().trim_end_matches('.').eq_ignore_ascii_case("queued")
+    reason
+        .trim()
+        .trim_end_matches('.')
+        .eq_ignore_ascii_case("queued")
 }
 
 async fn handle_connect_to_peer_request(
@@ -24929,8 +24940,16 @@ mod tests {
             ("GET", "/api/hashdb/stats", ""),
             ("POST", "/api/hashdb/backfill/from-history", ""),
             ("GET", "/api/streams/content-1", ""),
-            ("POST", "/api/v0/peer-streams/tickets", r#"{"filename":"Virtual/Test.flac","username":"peer"}"#),
-            ("POST", "/api/v0/mesh-streams/tickets", r#"{"contentId":"mesh-content","filename":"Virtual/Test.flac","peerId":"mesh-peer"}"#),
+            (
+                "POST",
+                "/api/v0/peer-streams/tickets",
+                r#"{"filename":"Virtual/Test.flac","username":"peer"}"#,
+            ),
+            (
+                "POST",
+                "/api/v0/mesh-streams/tickets",
+                r#"{"contentId":"mesh-content","filename":"Virtual/Test.flac","peerId":"mesh-peer"}"#,
+            ),
             ("GET", "/api/listening-party", ""),
             ("POST", "/api/listening-party/radio/party/content", ""),
             ("GET", "/api/mesh/health", ""),
@@ -25028,15 +25047,10 @@ mod tests {
             .unwrap()
             .starts_with("/api/v0/mesh-streams/"));
 
-        let missing = super::route_http_request(
-            "GET",
-            "/api/v0/peer-streams/not-a-ticket",
-            None,
-            "",
-            &state,
-        )
-        .await
-        .expect("missing ticket");
+        let missing =
+            super::route_http_request("GET", "/api/v0/peer-streams/not-a-ticket", None, "", &state)
+                .await
+                .expect("missing ticket");
         assert_eq!(missing.status, "404 Not Found");
     }
 
