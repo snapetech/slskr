@@ -7744,6 +7744,17 @@ async fn route_http_request_with_headers(
                       let acknowledgements = runtime.record_options_update();
                       drop(runtime);
                       persist_runtime_compat_state(state).await;
+                      record_event(
+                          state,
+                          "options.updated",
+                          "options",
+                          Some(format!(
+                              "acknowledgements={};persisted={};configPersisted=false",
+                              acknowledgements,
+                              state.db.is_some()
+                          )),
+                      )
+                      .await;
                       match slskd_options_mutation_response(body, acknowledgements, state.db.is_some()) {
                           Ok(json) => Ok(routing::ok_response(json)),
                           Err(error) => Ok(routing::bad_request_response(&error)),
@@ -10206,6 +10217,17 @@ async fn route_http_request_with_headers(
                     let acknowledgements = runtime.record_options_update();
                     drop(runtime);
                     persist_runtime_compat_state(state).await;
+                    record_event(
+                        state,
+                        "options.updated",
+                        "options",
+                        Some(format!(
+                            "acknowledgements={};persisted={};configPersisted=false",
+                            acknowledgements,
+                            state.db.is_some()
+                        )),
+                    )
+                    .await;
                     match slskd_options_mutation_response(body, acknowledgements, state.db.is_some()) {
                         Ok(json) => Ok(routing::ok_response(json)),
                         Err(error) => Ok(routing::bad_request_response(&error)),
@@ -11893,6 +11915,17 @@ async fn route_http_request_with_headers(
                     let acknowledgements = runtime.record_options_yaml_upload();
                     drop(runtime);
                     persist_runtime_compat_state(state).await;
+                    record_event(
+                        state,
+                        "options.yaml.uploaded",
+                        "options/yaml",
+                        Some(format!(
+                            "acknowledgements={};persisted={};configPersisted=false",
+                            acknowledgements,
+                            state.db.is_some()
+                        )),
+                    )
+                    .await;
                     match slskd_options_config_upload_response(body, acknowledgements, state.db.is_some()) {
                         Ok(json) => Ok(routing::ok_response(json)),
                         Err(error) => Ok(routing::bad_request_response(&error)),
@@ -12948,6 +12981,17 @@ async fn route_http_request_with_headers(
                       let acknowledgements = runtime.record_options_yaml_validation();
                       drop(runtime);
                       persist_runtime_compat_state(state).await;
+                      record_event(
+                          state,
+                          "options.yaml.validated",
+                          "options/yaml/validate",
+                          Some(format!(
+                              "acknowledgements={};persisted={};configPersisted=false",
+                              acknowledgements,
+                              state.db.is_some()
+                          )),
+                      )
+                      .await;
                       match slskd_options_config_validate_response(body, acknowledgements, state.db.is_some()) {
                           Ok(response) => Ok(response),
                           Err(error) => Ok(routing::bad_request_response(&error)),
@@ -25638,6 +25682,15 @@ mod tests {
         )
         .await
         .unwrap();
+        super::route_http_request(
+            "PATCH",
+            "/api/options",
+            None,
+            "{\"theme\":\"dark\"}",
+            &state,
+        )
+        .await
+        .unwrap();
 
         let events = super::route_http_request("GET", "/api/v0/events/records", None, "", &state)
             .await
@@ -25647,7 +25700,9 @@ mod tests {
         assert!(events.body.contains("\"topic\":\"searches\""));
         assert!(events.body.contains("\"kind\":\"message.received\""));
         assert!(events.body.contains("\"topic\":\"messages\""));
-        assert!(events.body.contains("\"count\":2"));
+        assert!(events.body.contains("\"kind\":\"options.updated\""));
+        assert!(events.body.contains("\"topic\":\"settings\""));
+        assert!(events.body.contains("\"count\":3"));
 
         let filtered = super::route_http_request(
             "GET",
@@ -25678,6 +25733,22 @@ mod tests {
             .body
             .contains("\"kind\":\"message.received\""));
         assert!(!topic_filtered.body.contains("search.started"));
+
+        let settings_filtered = super::route_http_request(
+            "GET",
+            "/api/v0/events/records?topic=settings",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("settings-filtered events");
+        assert_eq!(settings_filtered.status, "200 OK");
+        assert!(settings_filtered.body.contains("\"filtered_count\":1"));
+        assert!(settings_filtered
+            .body
+            .contains("\"kind\":\"options.updated\""));
+        assert!(settings_filtered.body.contains("configPersisted=false"));
 
         let slskd_events = super::route_http_request(
             "GET",
@@ -31120,6 +31191,22 @@ mod tests {
                 .await
                 .expect("invalid options validate");
         assert_eq!(invalid_validate.status, "400 Bad Request");
+
+        let events = super::route_http_request(
+            "GET",
+            "/api/v0/events/records?topic=settings",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("settings events");
+        assert_eq!(events.status, "200 OK");
+        assert!(events.body.contains("\"filtered_count\":3"));
+        assert!(events.body.contains("\"kind\":\"options.updated\""));
+        assert!(events.body.contains("\"kind\":\"options.yaml.uploaded\""));
+        assert!(events.body.contains("\"kind\":\"options.yaml.validated\""));
+        assert!(events.body.contains("configPersisted=false"));
     }
 
     #[tokio::test]
