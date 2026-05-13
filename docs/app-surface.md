@@ -239,18 +239,27 @@ Target distribution shape:
 - optional container image
 - smoke/probe commands built into `slskr`
 
-## Remaining Backfill
+## Remaining Hardening
 
-- keep the mirrored TSV share cache only as a toggleable compatibility/debug artifact now that the share index writes through to SQLite when persistence is enabled
-- finish `/api/v0/searches` parity beyond the current public-network dispatch, local share-backed projection, peer-response projection, external response ingestion, result paging/filtering, SQLite-backed lifecycle/result/delete write-through and restart hydration, and state-preserving lifecycle mutation/cancel/fail/expire routes
-- finish `/api/v0/users` browse parity beyond direct/indirect peer `GetShareFileList`/`FolderContentsRequest` execution, peer-address command hook, persisted cache projection, failed/cancelled/partial/ready-state projection, flattened browse-result ingestion, and slskd-shaped directory paging/filtering/count metadata
-- finish durable compatibility-store persistence beyond current SQLite startup hydration and write-through for share index, event log, search lifecycle/result/delete state, transfer lifecycle state, user, browse cache, message create/ack, room join/leave, collection/library/destination/now-playing/wishlist/contact/sharegroup/share-grant state, options/config acknowledgement counters, user notes, interests, and username/IP bans
-- deepen `/api/v0/files/:root` only as new storage-management workflows require mutation support; read-side folder views now include immediate directory summaries, folder selection, recursive listing, filtering, and pagination without exposing local host paths
-- expand `/api/v0/stats` beyond current projection and durable database counts as long-running task health matures
-- expand `/api/v0/metrics` beyond current session/share/search/user/browse/message/room/transfer/event/runtime/database counters as durable process gauges mature
-- expand `/api/v0/telemetry` beyond current projection/runtime/database/storage health as long-running task health matures
-- expand event emitters for new mutating workflows as additional web UI views move to live updates; `/api/events`, `/api/events/records`, and `/api/events/ws` now share the same topic taxonomy and filters, including settings-topic events for options/config compatibility acknowledgements
-- broaden `/api/v0/transfers` real transfer execution with richer production policy; current implementation has reloadable projection state in `transfer-state.json`, SQLite-backed transfer rows and transition/progress event trail, restart-safe queued resume records for interrupted active transfers, local-path file metadata execution, configurable max-active transfer policy, inbound/outbound transfer allow switches, peer-message transfer negotiation, direct plain/obfuscated `F` streaming/resume, chunked progress events, requester-side indirect `F` fallback, inbound shared-file serving over direct or pierced `F` sockets, and live queued payload proof against adjacent daemons
-- add durable config and state beyond current SQLite share-index/event/search/transfer/user/browse/message/room/collection/library/destination/now-playing/wishlist/contact/sharegroup/share-grant/social/security/OAuth/webhook/runtime-compatibility state, options/config acknowledgement counters, transfer-state JSON, event TSVs, and live database maintenance aliases
-- expand API route tests as new `/api/v0/*` resources land
+The large backfill phase is closed for the current cut: endpoint drift gates
+report 290/290 canonical WebUI routes, the share TSV mirror is toggleable, the
+event APIs share one topic taxonomy, and SQLite write-through/hydration covers
+the current compatibility stores.
+
+Open app-surface work is now production hardening rather than route scaffolding:
+
+- decide when default-off SQLite persistence is ready to become the default,
+  including migration/backfill policy, operator rollback guidance, and soak
+  evidence for long-running state directories
+- keep `/api/v0/searches`, browse, and transfer behavior aligned with live
+  Soulseek peers as optional live interop runs expose edge cases that hermetic
+  tests cannot reproduce
+- deepen `/api/v0/files/:root` only when new storage-management workflows need
+  mutation support; the current read-side folder views already provide
+  summaries, folder selection, recursive listing, filtering, and pagination
+  without exposing local host paths
+- expand `/api/v0/stats`, `/api/v0/metrics`, and `/api/v0/telemetry` as new
+  long-running task health signals are promoted into the daemon
+- add route tests with each new `/api/v0/*` resource or compatibility mutation
+  instead of treating route shape as the remaining parity problem
 - keep the Playwright/slskr harness build strategy current as repo layouts move
