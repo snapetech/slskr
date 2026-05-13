@@ -20,6 +20,22 @@ pub struct SearchRecord {
     pub target: Option<String>,
 }
 
+/// Search result row for persistence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SearchResultRecord {
+    pub id: i64,
+    pub search_id: String,
+    pub peer_username: Option<String>,
+    pub filename: String,
+    pub size: i64,
+    pub extension: String,
+    pub locked: bool,
+    pub slot_free: Option<bool>,
+    pub average_speed: Option<i64>,
+    pub queue_length: Option<i64>,
+    pub created_at: i64,
+}
+
 /// Transfer record for persistence
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransferRecord {
@@ -335,6 +351,24 @@ impl<'r> FromRow<'r, SqliteRow> for SearchRecord {
             completed_at: row.try_get("completed_at")?,
             room: row.try_get("room")?,
             target: row.try_get("target")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for SearchResultRecord {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            search_id: row.try_get("search_id")?,
+            peer_username: row.try_get("peer_username")?,
+            filename: row.try_get("filename")?,
+            size: row.try_get("size")?,
+            extension: row.try_get("extension")?,
+            locked: row.try_get("locked")?,
+            slot_free: row.try_get("slot_free")?,
+            average_speed: row.try_get("average_speed")?,
+            queue_length: row.try_get("queue_length")?,
+            created_at: row.try_get("created_at")?,
         })
     }
 }
@@ -746,6 +780,27 @@ impl DatabaseManager {
                 completed_at INTEGER,
                 room TEXT,
                 target TEXT
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create durable search result table
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS search_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                search_id TEXT NOT NULL,
+                peer_username TEXT,
+                filename TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                extension TEXT NOT NULL,
+                locked INTEGER NOT NULL,
+                slot_free INTEGER,
+                average_speed INTEGER,
+                queue_length INTEGER,
+                created_at INTEGER NOT NULL
             )
             "#,
         )
@@ -1196,6 +1251,10 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
 
+        query("CREATE INDEX IF NOT EXISTS idx_search_results_search ON search_results(search_id)")
+            .execute(&self.pool)
+            .await?;
+
         query("CREATE INDEX IF NOT EXISTS idx_transfers_started ON transfers(started_at DESC)")
             .execute(&self.pool)
             .await?;
@@ -1466,8 +1525,85 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Replace persisted result rows for one search.
+    pub async fn replace_search_results(
+        &self,
+        search_id: &str,
+        records: &[SearchResultRecord],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        query("DELETE FROM search_results WHERE search_id = ?")
+            .bind(search_id)
+            .execute(&self.pool)
+            .await?;
+        for record in records {
+            query(
+                r#"
+                INSERT INTO search_results
+                (search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(search_id)
+            .bind(&record.peer_username)
+            .bind(&record.filename)
+            .bind(record.size)
+            .bind(&record.extension)
+            .bind(record.locked)
+            .bind(record.slot_free)
+            .bind(record.average_speed)
+            .bind(record.queue_length)
+            .bind(record.created_at)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// List persisted search result rows.
+    pub async fn list_search_results(
+        &self,
+        search_id: Option<&str>,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<SearchResultRecord>, Box<dyn std::error::Error>> {
+        let records = if let Some(search_id) = search_id {
+            query_as::<_, SearchResultRecord>(
+                r#"
+                SELECT id, search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at
+                FROM search_results
+                WHERE search_id = ?
+                ORDER BY id
+                LIMIT ? OFFSET ?
+                "#,
+            )
+            .bind(search_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            query_as::<_, SearchResultRecord>(
+                r#"
+                SELECT id, search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at
+                FROM search_results
+                ORDER BY search_id, id
+                LIMIT ? OFFSET ?
+                "#,
+            )
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(records)
+    }
+
     /// Delete a search record
     pub async fn delete_search(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        query("DELETE FROM search_results WHERE search_id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         query("DELETE FROM searches WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -1477,6 +1613,9 @@ impl DatabaseManager {
 
     /// Delete all search records
     pub async fn delete_all_searches(&self) -> Result<(), Box<dyn std::error::Error>> {
+        query("DELETE FROM search_results")
+            .execute(&self.pool)
+            .await?;
         query("DELETE FROM searches").execute(&self.pool).await?;
         Ok(())
     }
@@ -2720,6 +2859,9 @@ impl DatabaseManager {
         let search_count: (i64,) = query_as("SELECT COUNT(*) FROM searches")
             .fetch_one(&self.pool)
             .await?;
+        let search_result_count: (i64,) = query_as("SELECT COUNT(*) FROM search_results")
+            .fetch_one(&self.pool)
+            .await?;
 
         let transfer_count: (i64,) = query_as("SELECT COUNT(*) FROM transfers")
             .fetch_one(&self.pool)
@@ -2827,6 +2969,7 @@ impl DatabaseManager {
 
         Ok(DatabaseStats {
             search_count: search_count.0 as u32,
+            search_result_count: search_result_count.0 as u32,
             transfer_count: transfer_count.0 as u32,
             transfer_event_count: transfer_event_count.0 as u32,
             share_file_count: share_file_count.0 as u32,
@@ -3064,6 +3207,7 @@ impl DatabaseManager {
 #[derive(Clone, Debug, Serialize)]
 pub struct DatabaseStats {
     pub search_count: u32,
+    pub search_result_count: u32,
     pub transfer_count: u32,
     pub transfer_event_count: u32,
     pub share_file_count: u32,
@@ -3101,6 +3245,7 @@ mod tests {
         let db = DatabaseManager::in_memory().await.unwrap();
         let stats = db.get_stats().await.unwrap();
         assert_eq!(stats.search_count, 0);
+        assert_eq!(stats.search_result_count, 0);
         assert_eq!(stats.transfer_count, 0);
         assert_eq!(stats.message_count, 0);
         assert_eq!(stats.user_count, 0);

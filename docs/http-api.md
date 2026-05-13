@@ -330,8 +330,8 @@ List recent searches with the slskr metadata envelope used by the dashboard.
 
 #### `POST /api/searches`
 
-Create a new search. When persistence is enabled, the search row is written to
-SQLite and rehydrated on restart.
+Create a new search. When persistence is enabled, the search row and result
+rows are written to SQLite and rehydrated on restart.
 
 **Request Body:**
 ```json
@@ -351,7 +351,8 @@ SQLite and rehydrated on restart.
 `PUT /api/searches/{id}`, `POST /api/search-responses`,
 `POST /api/searches/prune`, `DELETE /api/searches/{id}`, and
 `DELETE /api/searches` mutate the in-memory projection and write through to
-SQLite when persistence is enabled.
+SQLite when persistence is enabled. Search response rows are persisted in the
+`search_results` table so peer-group/result detail responses survive restart.
 
 #### `GET /api/searches/{id}`
 

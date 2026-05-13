@@ -524,6 +524,23 @@ impl SearchResultEntry {
         }
     }
 
+    fn from_persisted(record: &persistence::SearchResultRecord) -> Self {
+        Self {
+            peer_username: record.peer_username.clone(),
+            filename: record.filename.clone(),
+            size: record.size.max(0) as u64,
+            extension: record.extension.clone(),
+            locked: record.locked,
+            slot_free: record.slot_free,
+            average_speed: record
+                .average_speed
+                .and_then(|value| u32::try_from(value).ok()),
+            queue_length: record
+                .queue_length
+                .and_then(|value| u32::try_from(value).ok()),
+        }
+    }
+
     fn json(&self) -> String {
         format!(
             "{{\"peer_username\":{},\"filename\":\"{}\",\"size\":{},\"extension\":\"{}\",\"locked\":{},\"slot_free\":{},\"average_speed\":{},\"queue_length\":{}}}",
@@ -698,7 +715,15 @@ impl SearchRecord {
         serde_json::Value::Array(responses).to_string()
     }
 
+    #[cfg(test)]
     fn from_persisted(record: &persistence::SearchRecord) -> Option<Self> {
+        Self::from_persisted_with_results(record, Vec::new())
+    }
+
+    fn from_persisted_with_results(
+        record: &persistence::SearchRecord,
+        result_records: Vec<persistence::SearchResultRecord>,
+    ) -> Option<Self> {
         let token = record.id.parse::<u32>().ok()?;
         let target = persisted_target(record.target.as_deref());
         let target_name = match target {
@@ -713,7 +738,10 @@ impl SearchRecord {
             target,
             target_name,
             status: persisted_search_status(&record.status),
-            results: Vec::new(),
+            results: result_records
+                .iter()
+                .map(SearchResultEntry::from_persisted)
+                .collect(),
             expires_at: 0,
             created_at: record.created_at.max(0) as u64,
             updated_at: record.completed_at.unwrap_or(record.created_at).max(0) as u64,
@@ -735,10 +763,45 @@ impl SearchStore {
         }
     }
 
+    #[cfg(test)]
     fn from_persisted(records: Vec<persistence::SearchRecord>) -> Self {
         let records = records
             .iter()
             .filter_map(SearchRecord::from_persisted)
+            .collect::<Vec<_>>();
+        let next_token = records
+            .iter()
+            .map(|record| record.token)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1)
+            .max(1);
+        Self {
+            records,
+            next_token,
+        }
+    }
+
+    fn from_persisted_with_results(
+        records: Vec<persistence::SearchRecord>,
+        result_records: Vec<persistence::SearchResultRecord>,
+    ) -> Self {
+        let mut results_by_search: BTreeMap<String, Vec<persistence::SearchResultRecord>> =
+            BTreeMap::new();
+        for result in result_records {
+            results_by_search
+                .entry(result.search_id.clone())
+                .or_default()
+                .push(result);
+        }
+        let records = records
+            .iter()
+            .filter_map(|record| {
+                SearchRecord::from_persisted_with_results(
+                    record,
+                    results_by_search.remove(&record.id).unwrap_or_default(),
+                )
+            })
             .collect::<Vec<_>>();
         let next_token = records
             .iter()
@@ -1185,11 +1248,38 @@ fn persisted_search_record(record: &SearchRecord) -> persistence::SearchRecord {
     }
 }
 
+fn persisted_search_result_records(record: &SearchRecord) -> Vec<persistence::SearchResultRecord> {
+    let search_id = record.token.to_string();
+    record
+        .results
+        .iter()
+        .map(|result| persistence::SearchResultRecord {
+            id: 0,
+            search_id: search_id.clone(),
+            peer_username: result.peer_username.clone(),
+            filename: result.filename.clone(),
+            size: i64::try_from(result.size).unwrap_or(i64::MAX),
+            extension: result.extension.clone(),
+            locked: result.locked,
+            slot_free: result.slot_free,
+            average_speed: result.average_speed.map(i64::from),
+            queue_length: result.queue_length.map(i64::from),
+            created_at: record.updated_at as i64,
+        })
+        .collect()
+}
+
 async fn persist_search_record(state: &AppState, record: &SearchRecord) -> Result<(), String> {
     if let Some(db) = state.db.as_ref() {
         db.insert_search(&persisted_search_record(record))
             .await
             .map_err(|error| format!("failed to persist search: {error}"))?;
+        db.replace_search_results(
+            &record.token.to_string(),
+            &persisted_search_result_records(record),
+        )
+        .await
+        .map_err(|error| format!("failed to persist search results: {error}"))?;
     }
     Ok(())
 }
@@ -7160,6 +7250,7 @@ async fn route_http_request_with_headers(
                         "enabled": true,
                         "healthy": true,
                         "searches": stats.search_count,
+                        "searchResults": stats.search_result_count,
                         "transfers": stats.transfer_count,
                         "transferEvents": stats.transfer_event_count,
                         "shares": stats.share_file_count,
@@ -16317,7 +16408,11 @@ async fn serve(once: bool) -> Result<(), String> {
             .list_searches(EVENT_HISTORY_LIMIT as i32, 0)
             .await
             .map_err(|error| format!("failed to load persisted searches: {error}"))?;
-        SearchStore::from_persisted(records)
+        let result_records = db
+            .list_search_results(None, EVENT_HISTORY_LIMIT as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted search results: {error}"))?;
+        SearchStore::from_persisted_with_results(records, result_records)
     } else {
         SearchStore::new()
     };
@@ -19471,6 +19566,7 @@ async fn database_stats_value(state: &AppState) -> serde_json::Value {
                 "enabled": true,
                 "healthy": true,
                 "searches": stats.search_count,
+                "searchResults": stats.search_result_count,
                 "transfers": stats.transfer_count,
                 "transferEvents": stats.transfer_event_count,
                 "shares": stats.share_file_count,
@@ -19509,6 +19605,7 @@ async fn database_stats_value(state: &AppState) -> serde_json::Value {
             "enabled": false,
             "healthy": false,
             "searches": 0,
+            "searchResults": 0,
             "transfers": 0,
             "transferEvents": 0,
             "shares": 0,
@@ -19614,6 +19711,7 @@ async fn database_stats_value(state: &AppState) -> serde_json::Value {
     );
     for key in [
         "searches",
+        "searchResults",
         "transfers",
         "transferEvents",
         "shares",
@@ -23995,6 +24093,23 @@ mod tests {
         assert_eq!(response.status, "200 OK");
         let persisted = db.get_search("1").await.expect("get search").unwrap();
         assert_eq!(persisted.result_count, 1);
+        let persisted_results = db
+            .list_search_results(Some("1"), 10, 0)
+            .await
+            .expect("list search results");
+        assert_eq!(persisted_results.len(), 1);
+        assert_eq!(persisted_results[0].peer_username.as_deref(), Some("peer"));
+        assert_eq!(persisted_results[0].filename, "Remote/Durable.flac");
+
+        let rehydrated = super::SearchStore::from_persisted_with_results(
+            db.list_searches(10, 0).await.expect("list searches"),
+            persisted_results,
+        );
+        let rehydrated_record = rehydrated
+            .get_by_identifier("1")
+            .expect("rehydrated search");
+        assert_eq!(rehydrated_record.results.len(), 1);
+        assert_eq!(rehydrated_record.results[0].filename, "Remote/Durable.flac");
 
         let updated = super::route_http_request(
             "PUT",
@@ -24024,6 +24139,11 @@ mod tests {
             .expect("delete search");
         assert_eq!(deleted.status, "200 OK");
         assert!(db.get_search("1").await.expect("get deleted").is_none());
+        assert!(db
+            .list_search_results(Some("1"), 10, 0)
+            .await
+            .expect("list deleted results")
+            .is_empty());
 
         let created = super::route_http_request(
             "POST",
@@ -24043,6 +24163,9 @@ mod tests {
                 .len(),
             1
         );
+        let stats = db.get_stats().await.expect("stats before clear");
+        assert_eq!(stats.search_count, 1);
+        assert_eq!(stats.search_result_count, 0);
 
         let cleared = super::route_http_request("DELETE", "/api/v0/searches", None, "", &state)
             .await
