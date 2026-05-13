@@ -32,6 +32,9 @@ dirs = ["/srv/slskr/shares/music"]
 follow_symlinks = false
 include_hidden = false
 scan_max_files = 50000
+# Emit share-index.tsv for compatibility/debug inspection. SQLite share_files is
+# the durable share index when [persistence].enabled = true.
+cache_tsv_enabled = true
 # fixture = "Virtual/Example.flac=12345"
 
 [transfers]

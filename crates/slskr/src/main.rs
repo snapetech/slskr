@@ -236,6 +236,7 @@ struct ShareIndexSnapshot {
     fixture_files: usize,
     scan_errors: Vec<String>,
     cache_path: PathBuf,
+    cache_enabled: bool,
     cache_written_at: Option<u64>,
     cache_error: Option<String>,
     updated_at: u64,
@@ -256,7 +257,7 @@ impl ShareIndexSnapshot {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"roots\":[{}],\"files\":{},\"fixture_files\":{},\"scan_errors\":[{}],\"cache_file\":\"{}\",\"cache_written_at\":{},\"cache_error\":{},\"updated_at\":{}}}",
+            "{{\"roots\":[{}],\"files\":{},\"fixture_files\":{},\"scan_errors\":[{}],\"cache_file\":\"{}\",\"cache_enabled\":{},\"cache_kind\":\"compatibility-debug\",\"cache_written_at\":{},\"cache_error\":{},\"updated_at\":{}}}",
             roots,
             self.entries.len(),
             self.fixture_files,
@@ -267,6 +268,7 @@ impl ShareIndexSnapshot {
                     .and_then(|name| name.to_str())
                     .unwrap_or("share-index.tsv")
             ),
+            self.cache_enabled,
             json_u64_option(self.cache_written_at),
             json_option(self.cache_error.as_deref()),
             self.updated_at
@@ -276,12 +278,13 @@ impl ShareIndexSnapshot {
     fn summary_json(&self) -> String {
         let bytes = self.entries.iter().map(|entry| entry.size).sum::<u64>();
         format!(
-            "{{\"roots\":{},\"files\":{},\"fixture_files\":{},\"bytes\":{},\"scan_errors\":{},\"cache_error\":{},\"updated_at\":{}}}",
+            "{{\"roots\":{},\"files\":{},\"fixture_files\":{},\"bytes\":{},\"scan_errors\":{},\"cache_enabled\":{},\"cache_error\":{},\"updated_at\":{}}}",
             self.roots.len(),
             self.entries.len(),
             self.fixture_files,
             bytes,
             self.scan_errors.len(),
+            self.cache_enabled,
             self.cache_error.is_some(),
             self.updated_at
         )
@@ -352,10 +355,11 @@ impl ShareIndexSnapshot {
             .collect::<Vec<_>>();
         let roots = summarize_share_roots_from_persisted(&records);
         let cache_path = share_cache_path(&config.state_dir);
-        let (cache_written_at, cache_error) = match write_share_cache(&cache_path, &entries) {
-            Ok(()) => (Some(unix_timestamp()), None),
-            Err(error) => (None, Some(error)),
-        };
+        let (cache_written_at, cache_error) = write_share_cache_if_enabled(
+            config.share_settings.cache_tsv_enabled,
+            &cache_path,
+            &entries,
+        );
         Self {
             entries,
             local_paths,
@@ -363,6 +367,7 @@ impl ShareIndexSnapshot {
             fixture_files: 0,
             scan_errors: Vec::new(),
             cache_path,
+            cache_enabled: config.share_settings.cache_tsv_enabled,
             cache_written_at,
             cache_error,
             updated_at,
@@ -7209,6 +7214,8 @@ async fn route_http_request_with_headers(
 
             let shares = state.shares.read().await;
             let shares_json = shares.summary_json();
+            let share_cache_enabled = shares.cache_enabled;
+            let share_cache_error = shares.cache_error.clone();
             drop(shares);
 
             let searches = state.searches.read().await;
@@ -7268,6 +7275,9 @@ async fn route_http_request_with_headers(
                 },
                 "storage": {
                     "share_cache_file": "share-index.tsv",
+                    "share_cache_kind": "compatibility-debug",
+                    "share_cache_enabled": share_cache_enabled,
+                    "share_cache_error": share_cache_error,
                     "transfer_events_file": "transfer-events.tsv",
                     "transfer_state_error": transfer_state_error,
                     "transfer_events_error": transfer_events_error,
@@ -21267,10 +21277,11 @@ fn build_share_index(config: &AppConfig) -> ShareIndexSnapshot {
     let mut entries = config.share_settings.fixture_entries.clone();
     entries.append(&mut scan.entries);
     let cache_path = share_cache_path(&config.state_dir);
-    let (cache_written_at, cache_error) = match write_share_cache(&cache_path, &entries) {
-        Ok(()) => (Some(unix_timestamp()), None),
-        Err(error) => (None, Some(error)),
-    };
+    let (cache_written_at, cache_error) = write_share_cache_if_enabled(
+        config.share_settings.cache_tsv_enabled,
+        &cache_path,
+        &entries,
+    );
 
     ShareIndexSnapshot {
         entries,
@@ -21279,6 +21290,7 @@ fn build_share_index(config: &AppConfig) -> ShareIndexSnapshot {
         fixture_files,
         scan_errors: scan.errors,
         cache_path,
+        cache_enabled: config.share_settings.cache_tsv_enabled,
         cache_written_at,
         cache_error,
         updated_at: unix_timestamp(),
@@ -21523,6 +21535,20 @@ fn json_safe_share_label(label: &str) -> String {
 
 fn share_cache_path(state_dir: &Path) -> PathBuf {
     state_dir.join("share-index.tsv")
+}
+
+fn write_share_cache_if_enabled(
+    enabled: bool,
+    path: &Path,
+    entries: &[FileEntry],
+) -> (Option<u64>, Option<String>) {
+    if !enabled {
+        return (None, None);
+    }
+    match write_share_cache(path, entries) {
+        Ok(()) => (Some(unix_timestamp()), None),
+        Err(error) => (None, Some(error)),
+    }
 }
 
 fn write_share_cache(path: &Path, entries: &[FileEntry]) -> Result<(), String> {
@@ -22538,10 +22564,15 @@ mod tests {
             .contains("\"share_cache_file\":\"share-index.tsv\""));
         assert!(response
             .body
+            .contains("\"share_cache_kind\":\"compatibility-debug\""));
+        assert!(response
+            .body
             .contains("\"transfer_events_file\":\"transfer-events.tsv\""));
         let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
         assert_eq!(json["shares"]["roots"], 0);
         assert_eq!(json["shares"]["files"], 1);
+        assert_eq!(json["storage"]["share_cache_enabled"], true);
+        assert_eq!(json["shares"]["cache_enabled"], true);
         assert_eq!(json["database"]["enabled"], false);
         assert_eq!(json["health"]["database"], true);
         assert_eq!(json["events"]["total"], 0);
@@ -31053,6 +31084,7 @@ mod tests {
                 follow_symlinks = true
                 include_hidden = true
                 scan_max_files = 123
+                cache_tsv_enabled = false
 
                 [transfers]
                 history_limit = 12
@@ -31095,6 +31127,7 @@ mod tests {
             vec![PathBuf::from("/tmp/music")]
         );
         assert_eq!(config.share_settings.fixture_entries.len(), 1);
+        assert!(!config.share_settings.cache_tsv_enabled);
         assert_eq!(config.transfer_history_limit, 12);
         assert_eq!(config.transfer_max_active, 2);
         assert!(!config.transfer_allow_inbound);
@@ -31115,6 +31148,7 @@ mod tests {
         assert!(sanitized.contains("\"transfer_allow_outbound\":false"));
         assert!(sanitized.contains("\"api_token_configured\":true"));
         assert!(sanitized.contains("\"api_cookie_auth_enabled\":true"));
+        assert!(sanitized.contains("\"share_cache_tsv_enabled\":false"));
         assert!(sanitized.contains("\"launch_enabled\":true"));
         assert!(sanitized.contains("a***e"));
         assert!(!sanitized.contains("secret-password"));
@@ -31513,6 +31547,36 @@ mod tests {
     #[test]
     fn share_cache_escapes_fields() {
         assert_eq!(super::escape_cache_field("a\tb\\c\n"), "a\\tb\\\\c\\n");
+    }
+
+    #[test]
+    fn share_cache_tsv_can_be_disabled_for_sqlite_primary_state() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let state_dir = std::env::temp_dir().join(format!("slskr-share-cache-disabled-{unique}"));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let env = MapEnv::default()
+            .with("SLSKR_STATE_DIR", &state_dir.display().to_string())
+            .with("SLSKR_SHARE_FIXTURE", "Virtual/Test.flac=42")
+            .with("SLSKR_SHARE_CACHE_TSV_ENABLED", "false");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("config");
+
+        let snapshot = super::build_share_index(&config);
+
+        assert_eq!(snapshot.entries.len(), 1);
+        assert!(!snapshot.cache_enabled);
+        assert!(snapshot.cache_written_at.is_none());
+        assert!(snapshot.cache_error.is_none());
+        assert!(!super::share_cache_path(&state_dir).exists());
+        assert!(snapshot.json().contains("\"cache_enabled\":false"));
+        assert!(snapshot
+            .json()
+            .contains("\"cache_kind\":\"compatibility-debug\""));
+
+        std::fs::remove_dir_all(state_dir).unwrap();
     }
 
     #[test]

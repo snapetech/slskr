@@ -254,7 +254,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -281,6 +281,7 @@ impl AppConfig {
             self.share_settings.follow_symlinks,
             self.share_settings.include_hidden,
             self.share_settings.max_files,
+            self.share_settings.cache_tsv_enabled,
             self.transfer_history_limit,
             self.transfer_max_active,
             self.transfer_allow_inbound,
@@ -568,6 +569,7 @@ pub struct ShareSettings {
     pub follow_symlinks: bool,
     pub include_hidden: bool,
     pub max_files: usize,
+    pub cache_tsv_enabled: bool,
 }
 
 impl ShareSettings {
@@ -601,6 +603,11 @@ impl ShareSettings {
                 "SLSKR_SHARE_SCAN_MAX_FILES",
                 file_config.scan_max_files,
                 50_000_usize,
+            )?,
+            cache_tsv_enabled: env_bool_layer(
+                env,
+                "SLSKR_SHARE_CACHE_TSV_ENABLED",
+                file_config.cache_tsv_enabled.unwrap_or(true),
             )?,
         })
     }
@@ -670,6 +677,7 @@ pub struct ShareFileConfig {
     follow_symlinks: Option<bool>,
     include_hidden: Option<bool>,
     scan_max_files: Option<usize>,
+    cache_tsv_enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]

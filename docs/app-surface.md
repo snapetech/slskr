@@ -186,6 +186,7 @@ Initial configuration sources:
 - `SLSKR_SHARE_FOLLOW_SYMLINKS` to follow symlinks during share scans; defaults to `false`
 - `SLSKR_SHARE_INCLUDE_HIDDEN` to include dot-prefixed path components; defaults to `false`
 - `SLSKR_SHARE_SCAN_MAX_FILES` to cap startup scan size; defaults to `50000`
+- `SLSKR_SHARE_CACHE_TSV_ENABLED` to emit the `share-index.tsv` compatibility/debug mirror; defaults to `true`. SQLite `share_files` remains the durable share index when persistence is enabled.
 - `SLSKR_SHARE_FIXTURE` for temporary in-memory test entries as `path=size;path=size`
 - `SLSKR_TRANSFER_HISTORY_LIMIT` for the in-memory transfer event history; defaults to `500`
 - `SLSKR_TRANSFER_MAX_ACTIVE` for max concurrently active transfer records, including peer lookup/negotiation and inbound accepted transfers; defaults to `3`. Set to `0` to block transfer starts and inbound transfer acceptance.
@@ -205,7 +206,7 @@ Initial configuration sources:
 Backfill target:
 
 - expand `config.toml` coverage as API/auth/search/transfer modules land
-- state directory for database; share index writes SQLite `share_files` plus a mirrored `share-index.tsv` compatibility cache, transfer projection writes SQLite `transfer_events` plus mirrored `transfer-events.tsv` status/byte-progress events, and reloadable transfer records write `transfer-state.json`
+- state directory for database; share index writes SQLite `share_files` plus optional mirrored `share-index.tsv` compatibility/debug cache, transfer projection writes SQLite `transfer_events` plus mirrored `transfer-events.tsv` status/byte-progress events, and reloadable transfer records write `transfer-state.json`
 - separate secret loading path for credentials
 - maintained service/container artifacts that follow [install.md](./install.md) and never require checked-in secrets
 
@@ -238,7 +239,7 @@ Target distribution shape:
 
 ## Remaining Backfill
 
-- keep the mirrored TSV share cache only as a compatibility/debug artifact now that the share index writes through to SQLite when persistence is enabled
+- keep the mirrored TSV share cache only as a toggleable compatibility/debug artifact now that the share index writes through to SQLite when persistence is enabled
 - finish `/api/v0/searches` parity beyond the current public-network dispatch, local share-backed projection, peer-response projection, external response ingestion, result paging/filtering, SQLite-backed lifecycle/result/delete write-through and restart hydration, and state-preserving lifecycle mutation/cancel/fail/expire routes
 - finish `/api/v0/users` browse parity beyond direct/indirect peer `GetShareFileList`/`FolderContentsRequest` execution, peer-address command hook, persisted cache projection, failed/cancelled/partial/ready-state projection, flattened browse-result ingestion, and slskd-shaped directory paging/filtering/count metadata
 - finish durable compatibility-store persistence beyond current SQLite startup hydration and write-through for share index, event log, search lifecycle/result/delete state, transfer lifecycle state, user, browse cache, message create/ack, room join/leave, collection/library/destination/now-playing/wishlist/contact/sharegroup/share-grant state, user notes, interests, and username/IP bans
