@@ -30,6 +30,7 @@ GATES=(
   scripts/check-bug-council-all-phases.sh
   scripts/check-council-negative-space.sh
   scripts/check-council-active-backlog.sh
+  scripts/check-council-inventory-closure.sh
   scripts/check-rust-protocol-taint-lens.sh
   scripts/check-rust-protocol-adversarial-corpus.sh
   scripts/check-shell-script-hygiene.sh

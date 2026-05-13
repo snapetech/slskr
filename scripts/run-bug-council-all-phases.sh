@@ -13,6 +13,7 @@ scripts/run-council-scan.sh | tee "$scan_out"
 
 printf '\n==> Process gates\n'
 scripts/check-council-active-backlog.sh
+scripts/check-council-inventory-closure.sh
 scripts/check-council-loop.sh
 scripts/check-council-negative-space.sh
 

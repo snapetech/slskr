@@ -53,18 +53,19 @@ scripts/run-council-bughunt.sh
 
 ## Current Section Review
 
-Current section: `Example Web API candidates`
+Current section: all current candidate classes classified; reopen the first
+class whose fresh scan output is not covered by this inventory.
 
 Latest scanner counts:
 
 | Candidate Class | Count |
 | --- | ---: |
 | Constructor/mutable collection candidates | 7 |
-| Protocol count/length candidates | 41 |
-| Protocol scalar emission candidates | 30 |
-| Resolver/raw stream candidates | 220 |
-| Task/cancellation/lifecycle candidates | 236 |
-| Example Web API candidates | 289 |
+| Protocol count/length candidates | 46 |
+| Protocol scalar emission candidates | 42 |
+| Resolver/raw stream candidates | 225 |
+| Task/cancellation/lifecycle candidates | 246 |
+| Example Web API candidates | 287 |
 
 ### Constructor/mutable collection candidates
 

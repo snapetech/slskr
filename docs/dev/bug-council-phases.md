@@ -30,6 +30,7 @@ The canonical multi-phase tracker for the upgrade work itself lives in `../slskN
 | 6 | Council bughunt entrypoint | Done | (agent) | `scripts/run-council-bughunt.sh` delegates to the all-phases runner so legacy muscle memory cannot skip a council phase. |
 | 7 | All-phases council runner | Done | (agent) | `scripts/run-bug-council-all-phases.sh` runs fresh candidate counts, process gates, calibrated semantic lenses, adversarial protocol corpus, and pending-phase checks in one command; `scripts/check-bug-council-all-phases.sh` is wired into remediation so partial runners regress loudly. |
 | 8 | Active backlog pile gate | Done | (agent) | `docs/dev/bug-council-active-backlog.md` records every current council scan class with count/status, `scripts/check-council-active-backlog.sh` fails on stale or untriaged rows, and the all-phases runner invokes it every cycle. |
+| 9 | Inventory closure gate | Done | (agent) | `scripts/check-council-inventory-closure.sh` fails when a class marked fixed in `docs/dev/council-scan-inventory.md` is not represented as a guarded active-backlog row at the fresh scan count; the all-phases runner and remediation baseline invoke it every cycle. |
 
 ## How to resume
 
