@@ -83,12 +83,10 @@ filtered out. Use this list to decide what the bin crate must keep working.
 
 **Streaming:**
 
-- `/api/events/ws` — plain WebSocket. Used by all three SDKs. **Server does not
-  implement this route today.** (`/api/events` polling endpoint exists.)
-- SignalR hubs at `/application`, `/logs`, `/search`, `/songid`,
-  `/listening-party`, `/transfers`. Used by the React web UI via
-  `@microsoft/signalr` (`web/src/lib/hubFactory.js`). **Server does not
-  implement SignalR; current stub returns 501.**
+- `/api/events/ws` — plain WebSocket. Used by all three SDKs and the React
+  web UI through `web/src/lib/hubFactory.js`.
+- SignalR hubs are intentionally descoped. The React UI now uses the plain
+  WebSocket event feed and does not carry SignalR runtime dependencies.
 
 **Not used by anyone:**
 
@@ -417,9 +415,9 @@ existing rows; add a new dated entry.
   using a real `tokio-tungstenite` client and replaced the Go SDK's mocked
   WebSocket client with a real `gorilla/websocket` dial/read loop.
 - **2026-05-04** — Phase 5 complete. Replaced `web/src/lib/hubFactory.js`
-  with a plain WebSocket adapter over `/api/events/ws`, removed SignalR
-  packages from `web/package.json`/lockfile, and cleaned SignalR-specific web
-  config references.
+  with a plain WebSocket adapter over `/api/events/ws` and cleaned
+  SignalR-specific web config references. A later dependency sweep removed the
+  stale SignalR packages from `web/package.json`/lockfile.
 - **2026-05-04** — Phase 6 complete. Added default-off persistence config,
   opened SQLite only when enabled, wired search create through
   `db.insert_search`, hydrated `/api/searches` from persisted rows on startup,
@@ -434,5 +432,6 @@ existing rows; add a new dated entry.
   SignalR/GraphQL/SSE/distributed-theater surfaces. Archive deletion remains
   pending because the one-week cooldown has not elapsed.
 - **2026-05-04** — Follow-up cleanup. Removed the remaining fake SSE route
-  responses, `/hub/*` SignalR 501 stubs, and no-op persistence record
-  assignments for transfers/messages. `cargo test -p slskr` still passes.
+  responses, retired `/hub/*` SignalR compatibility stubs, and removed no-op
+  persistence record assignments for transfers/messages. `cargo test -p slskr`
+  still passes.

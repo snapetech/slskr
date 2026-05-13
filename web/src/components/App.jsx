@@ -772,7 +772,7 @@ class App extends Component {
 
         if (error?.message === 'HubConnectionTimeout') {
           console.warn(
-            'Hub connection timed out during background startup; allowing the UI to continue while SignalR retries.',
+            'Event feed connection timed out during background startup; allowing the UI to continue while WebSocket reconnects.',
           );
           return;
         }
