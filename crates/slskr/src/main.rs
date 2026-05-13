@@ -1610,6 +1610,8 @@ struct TransferEntry {
     peer_username: Option<String>,
     filename: String,
     local_path: Option<String>,
+    #[serde(default)]
+    batch_id: Option<String>,
     size: Option<u64>,
     bytes_transferred: u64,
     status: String,
@@ -1622,13 +1624,14 @@ impl TransferEntry {
     #[allow(dead_code)]
     fn json(&self) -> String {
         format!(
-            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"requested_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"batch_id\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"requested_at\":{},\"updated_at\":{}}}",
             self.id,
             self.direction,
             self.token,
             json_option(self.peer_username.as_deref()),
             json_escape(&self.filename),
             json_option(self.local_path.as_deref()),
+            json_option(self.batch_id.as_deref()),
             json_u64_option(self.size),
             self.bytes_transferred,
             json_escape(&self.status),
@@ -1664,6 +1667,7 @@ impl TransferEntry {
             "username": self.peer_username.as_deref().unwrap_or_default(),
             "direction": if self.direction == 0 { "Download" } else { "Upload" },
             "filename": self.filename,
+            "batchId": self.batch_id,
             "size": size,
             "startOffset": 0,
             "state": slskd_transfer_state(&self.status),
@@ -1888,6 +1892,7 @@ impl TransferQueue {
             peer_username: None,
             filename,
             local_path: None,
+            batch_id: None,
             size,
             bytes_transferred: 0,
             status: "rejected".to_owned(),
@@ -1915,6 +1920,7 @@ impl TransferQueue {
             peer_username: None,
             filename,
             local_path: Some(local_path),
+            batch_id: None,
             size: Some(size),
             bytes_transferred: 0,
             status: "accepted".to_owned(),
@@ -1934,6 +1940,18 @@ impl TransferQueue {
         local_path: Option<String>,
         size: Option<u64>,
     ) -> TransferEntry {
+        self.create_with_batch(direction, peer_username, filename, local_path, size, None)
+    }
+
+    fn create_with_batch(
+        &mut self,
+        direction: u32,
+        peer_username: Option<String>,
+        filename: String,
+        local_path: Option<String>,
+        size: Option<u64>,
+        batch_id: Option<String>,
+    ) -> TransferEntry {
         let now = unix_timestamp();
         let token = self.next_token;
         self.next_token = self.next_token.wrapping_add(1).max(1);
@@ -1944,6 +1962,7 @@ impl TransferQueue {
             peer_username,
             filename,
             local_path,
+            batch_id,
             size,
             bytes_transferred: 0,
             status: "queued".to_owned(),
@@ -6502,6 +6521,66 @@ impl DestinationStore {
     }
 }
 
+#[derive(Clone, Debug)]
+struct PreviewStreamTicket {
+    family: String,
+    source: String,
+    content_id: String,
+    filename: String,
+    peer_username: Option<String>,
+    size: u64,
+    content_type: String,
+    created_at: u64,
+    expires_at: u64,
+}
+
+#[derive(Debug, Default)]
+struct PreviewStreamTicketStore {
+    records: BTreeMap<String, PreviewStreamTicket>,
+}
+
+impl PreviewStreamTicketStore {
+    fn issue(
+        &mut self,
+        family: &str,
+        source: &str,
+        content_id: String,
+        filename: String,
+        peer_username: Option<String>,
+        size: u64,
+        content_type: String,
+        ttl_seconds: u64,
+    ) -> (String, PreviewStreamTicket) {
+        let now = unix_timestamp();
+        self.prune(now);
+        let token = secure_oauth_state();
+        let record = PreviewStreamTicket {
+            family: family.to_owned(),
+            source: source.to_owned(),
+            content_id,
+            filename,
+            peer_username,
+            size,
+            content_type,
+            created_at: now,
+            expires_at: now.saturating_add(ttl_seconds),
+        };
+        self.records.insert(token.clone(), record.clone());
+        (token, record)
+    }
+
+    fn get(&mut self, token: &str) -> Option<PreviewStreamTicket> {
+        let now = unix_timestamp();
+        self.prune(now);
+        self.records.get(token).cloned()
+    }
+
+    fn prune(&mut self, now: u64) {
+        self.records
+            .retain(|_, record| record.expires_at >= now);
+    }
+}
+
 #[derive(Debug)]
 struct AppState {
     config: AppConfig,
@@ -6536,6 +6615,7 @@ struct AppState {
     session_commands: mpsc::Sender<SessionCommand>,
     rate_limiter: rate_limit::RateLimiter,
     oauth_states: RwLock<OAuthStateStore>,
+    stream_tickets: RwLock<PreviewStreamTicketStore>,
 }
 
 #[derive(Clone, Debug)]
@@ -8587,6 +8667,8 @@ async fn route_http_request_with_headers(
         // TRANSFER ENDPOINTS
         ("POST", "/api/transfers") => {
             if let Some((username, files)) = slskd_enqueue_request(body) {
+                let batch_id = slskd_transfer_batch_id(body)
+                    .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
                 let mut transfers = state.transfers.write().await;
                 let mut created = Vec::new();
                 let mut created_entries = Vec::new();
@@ -8600,7 +8682,14 @@ async fn route_http_request_with_headers(
                         continue;
                     }
                     let size = file.get("size").and_then(serde_json::Value::as_u64);
-                    let entry = transfers.create(0, Some(username.clone()), filename, None, size);
+                    let entry = transfers.create_with_batch(
+                        0,
+                        Some(username.clone()),
+                        filename,
+                        None,
+                        size,
+                        batch_id.clone(),
+                    );
                     created.push(entry.slskd_file_json());
                     created_entries.push(entry);
                 }
@@ -8624,6 +8713,7 @@ async fn route_http_request_with_headers(
             let direction = extract_json_u32_field(body, "direction").unwrap_or(0);
             let peer_username = extract_json_string_field(body, "peer_username");
             let supplied_local_path = extract_json_string_field(body, "local_path");
+            let batch_id = slskd_transfer_batch_id(body);
             let size = extract_json_u64_field(body, "size");
             let local_path = match prepare_transfer_local_path(state, direction, &filename, supplied_local_path).await {
                 Ok(path) => path,
@@ -8631,7 +8721,14 @@ async fn route_http_request_with_headers(
             };
 
              let mut transfers = state.transfers.write().await;
-             let entry = transfers.create(direction, peer_username.clone(), filename.clone(), local_path.clone(), size);
+             let entry = transfers.create_with_batch(
+                 direction,
+                 peer_username.clone(),
+                 filename.clone(),
+                 local_path.clone(),
+                 size,
+                 batch_id,
+             );
              drop(transfers);
              persist_transfer_record(state, &entry).await?;
               Ok(routing::created_response(entry.json()))
@@ -8677,6 +8774,55 @@ async fn route_http_request_with_headers(
              let json = slskd_download_stats_json(&transfers);
              drop(transfers);
              Ok(routing::ok_response(json))
+         }
+
+         ("GET", path) if path.starts_with("/api/transfers/downloads/batches/") => {
+             let batch_id = decoded_path_segment(
+                 path.trim_start_matches("/api/transfers/downloads/batches/"),
+             );
+             if uuid::Uuid::parse_str(&batch_id).is_err() {
+                 return Ok(routing::bad_request_response("invalid batch id"));
+             }
+             let transfers = state.transfers.read().await;
+             let downloads = transfers
+                 .entries
+                 .iter()
+                 .filter(|entry| {
+                     entry.direction == 0 && entry.batch_id.as_deref() == Some(batch_id.as_str())
+                 })
+                 .map(TransferEntry::slskd_file_json)
+                 .collect::<Vec<_>>();
+             if downloads.is_empty() {
+                 drop(transfers);
+                 return Ok(routing::not_found_response());
+             }
+             let completed_count = downloads
+                 .iter()
+                 .filter(|entry| {
+                     entry
+                         .get("state")
+                         .and_then(serde_json::Value::as_str)
+                         .is_some_and(|state| state.eq_ignore_ascii_case("Completed"))
+                 })
+                 .count();
+             let failed_count = downloads
+                 .iter()
+                 .filter(|entry| {
+                     entry
+                         .get("state")
+                         .and_then(serde_json::Value::as_str)
+                         .is_some_and(|state| matches!(state, "Failed" | "Errored"))
+                 })
+                 .count();
+             let transfer_count = downloads.len();
+             drop(transfers);
+             Ok(routing::ok_response(serde_json::json!({
+                 "id": batch_id,
+                 "transfers": downloads,
+                 "transferCount": transfer_count,
+                 "completedCount": completed_count,
+                 "failedCount": failed_count,
+             }).to_string()))
          }
 
          ("GET", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
@@ -8943,6 +9089,8 @@ async fn route_http_request_with_headers(
              };
              let username = decoded_path_segment(username);
              let files = slskd_files_from_body(body);
+             let batch_id = slskd_transfer_batch_id(body)
+                 .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
              let mut transfers = state.transfers.write().await;
              let mut created = Vec::new();
              let mut created_entries = Vec::new();
@@ -8956,7 +9104,14 @@ async fn route_http_request_with_headers(
                      continue;
                  }
                  let size = file.get("size").and_then(serde_json::Value::as_u64);
-                 let entry = transfers.create(0, Some(username.clone()), filename, None, size);
+                 let entry = transfers.create_with_batch(
+                     0,
+                     Some(username.clone()),
+                     filename,
+                     None,
+                     size,
+                     batch_id.clone(),
+                 );
                  created.push(entry.slskd_file_json());
                  created_entries.push(entry);
              }
@@ -14062,6 +14217,35 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(body))
         }
 
+        ("POST", "/api/peer-streams/tickets") | ("POST", "/api/mesh-streams/tickets") => {
+            let family = if normalized_path.starts_with("/api/mesh-streams") {
+                "mesh"
+            } else {
+                "peer"
+            };
+            match create_preview_stream_ticket(state, family, body).await {
+                Ok(ticket) => Ok(routing::ok_response(ticket)),
+                Err(error) => Ok(routing::bad_request_response(&error)),
+            }
+        }
+
+        ("GET", path)
+            if path.starts_with("/api/peer-streams/") || path.starts_with("/api/mesh-streams/") =>
+        {
+            let (family, raw_ticket) = if let Some(ticket) = path.strip_prefix("/api/mesh-streams/") {
+                ("mesh", ticket)
+            } else if let Some(ticket) = path.strip_prefix("/api/peer-streams/") {
+                ("peer", ticket)
+            } else {
+                unreachable!()
+            };
+            let ticket = decoded_path_segment(raw_ticket);
+            match open_preview_stream_ticket(state, family, &ticket).await {
+                Some(body) => Ok(routing::ok_response(body)),
+                None => Ok(routing::not_found_response()),
+            }
+        }
+
         ("POST", "/api/listening-party/radio/party/content") => {
             let room = extract_json_string_field(body, "room").unwrap_or_else(|| "radio".to_owned());
             let title = extract_json_string_field(body, "title").unwrap_or_else(|| "party content".to_owned());
@@ -15209,6 +15393,16 @@ fn slskd_files_from_body(body: &str) -> Vec<serde_json::Value> {
     payload.as_array().cloned().unwrap_or_default()
 }
 
+fn slskd_transfer_batch_id(body: &str) -> Option<String> {
+    let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    ["batchId", "batch_id", "id"]
+        .iter()
+        .find_map(|field| payload.get(field).and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && uuid::Uuid::parse_str(value).is_ok())
+        .map(str::to_owned)
+}
+
 fn slskd_enqueue_request(body: &str) -> Option<(String, Vec<serde_json::Value>)> {
     let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let username = payload.get("username")?.as_str()?.to_owned();
@@ -15233,6 +15427,153 @@ fn path_segment_after<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
 
 fn decoded_path_segment(segment: &str) -> String {
     percent_decode(segment)
+}
+
+async fn create_preview_stream_ticket(
+    state: &AppState,
+    family: &str,
+    body: &str,
+) -> Result<String, String> {
+    let content_id = extract_json_string_field(body, "contentId")
+        .or_else(|| extract_json_string_field(body, "content_id"))
+        .or_else(|| extract_json_string_field(body, "id"));
+    let filename = extract_json_string_field(body, "filename")
+        .or_else(|| extract_json_string_field(body, "path"))
+        .or_else(|| content_id.clone())
+        .ok_or_else(|| "filename/contentId is required".to_owned())?;
+    let peer_username = extract_json_string_field(body, "username")
+        .or_else(|| extract_json_string_field(body, "peerUsername"))
+        .or_else(|| extract_json_string_field(body, "peer_username"))
+        .or_else(|| extract_json_string_field(body, "peerId"));
+    let requested_size = extract_json_u64_field(body, "size").unwrap_or(0);
+    let content_type = extract_json_string_field(body, "contentType")
+        .or_else(|| extract_json_string_field(body, "content_type"))
+        .unwrap_or_else(|| preview_stream_content_type(&filename).to_owned());
+
+    let shares = state.shares.read().await;
+    let transfers = state.transfers.read().await;
+    let searches = state.searches.read().await;
+    let share = shares.entries.iter().find(|entry| {
+        let hash = stable_content_hash(&entry.filename, entry.size).to_string();
+        entry.filename == filename
+            || content_id.as_deref() == Some(entry.filename.as_str())
+            || content_id.as_deref() == Some(hash.as_str())
+    });
+    let transfer = transfers.entries.iter().find(|entry| {
+        entry.filename == filename
+            || content_id
+                .as_deref()
+                .and_then(|id| id.strip_prefix("transfer-"))
+                .and_then(|id| id.parse::<u64>().ok())
+                == Some(entry.id)
+    });
+    let search_result = searches.records.iter().find_map(|record| {
+        record.results.iter().find(|result| {
+            result.filename == filename
+                || content_id.as_deref() == Some(result.filename.as_str())
+                || peer_username
+                    .as_deref()
+                    .is_some_and(|peer| result.peer_username.as_deref() == Some(peer))
+        })
+    });
+
+    let resolved_filename = share
+        .map(|entry| entry.filename.clone())
+        .or_else(|| transfer.map(|entry| entry.filename.clone()))
+        .or_else(|| search_result.map(|entry| entry.filename.clone()))
+        .unwrap_or(filename);
+    let resolved_size = share
+        .map(|entry| entry.size)
+        .or_else(|| transfer.and_then(|entry| entry.size))
+        .or_else(|| search_result.map(|entry| entry.size))
+        .unwrap_or(requested_size);
+    let resolved_content_id = content_id.unwrap_or_else(|| {
+        stable_content_hash(&resolved_filename, resolved_size).to_string()
+    });
+    let source = if share.is_some() {
+        "local-share"
+    } else if transfer.is_some() {
+        "transfer"
+    } else if search_result.is_some() && family == "mesh" {
+        "mesh-preview"
+    } else if search_result.is_some() {
+        "peer-preview"
+    } else if family == "mesh" {
+        "mesh-unresolved"
+    } else {
+        "peer-unresolved"
+    };
+    drop(searches);
+    drop(transfers);
+    drop(shares);
+
+    let mut tickets = state.stream_tickets.write().await;
+    let (token, ticket) = tickets.issue(
+        family,
+        source,
+        resolved_content_id,
+        resolved_filename,
+        peer_username,
+        resolved_size,
+        content_type,
+        120,
+    );
+    drop(tickets);
+
+    let body = serde_json::json!({
+        "ticket": token,
+        "streamUrl": format!("/api/v0/{family}-streams/{}", url_encode(&token)),
+        "stream_url": format!("/api/v0/{family}-streams/{}", url_encode(&token)),
+        "expiresInSeconds": 120,
+        "contentType": ticket.content_type,
+        "content_id": ticket.content_id,
+        "filename": ticket.filename,
+        "size": ticket.size,
+        "source": ticket.source,
+    })
+    .to_string();
+    Ok(body)
+}
+
+async fn open_preview_stream_ticket(
+    state: &AppState,
+    family: &str,
+    token: &str,
+) -> Option<String> {
+    let mut tickets = state.stream_tickets.write().await;
+    let ticket = tickets.get(token);
+    drop(tickets);
+    let ticket = ticket?;
+    if ticket.family != family {
+        return None;
+    }
+    Some(serde_json::json!({
+        "ticket": token,
+        "status": "available",
+        "source": ticket.source,
+        "content_id": ticket.content_id,
+        "filename": ticket.filename,
+        "peer_username": ticket.peer_username,
+        "size": ticket.size,
+        "contentType": ticket.content_type,
+        "created_at": ticket.created_at,
+        "expires_at": ticket.expires_at,
+        "cacheControl": "no-store",
+        "acceptRanges": "none",
+    })
+    .to_string())
+}
+
+fn preview_stream_content_type(path: &str) -> &'static str {
+    match path.rsplit_once('.').map(|(_, extension)| extension.to_ascii_lowercase()) {
+        Some(extension) if extension == "flac" => "audio/flac",
+        Some(extension) if extension == "mp3" => "audio/mpeg",
+        Some(extension) if extension == "ogg" || extension == "oga" => "audio/ogg",
+        Some(extension) if extension == "opus" => "audio/ogg; codecs=opus",
+        Some(extension) if extension == "wav" => "audio/wav",
+        Some(extension) if extension == "m4a" || extension == "mp4" => "audio/mp4",
+        _ => "application/octet-stream",
+    }
 }
 
 fn native_compat_path(path: &str) -> bool {
@@ -16891,6 +17232,7 @@ async fn serve(once: bool) -> Result<(), String> {
         session_commands,
         rate_limiter,
         oauth_states: RwLock::new(oauth_state_store),
+        stream_tickets: RwLock::new(PreviewStreamTicketStore::default()),
     });
     spawn_session_manager(Arc::clone(&state), session_receiver);
     spawn_configured_listeners(Arc::clone(&state));
@@ -22337,6 +22679,7 @@ mod tests {
             session_commands: sender.clone(),
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
+            stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
         });
         (state, receiver)
     }
@@ -24226,6 +24569,8 @@ mod tests {
             ("GET", "/api/hashdb/stats", ""),
             ("POST", "/api/hashdb/backfill/from-history", ""),
             ("GET", "/api/streams/content-1", ""),
+            ("POST", "/api/v0/peer-streams/tickets", r#"{"filename":"Virtual/Test.flac","username":"peer"}"#),
+            ("POST", "/api/v0/mesh-streams/tickets", r#"{"contentId":"mesh-content","filename":"Virtual/Test.flac","peerId":"mesh-peer"}"#),
             ("GET", "/api/listening-party", ""),
             ("POST", "/api/listening-party/radio/party/content", ""),
             ("GET", "/api/mesh/health", ""),
@@ -24271,6 +24616,125 @@ mod tests {
             );
             while receiver.try_recv().is_ok() {}
         }
+    }
+
+    #[tokio::test]
+    async fn peer_and_mesh_preview_stream_tickets_are_short_lived() {
+        let (state, _receiver) = test_state();
+
+        let peer_ticket = super::route_http_request(
+            "POST",
+            "/api/v0/peer-streams/tickets",
+            None,
+            r#"{"filename":"Virtual/Test.flac","username":"peer"}"#,
+            &state,
+        )
+        .await
+        .expect("peer ticket");
+        assert_eq!(peer_ticket.status, "200 OK");
+        let peer_json = serde_json::from_str::<serde_json::Value>(&peer_ticket.body).unwrap();
+        assert_eq!(peer_json["expiresInSeconds"], 120);
+        assert_eq!(peer_json["source"], "local-share");
+        assert_eq!(peer_json["streamUrl"], peer_json["stream_url"]);
+
+        let peer_stream = super::route_http_request(
+            "GET",
+            peer_json["streamUrl"].as_str().unwrap(),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("peer stream");
+        assert_eq!(peer_stream.status, "200 OK");
+        let stream_json = serde_json::from_str::<serde_json::Value>(&peer_stream.body).unwrap();
+        assert_eq!(stream_json["status"], "available");
+        assert_eq!(stream_json["acceptRanges"], "none");
+        assert_eq!(stream_json["cacheControl"], "no-store");
+
+        let mesh_ticket = super::route_http_request(
+            "POST",
+            "/api/v0/mesh-streams/tickets",
+            None,
+            r#"{"contentId":"mesh-content","filename":"Virtual/Test.flac","peerId":"mesh-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("mesh ticket");
+        assert_eq!(mesh_ticket.status, "200 OK");
+        let mesh_json = serde_json::from_str::<serde_json::Value>(&mesh_ticket.body).unwrap();
+        assert!(mesh_json["streamUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("/api/v0/mesh-streams/"));
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/v0/peer-streams/not-a-ticket",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing ticket");
+        assert_eq!(missing.status, "404 Not Found");
+    }
+
+    #[tokio::test]
+    async fn download_batch_projection_uses_local_transfer_state() {
+        let (state, _receiver) = test_state();
+        let batch_id = "11111111-1111-4111-8111-111111111111";
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            &format!(
+                r#"{{"filename":"Virtual/Test.flac","peer_username":"peer","size":42,"batchId":"{batch_id}"}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create transfer");
+        assert_eq!(created.status, "201 Created");
+
+        let invalid = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/batches/not-a-guid",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("invalid batch");
+        assert_eq!(invalid.status, "400 Bad Request");
+
+        let response = super::route_http_request(
+            "GET",
+            &format!("/api/v0/transfers/downloads/batches/{batch_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("batch projection");
+        assert_eq!(response.status, "200 OK");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["id"], batch_id);
+        assert_eq!(json["transferCount"], 1);
+        assert_eq!(json["transfers"][0]["batchId"], batch_id);
+        assert_eq!(json["transfers"][0]["filename"], "Virtual/Test.flac");
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/batches/22222222-2222-4222-8222-222222222222",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing batch");
+        assert_eq!(missing.status, "404 Not Found");
     }
 
     #[tokio::test]
@@ -31533,6 +31997,7 @@ mod tests {
             session_commands: sender.clone(),
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
+            stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
         };
 
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
@@ -31671,6 +32136,7 @@ mod tests {
                 enabled: true,
             }),
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
+            stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",
@@ -31972,6 +32438,7 @@ mod tests {
             peer_username: Some("friend".to_owned()),
             filename: "Remote/Song.flac".to_owned(),
             local_path: None,
+            batch_id: None,
             size: Some(100),
             bytes_transferred: 25,
             status: "in_progress".to_owned(),
