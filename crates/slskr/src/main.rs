@@ -31025,7 +31025,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn patch_options_reports_non_persisted_runtime_update() {
+    async fn patch_options_reports_config_read_only_acknowledgement_state() {
         let (state, _receiver) = test_state();
 
         let options = super::route_http_request("GET", "/api/options", None, "", &state)
@@ -31058,6 +31058,7 @@ mod tests {
 
         assert_eq!(response.status, "200 OK");
         assert!(response.body.contains("\"persisted\":false"));
+        assert!(response.body.contains("\"configPersisted\":false"));
         assert!(response.body.contains("\"acceptedKeys\""));
         assert!(response
             .body
@@ -31090,7 +31091,23 @@ mod tests {
                 .expect("options upload");
         assert_eq!(uploaded.status, "200 OK");
         assert!(uploaded.body.contains("\"persisted\":false"));
+        assert!(uploaded.body.contains("\"configPersisted\":false"));
         assert!(uploaded.body.contains("not persisted by this runtime"));
+
+        let validated = super::route_http_request(
+            "POST",
+            "/api/options/yaml/validate",
+            None,
+            r#""app: {}""#,
+            &state,
+        )
+        .await
+        .expect("valid options validate");
+        assert_eq!(validated.status, "200 OK");
+        let validated_json = serde_json::from_str::<serde_json::Value>(&validated.body).unwrap();
+        assert_eq!(validated_json["valid"], true);
+        assert_eq!(validated_json["persisted"], false);
+        assert_eq!(validated_json["configPersisted"], false);
 
         let invalid_upload =
             super::route_http_request("PUT", "/api/options/yaml", None, "{}", &state)
