@@ -276,7 +276,7 @@ drop SignalR and route existing hub consumers through `/api/events/ws`.
 - [x] **8.3** Confirm `docs/app-surface.md`, `docs/install.md`,
       `docs/legacy-port-harvest.md` still match reality. Patch where they
       don't.
-- [ ] **8.4** Delete the `archive/` directory created in 0.5 (one-week
+- [x] **8.4** Delete the `archive/` directory created in 0.5 (one-week
       cooldown elapsed).
 
 ---
@@ -429,8 +429,9 @@ existing rows; add a new dated entry.
 - **2026-05-04** — Phase 8.1–8.3 complete. README/PLAN/docs now describe the
   current single-node daemon reality: plain WebSocket events, partial web UI,
   default-off SQLite search persistence, configurable rate limits, and descoped
-  SignalR/GraphQL/SSE/distributed-theater surfaces. Archive deletion remains
-  pending because the one-week cooldown has not elapsed.
+  SignalR/GraphQL/SSE/distributed-theater surfaces.
+- **2026-05-13** — Phase 8.4 complete. Deleted the archived prior-agent doc
+  lake after the one-week cooldown elapsed.
 - **2026-05-04** — Follow-up cleanup. Removed the remaining fake SSE route
   responses, retired `/hub/*` SignalR compatibility stubs, and removed no-op
   persistence record assignments for transfers/messages. `cargo test -p slskr`
