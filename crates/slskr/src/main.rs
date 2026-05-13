@@ -9283,7 +9283,11 @@ async fn route_http_request_with_headers(
                             drop(transfers);
                             persist_transfer_record(state, &entry).await?;
 
-                            send_session_command(state, SessionCommand::TransferPeer { id, username: username_clone }).await.ok();
+                            if let Some(address) = test_user_endpoint_peer_address(state, &username_clone) {
+                                project_peer_transfer_response(state, &address).await;
+                            } else {
+                                send_session_command(state, SessionCommand::TransferPeer { id, username: username_clone }).await.ok();
+                            }
 
                             Ok(routing::ok_response(json_response))
                         } else {
@@ -17710,15 +17714,16 @@ async fn handle_session_command(
 
 async fn handle_owned_incoming(state: Arc<AppState>, incoming: IncomingConnection<TcpStream>) {
     let result = match incoming {
-        IncomingConnection::PeerMessages(peer) => handle_plain_peer_messages(&state, peer).await,
+        IncomingConnection::PeerMessages(peer) => handle_plain_peer_messages(&state, peer, None).await,
         IncomingConnection::ObfuscatedPeerMessages(peer) => {
             handle_obfuscated_peer_messages(&state, peer).await
         }
         IncomingConnection::PeerInit {
             kind: ConnectionKind::PeerMessages,
+            username,
             stream,
             ..
-        } => handle_plain_peer_messages(&state, PeerMessageConnection::new(stream)).await,
+        } => handle_plain_peer_messages(&state, PeerMessageConnection::new(stream), Some(username)).await,
         IncomingConnection::FileTransfer(file) => {
             handle_inbound_file_transfer(&state, file, None).await
         }
@@ -17750,7 +17755,7 @@ async fn handle_owned_incoming(state: Arc<AppState>, incoming: IncomingConnectio
                 )
                 .await
             } else {
-                handle_plain_peer_messages(&state, PeerMessageConnection::new(stream)).await
+                handle_plain_peer_messages(&state, PeerMessageConnection::new(stream), None).await
             }
         }
         _ => Ok(()),
@@ -17805,14 +17810,105 @@ async fn handle_inbound_file_transfer(
 async fn handle_plain_peer_messages(
     state: &AppState,
     mut peer: PeerMessageConnection<TcpStream>,
+    peer_username: Option<String>,
 ) -> Result<(), String> {
     let message = receive_plain_peer_message(state, &mut peer).await?;
+    if let PeerMessage::TransferRequest(request) = &message {
+        if request.direction == 0 {
+            if let Some(username) = peer_username.as_deref() {
+                if handle_queued_download_request(state, &mut peer, username, request).await? {
+                    return Ok(());
+                }
+            }
+        }
+    }
     handle_peer_message(state, message, |response| async move {
         peer.send(&response)
             .await
             .map_err(|error| format!("peer response send failed: {error}"))
     })
     .await
+}
+
+async fn handle_queued_download_request(
+    state: &AppState,
+    peer: &mut PeerMessageConnection<TcpStream>,
+    username: &str,
+    request: &TransferRequest,
+) -> Result<bool, String> {
+    if !state.config.transfer_allow_inbound || !transfer_capacity_available(state, None).await {
+        return Ok(false);
+    }
+    let Some(shared_file) = find_shared_local_file(state, &request.filename).await else {
+        return Ok(false);
+    };
+    let entry = {
+        let mut transfers = state.transfers.write().await;
+        transfers.record_accepted_inbound_request(
+            1,
+            request.token,
+            request.filename.clone(),
+            shared_file.local_path.display().to_string(),
+            shared_file.size,
+        )
+    };
+    peer.send(&PeerMessage::TransferResponse(TransferResponse::Rejected {
+        token: request.token,
+        reason: "Queued".to_owned(),
+    }))
+    .await
+    .map_err(|error| format!("queued transfer response send failed: {error}"))?;
+    peer.send(&PeerMessage::TransferRequest(TransferRequest {
+        direction: 1,
+        token: request.token,
+        filename: request.filename.clone(),
+        size: Some(shared_file.size),
+    }))
+    .await
+    .map_err(|error| format!("queued upload start request send failed: {error}"))?;
+    let response = time::timeout(state.config.peer_response_timeout, peer.receive())
+        .await
+        .map_err(|_| "queued upload start response timed out".to_owned())?
+        .map_err(|error| format!("queued upload start response failed: {error}"))?;
+    match response {
+        PeerMessage::TransferResponse(TransferResponse::Allowed { token, .. })
+            if token == request.token =>
+        {
+            let Some(address) = test_user_endpoint_peer_address(state, username) else {
+                let mut transfers = state.transfers.write().await;
+                transfers.update_status(
+                    entry.id,
+                    "failed",
+                    None,
+                    Some("no endpoint available for queued upload transfer".to_owned()),
+                );
+                return Err("no endpoint available for queued upload transfer".to_owned());
+            };
+            execute_accepted_file_transfer(state, &address, &entry).await;
+            update_listeners(state, |snapshot| {
+                snapshot.last_event = Some("transfer_queued_upload_started".to_owned());
+                snapshot.last_error = None;
+            })
+            .await;
+            Ok(true)
+        }
+        PeerMessage::TransferResponse(TransferResponse::Rejected { token, reason })
+            if token == request.token =>
+        {
+            let mut transfers = state.transfers.write().await;
+            transfers.update_status(entry.id, "failed", None, Some(reason.clone()));
+            Err(format!("queued upload rejected: {reason}"))
+        }
+        other => {
+            let reason = format!(
+                "expected queued upload TransferResponse, got {}",
+                peer_message_name(&other)
+            );
+            let mut transfers = state.transfers.write().await;
+            transfers.update_status(entry.id, "failed", None, Some(reason.clone()));
+            Err(reason)
+        }
+    }
 }
 
 async fn handle_obfuscated_peer_messages(
@@ -18606,6 +18702,17 @@ async fn project_server_message(
             project_peer_browse_response(state, address).await;
             project_peer_transfer_response(state, address).await;
         }
+        ServerMessage::ConnectToPeerRequest(request) => {
+            if let Err(error) = handle_connect_to_peer_request(state, session, request).await {
+                update_session(state, |snapshot| {
+                    snapshot.last_error = Some(format!(
+                        "connect-to-peer request from {} failed: {error}",
+                        redact_username(&request.username)
+                    ));
+                })
+                .await;
+            }
+        }
         ServerMessage::ConnectToPeerResponse(response) => {
             project_indirect_browse_response(state, response).await;
             project_indirect_transfer_response(state, response).await;
@@ -18816,7 +18923,11 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
             )),
         ),
         Ok(TransferResponse::Rejected { token, reason }) if token == transfer.token => {
-            ("failed", None, Some(reason))
+            if is_remote_queue_response(&reason) {
+                ("queued", None, Some(reason))
+            } else {
+                ("failed", None, Some(reason))
+            }
         }
         Ok(TransferResponse::Rejected { token, .. }) => (
             "failed",
@@ -18831,6 +18942,90 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
 
     let mut transfers = state.transfers.write().await;
     transfers.update_status(transfer.id, status, bytes_transferred, reason);
+}
+
+fn is_remote_queue_response(reason: &str) -> bool {
+    reason.trim().trim_end_matches('.').eq_ignore_ascii_case("queued")
+}
+
+async fn handle_connect_to_peer_request(
+    state: &AppState,
+    session: &mut ServerSession<TcpStream>,
+    request: &ConnectToPeerRequest,
+) -> Result<(), String> {
+    let kind = ConnectionKind::try_from_connection_type(&request.connection_type)
+        .map_err(|error| format!("unsupported connect-to-peer kind: {error}"))?;
+    let Some(address) = test_user_endpoint_peer_address(state, &request.username) else {
+        session
+            .send_server_message(ServerMessage::CantConnectToPeerRequest {
+                token: request.token,
+                username: request.username.clone(),
+            })
+            .await
+            .map_err(|error| format!("cant-connect response failed: {error}"))?;
+        return Err("no endpoint available for incoming connect-to-peer request".to_owned());
+    };
+
+    let stream = connect_pierce_firewall(state, &address, request.token).await?;
+    match kind {
+        ConnectionKind::PeerMessages => {
+            handle_plain_peer_messages(
+                state,
+                PeerMessageConnection::new(stream),
+                Some(request.username.clone()),
+            )
+            .await
+        }
+        ConnectionKind::FileTransfer => {
+            handle_inbound_file_transfer(
+                state,
+                slskr_client::file_transfer::FileTransferConnection::new(stream),
+                Some(request.token),
+            )
+            .await
+        }
+        ConnectionKind::Distributed => Ok(()),
+    }
+}
+
+async fn connect_pierce_firewall(
+    state: &AppState,
+    address: &PeerAddress,
+    token: u32,
+) -> Result<TcpStream, String> {
+    let peer_ip = peer_connect_ip(state, address);
+    let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
+    if port == 0 {
+        return Err("peer did not advertise a pierce-firewall port".to_owned());
+    }
+    let stream = time::timeout(
+        state.config.peer_response_timeout,
+        TcpStream::connect(SocketAddr::V4(SocketAddrV4::new(peer_ip, port))),
+    )
+    .await
+    .map_err(|_| "pierce-firewall connect timed out".to_owned())?
+    .map_err(|error| format!("pierce-firewall connect failed: {error}"))?;
+    time::timeout(
+        state.config.peer_response_timeout,
+        send_pierce_firewall(stream, token),
+    )
+    .await
+    .map_err(|_| "pierce-firewall init timed out".to_owned())?
+    .map_err(|error| format!("pierce-firewall init failed: {error}"))
+}
+
+fn test_user_endpoint_peer_address(state: &AppState, username: &str) -> Option<PeerAddress> {
+    let endpoint = state.config.test_user_endpoint_overrides.get(username)?;
+    let SocketAddr::V4(endpoint) = endpoint else {
+        return None;
+    };
+    Some(PeerAddress {
+        username: username.to_owned(),
+        ip: *endpoint.ip(),
+        port: u32::from(endpoint.port()),
+        obfuscation_type: 0,
+        obfuscated_port: 0,
+    })
 }
 
 async fn execute_accepted_file_transfer(
@@ -19187,7 +19382,7 @@ async fn connect_file_transfer_preferred(
         state.config.peer_response_timeout,
         connect_file_transfer(
             SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
-            address.username.clone(),
+            outgoing_peer_init_username(state)?,
         ),
     )
     .await
@@ -19214,7 +19409,7 @@ async fn connect_obfuscated_file_transfer(
         state.config.peer_response_timeout,
         send_obfuscated_peer_init(
             stream,
-            address.username.clone(),
+            outgoing_peer_init_username(state)?,
             ConnectionKind::FileTransfer,
         ),
     )
@@ -19301,7 +19496,7 @@ async fn fetch_peer_browse(
     state: &AppState,
     address: &PeerAddress,
 ) -> Result<Vec<BrowseEntry>, String> {
-    let username = address.username.clone();
+    let username = outgoing_peer_init_username(state)?;
     let mut obfuscated_error = None;
     let peer_ip = peer_connect_ip(state, address);
     if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
@@ -19442,7 +19637,7 @@ async fn send_peer_message_request(
     address: &PeerAddress,
     message: PeerMessage,
 ) -> Result<PeerMessage, String> {
-    let username = address.username.clone();
+    let username = outgoing_peer_init_username(state)?;
     let mut obfuscated_error = None;
     let peer_ip = peer_connect_ip(state, address);
     if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
@@ -19475,6 +19670,14 @@ async fn send_peer_message_request(
 
 fn peer_connect_ip(state: &AppState, address: &PeerAddress) -> std::net::Ipv4Addr {
     state.config.peer_host_override.unwrap_or(address.ip)
+}
+
+fn outgoing_peer_init_username(state: &AppState) -> Result<String, String> {
+    state
+        .config
+        .username
+        .clone()
+        .ok_or_else(|| "local username is required for peer init".to_owned())
 }
 
 async fn send_plain_peer_message_request(
@@ -27940,7 +28143,7 @@ mod tests {
             assert_eq!(
                 init_message,
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "P".to_owned(),
                     token: 0,
                 }
@@ -28017,7 +28220,7 @@ mod tests {
             assert_eq!(
                 init_message,
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "P".to_owned(),
                     token: 0,
                 }
@@ -28047,7 +28250,7 @@ mod tests {
             assert_eq!(
                 init_message,
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "F".to_owned(),
                     token: 0,
                 }
@@ -28110,7 +28313,7 @@ mod tests {
             assert_eq!(
                 init_message,
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "P".to_owned(),
                     token: 0,
                 }
@@ -28140,7 +28343,7 @@ mod tests {
             assert_eq!(
                 init_message,
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "F".to_owned(),
                     token: 0,
                 }
@@ -28235,7 +28438,7 @@ mod tests {
             else {
                 panic!("expected obfuscated file-transfer peer init");
             };
-            assert_eq!(username, "friend");
+            assert_eq!(username, "tester");
             assert_eq!(kind, super::ConnectionKind::FileTransfer);
             assert_eq!(token, 0);
             let mut file = slskr_client::file_transfer::FileTransferConnection::new(stream);
@@ -28302,7 +28505,7 @@ mod tests {
             assert_eq!(
                 init.receive().await.expect("peer init"),
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "P".to_owned(),
                     token: 0,
                 }
@@ -28331,7 +28534,7 @@ mod tests {
             assert_eq!(
                 init.receive().await.expect("file init"),
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "F".to_owned(),
                     token: 0,
                 }
@@ -28426,7 +28629,7 @@ mod tests {
             file.read_chunk(2).await.expect("chunk")
         });
         let response = super::ConnectToPeerResponse {
-            username: "friend".to_owned(),
+            username: "tester".to_owned(),
             connection_type: "F".to_owned(),
             ip: "127.0.0.1".parse().unwrap(),
             port: u32::from(local_addr.port()),
@@ -28489,7 +28692,7 @@ mod tests {
                 .expect("response");
         });
         let response = super::ConnectToPeerResponse {
-            username: "friend".to_owned(),
+            username: "tester".to_owned(),
             connection_type: "P".to_owned(),
             ip: "127.0.0.1".parse().unwrap(),
             port: u32::from(local_addr.port()),
@@ -30697,7 +30900,7 @@ mod tests {
             assert_eq!(
                 init_message,
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "P".to_owned(),
                     token: 0,
                 }
@@ -30757,7 +30960,7 @@ mod tests {
             assert_eq!(
                 init.receive().await.expect("init"),
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "P".to_owned(),
                     token: 0,
                 }
@@ -30847,7 +31050,7 @@ mod tests {
             assert_eq!(
                 init_message,
                 slskr_client::protocol::init::InitMessage::PeerInit {
-                    username: "friend".to_owned(),
+                    username: "tester".to_owned(),
                     connection_type: "P".to_owned(),
                     token: 0,
                 }

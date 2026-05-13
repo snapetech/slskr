@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env, fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -32,6 +33,7 @@ pub struct AppConfig {
     pub obfuscated_listener_bind: Option<String>,
     pub obfuscated_advertised_port: Option<u32>,
     pub peer_host_override: Option<Ipv4Addr>,
+    pub test_user_endpoint_overrides: BTreeMap<String, SocketAddr>,
     pub user_info_description: String,
     pub peer_response_timeout: Duration,
     pub share_settings: ShareSettings,
@@ -133,6 +135,8 @@ impl AppConfig {
                     .map_err(|error| format!("invalid SLSKR_PEER_HOST_OVERRIDE: {error}"))
             })
             .transpose()?;
+        let test_user_endpoint_overrides =
+            parse_user_endpoint_overrides(env.var("SLSKR_TEST_USER_ENDPOINT_OVERRIDES"))?;
         let user_info_description = env
             .var("SLSKR_USER_INFO_DESCRIPTION")
             .or(file_config.profile.user_info_description)
@@ -227,6 +231,7 @@ impl AppConfig {
             obfuscated_listener_bind,
             obfuscated_advertised_port,
             peer_host_override,
+            test_user_endpoint_overrides,
             user_info_description,
             peer_response_timeout,
             share_settings,
@@ -254,7 +259,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -270,6 +275,7 @@ impl AppConfig {
             json_option(self.obfuscated_listener_bind.as_deref()),
             json_u32_option(self.obfuscated_advertised_port),
             json_option(self.peer_host_override.map(|ip| ip.to_string()).as_deref()),
+            self.test_user_endpoint_overrides.len(),
             json_option(self.username.as_deref().map(redact_username).as_deref()),
             self.username.is_some() && self.password.is_some(),
             self.auto_connect,
@@ -880,6 +886,31 @@ fn trusted_proxy_cidrs_from_layers(
         .into_iter()
         .map(|value| TrustedProxyCidr::parse(&value))
         .collect()
+}
+
+fn parse_user_endpoint_overrides(
+    value: Option<String>,
+) -> Result<BTreeMap<String, SocketAddr>, String> {
+    let Some(value) = value else {
+        return Ok(BTreeMap::new());
+    };
+    let mut overrides = BTreeMap::new();
+    for entry in value.split(';').map(str::trim).filter(|entry| !entry.is_empty()) {
+        let (username, endpoint) = entry.split_once('=').ok_or_else(|| {
+            format!(
+                "invalid SLSKR_TEST_USER_ENDPOINT_OVERRIDES entry {entry:?}; expected user=host:port"
+            )
+        })?;
+        let username = username.trim();
+        if username.is_empty() {
+            return Err("SLSKR_TEST_USER_ENDPOINT_OVERRIDES contains an empty username".to_owned());
+        }
+        let endpoint = endpoint.trim().parse::<SocketAddr>().map_err(|error| {
+            format!("invalid endpoint override for {username}: {error}")
+        })?;
+        overrides.insert(username.to_owned(), endpoint);
+    }
+    Ok(overrides)
 }
 
 fn env_parse_layer<E, T>(
