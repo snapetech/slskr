@@ -1,22 +1,24 @@
 # slskr Remediation Plan
 
-This document is the single source of truth for what is real, what is theater,
-and what we are going to do about it. Anyone (human or agent) picking up this
-project should read this before producing more code or markdown.
+This document is the single source of truth for what is real, what has been
+cut, and what we are going to do about it. Anyone (human or agent) picking up
+this project should read this before producing more code or markdown.
 
 If you find yourself writing `FINAL_*.md`, `*_COMPLETION_*.md`, or
 `PHASE_N_DONE.md` again, stop. Update *this* document instead.
 
 ---
 
-## 0. Snapshot (2026-05-04)
+## 0. Snapshot (2026-05-13)
 
-- Branch `main` is **92 commits ahead of `origin/main`**, none pushed.
-- `cargo check -p slskr` passes; `cargo test -p slskr` passes (130/130).
-- `cargo check -p slskr-protocol -p slskr-client` passes; their tests pass.
-- `crates/slskr/src/main.rs` is **13955 lines** (tests in http_server.rs + fixed inline tests).
-- 54 root-level `.md` files. ~20 of them are duplicate "we are done" reports.
-- http_server real tests (duplex + TCP roundtrip) replace sham.
+- `cargo test --workspace` passes.
+- `scripts/check-remediation-baseline.sh` passes.
+- `scripts/run-bug-council-all-phases.sh` passes and all current council
+  candidate classes are classified/guarded at the fresh scan counts.
+- `scripts/check-release-package.sh` passes for the runtime crates.
+- The standalone `slskr-cli` crate is gone; smoke/probe commands live in
+  `crates/slskr/src/cli.rs` and are exposed through the `slskr` binary.
+- The prior root markdown/doc lake has been deleted after the cooldown.
 
 ---
 
@@ -27,12 +29,12 @@ If you find yourself writing `FINAL_*.md`, `*_COMPLETION_*.md`, or
 | `crates/slskr-protocol`       | TRUST      | Real Soulseek wire codecs, 7 test files, all passing                |
 | `crates/slskr-client`         | TRUST      | Real session/listener/transfer runtime, 14 test files, all passing  |
 | `crates/slskr/src/cli.rs`     | TRUST      | Real smoke/probe commands the README documents                      |
-| `scripts/`                    | TRUST      | Live-soak and Proton matrix scripts are serious infra               |
-| `docs/` (most)                | TRUST      | `app-surface.md`, `install.md`, `legacy-port-harvest.md`, etc.      |
-| `crates/slskr` (bin)          | DISTRUST   | God-file `main.rs`, ~20 ghost modules, fake handlers                |
-| Root `*.md` (most)            | DELETE     | Repeating victory laps from prior agent runs                        |
-| `web/`, `dashboard/`          | UNAUDITED  | Frontends — depend on API surface that is partly theater            |
-| `client-go`, `-python`, `-ts` | UNAUDITED  | SDKs hit `/api/events/ws` which the server does not implement       |
+| `scripts/`                    | TRUST      | Remediation, release, live-soak, Proton matrix, SDK, and council gates are wired into repeatable checks |
+| `docs/`                       | TRUST      | Active docs are gate-checked for freshness/drift; stale archive docs are deleted |
+| `crates/slskr` (bin)          | TRUST      | Single-binary daemon/API/WebSocket/runtime surface is covered by route, storage, transfer, event, auth, and package gates |
+| `crates/slskr-web` and `web/` | TRUST      | Rust WebUI and React reference surfaces are covered by route inventory, focused UI tests, and WebSocket auth gates |
+| `client-go`, `-python`, `-ts` | TRUST      | SDK gates exercise Go compile, Python tests/dependency checks, and TypeScript lifecycle/build checks |
+| `dashboard/`                  | LEGACY     | Retained as a legacy/reference frontend; not the primary release WebUI |
 
 ---
 
@@ -44,9 +46,11 @@ slskr parity notes:
 1. A real, independent Rust implementation of the Soulseek protocol.
    **— `slskr-protocol` and `slskr-client` deliver this.**
 2. One bundled app, `slskr`, that runs as a daemon with an HTTP API and a
-   bundled web UI, mirroring how slskr is shipped.
-   **— `slskr` (bin) delivers a hand-rolled HTTP server, but most of the
-     "Phase 6/8/9/10/11/12" surface around it is decorative.**
+   bundled web UI.
+   **— `slskr` (bin) now delivers the single-node daemon/API/WebSocket surface,
+     compatibility projections, persistence-backed stores, and smoke/probe
+     commands. Remaining work is production hardening, live proof, and deeper
+     parity where the app-surface ledger still calls it out.**
 3. Probe-driven validation against live Soulseek (matrix runs, Proton NAT-PMP).
    **— `slskr` smoke/probe subcommands and `scripts/` deliver this.**
 
@@ -110,7 +114,7 @@ This is the contract we owe consumers. Everything outside it can be cut.
 | D5 | **SignalR: replace UI's SignalR usage with plain WebSocket. Delete `signalr_hub.rs`.**          | A real SignalR server is months of work; the UI hubs are thin and easy to repoint at WS.   |
 | D6 | **Delete GraphQL, SSE, middleware, filters, enrichment, versioning, response_cache, observability, rate_limiter (the duplicate), api_keys, api_integration, openapi, docs (the module), validation, pagination, compression, security, metrics, websocket_handler, axum_router, caching.** | All have **zero `module::` call sites** in `main.rs`. They're dead weight. |
 | D7 | **Keep `webhooks`, `batch`, `tracing`, `logging`, `routing`, `utils`, `storage`, `config`, `persistence`, `rate_limit`.** | These are the modules `main.rs` actually calls.                                            |
-| D8 | **Persistence: keep `persistence.rs`, gate behind a config flag (default off).**               | Schema is fine; current writes are all `let _ =` no-ops, so flipping the flag isn't viable yet. Wire one path (search create) end-to-end as proof-of-life before flipping the default. |
+| D8 | **Persistence: keep `persistence.rs`, gate behind a config flag (default off).**               | SQLite write-through now covers the major app stores, but the default stays off until migration/backfill policy and production durability are ready. |
 | D9 | **Delete `tests/integration_tests.rs` entirely. Replace with one real e2e test.**              | Current 689 lines compare a string formatter to itself.                                    |
 | D10| **Strip `tonic`, `prost`, `sea-orm`, `deadpool-postgres`, `redis`, `moka`, `dashmap`, `axum`, `tower`, `tower-http`, `flate2`, `http`, `tokio-util`, `bytes` from the bin crate.** | Every one is either unused or used only by a module being deleted. (Keep `tokio-tungstenite` for D4.) |
 | D11| **Cull root markdown.** Keep `README.md`, `PLAN.md`, `COMPLIANCE.md`, `LICENSE`, `NOTICE`, this file. Move everything else to `archive/` in one commit, then delete in a follow-up if nobody objects within a week. | They contradict the code and each other. Honest README first, then optional history.       |
@@ -349,7 +353,8 @@ Sum of DELETE column: **~7,500 LOC** going away in Phase 1.
 
 ## 8. Appendix B — Dependency disposition
 
-`crates/slskr/Cargo.toml` after Phase 2:
+Historical dependency target after Phase 2; use the checked-in
+`crates/slskr/Cargo.toml` as the current source of truth:
 
 ```toml
 [dependencies]

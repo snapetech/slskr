@@ -1,6 +1,6 @@
 # slskr — Plan
 
-Independent independent Rust client/server app for the Soulseek network. Compatibility work uses public protocol documentation, interoperability tests, and observed network behavior; do not copy official client code or third-party client code unless its license is reviewed and attribution is added first. Wire protocol notes are maintained at [nicotine-plus.org/doc/SLSKPROTOCOL.html](https://nicotine-plus.org/doc/SLSKPROTOCOL.html).
+Independent Rust client/server app for the Soulseek network. Compatibility work uses public protocol documentation, interoperability tests, and observed network behavior; do not copy official client code or third-party client code unless its license is reviewed and attribution is added first. Wire protocol notes are maintained at [nicotine-plus.org/doc/SLSKPROTOCOL.html](https://nicotine-plus.org/doc/SLSKPROTOCOL.html).
 
 Public product posture: ship one runnable app named `slskr`, with daemon/API/web UI bundled. The workspace crates are internal implementation boundaries, not separate user-facing product names except where publishing a library is intentional.
 
@@ -11,24 +11,26 @@ They implement real Soulseek wire codecs, session/listener/peer runtime,
 search, transfer, distributed search, obfuscation type 1, and live probe
 tooling.
 
-The `slskr` product binary now exists and runs a single-node daemon with a
-manual HTTP/1.1 API server, bundled local dashboard, bearer-token/browser-cookie
-auth, CSRF origin checks for protected mutating routes, share/search/browse/
-transfer/message/room/user projections, `/api/events` polling, and
-`/api/events/ws` WebSocket events. The web UI is partially wired to the REST API
-and plain WebSocket event feed. SignalR, GraphQL, SSE, clustering, sharding,
-gRPC, Redis/Postgres cache layers, and HTTP/2 performance claims are descoped.
+The `slskr` product binary runs a single-node daemon with a manual HTTP/1.1 API
+server, bundled local dashboard, bearer-token/browser-cookie auth, CSRF origin
+checks for protected mutating routes, share/search/browse/transfer/message/
+room/user/social/library/runtime projections, `/api/events` polling, and
+`/api/events/ws` WebSocket events. The web UI and SDKs use the REST API and the
+plain WebSocket event feed. SignalR, GraphQL, SSE, clustering, sharding, gRPC,
+Redis/Postgres cache layers, and HTTP/2 performance claims are descoped.
 
-Persistence is intentionally default-off. One proof path is real: search create
-can write to SQLite and startup can hydrate `/api/searches` when
-`SLSKR_PERSISTENCE_ENABLED` or `[persistence].enabled` is true. Transfer,
-message, room, and user persistence remain incomplete and must be wired before
-the default can flip on.
+Persistence is intentionally default-off, but no longer only proof-of-life.
+SQLite write-through and startup hydration exist for search lifecycle/results,
+transfer state/events, shares, events, users, browse cache, messages, rooms,
+collections, library, destinations, now-playing, wishlist, contacts,
+sharegroups, share grants, social/security state, OAuth/webhook state, and
+runtime compatibility counters. The remaining storage work is production
+policy, migration/backfill hardening, and deciding when the default can safely
+flip on.
 
 Remaining product work is narrower than the historical phase list below:
-single-node daemon hardening, removal or replacement of compatibility stubs,
-durable storage for the remaining app resources, API/web parity for the
-documented endpoint surface, and public-posture cleanup before any release.
+single-node daemon hardening, production policy, optional live interop proof,
+public provenance/branding review, and release-readiness evidence.
 
 ## Scope
 
@@ -47,7 +49,7 @@ In-scope (normal Soulseek client behavior):
 Out-of-scope:
 
 - Distributed clustering, sharding, mesh routing, GraphQL, gRPC, Redis/Postgres
-  cache layers, and HTTP/2 performance theater.
+  cache layers, and HTTP/2 performance claims.
 - TLS for Soulseek wire traffic. The network protocol is plaintext; protect the
   local HTTP API by binding locally or placing a deliberate reverse proxy in
   front of it.
@@ -163,8 +165,8 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - Soulfind-backed local server contract tests. *(done initial cut: `slskr-client` has optional `soulfind_contract` integration test using `SOULFIND_PATH` or opt-in `SLSK_SOULFIND_DOCKER=1`; current coverage is login, keepalive, wait-port, obfuscated-port metadata relay, local multi-client direct `PeerInit`, local multi-client indirect `ConnectToPeer`/`PierceFirewall`, local multi-client obfuscated `P` connection through server-returned obfuscated port, typed room-list observation, room join/leave commands, search dispatch, and reconnect after server restart; additional black-box client testing remains useful later, but type-1 obfuscation coverage stays slskr-to-slskr until another client advertises type `1`)*
 - Terms/rules compliance review. *(done initial pass: see `COMPLIANCE.md`; public release remains gated on full expected client feature surface and non-abusive network behavior)*
 - Public provenance/branding scrub. *(final pre-public task: audit README, plan, comments, commit-visible docs, package metadata, examples, UI assets, screenshots, generated fixtures, and release text; remove casual "inspiration/root/reference implementation" language and avoid names or descriptions that imply an official variant or a replacement distribution for another project; keep only accurate independent-implementation language and legally required license attribution for any copied material)*
-- Bundled app crate. *(started: `crates/slskr` exists, exposes the command surface, runs `slskr serve`, creates state dir, exposes health/version/config/session/listener/share/transfer APIs, and owns a background session manager with connect/disconnect/ping commands, receive-loop status, keepalive pings, optional reconnect, explicit regular/obfuscated listener ownership, listener-owned `UserInfoRequest` responses, startup/rescan share indexing with a state-dir cache and private local-path map, browse payloads, direct peer browse execution from peer-address responses, file-search responses, transfer request projection with local-path metadata execution, peer-message `TransferRequest` negotiation, direct plain/obfuscated file-transfer `F` streaming/resume, requester-side indirect `F` fallback via `ConnectToPeer`/`PierceFirewall`, inbound shared-file serving over direct or pierced `F` sockets, and explicit transfer rejection; full web UI hardening still pending)*
-- Web/API surface. *(started: one binary serves API and a bundled local dashboard with stats cards, user/share-catalog/search/transfer/message/room/browse tables, table filters, session controls and privilege checks, search start/complete, user-watch/unwatch/stats, browse-request, share-rescan, transfer queue/lifecycle with explicit progress bytes, local-path execution, max-active transfer admission control, inbound/outbound transfer allow switches, peer-message negotiation, direct plain/obfuscated `F` streaming, chunked transfer progress events, reloadable `transfer-state.json` records for restart resume, requester-side indirect `F` fallback, and inbound shared-file serving over direct or pierced `F` sockets, messaging/ack, room-list sync, room join/leave/message, refresh, bearer-token and same-site browser-cookie controls, public capabilities with negotiation, projection events/stats/metrics/telemetry, and cross-site `Origin`/`Referer` rejection for protected mutating API routes; typed TOML config loading now covers app/network/listener/profile/timeout/share/transfer-history/auth settings with env overrides; current app endpoints also have `/api/v0/*` aliases, route contract tests, bearer-token/API-cookie auth for protected routes, `/api/v0/capabilities`, `/api/v0/capabilities/negotiate`, `/api/v0/events`, `/api/v0/stats`, `/api/v0/metrics`, `/api/v0/telemetry`, `/api/v0/shares/catalog`, `/api/v0/files/:root`, `/api/v0/searches` state wired to public-network global/user/room/wishlist dispatch plus expiration/pruning, list filtering/pagination, and peer-response/external result ingestion, user watch/stats projection routes wired to server watch/status/stats commands/events, browse request/cache/failure projection with list filtering/pagination, single-entry/batched flattened result ingestion, and direct peer `GetShareFileList` execution, message/room projection routes wired to server PM/ack/room-list commands/events with list filtering/pagination, and transfer projection routes for queue/progress/complete/cancel/fail/stats with list filtering/pagination; pending static asset strategy and fuller resource APIs)*
+- Bundled app crate. *(done current cut: `crates/slskr` is the product binary, owns `slskr serve`, smoke/probe subcommands, HTTP API, WebSocket event feed, background session manager, listener ownership, share indexing, browse/search/message/room/user/transfer projections, direct and indirect peer/file-transfer execution, SQLite-backed app stores, auth/rate-limit/CSP/public-posture guards, and release package checks; remaining work is production hardening and live proof rather than app scaffolding)*
+- Web/API surface. *(done current cut: one binary serves the API and bundled local dashboard; endpoint drift gates report 290/290 canonical WebUI routes implemented, route contract tests cover protected routes and compatibility projections, OpenAPI/docs drift is gated, SDK gates pass, and React/Rust WebUI surfaces use the plain WebSocket event feed; remaining work is deeper behavior parity and production UX hardening, not route-shape parity)*
 - Rust/WASM web UI track. *(future/non-blocking: evaluate a Rust frontend rewrite after the current React/Vite dashboard reaches API parity and stabilizes. Candidate stacks are Leptos, Dioxus, or Yew, with a preference for a framework that supports browser-only WASM, component tests, ergonomic routing/forms, and incremental embedding inside the existing `slskr serve` static-asset pipeline. This is not a release blocker and should not become a product rewrite until a prototype proves comparable search, transfers, player/events, settings, auth/session, and websocket behavior with an acceptable build/test loop. Keep the current web UI as the reference implementation during evaluation; do not mix two production UIs without an explicit migration plan.)*
 - App surface runbook. *(done initial cut: see `docs/app-surface.md` for command layout, HTTP shell, auth defaults, config direction, persistent TOML example, packaging target, and backfill list)*
 - Install/service runbook. *(done initial cut: see `docs/install.md` for build/install, config/state paths, user/system service units, container shape, and exposure rules)*
