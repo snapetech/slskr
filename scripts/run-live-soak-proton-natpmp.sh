@@ -54,8 +54,8 @@ set -a
 source "$credential_file"
 set +a
 
-export SLSK_USERNAME="${SLSK_USERNAME:-${SLSKR_SOAK_USERNAME:?missing soak username}}"
-export SLSK_PASSWORD="${SLSK_PASSWORD:-${SLSKR_SOAK_PASSWORD:?missing soak password}}"
+export SLSK_USERNAME="${SLSK_USERNAME:-${SLSKR_SOAK_USERNAME:-${SLSK_INTEGRATION_USERNAME:?missing soak username}}}"
+export SLSK_PASSWORD="${SLSK_PASSWORD:-${SLSKR_SOAK_PASSWORD:-${SLSK_INTEGRATION_PASSWORD:?missing soak password}}}"
 export SLSK_LISTEN_PORT="$listen_port"
 export SLSK_SOAK_LISTENER_BIND="${SLSK_SOAK_LISTENER_BIND:-0.0.0.0:$listen_port}"
 export SLSK_SOAK_OBFUSCATED_LISTENER_BIND="${SLSK_SOAK_OBFUSCATED_LISTENER_BIND:-0.0.0.0:$obfuscated_port}"

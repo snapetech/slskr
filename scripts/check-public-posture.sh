@@ -5,14 +5,23 @@ patterns=(
   "fork"" of "
   "drop-in replacement"
   "replacement distribution"
-  "based on "
+  "based on another implementation"
+  "inspiration"
+  "reference implementation"
+  "root implementation"
   "official variant"
   "official client"
+  "successor"
 )
 
 status=0
 for pattern in "${patterns[@]}"; do
-  if rg -n -F "$pattern" README.md Cargo.toml crates .github; then
+  matches="$(
+    rg -n -i -F "$pattern" README.md PLAN.md COMPLIANCE.md NOTICE Cargo.toml crates client-go client-python client-ts web docs k8s .github \
+      | rg -v -i 'do not|should not|must not|unless|avoid|remove casual|presenting the repository|not copied|not copy|not import|not say|prohibited|forbidden|current web ui as the reference implementation|based on error type' || true
+  )"
+  if [[ -n "$matches" ]]; then
+    printf '%s\n' "$matches"
     status=1
   fi
 done

@@ -1,6 +1,6 @@
 # slskr Client Libraries
 
-Official client libraries for the slskr HTTP API, providing language-specific implementations with batch operations, WebSocket support, and comprehensive examples.
+Client libraries for the slskr HTTP API, providing language-specific implementations with batch operations, WebSocket support, and comprehensive examples.
 
 ## Overview
 
