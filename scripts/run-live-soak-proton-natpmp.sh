@@ -66,8 +66,14 @@ export SLSK_SOAK_OBFUSCATED_LISTENER_BIND="${SLSK_SOAK_OBFUSCATED_LISTENER_BIND:
 export SLSK_SOAK_SECONDS="${SLSK_SOAK_SECONDS:-86400}"
 export SLSK_SOAK_MAX_EVENTS="${SLSK_SOAK_MAX_EVENTS:-200000}"
 export SLSK_SOAK_PING_SECONDS="${SLSK_SOAK_PING_SECONDS:-300}"
+export SLSK_SOAK_ACTIVE_PROBES="${SLSK_SOAK_ACTIVE_PROBES:-1}"
+export SLSK_SOAK_DEFAULT_SEARCH="${SLSK_SOAK_DEFAULT_SEARCH:-1}"
+export SLSK_SOAK_SEARCH_INTERVAL_SECONDS="${SLSK_SOAK_SEARCH_INTERVAL_SECONDS:-900}"
 
 cd "$repo_root"
+
+cargo build -q -p slskr
+slskr_bin="$repo_root/target/debug/slskr"
 
 {
     printf '[slskr-proton-natpmp-soak start=%s gateway=%s listen_port=%s obfuscated_port=%s]\n' \
@@ -94,7 +100,7 @@ cd "$repo_root"
     renew_pid=$!
     trap 'kill "$renew_pid" 2>/dev/null || true' EXIT
 
-    cargo run -q -p slskr -- soak live
+    "$slskr_bin" soak live
     status=$?
     printf '[slskr-proton-natpmp-soak exit=%s at %s]\n' "$status" "$(date -Is)"
     exit "$status"

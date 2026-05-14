@@ -17,13 +17,19 @@ export SLSK_PASSWORD="${SLSK_PASSWORD:-${SLSKR_SOAK_PASSWORD:-${SLSK_INTEGRATION
 export SLSK_SOAK_SECONDS="${SLSK_SOAK_SECONDS:-86400}"
 export SLSK_SOAK_MAX_EVENTS="${SLSK_SOAK_MAX_EVENTS:-200000}"
 export SLSK_SOAK_PING_SECONDS="${SLSK_SOAK_PING_SECONDS:-300}"
+export SLSK_SOAK_ACTIVE_PROBES="${SLSK_SOAK_ACTIVE_PROBES:-1}"
+export SLSK_SOAK_DEFAULT_SEARCH="${SLSK_SOAK_DEFAULT_SEARCH:-1}"
+export SLSK_SOAK_SEARCH_INTERVAL_SECONDS="${SLSK_SOAK_SEARCH_INTERVAL_SECONDS:-900}"
 export SLSK_SOAK_OBFUSCATED_LISTENER_BIND="${SLSK_SOAK_OBFUSCATED_LISTENER_BIND:-0.0.0.0:0}"
 
 cd "$repo_root"
 
+cargo build -q -p slskr
+slskr_bin="$repo_root/target/debug/slskr"
+
 {
     printf '[slskr-live-soak start=%s]\n' "$(date -Is)"
-    cargo run -q -p slskr -- soak live
+    "$slskr_bin" soak live
     status=$?
     printf '[slskr-live-soak exit=%s at %s]\n' "$status" "$(date -Is)"
     exit "$status"

@@ -2099,14 +2099,15 @@ async fn live_soak() -> Result<(), String> {
         }
     }
 
-    if let Some(query) = &config.search_query {
+    if config.active_probes {
         session
-            .send_server_message(ServerMessage::FileSearchRequest(SearchRequest {
-                token: config.search_token,
-                query: query.clone(),
-            }))
+            .send_server_message(ServerMessage::RoomListRequest)
             .await
-            .map_err(|error| format!("search dispatch failed: {error}"))?;
+            .map_err(|error| format!("room list refresh failed: {error}"))?;
+        println!("active probe: room list requested");
+        if let Some(query) = &config.search_query {
+            dispatch_live_soak_search(&mut session, query, config.search_token).await?;
+        }
     }
 
     println!(
@@ -2850,6 +2851,8 @@ struct LiveSoakConfig {
     duration: Duration,
     max_events: usize,
     ping_interval: Duration,
+    search_interval: Duration,
+    active_probes: bool,
     peer_username: Option<String>,
     search_query: Option<String>,
     search_token: u32,
@@ -2880,8 +2883,18 @@ impl LiveSoakConfig {
             duration: Duration::from_secs(env_u64("SLSK_SOAK_SECONDS", 60)?),
             max_events: env_usize("SLSK_SOAK_MAX_EVENTS", 40)?,
             ping_interval: Duration::from_secs(env_u64("SLSK_SOAK_PING_SECONDS", 30)?),
+            search_interval: Duration::from_secs(env_u64(
+                "SLSK_SOAK_SEARCH_INTERVAL_SECONDS",
+                900,
+            )?),
+            active_probes: env_bool("SLSK_SOAK_ACTIVE_PROBES", true)?,
             peer_username: optional_env("SLSK_SOAK_PEER_USERNAME"),
-            search_query: optional_env("SLSK_SOAK_SEARCH_QUERY"),
+            search_query: optional_env("SLSK_SOAK_SEARCH_QUERY").or_else(|| {
+                env_bool("SLSK_SOAK_DEFAULT_SEARCH", true)
+                    .ok()
+                    .filter(|enabled| *enabled)
+                    .map(|_| "commons".to_owned())
+            }),
             search_token: env_u32("SLSK_SOAK_SEARCH_TOKEN", 1_000_001)?,
             shared_folders: env_u32("SLSK_SOAK_SHARED_FOLDERS", 0)?,
             shared_files: env_u32("SLSK_SOAK_SHARED_FILES", 0)?,
@@ -2898,11 +2911,18 @@ where
 {
     let deadline = Instant::now() + config.duration;
     let mut next_ping = Instant::now() + config.ping_interval;
+    let mut next_search = Instant::now() + config.search_interval;
+    let mut search_token = config.search_token;
     let mut events = 0usize;
 
     while Instant::now() < deadline && events < config.max_events {
         let now = Instant::now();
-        let next_wait = next_ping.min(deadline).saturating_duration_since(now);
+        let next_action = if config.active_probes && config.search_query.is_some() {
+            next_ping.min(next_search)
+        } else {
+            next_ping
+        };
+        let next_wait = next_action.min(deadline).saturating_duration_since(now);
 
         match time::timeout(next_wait, session.receive()).await {
             Ok(Ok(message)) => {
@@ -2919,11 +2939,40 @@ where
                     next_ping = Instant::now() + config.ping_interval;
                     println!("server ping sent");
                 }
+                if config.active_probes && Instant::now() >= next_search {
+                    if let Some(query) = &config.search_query {
+                        search_token = search_token.wrapping_add(1).max(1);
+                        dispatch_live_soak_search(session, query, search_token).await?;
+                    }
+                    next_search = Instant::now() + config.search_interval;
+                }
             }
         }
     }
 
     println!("server soak observed {events} event(s)");
+    Ok(())
+}
+
+async fn dispatch_live_soak_search<S>(
+    session: &mut ServerSession<S>,
+    query: &str,
+    token: u32,
+) -> Result<(), String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    session
+        .send_server_message(ServerMessage::FileSearchRequest(SearchRequest {
+            token,
+            query: query.to_owned(),
+        }))
+        .await
+        .map_err(|error| format!("search dispatch failed: {error}"))?;
+    println!(
+        "active probe: file search dispatched token={token} query={}",
+        redact_query(query)
+    );
     Ok(())
 }
 
@@ -3048,7 +3097,10 @@ async fn handle_live_soak_connect_to_peer_response(
         let peer_response = match time::timeout(timeout, peer.receive()).await {
             Ok(Ok(message)) => message,
             Ok(Err(error)) => {
-                println!("live soak indirect peer-message closed before response: {error}");
+                println!(
+                    "live soak indirect peer-message closed before response: {}",
+                    peer_close_reason(&error.to_string())
+                );
                 return Ok(());
             }
             Err(_) => {
@@ -3174,7 +3226,50 @@ async fn handle_plain_soak_incoming(incoming: IncomingConnection<TcpStream>) -> 
             ..
         } => {
             let mut peer = PeerMessageConnection::new(stream);
-            respond_to_user_info_request(&mut peer, "slskr live soak").await?;
+            match time::timeout(Duration::from_secs(5), peer.receive()).await {
+                Ok(Ok(PeerMessage::UserInfoRequest)) => {
+                    peer.send(&PeerMessage::UserInfoResponse(UserInfo {
+                        description: "slskr live soak".to_owned(),
+                        picture: None,
+                        total_uploads: 0,
+                        queue_size: 0,
+                        slots_free: true,
+                        upload_permissions: None,
+                    }))
+                    .await
+                    .map_err(|error| format!("peer response send failed: {error}"))?;
+                    println!("listener proof: peer user-info request answered");
+                }
+                Ok(Ok(PeerMessage::FileSearchResponse(response))) => {
+                    println!(
+                        "listener proof: search response username={} token={} results={} private_results={} slots_free={} queue_length={} speed={}",
+                        redact_username(&response.username),
+                        response.token,
+                        response.results.len(),
+                        response.private_results.len(),
+                        response.slot_free,
+                        response.queue_length,
+                        response.average_speed
+                    );
+                }
+                Ok(Ok(PeerMessage::TransferRequest(request))) => {
+                    println!(
+                        "listener proof: transfer request direction={} token={} filename={} size={}",
+                        request.direction,
+                        request.token,
+                        redact_path(&request.filename),
+                        request
+                            .size
+                            .map(|size| size.to_string())
+                            .unwrap_or_else(|| "unknown".to_owned())
+                    );
+                }
+                Ok(Ok(other)) => {
+                    println!("listener proof: peer message {}", peer_message_name(&other));
+                }
+                Ok(Err(error)) => return Err(format!("peer receive failed: {error}")),
+                Err(_) => println!("listener proof: peer connection accepted without message"),
+            }
         }
         IncomingConnection::PeerInit {
             kind: ConnectionKind::Distributed,
@@ -3218,7 +3313,43 @@ async fn handle_obfuscated_soak_incoming(
     incoming: IncomingConnection<TcpStream>,
 ) -> Result<(), String> {
     if let IncomingConnection::ObfuscatedPeerMessages(mut peer) = incoming {
-        respond_to_user_info_request(&mut peer, "slskr obfuscated live soak").await?;
+        match time::timeout(Duration::from_secs(5), peer.receive()).await {
+            Ok(Ok(PeerMessage::UserInfoRequest)) => {
+                peer.send(&PeerMessage::UserInfoResponse(UserInfo {
+                    description: "slskr obfuscated live soak".to_owned(),
+                    picture: None,
+                    total_uploads: 0,
+                    queue_size: 0,
+                    slots_free: true,
+                    upload_permissions: None,
+                }))
+                .await
+                .map_err(|error| format!("obfuscated peer response send failed: {error}"))?;
+                println!("obfuscated listener proof: peer user-info request answered");
+            }
+            Ok(Ok(PeerMessage::FileSearchResponse(response))) => {
+                println!(
+                    "obfuscated listener proof: search response username={} token={} results={} private_results={} slots_free={} queue_length={} speed={}",
+                    redact_username(&response.username),
+                    response.token,
+                    response.results.len(),
+                    response.private_results.len(),
+                    response.slot_free,
+                    response.queue_length,
+                    response.average_speed
+                );
+            }
+            Ok(Ok(other)) => {
+                println!(
+                    "obfuscated listener proof: peer message {}",
+                    peer_message_name(&other)
+                );
+            }
+            Ok(Err(error)) => return Err(format!("obfuscated peer receive failed: {error}")),
+            Err(_) => {
+                println!("obfuscated listener proof: peer connection accepted without message")
+            }
+        }
     }
 
     Ok(())
@@ -3376,6 +3507,63 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::CantConnectToPeerResponse { .. } => "cant_connect_to_peer_response",
         ServerMessage::CantCreateRoom { .. } => "cant_create_room",
         ServerMessage::Unknown { .. } => "unknown",
+    }
+}
+
+fn peer_message_name(message: &PeerMessage) -> &'static str {
+    match message {
+        PeerMessage::PrivateMessage(_) => "private_message",
+        PeerMessage::GetShareFileList => "get_share_file_list",
+        PeerMessage::SharedFileListResponse(_) => "shared_file_list_response",
+        PeerMessage::FileSearchRequest { .. } => "file_search_request",
+        PeerMessage::FileSearchResponse(_) => "file_search_response",
+        PeerMessage::RoomInvitation(_) => "room_invitation",
+        PeerMessage::CancelledQueuedTransfer(_) => "cancelled_queued_transfer",
+        PeerMessage::UserInfoRequest => "user_info_request",
+        PeerMessage::UserInfoResponse(_) => "user_info_response",
+        PeerMessage::SendConnectToken(_) => "send_connect_token",
+        PeerMessage::MoveDownloadToTop(_) => "move_download_to_top",
+        PeerMessage::FolderContentsRequest(_) => "folder_contents_request",
+        PeerMessage::FolderContentsResponse(_) => "folder_contents_response",
+        PeerMessage::TransferRequest(_) => "transfer_request",
+        PeerMessage::TransferResponse(_) => "transfer_response",
+        PeerMessage::PlaceholdUpload { .. } => "placehold_upload",
+        PeerMessage::QueueUpload { .. } => "queue_upload",
+        PeerMessage::PlaceInQueueResponse { .. } => "place_in_queue_response",
+        PeerMessage::UploadFailed { .. } => "upload_failed",
+        PeerMessage::ExactFileSearchRequest(_) => "exact_file_search_request",
+        PeerMessage::QueuedDownloads(_) => "queued_downloads",
+        PeerMessage::IndirectFileSearchRequest(_) => "indirect_file_search_request",
+        PeerMessage::UploadDenied { .. } => "upload_denied",
+        PeerMessage::PlaceInQueueRequest { .. } => "place_in_queue_request",
+        PeerMessage::UploadQueueNotification => "upload_queue_notification",
+        PeerMessage::Unknown { .. } => "unknown",
+    }
+}
+
+fn redact_query(query: &str) -> String {
+    if query.is_empty() {
+        "<empty>".to_owned()
+    } else {
+        format!("len{}", query.chars().count())
+    }
+}
+
+fn redact_path(path: &str) -> String {
+    if path.is_empty() {
+        "<empty>".to_owned()
+    } else {
+        format!("len{}", path.chars().count())
+    }
+}
+
+fn peer_close_reason(error: &str) -> &'static str {
+    if error.contains("Connection reset by peer") {
+        "connection reset by peer"
+    } else if error.contains("unexpected end of file") {
+        "unexpected eof"
+    } else {
+        "closed"
     }
 }
 
