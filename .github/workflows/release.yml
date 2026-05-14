@@ -140,6 +140,10 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Enable long Git paths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
       - name: Install native packages
         if: matrix.apt != ''
         shell: bash
