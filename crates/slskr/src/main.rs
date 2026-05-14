@@ -2104,6 +2104,41 @@ impl TransferQueue {
         Some(entry)
     }
 
+    fn accept_pending_remote_download_request(
+        &mut self,
+        username: &str,
+        filename: &str,
+        token: u32,
+        size: Option<u64>,
+    ) -> Option<TransferEntry> {
+        let entry = self.entries.iter_mut().find(|entry| {
+            entry.direction == 1
+                && entry.peer_username.as_deref() == Some(username)
+                && entry.filename == filename
+                && entry.local_path.is_some()
+                && entry.status == "queued"
+                && entry
+                    .reason
+                    .as_deref()
+                    .map(is_remote_queue_response)
+                    .unwrap_or(false)
+        })?;
+        entry.token = token;
+        if size.is_some() {
+            entry.size = size;
+        }
+        entry.status = "accepted".to_owned();
+        entry.reason = None;
+        entry.updated_at = unix_timestamp();
+        if let Err(error) = append_transfer_event(&self.events_path, entry) {
+            self.events_error = Some(error);
+        }
+        let entry = entry.clone();
+        self.persist_state();
+        self.updated_at = unix_timestamp();
+        Some(entry)
+    }
+
     fn active_count_excluding(&self, id: Option<u64>) -> usize {
         self.entries
             .iter()
@@ -17871,6 +17906,9 @@ async fn handle_plain_peer_messages(
     if let PeerMessage::TransferRequest(request) = &message {
         if request.direction == 0 {
             if let Some(username) = peer_username.as_deref() {
+                if handle_queued_upload_resume_request(state, &mut peer, username, request).await? {
+                    return Ok(());
+                }
                 if handle_queued_download_request(state, &mut peer, username, request).await? {
                     return Ok(());
                 }
@@ -17944,6 +17982,41 @@ async fn handle_queued_upload_request(
     .map_err(|error| format!("queued upload response send failed: {error}"))?;
     update_listeners(state, |snapshot| {
         snapshot.last_event = Some("transfer_queued_upload_accepted".to_owned());
+        snapshot.last_error = None;
+    })
+    .await;
+    Ok(true)
+}
+
+async fn handle_queued_upload_resume_request(
+    state: &AppState,
+    peer: &mut PeerMessageConnection<TcpStream>,
+    username: &str,
+    request: &TransferRequest,
+) -> Result<bool, String> {
+    if !state.config.transfer_allow_inbound || !transfer_capacity_available(state, None).await {
+        return Ok(false);
+    }
+    let accepted = {
+        let mut transfers = state.transfers.write().await;
+        transfers.accept_pending_remote_download_request(
+            username,
+            &request.filename,
+            request.token,
+            request.size,
+        )
+    };
+    let Some(accepted) = accepted else {
+        return Ok(false);
+    };
+    peer.send(&PeerMessage::TransferResponse(TransferResponse::Allowed {
+        token: request.token,
+        size: accepted.size,
+    }))
+    .await
+    .map_err(|error| format!("queued upload resume response send failed: {error}"))?;
+    update_listeners(state, |snapshot| {
+        snapshot.last_event = Some("transfer_queued_upload_resume_accepted".to_owned());
         snapshot.last_error = None;
     })
     .await;
@@ -28739,6 +28812,78 @@ mod tests {
             std::fs::read(&path).expect("download file"),
             vec![9, 2, 3, 4]
         );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn queued_outgoing_upload_accepts_remote_download_resume_request() {
+        let (state, _receiver) = test_state();
+        let path = std::env::temp_dir().join(format!(
+            "slskr-transfer-queued-upload-{}-resume.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, [1_u8, 2, 3, 4]).expect("write upload file");
+        add_test_share(&state, "Remote/QueuedUpload.flac", &path, 4).await;
+        {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(
+                1,
+                Some("friend".to_owned()),
+                "Remote/QueuedUpload.flac".to_owned(),
+                Some(path.display().to_string()),
+                Some(4),
+            );
+            assert_eq!(entry.token, 1);
+            transfers.update_status(entry.id, "queued", None, Some("Queued".to_owned()));
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let local_addr = listener.local_addr().expect("local addr");
+        let server_state = state.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept peer-message");
+            super::handle_plain_peer_messages(
+                &server_state,
+                slskr_client::stream::PeerMessageConnection::new(stream),
+                Some("friend".to_owned()),
+            )
+            .await
+        });
+
+        let stream = tokio::net::TcpStream::connect(local_addr)
+            .await
+            .expect("connect peer-message");
+        let mut peer = slskr_client::stream::PeerMessageConnection::new(stream);
+        peer.send(&super::PeerMessage::TransferRequest(
+            super::TransferRequest {
+                direction: 0,
+                token: 77,
+                filename: "Remote/QueuedUpload.flac".to_owned(),
+                size: None,
+            },
+        ))
+        .await
+        .expect("send resume request");
+        assert_eq!(
+            peer.receive().await.expect("resume response"),
+            super::PeerMessage::TransferResponse(super::TransferResponse::Allowed {
+                token: 77,
+                size: Some(4),
+            })
+        );
+        drop(peer);
+        server.await.expect("server task").expect("server result");
+
+        let transfers = state.transfers.read().await;
+        assert_eq!(transfers.entries.len(), 1);
+        let record = transfers.entries.first().expect("transfer");
+        assert_eq!(record.direction, 1);
+        assert_eq!(record.token, 77);
+        assert_eq!(record.status, "accepted");
+        assert_eq!(record.size, Some(4));
+        assert_eq!(record.reason, None);
         let _ = std::fs::remove_file(path);
     }
 
