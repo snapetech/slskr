@@ -373,7 +373,7 @@ YAML
   export SLSK_LISTEN_PORT="$slskr_listen_port"
   export SLSKR_ADVERTISED_PORT="$slskr_listen_port"
   export SLSKR_PEER_HOST_OVERRIDE=127.0.0.1
-  export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$slskdn_username=127.0.0.1:$slskdn_listen_port"
+  export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$slskdn_username=127.0.0.1:$slskdn_listen_port;$upstream_username=127.0.0.1:$slskdn_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=60
   exec cargo run -q -p slskr -- serve
 ) >"$slskr_log" 2>&1 &
@@ -381,7 +381,7 @@ slskr_pid="$!"
 
 (
   export APP_DIR="$slskdn_app"
-  export SLSKDN_TEST_USER_ENDPOINT_OVERRIDES="$slskr_username=127.0.0.1:$slskr_listen_port"
+  export SLSKDN_TEST_USER_ENDPOINT_OVERRIDES="$slskr_username=127.0.0.1:$slskr_listen_port;$upstream_username=127.0.0.1:$slskr_listen_port"
   exec "$slskdn_binary" --config "$slskdn_app/config/slskd.yml" --app-dir "$slskdn_app"
 ) >"$slskdn_log" 2>&1 &
 slskdn_pid="$!"
@@ -391,7 +391,9 @@ slskdn_pid="$!"
   printf 'slskr_http=127.0.0.1:%s slskr_listen=127.0.0.1:%s\n' "$slskr_http_port" "$slskr_listen_port"
   printf 'slskdn_http=127.0.0.1:%s slskdn_listen=127.0.0.1:%s\n' "$slskdn_http_port" "$slskdn_listen_port"
   printf 'slskr_endpoint_override=%s=127.0.0.1:%s\n' "$slskdn_username" "$slskdn_listen_port"
+  printf 'slskr_upstream_endpoint_override=%s=127.0.0.1:%s\n' "$upstream_username" "$slskdn_listen_port"
   printf 'slskdn_endpoint_override=%s=127.0.0.1:%s\n' "$slskr_username" "$slskr_listen_port"
+  printf 'slskdn_upstream_endpoint_override=%s=127.0.0.1:%s\n' "$upstream_username" "$slskr_listen_port"
 } >"$diag_file"
 
 wait_slskr_connected() {
@@ -618,14 +620,14 @@ run_message_interop_checks() {
   slskdn_message="slskdn-to-slskr-message-$(date -u +%Y%m%d%H%M%S)"
 
   if auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/messages" "{\"username\":\"$slskdn_username\",\"body\":\"$slskr_message\"}" >/dev/null; then
-    wait_json_contains protocol-slskr-message-dispatch "http://127.0.0.1:$slskdn_http_port/api/v0/conversations/$escaped_slskr" "$slskr_message"
+    wait_json_contains protocol-slskr-message-dispatch "http://127.0.0.1:$slskdn_http_port/api/v0/conversations/$escaped_slskr" "$slskr_message" || return 1
   else
     record_check protocol-slskr-message-dispatch fail "send failed"
     return 1
   fi
 
   if auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/conversations/$escaped_slskr" "\"$slskdn_message\"" >/dev/null; then
-    wait_json_contains protocol-slskdn-message-dispatch "http://127.0.0.1:$slskr_http_port/api/v0/messages/$escaped_slskdn" "$slskdn_message"
+    wait_json_contains protocol-slskdn-message-dispatch "http://127.0.0.1:$slskr_http_port/api/v0/messages/$escaped_slskdn" "$slskdn_message" || return 1
   else
     record_check protocol-slskdn-message-dispatch fail "send failed"
     return 1
@@ -725,9 +727,9 @@ record_final_diagnostics() {
 status=0
 run_runtime_protocol_checks || status=1
 run_browse_interop_checks || status=1
+run_search_interop_checks || status=1
 run_slskr_to_slskdn_download || status=1
 run_slskdn_to_slskr_download || status=1
-run_search_interop_checks || status=1
 run_message_interop_checks || status=1
 run_mesh_runtime_checks || status=1
 record_final_diagnostics

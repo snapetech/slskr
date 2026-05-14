@@ -17386,12 +17386,7 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                     time::timeout(Duration::from_millis(250), active_session.readable()).await,
                     Ok(Ok(()))
                 ) {
-                    match time::timeout(
-                        state.config.peer_response_timeout,
-                        active_session.receive(),
-                    )
-                    .await
-                    {
+                    match time::timeout(Duration::from_secs(1), active_session.receive()).await {
                         Ok(Ok(message)) => {
                             if wishlist_scheduler.apply_server_message(&message) {
                                 next_wishlist_search =
@@ -17419,19 +17414,7 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                             .await;
                             reconnect_requested = state.config.reconnect;
                         }
-                        Err(_) => {
-                            eprintln!("server receive timed out after readability");
-                            session = None;
-                            update_session(&state, |snapshot| {
-                                snapshot.state = "error";
-                                snapshot.last_error =
-                                    Some("server receive timed out after readability".to_owned());
-                                snapshot.supporter = None;
-                                snapshot.connected_at = None;
-                            })
-                            .await;
-                            reconnect_requested = state.config.reconnect;
-                        }
+                        Err(_) => {}
                     }
                 }
 
