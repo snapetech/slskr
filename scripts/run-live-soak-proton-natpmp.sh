@@ -89,7 +89,7 @@ slskr_bin="$repo_root/target/debug/slskr"
     printf '[slskr-proton-natpmp-soak start=%s gateway=%s listen_port=%s obfuscated_port=%s]\n' \
         "$(date -Is)" "$gateway" "$listen_port" "$obfuscated_port"
 
-    cargo build -q -p slskr
+    RUSTFLAGS="${RUSTFLAGS:-} -Awarnings" cargo build -q -p slskr
 
     advertised_port="$(claim_tcp_port "$listen_port")"
     obfuscated_advertised_port="$(claim_tcp_port "$obfuscated_port")"
