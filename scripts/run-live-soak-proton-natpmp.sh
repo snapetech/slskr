@@ -43,10 +43,21 @@ claim_tcp_port() {
 
 renew_loop() {
     while true; do
-        date -Is
-        natpmpc -g "$gateway" -a "$advertised_port" "$listen_port" tcp "$lifetime"
-        natpmpc -g "$gateway" -a "$obfuscated_advertised_port" "$obfuscated_port" tcp "$lifetime"
         sleep "$renew_seconds"
+        local renewed_at regular_output obfuscated_output
+        renewed_at="$(date -Is)"
+        if ! regular_output="$(natpmpc -g "$gateway" -a "$advertised_port" "$listen_port" tcp "$lifetime" 2>&1)"; then
+            printf '[slskr-proton-natpmp-soak renew_failed at=%s port=%s local_port=%s]\n%s\n' \
+                "$renewed_at" "$advertised_port" "$listen_port" "$regular_output"
+            continue
+        fi
+        if ! obfuscated_output="$(natpmpc -g "$gateway" -a "$obfuscated_advertised_port" "$obfuscated_port" tcp "$lifetime" 2>&1)"; then
+            printf '[slskr-proton-natpmp-soak renew_failed at=%s port=%s local_port=%s]\n%s\n' \
+                "$renewed_at" "$obfuscated_advertised_port" "$obfuscated_port" "$obfuscated_output"
+            continue
+        fi
+        printf '[slskr-proton-natpmp-soak renew_ok at=%s regular_public_port=%s obfuscated_public_port=%s]\n' \
+            "$renewed_at" "$advertised_port" "$obfuscated_advertised_port"
     done
 }
 
@@ -72,12 +83,13 @@ export SLSK_SOAK_SEARCH_INTERVAL_SECONDS="${SLSK_SOAK_SEARCH_INTERVAL_SECONDS:-9
 
 cd "$repo_root"
 
-cargo build -q -p slskr
 slskr_bin="$repo_root/target/debug/slskr"
 
 {
     printf '[slskr-proton-natpmp-soak start=%s gateway=%s listen_port=%s obfuscated_port=%s]\n' \
         "$(date -Is)" "$gateway" "$listen_port" "$obfuscated_port"
+
+    cargo build -q -p slskr
 
     advertised_port="$(claim_tcp_port "$listen_port")"
     obfuscated_advertised_port="$(claim_tcp_port "$obfuscated_port")"
