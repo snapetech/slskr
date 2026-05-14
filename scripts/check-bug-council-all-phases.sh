@@ -10,7 +10,7 @@ require_literal() {
   local file="$2"
 
   if ! rg -q --fixed-strings "$literal" "$file"; then
-    printf '%s is missing required council all-phases marker: %s\n' "${file#$repo_root/}" "$literal" >&2
+    printf '%s is missing required council all-phases marker: %s\n' "${file#"$repo_root"/}" "$literal" >&2
     failed=1
   fi
 }
@@ -39,7 +39,7 @@ assert_phase_done() {
 }
 
 if [ ! -x "$runner" ]; then
-  printf 'Council all-phases runner is missing or not executable: %s\n' "${runner#$repo_root/}" >&2
+  printf 'Council all-phases runner is missing or not executable: %s\n' "${runner#"$repo_root"/}" >&2
   exit 1
 fi
 
