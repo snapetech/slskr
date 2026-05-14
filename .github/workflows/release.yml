@@ -64,7 +64,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # Swatinem/rust-cache@v2
       - name: Prefer rustup toolchain binaries
-        run: echo "$(dirname "$(rustup which cargo)")" >> "$GITHUB_PATH"
+        run: dirname "$(rustup which cargo)" >> "$GITHUB_PATH"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
         with:
           node-version: '22'
@@ -139,7 +139,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # Swatinem/rust-cache@v2
       - name: Prefer rustup toolchain binaries
         shell: bash
-        run: echo "$(dirname "$(rustup which cargo)")" >> "$GITHUB_PATH"
+        run: dirname "$(rustup which cargo)" >> "$GITHUB_PATH"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
         with:
           node-version: '22'
