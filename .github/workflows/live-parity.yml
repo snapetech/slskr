@@ -1,5 +1,8 @@
 name: Live Parity
 
+env:
+  WASM_BINDGEN_CLI_VERSION: 0.2.120
+
 on:
   workflow_dispatch:
   schedule:
@@ -34,7 +37,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ripgrep
-          cargo install wasm-bindgen-cli --locked
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked
       - name: Install web dependencies
         run: npm --prefix web ci
       - name: Rust web UI headless parity audit

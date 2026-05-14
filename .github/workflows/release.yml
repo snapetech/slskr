@@ -5,6 +5,7 @@ env:
   SLSKR_SECURITY_SCANS_REQUIRED: '1'
   SLSKR_SEMGREP_IMAGE: semgrep/semgrep:1.70.0
   SLSKR_TRIVY_IMAGE: aquasec/trivy:0.50.1
+  WASM_BINDGEN_CLI_VERSION: 0.2.120
 
 on:
   workflow_dispatch:
@@ -86,7 +87,7 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Install wasm-bindgen CLI
-        run: cargo install wasm-bindgen-cli --locked
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked
       - name: Run release gate
         run: scripts/run-release-gate.sh
 
