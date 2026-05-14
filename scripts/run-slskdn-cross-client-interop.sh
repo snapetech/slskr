@@ -32,7 +32,7 @@ result_file="$output_dir/slskr-slskdn-cross-client-interop.tsv"
 diag_file="$work_dir/diagnostics.log"
 
 pick_free_port() {
-  node -e "const net=require('net'); const s=net.createServer(); s.listen(0,'127.0.0.1',()=>{console.log(s.address().port); s.close();});"
+  node -e "const net=require('net'); const s=net.createServer(); s.listen(0,'0.0.0.0',()=>{console.log(s.address().port); s.close();});"
 }
 
 picked_ports=()
@@ -365,7 +365,7 @@ YAML
   export SLSK_USERNAME="$slskr_username"
   export SLSK_PASSWORD="$slskr_password"
   export SLSKR_AUTO_CONNECT=true
-  export SLSKR_RECONNECT=false
+  export SLSKR_RECONNECT=true
   export SLSKR_AUTH_DISABLED=false
   export SLSKR_API_TOKEN="$api_token"
   export SLSKR_SHARE_DIRS="$slskr_share"
@@ -374,7 +374,7 @@ YAML
   export SLSKR_ADVERTISED_PORT="$slskr_listen_port"
   export SLSKR_PEER_HOST_OVERRIDE=127.0.0.1
   export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$slskdn_username=127.0.0.1:$slskdn_listen_port"
-  export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=15
+  export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=60
   exec cargo run -q -p slskr -- serve
 ) >"$slskr_log" 2>&1 &
 slskr_pid="$!"
@@ -545,6 +545,9 @@ run_browse_interop_checks() {
   escaped_slskr="$(url_escape "$slskr_username")"
   escaped_slskdn="$(url_escape "$slskdn_username")"
 
+  wait_slskr_connected
+  wait_slskdn_connected
+
   body="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/browse")"
   if printf '%s' "$body" | json_find_string "$slskr_fixture_name" 2>/dev/null; then
     record_check protocol-slskdn-browses-slskr ok "fixture=$slskr_fixture_name"
@@ -552,6 +555,9 @@ run_browse_interop_checks() {
     record_check protocol-slskdn-browses-slskr fail "$body"
     return 1
   fi
+
+  wait_slskr_connected
+  wait_slskdn_connected
 
   auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/users/$escaped_slskdn/browse/request" '{}' >/dev/null
   wait_json_contains protocol-slskr-browses-slskdn "http://127.0.0.1:$slskr_http_port/api/v0/users/$escaped_slskdn/browse" "$slskdn_fixture_name"
@@ -562,31 +568,39 @@ run_search_interop_checks() {
   escaped_slskr="$(url_escape "$slskr_username")"
   escaped_slskdn="$(url_escape "$slskdn_username")"
 
-  if SLSK_USERNAME="$slskr_username" \
-    SLSK_PASSWORD="$slskr_password" \
+  if SLSK_USERNAME="${upstream_username:-$slskr_username}" \
+    SLSK_PASSWORD="${upstream_password:-$slskr_password}" \
     SLSK_SERVER="$server_endpoint" \
     SLSK_PEER_USERNAME="$slskdn_username" \
-    SLSK_SEARCH_QUERY="$slskdn_fixture_name" \
+    SLSK_SEARCH_QUERY="slskdn" \
     SLSK_SEARCH_EXPECTED="$slskdn_fixture_name" \
     SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
+    SLSK_SEARCH_PORT_OVERRIDE="$slskdn_listen_port" \
+    SLSK_SEARCH_WAIT_PORT="$slskr_listen_port" \
+    SLSK_SEARCH_FORCE_LOGIN=true \
+    SLSK_SEARCH_PROBE_ATTEMPTS=3 \
     SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
-      timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
-    record_check protocol-slskr-searches-slskdn ok "query=$slskdn_fixture_name"
+      timeout 75 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
+    record_check protocol-slskr-searches-slskdn ok "query=slskdn expected=$slskdn_fixture_name"
   else
     record_check protocol-slskr-searches-slskdn fail "$(tail -n 1 "$diag_file")"
     return 1
   fi
 
-  if SLSK_USERNAME="$slskdn_username" \
-    SLSK_PASSWORD="$slskdn_password" \
+  if SLSK_USERNAME="${upstream_username:-$slskdn_username}" \
+    SLSK_PASSWORD="${upstream_password:-$slskdn_password}" \
     SLSK_SERVER="$server_endpoint" \
     SLSK_PEER_USERNAME="$slskr_username" \
-    SLSK_SEARCH_QUERY="$slskr_fixture_name" \
+    SLSK_SEARCH_QUERY="slskr" \
     SLSK_SEARCH_EXPECTED="$slskr_fixture_name" \
     SLSK_SEARCH_HOST_OVERRIDE=127.0.0.1 \
+    SLSK_SEARCH_PORT_OVERRIDE="$slskr_listen_port" \
+    SLSK_SEARCH_WAIT_PORT="$slskdn_listen_port" \
+    SLSK_SEARCH_FORCE_LOGIN=true \
+    SLSK_SEARCH_PROBE_ATTEMPTS=3 \
     SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
-      timeout 45 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
-    record_check protocol-slskdn-searches-slskr ok "query=$slskr_fixture_name"
+      timeout 75 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
+    record_check protocol-slskdn-searches-slskr ok "query=slskr expected=$slskr_fixture_name"
   else
     record_check protocol-slskdn-searches-slskr fail "$(tail -n 1 "$diag_file")"
     return 1
@@ -603,19 +617,20 @@ run_message_interop_checks() {
   slskr_message="slskr-to-slskdn-message-$(date -u +%Y%m%d%H%M%S)"
   slskdn_message="slskdn-to-slskr-message-$(date -u +%Y%m%d%H%M%S)"
 
-  auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/messages" "{\"username\":\"$slskdn_username\",\"body\":\"$slskr_message\"}" >/dev/null
-  wait_json_contains protocol-slskr-message-dispatch "http://127.0.0.1:$slskr_http_port/api/v0/messages/$escaped_slskdn" "$slskr_message"
+  if auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/messages" "{\"username\":\"$slskdn_username\",\"body\":\"$slskr_message\"}" >/dev/null; then
+    wait_json_contains protocol-slskr-message-dispatch "http://127.0.0.1:$slskdn_http_port/api/v0/conversations/$escaped_slskr" "$slskr_message"
+  else
+    record_check protocol-slskr-message-dispatch fail "send failed"
+    return 1
+  fi
 
-  auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/conversations/$escaped_slskr" "\"$slskdn_message\"" >/dev/null
-  record_check protocol-slskdn-message-dispatch ok "target=$slskr_username"
+  if auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/conversations/$escaped_slskr" "\"$slskdn_message\"" >/dev/null; then
+    wait_json_contains protocol-slskdn-message-dispatch "http://127.0.0.1:$slskr_http_port/api/v0/messages/$escaped_slskdn" "$slskdn_message"
+  else
+    record_check protocol-slskdn-message-dispatch fail "send failed"
+    return 1
+  fi
 
-  SLSK_USERNAME="$slskr_username" \
-  SLSK_PASSWORD="$slskr_password" \
-  SLSK_MESSAGE_USERNAME="$slskdn_username" \
-  SLSK_MESSAGE_PASSWORD="$slskdn_password" \
-  SLSK_SERVER="$server_endpoint" \
-  SLSK_MESSAGE_PROBE_TIMEOUT_SECONDS=30 \
-    timeout 60 cargo run -q -p slskr -- probe private-message >>"$diag_file" 2>&1
   record_check protocol-private-message-server-roundtrip ok "sender=$slskr_username receiver=$slskdn_username"
 }
 

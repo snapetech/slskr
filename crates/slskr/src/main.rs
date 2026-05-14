@@ -9644,7 +9644,20 @@ async fn route_http_request_with_headers(
                   webhook_data,
               ).await;
 
-              send_session_command(state, SessionCommand::MessageUser { username, body: message_body }).await.ok();
+              if let Err(error) = send_session_command(
+                  state,
+                  SessionCommand::MessageUser {
+                      username,
+                      body: message_body,
+                  },
+              )
+              .await
+              {
+                  eprintln!("session command dispatch failed for message user: {error}");
+                  return Ok(routing::service_unavailable_response(
+                      "session manager is not running",
+                  ));
+              }
 
               Ok(routing::created_response(record.json()))
          }
@@ -11534,10 +11547,15 @@ async fn route_http_request_with_headers(
             let mut messages = state.messages.write().await;
             let record = messages.add(username.clone(), "outbound", message_body.clone());
             drop(messages);
-            send_session_command(state, SessionCommand::MessageUser {
+            if let Err(error) = send_session_command(state, SessionCommand::MessageUser {
                 username,
                 body: message_body,
-            }).await.ok();
+            }).await {
+                eprintln!("session command dispatch failed for conversation message: {error}");
+                return Ok(routing::service_unavailable_response(
+                    "session manager is not running",
+                ));
+            }
             Ok(routing::ok_response((record.id > 0).to_string()))
         }
 
@@ -17389,6 +17407,7 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                             .await;
                         }
                         Ok(Err(error)) => {
+                            eprintln!("server receive failed: {error}");
                             session = None;
                             update_session(&state, |snapshot| {
                                 snapshot.state = "error";
@@ -17401,6 +17420,7 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                             reconnect_requested = state.config.reconnect;
                         }
                         Err(_) => {
+                            eprintln!("server receive timed out after readability");
                             session = None;
                             update_session(&state, |snapshot| {
                                 snapshot.state = "error";
@@ -18745,6 +18765,7 @@ async fn send_active_server_message(
     action: &str,
 ) {
     let Some(active_session) = session.as_mut() else {
+        eprintln!("cannot {action}: server session is disconnected");
         update_session(state, |snapshot| {
             snapshot.state = "disconnected";
             snapshot.last_error = Some(format!("cannot {action} while disconnected"));
@@ -18755,12 +18776,14 @@ async fn send_active_server_message(
 
     match active_session.send_server_message(message).await {
         Ok(()) => {
+            eprintln!("sent server message for {action}");
             update_session(state, |snapshot| {
                 snapshot.last_error = None;
             })
             .await;
         }
         Err(error) => {
+            eprintln!("failed to send server message for {action}: {error}");
             *session = None;
             update_session(state, |snapshot| {
                 snapshot.state = "error";
@@ -18832,6 +18855,11 @@ async fn project_server_message(
             .await;
         }
         ServerMessage::MessageUserResponse(message) => {
+            eprintln!(
+                "received private message id={} from {}",
+                message.id,
+                redact_username(&message.username)
+            );
             let mut messages = state.messages.write().await;
             messages.add(message.username.clone(), "inbound", message.message.clone());
             drop(messages);

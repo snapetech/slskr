@@ -3,7 +3,7 @@ use slskr_client::protocol::{
     distributed::DistributedMessage,
     init::InitMessage,
     peer::{FileEntry, PeerMessage, TransferRequest, TransferResponse, UserInfo},
-    server::{ConnectToPeerResponse, SearchRequest, ServerMessage},
+    server::{ConnectToPeerResponse, SearchRequest, ServerMessage, WaitPort},
     Writer, ROTATED_OBFUSCATION_TYPE,
 };
 use slskr_client::{
@@ -626,7 +626,6 @@ async fn browse_peer_probe() -> Result<(), String> {
 
 async fn search_peer_probe() -> Result<(), String> {
     let username = required_env_any(&["SLSK_USERNAME"])?;
-    let password = required_env_any(&["SLSK_PASSWORD"])?;
     let peer_username = required_env_any(&["SLSK_SEARCH_PEER_USERNAME", "SLSK_PEER_USERNAME"])?;
     let query = required_env_any(&["SLSK_SEARCH_QUERY"])?;
     let expected = optional_env("SLSK_SEARCH_EXPECTED").unwrap_or_else(|| query.clone());
@@ -634,31 +633,57 @@ async fn search_peer_probe() -> Result<(), String> {
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
     let timeout = Duration::from_secs(env_u64("SLSK_SEARCH_PROBE_TIMEOUT_SECONDS", 20)?);
     let token = env_u32("SLSK_SEARCH_TOKEN", 0x51ab_5001)?;
+    let attempts = env_u32("SLSK_SEARCH_PROBE_ATTEMPTS", 1)?.max(1);
 
-    let address = resolve_peer_address(
-        &username,
-        &password,
-        &peer_username,
-        &server_address,
-        timeout,
-    )
-    .await?;
-    let port = peer_regular_port(&address)?;
-    let host = optional_env("SLSK_SEARCH_HOST_OVERRIDE").unwrap_or_else(|| address.ip.to_string());
-    let mut peer = connect_plain_peer_messages(&username, &host, port, timeout).await?;
-    peer.send(&PeerMessage::FileSearchRequest {
-        token,
-        query: query.clone(),
-    })
-    .await
-    .map_err(|error| format!("search request failed: {error}"))?;
-    let response = time::timeout(timeout, peer.receive())
-        .await
-        .map_err(|_| "search response timed out".to_owned())?
-        .map_err(|error| format!("search response failed: {error}"))?;
-    let PeerMessage::FileSearchResponse(response) = response else {
-        return Err(format!("unexpected search response: {response:?}"));
+    let host_override = optional_env("SLSK_SEARCH_HOST_OVERRIDE");
+    let port_override = optional_env("SLSK_SEARCH_PORT_OVERRIDE");
+    let force_login = env_bool("SLSK_SEARCH_FORCE_LOGIN", false)?;
+    let (host, port) = match (host_override, port_override, force_login) {
+        (Some(host), Some(port), false) => {
+            let port = port
+                .parse::<u16>()
+                .map_err(|error| format!("invalid SLSK_SEARCH_PORT_OVERRIDE: {error}"))?;
+            (host, port)
+        }
+        (host_override, port_override, _) => {
+            let password = required_env_any(&["SLSK_PASSWORD"])?;
+            let address = resolve_peer_address(
+                &username,
+                &password,
+                &peer_username,
+                &server_address,
+                timeout,
+            )
+            .await?;
+            let port = match port_override {
+                Some(value) => value
+                    .parse::<u16>()
+                    .map_err(|error| format!("invalid SLSK_SEARCH_PORT_OVERRIDE: {error}"))?,
+                None => peer_regular_port(&address)?,
+            };
+            let host = host_override.unwrap_or_else(|| address.ip.to_string());
+            (host, port)
+        }
     };
+    let mut last_error = None;
+    let mut response = None;
+    for attempt in 1..=attempts {
+        match search_peer_once(&username, &host, port, timeout, token, &query).await {
+            Ok(value) => {
+                response = Some(value);
+                break;
+            }
+            Err(error) => {
+                last_error = Some(error);
+                if attempt < attempts {
+                    time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+    }
+    let response = response.ok_or_else(|| {
+        last_error.unwrap_or_else(|| "search response failed without an error".to_owned())
+    })?;
     let found = response
         .results
         .iter()
@@ -678,6 +703,31 @@ async fn search_peer_probe() -> Result<(), String> {
         response.private_results.len()
     );
     Ok(())
+}
+
+async fn search_peer_once(
+    username: &str,
+    host: &str,
+    port: u16,
+    timeout: Duration,
+    token: u32,
+    query: &str,
+) -> Result<slskr_client::protocol::peer::FileSearchResponse, String> {
+    let mut peer = connect_plain_peer_messages(username, host, port, timeout).await?;
+    peer.send(&PeerMessage::FileSearchRequest {
+        token,
+        query: query.to_owned(),
+    })
+    .await
+    .map_err(|error| format!("search request failed: {error}"))?;
+    let response = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "search response timed out".to_owned())?
+        .map_err(|error| format!("search response failed: {error}"))?;
+    let PeerMessage::FileSearchResponse(response) = response else {
+        return Err(format!("unexpected search response: {response:?}"));
+    };
+    Ok(response)
 }
 
 async fn download_peer_probe() -> Result<(), String> {
@@ -2541,6 +2591,23 @@ async fn resolve_peer_address(
         ))
         .await
         .map_err(|error| format!("login failed for configured user: {error}"))?;
+    if let Some(wait_port) = optional_env("SLSK_WAIT_PORT")
+        .or_else(|| optional_env("SLSK_SEARCH_WAIT_PORT"))
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map_err(|error| format!("invalid SLSK_WAIT_PORT/SLSK_SEARCH_WAIT_PORT: {error}"))
+        })
+        .transpose()?
+    {
+        session
+            .send_server_message(ServerMessage::SetWaitPort(WaitPort {
+                port: wait_port,
+                obfuscation: None,
+            }))
+            .await
+            .map_err(|error| format!("set wait port failed: {error}"))?;
+    }
     session
         .send_server_message(ServerMessage::GetPeerAddressRequest {
             username: peer_username.to_owned(),
