@@ -18436,7 +18436,7 @@ where
                 {
                     let mut transfers = state.transfers.write().await;
                     transfers.record_accepted_inbound_request(
-                        request.direction,
+                        1,
                         request.token,
                         request.filename.clone(),
                         shared_file.local_path.display().to_string(),
@@ -28811,7 +28811,7 @@ mod tests {
             file.read_chunk(2).await.expect("chunk")
         });
         let response = super::ConnectToPeerResponse {
-            username: "tester".to_owned(),
+            username: "friend".to_owned(),
             connection_type: "F".to_owned(),
             ip: "127.0.0.1".parse().unwrap(),
             port: u32::from(local_addr.port()),
@@ -28874,7 +28874,7 @@ mod tests {
                 .expect("response");
         });
         let response = super::ConnectToPeerResponse {
-            username: "tester".to_owned(),
+            username: "friend".to_owned(),
             connection_type: "P".to_owned(),
             ip: "127.0.0.1".parse().unwrap(),
             port: u32::from(local_addr.port()),
