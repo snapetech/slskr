@@ -1,54 +1,36 @@
 # slskr
 
-`slskr` is a self-hosted Rust application for the Soulseek network. It runs as a single daemon with a bundled browser UI, HTTP API, WebSocket event feed, protocol runtime, transfer engine, share indexer, observability endpoints, client libraries, and live interoperability tooling.
+`slskr` is a self-hosted Rust daemon, HTTP API, and browser UI for the
+[Soulseek](https://www.slsknet.org/news/) network.
 
-It is built for operators who want a private, scriptable music-sharing client they can run locally, in a lab, or behind their own service boundary while still having a full web control surface.
+It is built for operators who want a private, scriptable Soulseek client they
+can run locally, on a server, or behind their own service boundary. One
+`slskr serve` process owns the Soulseek session, peer listeners, share index,
+transfer engine, API, event stream, and bundled Web UI.
 
-## Table Of Contents
+## Project Status
 
-- [Highlights](#highlights)
-- [Screenshots](#screenshots)
-- [Feature Index](#feature-index)
-- [Architecture](#architecture)
-- [Install And Run](#install-and-run)
-- [Configuration](#configuration)
-- [Web UI](#web-ui)
-- [HTTP API](#http-api)
-- [CLI Commands](#cli-commands)
-- [Search And Discovery](#search-and-discovery)
-- [Browse, Shares, And Library State](#browse-shares-and-library-state)
-- [Transfers](#transfers)
-- [Messaging, Rooms, Users, And Contacts](#messaging-rooms-users-and-contacts)
-- [Player And Media Tools](#player-and-media-tools)
-- [Integrations](#integrations)
-- [Security Model](#security-model)
-- [Observability](#observability)
-- [Persistence And State](#persistence-and-state)
-- [Client Libraries](#client-libraries)
-- [Testing And Verification](#testing-and-verification)
-- [Deployment](#deployment)
-- [Repository Layout](#repository-layout)
-- [Reference Documents](#reference-documents)
-- [License](#license)
+`slskr` is the Rust implementation target for the slskr/slskdN feature-parity
+work. The daemon already includes the main operating surfaces needed by a
+browser client and API automation:
 
-## Highlights
+- Soulseek login/session management, keepalive, reconnect, and listener state.
+- Search, browse, private messages, rooms, watched users, shares, and transfers.
+- Direct, obfuscated, and indirect peer probes for protocol/runtime validation.
+- Bundled Web UI plus compatibility-oriented HTTP endpoints and event streams.
+- TypeScript, Python, Go, and Rust client surfaces for automation and tests.
+- Release, security, packaging, live-interop, and public-posture gates.
 
-- One `slskr serve` process for the daemon, API, web UI, session runtime, share scanner, transfer state, and static assets.
-- Rust protocol crates for server, peer-message, file-transfer, distributed, init, obfuscation, and wire-frame behavior.
-- Compatibility-oriented mesh-network, pod/service-fabric deployment, and automation surfaces through the slskr API, WebUI, event, transfer, search, room, message, browse, share, integration, and network-status projections.
-- Browser UI for search, downloads, uploads, rooms, messages, users, contacts, browse, collections, share groups, shared-with-me views, discovery graph tools, playlist intake, integrations, system status, and playback.
-- Search workflow with query history, result aggregation, result ranking, deduplication, lossless/acquisition profiles, wishlist search, discovery graph views, release-radar panels, MusicBrainz lookup, SongID workflows, and local review controls.
-- Download and upload views with grouped transfers, progress, speed, queue position checks, retry/cancel/remove actions, accelerated download mode, and auto-replace controls.
-- Share indexing with virtual paths, scan limits, hidden-file/symlink policy, extension summaries, deterministic catalog APIs, and safe file listing that avoids leaking host paths.
-- Direct, obfuscated, and indirect peer paths for messaging, browsing, and file-transfer probes.
-- Bearer-token API authentication, automation-compatible API-key headers, CSRF origin checks for mutating browser requests, loopback-safe defaults, and non-loopback exposure guards.
-- WebSocket event feed plus bounded event polling for search, transfer, share, user, browse, message, room, and session workflows.
-- Health, metrics, telemetry, release/build metadata, configuration inspection, and live smoke automation.
-- TypeScript, Python, Go, and Rust client surfaces for API automation and validation.
+The compatibility goal is behavioral and operational compatibility with useful
+slskd/slskdN workflows, not a copied implementation. Advanced discovery,
+metadata, integrations, and mesh/federation surfaces should be treated as
+configuration-dependent or experimental unless the linked docs and tests say
+otherwise.
 
 ## Screenshots
 
-The screenshots are generated from the local React UI with mocked daemon responses, so they are safe for documentation and do not contain credentials.
+The README screenshots are generated from the local Web UI with mocked daemon
+responses, so they do not contain credentials.
 
 | Search and discovery | Transfers |
 | --- | --- |
@@ -58,7 +40,7 @@ The screenshots are generated from the local React UI with mocked daemon respons
 | --- | --- |
 | ![Rooms page with joined rooms and message context](./docs/screenshots/webui-rooms.png) | ![System page with daemon and configuration status](./docs/screenshots/webui-system.png) |
 
-Regenerate the images from a running frontend with:
+Regenerate screenshots from a running frontend with:
 
 ```bash
 cd web
@@ -66,86 +48,124 @@ SLSKR_SCREENSHOT_BASE_URL=http://127.0.0.1:3001 \
   node scripts/capture-readme-screenshots.mjs
 ```
 
-## Feature Index
+## Features
 
-| Area | What slskr provides | Primary references |
-| --- | --- | --- |
-| Daemon | `slskr serve`, bundled UI/API, session lifecycle, listener state, reconnect policy | [docs/app-surface.md](./docs/app-surface.md), [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) |
-| Protocol runtime | Login, keepalive, server commands, peer init, peer messages, distributed messages, transfer sockets, obfuscation | [crates/slskr-client](./crates/slskr-client), [crates/slskr-protocol](./crates/slskr-protocol) |
-| Compatibility surfaces | Mesh-network, pod/service-fabric, WebUI, API, event, transfer, search, browse, room, message, share, and integration surfaces for operators migrating existing automation to slskr | [docs/app-surface.md](./docs/app-surface.md), [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md) |
-| Web UI | Search, transfers, rooms, messages, browse, users, contacts, system, player, collections, integrations | [crates/slskr-web](./crates/slskr-web), [docs/rust-web-ui.md](./docs/rust-web-ui.md), [web/README.md](./web/README.md) |
-| HTTP API | Versioned `/api/v0/*` endpoints, unversioned compatibility routes, auth, telemetry, metrics | [docs/http-api.md](./docs/http-api.md), [docs/openapi.json](./docs/openapi.json) |
-| Events | Polling event log and `/api/events/ws` WebSocket stream | [docs/app-surface.md](./docs/app-surface.md) |
-| Shares | Share root scanning, virtual catalog, rescan endpoint, filtered file APIs | [docs/app-surface.md](./docs/app-surface.md) |
-| Transfers | Queue projections, progress updates, direct and indirect peer transfer execution, inbound serving | [docs/app-surface.md](./docs/app-surface.md), [scripts/run-live-http-transfer-smoke.sh](./scripts/run-live-http-transfer-smoke.sh) |
-| Client SDKs | TypeScript, Python, Go, and Rust client packages/examples | [docs/CLIENT_LIBRARIES.md](./docs/CLIENT_LIBRARIES.md) |
-| Live verification | Local peer smoke, public-network probes, HTTP transfer smoke, open fixture policy | [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md), [docs/open-commons-fixtures.md](./docs/open-commons-fixtures.md) |
-| Deployment | Kubernetes manifests, Prometheus rules, public posture checks, release package checks | [k8s](./k8s), [scripts/check-release-package.sh](./scripts/check-release-package.sh) |
+### Web Access
 
-## Architecture
+`slskr serve` starts the daemon and serves the Web UI on the same HTTP listener.
+The default bind is loopback-only:
 
-`slskr` is split into small crates and one browser workspace:
+```text
+http://127.0.0.1:5030/
+```
 
-- `crates/slskr`: the application binary, HTTP server, API routing, web UI serving, daemon orchestration, config loading, storage projections, auth, rate limiting, logging, telemetry, webhooks, OpenAPI embedding, and built-in smoke/probe commands.
-- `crates/slskr-client`: async runtime for server sessions, peer connections, listeners, searches, browsing, social/user operations, transfers, stream handling, peer cache, distributed tree state, and live probes.
-- `crates/slskr-protocol`: protocol message types, binary codecs, frame parsing, primitives, peer/server/distributed/init messages, obfuscation helpers, and wire-format tests.
-- `crates/slskr-web`: Rust/WASM browser UI served in release archives.
-- `web`: legacy React/Vite UI reference and test harness retained while parity code is migrated.
-- `client-ts`, `client-python`, `client-go`: generated or maintained API clients and examples for automation.
-- `docs`, `examples`, `scripts`, and `k8s`: operator references, smoke automation, public posture checks, fixture policy, and deployment manifests.
+The UI includes search, downloads, uploads, rooms, private messages, users,
+contacts, browse state, shares, collections, integrations, player controls,
+configuration status, telemetry, and runtime health.
 
-The daemon owns the long-lived runtime state. The web UI and clients talk to the daemon through HTTP and the event feed rather than holding protocol sockets themselves.
+### Search And Results
 
-## Compatibility Surfaces
+Search supports global, user, room, and wishlist-style targets. Results include
+peer metadata such as locked state, slot availability, queue length, speed, file
+size, and path. The UI adds filters, duplicate folding, hidden/blocked users,
+search history, review notes, acquisition profiles, discovery graph panels, and
+metadata-assisted follow-up searches.
 
-`slskr` keeps compatibility-oriented operating surfaces while using an independent Rust daemon/runtime implementation. Operators should be able to map mesh-network concepts, pod deployments, service-fabric topology, API-driven automation, WebUI workflows, player controls, integrations, and network-status views onto the slskr daemon.
+### Transfers
 
-Compatibility coverage includes:
+Downloads and uploads are represented as daemon-owned transfer records with
+queue, start, progress, completion, cancellation, retry, and failure state.
+`slskr` supports local file-backed projections for tests, outbound downloads,
+inbound shared-file serving, direct peer transfer sockets, type-1 obfuscated
+transfer sockets, indirect transfer fallback, offset/resume fields, and bounded
+transfer event history.
 
-- Mesh and service-fabric projections for DHT, mesh peers, hash/catalog state, swarm/backfill activity, sequence state, transfer speed, and network health.
-- Pod-oriented deployment and service-boundary operation using one daemon process that serves the API, WebUI, event stream, static assets, session runtime, share indexer, and transfer engine.
-- Feature-surface parity for search, wishlist-style searches, browse, downloads, uploads, private messages, rooms, users, contacts, share groups, shared-with-me views, collections, playlist intake, integrations, system status, and player workflows.
-- Compatibility APIs and event feeds for client automation and UI integration, with versioned `/api/v0/*` routes and selected unversioned aliases where existing clients expect them.
-- Live interoperability tooling that exercises Soulseek network behavior and adjacent-client compatibility against slskd, Soulseek.NET-family libraries, and other compatible runtimes.
+### Shares And Browse
 
-The compatibility goal is behavioral and operational compatibility, not copied implementation. slskr keeps its own Rust protocol/runtime, API, storage, and UI integration code while preserving externally useful workflows and deployment assumptions.
+Share roots are indexed at startup or by rescan. The catalog uses virtual share
+paths rather than exposing raw host paths. Operators can configure hidden-file
+handling, symlink following, scan limits, and allowed transfer directions.
+Browse state is tracked per peer and exposed through the API and Web UI.
 
-## Install And Run
+### Messaging, Rooms, And Users
+
+The daemon tracks private-message conversations, message acknowledgement, room
+lists, room join/leave state, recent room messages, watched users, user stats,
+contacts, notes, and related peer context needed by search and browse workflows.
+
+### API And Automation
+
+The HTTP API exposes versioned `/api/v0/*` routes plus selected unversioned
+compatibility aliases. API clients can use bearer auth or the `X-API-Key` header
+with the same token. Event consumers can poll bounded event records or subscribe
+to the WebSocket event stream.
+
+OpenAPI and detailed endpoint docs live in:
+
+- [docs/http-api.md](./docs/http-api.md)
+- [docs/http-api-features.md](./docs/http-api-features.md)
+- [docs/openapi.json](./docs/openapi.json)
+- [docs/CLIENT_LIBRARIES.md](./docs/CLIENT_LIBRARIES.md)
+
+### Integrations
+
+Current integration surfaces include Spotify OAuth callback handling on the
+daemon HTTP listener, Lidarr status/wanted/manual-import flows, external
+visualizer launch reporting, and UI-side panels for library, source, and
+recommendation workflows. Integrations report unavailable or disabled states
+when required local config or credentials are missing.
+
+## Quick Start
+
+### Download A Release
+
+Release artifacts are published from tags named `release-v<semver>`:
+
+```text
+https://github.com/snapetech/slskr/releases
+```
+
+Archives include the `slskr` binary and bundled web assets for supported Linux,
+macOS, and Windows targets, plus checksums and release manifests. Extract the
+archive for your platform, put the binary on your `PATH`, then create a config.
+
+### Build From Source
 
 Prerequisites:
 
 - Rust toolchain compatible with the workspace `rust-version`.
-- Node.js/npm for web UI development and tests.
-- Soulseek credentials for live network operation.
-- Optional: Go for the Go client tests, Python for the Python client checks, Kubernetes tooling for manifest workflows.
+- Node.js/npm when working on or testing web assets.
+- Soulseek credentials for real network operation.
+- Optional Go and Python for client-library test gates.
 
-Print the binary version:
+Build and install locally:
 
 ```bash
-cargo run -p slskr -- version
+cargo build --release -p slskr
+install -Dm755 target/release/slskr "$HOME/.local/bin/slskr"
 ```
 
-Run a low-risk login smoke:
+Print version information:
+
+```bash
+slskr version
+```
+
+Run a login smoke test:
 
 ```bash
 SLSK_USERNAME=<username> \
 SLSK_PASSWORD=<password> \
-cargo run -p slskr -- login smoke
+slskr login smoke
 ```
 
-Run the daemon and bundled web UI:
+Start the daemon and Web UI:
 
 ```bash
 SLSK_USERNAME=<username> \
 SLSK_PASSWORD=<password> \
 SLSKR_AUTO_CONNECT=true \
-cargo run -p slskr -- serve
-```
-
-Default bind:
-
-```text
-127.0.0.1:5030
+slskr serve
 ```
 
 Then open:
@@ -156,73 +176,84 @@ http://127.0.0.1:5030/
 
 ## Configuration
 
-Configuration can come from environment variables, `SLSKR_CONFIG`, or the default config path under `$XDG_CONFIG_HOME/slskr/config.toml` when present. The state directory defaults under `$XDG_STATE_HOME/slskr` or `$HOME/.local/state/slskr`.
+Start from the annotated example:
 
-Common controls:
-
-- `SLSKR_HTTP_BIND`: HTTP listener, default `127.0.0.1:5030`.
-- `SLSKR_CONFIG`: path to TOML config.
-- `SLSKR_STATE_DIR`: daemon state directory.
-- `SLSKR_AUTO_CONNECT`: connect on startup when credentials exist.
-- `SLSKR_RECONNECT` and `SLSKR_RECONNECT_SECONDS`: reconnect policy.
-- `SLSKR_PING_SECONDS`: server keepalive interval.
-- `SLSKR_LISTENER_BIND` and `SLSKR_ADVERTISED_PORT`: regular peer listener and advertised port.
-- `SLSKR_OBFUSCATED_LISTENER_BIND` and `SLSKR_OBFUSCATED_ADVERTISED_PORT`: type-1 obfuscated listener and advertised port.
-- `SLSKR_SHARE_DIRS`: semicolon-separated share roots.
-- `SLSKR_SHARE_FOLLOW_SYMLINKS`, `SLSKR_SHARE_INCLUDE_HIDDEN`, `SLSKR_SHARE_SCAN_MAX_FILES`: share scan policy.
-- `SLSKR_TRANSFER_MAX_ACTIVE`: concurrent active transfer cap.
-- `SLSKR_TRANSFER_ALLOW_INBOUND` and `SLSKR_TRANSFER_ALLOW_OUTBOUND`: transfer direction policy.
-- `SLSKR_API_TOKEN`: bearer token for protected API routes.
-- `SLSKR_AUTH_DISABLED`: explicit auth override.
-- `SLSKR_PERSISTENCE_ENABLED`: enable SQLite-backed persistence paths that are currently wired.
-- `SLSKR_SPOTIFY_ENABLED`, `SLSKR_SPOTIFY_CLIENT_ID`, `SLSKR_SPOTIFY_REDIRECT_URI`: Spotify integration.
-- `SLSKR_LIDARR_ENABLED`, `SLSKR_LIDARR_URL`, `SLSKR_LIDARR_API_KEY`: Lidarr integration.
-- `SLSKR_EXTERNAL_VISUALIZER_COMMAND`: optional local visualizer launcher.
-
-Use [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) as the annotated config reference.
-
-## Web UI
-
-The bundled UI is an operator dashboard, not a marketing page. It is designed for repeated control workflows:
-
-- Search: query entry, acquisition profile selection, current/history view, search detail pages, result filters, result ranking, duplicate folding, blocked-user hiding, local review notes, and graph-driven follow-up searches.
-- Discovery Graph: graph atlas and modal views for navigating nearby artists, releases, tracks, and query branches.
-- Playlist Intake: import/review workflows for source lists before turning them into searches or library actions.
-- Wishlist: saved search intents and repeatable watch workflows.
-- Downloads and Uploads: grouped transfer cards by peer and directory, progress, speeds, selected bulk actions, retry/cancel/remove controls, accelerated mode, and auto-replace toggles.
-- Messages, Chat, and Rooms: private conversations, room lists, joined-room activity, message acknowledgement, room-user views, and navigation badges.
-- Users, Contacts, Share Groups, Shared With Me, and Collections: social/library organization surfaces for peer context, shared objects, and grouped access.
-- Browse: peer browse request state and browse cache display.
-- System: runtime state, configuration, shares, network status, telemetry, integrations, and operational controls.
-- Player: persistent bottom player bar, transport controls, spectrum visualizer, queue/list controls, lyrics pane support, and collection/local-file playback hooks.
-- Theme: `slskr`, classic dark, and light theme choices.
-
-## HTTP API
-
-The daemon exposes versioned API routes under `/api/v0/*` plus selected compatibility aliases under `/api/*`. Security-sensitive operations require bearer-token auth when auth is enabled. Automation clients may also send the same token as `X-API-Key`. Browser-origin mutating requests are checked for CSRF safety.
-
-Core endpoint groups:
-
-- Health/version/config: `/api/health`, `/api/v0/health`, `/api/version`, `/api/v0/version`, `/api/v0/config`.
-- Capabilities: `/api/v0/capabilities`, `/api/v0/capabilities/negotiate`.
-- Stats/metrics/telemetry: `/api/v0/stats`, `/api/v0/metrics`, `/api/v0/telemetry`.
-- Events: `/api/v0/events`, `/api/v0/events/records`, `/api/events/ws`.
-- Shares and catalog: `/api/v0/shares`, `/api/v0/shares/catalog`, `/api/v0/files/:root`, `/api/v0/shares/rescan`.
-- Search: `/api/v0/searches`, `/api/v0/searches/records`, `/api/v0/searches/:token`, `/api/v0/searches/:token/complete`, `/api/v0/searches/prune`, `/api/v0/search-responses`.
-- Users and browse: `/api/v0/users`, `/api/v0/users/watch`, `/api/v0/users/:username/browse`, `/api/v0/users/:username/browse/request`, `/api/v0/browse-responses`.
-- Messages: `/api/v0/messages`, `/api/v0/messages/:username`, `/api/v0/messages/:id/ack`.
-- Rooms: `/api/v0/rooms`, `/api/v0/rooms/refresh`, `/api/v0/rooms/:room/join`, `/api/v0/rooms/:room/messages`.
-- Session/listeners: `/api/v0/session`, `/api/v0/session/connect`, `/api/v0/session/disconnect`, `/api/v0/session/ping`, `/api/v0/listeners`.
-- Transfers: `/api/v0/transfers`, `/api/v0/transfers/stats`, `/api/v0/transfers/downloads`, `/api/v0/transfers/uploads`, `/api/v0/transfers/:id/start`, `/api/v0/transfers/:id/progress`, `/api/v0/transfers/:id/complete`, `/api/v0/transfers/:id/cancel`, `/api/v0/transfers/:id/fail`.
-- Automation compatibility: `/api/v0/application`, `/api/v0/application/version/latest`, `/api/v0/server`, `/api/v0/session/enabled`, `searchText` search bodies, slskd-style top-level search/event arrays, grouped transfer download/upload views, JSON-string YAML options, and search response arrays.
-
-Run the local slskd automation-client compatibility smoke with:
-
-```bash
-SLSKR_SLSKD_API_SMOKE_TOKEN=slskd-api-smoke-token scripts/run-slskd-api-compat-smoke.sh
+```text
+docs/slskr.config.example.toml
 ```
 
-Example search request:
+Default config path:
+
+```text
+$XDG_CONFIG_HOME/slskr/config.toml
+```
+
+Fallback when `XDG_CONFIG_HOME` is unset:
+
+```text
+$HOME/.config/slskr/config.toml
+```
+
+Default state directory:
+
+```text
+$XDG_STATE_HOME/slskr
+```
+
+Fallback when `XDG_STATE_HOME` is unset:
+
+```text
+$HOME/.local/state/slskr
+```
+
+Use `SLSKR_CONFIG=/path/to/config.toml` and
+`SLSKR_STATE_DIR=/path/to/state` to override those paths. Environment variables
+override config-file values.
+
+Common settings:
+
+| Setting | Purpose |
+| --- | --- |
+| `SLSKR_HTTP_BIND` | HTTP listener, default `127.0.0.1:5030`. |
+| `SLSKR_AUTO_CONNECT` | Connect at startup when credentials are configured. |
+| `SLSK_USERNAME`, `SLSK_PASSWORD` | Soulseek account credentials. |
+| `SLSKR_API_TOKEN` | Token for protected API routes. |
+| `SLSKR_SHARE_DIRS` | Semicolon-separated share roots. |
+| `SLSKR_LISTENER_BIND` | Regular peer listener bind address. |
+| `SLSKR_ADVERTISED_PORT` | Public regular peer port advertised to the network. |
+| `SLSKR_OBFUSCATED_LISTENER_BIND` | Optional obfuscated peer listener bind address. |
+| `SLSKR_OBFUSCATED_ADVERTISED_PORT` | Public obfuscated peer port. |
+| `SLSKR_TRANSFER_MAX_ACTIVE` | Maximum active transfers. |
+| `SLSKR_TRANSFER_ALLOW_INBOUND` | Enable inbound shared-file serving. |
+| `SLSKR_TRANSFER_ALLOW_OUTBOUND` | Enable outbound downloads. |
+| `SLSKR_PERSISTENCE_ENABLED` | Enable SQLite-backed persistence paths. |
+
+See [docs/install.md](./docs/install.md) for service units, state layout,
+container shape, and exposure rules.
+
+## Security
+
+Default behavior is intentionally conservative:
+
+- HTTP binds to `127.0.0.1:5030` by default.
+- Non-loopback HTTP binds require `SLSKR_API_TOKEN` unless auth is explicitly
+  disabled with `SLSKR_AUTH_DISABLED=true`.
+- Protected API routes accept `Authorization: Bearer <token>` or
+  `X-API-Key: <token>`.
+- Browser-origin mutating requests are checked with `Origin`/`Referer` to reduce
+  CSRF exposure.
+- Sanitized config responses do not return credentials.
+- Share APIs return virtual paths rather than raw host paths.
+
+Before exposing `slskr` beyond localhost, set an API token, keep auth enabled,
+put it behind a reverse proxy you control, and make sure forwarded `Host`,
+`Origin`, and `Referer` headers are preserved. Peer listener ports are separate
+from the HTTP UI/API port and should match the advertised ports configured for
+your NAT, VPN, or port-forwarding setup.
+
+## HTTP API Examples
+
+Create a search:
 
 ```bash
 curl -H "Authorization: Bearer $SLSKR_API_TOKEN" \
@@ -231,29 +262,44 @@ curl -H "Authorization: Bearer $SLSKR_API_TOKEN" \
   http://127.0.0.1:5030/api/v0/searches
 ```
 
-Example transfer projection:
+List transfer projections:
 
 ```bash
 curl -H "Authorization: Bearer $SLSKR_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"direction":"download","peer_username":"commons_peer","filename":"Example_sound_file_in_Ogg_Vorbis_format.ogg","size":153301}' \
   http://127.0.0.1:5030/api/v0/transfers
 ```
 
-See [docs/http-api.md](./docs/http-api.md), [docs/http-api-features.md](./docs/http-api-features.md), and [docs/openapi.json](./docs/openapi.json).
+Stream events:
 
-## CLI Commands
+```bash
+curl -H "Authorization: Bearer $SLSKR_API_TOKEN" \
+  http://127.0.0.1:5030/api/v0/events
+```
 
-Prefer the `slskr` binary for operator workflows:
+Run the slskd-style API automation smoke:
+
+```bash
+SLSKR_SLSKD_API_SMOKE_TOKEN=slskd-api-smoke-token \
+  scripts/run-slskd-api-compat-smoke.sh
+```
+
+## CLI Reference
+
+Common operator commands:
 
 ```bash
 slskr serve
 slskr version
 slskr login smoke
-slskr soak live
 slskr smoke local-peer
+slskr soak live
 slskr probe peer-address
 slskr probe plain-peer
+slskr probe browse-peer
+slskr probe search-peer
+slskr probe download-peer
+slskr probe private-message
+slskr probe room-message
 slskr probe obfuscated-peer
 slskr probe indirect-peer
 slskr probe distributed-peer
@@ -262,156 +308,8 @@ slskr probe metadata-relogin
 slskr probe negative-indirect
 ```
 
-The probe commands are intentionally narrow. They let you verify one network behavior at a time before running broader live smoke suites.
-
-## Search And Discovery
-
-Search features include:
-
-- Global, user, room, and wishlist-targeted search records.
-- Public-network dispatch when connected.
-- Local share snapshot matching.
-- Search TTL and prune behavior.
-- Result ingestion through `/api/v0/search-responses`.
-- Result counts, locked counts, peer metadata fields, slot availability, average speed, and queue length.
-- Browser-side filters, hidden users, blocked users, duplicate folding, and user notes.
-- Acquisition profiles such as lossless-exact matching.
-- MusicBrainz lookup, discography coverage, artist release radar, SongID panels, discovery graph atlas, and federated taste panels.
-
-Useful example queries while testing:
-
-- `Example sound file Ogg Vorbis`
-- `Audacity click track eight seconds`
-
-The open fixture policy and source list are documented in [docs/open-commons-fixtures.md](./docs/open-commons-fixtures.md).
-
-## Browse, Shares, And Library State
-
-Share and browse features include:
-
-- Startup share scanning from configured roots.
-- Optional symlink following and hidden-file inclusion.
-- Scan caps for predictable startup behavior.
-- State-dir share cache.
-- Virtual share paths instead of host path disclosure.
-- Root-level file APIs with `q`, `prefix`, `extension`, `limit`, and `offset`.
-- Browse requests per user.
-- Folder-content browse requests.
-- Direct peer browse and indirect fallback paths.
-- Browse status projection: requested, partial, ready, failed.
-- Flattened browse-response ingestion for tests and external tools.
-
-## Transfers
-
-Transfer features include:
-
-- Download and upload projection APIs.
-- Queue, start, progress, complete, cancel, and fail operations.
-- Transfer stats for counts and bytes.
-- Restart-safe transfer state through `transfer-state.json`.
-- State-dir transfer event log.
-- Configurable active transfer cap.
-- Inbound and outbound allow switches.
-- Local-path metadata execution for file-backed projections.
-- Direct plain and type-1 obfuscated file-transfer sockets.
-- Indirect file-transfer fallback through server-mediated peer connection.
-- Inbound shared-file serving for indexed local files.
-- Resume/offset handling in the transfer handshake.
-- Chunked progress events.
-- Live HTTP transfer smoke automation.
-
-Run the live HTTP transfer smoke with:
-
-```bash
-scripts/run-live-http-transfer-smoke.sh
-```
-
-## Messaging, Rooms, Users, And Contacts
-
-Social and communication surfaces include:
-
-- Private-message send, inbound projection, list, per-user read, and acknowledgement.
-- Room list refresh, join, leave, room message projection, joined filtering, and recent room-message state.
-- Watched users, watch/unwatch commands, user stats requests, and projected speed/upload/file/directory counts.
-- Contacts, nearby contacts, invite flows, contact update/delete, and discovery import surfaces in the web client.
-- User notes and local peer context controls in search results.
-
-## Player And Media Tools
-
-The web UI includes a persistent player surface:
-
-- Transport controls.
-- Queue/list controls.
-- Local collection item playback hooks.
-- Spectrum analyzer and visualizer components.
-- Lyrics pane support.
-- Listen-along/pod panel support.
-- Player auto-queue, player radio, ratings, shortcuts, and now-playing helpers in the web library layer.
-
-## Integrations
-
-Current integration surfaces include:
-
-- Spotify authorization callback through the same daemon HTTP port.
-- Lidarr status, wanted-album sync, and manual import flows.
-- ListenBrainz, source providers, source feed imports, and taste recommendation helpers in the web library layer.
-- External visualizer command launch reporting.
-- Bridge, relay, mesh, media-server, and federation diagnostics modules in the web client.
-- Solid settings view and profile/contact identity surfaces.
-
-Some integrations are operationally dependent on local config and API keys. The UI should show disabled or unavailable state when the daemon reports that an integration is not configured.
-
-## Security Model
-
-Default behavior is conservative:
-
-- `slskr serve` binds to loopback by default.
-- Protected API routes accept `Authorization: Bearer <token>` or `X-API-Key: <token>` when `SLSKR_API_TOKEN` is configured.
-- Browser clients use bearer-token headers for protected APIs and should avoid long-lived token persistence. Legacy same-site `slskr.session` cookie auth remains accepted for compatibility.
-- Mutating browser-origin API requests are checked against `Origin`/`Referer` to reduce CSRF exposure.
-- Non-loopback HTTP binds require auth unless `SLSKR_AUTH_DISABLED=true` is explicitly set.
-- Health, version, and public capability endpoints remain available for lightweight checks.
-- Sanitized config responses do not expose credentials.
-- Share APIs expose virtual paths rather than raw host paths.
-
-Before exposing the service beyond localhost, configure an API token, use a reverse proxy you control, and decide whether public peer listener ports should be advertised directly or through a network boundary.
-
-## Observability
-
-Operational surfaces include:
-
-- `/api/v0/health`: JSON health.
-- `/api/v0/stats`: compact projection counts.
-- `/api/v0/metrics`: Prometheus-style text metrics.
-- `/api/v0/telemetry`: protected runtime snapshot.
-- `/api/v0/events`: bounded event log with `kind`, `q`, `limit`, and `offset`.
-- `/api/events/ws`: WebSocket event feed with topic/type/data/timestamp frames.
-- Kubernetes `ServiceMonitor` and Prometheus rule examples under [k8s](./k8s).
-- Public posture checks and live soak scripts under [scripts](./scripts).
-
-## Persistence And State
-
-Current state paths include:
-
-- Share index cache in the state directory.
-- Transfer event log and `transfer-state.json`.
-- Optional SQLite persistence paths when `SLSKR_PERSISTENCE_ENABLED=true`.
-- Search create/list hydration through SQLite when enabled.
-- Restart-safe active transfer projection records.
-- In-memory bounded event store for current event feed behavior.
-
-The persistence boundary is intentionally explicit so operators can inspect and back up state without mixing it with secrets.
-
-## Client Libraries
-
-The repository includes client examples and packages for:
-
-- TypeScript: [client-ts](./client-ts)
-- Python: [client-python](./client-python)
-- Go: [client-go](./client-go)
-- Rust: [crates/slskr-client](./crates/slskr-client)
-
-See [docs/CLIENT_LIBRARIES.md](./docs/CLIENT_LIBRARIES.md) for generated-client notes and examples.
+The probe commands are deliberately narrow. Use them to verify one network
+behavior at a time before running broader live smoke or soak suites.
 
 ## Testing And Verification
 
@@ -422,16 +320,19 @@ cargo fmt --all --check
 cargo test --workspace
 ```
 
+Web checks:
+
 ```bash
 cd web
 npm test
 npm run build
 ```
 
-Release/package check:
+Release/package checks:
 
 ```bash
 scripts/check-release-package.sh
+scripts/run-release-gate.sh
 ```
 
 Local two-account peer smoke:
@@ -445,25 +346,26 @@ SLSKR_INDIRECT_HOST_OVERRIDE=127.0.0.1 \
 cargo run -p slskr -- smoke local-peer
 ```
 
-Open fixture workflow:
-
-```bash
-scripts/fetch-open-commons-fixtures.sh
-scripts/verify-open-commons-fixtures.sh
-```
-
-Live matrix and soak scripts are under [scripts](./scripts). They are meant for deliberate operator runs because they use real accounts and live network behavior.
+Live interop and soak scripts are under [scripts](./scripts). They use real
+accounts and public-network behavior, so run them deliberately and keep
+credentials out of git.
 
 ## Deployment
 
+`slskr` is designed around one daemon process, one config file, one state
+directory, and explicit operator-controlled secrets.
+
 Deployment assets include:
 
-- Kubernetes namespace, config map, deployment, service, ingress, HPA, PDB, RBAC, ServiceMonitor, and Prometheus rules under [k8s](./k8s).
+- Systemd examples in [docs/install.md](./docs/install.md).
+- Kubernetes manifests in [k8s](./k8s).
+- Prometheus rules and ServiceMonitor examples in [k8s](./k8s).
 - Public posture checks in [scripts/check-public-posture.sh](./scripts/check-public-posture.sh).
-- Proton/NAT-PMP helper scripts for lab listener exposure.
-- Release package validation in [scripts/check-release-package.sh](./scripts/check-release-package.sh).
+- Release packaging checks in [scripts/check-release-package.sh](./scripts/check-release-package.sh).
 
-The expected release shape is one binary, one config file, one state directory, optional container image, and explicit operator-controlled secrets.
+For container deployments, run the same command, `slskr serve`, mount config
+read-only, mount state read-write, and expose only the HTTP and peer listener
+ports you intend to publish.
 
 ## Repository Layout
 
@@ -474,31 +376,30 @@ The expected release shape is one binary, one config file, one state directory, 
 │   ├── slskr-client/     # async session, peer, search, browse, transfer runtime
 │   ├── slskr-protocol/   # protocol messages, codecs, frames, obfuscation
 │   └── slskr-web/        # Rust/WASM web UI migration target
-├── web/                  # React/Vite web UI
-├── client-ts/            # TypeScript client
-├── client-python/        # Python client
-├── client-go/            # Go client
-├── docs/                 # API, app-surface, install, fixture, and screenshot docs
+├── web/                  # React/Vite Web UI and screenshot/test harness
+├── client-ts/            # TypeScript API client
+├── client-python/        # Python API client
+├── client-go/            # Go API client
+├── docs/                 # API, install, feature, fixture, and release docs
 ├── examples/             # example workflows
 ├── fixtures/             # hash-pinned fixture manifests
 ├── k8s/                  # Kubernetes deployment and observability manifests
 └── scripts/              # smoke, soak, posture, release, and fixture helpers
 ```
 
-## Reference Documents
+## Documentation Index
 
-- [App surface](./docs/app-surface.md)
-- [HTTP API reference](./docs/http-api.md)
-- [HTTP API feature notes](./docs/http-api-features.md)
-- [OpenAPI JSON](./docs/openapi.json)
-- [Install notes](./docs/install.md)
-- [Config example](./docs/slskr.config.example.toml)
-- [Rust web UI migration](./docs/rust-web-ui.md)
-- [Client libraries](./docs/CLIENT_LIBRARIES.md)
-- [Live interop matrix](./docs/live-interop-test-matrix.md)
-- [Open commons fixtures](./docs/open-commons-fixtures.md)
-- [Integration guide](./docs/INTEGRATION_GUIDE.md)
-- [Enhancements](./docs/ENHANCEMENTS.md)
+| Document | Purpose |
+| --- | --- |
+| [docs/install.md](./docs/install.md) | Build, install, config/state, service, container, and exposure runbook. |
+| [docs/app-surface.md](./docs/app-surface.md) | User-facing app surface and compatibility map. |
+| [docs/http-api.md](./docs/http-api.md) | HTTP API reference. |
+| [docs/openapi.json](./docs/openapi.json) | OpenAPI document. |
+| [docs/CLIENT_LIBRARIES.md](./docs/CLIENT_LIBRARIES.md) | TypeScript, Python, Go, and Rust client notes. |
+| [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md) | Live network and cross-client verification matrix. |
+| [docs/open-commons-fixtures.md](./docs/open-commons-fixtures.md) | Open fixture policy and source list. |
+| [docs/release.md](./docs/release.md) | Release tag, archive, and metadata policy. |
+| [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) | Annotated config example. |
 
 Canonical repository:
 
@@ -508,4 +409,5 @@ https://github.com/snapetech/slskr
 
 ## License
 
-`slskr` is licensed under AGPL-3.0-only. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
+`slskr` is licensed under AGPL-3.0-only. See [LICENSE](./LICENSE) and
+[NOTICE](./NOTICE).
