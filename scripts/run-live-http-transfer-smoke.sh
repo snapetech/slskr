@@ -147,6 +147,7 @@ echo "source_user=$(redact "$source_username") target_user=$(redact "$target_use
   export SLSKR_LISTENER_BIND="127.0.0.1:$source_listen_port"
   export SLSK_LISTEN_PORT="$source_listen_port"
   export SLSKR_ADVERTISED_PORT="$source_listen_port"
+  export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$target_username=127.0.0.1:$target_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=10
   exec cargo run -q -p slskr -- serve
 ) >"$source_log" 2>&1 &
@@ -165,6 +166,7 @@ source_pid="$!"
   export SLSK_LISTEN_PORT="$target_listen_port"
   export SLSKR_ADVERTISED_PORT="$target_listen_port"
   export SLSKR_PEER_HOST_OVERRIDE=127.0.0.1
+  export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$source_username=127.0.0.1:$source_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=10
   exec cargo run -q -p slskr -- serve
 ) >"$target_log" 2>&1 &

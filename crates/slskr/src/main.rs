@@ -19068,7 +19068,7 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
 
     let result = negotiate_peer_transfer(state, address, &transfer).await;
     let (status, bytes_transferred, reason) = match result {
-        Ok(TransferResponse::Allowed { token, size }) if token == transfer.token => {
+        Ok(PeerTransferNegotiation::Allowed { token, size }) if token == transfer.token => {
             let transferred = transfer.bytes_transferred;
             let size = size.or(transfer.size);
             let accepted = {
@@ -19080,7 +19080,18 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
             }
             return;
         }
-        Ok(TransferResponse::Allowed { token, .. }) => (
+        Ok(PeerTransferNegotiation::QueuedInbound { token, size }) if token == transfer.token => {
+            let accepted = {
+                let mut transfers = state.transfers.write().await;
+                transfers.update_local_execution(transfer.id, "accepted", 0, size, None)
+            };
+            if let Some(accepted) = accepted {
+                persist_transfer_record(state, &accepted).await.ok();
+            }
+            return;
+        }
+        Ok(PeerTransferNegotiation::Allowed { token, .. })
+        | Ok(PeerTransferNegotiation::QueuedInbound { token, .. }) => (
             "failed",
             None,
             Some(format!(
@@ -19088,14 +19099,14 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
                 transfer.token
             )),
         ),
-        Ok(TransferResponse::Rejected { token, reason }) if token == transfer.token => {
+        Ok(PeerTransferNegotiation::Rejected { token, reason }) if token == transfer.token => {
             if is_remote_queue_response(&reason) {
                 ("queued", None, Some(reason))
             } else {
                 ("failed", None, Some(reason))
             }
         }
-        Ok(TransferResponse::Rejected { token, .. }) => (
+        Ok(PeerTransferNegotiation::Rejected { token, .. }) => (
             "failed",
             None,
             Some(format!(
@@ -19640,25 +19651,54 @@ async fn connect_indirect_peer_messages(
     Ok(PeerMessageConnection::new(stream))
 }
 
+enum PeerTransferNegotiation {
+    Allowed { token: u32, size: Option<u64> },
+    Rejected { token: u32, reason: String },
+    QueuedInbound { token: u32, size: Option<u64> },
+}
+
 async fn negotiate_peer_transfer(
     state: &AppState,
     address: &PeerAddress,
     transfer: &TransferEntry,
-) -> Result<TransferResponse, String> {
+) -> Result<PeerTransferNegotiation, String> {
     let message = PeerMessage::TransferRequest(TransferRequest {
         direction: transfer.direction,
         token: transfer.token,
         filename: transfer.filename.clone(),
         size: (transfer.direction == 1).then_some(transfer.size).flatten(),
     });
-    let response = send_peer_message_request(state, address, message).await?;
-    match response {
-        PeerMessage::TransferResponse(response) => Ok(response),
-        other => Err(format!(
-            "expected TransferResponse, got {}",
-            peer_message_name(&other)
-        )),
+    let username = outgoing_peer_init_username(state)?;
+    let mut obfuscated_error = None;
+    let peer_ip = peer_connect_ip(state, address);
+    if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
+        match negotiate_obfuscated_peer_transfer(
+            SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
+            username.clone(),
+            message.clone(),
+            transfer,
+            state.config.peer_response_timeout,
+        )
+        .await
+        {
+            Ok(response) => return Ok(response),
+            Err(error) => obfuscated_error = Some(error),
+        }
     }
+
+    let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
+    if port != 0 {
+        return negotiate_plain_peer_transfer(
+            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
+            username,
+            message,
+            transfer,
+            state.config.peer_response_timeout,
+        )
+        .await;
+    }
+
+    Err(obfuscated_error.unwrap_or_else(|| "peer did not advertise a peer-message port".to_owned()))
 }
 
 async fn fetch_peer_browse(
@@ -19895,6 +19935,149 @@ async fn send_obfuscated_peer_message_request(
         .await
         .map_err(|_| "obfuscated peer response timed out".to_owned())?
         .map_err(|error| format!("obfuscated peer response failed: {error}"))
+}
+
+async fn negotiate_plain_peer_transfer(
+    address: SocketAddr,
+    username: String,
+    message: PeerMessage,
+    transfer: &TransferEntry,
+    timeout: Duration,
+) -> Result<PeerTransferNegotiation, String> {
+    let mut peer = time::timeout(timeout, connect_peer_messages(address, username))
+        .await
+        .map_err(|_| "plain peer connect timed out".to_owned())?
+        .map_err(|error| format!("plain peer connect failed: {error}"))?;
+    time::timeout(timeout, peer.send(&message))
+        .await
+        .map_err(|_| "plain peer transfer request timed out".to_owned())?
+        .map_err(|error| format!("plain peer transfer request failed: {error}"))?;
+    let response = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "plain peer transfer response timed out".to_owned())?
+        .map_err(|error| format!("plain peer transfer response failed: {error}"))?;
+    handle_peer_transfer_negotiation_response(&mut peer, response, transfer, timeout).await
+}
+
+async fn negotiate_obfuscated_peer_transfer(
+    address: SocketAddr,
+    username: String,
+    message: PeerMessage,
+    transfer: &TransferEntry,
+    timeout: Duration,
+) -> Result<PeerTransferNegotiation, String> {
+    let stream = time::timeout(timeout, TcpStream::connect(address))
+        .await
+        .map_err(|_| "obfuscated peer connect timed out".to_owned())?
+        .map_err(|error| format!("obfuscated peer connect failed: {error}"))?;
+    let stream = time::timeout(
+        timeout,
+        send_obfuscated_peer_init(stream, username, ConnectionKind::PeerMessages),
+    )
+    .await
+    .map_err(|_| "obfuscated peer init timed out".to_owned())?
+    .map_err(|error| format!("obfuscated peer init failed: {error}"))?;
+    let mut peer = ObfuscatedPeerMessageConnection::new(stream);
+    time::timeout(timeout, peer.send(&message))
+        .await
+        .map_err(|_| "obfuscated peer transfer request timed out".to_owned())?
+        .map_err(|error| format!("obfuscated peer transfer request failed: {error}"))?;
+    let response = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "obfuscated peer transfer response timed out".to_owned())?
+        .map_err(|error| format!("obfuscated peer transfer response failed: {error}"))?;
+    handle_peer_transfer_negotiation_response(&mut peer, response, transfer, timeout).await
+}
+
+async fn handle_peer_transfer_negotiation_response<C>(
+    peer: &mut C,
+    response: PeerMessage,
+    transfer: &TransferEntry,
+    timeout: Duration,
+) -> Result<PeerTransferNegotiation, String>
+where
+    C: PeerMessageSenderReceiver,
+{
+    let PeerMessage::TransferResponse(response) = response else {
+        return Err(format!(
+            "expected TransferResponse, got {}",
+            peer_message_name(&response)
+        ));
+    };
+    match response {
+        TransferResponse::Allowed { token, size } => Ok(PeerTransferNegotiation::Allowed {
+            token,
+            size: size.or(transfer.size),
+        }),
+        TransferResponse::Rejected { token, reason }
+            if token == transfer.token
+                && transfer.direction == 0
+                && is_remote_queue_response(&reason) =>
+        {
+            let queued = time::timeout(timeout, peer.receive_peer_message())
+                .await
+                .map_err(|_| "queued transfer request timed out".to_owned())?
+                .map_err(|error| format!("queued transfer request failed: {error}"))?;
+            let PeerMessage::TransferRequest(request) = queued else {
+                return Err(format!(
+                    "expected queued TransferRequest, got {}",
+                    peer_message_name(&queued)
+                ));
+            };
+            if request.direction != 1
+                || request.token != transfer.token
+                || request.filename != transfer.filename
+            {
+                return Err("queued transfer request did not match pending download".to_owned());
+            }
+            peer.send_peer_message(&PeerMessage::TransferResponse(TransferResponse::Allowed {
+                token: request.token,
+                size: request.size.or(transfer.size),
+            }))
+            .await
+            .map_err(|error| format!("queued transfer response failed: {error}"))?;
+            Ok(PeerTransferNegotiation::QueuedInbound {
+                token: request.token,
+                size: request.size.or(transfer.size),
+            })
+        }
+        TransferResponse::Rejected { token, reason } => {
+            Ok(PeerTransferNegotiation::Rejected { token, reason })
+        }
+    }
+}
+
+trait PeerMessageSenderReceiver {
+    async fn receive_peer_message(&mut self) -> Result<PeerMessage, String>;
+    async fn send_peer_message(&mut self, message: &PeerMessage) -> Result<(), String>;
+}
+
+impl PeerMessageSenderReceiver for PeerMessageConnection<TcpStream> {
+    async fn receive_peer_message(&mut self) -> Result<PeerMessage, String> {
+        self.receive()
+            .await
+            .map_err(|error| format!("plain peer receive failed: {error}"))
+    }
+
+    async fn send_peer_message(&mut self, message: &PeerMessage) -> Result<(), String> {
+        self.send(message)
+            .await
+            .map_err(|error| format!("plain peer send failed: {error}"))
+    }
+}
+
+impl PeerMessageSenderReceiver for ObfuscatedPeerMessageConnection<TcpStream> {
+    async fn receive_peer_message(&mut self) -> Result<PeerMessage, String> {
+        self.receive()
+            .await
+            .map_err(|error| format!("obfuscated peer receive failed: {error}"))
+    }
+
+    async fn send_peer_message(&mut self, message: &PeerMessage) -> Result<(), String> {
+        self.send(message)
+            .await
+            .map_err(|error| format!("obfuscated peer send failed: {error}"))
+    }
 }
 
 fn browse_entries_from_peer_message(message: PeerMessage) -> Result<Vec<BrowseEntry>, String> {
