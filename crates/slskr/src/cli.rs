@@ -2924,12 +2924,30 @@ where
 
     while Instant::now() < deadline && events < config.max_events {
         let now = Instant::now();
+        if now >= next_ping {
+            session
+                .send_ping()
+                .await
+                .map_err(|error| format!("periodic ping failed: {error}"))?;
+            next_ping = Instant::now() + config.ping_interval;
+            println!("server ping sent");
+        }
+        if config.active_probes && now >= next_search {
+            if let Some(query) = &config.search_query {
+                search_token = search_token.wrapping_add(1).max(1);
+                dispatch_live_soak_search(session, query, search_token).await?;
+            }
+            next_search = Instant::now() + config.search_interval;
+        }
+
         let next_action = if config.active_probes && config.search_query.is_some() {
             next_ping.min(next_search)
         } else {
             next_ping
         };
-        let next_wait = next_action.min(deadline).saturating_duration_since(now);
+        let next_wait = next_action
+            .min(deadline)
+            .saturating_duration_since(Instant::now());
 
         match time::timeout(next_wait, session.receive()).await {
             Ok(Ok(message)) => {
@@ -2937,23 +2955,7 @@ where
                 handle_server_message(session, message).await?;
             }
             Ok(Err(error)) => return Err(format!("server receive failed: {error}")),
-            Err(_) => {
-                if Instant::now() >= next_ping {
-                    session
-                        .send_ping()
-                        .await
-                        .map_err(|error| format!("periodic ping failed: {error}"))?;
-                    next_ping = Instant::now() + config.ping_interval;
-                    println!("server ping sent");
-                }
-                if config.active_probes && Instant::now() >= next_search {
-                    if let Some(query) = &config.search_query {
-                        search_token = search_token.wrapping_add(1).max(1);
-                        dispatch_live_soak_search(session, query, search_token).await?;
-                    }
-                    next_search = Instant::now() + config.search_interval;
-                }
-            }
+            Err(_) => {}
         }
     }
 
