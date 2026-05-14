@@ -63,6 +63,8 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # Swatinem/rust-cache@v2
+      - name: Prefer rustup toolchain binaries
+        run: echo "$(dirname "$(rustup which cargo)")" >> "$GITHUB_PATH"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
         with:
           node-version: '22'
@@ -85,9 +87,9 @@ jobs:
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked --force
+        run: '"$(rustup which cargo)" install cargo-audit --locked --force'
       - name: Install wasm-bindgen CLI
-        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
+        run: '"$(rustup which cargo)" install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force'
       - name: Install Playwright browsers
         run: |
           npm --prefix web ci
@@ -135,6 +137,9 @@ jobs:
             ${{ matrix.target }}
             wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # Swatinem/rust-cache@v2
+      - name: Prefer rustup toolchain binaries
+        shell: bash
+        run: echo "$(dirname "$(rustup which cargo)")" >> "$GITHUB_PATH"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
         with:
           node-version: '22'
@@ -152,7 +157,7 @@ jobs:
           sudo apt-get install -y ${{ matrix.apt }}
       - name: Install wasm-bindgen CLI
         shell: bash
-        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
+        run: '"$(rustup which cargo)" install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force'
       - name: Build archive
         shell: bash
         env:

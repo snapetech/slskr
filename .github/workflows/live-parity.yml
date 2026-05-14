@@ -25,6 +25,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # Swatinem/rust-cache@v2
+      - name: Prefer rustup toolchain binaries
+        run: echo "$(dirname "$(rustup which cargo)")" >> "$GITHUB_PATH"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
         with:
           node-version: '22'
@@ -37,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ripgrep
-          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
+          "$(rustup which cargo)" install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Install web dependencies
         run: npm --prefix web ci
       - name: Install Playwright browsers
@@ -69,6 +71,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # actions/checkout@v4
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # Swatinem/rust-cache@v2
+      - name: Prefer rustup toolchain binaries
+        run: echo "$(dirname "$(rustup which cargo)")" >> "$GITHUB_PATH"
       - name: Prepare live credentials
         id: live-creds
         shell: bash
