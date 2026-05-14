@@ -85,6 +85,8 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --locked
       - name: Run release gate
         run: scripts/run-release-gate.sh
 
