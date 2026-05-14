@@ -40,6 +40,8 @@ jobs:
           cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked
       - name: Install web dependencies
         run: npm --prefix web ci
+      - name: Install Playwright browsers
+        run: npm --prefix web exec playwright install --with-deps chromium
       - name: Rust web UI headless parity audit
         run: node scripts/audit-rust-web-ui.mjs
       - name: slskd API automation compatibility smoke

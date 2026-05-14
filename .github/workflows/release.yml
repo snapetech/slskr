@@ -88,6 +88,10 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Install wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked
+      - name: Install Playwright browsers
+        run: |
+          npm --prefix web ci
+          npm --prefix web exec playwright install --with-deps chromium
       - name: Run release gate
         run: scripts/run-release-gate.sh
 
