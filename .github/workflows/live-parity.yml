@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ripgrep
-          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Install web dependencies
         run: npm --prefix web ci
       - name: Install Playwright browsers

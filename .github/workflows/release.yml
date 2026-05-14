@@ -85,9 +85,9 @@ jobs:
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        run: cargo install cargo-audit --locked --force
       - name: Install wasm-bindgen CLI
-        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Install Playwright browsers
         run: |
           npm --prefix web ci
@@ -152,7 +152,7 @@ jobs:
           sudo apt-get install -y ${{ matrix.apt }}
       - name: Install wasm-bindgen CLI
         shell: bash
-        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Build archive
         shell: bash
         env:
