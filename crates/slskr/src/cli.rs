@@ -26,7 +26,14 @@ use slskr_client::{
         DEFAULT_SERVER_ADDRESS,
     },
 };
-use std::{ffi::OsString, fs, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    ffi::OsString,
+    fs,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
 use tokio::net::TcpStream;
 use tokio::time::{self, Instant};
 
@@ -3097,14 +3104,11 @@ async fn handle_live_soak_connect_to_peer_response(
         let peer_response = match time::timeout(timeout, peer.receive()).await {
             Ok(Ok(message)) => message,
             Ok(Err(error)) => {
-                println!(
-                    "live soak indirect peer-message closed before response: {}",
-                    peer_close_reason(&error.to_string())
-                );
+                log_live_soak_indirect_close(peer_close_reason(&error.to_string()));
                 return Ok(());
             }
             Err(_) => {
-                println!("live soak indirect peer-message response timed out");
+                log_live_soak_indirect_close("response timed out");
                 return Ok(());
             }
         };
@@ -3564,6 +3568,43 @@ fn peer_close_reason(error: &str) -> &'static str {
         "unexpected eof"
     } else {
         "closed"
+    }
+}
+
+#[derive(Default)]
+struct LiveSoakIndirectCloseLog {
+    total: u64,
+    connection_reset: u64,
+    unexpected_eof: u64,
+    timed_out: u64,
+    other: u64,
+}
+
+fn log_live_soak_indirect_close(reason: &'static str) {
+    const VERBOSE_LIMIT: u64 = 3;
+    const SUMMARY_INTERVAL: u64 = 25;
+
+    static CLOSE_LOG: OnceLock<Mutex<LiveSoakIndirectCloseLog>> = OnceLock::new();
+    let mut log = CLOSE_LOG
+        .get_or_init(|| Mutex::new(LiveSoakIndirectCloseLog::default()))
+        .lock()
+        .expect("live soak indirect close log poisoned");
+
+    log.total += 1;
+    match reason {
+        "connection reset by peer" => log.connection_reset += 1,
+        "unexpected eof" => log.unexpected_eof += 1,
+        "response timed out" => log.timed_out += 1,
+        _ => log.other += 1,
+    }
+
+    if log.total <= VERBOSE_LIMIT {
+        println!("live soak indirect peer-message closed before response: {reason}");
+    } else if log.total % SUMMARY_INTERVAL == 0 {
+        println!(
+            "live soak indirect peer-message close summary total={} connection_reset={} unexpected_eof={} timed_out={} other={}",
+            log.total, log.connection_reset, log.unexpected_eof, log.timed_out, log.other
+        );
     }
 }
 
