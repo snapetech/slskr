@@ -16,3 +16,6 @@ __pycache__/
 
 # Local live-test credentials
 .env
+
+# Local private denylist/config
+/.local/
