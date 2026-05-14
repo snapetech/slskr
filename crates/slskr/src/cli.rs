@@ -3026,7 +3026,22 @@ where
             );
         }
         ServerMessage::ConnectToPeerResponse(response) => {
-            handle_live_soak_connect_to_peer_response(response).await?;
+            println!(
+                "server event: connect_to_peer received requester={} kind={} token={} host_override={}",
+                redact_username(&response.username),
+                response.connection_type,
+                response.token,
+                optional_env("SLSK_SOAK_INDIRECT_HOST_OVERRIDE").is_some()
+            );
+            let timeout =
+                Duration::from_secs(env_u64("SLSK_SOAK_INDIRECT_TIMEOUT_SECONDS", 20)? + 5);
+            match time::timeout(timeout, handle_live_soak_connect_to_peer_response(response)).await
+            {
+                Ok(result) => result?,
+                Err(_) => {
+                    println!("server event: connect_to_peer probe timed out");
+                }
+            }
         }
         ServerMessage::RoomList(rooms) => {
             println!(
