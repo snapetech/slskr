@@ -123,36 +123,171 @@ const AdversarialSettings = () => {
     }
   };
 
-  const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+  const cloneSettings = (previous) => JSON.parse(JSON.stringify(previous || {}));
+
+  const ensurePrivacyPadding = (settings_) => {
+    settings_.Privacy = settings_.Privacy || {};
+    settings_.Privacy.Padding = settings_.Privacy.Padding || {};
+    return settings_.Privacy.Padding;
+  };
+
+  const ensurePrivacyTiming = (settings_) => {
+    settings_.Privacy = settings_.Privacy || {};
+    settings_.Privacy.Timing = settings_.Privacy.Timing || {};
+    return settings_.Privacy.Timing;
+  };
+
+  const ensurePrivacyBatching = (settings_) => {
+    settings_.Privacy = settings_.Privacy || {};
+    settings_.Privacy.Batching = settings_.Privacy.Batching || {};
+    return settings_.Privacy.Batching;
+  };
+
+  const ensurePrivacyCoverTraffic = (settings_) => {
+    settings_.Privacy = settings_.Privacy || {};
+    settings_.Privacy.CoverTraffic = settings_.Privacy.CoverTraffic || {};
+    return settings_.Privacy.CoverTraffic;
+  };
+
+  const ensureAnonymityTor = (settings_) => {
+    settings_.Anonymity = settings_.Anonymity || {};
+    settings_.Anonymity.Tor = settings_.Anonymity.Tor || {};
+    return settings_.Anonymity.Tor;
+  };
+
+  const ensureAnonymityI2P = (settings_) => {
+    settings_.Anonymity = settings_.Anonymity || {};
+    settings_.Anonymity.I2P = settings_.Anonymity.I2P || {};
+    return settings_.Anonymity.I2P;
+  };
+
+  const ensureAnonymityRelayOnly = (settings_) => {
+    settings_.Anonymity = settings_.Anonymity || {};
+    settings_.Anonymity.RelayOnly = settings_.Anonymity.RelayOnly || {};
+    return settings_.Anonymity.RelayOnly;
+  };
+
+  const ensureTransportWebSocket = (settings_) => {
+    settings_.Transport = settings_.Transport || {};
+    settings_.Transport.WebSocket = settings_.Transport.WebSocket || {};
+    return settings_.Transport.WebSocket;
+  };
+
+  const ensureTransportHttpTunnel = (settings_) => {
+    settings_.Transport = settings_.Transport || {};
+    settings_.Transport.HttpTunnel = settings_.Transport.HttpTunnel || {};
+    return settings_.Transport.HttpTunnel;
+  };
+
+  const ensureTransportObfs4 = (settings_) => {
+    settings_.Transport = settings_.Transport || {};
+    settings_.Transport.Obfs4 = settings_.Transport.Obfs4 || {};
+    return settings_.Transport.Obfs4;
+  };
+
+  const ensureTransportMeek = (settings_) => {
+    settings_.Transport = settings_.Transport || {};
+    settings_.Transport.Meek = settings_.Transport.Meek || {};
+    return settings_.Transport.Meek;
+  };
 
   const updateSetting = (path, value) => {
     setSettings((previous) => {
-      const newSettings = { ...previous };
-      const keys = path.split('.');
+      const newSettings = cloneSettings(previous);
 
-      if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return newSettings;
-
-      let current = newSettings;
-
-      for (let index = 0; index < keys.length - 1; index++) {
-        const key = keys[index];
-        if (!Object.hasOwn(current, key) || typeof current[key] !== 'object' || current[key] === null) {
-          Object.defineProperty(current, key, {
-            configurable: true,
-            enumerable: true,
-            value: {},
-            writable: true,
-          });
-        }
-        current = current[key]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
+      switch (path) {
+        case 'Profile':
+          newSettings.Profile = value;
+          break;
+        case 'Enabled':
+          newSettings.Enabled = value;
+          break;
+        case 'Privacy.Enabled':
+          newSettings.Privacy = newSettings.Privacy || {};
+          newSettings.Privacy.Enabled = value;
+          break;
+        case 'Privacy.Padding.Enabled':
+          ensurePrivacyPadding(newSettings).Enabled = value;
+          break;
+        case 'Privacy.Padding.UseRandomFill':
+          ensurePrivacyPadding(newSettings).UseRandomFill = value;
+          break;
+        case 'Privacy.Timing.Enabled':
+          ensurePrivacyTiming(newSettings).Enabled = value;
+          break;
+        case 'Privacy.Timing.JitterMs':
+          ensurePrivacyTiming(newSettings).JitterMs = value;
+          break;
+        case 'Privacy.Batching.Enabled':
+          ensurePrivacyBatching(newSettings).Enabled = value;
+          break;
+        case 'Privacy.Batching.BatchWindowMs':
+          ensurePrivacyBatching(newSettings).BatchWindowMs = value;
+          break;
+        case 'Privacy.CoverTraffic.Enabled':
+          ensurePrivacyCoverTraffic(newSettings).Enabled = value;
+          break;
+        case 'Privacy.CoverTraffic.IntervalSeconds':
+          ensurePrivacyCoverTraffic(newSettings).IntervalSeconds = value;
+          break;
+        case 'Anonymity.Enabled':
+          newSettings.Anonymity = newSettings.Anonymity || {};
+          newSettings.Anonymity.Enabled = value;
+          break;
+        case 'Anonymity.Mode':
+          newSettings.Anonymity = newSettings.Anonymity || {};
+          newSettings.Anonymity.Mode = value;
+          break;
+        case 'Anonymity.Tor.SocksAddress':
+          ensureAnonymityTor(newSettings).SocksAddress = value;
+          break;
+        case 'Anonymity.Tor.IsolateStreams':
+          ensureAnonymityTor(newSettings).IsolateStreams = value;
+          break;
+        case 'Anonymity.I2P.SamAddress':
+          ensureAnonymityI2P(newSettings).SamAddress = value;
+          break;
+        case 'Anonymity.RelayOnly.MaxChainLength':
+          ensureAnonymityRelayOnly(newSettings).MaxChainLength = value;
+          break;
+        case 'Transport.Enabled':
+          newSettings.Transport = newSettings.Transport || {};
+          newSettings.Transport.Enabled = value;
+          break;
+        case 'Transport.PrimaryTransport':
+          newSettings.Transport = newSettings.Transport || {};
+          newSettings.Transport.PrimaryTransport = value;
+          break;
+        case 'Transport.WebSocket.ServerUrl':
+          ensureTransportWebSocket(newSettings).ServerUrl = value;
+          break;
+        case 'Transport.WebSocket.UseWss':
+          ensureTransportWebSocket(newSettings).UseWss = value;
+          break;
+        case 'Transport.HttpTunnel.ProxyUrl':
+          ensureTransportHttpTunnel(newSettings).ProxyUrl = value;
+          break;
+        case 'Transport.HttpTunnel.Method':
+          ensureTransportHttpTunnel(newSettings).Method = value;
+          break;
+        case 'Transport.HttpTunnel.UseHttps':
+          ensureTransportHttpTunnel(newSettings).UseHttps = value;
+          break;
+        case 'Transport.Obfs4.Obfs4ProxyPath':
+          ensureTransportObfs4(newSettings).Obfs4ProxyPath = value;
+          break;
+        case 'Transport.Obfs4.BridgeLines':
+          ensureTransportObfs4(newSettings).BridgeLines = value;
+          break;
+        case 'Transport.Meek.BridgeUrl':
+          ensureTransportMeek(newSettings).BridgeUrl = value;
+          break;
+        case 'Transport.Meek.FrontDomain':
+          ensureTransportMeek(newSettings).FrontDomain = value;
+          break;
+        default:
+          return newSettings;
       }
-
-      Object.defineProperty(current, keys[keys.length - 1], {
-        configurable: true,
-        enumerable: true,
-        value,
-        writable: true,
-      });
       return newSettings;
     });
     setHasChanges(true);
@@ -160,36 +295,22 @@ const AdversarialSettings = () => {
 
   const updateArray = (path, index, value) => {
     setSettings((previous) => {
-      const newSettings = { ...previous };
-      const keys = path.split('.');
+      const newSettings = cloneSettings(previous);
+      let items;
 
-      if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return newSettings;
-
-      let current = newSettings;
-
-      for (let index_ = 0; index_ < keys.length - 1; index_++) {
-        const key = keys[index_];
-        if (!Object.hasOwn(current, key) || typeof current[key] !== 'object' || current[key] === null) {
-          Object.defineProperty(current, key, {
-            configurable: true,
-            enumerable: true,
-            value: {},
-            writable: true,
-          });
-        }
-        current = current[key]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
+      switch (path) {
+        case 'Privacy.Padding.BucketSizes':
+          items = ensurePrivacyPadding(newSettings).BucketSizes || [];
+          ensurePrivacyPadding(newSettings).BucketSizes = items;
+          break;
+        case 'Transport.Obfs4.BridgeLines':
+          items = ensureTransportObfs4(newSettings).BridgeLines || [];
+          ensureTransportObfs4(newSettings).BridgeLines = items;
+          break;
+        default:
+          return newSettings;
       }
-
-      if (!Array.isArray(current[keys[keys.length - 1]])) {
-        Object.defineProperty(current, keys[keys.length - 1], {
-          configurable: true,
-          enumerable: true,
-          value: [],
-          writable: true,
-        });
-      }
-
-      current[keys[keys.length - 1]][index] = value;
+      items[index] = value;
       return newSettings;
     });
     setHasChanges(true);
@@ -197,25 +318,24 @@ const AdversarialSettings = () => {
 
   const addArrayItem = (path) => {
     setSettings((previous) => {
-      const newSettings = { ...previous };
-      const keys = path.split('.');
+      const newSettings = cloneSettings(previous);
 
-      if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return newSettings;
-
-      let current = newSettings;
-
-      for (let index = 0; index < keys.length - 1; index++) {
-        if (!Object.hasOwn(current, keys[index]) || typeof current[keys[index]] !== 'object') {
-          current[keys[index]] = {};
-        }
-        current = current[keys[index]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
+      switch (path) {
+        case 'Privacy.Padding.BucketSizes':
+          ensurePrivacyPadding(newSettings).BucketSizes = [
+            ...(ensurePrivacyPadding(newSettings).BucketSizes || []),
+            '',
+          ];
+          break;
+        case 'Transport.Obfs4.BridgeLines':
+          ensureTransportObfs4(newSettings).BridgeLines = [
+            ...(ensureTransportObfs4(newSettings).BridgeLines || []),
+            '',
+          ];
+          break;
+        default:
+          return newSettings;
       }
-
-      if (!Array.isArray(current[keys[keys.length - 1]])) {
-        current[keys[keys.length - 1]] = [];
-      }
-
-      current[keys[keys.length - 1]].push('');
       return newSettings;
     });
     setHasChanges(true);
@@ -223,22 +343,21 @@ const AdversarialSettings = () => {
 
   const removeArrayItem = (path, index) => {
     setSettings((previous) => {
-      const newSettings = { ...previous };
-      const keys = path.split('.');
+      const newSettings = cloneSettings(previous);
 
-      if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return newSettings;
-
-      let current = newSettings;
-
-      for (let index_ = 0; index_ < keys.length - 1; index_++) {
-        if (!Object.hasOwn(current, keys[index_]) || typeof current[keys[index_]] !== 'object') {
-          current[keys[index_]] = {};
-        }
-        current = current[keys[index_]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
-      }
-
-      if (Array.isArray(current[keys[keys.length - 1]])) {
-        current[keys[keys.length - 1]].splice(index, 1);
+      switch (path) {
+        case 'Privacy.Padding.BucketSizes':
+          ensurePrivacyPadding(newSettings).BucketSizes = (
+            ensurePrivacyPadding(newSettings).BucketSizes || []
+          ).filter((_, itemIndex) => itemIndex !== index);
+          break;
+        case 'Transport.Obfs4.BridgeLines':
+          ensureTransportObfs4(newSettings).BridgeLines = (
+            ensureTransportObfs4(newSettings).BridgeLines || []
+          ).filter((_, itemIndex) => itemIndex !== index);
+          break;
+        default:
+          return newSettings;
       }
 
       return newSettings;
