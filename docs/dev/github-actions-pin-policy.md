@@ -16,9 +16,9 @@ or if a pinned action is missing from this ledger.
 | `actions/setup-node` | `v6` | `48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e` | Node setup for web, dashboard, TypeScript SDK, and live parity gates. |
 | `actions/setup-go` | `v6` | `4a3601121dd01d1626a1e23e37211e3254c1c06c` | Go SDK test setup. |
 | `actions/setup-python` | `v6` | `a309ff8b426b58ec0e2a45f0f869d46889d02405` | Python SDK and slskd API compatibility smoke setup. |
-| `actions/upload-artifact` | `v5` | `330a01c490aca151604b8cf639adc76d48f6c5d4` | Release archive and live parity artifact upload. |
-| `actions/download-artifact` | `v5` | `634f93cb2916e3fdff6788551b99b062d0335ce0` | Release archive download before publishing. |
-| `actions/attest-build-provenance` | `v4` | `b3e506e8c389afc651c5bacf2b8f2a1ea0557215` | Dereferenced tag target for release asset attestations. |
+| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | Release archive and live parity artifact upload. |
+| `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | Release archive download before publishing. |
+| `actions/attest-build-provenance` | `v4` | `a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32` | Dereferenced tag target for release asset attestations. |
 | `softprops/action-gh-release` | `v3` | `b4309332981a82ec1c5618f44dd2e27cc8bfbfda` | GitHub Release publisher. |
 | `github/codeql-action/init` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL initialization for GitHub code scanning. |
 | `github/codeql-action/autobuild` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL autobuild for analyzable language matrix entries. |

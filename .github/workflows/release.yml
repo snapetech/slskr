@@ -167,7 +167,7 @@ jobs:
         shell: bash
         run: scripts/verify-release-artifacts.sh target/dist
       - name: Upload archive
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
         with:
           name: slskr-${{ matrix.name }}
           path: |
@@ -186,7 +186,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # actions/checkout@v6
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # actions/download-artifact@v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact@v8.0.1
         with:
           path: artifacts
           pattern: slskr-*
@@ -199,7 +199,7 @@ jobs:
           (cd release && find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.json' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
           ls -lh release
       - name: Attest release assets
-        uses: actions/attest-build-provenance@b3e506e8c389afc651c5bacf2b8f2a1ea0557215 # actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # actions/attest-build-provenance@v4
         with:
           subject-path: |
             release/*.tar.gz
