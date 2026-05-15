@@ -19,7 +19,17 @@ duplicate_roots="$(
     sort -u
 )"
 
-allowed_roots="$(printf '%s\n' getrandom hashbrown thiserror thiserror-impl | sort -u)"
+allowed_roots="$(
+  printf '%s\n' \
+    block-buffer \
+    cpufeatures \
+    crypto-common \
+    digest \
+    getrandom \
+    hashbrown \
+    sha2 |
+    sort -u
+)"
 
 unexpected="$(comm -13 <(printf '%s\n' "$allowed_roots") <(printf '%s\n' "$duplicate_roots"))"
 missing="$(comm -23 <(printf '%s\n' "$allowed_roots") <(printf '%s\n' "$duplicate_roots"))"
@@ -33,7 +43,7 @@ if [[ -n "$missing" ]]; then
   printf 'rust dependency hygiene note: duplicate roots resolved; update %s and BUG-021:\n%s\n' "$policy" "$missing"
 fi
 
-for root in getrandom hashbrown thiserror thiserror-impl; do
+for root in block-buffer cpufeatures crypto-common digest getrandom hashbrown sha2; do
   if ! rg -n -F "| \`$root\` |" "$policy" >/dev/null; then
     printf 'rust dependency hygiene failed: %s missing from %s\n' "$root" "$policy" >&2
     status=1
