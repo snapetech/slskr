@@ -31,11 +31,13 @@ GATES=(
   scripts/check-council-negative-space.sh
   scripts/check-council-active-backlog.sh
   scripts/check-council-inventory-closure.sh
+  scripts/check-council-sweep-counts.sh
   scripts/check-rust-protocol-taint-lens.sh
   scripts/check-rust-protocol-adversarial-corpus.sh
   scripts/check-shell-script-hygiene.sh
   scripts/check-kubernetes-public-posture.sh
   scripts/check-compatibility-noop-documentation.sh
+  scripts/check-local-identity-leaks.sh
   scripts/check-remediation-script-registry.sh
 )
 
