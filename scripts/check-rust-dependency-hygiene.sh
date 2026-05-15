@@ -27,6 +27,8 @@ allowed_roots="$(
     digest \
     getrandom \
     hashbrown \
+    rand \
+    rand_core \
     sha2 |
     sort -u
 )"
@@ -43,7 +45,7 @@ if [[ -n "$missing" ]]; then
   printf 'rust dependency hygiene note: duplicate roots resolved; update %s and BUG-021:\n%s\n' "$policy" "$missing"
 fi
 
-for root in block-buffer cpufeatures crypto-common digest getrandom hashbrown sha2; do
+for root in block-buffer cpufeatures crypto-common digest getrandom hashbrown rand rand_core sha2; do
   if ! rg -n -F "| \`$root\` |" "$policy" >/dev/null; then
     printf 'rust dependency hygiene failed: %s missing from %s\n' "$root" "$policy" >&2
     status=1

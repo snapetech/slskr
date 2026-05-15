@@ -12,6 +12,8 @@ Date: 2026-05-15
 | `digest` | `ed25519-dalek`/`tungstenite` remain on `0.10`, while direct `hmac`/`sha2` usage is on `0.11`. | Tracked transitive duplicate. |
 | `getrandom` | `ring` uses `0.2`, `rand`/`tungstenite` use `0.3`, and `uuid` uses `0.4`. | Tracked transitive duplicate. |
 | `hashbrown` | `sqlx`/`hashlink` use `0.15`, while `indexmap`/`toml_edit` use `0.17`. | Tracked transitive duplicate. |
+| `rand` | Direct workspace randomness uses `0.10`, while `tungstenite` and dev-only `proptest` remain on `0.9`. | Tracked transitive duplicate until upstreams converge. |
+| `rand_core` | Direct `rand 0.10` uses `rand_core 0.10`, while `tungstenite`/`proptest` keep `rand_core 0.9`. | Tracked transitive duplicate until upstreams converge. |
 | `sha2` | `ed25519-dalek` remains on `0.10`, while direct workspace hashing/signing uses `0.11`. | Tracked transitive duplicate. |
 
 Policy:
