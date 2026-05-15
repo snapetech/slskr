@@ -31,8 +31,11 @@ use std::{
     fs,
     net::SocketAddr,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
-    time::Duration,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::net::TcpStream;
 use tokio::time::{self, Instant};
@@ -2142,7 +2145,13 @@ async fn live_soak() -> Result<(), String> {
         let duration = config.duration;
         tokio::spawn(async move { run_obfuscated_listener(listener, duration).await })
     });
-    let server_result = run_server_soak(&mut session, &config).await;
+    let server_progress = Arc::new(AtomicU64::new(unix_seconds()));
+    let watchdog_task = tokio::spawn(run_live_soak_server_watchdog(
+        server_progress.clone(),
+        config.duration,
+    ));
+    let server_result = run_server_soak(&mut session, &config, server_progress).await;
+    watchdog_task.abort();
     let listener_result = listener_task
         .await
         .map_err(|error| format!("listener task failed: {error}"))?;
@@ -2912,6 +2921,7 @@ impl LiveSoakConfig {
 async fn run_server_soak<S>(
     session: &mut ServerSession<S>,
     config: &LiveSoakConfig,
+    progress: Arc<AtomicU64>,
 ) -> Result<(), String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -2919,23 +2929,31 @@ where
     let deadline = Instant::now() + config.duration;
     let mut next_ping = Instant::now() + config.ping_interval;
     let mut next_search = Instant::now() + config.search_interval;
+    let send_timeout = Duration::from_secs(env_u64("SLSK_SOAK_SERVER_SEND_TIMEOUT_SECONDS", 20)?);
     let mut search_token = config.search_token;
     let mut events = 0usize;
 
     while Instant::now() < deadline && events < config.max_events {
         let now = Instant::now();
         if now >= next_ping {
-            session
-                .send_ping()
+            time::timeout(send_timeout, session.send_ping())
                 .await
+                .map_err(|_| "periodic ping send timed out".to_owned())?
                 .map_err(|error| format!("periodic ping failed: {error}"))?;
             next_ping = Instant::now() + config.ping_interval;
+            progress.store(unix_seconds(), Ordering::Relaxed);
             println!("server ping sent");
         }
         if config.active_probes && now >= next_search {
             if let Some(query) = &config.search_query {
                 search_token = search_token.wrapping_add(1).max(1);
-                dispatch_live_soak_search(session, query, search_token).await?;
+                time::timeout(
+                    send_timeout,
+                    dispatch_live_soak_search(session, query, search_token),
+                )
+                .await
+                .map_err(|_| "search dispatch timed out".to_owned())??;
+                progress.store(unix_seconds(), Ordering::Relaxed);
             }
             next_search = Instant::now() + config.search_interval;
         }
@@ -2952,6 +2970,7 @@ where
         match time::timeout(next_wait, session.receive()).await {
             Ok(Ok(message)) => {
                 events += 1;
+                progress.store(unix_seconds(), Ordering::Relaxed);
                 handle_server_message(session, message).await?;
             }
             Ok(Err(error)) => return Err(format!("server receive failed: {error}")),
@@ -2961,6 +2980,27 @@ where
 
     println!("server soak observed {events} event(s)");
     Ok(())
+}
+
+async fn run_live_soak_server_watchdog(progress: Arc<AtomicU64>, duration: Duration) {
+    let deadline = Instant::now() + duration;
+    let interval_seconds = env_u64("SLSK_SOAK_WATCHDOG_SECONDS", 120).unwrap_or(120);
+    let stale_seconds = env_u64("SLSK_SOAK_WATCHDOG_STALE_SECONDS", 240).unwrap_or(240);
+    let mut last_reported = 0_u64;
+
+    while Instant::now() < deadline {
+        time::sleep(Duration::from_secs(interval_seconds)).await;
+        let now = unix_seconds();
+        let last = progress.load(Ordering::Relaxed);
+        let idle = now.saturating_sub(last);
+        if idle >= stale_seconds && last != last_reported {
+            println!(
+                "live soak server watchdog stale idle_seconds={} stale_threshold_seconds={}",
+                idle, stale_seconds
+            );
+            last_reported = last;
+        }
+    }
 }
 
 async fn dispatch_live_soak_search<S>(
@@ -3586,6 +3626,13 @@ fn peer_close_reason(error: &str) -> &'static str {
     } else {
         "closed"
     }
+}
+
+fn unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Default)]
