@@ -135,13 +135,24 @@ const AdversarialSettings = () => {
       let current = newSettings;
 
       for (let index = 0; index < keys.length - 1; index++) {
-        if (!Object.hasOwn(current, keys[index]) || typeof current[keys[index]] !== 'object') {
-          current[keys[index]] = {};
+        const key = keys[index];
+        if (!Object.hasOwn(current, key) || typeof current[key] !== 'object' || current[key] === null) {
+          Object.defineProperty(current, key, {
+            configurable: true,
+            enumerable: true,
+            value: {},
+            writable: true,
+          });
         }
-        current = current[keys[index]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
+        current = current[key]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
       }
 
-      current[keys[keys.length - 1]] = value;
+      Object.defineProperty(current, keys[keys.length - 1], {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true,
+      });
       return newSettings;
     });
     setHasChanges(true);
@@ -157,14 +168,25 @@ const AdversarialSettings = () => {
       let current = newSettings;
 
       for (let index_ = 0; index_ < keys.length - 1; index_++) {
-        if (!Object.hasOwn(current, keys[index_]) || typeof current[keys[index_]] !== 'object') {
-          current[keys[index_]] = {};
+        const key = keys[index_];
+        if (!Object.hasOwn(current, key) || typeof current[key] !== 'object' || current[key] === null) {
+          Object.defineProperty(current, key, {
+            configurable: true,
+            enumerable: true,
+            value: {},
+            writable: true,
+          });
         }
-        current = current[keys[index_]]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
+        current = current[key]; // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
       }
 
       if (!Array.isArray(current[keys[keys.length - 1]])) {
-        current[keys[keys.length - 1]] = [];
+        Object.defineProperty(current, keys[keys.length - 1], {
+          configurable: true,
+          enumerable: true,
+          value: [],
+          writable: true,
+        });
       }
 
       current[keys[keys.length - 1]][index] = value;

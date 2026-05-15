@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { extname, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,7 +104,14 @@ const server = createServer(async (request, response) => {
       return;
     }
     const requestPath = decodeURIComponent((request.url || '/').split('?')[0]);
-    const filePath = join(distDir, requestPath === '/' ? 'index.html' : requestPath);
+    const normalizedRequestPath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
+    const filePath = resolve(distDir, normalizedRequestPath);
+    const relativePath = relative(distDir, filePath);
+    if (relativePath.startsWith('..') || relativePath === '' || relativePath.includes(`..${sep}`)) {
+      response.writeHead(403);
+      response.end('forbidden');
+      return;
+    }
     const body = await readFile(filePath);
     response.writeHead(200, {
       'Content-Type': mimeTypes[extname(filePath)] || 'application/octet-stream',
