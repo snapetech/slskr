@@ -25,7 +25,7 @@ use base64::{
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
     Engine,
 };
-use rand::{rngs::OsRng, TryRngCore};
+use rand::{rngs::SysRng, TryRng};
 use serde::{Deserialize, Serialize};
 use slskr_client::{
     capabilities::PeerCapabilityDescriptor,
@@ -15069,7 +15069,7 @@ fn url_encode(value: &str) -> String {
 
 fn secure_oauth_state() -> String {
     let mut bytes = [0_u8; 32];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut bytes)
         .expect("operating system randomness is unavailable");
     format!("slskr-{}", hex::encode(bytes))
