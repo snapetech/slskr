@@ -1,5 +1,5 @@
-use hmac::{Hmac, Mac};
-use rand::{rngs::OsRng, RngCore};
+use hmac::{Hmac, KeyInit, Mac};
+use rand::{rngs::OsRng, TryRngCore};
 /// Webhook support with HMAC-SHA256 request signing
 ///
 /// Allows configuring webhooks that are triggered on API events,
@@ -122,7 +122,9 @@ impl Webhook {
     /// Generate signing secret
     pub fn generate_secret() -> String {
         let mut secret = [0_u8; 32];
-        OsRng.fill_bytes(&mut secret);
+        OsRng
+            .try_fill_bytes(&mut secret)
+            .expect("operating system randomness is unavailable");
         format!("secret_{}", hex::encode(secret))
     }
 
