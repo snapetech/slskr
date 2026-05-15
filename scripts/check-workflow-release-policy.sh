@@ -21,7 +21,7 @@ for expected in \
   'SLSKR_SEMGREP_IMAGE: semgrep/semgrep:' \
   'SLSKR_TRIVY_IMAGE: aquasec/trivy:' \
   'concurrency:' \
-  'actions/attest-build-provenance@v3' \
+  'actions/attest-build-provenance@v4' \
   'attestations: write' \
   'id-token: write'; do
   if ! rg -n -F "$expected" .github/workflows >/dev/null; then

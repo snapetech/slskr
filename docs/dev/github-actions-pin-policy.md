@@ -10,16 +10,19 @@ or if a pinned action is missing from this ledger.
 
 | Action | Reviewed ref | Pinned commit | Notes |
 | --- | --- | --- | --- |
-| `actions/checkout` | `v4` | `34e114876b0b11c390a56381ad16ebd13914f8d5` | CI, release, and live parity checkout. |
+| `actions/checkout` | `v6` | `de0fac2e4500dabe0009e67214ff5f5447ce83dd` | CI, release, live parity, local identity, and CodeQL checkout. |
 | `dtolnay/rust-toolchain` | `stable` | `29eef336d9b2848a0b548edc03f92a220660cdb8` | Rust toolchain install for CI, release, and live parity jobs. |
 | `Swatinem/rust-cache` | `v2` | `e18b497796c12c097a38f9edb9d0641fb99eee32` | Dereferenced tag target for Rust cache setup. |
-| `actions/setup-node` | `v4` | `49933ea5288caeca8642d1e84afbd3f7d6820020` | Node setup for web, dashboard, TypeScript SDK, and live parity gates. |
-| `actions/setup-go` | `v5` | `40f1582b2485089dde7abd97c1529aa768e1baff` | Go SDK test setup. |
-| `actions/setup-python` | `v5` | `a26af69be951a213d495a4c3e4e4022e16d87065` | Python SDK and slskd API compatibility smoke setup. |
-| `actions/upload-artifact` | `v4` | `ea165f8d65b6e75b540449e92b4886f43607fa02` | Release archive and live parity artifact upload. |
-| `actions/download-artifact` | `v4` | `d3f86a106a0bac45b974a628896c90dbdf5c8093` | Release archive download before publishing. |
-| `actions/attest-build-provenance` | `v3` | `977bb373ede98d70efdf65b84cb5f73e068dcc2a` | Dereferenced tag target for release asset attestations. |
-| `softprops/action-gh-release` | `v2` | `3bb12739c298aeb8a4eeaf626c5b8d85266b0e65` | GitHub Release publisher. |
+| `actions/setup-node` | `v6` | `48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e` | Node setup for web, dashboard, TypeScript SDK, and live parity gates. |
+| `actions/setup-go` | `v6` | `4a3601121dd01d1626a1e23e37211e3254c1c06c` | Go SDK test setup. |
+| `actions/setup-python` | `v6` | `a309ff8b426b58ec0e2a45f0f869d46889d02405` | Python SDK and slskd API compatibility smoke setup. |
+| `actions/upload-artifact` | `v5` | `330a01c490aca151604b8cf639adc76d48f6c5d4` | Release archive and live parity artifact upload. |
+| `actions/download-artifact` | `v5` | `634f93cb2916e3fdff6788551b99b062d0335ce0` | Release archive download before publishing. |
+| `actions/attest-build-provenance` | `v4` | `b3e506e8c389afc651c5bacf2b8f2a1ea0557215` | Dereferenced tag target for release asset attestations. |
+| `softprops/action-gh-release` | `v3` | `b4309332981a82ec1c5618f44dd2e27cc8bfbfda` | GitHub Release publisher. |
+| `github/codeql-action/init` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL initialization for GitHub code scanning. |
+| `github/codeql-action/autobuild` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL autobuild for analyzable language matrix entries. |
+| `github/codeql-action/analyze` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL SARIF upload and alert generation. |
 
 To update an action, resolve the new trusted ref, replace the workflow SHA and the
 matching ledger row in the same change, and run the remediation baseline.
