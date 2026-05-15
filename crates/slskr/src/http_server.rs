@@ -2,7 +2,7 @@
 //! Replaces manual HTTP parsing in main.rs
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, TryRngCore};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{self, Duration};
 
@@ -455,7 +455,9 @@ fn body_with_content_security_policy(response: &HttpResponse) -> (String, String
 
 fn csp_nonce() -> String {
     let mut bytes = [0_u8; 16];
-    OsRng.fill_bytes(&mut bytes);
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("operating system randomness is unavailable");
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
