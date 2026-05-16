@@ -349,7 +349,7 @@ let mut suite = BenchmarkSuite::new();
 // Add benchmarks
 suite.add(HttpBenchmark::new(
     "GET /api/health".to_string(),
-    "http://localhost:8080".to_string(),
+    "http://127.0.0.1:5030".to_string(),
     "/api/health".to_string(),
     "GET".to_string(),
     100,  // concurrent clients
@@ -458,7 +458,7 @@ slskr-admin config export config.json
 ### Global Options
 
 ```bash
---api-url http://localhost:8080    # API server URL
+--api-url http://127.0.0.1:5030    # API server URL
 --api-key <key>                    # API authentication key
 ```
 

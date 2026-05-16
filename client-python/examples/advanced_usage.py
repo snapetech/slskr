@@ -86,7 +86,7 @@ async def main():
     
     # Using context manager
     async with SlskrClient(
-        base_url="http://localhost:8080",
+        base_url="http://127.0.0.1:5030",
         token="your-api-key-here",
         timeout=30,
         retries=3,

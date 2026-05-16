@@ -28,7 +28,7 @@ from slskr import SlskrClient
 
 async def main():
     async with SlskrClient(
-        base_url="http://localhost:8080",
+        base_url="http://127.0.0.1:5030",
         token="your-bearer-token"
     ) as client:
         # Get stats
@@ -74,7 +74,7 @@ from slskr import WebSocketClient
 
 async def websocket_example():
     ws = WebSocketClient(
-        base_url="http://localhost:8080",
+        base_url="http://127.0.0.1:5030",
         token="your-token"
     )
 
@@ -182,7 +182,7 @@ async def on_complete(event):
 
 ```python
 client = SlskrClient(
-    base_url="http://localhost:8080",
+    base_url="http://127.0.0.1:5030",
     token="your-token",
     timeout=30,  # Request timeout in seconds
     retries=3,   # Retry attempts

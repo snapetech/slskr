@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	client := slskr.NewClient("http://localhost:8080", "your-api-key-here")
+	client := slskr.NewClient("http://127.0.0.1:5030", "your-api-key-here")
 
 	// Create WebSocket client
 	ws := client.NewWebSocketClient(true)

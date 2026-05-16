@@ -42,7 +42,7 @@ npm install @slskr/api-client ws
 import SlskrClient from '@slskr/api-client';
 
 const client = new SlskrClient({
-  baseUrl: 'http://localhost:8080',
+  baseUrl: 'http://127.0.0.1:5030',
   token: 'your-bearer-token',
 });
 
@@ -87,7 +87,7 @@ Listen to real-time events:
 ```typescript
 import { WebSocketClient } from '@slskr/api-client';
 
-const ws = new WebSocketClient('http://localhost:8080', 'your-token');
+const ws = new WebSocketClient('http://127.0.0.1:5030', 'your-token');
 
 // Subscribe to events
 ws.subscribe('transfer.started', 'transfer.completed');
@@ -285,7 +285,7 @@ console.log(`Sent ${batch.getSuccessful(response).length} messages`);
 ### Real-Time Monitoring
 
 ```typescript
-const ws = new WebSocketClient('http://localhost:8080', token);
+const ws = new WebSocketClient('http://127.0.0.1:5030', token);
 
 ws.subscribe(
   'transfer.started',
@@ -315,7 +315,7 @@ await ws.connect();
 ```typescript
 const client = new SlskrClient({
   // API server URL
-  baseUrl: 'http://localhost:8080',
+  baseUrl: 'http://127.0.0.1:5030',
 
   // Bearer token for authentication
   token: 'your-token',
@@ -365,7 +365,7 @@ Works in all modern browsers with `fetch` API support:
 <script src="https://cdn.jsdelivr.net/npm/@slskr/api-client@latest/dist/index.js"></script>
 <script>
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'token'
   });
 
@@ -381,7 +381,7 @@ Works in Node.js (tested on v14+):
 const { default: SlskrClient } = require('@slskr/api-client');
 
 const client = new SlskrClient({
-  baseUrl: 'http://localhost:8080',
+  baseUrl: 'http://127.0.0.1:5030',
   token: 'token'
 });
 
@@ -400,7 +400,8 @@ const client = new SlskrClient({
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions follow the repository workflow in the project
+[README](../README.md).
 
 ## License
 
@@ -408,9 +409,8 @@ AGPL-3.0-only. See the repository `LICENSE` and `NOTICE` files for details.
 
 ## Support
 
-- Documentation: [docs/http-api.md](../../docs/http-api.md)
-- GitHub Issues: [Report bugs](https://github.com/slskr/issues)
-- GitHub Discussions: [Ask questions](https://github.com/slskr/discussions)
+- Documentation: [docs/http-api.md](../docs/http-api.md)
+- GitHub Issues: [Report bugs](https://github.com/snapetech/slskr/issues)
 
 ## Changelog
 

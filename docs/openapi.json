@@ -15,7 +15,7 @@
   },
   "servers": [
     {
-      "url": "http://localhost:8080",
+      "url": "http://127.0.0.1:5030",
       "description": "Local development server"
     },
     {

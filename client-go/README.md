@@ -32,7 +32,7 @@ import (
 
 func main() {
 	client := slskr.NewClient(
-		"http://localhost:8080",
+		"http://127.0.0.1:5030",
 		"your-bearer-token",
 	)
 

@@ -27,6 +27,21 @@ metadata, integrations, and mesh/federation surfaces should be treated as
 configuration-dependent or experimental unless the linked docs and tests say
 otherwise.
 
+## Table Of Contents
+
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Security](#security)
+- [HTTP API Examples](#http-api-examples)
+- [CLI Reference](#cli-reference)
+- [Testing And Verification](#testing-and-verification)
+- [Deployment](#deployment)
+- [Repository Layout](#repository-layout)
+- [Documentation Index](#documentation-index)
+- [License](#license)
+
 ## Screenshots
 
 The README screenshots are generated from the local Web UI with mocked daemon
@@ -389,16 +404,29 @@ ports you intend to publish.
 
 ## Documentation Index
 
+Start with the full documentation map in [docs/README.md](./docs/README.md).
+The table below links the maintained entry points most users need first.
+
 | Document | Purpose |
 | --- | --- |
+| [docs/README.md](./docs/README.md) | Full documentation index, status notes, and cross-links. |
 | [docs/install.md](./docs/install.md) | Build, install, config/state, service, container, and exposure runbook. |
 | [docs/app-surface.md](./docs/app-surface.md) | User-facing app surface and compatibility map. |
+| [web/README.md](./web/README.md) | React Web UI development, audit, build, and screenshot workflow. |
 | [docs/http-api.md](./docs/http-api.md) | HTTP API reference. |
+| [docs/http-api-deployment.md](./docs/http-api-deployment.md) | Deployment notes for the HTTP listener, auth, reverse proxies, and Kubernetes. |
+| [docs/http-api-features.md](./docs/http-api-features.md) | HTTP API capability notes and workflow examples. |
 | [docs/openapi.json](./docs/openapi.json) | OpenAPI document. |
+| [docs/WEBHOOK_API.md](./docs/WEBHOOK_API.md) | Webhook API and delivery model. |
 | [docs/CLIENT_LIBRARIES.md](./docs/CLIENT_LIBRARIES.md) | TypeScript, Python, Go, and Rust client notes. |
+| [client-ts/README.md](./client-ts/README.md) | TypeScript/JavaScript client package usage. |
+| [client-python/README.md](./client-python/README.md) | Python client package usage. |
+| [client-go/README.md](./client-go/README.md) | Go client package usage. |
+| [examples/README.md](./examples/README.md) | API and automation examples. |
 | [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md) | Live network and cross-client verification matrix. |
 | [docs/open-commons-fixtures.md](./docs/open-commons-fixtures.md) | Open fixture policy and source list. |
 | [docs/release.md](./docs/release.md) | Release tag, archive, and metadata policy. |
+| [COMPLIANCE.md](./COMPLIANCE.md) | Public posture, licensing, and project compliance notes. |
 | [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) | Annotated config example. |
 
 Canonical repository:

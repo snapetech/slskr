@@ -228,7 +228,7 @@ Example with wrk:
 ```bash
 wrk -t4 -c100 -d30s \
     -H "Authorization: Bearer token" \
-    http://localhost:8080/api/stats
+    http://127.0.0.1:5030/api/stats
 ```
 
 ## Memory Safety

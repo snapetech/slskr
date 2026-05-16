@@ -13,7 +13,7 @@ import (
 
 func main() {
 	// Initialize client
-	client := slskr.NewClient("http://localhost:8080", "your-api-key-here")
+	client := slskr.NewClient("http://127.0.0.1:5030", "your-api-key-here")
 	client.HTTPClient.Timeout = 30 * time.Second
 
 	ctx := context.Background()

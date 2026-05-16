@@ -31,7 +31,7 @@ from slskr import SlskrClient
 
 async def main():
     client = SlskrClient(
-        base_url="http://localhost:8080",
+        base_url="http://127.0.0.1:5030",
         token="your-api-key-here"
     )
     
@@ -133,7 +133,7 @@ await client.disconnect_ws()
 
 ```python
 # Auto-cleanup with context manager
-async with SlskrClient("http://localhost:8080", "token") as client:
+async with SlskrClient("http://127.0.0.1:5030", "token") as client:
     health = await client.health()
     searches = await client.list_searches()
     # Auto-closed when exiting
@@ -265,7 +265,7 @@ import (
 
 func main() {
     client := slskr.NewClient(
-        "http://localhost:8080",
+        "http://127.0.0.1:5030",
         "your-api-key-here",
     )
     ctx := context.Background()
@@ -476,24 +476,25 @@ response, err := builder.Execute(ctx)
 
 ## TypeScript/JavaScript Client
 
-See `docs/http-api-sdk.md` for complete documentation of the TypeScript client.
+See [client-ts/README.md](../client-ts/README.md) for complete documentation of
+the TypeScript client.
 
 ### Quick Installation
 
 ```bash
-npm install slskr-api
+npm install @slskr/api-client
 # or
-yarn add slskr-api
+yarn add @slskr/api-client
 ```
 
 ### Quick Usage
 
 ```typescript
-import { SlskrClient } from 'slskr-api';
+import SlskrClient from '@slskr/api-client';
 
 const client = new SlskrClient({
-    baseURL: 'http://localhost:8080',
-    apiKey: 'your-api-key'
+    baseUrl: 'http://127.0.0.1:5030',
+    token: 'your-api-key'
 });
 
 // Create search

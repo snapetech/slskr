@@ -21,7 +21,7 @@ Tokens are configured in your `slskr.config.toml` file. Request without valid to
 All mutating requests (POST, PUT, DELETE) require CSRF origin verification:
 
 ```
-Origin: http://localhost:8080
+Origin: http://127.0.0.1:5030
 ```
 
 The origin must match the configured server address. Invalid origin returns `403 Forbidden`.
@@ -898,11 +898,11 @@ Test endpoints with curl:
 
 ```bash
 # Health check
-curl http://localhost:8080/api/health
+curl http://127.0.0.1:5030/api/health
 
 # With authentication
 curl -H "Authorization: Bearer your-token" \
-     http://localhost:8080/api/stats
+     http://127.0.0.1:5030/api/stats
 ```
 
 Or use the provided test suite:

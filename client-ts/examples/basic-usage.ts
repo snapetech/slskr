@@ -13,7 +13,7 @@ import { WebSocketClient } from '../src/websocket-client';
 async function basicRestExample() {
   // Create client
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'your-bearer-token',
     timeout: 30000,
     debug: true,
@@ -75,7 +75,7 @@ async function basicRestExample() {
 
 async function batchOperationsExample() {
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'your-bearer-token',
   });
 
@@ -111,7 +111,7 @@ async function batchOperationsExample() {
 
 async function bulkMessageExample() {
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'your-bearer-token',
   });
 
@@ -140,7 +140,7 @@ async function bulkMessageExample() {
 // ============================================================================
 
 async function websocketExample() {
-  const ws = new WebSocketClient('http://localhost:8080', 'your-bearer-token');
+  const ws = new WebSocketClient('http://127.0.0.1:5030', 'your-bearer-token');
 
   // Listen to connection changes
   ws.onConnectionChange((connected) => {
@@ -187,7 +187,7 @@ async function websocketExample() {
 
 async function paginationExample() {
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'your-bearer-token',
   });
 
@@ -218,7 +218,7 @@ async function paginationExample() {
 
 async function errorHandlingExample() {
   const client = new SlskrClient({
-    baseUrl: 'http://localhost:8080',
+    baseUrl: 'http://127.0.0.1:5030',
     token: 'your-bearer-token',
   });
 

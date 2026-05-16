@@ -203,24 +203,32 @@ Initial configuration sources:
 - `SLSKR_EXTERNAL_VISUALIZER_COMMAND` configures the optional local visualizer launch command. `SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED=true` is also required before the daemon will spawn that command; launch attempts are recorded as events.
 - `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold
 - gitignored `.secrets/` files for local lab credentials
-- OpenBao paths documented under `../k3s/slskr/README.md`
+- external secret-manager deployment notes are intentionally out of tree; the
+  maintained in-repo operator guidance is [install.md](./install.md) and
+  [http-api-deployment.md](./http-api-deployment.md)
 
 Backfill target:
 
-- expand `config.toml` coverage as API/auth/search/transfer modules land
-- state directory for database; share index writes SQLite `share_files` plus optional mirrored `share-index.tsv` compatibility/debug cache, transfer projection writes SQLite `transfer_events` plus mirrored `transfer-events.tsv` status/byte-progress events, and reloadable transfer records write `transfer-state.json`
-- separate secret loading path for credentials
-- maintained service/container artifacts that follow [install.md](./install.md) and never require checked-in secrets
+- continue expanding `config.toml` coverage as compatibility and integration
+  modules graduate from environment-only switches
+- keep state directory ownership explicit; share index writes SQLite
+  `share_files` plus optional mirrored `share-index.tsv` compatibility/debug
+  cache, transfer projection writes SQLite `transfer_events` plus mirrored
+  `transfer-events.tsv` status/byte-progress events, and reloadable transfer
+  records write `transfer-state.json`
+- keep credential loading explicit through environment variables, config files
+  outside git, or the operator's secret manager
+- maintain service/container artifacts that follow [install.md](./install.md)
+  and never require checked-in secrets
 
 ## Auth And Exposure
 
-Default `slskr serve` binds to loopback. Before exposing it outside localhost, add:
-
-- local admin credential bootstrap
-- explicit CORS defaults
-- reverse-proxy guidance
-
 Current behavior: bearer-token and `X-API-Key` auth are available for protected API routes; legacy same-site dashboard cookie auth is disabled unless explicitly opted in. Auth is required automatically for non-loopback HTTP binds unless `SLSKR_AUTH_DISABLED=true` is set. When auth is enabled, unsafe API methods reject cross-site browser requests with foreign `Origin` or `Referer` headers. `GET /`, `GET /api/health`, `GET /api/version`, `GET /api/session/enabled`, and `GET /api/v0/capabilities` remain public health/version/capability surfaces.
+
+Default `slskr serve` binds to loopback. Before exposing it outside localhost,
+set `SLSKR_API_TOKEN`, keep auth enabled, preserve forwarded `Host`, `Origin`,
+and `Referer` headers through your reverse proxy, and review
+[install.md](./install.md) plus [http-api-deployment.md](./http-api-deployment.md).
 
 ## Third-Party Authorization UX
 

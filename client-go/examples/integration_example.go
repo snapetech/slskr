@@ -294,7 +294,7 @@ func websocketMonitoring(ctx context.Context, client *slskr.Client, duration tim
 }
 
 func main() {
-	client := slskr.NewClient("http://localhost:8080", "your-api-key-here")
+	client := slskr.NewClient("http://127.0.0.1:5030", "your-api-key-here")
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()

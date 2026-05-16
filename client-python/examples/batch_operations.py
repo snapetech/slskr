@@ -11,7 +11,7 @@ async def main():
     """Batch operations example"""
     
     client = SlskrClient(
-        base_url="http://localhost:8080",
+        base_url="http://127.0.0.1:5030",
         token="your-api-key-here",
         debug=True
     )

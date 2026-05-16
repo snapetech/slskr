@@ -357,7 +357,7 @@ Access cache metrics:
 
 ```bash
 curl -H "Authorization: Bearer token" \
-     http://localhost:8080/api/cache/stats
+     http://127.0.0.1:5030/api/cache/stats
 ```
 
 **Response:**
@@ -401,7 +401,7 @@ Caches are automatically invalidated when:
 
 ```bash
 curl -X POST -H "Authorization: Bearer token" \
-     http://localhost:8080/api/cache/invalidate \
+     http://127.0.0.1:5030/api/cache/invalidate \
      -d '{"keys": ["/api/stats", "/api/config"]}'
 ```
 
@@ -418,24 +418,24 @@ With 85% cache hit rate:
 
 ```bash
 # Basic health check
-curl http://localhost:8080/api/health
+curl http://127.0.0.1:5030/api/health
 
 # Get version
-curl http://localhost:8080/api/version
+curl http://127.0.0.1:5030/api/version
 
 # Get capabilities
-curl http://localhost:8080/api/capabilities
+curl http://127.0.0.1:5030/api/capabilities
 
 # Get current stats
 curl -H "Authorization: Bearer token" \
-     http://localhost:8080/api/stats
+     http://127.0.0.1:5030/api/stats
 ```
 
 ### Metrics Endpoint
 
 ```bash
 curl -H "Authorization: Bearer token" \
-     http://localhost:8080/api/metrics
+     http://127.0.0.1:5030/api/metrics
 ```
 
 **Response:**
@@ -567,7 +567,7 @@ ws.onmessage = (evt) => {
 ```bash
 # Check cache performance
 curl -H "Authorization: Bearer token" \
-     http://localhost:8080/api/cache/stats | jq '.hit_rate'
+     http://127.0.0.1:5030/api/cache/stats | jq '.hit_rate'
 
 # If < 70%, consider increasing TTLs
 ```

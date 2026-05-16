@@ -1,6 +1,23 @@
 # Integration Guide - Wiring All Components
 
-This guide shows how to integrate all the completed components into the running slskr system.
+Status: historical integration backlog. This file is retained to explain older
+component plans and migration context, but it is not the current operator
+runbook. For maintained instructions use:
+
+- [README](../README.md)
+- [Documentation index](README.md)
+- [Install guide](install.md)
+- [App surface](app-surface.md)
+- [HTTP API reference](http-api.md)
+- [HTTP API deployment](http-api-deployment.md)
+- [Web UI README](../web/README.md)
+
+The shipped browser UI is the React/Vite app in `web/` served by
+`slskr serve`. Standalone dashboard references below are historical unless a
+current release note or maintained deployment doc says otherwise.
+
+This guide shows how earlier completed components were intended to integrate
+into the running slskr system.
 
 ## 1. Admin Dashboard Integration
 
@@ -21,7 +38,8 @@ npm run dev    # For development
 - ✅ Monitoring - Performance metrics
 - ✅ Configuration - Server configuration
 
-The dashboard connects to the API at `http://localhost:8080` (configurable in settings).
+The historical dashboard connected to the API at `http://127.0.0.1:5030`
+(configurable in settings).
 
 ## 2. Webhooks Integration
 
