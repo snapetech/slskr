@@ -1,5 +1,7 @@
 # slskr
 
+[![Discord](https://img.shields.io/badge/Discord-join%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/hyG8Pf6KGA)
+
 `slskr` is a self-hosted Rust daemon, HTTP API, and browser UI for the
 [Soulseek](https://www.slsknet.org/news/) network.
 
@@ -40,6 +42,7 @@ otherwise.
 - [Deployment](#deployment)
 - [Repository Layout](#repository-layout)
 - [Documentation Index](#documentation-index)
+- [Support](#support)
 - [License](#license)
 
 ## Screenshots
@@ -434,6 +437,11 @@ Canonical repository:
 ```text
 https://github.com/snapetech/slskr
 ```
+
+## Support
+
+Community support and migration discussion can be found on Discord:
+[discord.gg/hyG8Pf6KGA](https://discord.gg/hyG8Pf6KGA).
 
 ## License
 
