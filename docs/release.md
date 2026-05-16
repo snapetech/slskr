@@ -59,7 +59,7 @@ The release workflow builds these native runner variants:
 - `macos-arm64` on `macos-14`
 - `windows-x64` on `windows-latest`
 
-Trigger it manually with `workflow_dispatch`, or push a tag named:
+Push a tag named:
 
 ```text
 release-v<semver>
@@ -67,17 +67,22 @@ release-v<semver>
 
 Tag-triggered releases intentionally use the `release-v<semver>` convention,
 for example `release-v1.2.3` or `release-v1.2.3-rc.1`. Plain `v*` tags and
-loose `release-*` tags are not release triggers.
+loose `release-*` tags are not release triggers. Commits pushed to `main` do
+not build release archives, and the release workflow does not provide a manual
+dispatch path; a full release requires a `release-v<semver>` tag on `main`.
 
 For a tag build, the workflow creates a GitHub Release and uploads all archives
 plus `SHA256SUMS.txt`, `slskr-cyclonedx.json`, and
 `slskr-dependency-manifest.json`. The JSON manifests are included in the
 release checksum file and build-provenance attestation subjects.
+After the GitHub Release is published, the workflow posts a Discord
+announcement using the `DISCORD_RELEASE_WEBHOOK_URL` repository secret.
 
 The internal/unpublished Cargo crates intentionally remain at `0.0.0`. Binary
-and archive version metadata comes from the release workflow: tag builds derive
-the artifact version from `release-v<semver>`, while manual builds use the
-`SLSKR_RELEASE_VERSION` value passed to `scripts/build-release-archive.sh`.
+and archive version metadata comes from the release workflow. Tag builds derive
+the artifact version from `release-v<semver>`, and local/manual archive tests
+can still pass `SLSKR_RELEASE_VERSION` directly to
+`scripts/build-release-archive.sh`.
 Archive roots are named `slskr-<version>-<target>` so the published package
 version remains tied to the release input even though the workspace crates are
 not published independently.

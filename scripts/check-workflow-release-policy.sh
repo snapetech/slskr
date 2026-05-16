@@ -98,11 +98,23 @@ if ! rg -n -F "release-v*" .github/workflows/release.yml >/dev/null; then
   status=1
 fi
 
+if rg -n -F "workflow_dispatch:" .github/workflows/release.yml >/dev/null; then
+  printf 'workflow release policy check failed: release workflow must only run from release-v tags\n' >&2
+  status=1
+fi
+
+if rg -n -F "branches:" .github/workflows/ci.yml >/dev/null; then
+  printf 'workflow release policy check failed: CI must not build on main pushes\n' >&2
+  status=1
+fi
+
 for expected in \
   'tag_pattern=' \
   'release-v<semver>' \
   "startsWith(github.ref, 'refs/tags/release-v')" \
-  'version="${GITHUB_REF_NAME#release-}"'; do
+  'version="${GITHUB_REF_NAME#release-}"' \
+  'DISCORD_RELEASE_WEBHOOK_URL' \
+  'Announce Discord Release'; do
   if ! rg -n -F "$expected" .github/workflows/release.yml >/dev/null; then
     printf 'workflow release policy check failed: release tag policy token missing: %s\n' "$expected" >&2
     status=1

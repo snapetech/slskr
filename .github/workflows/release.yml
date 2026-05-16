@@ -8,12 +8,6 @@ env:
   WASM_BINDGEN_CLI_VERSION: 0.2.120
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Release version label
-        required: false
-        default: manual
   push:
     tags:
       - 'release-v*'
@@ -34,23 +28,13 @@ jobs:
     steps:
       - id: version
         shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            version="$INPUT_VERSION"
-            if [[ -z "$version" || "$version" == "manual" ]]; then
-              version="manual-${GITHUB_SHA::12}"
-            fi
-          else
-            tag_pattern='^release-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
-            if [[ ! "$GITHUB_REF_NAME" =~ $tag_pattern ]]; then
-              printf 'Release tags must use release-v<semver>, got %s\n' "$GITHUB_REF_NAME" >&2
-              exit 1
-            fi
-            version="${GITHUB_REF_NAME#release-}"
+          tag_pattern='^release-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if [[ ! "$GITHUB_REF_NAME" =~ $tag_pattern ]]; then
+            printf 'Release tags must use release-v<semver>, got %s\n' "$GITHUB_REF_NAME" >&2
+            exit 1
           fi
+          version="${GITHUB_REF_NAME#release-}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   gate:
@@ -223,3 +207,44 @@ jobs:
           name: slskr ${{ needs.version.outputs.version }}
           body_path: release/RELEASE_NOTES.md
           files: release/*
+
+  discord:
+    name: Announce Discord Release
+    if: startsWith(github.ref, 'refs/tags/release-v')
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release announcement
+        shell: bash
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        run: |
+          if [[ -z "$DISCORD_RELEASE_WEBHOOK_URL" ]]; then
+            echo "DISCORD_RELEASE_WEBHOOK_URL secret is required for release announcements" >&2
+            exit 1
+          fi
+          python - <<'PY' | curl --fail-with-body -H 'Content-Type: application/json' -d @- "$DISCORD_RELEASE_WEBHOOK_URL"
+          import json
+          import os
+
+          version = os.environ["RELEASE_VERSION"]
+          tag = os.environ["RELEASE_TAG"]
+          url = os.environ["RELEASE_URL"]
+          payload = {
+              "content": f"slskr {version} is released: {url}",
+              "embeds": [
+                  {
+                      "title": f"slskr {version}",
+                      "url": url,
+                      "description": "A new tagged GitHub release is available.",
+                      "fields": [
+                          {"name": "Tag", "value": tag, "inline": True},
+                      ],
+                  }
+              ],
+          }
+          print(json.dumps(payload))
+          PY
