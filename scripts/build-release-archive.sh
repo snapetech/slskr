@@ -86,6 +86,9 @@ if [[ "$target" == *windows* ]]; then
 fi
 
 if ((build_web)); then
+  if [[ ! -x web/node_modules/.bin/vite && ! -x web/node_modules/.bin/vite.cmd ]]; then
+    npm --prefix web ci
+  fi
   npm --prefix web run build
 fi
 
