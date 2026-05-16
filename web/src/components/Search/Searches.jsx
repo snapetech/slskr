@@ -200,11 +200,61 @@ const Searches = ({ server } = {}) => {
   };
 
   useEffect(() => {
+    let mounted = true;
+
+    const loadSearches = async () => {
+      try {
+        const records = await library.getAll();
+        if (!mounted) {
+          return;
+        }
+        onUpdate(
+          records.reduce((accumulator, search) => {
+            accumulator[search.id] = search;
+            return accumulator;
+          }, {}),
+        );
+      } catch (loadError) {
+        if (!mounted) {
+          return;
+        }
+        onConnectionError(loadError?.message ?? 'Failed to load searches');
+      }
+    };
+
+    const refreshSearch = async (eventOrSearch) => {
+      if (eventOrSearch?.searchText || eventOrSearch?.query) {
+        onUpdate((old) => ({ ...old, [eventOrSearch.id]: eventOrSearch }));
+        return;
+      }
+
+      const id = eventOrSearch?.resource ?? eventOrSearch?.id;
+      if (!id) {
+        await loadSearches();
+        return;
+      }
+
+      try {
+        const search = await library.getStatus({ id });
+        if (!mounted) {
+          return;
+        }
+        onUpdate((old) => ({ ...old, [search.id]: search }));
+      } catch (refreshError) {
+        console.debug('failed to refresh search event payload', refreshError);
+        await loadSearches();
+      }
+    };
+
     onConnecting();
 
     const searchHub = createSearchHubConnection();
 
     searchHub.on('list', (searchesEvent) => {
+      if (!Array.isArray(searchesEvent)) {
+        loadSearches();
+        return;
+      }
       onUpdate(
         searchesEvent.reduce((accumulator, search) => {
           accumulator[search.id] = search;
@@ -215,18 +265,18 @@ const Searches = ({ server } = {}) => {
     });
 
     searchHub.on('update', (search) => {
-      onUpdate((old) => ({ ...old, [search.id]: search }));
+      refreshSearch(search);
     });
 
     searchHub.on('delete', (search) => {
       onUpdate((old) => {
-        delete old[search.id];
+        delete old[search.id ?? search.resource];
         return { ...old };
       });
     });
 
     searchHub.on('create', (search) => {
-      onUpdate((old) => ({ ...old, [search.id]: search }));
+      refreshSearch(search);
     });
 
     searchHub.onreconnecting((connectionError) =>
@@ -241,9 +291,10 @@ const Searches = ({ server } = {}) => {
       try {
         onConnecting();
         await searchHub.start();
+        await loadSearches();
       } catch (connectionError) {
-        toast.error(connectionError?.message ?? 'Failed to connect');
-        onConnectionError(connectionError?.message ?? 'Failed to connect');
+        toast.error(connectionError?.message ?? 'Failed to connect to search updates');
+        await loadSearches();
       }
     };
 
@@ -270,6 +321,7 @@ const Searches = ({ server } = {}) => {
     checkFeatureFlag();
 
     return () => {
+      mounted = false;
       searchHub.stop();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

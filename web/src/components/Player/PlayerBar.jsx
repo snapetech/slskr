@@ -1388,7 +1388,9 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
     collectionsAPI
       .getCollections()
       .then((response) => {
-        if (!canceled) setCollections(response.data || []);
+        if (!canceled) {
+          setCollections(Array.isArray(response.data) ? response.data : []);
+        }
       })
       .catch(() => {
         if (!canceled) setCollections([]);
@@ -1424,9 +1426,17 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
         })
         .then((response) => {
           if (!canceled) {
-            setItems(response.data?.files || []);
-            setBrowserDirectories(response.data?.directories || []);
-            setBrowserBreadcrumbs(response.data?.breadcrumbs || []);
+            setItems(Array.isArray(response.data?.files) ? response.data.files : []);
+            setBrowserDirectories(
+              Array.isArray(response.data?.directories)
+                ? response.data.directories
+                : [],
+            );
+            setBrowserBreadcrumbs(
+              Array.isArray(response.data?.breadcrumbs)
+                ? response.data.breadcrumbs
+                : [],
+            );
             setBrowserHasMore(Boolean(response.data?.hasMore));
             setBrowserStats({
               duplicatesRemoved: response.data?.duplicatesRemoved || 0,

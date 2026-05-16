@@ -110,10 +110,9 @@ PY
   test -f "$root/COMPLIANCE.md"
   test -f "$root/docs/slskr.config.example.toml"
   test -f "$root/web/build/index.html"
-  test -f "$root/web/build/slskr_web_bootstrap.js"
-  test -f "$root/web/build/styles.css"
-  test -f "$root/web/build/slskr_web.js"
-  test -f "$root/web/build/slskr_web_bg.wasm"
+  test -d "$root/web/build/assets"
+  find "$root/web/build/assets" -type f -name '*.js' | grep -q .
+  find "$root/web/build/assets" -type f -name '*.css' | grep -q .
   if [[ -f "$root/slskr" ]]; then
     chmod +x "$root/slskr"
     "$root/slskr" version

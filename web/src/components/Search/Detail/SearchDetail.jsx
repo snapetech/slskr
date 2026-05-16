@@ -118,7 +118,8 @@ const SearchDetail = ({
   const fetchUserNotes = useCallback(async () => {
     try {
       const response = await getAllNotes();
-      const notesMap = response.data.reduce((accumulator, note) => {
+      const notes = Array.isArray(response.data) ? response.data : [];
+      const notesMap = notes.reduce((accumulator, note) => {
         accumulator[note.username] = note;
         return accumulator;
       }, {});

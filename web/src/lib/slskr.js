@@ -179,7 +179,10 @@ export const getSlskrStats = async () => {
       dht: dht.status === 'fulfilled' ? dht.value : null,
       hashDb: normalizedHashDatabase,
       mesh: normalizedMesh,
-      swarmJobs: swarmJobs.status === 'fulfilled' ? swarmJobs.value : [],
+      swarmJobs:
+        swarmJobs.status === 'fulfilled' && Array.isArray(swarmJobs.value)
+          ? swarmJobs.value
+          : [],
     };
   } catch (error) {
     console.error('Failed to fetch slskr stats:', error);

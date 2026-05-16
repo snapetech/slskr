@@ -24,7 +24,7 @@ const Events = () => {
 
     const tp = Math.ceil(totalCount / PER_PAGE);
 
-    setEvents(items);
+    setEvents(Array.isArray(items) ? items : []);
     setTotalPages(Number.isNaN(tp) ? 0 : tp);
     setLoading(false);
 

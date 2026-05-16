@@ -19,6 +19,7 @@ vi.mock('../../lib/slskr', () => ({
 vi.mock('../../lib/searches', () => ({
   create: vi.fn(),
   getAll: vi.fn(),
+  getStatus: vi.fn(),
   remove: vi.fn(),
   removeAll: vi.fn(),
   stop: vi.fn(),
@@ -66,6 +67,41 @@ describe('Searches', () => {
     localStorage.clear();
     getCapabilities.mockResolvedValue({ features: [] });
     library.create.mockResolvedValue({});
+    library.getAll.mockResolvedValue([]);
+    library.getStatus.mockResolvedValue({});
+  });
+
+  it('loads existing searches after the update stream connects', async () => {
+    library.getAll.mockResolvedValue([
+      {
+        id: 'search-1',
+        searchText: 'existing search',
+        startedAt: '2026-05-15T00:00:00Z',
+      },
+    ]);
+
+    await renderSearches();
+
+    await waitFor(() => expect(library.getAll).toHaveBeenCalledTimes(1));
+  });
+
+  it('refreshes generic search events by resource id', async () => {
+    library.getStatus.mockResolvedValue({
+      id: 'search-1',
+      searchText: 'event search',
+      startedAt: '2026-05-15T00:00:00Z',
+    });
+
+    await renderSearches();
+    callbacks.create?.({
+      id: 42,
+      kind: 'search.started',
+      resource: 'search-1',
+    });
+
+    await waitFor(() =>
+      expect(library.getStatus).toHaveBeenCalledWith({ id: 'search-1' }),
+    );
   });
 
   it('keeps ScenePodBridge disabled by default and creates ordinary searches without providers', async () => {

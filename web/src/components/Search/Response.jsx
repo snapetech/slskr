@@ -630,6 +630,13 @@ class Response extends Component {
     const badgeColor = getBadgeColor(downloadStats);
     const activeQualitySummary = response.communityQualitySummary || qualitySummary;
     const qualityLabel = getCommunityQualityLabel(activeQualitySummary);
+    const rawUploadSpeed = response.uploadSpeed ?? response.averageSpeed;
+    const uploadSpeed = Number.isFinite(rawUploadSpeed)
+      ? `${formatBytes(rawUploadSpeed)}/s`
+      : 'Unknown';
+    const queueLength = Number.isFinite(response.queueLength)
+      ? response.queueLength
+      : 'Unknown';
 
     return (
       <>
@@ -886,8 +893,8 @@ class Response extends Component {
           </Card.Header>
           <Card.Meta className="result-meta">
             <span>
-              Upload Speed: {formatBytes(response.uploadSpeed)}/s, Free Upload
-              Slot: {free ? 'YES' : 'NO'}, Queue Length: {response.queueLength}
+              Upload Speed: {uploadSpeed}, Free Upload Slot:{' '}
+              {free ? 'YES' : 'NO'}, Queue Length: {queueLength}
             </span>
           </Card.Meta>
           {((!isFolded && Object.keys(tree)) || []).map((directory) => (

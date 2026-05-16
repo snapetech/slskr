@@ -57,9 +57,9 @@ export default class ShareGroups extends Component {
         identityAPI.getContacts().catch(() => ({ data: [] })), // Gracefully handle if Identity not enabled
       ]);
       this.setState({
-        contacts: contactsRes.data || [],
+        contacts: Array.isArray(contactsRes.data) ? contactsRes.data : [],
         loading: false,
-        shareGroups: groupsRes.data || [],
+        shareGroups: Array.isArray(groupsRes.data) ? groupsRes.data : [],
       });
     } catch (error) {
       // Extract error message from response

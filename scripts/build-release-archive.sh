@@ -15,7 +15,7 @@ usage: scripts/build-release-archive.sh [--target <rust-target>] [--version <ver
 
 Builds the slskr binary and creates a release archive containing:
   - slskr executable
-  - Rust/WASM web runtime assets
+  - production React web UI assets
   - README, LICENSE, NOTICE, COMPLIANCE
   - docs/slskr.config.example.toml
 
@@ -86,19 +86,16 @@ if [[ "$target" == *windows* ]]; then
 fi
 
 if ((build_web)); then
-  scripts/build-rust-web.sh
+  npm --prefix web run build
 fi
 
-rust_web_build="${SLSKR_RUST_WEB_DIST:-target/slskr-web}"
+web_build="${SLSKR_WEB_BUILD_DIR:-web/build}"
 if [[ \
-  ! -f "$rust_web_build/index.html" || \
-  ! -f "$rust_web_build/slskr_web_bootstrap.js" || \
-  ! -f "$rust_web_build/styles.css" || \
-  ! -f "$rust_web_build/slskr_web.js" || \
-  ! -f "$rust_web_build/slskr_web_bg.wasm" \
+  ! -f "$web_build/index.html" || \
+  ! -d "$web_build/assets" \
  ]]; then
-  echo "Rust/WASM web assets are missing from $rust_web_build" >&2
-  echo "run scripts/build-rust-web.sh or unset --skip-web-build" >&2
+  echo "Production web assets are missing from $web_build" >&2
+  echo "run npm --prefix web run build or unset --skip-web-build" >&2
   exit 1
 fi
 
@@ -127,7 +124,7 @@ cp "$binary_path" "$stage_dir/$binary_name"
 cp README.md LICENSE NOTICE COMPLIANCE.md "$stage_dir/"
 mkdir -p "$stage_dir/docs" "$stage_dir/web"
 cp docs/slskr.config.example.toml "$stage_dir/docs/"
-cp -R "$rust_web_build" "$stage_dir/web/build"
+cp -R "$web_build" "$stage_dir/web/build"
 
 cat > "$stage_dir/RUN.txt" <<EOF
 slskr $version ($target)

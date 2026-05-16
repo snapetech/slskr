@@ -453,7 +453,7 @@ const Wishlist = () => {
   const loadItems = useCallback(async () => {
     try {
       const data = await wishlistAPI.getAll();
-      setItems(data);
+      setItems(Array.isArray(data) ? data : []);
     } catch (error) {
       toast.error(`Failed to load wishlist: ${error.message}`);
     } finally {

@@ -65,7 +65,7 @@ export default class Collections extends Component {
         throw error;
       });
       this.setState({
-        collections: response.data || [],
+        collections: Array.isArray(response.data) ? response.data : [],
         loading: false,
       });
     } catch (error) {
@@ -107,7 +107,7 @@ export default class Collections extends Component {
 
         throw error;
       });
-      const shareGroups = response.data || [];
+      const shareGroups = Array.isArray(response.data) ? response.data : [];
       this.setState((previousState) => ({
         shareAudienceId:
           previousState.shareAudienceId ?? shareGroups[0]?.id ?? null,
@@ -139,7 +139,7 @@ export default class Collections extends Component {
 
           throw error;
         });
-      this.setState({ shares: response.data || [] });
+      this.setState({ shares: Array.isArray(response.data) ? response.data : [] });
     } catch {
       this.setState({ shares: [] });
     }
@@ -148,7 +148,9 @@ export default class Collections extends Component {
   loadCollectionItems = async (collectionId) => {
     try {
       const response = await collectionsAPI.getCollectionItems(collectionId);
-      this.setState({ selectedCollectionItems: response.data || [] });
+      this.setState({
+        selectedCollectionItems: Array.isArray(response.data) ? response.data : [],
+      });
     } catch (error) {
       console.error('[Collections] Error loading items:', error);
     }

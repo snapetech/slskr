@@ -12,6 +12,7 @@ const searches = [
     endedAt: new Date('2026-05-05T18:20:00Z').toISOString(),
     fileCount: 18,
     id: 'commons-example-sound',
+    isComplete: true,
     lockedFileCount: 0,
     responseCount: 7,
     searchText: 'Example sound file Ogg Vorbis',
@@ -22,6 +23,7 @@ const searches = [
     endedAt: null,
     fileCount: 4,
     id: 'commons-click-track',
+    isComplete: false,
     lockedFileCount: 1,
     responseCount: 3,
     searchText: 'Audacity click track eight seconds',
@@ -175,6 +177,44 @@ const fallback = (url) => {
       storage: ['share-index', 'transfer-state'],
     });
   }
+  if (pathname.match(/^\/searches\/[^/]+\/responses$/u)) {
+    return json([
+      {
+        averageSpeed: 512_000,
+        files: [
+          {
+            bitRate: 192,
+            filename: 'Example_sound_file_in_Ogg_Vorbis_format.ogg',
+            length: 84,
+            path: 'open-fixtures/Example_sound_file_in_Ogg_Vorbis_format.ogg',
+            size: 153_301,
+          },
+        ],
+        hasFreeUploadSlot: true,
+        isLocked: false,
+        queueLength: 0,
+        token: 1,
+        username: 'commons_peer',
+      },
+      {
+        averageSpeed: 96_000,
+        files: [
+          {
+            bitRate: 1411,
+            filename: 'Example_sound_file_lossless.flac',
+            length: 84,
+            path: 'open-fixtures/Example_sound_file_lossless.flac',
+            size: 2_400_000,
+          },
+        ],
+        hasFreeUploadSlot: false,
+        isLocked: false,
+        queueLength: 2,
+        token: 1,
+        username: 'audio_lab',
+      },
+    ]);
+  }
   if (pathname.startsWith('/searches/')) return json(searches[0]);
   if (pathname === '/searches') return json(searches);
   if (pathname === '/transfers/downloads') return json(transfers);
@@ -261,11 +301,18 @@ const fallback = (url) => {
 await fs.mkdir(outputDir, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const context = await browser.newContext({
+  serviceWorkers: 'block',
+  viewport: { width: 1440, height: 1000 },
+});
+const page = await context.newPage();
 
 await page.addInitScript(({ appState, options, searchList }) => {
   window.localStorage.setItem('slskr-theme', 'slskr');
   window.sessionStorage.setItem('slskr-token', 'readme-screenshot-token');
+  window.navigator.serviceWorker?.getRegistrations?.().then((registrations) => {
+    registrations.forEach((registration) => registration.unregister());
+  });
 
   class FakeWebSocket {
     constructor(url) {
@@ -320,16 +367,20 @@ await page.route('**/api/**', (route) => route.fulfill(fallback(route.request().
 
 const capture = async (route, filename) => {
   await page.goto(`${baseUrl}${route}`, { waitUntil: 'networkidle' });
-  await page.waitForTimeout(600);
+  if (route.startsWith('/searches/')) {
+    await page.locator('.result-card').first().waitFor({ state: 'visible', timeout: 5000 });
+  }
+  await page.waitForTimeout(300);
   await page.screenshot({
     fullPage: false,
     path: path.join(outputDir, filename),
   });
 };
 
-await capture('/searches', 'webui-searches.png');
+await capture('/searches/commons-example-sound', 'webui-searches.png');
 await capture('/downloads', 'webui-downloads.png');
 await capture('/rooms', 'webui-rooms.png');
 await capture('/system', 'webui-system.png');
 
+await context.close();
 await browser.close();

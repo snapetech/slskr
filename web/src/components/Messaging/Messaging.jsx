@@ -304,8 +304,15 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
       rooms.getJoined(),
       pods.list().catch(() => []),
     ]);
+    const conversationsList = Array.isArray(serverConversations)
+      ? serverConversations
+      : [];
+    const joinedRoomList = Array.isArray(serverJoinedRooms)
+      ? serverJoinedRooms
+      : [];
+    const podList = Array.isArray(serverPods) ? serverPods : [];
     const podDetails = await Promise.all(
-      (serverPods || []).map(async (pod) => {
+      podList.map(async (pod) => {
         try {
           return await pods.get(pod.podId);
         } catch {
@@ -315,7 +322,7 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
     );
 
     setConversations(
-      (serverConversations || [])
+      conversationsList
         .filter((conversation) => conversation.username)
         .sort((a, b) => {
           if (a.hasUnAcknowledgedMessages !== b.hasUnAcknowledgedMessages) {
@@ -325,7 +332,7 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
           return a.username.localeCompare(b.username);
         }),
     );
-    setJoinedRooms((serverJoinedRooms || []).filter(Boolean).sort());
+    setJoinedRooms(joinedRoomList.filter(Boolean).sort());
     setPodChannels(
       podDetails
         .flatMap((pod) =>

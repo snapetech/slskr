@@ -46,10 +46,15 @@ const Shares = ({ state = {}, theme } = {}) => {
       if (!quiet) setLoading(true);
 
       const sharesByHost = await sharesLibrary.getAll();
-      const flattened = Object.entries(sharesByHost).reduce(
+      const groupedShares =
+        sharesByHost && typeof sharesByHost === 'object' && !Array.isArray(sharesByHost)
+          ? sharesByHost
+          : {};
+      const flattened = Object.entries(groupedShares).reduce(
         (accumulator, [host, sharesForHost]) => {
+          const hostShares = Array.isArray(sharesForHost) ? sharesForHost : [];
           return accumulator.concat(
-            sharesForHost.map((share) => ({ host, ...share })),
+            hostShares.map((share) => ({ host, ...share })),
           );
         },
         [],
