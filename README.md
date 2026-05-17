@@ -156,12 +156,23 @@ Prerequisites:
 - Soulseek credentials for real network operation.
 - Optional Go and Python for client-library test gates.
 
-Build and install locally:
+Build and install locally with the React Web UI used in the screenshots:
 
 ```bash
+npm --prefix web ci
+npm --prefix web run build
 cargo build --release -p slskr
 install -Dm755 target/release/slskr "$HOME/.local/bin/slskr"
+mkdir -p "$HOME/.local/share/slskr/web"
+cp -R web/build "$HOME/.local/share/slskr/web/build"
 ```
+
+`slskr serve` looks for the production UI in `SLSKR_WEB_BUILD_DIR`, next to the
+binary as `web/build`, under `$prefix/share/slskr/web/build`, or in the current
+repository checkout. `/` is the full React client when those assets are present.
+The minimal built-in operator dashboard is available at `/dashboard`; if no
+built UI is present, `/` falls back to that dashboard and explains how to install
+the full UI.
 
 Print version information:
 

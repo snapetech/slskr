@@ -6863,6 +6863,7 @@ async fn route_http_request_with_headers(
 
     match (method, normalized_path.as_str()) {
         ("GET", "/") => Ok(index_html_response()),
+        ("GET", "/dashboard") => Ok(fallback_dashboard_response()),
         ("GET", "/api/health") => Ok(health_response(&state.config)),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
@@ -14556,10 +14557,32 @@ fn index_html_response() -> HttpResponse {
     }
 }
 
+fn fallback_dashboard_response() -> HttpResponse {
+    HttpResponse {
+        status: "200 OK",
+        content_type: "text/html; charset=utf-8",
+        body: fallback_dashboard_html(),
+    }
+}
+
 fn web_build_root() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(configured) = env::var("SLSKR_WEB_BUILD_DIR") {
         candidates.push(PathBuf::from(configured));
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join("web").join("build"));
+            candidates.push(exe_dir.join("build"));
+            candidates.push(
+                exe_dir
+                    .join("..")
+                    .join("share")
+                    .join("slskr")
+                    .join("web")
+                    .join("build"),
+            );
+        }
     }
     if let Ok(cwd) = env::current_dir() {
         candidates.push(cwd.join("web").join("build"));
@@ -14598,7 +14621,12 @@ fn web_static_content_type(path: &Path) -> &'static str {
 }
 
 fn web_static_file_for_request(path: &str) -> Option<(PathBuf, &'static str)> {
-    if path.starts_with("/api/") || path.starts_with("/hub/") || path == "/api" || path == "/hub" {
+    if path.starts_with("/api/")
+        || path.starts_with("/hub/")
+        || path == "/api"
+        || path == "/hub"
+        || path == "/dashboard"
+    {
         return None;
     }
 
@@ -21335,6 +21363,10 @@ pub fn index_html() -> String {
         return html;
     }
 
+    fallback_dashboard_html()
+}
+
+pub fn fallback_dashboard_html() -> String {
     r#"<!doctype html>
 <html lang="en">
 <head>
@@ -21395,6 +21427,20 @@ pub fn index_html() -> String {
       color: var(--muted);
       font-size: 13px;
       white-space: nowrap;
+    }
+    .notice {
+      margin-top: 18px;
+      padding: 12px 14px;
+      border: 1px solid var(--amber);
+      border-radius: 8px;
+      background: rgba(242, 198, 109, .12);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .notice a {
+      color: var(--blue);
+      font-weight: 700;
     }
     .dot {
       width: 8px;
@@ -21563,10 +21609,16 @@ pub fn index_html() -> String {
     <header>
       <div>
         <h1>slskr</h1>
-        <div class="version">__VERSION__</div>
+        <div class="version">Fallback dashboard · __VERSION__</div>
       </div>
       <div class="status"><span id="status-dot" class="dot"></span><span id="status-text">Loading</span></div>
     </header>
+    <section class="notice">
+      This is the minimal fallback dashboard. The full React Web UI is the default at
+      <a href="/">/</a> when production assets are installed. If this page appears at
+      the root URL, build or install <code>web/build</code>, or set
+      <code>SLSKR_WEB_BUILD_DIR</code> to the built UI directory.
+    </section>
 
     <section class="grid" aria-live="polite">
       <article class="panel metric"><div class="label">Session</div><div id="session-state" class="value">-</div><div id="session-sub" class="sub">-</div></article>
@@ -23752,6 +23804,9 @@ mod tests {
         }
 
         assert!(response.body.contains("<h1>slskr</h1>"));
+        assert!(response.body.contains("Fallback dashboard"));
+        assert!(response.body.contains("href=\"/\""));
+        assert!(response.body.contains("SLSKR_WEB_BUILD_DIR"));
         assert!(response.body.contains("id=\"session-actions\""));
         assert!(response
             .body
@@ -23802,6 +23857,21 @@ mod tests {
         assert!(response.body.contains("/api/v0/rooms/"));
         assert!(response.body.contains("/api/v0/rooms/refresh"));
         assert!(response.body.contains("data-room-action=\"leave\""));
+    }
+
+    #[tokio::test]
+    async fn fallback_dashboard_is_available_on_dashboard_route() {
+        let (state, _receiver) = test_state();
+
+        let response = super::route_http_request("GET", "/dashboard", None, "", &state)
+            .await
+            .expect("dashboard response");
+
+        assert_eq!(response.status, "200 OK");
+        assert_eq!(response.content_type, "text/html; charset=utf-8");
+        assert!(response.body.contains("Fallback dashboard"));
+        assert!(response.body.contains("href=\"/\""));
+        assert!(response.body.contains("id=\"session-actions\""));
     }
 
     #[test]

@@ -1,6 +1,11 @@
 # slskr Install And Service Runbook
 
-This is the operator-facing shape for the bundled `slskr` app. It assumes one installed binary that runs the daemon, API, and web UI with `slskr serve`.
+This is the operator-facing shape for the bundled `slskr` app. It assumes one
+installed binary that runs the daemon/API with `slskr serve`, plus the built
+React Web UI assets from `web/build` when you want the full browser client shown
+in the README screenshots. If those assets are missing, `slskr serve` falls back
+to a minimal built-in operator dashboard. The full UI is served at `/` by
+default; the fallback dashboard is also available at `/dashboard`.
 
 ## Build
 

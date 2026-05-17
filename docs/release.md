@@ -1,7 +1,7 @@
 # slskr Release Runbook
 
 This is the release-prep path for binary archives. `slskr` is a single Rust
-binary plus Rust/WASM runtime web assets staged as `web/build`.
+binary plus the production React/Vite Web UI assets staged as `web/build`.
 
 ## Local Gate
 
@@ -43,7 +43,8 @@ scripts/verify-release-artifacts.sh target/dist
 The archive includes:
 
 - `slskr` or `slskr.exe`
-- `web/build` with `index.html`, `slskr_web_bootstrap.js`, `styles.css`, `slskr_web.js`, and `slskr_web_bg.wasm`
+- `web/build` with `index.html`, hashed JavaScript/CSS assets, icons, and the
+  web app manifest
 - `README.md`, `LICENSE`, `NOTICE`, `COMPLIANCE.md`
 - `docs/slskr.config.example.toml`
 - `RUN.txt`
