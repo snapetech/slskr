@@ -388,8 +388,8 @@ cargo run -p slskr -- smoke local-peer
 ```
 
 Live interop and soak scripts are under [scripts](./scripts). They use real
-accounts and public-network behavior, so run them deliberately and keep
-credentials out of git.
+accounts and public-network behavior, so run them deliberately and provide
+credentials through your normal local secret source.
 
 ## Deployment
 

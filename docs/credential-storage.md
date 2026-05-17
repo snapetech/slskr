@@ -106,9 +106,9 @@ new credentials into systemd.
 
 - `/api/config`, server state responses, logs, and telemetry must not return raw
   Soulseek passwords.
-- Keep config files containing `username` or `password` outside git and restrict
-  permissions.
-- Prefer `LoadCredentialEncrypted=` over checked-in unit environment variables
-  for Linux system services.
+- Keep config files containing `username` or `password` in protected deployment
+  paths with permissions scoped to the service user.
+- Prefer `LoadCredentialEncrypted=` over unit-file environment variables for
+  Linux system services.
 - Treat `file` mode as plaintext-at-rest. Back it with filesystem permissions,
   disk encryption, and a dedicated service user when possible.

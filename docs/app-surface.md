@@ -204,8 +204,8 @@ Initial configuration sources:
 - Lidarr does not provide an OAuth clickthrough surface. Configure `SLSKR_LIDARR_ENABLED=true`, `SLSKR_LIDARR_URL`, and `SLSKR_LIDARR_API_KEY`; the WebUI can then test status and run wanted/import actions using API-key authentication.
 - `SLSKR_EXTERNAL_VISUALIZER_COMMAND` configures the optional local visualizer launch command. `SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED=true` is also required before the daemon will spawn that command; launch attempts are recorded as events.
 - `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold or env-backed secret-manager deployments
-- gitignored `.secrets/` files for local lab credentials
-- external secret-manager deployment notes are intentionally out of tree; the
+- local `.secrets/` files for lab credentials
+- external secret-manager deployment notes are intentionally environment-specific; the
   maintained in-repo operator guidance is [install.md](./install.md) and
   [http-api-deployment.md](./http-api-deployment.md)
 
@@ -221,9 +221,9 @@ Backfill target:
 - keep Soulseek credential loading explicit through Web UI runtime entry,
   platform OS credential storage, read-only systemd credentials for Linux
   services, the restricted local credential-file fallback, environment
-  variables, config files outside git, or the operator's secret manager
+  variables, protected config files, or the operator's secret manager
 - maintain service/container artifacts that follow [install.md](./install.md)
-  and never require checked-in secrets
+  and keep secrets in operator-controlled deployment storage
 
 ## Auth And Exposure
 

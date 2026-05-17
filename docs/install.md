@@ -47,12 +47,13 @@ $HOME/.local/state/slskr
 
 Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to override those paths. Environment variables override config-file values.
 
-Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep API
-tokens out of git. For Soulseek credentials, prefer first-run Web UI entry with
-the OS credential store for user installs, systemd credentials for Linux
-services, runtime-only memory when you do not want persistence, the restricted
-local credential-file fallback when a better store is unavailable, or env/config
-credentials from your service/container secret manager. See
+Start from [slskr.config.example.toml](./slskr.config.example.toml). Configure
+API tokens through your service manager, deployment config, or secret manager.
+For Soulseek credentials, prefer first-run Web UI entry with the OS credential
+store for user installs, systemd credentials for Linux services, runtime-only
+memory when you do not want persistence, the restricted local credential-file
+fallback when a better store is unavailable, or env/config credentials from your
+service/container secret manager. See
 [credential-storage.md](./credential-storage.md) for the full credential-source
 matrix.
 
@@ -228,4 +229,4 @@ Peer listener ports must match the configured advertised ports. For NAT-PMP/UPnP
 - Keep `GET /`, `GET /api/health`, `GET /api/version`, and `GET /api/v0/capabilities` public only as health/version/capability surfaces.
 - Keep protected API routes behind bearer or same-site browser-cookie auth.
 - Preserve same-origin headers through reverse proxies so cross-site mutating requests continue to be rejected.
-- Do not check in credentials, WireGuard configs, NAT-PMP lease output, cookies, transfer state, share cache, or logs.
+- Keep credentials, WireGuard configs, NAT-PMP lease output, cookies, transfer state, share cache, and logs in the deployment paths intended for those files, with permissions scoped to the service user.
