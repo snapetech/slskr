@@ -15180,6 +15180,7 @@ fn slskd_server_state_json(
         "credentialSource": credential_source,
         "credentialStore": config.credential_store.as_str(),
         "credentialStoreModes": credential_store::supported_store_modes(),
+        "writableCredentialStoreModes": credential_store::writable_store_modes(),
         "state": state,
         "isConnected": connected,
         "isConnecting": session.state == "connecting",

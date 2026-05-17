@@ -47,7 +47,7 @@ $HOME/.local/state/slskr
 
 Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to override those paths. Environment variables override config-file values.
 
-Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep API tokens out of git. For Soulseek credentials, prefer first-run Web UI entry with the OS credential store; use runtime-only memory when you do not want persistence, the restricted local credential-file fallback when an OS store is unavailable, or env/config credentials from your service/container secret manager.
+Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep API tokens out of git. For Soulseek credentials, prefer first-run Web UI entry with the OS credential store for user installs, systemd credentials for Linux services, runtime-only memory when you do not want persistence, the restricted local credential-file fallback when a better store is unavailable, or env/config credentials from your service/container secret manager.
 
 SQLite persistence is default-off. Enable the durable compatibility-store path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; share index, event, search, transfer rows and transfer event trail, user, browse, message, room, collection/library, social/security, OAuth, webhook, and runtime projections write through to SQLite. Transfer projection restart state and event TSV mirrors are also maintained in the slskr state directory.
 
@@ -134,6 +134,12 @@ PrivateTmp=true
 WantedBy=default.target
 ```
 
+For a user service, `credential_store = "os"` is usually the most convenient
+Soulseek credential store. If you prefer systemd credentials, set
+`credential_store = "systemd"` in config and add credentials named
+`slsk-username` and `slsk-password` to the unit with `LoadCredential=` or
+`LoadCredentialEncrypted=`.
+
 Place it at:
 
 ```text
@@ -165,6 +171,8 @@ Group=slskr
 ExecStart=/usr/local/bin/slskr serve
 Environment=SLSKR_CONFIG=/etc/slskr/config.toml
 Environment=SLSKR_STATE_DIR=/var/lib/slskr
+LoadCredentialEncrypted=slsk-username:/etc/credstore.encrypted/slskr-slsk-username.cred
+LoadCredentialEncrypted=slsk-password:/etc/credstore.encrypted/slskr-slsk-password.cred
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true
@@ -177,6 +185,13 @@ WantedBy=multi-user.target
 ```
 
 If shared directories live outside `/var/lib/slskr`, add them to `ReadWritePaths=` or `ReadOnlyPaths=` as appropriate.
+
+For systemd credentials, set `credential_store = "systemd"` under `[network]`.
+`slskr` reads `$CREDENTIALS_DIRECTORY/slsk-username` and
+`$CREDENTIALS_DIRECTORY/slsk-password` at service start. As an alternative, pass
+one JSON credential named `slskr-soulseek` with `{"username":"...","password":"..."}`.
+Use `systemd-creds encrypt` to create the encrypted credential files referenced
+by `LoadCredentialEncrypted=`.
 
 ## Container Shape
 

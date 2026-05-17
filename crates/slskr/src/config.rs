@@ -330,6 +330,7 @@ impl AppConfig {
 pub enum CredentialStoreMode {
     Memory,
     Os,
+    Systemd,
     File,
 }
 
@@ -338,9 +339,10 @@ impl CredentialStoreMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "memory" | "runtime" | "none" => Ok(Self::Memory),
             "os" | "keyring" | "keychain" | "credential-manager" => Ok(Self::Os),
+            "systemd" | "systemd-credentials" | "systemd-creds" => Ok(Self::Systemd),
             "file" | "local-file" => Ok(Self::File),
             other => Err(format!(
-                "invalid SLSKR_CREDENTIAL_STORE {other:?}; expected memory, os, or file"
+                "invalid SLSKR_CREDENTIAL_STORE {other:?}; expected memory, os, systemd, or file"
             )),
         }
     }
@@ -349,6 +351,7 @@ impl CredentialStoreMode {
         match self {
             Self::Memory => "memory",
             Self::Os => "os",
+            Self::Systemd => "systemd",
             Self::File => "file",
         }
     }

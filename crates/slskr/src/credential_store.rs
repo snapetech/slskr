@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{env, fs, path::Path};
 
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,10 @@ pub struct StoredCredentials {
 }
 
 pub fn supported_store_modes() -> &'static [&'static str] {
+    &["memory", "os", "systemd", "file"]
+}
+
+pub fn writable_store_modes() -> &'static [&'static str] {
     &["memory", "os", "file"]
 }
 
@@ -37,6 +41,7 @@ pub fn load(config: &AppConfig) -> Result<Option<StoredCredentials>, String> {
     match config.credential_store {
         CredentialStoreMode::Memory => Ok(None),
         CredentialStoreMode::Os => load_os(),
+        CredentialStoreMode::Systemd => load_systemd(),
         CredentialStoreMode::File => load_file(&config.credential_file),
     }
 }
@@ -49,8 +54,71 @@ pub fn store(
     match mode {
         CredentialStoreMode::Memory => Ok("runtime"),
         CredentialStoreMode::Os => store_os(credentials),
+        CredentialStoreMode::Systemd => Err(
+            "systemd credentials are read-only at runtime; configure LoadCredential= or LoadCredentialEncrypted= in the service unit".to_owned(),
+        ),
         CredentialStoreMode::File => store_file(&config.credential_file, credentials),
     }
+}
+
+fn load_systemd() -> Result<Option<StoredCredentials>, String> {
+    let Some(credentials_dir) = env::var_os("CREDENTIALS_DIRECTORY") else {
+        return Ok(None);
+    };
+    let credentials_dir = Path::new(&credentials_dir);
+
+    if let Some(credentials) = load_systemd_json(credentials_dir)? {
+        return Ok(Some(credentials));
+    }
+
+    let username_path = credentials_dir.join("slsk-username");
+    let password_path = credentials_dir.join("slsk-password");
+    if !username_path.exists() && !password_path.exists() {
+        return Ok(None);
+    }
+
+    let username = read_secret_text(&username_path, "systemd Soulseek username")?;
+    let password = read_secret_text(&password_path, "systemd Soulseek password")?;
+    if username.trim().is_empty() || password.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(StoredCredentials {
+        credentials: LoginCredentials::default_client(username.trim().to_owned(), password),
+        source: "systemd",
+    }))
+}
+
+fn load_systemd_json(credentials_dir: &Path) -> Result<Option<StoredCredentials>, String> {
+    let path = credentials_dir.join("slskr-soulseek");
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = read_secret_text(&path, "systemd Soulseek credential JSON")?;
+    let parsed = serde_json::from_str::<FileCredentials>(&content).map_err(|error| {
+        format!(
+            "failed to parse systemd Soulseek credential JSON {}: {error}",
+            path.display()
+        )
+    })?;
+    if parsed.username.trim().is_empty() || parsed.password.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(StoredCredentials {
+        credentials: LoginCredentials::default_client(
+            parsed.username.trim().to_owned(),
+            parsed.password,
+        ),
+        source: "systemd",
+    }))
+}
+
+fn read_secret_text(path: &Path, label: &str) -> Result<String, String> {
+    fs::read_to_string(path)
+        .map(|value| value.trim_end_matches(['\r', '\n']).to_owned())
+        .map_err(|error| format!("failed to read {label} {}: {error}", path.display()))
 }
 
 fn load_os() -> Result<Option<StoredCredentials>, String> {

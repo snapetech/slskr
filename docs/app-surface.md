@@ -175,7 +175,7 @@ Initial configuration sources:
 - `SLSKR_HTTP_BIND` for the app HTTP listener
 - `SLSKR_STATE_DIR` for daemon state, defaulting to `$XDG_STATE_HOME/slskr` or `$HOME/.local/state/slskr`
 - `SLSKR_AUTO_CONNECT` to control startup login behavior; defaults to true when username/password are configured or when a persistent Soulseek credential store is enabled
-- `SLSKR_CREDENTIAL_STORE` for Soulseek credential storage: `os` uses the platform credential store, `memory` keeps Web UI credentials runtime-only, and `file` uses the restricted local credential-file fallback
+- `SLSKR_CREDENTIAL_STORE` for Soulseek credential storage: `os` uses the platform credential store, `systemd` reads `$CREDENTIALS_DIRECTORY` service credentials, `memory` keeps Web UI credentials runtime-only, and `file` uses the restricted local credential-file fallback
 - `SLSKR_CREDENTIAL_FILE` for the `file` credential-store path; defaults to `soulseek-credentials.json` under `SLSKR_STATE_DIR`
 - `SLSKR_RECONNECT` to reconnect after session I/O failure; defaults to the auto-connect value
 - `SLSKR_RECONNECT_SECONDS` for reconnect backoff; defaults to `30`

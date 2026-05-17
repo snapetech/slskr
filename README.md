@@ -247,7 +247,7 @@ Common settings:
 | --- | --- |
 | `SLSKR_HTTP_BIND` | HTTP listener, default `127.0.0.1:5030`. |
 | `SLSKR_AUTO_CONNECT` | Connect at startup when credentials are configured or stored. |
-| `SLSKR_CREDENTIAL_STORE` | Soulseek credential storage: `os`, `memory`, or `file`. |
+| `SLSKR_CREDENTIAL_STORE` | Soulseek credential storage: `os`, `systemd`, `memory`, or `file`. |
 | `SLSKR_CREDENTIAL_FILE` | Local credential-file fallback path; default is under `SLSKR_STATE_DIR`. |
 | `SLSK_USERNAME`, `SLSK_PASSWORD` | Soulseek account credentials for env/config secret-manager deployments. |
 | `SLSKR_API_TOKEN` | Token for protected API routes. |

@@ -922,8 +922,8 @@ class App extends Component {
   };
 
   openSoulseekCredentials = (server) => {
-    const modes = Array.isArray(server?.credentialStoreModes)
-      ? server.credentialStoreModes
+    const modes = Array.isArray(server?.writableCredentialStoreModes)
+      ? server.writableCredentialStoreModes
       : [];
     const defaultCredentialStore = modes.includes(server?.credentialStore)
       ? server.credentialStore
@@ -1200,7 +1200,7 @@ class App extends Component {
                   this.updateSoulseekCredential('credentialStore', data.value)
                 }
                 options={SOULSEEK_CREDENTIAL_STORE_OPTIONS.filter((option) =>
-                  (server?.credentialStoreModes || ['memory']).includes(
+                  (server?.writableCredentialStoreModes || ['memory']).includes(
                     option.value,
                   ),
                 )}
