@@ -14,7 +14,12 @@ log_level = "info"
 [network]
 server_address = "server.slsknet.org:2242"
 listen_port = 2234
-# Prefer a secret manager or environment variables for real credentials.
+# Prefer the Web UI "OS credential store" option for first-run credentials.
+# Alternatives: set credential_store = "memory" for runtime-only entry,
+# credential_store = "file" for a restricted local fallback, or keep using
+# explicit username/password from env/config for container secret managers.
+# credential_store = "os"
+# credential_file = "/var/lib/slskr/soulseek-credentials.json"
 # username = "user"
 # password = "pass"
 

@@ -24,6 +24,8 @@ pub struct AppConfig {
     pub listen_port: u32,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub credential_store: CredentialStoreMode,
+    pub credential_file: PathBuf,
     pub auto_connect: bool,
     pub reconnect: bool,
     pub reconnect_delay: Duration,
@@ -86,13 +88,23 @@ impl AppConfig {
         )?;
         let username = optional_env_any(env, &["SLSK_USERNAME"]).or(file_config.network.username);
         let password = optional_env_any(env, &["SLSK_PASSWORD"]).or(file_config.network.password);
+        let credential_store = CredentialStoreMode::parse(
+            env.var("SLSKR_CREDENTIAL_STORE")
+                .or(file_config.network.credential_store)
+                .unwrap_or_else(|| "os".to_owned())
+                .as_str(),
+        )?;
+        let credential_file = env
+            .var("SLSKR_CREDENTIAL_FILE")
+            .map(PathBuf::from)
+            .or(file_config.network.credential_file)
+            .unwrap_or_else(|| state_dir.join("soulseek-credentials.json"));
         let auto_connect = env_bool_layer(
             env,
             "SLSKR_AUTO_CONNECT",
-            file_config
-                .app
-                .auto_connect
-                .unwrap_or(username.is_some() && password.is_some()),
+            file_config.app.auto_connect.unwrap_or(
+                username.is_some() && password.is_some() || credential_store.auto_connect_default(),
+            ),
         )?;
         let reconnect = env_bool_layer(
             env,
@@ -228,6 +240,8 @@ impl AppConfig {
             listen_port,
             username,
             password,
+            credential_store,
+            credential_file,
             auto_connect,
             reconnect,
             reconnect_delay,
@@ -266,7 +280,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -285,6 +299,8 @@ impl AppConfig {
             self.test_user_endpoint_overrides.len(),
             json_option(self.username.as_deref().map(redact_username).as_deref()),
             self.username.is_some() && self.password.is_some(),
+            self.credential_store.as_str(),
+            json_escape(&self.credential_file.display().to_string()),
             self.auto_connect,
             self.reconnect,
             self.reconnect_delay.as_secs(),
@@ -307,6 +323,38 @@ impl AppConfig {
             self.persistence_enabled,
             self.integrations.sanitized_json()
         )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CredentialStoreMode {
+    Memory,
+    Os,
+    File,
+}
+
+impl CredentialStoreMode {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "memory" | "runtime" | "none" => Ok(Self::Memory),
+            "os" | "keyring" | "keychain" | "credential-manager" => Ok(Self::Os),
+            "file" | "local-file" => Ok(Self::File),
+            other => Err(format!(
+                "invalid SLSKR_CREDENTIAL_STORE {other:?}; expected memory, os, or file"
+            )),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Memory => "memory",
+            Self::Os => "os",
+            Self::File => "file",
+        }
+    }
+
+    pub fn auto_connect_default(&self) -> bool {
+        !matches!(self, Self::Memory)
     }
 }
 
@@ -661,6 +709,8 @@ pub struct NetworkFileConfig {
     listen_port: Option<u32>,
     username: Option<String>,
     password: Option<String>,
+    credential_store: Option<String>,
+    credential_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]

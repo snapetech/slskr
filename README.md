@@ -191,9 +191,6 @@ slskr login smoke
 Start the daemon and Web UI:
 
 ```bash
-SLSK_USERNAME=<username> \
-SLSK_PASSWORD=<password> \
-SLSKR_AUTO_CONNECT=true \
 slskr serve
 ```
 
@@ -202,6 +199,11 @@ Then open:
 ```text
 http://127.0.0.1:5030/
 ```
+
+On first connect, the Web UI prompts for Soulseek credentials and lets you choose
+runtime-only memory, the platform OS credential store, or a restricted local
+credential file. `SLSK_USERNAME`/`SLSK_PASSWORD` and config-file credentials
+remain supported for container secret managers and scripted deployments.
 
 ## Configuration
 
@@ -244,8 +246,10 @@ Common settings:
 | Setting | Purpose |
 | --- | --- |
 | `SLSKR_HTTP_BIND` | HTTP listener, default `127.0.0.1:5030`. |
-| `SLSKR_AUTO_CONNECT` | Connect at startup when credentials are configured. |
-| `SLSK_USERNAME`, `SLSK_PASSWORD` | Soulseek account credentials. |
+| `SLSKR_AUTO_CONNECT` | Connect at startup when credentials are configured or stored. |
+| `SLSKR_CREDENTIAL_STORE` | Soulseek credential storage: `os`, `memory`, or `file`. |
+| `SLSKR_CREDENTIAL_FILE` | Local credential-file fallback path; default is under `SLSKR_STATE_DIR`. |
+| `SLSK_USERNAME`, `SLSK_PASSWORD` | Soulseek account credentials for env/config secret-manager deployments. |
 | `SLSKR_API_TOKEN` | Token for protected API routes. |
 | `SLSKR_SHARE_DIRS` | Semicolon-separated share roots. |
 | `SLSKR_LISTENER_BIND` | Regular peer listener bind address. |

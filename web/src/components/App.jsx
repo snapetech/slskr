@@ -69,6 +69,12 @@ const THEME_LABELS = THEME_OPTIONS.reduce(
   {},
 );
 
+const SOULSEEK_CREDENTIAL_STORE_OPTIONS = [
+  { key: 'memory', text: 'This session only', value: 'memory' },
+  { key: 'os', text: 'OS credential store', value: 'os' },
+  { key: 'file', text: 'Local credential file', value: 'file' },
+];
+
 const normalizeTheme = (theme) => {
   if (theme === 'light' || theme === 'classic-dark') {
     return theme;
@@ -433,6 +439,7 @@ const initialState = {
   },
   retriesExhausted: false,
   soulseekCredentials: {
+    credentialStore: 'memory',
     error: undefined,
     open: false,
     password: '',
@@ -914,10 +921,17 @@ class App extends Component {
     this.setState({ themeMenuOpen: false });
   };
 
-  openSoulseekCredentials = () => {
+  openSoulseekCredentials = (server) => {
+    const modes = Array.isArray(server?.credentialStoreModes)
+      ? server.credentialStoreModes
+      : [];
+    const defaultCredentialStore = modes.includes(server?.credentialStore)
+      ? server.credentialStore
+      : 'memory';
     this.setState((previousState) => ({
       soulseekCredentials: {
         ...previousState.soulseekCredentials,
+        credentialStore: defaultCredentialStore,
         error: undefined,
         open: true,
       },
@@ -957,7 +971,7 @@ class App extends Component {
       return;
     }
 
-    this.openSoulseekCredentials();
+    this.openSoulseekCredentials(server);
   };
 
   submitSoulseekCredentials = async () => {
@@ -984,7 +998,11 @@ class App extends Component {
     }));
 
     try {
-      await connect({ password, username });
+      await connect({
+        credentialStore: soulseekCredentials.credentialStore || 'memory',
+        password,
+        username,
+      });
       this.closeSoulseekCredentials();
     } catch (error) {
       this.setState((previousState) => ({
@@ -1174,6 +1192,19 @@ class App extends Component {
                 }
                 type="password"
                 value={soulseekCredentials.password}
+              />
+              <Form.Select
+                disabled={soulseekCredentials.pending}
+                label="Credential storage"
+                onChange={(_, data) =>
+                  this.updateSoulseekCredential('credentialStore', data.value)
+                }
+                options={SOULSEEK_CREDENTIAL_STORE_OPTIONS.filter((option) =>
+                  (server?.credentialStoreModes || ['memory']).includes(
+                    option.value,
+                  ),
+                )}
+                value={soulseekCredentials.credentialStore}
               />
               {soulseekCredentials.error && (
                 <Segment

@@ -47,7 +47,7 @@ $HOME/.local/state/slskr
 
 Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to override those paths. Environment variables override config-file values.
 
-Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep credentials and API tokens out of git; use a local ignored env file, service environment file, or secret manager.
+Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep API tokens out of git. For Soulseek credentials, prefer first-run Web UI entry with the OS credential store; use runtime-only memory when you do not want persistence, the restricted local credential-file fallback when an OS store is unavailable, or env/config credentials from your service/container secret manager.
 
 SQLite persistence is default-off. Enable the durable compatibility-store path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; share index, event, search, transfer rows and transfer event trail, user, browse, message, room, collection/library, social/security, OAuth, webhook, and runtime projections write through to SQLite. Transfer projection restart state and event TSV mirrors are also maintained in the slskr state directory.
 

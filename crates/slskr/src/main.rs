@@ -1,6 +1,7 @@
 mod batch;
 mod cli;
 mod config;
+mod credential_store;
 mod events_ws;
 mod http_server;
 mod logging;
@@ -6971,6 +6972,15 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "Username"));
             let password = extract_json_string_field(body, "password")
                 .or_else(|| extract_json_string_field(body, "Password"));
+            let credential_store_mode = extract_json_string_field(body, "credentialStore")
+                .or_else(|| extract_json_string_field(body, "credential_store"))
+                .or_else(|| extract_json_string_field(body, "CredentialStore"))
+                .map(|value| config::CredentialStoreMode::parse(&value))
+                .transpose();
+            let credential_store_mode = match credential_store_mode {
+                Ok(mode) => mode,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
             match (username, password) {
                 (Some(username), Some(password)) => {
                     if username.trim().is_empty() || password.is_empty() {
@@ -6978,20 +6988,31 @@ async fn route_http_request_with_headers(
                             "username and password are required",
                         ));
                     }
+                    let credentials =
+                        LoginCredentials::default_client(username.trim().to_owned(), password);
+                    let credential_source = credential_store::store(
+                        &state.config,
+                        credential_store_mode
+                            .as_ref()
+                            .unwrap_or(&config::CredentialStoreMode::Memory),
+                        &credentials,
+                    );
+                    let credential_source = match credential_source {
+                        Ok(source) => source,
+                        Err(error) => return Ok(routing::bad_request_response(&error)),
+                    };
                     {
-                        let mut credentials = state.runtime_credentials.write().await;
-                        *credentials = Some(LoginCredentials::default_client(
-                            username.trim().to_owned(),
-                            password,
-                        ));
+                        let mut runtime_credentials = state.runtime_credentials.write().await;
+                        *runtime_credentials = Some(credentials);
                     }
                     record_daemon_log(
                         state,
                         logging::LogLevel::Info,
                         "session",
                         format!(
-                            "received in-memory Soulseek credentials for {}",
-                            redact_username(username.trim())
+                            "received Soulseek credentials for {} using {} credential store",
+                            redact_username(username.trim()),
+                            credential_source
                         ),
                     )
                     .await;
@@ -15157,6 +15178,8 @@ fn slskd_server_state_json(
         "ipEndPoint": config.server_address,
         "credentialsConfigured": runtime_credentials_configured || config_credentials_configured,
         "credentialSource": credential_source,
+        "credentialStore": config.credential_store.as_str(),
+        "credentialStoreModes": credential_store::supported_store_modes(),
         "state": state,
         "isConnected": connected,
         "isConnecting": session.state == "connecting",
@@ -17558,6 +17581,35 @@ async fn serve(once: bool) -> Result<(), String> {
         oauth_states: RwLock::new(oauth_state_store),
         stream_tickets: RwLock::new(PreviewStreamTicketStore::default()),
     });
+    match credential_store::load(&state.config) {
+        Ok(Some(stored)) => {
+            let username = redact_username(&stored.credentials.username);
+            {
+                let mut runtime_credentials = state.runtime_credentials.write().await;
+                *runtime_credentials = Some(stored.credentials);
+            }
+            record_daemon_log(
+                &state,
+                logging::LogLevel::Info,
+                "session",
+                format!(
+                    "loaded Soulseek credentials for {} from {} credential store",
+                    username, stored.source
+                ),
+            )
+            .await;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            record_daemon_log(
+                &state,
+                logging::LogLevel::Warn,
+                "session",
+                format!("could not load stored Soulseek credentials: {error}"),
+            )
+            .await;
+        }
+    }
     spawn_session_manager(Arc::clone(&state), session_receiver);
     spawn_configured_listeners(Arc::clone(&state));
     spawn_rate_limit_cleanup(Arc::clone(&state));
@@ -18807,12 +18859,35 @@ async fn connect_session(
 ) -> bool {
     let credentials = {
         let runtime_credentials = state.runtime_credentials.read().await;
-        runtime_credentials
-            .clone()
-            .or_else(|| state.config.credentials())
+        runtime_credentials.clone()
+    };
+    let credentials = match credentials {
+        Some(credentials) => Some(credentials),
+        None => match credential_store::load(&state.config) {
+            Ok(Some(stored)) => {
+                let credentials = stored.credentials;
+                {
+                    let mut runtime_credentials = state.runtime_credentials.write().await;
+                    *runtime_credentials = Some(credentials.clone());
+                }
+                Some(credentials)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Warn,
+                    "session",
+                    format!("could not load stored Soulseek credentials: {error}"),
+                )
+                .await;
+                None
+            }
+        },
     };
     let Some(credentials) = credentials else {
-        let reason = "SLSK_USERNAME/SLSK_PASSWORD are required to connect";
+        let reason =
+            "Soulseek credentials are required; enter them in the web UI or configure a credential store";
         update_session(state, |snapshot| {
             snapshot.state = "error";
             snapshot.last_error = Some(reason.to_owned());

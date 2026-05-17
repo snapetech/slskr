@@ -174,7 +174,9 @@ Initial configuration sources:
 - `SLSKR_CONFIG` for an optional TOML config file; if unset, `slskr serve` also loads `$XDG_CONFIG_HOME/slskr/config.toml` when it exists
 - `SLSKR_HTTP_BIND` for the app HTTP listener
 - `SLSKR_STATE_DIR` for daemon state, defaulting to `$XDG_STATE_HOME/slskr` or `$HOME/.local/state/slskr`
-- `SLSKR_AUTO_CONNECT` to control startup login behavior; defaults to true only when username and password are configured
+- `SLSKR_AUTO_CONNECT` to control startup login behavior; defaults to true when username/password are configured or when a persistent Soulseek credential store is enabled
+- `SLSKR_CREDENTIAL_STORE` for Soulseek credential storage: `os` uses the platform credential store, `memory` keeps Web UI credentials runtime-only, and `file` uses the restricted local credential-file fallback
+- `SLSKR_CREDENTIAL_FILE` for the `file` credential-store path; defaults to `soulseek-credentials.json` under `SLSKR_STATE_DIR`
 - `SLSKR_RECONNECT` to reconnect after session I/O failure; defaults to the auto-connect value
 - `SLSKR_RECONNECT_SECONDS` for reconnect backoff; defaults to `30`
 - `SLSKR_PING_SECONDS` for daemon keepalive pings; defaults to `300`
@@ -201,7 +203,7 @@ Initial configuration sources:
 - Spotify integration uses the existing slskr HTTP/WebUI port for OAuth callback handling. Configure `SLSKR_SPOTIFY_ENABLED=true` and `SLSKR_SPOTIFY_CLIENT_ID`; if `SLSKR_SPOTIFY_REDIRECT_URI` is unset, the daemon advertises `http://127.0.0.1:<http-port>/api/integrations/spotify/callback` for loopback use. The callback requires a daemon-issued cryptographically random state value, expires pending state after 10 minutes, and rejects replayed, missing, or invalid state.
 - Lidarr does not provide an OAuth clickthrough surface. Configure `SLSKR_LIDARR_ENABLED=true`, `SLSKR_LIDARR_URL`, and `SLSKR_LIDARR_API_KEY`; the WebUI can then test status and run wanted/import actions using API-key authentication.
 - `SLSKR_EXTERNAL_VISUALIZER_COMMAND` configures the optional local visualizer launch command. `SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED=true` is also required before the daemon will spawn that command; launch attempts are recorded as events.
-- `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold
+- `SLSK_SERVER`, `SLSK_LISTEN_PORT`, `SLSK_USERNAME`, and `SLSK_PASSWORD` for the initial session scaffold or env-backed secret-manager deployments
 - gitignored `.secrets/` files for local lab credentials
 - external secret-manager deployment notes are intentionally out of tree; the
   maintained in-repo operator guidance is [install.md](./install.md) and
@@ -216,8 +218,10 @@ Backfill target:
   cache, transfer projection writes SQLite `transfer_events` plus mirrored
   `transfer-events.tsv` status/byte-progress events, and reloadable transfer
   records write `transfer-state.json`
-- keep credential loading explicit through environment variables, config files
-  outside git, or the operator's secret manager
+- keep Soulseek credential loading explicit through Web UI runtime entry,
+  platform OS credential storage, the restricted local credential-file fallback,
+  environment variables, config files outside git, or the operator's secret
+  manager
 - maintain service/container artifacts that follow [install.md](./install.md)
   and never require checked-in secrets
 

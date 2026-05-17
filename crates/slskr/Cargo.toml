@@ -29,6 +29,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio-tungstenite = "0.29"
 base64 = "0.22"
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "linux-native", "windows-native"] }
 
 [dev-dependencies]
 futures-util = "0.3"
