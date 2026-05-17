@@ -47,7 +47,14 @@ $HOME/.local/state/slskr
 
 Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to override those paths. Environment variables override config-file values.
 
-Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep API tokens out of git. For Soulseek credentials, prefer first-run Web UI entry with the OS credential store for user installs, systemd credentials for Linux services, runtime-only memory when you do not want persistence, the restricted local credential-file fallback when a better store is unavailable, or env/config credentials from your service/container secret manager.
+Start from [slskr.config.example.toml](./slskr.config.example.toml). Keep API
+tokens out of git. For Soulseek credentials, prefer first-run Web UI entry with
+the OS credential store for user installs, systemd credentials for Linux
+services, runtime-only memory when you do not want persistence, the restricted
+local credential-file fallback when a better store is unavailable, or env/config
+credentials from your service/container secret manager. See
+[credential-storage.md](./credential-storage.md) for the full credential-source
+matrix.
 
 SQLite persistence is default-off. Enable the durable compatibility-store path with `SLSKR_PERSISTENCE_ENABLED=true` or `[persistence].enabled = true`; share index, event, search, transfer rows and transfer event trail, user, browse, message, room, collection/library, social/security, OAuth, webhook, and runtime projections write through to SQLite. Transfer projection restart state and event TSV mirrors are also maintained in the slskr state directory.
 
@@ -191,7 +198,9 @@ For systemd credentials, set `credential_store = "systemd"` under `[network]`.
 `$CREDENTIALS_DIRECTORY/slsk-password` at service start. As an alternative, pass
 one JSON credential named `slskr-soulseek` with `{"username":"...","password":"..."}`.
 Use `systemd-creds encrypt` to create the encrypted credential files referenced
-by `LoadCredentialEncrypted=`.
+by `LoadCredentialEncrypted=`. The systemd credential store is read-only inside
+`slskr`; update credentials by changing the unit credentials and restarting the
+service.
 
 ## Container Shape
 

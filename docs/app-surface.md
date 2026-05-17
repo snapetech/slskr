@@ -33,7 +33,7 @@ The `slskr serve` process owns the app state and should grow into:
 - HTTP API and plain WebSocket event stream
 - static web UI assets
 
-The daemon calls `slskr-client` for protocol/runtime behavior rather than duplicating connection logic in the app crate. The current scaffold can optionally start a real server login session when credentials are provided through the environment.
+The daemon calls `slskr-client` for protocol/runtime behavior rather than duplicating connection logic in the app crate. It can start a real server login session from Web UI-supplied credentials, stored credentials, environment variables, or a protected config file.
 
 ## Mesh, Pod, And Service-Fabric Compatibility
 
@@ -155,7 +155,7 @@ The first app shell exposes:
 - `GET /api/v0/database/stats`, `/api/database/stats`, and `/api/admin/database/stats`: live persisted SQLite counts plus current projection counts for search, transfer, message, user, browse, room, social/security, wishlist/contact/sharegroup/share-grant, collection, library, destination, now-playing, webhook, and runtime compatibility stores
 - `POST /api/v0/database/cleanup`, `/api/database/cleanup`, and `/api/admin/database/cleanup`: remove old persisted message rows using optional `{"days":30}` and prune terminal transfer projections from the reloadable transfer state
 - `POST /api/v0/database/vacuum`, `/api/database/vacuum`, and `/api/admin/database/vacuum`: run SQLite `VACUUM` when persistence is enabled and return a structured skipped status otherwise
-- `POST /api/session/connect`: start a session using configured environment credentials
+- `POST /api/session/connect`: start a session using Web UI-supplied credentials, stored credentials, or configured env/config credentials
 - `POST /api/v0/session/connect`: versioned alias for session connect
 - `POST /api/session/disconnect`: drop the active session and suppress reconnect
 - `POST /api/v0/session/disconnect`: versioned alias for session disconnect
@@ -219,9 +219,9 @@ Backfill target:
   `transfer-events.tsv` status/byte-progress events, and reloadable transfer
   records write `transfer-state.json`
 - keep Soulseek credential loading explicit through Web UI runtime entry,
-  platform OS credential storage, the restricted local credential-file fallback,
-  environment variables, config files outside git, or the operator's secret
-  manager
+  platform OS credential storage, read-only systemd credentials for Linux
+  services, the restricted local credential-file fallback, environment
+  variables, config files outside git, or the operator's secret manager
 - maintain service/container artifacts that follow [install.md](./install.md)
   and never require checked-in secrets
 

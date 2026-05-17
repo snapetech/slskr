@@ -202,8 +202,10 @@ http://127.0.0.1:5030/
 
 On first connect, the Web UI prompts for Soulseek credentials and lets you choose
 runtime-only memory, the platform OS credential store, or a restricted local
-credential file. `SLSK_USERNAME`/`SLSK_PASSWORD` and config-file credentials
-remain supported for container secret managers and scripted deployments.
+credential file. Linux services can use read-only systemd credentials through
+`LoadCredential=` or `LoadCredentialEncrypted=`. `SLSK_USERNAME`/`SLSK_PASSWORD`
+and config-file credentials remain supported for container secret managers and
+scripted deployments.
 
 ## Configuration
 
@@ -266,8 +268,9 @@ The Web UI System -> Logs tab can inspect recent daemon logs and change the
 runtime log level without a restart. `RUST_LOG` is still accepted as a familiar
 alias, while `SLSKR_LOG_LEVEL` takes precedence.
 
-See [docs/install.md](./docs/install.md) for service units, state layout,
-container shape, and exposure rules.
+See [docs/credential-storage.md](./docs/credential-storage.md) for credential
+store tradeoffs and [docs/install.md](./docs/install.md) for service units,
+state layout, container shape, and exposure rules.
 
 ## Security
 

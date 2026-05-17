@@ -16,7 +16,8 @@ server_address = "server.slsknet.org:2242"
 listen_port = 2234
 # Prefer the Web UI "OS credential store" option for desktop/user installs.
 # For Linux system services, prefer credential_store = "systemd" with
-# LoadCredential= or LoadCredentialEncrypted= in the unit.
+# LoadCredential= or LoadCredentialEncrypted= in the unit. systemd mode is
+# read-only at runtime; update unit credentials and restart the service.
 # Alternatives: set credential_store = "memory" for runtime-only entry,
 # credential_store = "file" for a restricted local fallback, or keep using
 # explicit username/password from env/config for container secret managers.
