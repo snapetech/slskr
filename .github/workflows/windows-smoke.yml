@@ -1,0 +1,50 @@
+name: Windows Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "**/*.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "web/**"
+      - "dashboard/**"
+      - "client-ts/**"
+      - ".github/workflows/windows-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: [self-hosted, Windows, X64, packer-windows]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            dashboard/package-lock.json
+            client-ts/package-lock.json
+
+      - name: Rust fmt
+        run: cargo fmt --all --check
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: WASM check
+        run: cargo check -p slskr-web --target wasm32-unknown-unknown
+
+      - name: Web build
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
