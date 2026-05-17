@@ -49,7 +49,7 @@ use slskr_client::{
         Reader, Writer, ROTATED_OBFUSCATION_TYPE,
     },
     search::{WishlistSearchScheduler, WishlistSearchSchedulerOptions},
-    server::ServerSession,
+    server::{LoginCredentials, ServerSession},
     share_payload::{compress_zlib_payload, decompress_zlib_payload},
     social::private_message_users_command,
     stream::{ObfuscatedPeerMessageConnection, PeerMessageConnection, ServerConnection},
@@ -1378,6 +1378,37 @@ impl EventRecord {
     }
 
     fn data_json(&self) -> serde_json::Value {
+        if self.kind == "log.created" {
+            let detail = self
+                .detail
+                .as_deref()
+                .and_then(|detail| serde_json::from_str::<serde_json::Value>(detail).ok())
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "level": "Information",
+                        "message": self.detail.as_deref().unwrap_or(&self.resource),
+                        "category": self.resource,
+                    })
+                });
+            return serde_json::json!({
+                "id": self.id,
+                "kind": self.kind,
+                "topic": self.topic(),
+                "resource": &self.resource,
+                "detail": &self.detail,
+                "created_at": self.created_at,
+                "timestamp": self.created_at,
+                "level": detail.get("level").and_then(|v| v.as_str()).unwrap_or("Information"),
+                "message": detail.get("message").and_then(|v| v.as_str()).unwrap_or(""),
+                "category": detail.get("category").and_then(|v| v.as_str()).unwrap_or(&self.resource),
+                "request_id": detail.get("request_id").and_then(|v| v.as_str()),
+                "method": detail.get("method").and_then(|v| v.as_str()),
+                "path": detail.get("path").and_then(|v| v.as_str()),
+                "status": detail.get("status").and_then(|v| v.as_u64()),
+                "duration_ms": detail.get("duration_ms").and_then(|v| v.as_u64()),
+                "remote_addr": detail.get("remote_addr").and_then(|v| v.as_str()),
+            });
+        }
         serde_json::json!({
             "id": self.id,
             "kind": self.kind,
@@ -1435,6 +1466,7 @@ fn topic_for_event_kind(kind: &str) -> &'static str {
         "bridge" => "bridge",
         "mesh" => "mesh",
         "webhook" => "webhooks",
+        "log" => "logs",
         "security" | "ban" => "security",
         "federation" => "federation",
         "solid" => "solid",
@@ -6653,6 +6685,8 @@ impl PreviewStreamTicketStore {
 #[derive(Debug)]
 struct AppState {
     config: AppConfig,
+    log_level: RwLock<logging::LogLevel>,
+    runtime_credentials: RwLock<Option<LoginCredentials>>,
     session: RwLock<SessionSnapshot>,
     listeners: RwLock<ListenerSnapshot>,
     shares: RwLock<ShareIndexSnapshot>,
@@ -6874,6 +6908,7 @@ async fn route_http_request_with_headers(
             let users = state.users.read().await;
             let relay = state.relay.read().await;
             let runtime = state.runtime.read().await;
+            let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let body = slskd_application_state_json(
                 &session,
                 &shares,
@@ -6882,6 +6917,7 @@ async fn route_http_request_with_headers(
                 &relay,
                 &runtime,
                 &state.config,
+                runtime_credentials_configured,
             );
             drop(runtime);
             drop(relay);
@@ -6920,31 +6956,118 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/server") => {
             let session = state.session.read().await;
-            let body = slskd_server_state_json(&session, &state.config).to_string();
+            let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
+            let body = slskd_server_state_json(
+                &session,
+                &state.config,
+                runtime_credentials_configured,
+            )
+            .to_string();
             drop(session);
             Ok(routing::ok_response(body))
         }
         ("PUT", "/api/server") | ("POST", "/api/server") => {
+            let username = extract_json_string_field(body, "username")
+                .or_else(|| extract_json_string_field(body, "Username"));
+            let password = extract_json_string_field(body, "password")
+                .or_else(|| extract_json_string_field(body, "Password"));
+            match (username, password) {
+                (Some(username), Some(password)) => {
+                    if username.trim().is_empty() || password.is_empty() {
+                        return Ok(routing::bad_request_response(
+                            "username and password are required",
+                        ));
+                    }
+                    {
+                        let mut credentials = state.runtime_credentials.write().await;
+                        *credentials = Some(LoginCredentials::default_client(
+                            username.trim().to_owned(),
+                            password,
+                        ));
+                    }
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Info,
+                        "session",
+                        format!(
+                            "received in-memory Soulseek credentials for {}",
+                            redact_username(username.trim())
+                        ),
+                    )
+                    .await;
+                }
+                (Some(_), None) | (None, Some(_)) => {
+                    return Ok(routing::bad_request_response(
+                        "username and password must be supplied together",
+                    ));
+                }
+                (None, None) => {}
+            }
             {
                 let mut session = state.session.write().await;
+                let already_connecting = matches!(session.state, "connecting" | "connected");
+                if already_connecting {
+                    let runtime_credentials_configured =
+                        state.runtime_credentials.read().await.is_some();
+                    let body = slskd_server_state_json(
+                        &session,
+                        &state.config,
+                        runtime_credentials_configured,
+                    )
+                    .to_string();
+                    drop(session);
+                    return Ok(routing::accepted_response(body));
+                }
                 session.state = "connecting";
                 session.updated_at = unix_timestamp();
             }
             send_session_command(state, SessionCommand::Connect).await.ok();
+            record_daemon_log(
+                state,
+                logging::LogLevel::Info,
+                "session",
+                "connect requested from API",
+            )
+            .await;
             let session = state.session.read().await;
-            let body = slskd_server_state_json(&session, &state.config).to_string();
+            let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
+            let body =
+                slskd_server_state_json(&session, &state.config, runtime_credentials_configured)
+                    .to_string();
             drop(session);
             Ok(routing::accepted_response(body))
         }
         ("DELETE", "/api/server") => {
             {
                 let mut session = state.session.write().await;
+                if matches!(session.state, "disconnecting" | "disconnected") {
+                    let runtime_credentials_configured =
+                        state.runtime_credentials.read().await.is_some();
+                    let body = slskd_server_state_json(
+                        &session,
+                        &state.config,
+                        runtime_credentials_configured,
+                    )
+                    .to_string();
+                    drop(session);
+                    return Ok(routing::accepted_response(body));
+                }
                 session.state = "disconnecting";
                 session.updated_at = unix_timestamp();
             }
             send_session_command(state, SessionCommand::Disconnect).await.ok();
+            record_daemon_log(
+                state,
+                logging::LogLevel::Info,
+                "session",
+                "disconnect requested from API",
+            )
+            .await;
             let session = state.session.read().await;
-            let body = slskd_server_state_json(&session, &state.config).to_string();
+            let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
+            let body =
+                slskd_server_state_json(&session, &state.config, runtime_credentials_configured)
+                    .to_string();
             drop(session);
             Ok(routing::accepted_response(body))
         }
@@ -7742,26 +7865,63 @@ async fn route_http_request_with_headers(
                 .to_string(),
             ))
         }
-         ("GET", "/api/logs") => {
-             let events = state.events.read().await;
-             let logs = events
-                 .records
-                 .iter()
-                 .rev()
-                 .map(|event| {
-                     serde_json::json!({
-                         "id": event.id,
-                         "level": "Information",
-                         "message": event.detail.as_deref().unwrap_or(&event.kind),
-                         "category": event.kind,
-                         "resource": event.resource,
-                         "timestamp": event.created_at,
-                     })
-                 })
-                 .collect::<Vec<_>>();
-             drop(events);
-             Ok(routing::ok_response(serde_json::Value::Array(logs).to_string()))
-         }
+        ("GET", "/api/logs") => {
+            let events = state.events.read().await;
+            let logs = events
+                .records
+                .iter()
+                .rev()
+                .filter(|event| event.kind == "log.created")
+                .map(EventRecord::data_json)
+                .collect::<Vec<_>>();
+            drop(events);
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "entries": logs,
+                    "level": logging::LogConfig::level_name(*state.log_level.read().await),
+                    "levels": ["Trace", "Debug", "Information", "Warning", "Error"],
+                    "limit": EVENT_HISTORY_LIMIT,
+                })
+                .to_string(),
+            ))
+        }
+        ("GET", "/api/logs/level") => Ok(routing::ok_response(
+            serde_json::json!({
+                "level": logging::LogConfig::level_name(*state.log_level.read().await),
+                "levels": ["Trace", "Debug", "Information", "Warning", "Error"],
+                "source": "runtime",
+            })
+            .to_string(),
+        )),
+        ("PUT", "/api/logs/level") => {
+            let requested = extract_json_string_field(body, "level")
+                .or_else(|| json_body_string(body))
+                .unwrap_or_default();
+            let Some(level) = logging::LogConfig::parse_level(&requested) else {
+                return Ok(routing::bad_request_response("invalid log level"));
+            };
+            {
+                let mut current = state.log_level.write().await;
+                *current = level;
+            }
+            record_daemon_log(
+                state,
+                logging::LogLevel::Info,
+                "logging",
+                format!(
+                    "runtime log level changed to {}",
+                    logging::LogConfig::level_name(level)
+                ),
+            )
+            .await;
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "level": logging::LogConfig::level_name(level),
+                    "updated": true,
+                })
+                .to_string(),
+            ))
+        }
          // WEBHOOK ENDPOINTS
          ("GET", "/api/webhooks") => {
              let webhooks = state.webhooks.read().await;
@@ -10434,7 +10594,12 @@ async fn route_http_request_with_headers(
         // WEBUI PARITY: Options/Config read-write endpoints
         ("GET", "/api/options") => {
             let runtime = state.runtime.read().await;
-            let body = slskd_options_json(&state.config, &runtime, state.db.is_some());
+            let body = slskd_options_json(
+                &state.config,
+                &runtime,
+                state.db.is_some(),
+                *state.log_level.read().await,
+            );
             drop(runtime);
             Ok(routing::ok_response(body))
         }
@@ -14812,6 +14977,7 @@ fn slskd_options_json(
     config: &AppConfig,
     runtime: &RuntimeCompatState,
     acknowledgement_persistence_enabled: bool,
+    log_level: logging::LogLevel,
 ) -> String {
     let options = serde_json::from_str::<serde_json::Value>(&config.sanitized_json())
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -14821,6 +14987,12 @@ fn slskd_options_json(
         "persisted": true,
         "readOnly": true,
         "runtimeMutationEnabled": false,
+        "logging": {
+            "level": logging::LogConfig::level_name(log_level),
+            "levels": ["Trace", "Debug", "Information", "Warning", "Error"],
+            "runtimeMutable": true,
+            "env": ["SLSKR_LOG_LEVEL", "RUST_LOG"],
+        },
         "compatibility": {
             "surface": "slskd-options",
             "configFormat": "toml",
@@ -14960,7 +15132,11 @@ fn slskd_options_mutation_response(
     .to_string())
 }
 
-fn slskd_server_state_json(session: &SessionSnapshot, config: &AppConfig) -> serde_json::Value {
+fn slskd_server_state_json(
+    session: &SessionSnapshot,
+    config: &AppConfig,
+    runtime_credentials_configured: bool,
+) -> serde_json::Value {
     let connected = session.state == "connected";
     let state = match session.state {
         "connected" => "Connected, LoggedIn",
@@ -14968,15 +15144,28 @@ fn slskd_server_state_json(session: &SessionSnapshot, config: &AppConfig) -> ser
         "disconnecting" => "Disconnecting",
         _ => "Disconnected",
     };
+    let config_credentials_configured = config.credentials().is_some();
+    let credential_source = if runtime_credentials_configured {
+        "runtime"
+    } else if config_credentials_configured {
+        "config"
+    } else {
+        "none"
+    };
     serde_json::json!({
         "address": config.server_address,
         "ipEndPoint": config.server_address,
+        "credentialsConfigured": runtime_credentials_configured || config_credentials_configured,
+        "credentialSource": credential_source,
         "state": state,
         "isConnected": connected,
         "isConnecting": session.state == "connecting",
+        "isDisconnecting": session.state == "disconnecting",
         "isLoggedIn": connected,
         "isLoggingIn": session.state == "connecting",
         "isTransitioning": session.state == "connecting" || session.state == "disconnecting",
+        "lastError": session.last_error,
+        "runtimeCredentialsConfigured": runtime_credentials_configured,
     })
 }
 
@@ -14988,12 +15177,13 @@ fn slskd_application_state_json(
     relay: &RelayState,
     runtime: &RuntimeCompatState,
     config: &AppConfig,
+    runtime_credentials_configured: bool,
 ) -> String {
     serde_json::json!({
         "version": slskd_version_json(),
         "pendingReconnect": false,
         "pendingRestart": runtime.application_restart_requested,
-        "server": slskd_server_state_json(session, config),
+        "server": slskd_server_state_json(session, config, runtime_credentials_configured),
         "connectionWatchdog": {
             "enabled": config.reconnect,
             "reconnectDelaySeconds": config.reconnect_delay.as_secs(),
@@ -17330,6 +17520,10 @@ async fn serve(once: bool) -> Result<(), String> {
     });
 
     let state = Arc::new(AppState {
+        log_level: RwLock::new(
+            logging::LogConfig::parse_level(&config.log_level).unwrap_or(logging::LogLevel::Info),
+        ),
+        runtime_credentials: RwLock::new(None),
         session: RwLock::new(SessionSnapshot::disconnected(&config)),
         listeners: RwLock::new(ListenerSnapshot::new(&config)),
         shares: RwLock::new(share_index),
@@ -17367,6 +17561,18 @@ async fn serve(once: bool) -> Result<(), String> {
     spawn_session_manager(Arc::clone(&state), session_receiver);
     spawn_configured_listeners(Arc::clone(&state));
     spawn_rate_limit_cleanup(Arc::clone(&state));
+    record_daemon_log(
+        &state,
+        logging::LogLevel::Info,
+        "daemon",
+        format!(
+            "slskr {} listening on {} with log level {}",
+            APP_VERSION,
+            address,
+            logging::LogConfig::level_name(*state.log_level.read().await)
+        ),
+    )
+    .await;
 
     if state.config.auto_connect {
         send_session_command(&state, SessionCommand::Connect).await?;
@@ -18599,17 +18805,34 @@ async fn connect_session(
     session: &mut Option<ServerSession<TcpStream>>,
     next_ping: &mut Instant,
 ) -> bool {
-    let credentials = state.config.credentials();
+    let credentials = {
+        let runtime_credentials = state.runtime_credentials.read().await;
+        runtime_credentials
+            .clone()
+            .or_else(|| state.config.credentials())
+    };
     let Some(credentials) = credentials else {
+        let reason = "SLSK_USERNAME/SLSK_PASSWORD are required to connect";
         update_session(state, |snapshot| {
             snapshot.state = "error";
-            snapshot.last_error =
-                Some("SLSK_USERNAME/SLSK_PASSWORD are required to connect".to_owned());
+            snapshot.last_error = Some(reason.to_owned());
         })
         .await;
+        record_daemon_log(state, logging::LogLevel::Error, "session", reason).await;
         return false;
     };
 
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "session",
+        format!(
+            "connecting to Soulseek server {} as {}",
+            state.config.server_address,
+            redact_username(&credentials.username)
+        ),
+    )
+    .await;
     update_session(state, |snapshot| {
         snapshot.state = "connecting";
         snapshot.last_error = None;
@@ -18621,12 +18844,14 @@ async fn connect_session(
     let connection = match ServerConnection::connect(state.config.server_address.as_str()).await {
         Ok(connection) => connection,
         Err(error) => {
+            let reason = format!("connect failed: {error}");
             update_session(state, |snapshot| {
                 snapshot.state = "error";
-                snapshot.last_error = Some(format!("connect failed: {error}"));
+                snapshot.last_error = Some(reason.clone());
                 snapshot.supporter = None;
             })
             .await;
+            record_daemon_log(state, logging::LogLevel::Error, "session", reason).await;
             return false;
         }
     };
@@ -18634,12 +18859,14 @@ async fn connect_session(
     let info = match new_session.login(credentials).await {
         Ok(info) => info,
         Err(error) => {
+            let reason = format!("login failed: {error}");
             update_session(state, |snapshot| {
                 snapshot.state = "error";
-                snapshot.last_error = Some(format!("login failed: {error}"));
+                snapshot.last_error = Some(reason.clone());
                 snapshot.supporter = None;
             })
             .await;
+            record_daemon_log(state, logging::LogLevel::Error, "session", reason).await;
             return false;
         }
     };
@@ -18657,24 +18884,28 @@ async fn connect_session(
             .await
     };
     if let Err(error) = wait_port_result {
+        let reason = format!("set wait port failed: {error}");
         update_session(state, |snapshot| {
             snapshot.state = "error";
-            snapshot.last_error = Some(format!("set wait port failed: {error}"));
+            snapshot.last_error = Some(reason.clone());
             snapshot.supporter = None;
         })
         .await;
+        record_daemon_log(state, logging::LogLevel::Error, "session", reason).await;
         return false;
     }
     if let Err(error) = new_session
         .send_server_message(ServerMessage::SetStatus { status: 2 })
         .await
     {
+        let reason = format!("set status failed: {error}");
         update_session(state, |snapshot| {
             snapshot.state = "error";
-            snapshot.last_error = Some(format!("set status failed: {error}"));
+            snapshot.last_error = Some(reason.clone());
             snapshot.supporter = None;
         })
         .await;
+        record_daemon_log(state, logging::LogLevel::Error, "session", reason).await;
         return false;
     }
     let (folders, files) = {
@@ -18695,21 +18926,25 @@ async fn connect_session(
         .send_server_message(ServerMessage::SharedFoldersFiles { folders, files })
         .await
     {
+        let reason = format!("share count update failed: {error}");
         update_session(state, |snapshot| {
             snapshot.state = "error";
-            snapshot.last_error = Some(format!("share count update failed: {error}"));
+            snapshot.last_error = Some(reason.clone());
             snapshot.supporter = None;
         })
         .await;
+        record_daemon_log(state, logging::LogLevel::Error, "session", reason).await;
         return false;
     }
     if let Err(error) = new_session.send_ping().await {
+        let reason = format!("initial ping failed: {error}");
         update_session(state, |snapshot| {
             snapshot.state = "error";
-            snapshot.last_error = Some(format!("initial ping failed: {error}"));
+            snapshot.last_error = Some(reason.clone());
             snapshot.supporter = None;
         })
         .await;
+        record_daemon_log(state, logging::LogLevel::Error, "session", reason).await;
         return false;
     }
 
@@ -18725,6 +18960,16 @@ async fn connect_session(
     .await;
     *next_ping = Instant::now() + state.config.ping_interval;
     *session = Some(new_session);
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "session",
+        format!(
+            "Soulseek login succeeded; supporter={}",
+            if info.is_supporter { "true" } else { "false" }
+        ),
+    )
+    .await;
     true
 }
 
@@ -20267,6 +20512,53 @@ async fn record_event(
     let _ = state.event_tx.send(record);
 }
 
+async fn record_daemon_log(
+    state: &AppState,
+    level: logging::LogLevel,
+    category: &str,
+    message: impl Into<String>,
+) {
+    let message = message.into();
+    let detail = serde_json::json!({
+        "level": logging::LogConfig::level_name(level),
+        "category": category,
+        "message": message,
+    })
+    .to_string();
+    record_event(state, "log.created", category, Some(detail)).await;
+}
+
+async fn record_http_log(
+    state: &AppState,
+    request_id: &str,
+    transaction: &logging::HttpTransactionLog,
+) {
+    let level = logging::response_level(transaction.response.status_code);
+    let configured_level = *state.log_level.read().await;
+    let log_config = logging::LogConfig {
+        level: configured_level,
+        log_requests: configured_level <= logging::LogLevel::Debug,
+        log_responses: true,
+        log_errors_only: false,
+    };
+    if !log_config.should_log(level) {
+        return;
+    }
+    let detail = serde_json::json!({
+        "level": logging::LogConfig::level_name(level),
+        "category": "http",
+        "message": logging::transaction_summary(transaction),
+        "request_id": request_id,
+        "method": transaction.request.method,
+        "path": transaction.request.path,
+        "status": transaction.response.status_code,
+        "duration_ms": transaction.response.duration_ms,
+        "remote_addr": transaction.request.remote_addr,
+    })
+    .to_string();
+    record_event(state, "log.created", "http", Some(detail)).await;
+}
+
 async fn persist_event_record(state: &AppState, record: &EventRecord) {
     let Some(db) = state.db.as_ref() else {
         return;
@@ -21229,6 +21521,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             remote_addr: remote_addr.map(|a| a.to_string()),
             timestamp: logging::format_timestamp(),
         };
+        let request_id = generate_request_id();
 
         // CORS preflight
         if is_cors_preflight(method) {
@@ -21256,13 +21549,28 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                         duration_ms: logging::elapsed_ms(request_timer),
                         error: None,
                     };
+                    let log_config = logging::LogConfig {
+                        level: *state.log_level.read().await,
+                        log_requests: true,
+                        log_responses: true,
+                        log_errors_only: false,
+                    };
                     logging::log_transaction(
-                        &logging::LogConfig::from_env(),
+                        &log_config,
+                        &logging::HttpTransactionLog {
+                            request: req_log.clone(),
+                            response: resp_log.clone(),
+                        },
+                    );
+                    record_http_log(
+                        &state,
+                        &request_id,
                         &logging::HttpTransactionLog {
                             request: req_log,
                             response: resp_log,
                         },
-                    );
+                    )
+                    .await;
                     if !keep_alive {
                         break;
                     }
@@ -21327,7 +21635,6 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         };
         let fallback_host = state.config.http_bind.to_string();
         let cors_str = same_origin_cors_headers(&sec_headers, &fallback_host);
-        let request_id = generate_request_id();
         let extra = format!(
             "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n{}{}{}X-Request-ID: {}\r\n",
             max_requests, remaining, reset_secs, cache_hdr, etag_hdr, cors_str, request_id
@@ -21343,13 +21650,28 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             duration_ms: logging::elapsed_ms(request_timer),
             error: None,
         };
+        let log_config = logging::LogConfig {
+            level: *state.log_level.read().await,
+            log_requests: true,
+            log_responses: true,
+            log_errors_only: false,
+        };
         logging::log_transaction(
-            &logging::LogConfig::from_env(),
+            &log_config,
+            &logging::HttpTransactionLog {
+                request: req_log.clone(),
+                response: resp_log.clone(),
+            },
+        );
+        record_http_log(
+            &state,
+            &request_id,
             &logging::HttpTransactionLog {
                 request: req_log,
                 response: resp_log,
             },
-        );
+        )
+        .await;
 
         if !keep_alive {
             break;
@@ -23339,6 +23661,8 @@ mod tests {
             });
 
         let state = Arc::new(super::AppState {
+            log_level: RwLock::new(super::logging::LogLevel::Info),
+            runtime_credentials: RwLock::new(None),
             session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
             listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
             shares: RwLock::new(share_index),
@@ -24616,10 +24940,10 @@ mod tests {
                 .await
                 .expect("server put connect");
         assert_eq!(server_connect_put.status, "202 Accepted");
-        assert!(matches!(
-            receiver.try_recv().unwrap(),
-            super::SessionCommand::Connect
-        ));
+        let server_connect_put_json =
+            serde_json::from_str::<serde_json::Value>(&server_connect_put.body).unwrap();
+        assert_eq!(server_connect_put_json["isConnecting"], true);
+        assert!(receiver.try_recv().is_err());
 
         let session_enabled =
             super::route_http_request("GET", "/api/v0/session/enabled", None, "", &state)
@@ -30720,12 +31044,19 @@ mod tests {
         assert_eq!(recorded_event_json["recorded"], true);
         assert_eq!(recorded_event_json["event"]["type"], "compat.event");
         assert!(recorded_event_json["count"].as_u64().unwrap() >= 1);
+        super::record_daemon_log(
+            &state,
+            super::logging::LogLevel::Info,
+            "compat.event",
+            "compat event",
+        )
+        .await;
         let logs = super::route_http_request("GET", "/api/logs", None, "", &state)
             .await
             .expect("logs");
         let logs_json = serde_json::from_str::<serde_json::Value>(&logs.body).unwrap();
-        assert_eq!(logs_json[0]["category"], "compat.event");
-        assert_eq!(logs_json[0]["message"], "compat event");
+        assert_eq!(logs_json["entries"][0]["category"], "compat.event");
+        assert_eq!(logs_json["entries"][0]["message"], "compat event");
 
         {
             let mut users = state.users.write().await;
@@ -32467,7 +32798,9 @@ mod tests {
             .await
             .expect("logs");
         assert_eq!(logs.status, "200 OK");
-        assert_eq!(logs.body, "[]");
+        let logs_json = serde_json::from_str::<serde_json::Value>(&logs.body).unwrap();
+        assert_eq!(logs_json["entries"].as_array().unwrap().len(), 0);
+        assert_eq!(logs_json["level"], "Information");
 
         let bridge =
             super::route_http_request("PUT", "/api/bridge/admin/config", None, "{}", &state)
@@ -32750,6 +33083,8 @@ mod tests {
             });
 
         let state = super::AppState {
+            log_level: RwLock::new(super::logging::LogLevel::Info),
+            runtime_credentials: RwLock::new(None),
             session: RwLock::new(super::SessionSnapshot::disconnected(&config)),
             listeners: RwLock::new(super::ListenerSnapshot::new(&config)),
             shares: RwLock::new(super::build_share_index(&config)),
@@ -32884,6 +33219,8 @@ mod tests {
             super::AppConfig::from_layers(None, FileConfig::default(), &cookie_enabled_env)
                 .expect("cookie auth config");
         let cookie_enabled_state = super::AppState {
+            log_level: RwLock::new(super::logging::LogLevel::Info),
+            runtime_credentials: RwLock::new(None),
             session: RwLock::new(super::SessionSnapshot::disconnected(&cookie_enabled_config)),
             listeners: RwLock::new(super::ListenerSnapshot::new(&cookie_enabled_config)),
             shares: RwLock::new(super::build_share_index(&cookie_enabled_config)),

@@ -135,6 +135,9 @@ impl RequestSpan {
 
     /// Log formatted trace
     pub fn log(&self) {
+        if !trace_logging_enabled() {
+            return;
+        }
         if self.timing.is_very_slow() {
             eprintln!(
                 "[TRACE] {} {} {} {} - VERY SLOW {}ms ({})",
@@ -167,6 +170,19 @@ impl RequestSpan {
             );
         }
     }
+}
+
+fn trace_logging_enabled() -> bool {
+    matches!(
+        std::env::var("SLSKR_TRACE_REQUESTS")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    ) || std::env::var("SLSKR_LOG_LEVEL")
+        .or_else(|_| std::env::var("RUST_LOG"))
+        .map(|value| value.eq_ignore_ascii_case("trace"))
+        .unwrap_or(false)
 }
 
 /// Set correlation ID for current request

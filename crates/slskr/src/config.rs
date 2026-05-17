@@ -28,6 +28,7 @@ pub struct AppConfig {
     pub reconnect: bool,
     pub reconnect_delay: Duration,
     pub ping_interval: Duration,
+    pub log_level: String,
     pub listener_bind: Option<String>,
     pub advertised_port: u32,
     pub obfuscated_listener_bind: Option<String>,
@@ -110,6 +111,11 @@ impl AppConfig {
             file_config.app.ping_seconds,
             300,
         )?);
+        let log_level = env
+            .var("SLSKR_LOG_LEVEL")
+            .or(file_config.app.log_level)
+            .or_else(|| env.var("RUST_LOG"))
+            .unwrap_or_else(|| "info".to_owned());
         let listener_bind = env
             .var("SLSKR_LISTENER_BIND")
             .or(file_config.listeners.regular_bind);
@@ -226,6 +232,7 @@ impl AppConfig {
             reconnect,
             reconnect_delay,
             ping_interval,
+            log_level,
             listener_bind,
             advertised_port,
             obfuscated_listener_bind,
@@ -259,7 +266,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -282,6 +289,7 @@ impl AppConfig {
             self.reconnect,
             self.reconnect_delay.as_secs(),
             self.ping_interval.as_secs(),
+            json_escape(&self.log_level),
             self.peer_response_timeout.as_secs(),
             self.share_settings.roots.len(),
             self.share_settings.follow_symlinks,
@@ -643,6 +651,7 @@ pub struct AppFileConfig {
     reconnect: Option<bool>,
     reconnect_seconds: Option<u64>,
     ping_seconds: Option<u64>,
+    log_level: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

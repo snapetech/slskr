@@ -12,20 +12,22 @@ slskr includes built-in structured logging for HTTP API requests and responses t
 
 ### Configuration
 
-Logging is controlled via the `RUST_LOG` environment variable:
+Logging is controlled by `SLSKR_LOG_LEVEL`, the `[app].log_level` config value,
+or `RUST_LOG` as a compatibility alias. The System -> Logs Web UI tab can also
+change the runtime log level without restarting the daemon.
 
 ```bash
 # Info level (default)
 ./target/release/slskr
 
 # Debug level (log all requests)
-RUST_LOG=debug ./target/release/slskr
+SLSKR_LOG_LEVEL=debug ./target/release/slskr
 
 # Trace level (maximum detail)
-RUST_LOG=trace ./target/release/slskr
+SLSKR_LOG_LEVEL=trace ./target/release/slskr
 
 # Warn level (errors and warnings only)
-RUST_LOG=warn ./target/release/slskr
+SLSKR_LOG_LEVEL=warn ./target/release/slskr
 ```
 
 ### Log Output Format

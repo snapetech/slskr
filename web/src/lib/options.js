@@ -12,6 +12,14 @@ export const getCurrentDebugView = async () => {
   return (await api.get('/options/debug')).data;
 };
 
+export const getLogs = async () => {
+  return (await api.get('/logs')).data;
+};
+
+export const updateLogLevel = async (level) => {
+  return (await api.put('/logs/level', { level })).data;
+};
+
 export const getYaml = async () => {
   return (await api.get('/options/yaml')).data;
 };

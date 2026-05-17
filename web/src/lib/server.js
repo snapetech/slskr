@@ -4,8 +4,8 @@ export const getState = async () => {
   return (await api.get('/server')).data;
 };
 
-export const connect = () => {
-  return api.put('/server');
+export const connect = (credentials) => {
+  return api.put('/server', credentials || {});
 };
 
 export const disconnect = ({

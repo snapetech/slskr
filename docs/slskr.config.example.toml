@@ -7,6 +7,9 @@ auto_connect = false
 reconnect = true
 reconnect_seconds = 30
 ping_seconds = 300
+# Logging levels: trace, debug, info, warn, error.
+# Can also be overridden with SLSKR_LOG_LEVEL or RUST_LOG.
+log_level = "info"
 
 [network]
 server_address = "server.slsknet.org:2242"

@@ -256,6 +256,11 @@ Common settings:
 | `SLSKR_TRANSFER_ALLOW_INBOUND` | Enable inbound shared-file serving. |
 | `SLSKR_TRANSFER_ALLOW_OUTBOUND` | Enable outbound downloads. |
 | `SLSKR_PERSISTENCE_ENABLED` | Enable SQLite-backed persistence paths. |
+| `SLSKR_LOG_LEVEL` | Runtime log threshold: `trace`, `debug`, `info`, `warn`, or `error`. |
+
+The Web UI System -> Logs tab can inspect recent daemon logs and change the
+runtime log level without a restart. `RUST_LOG` is still accepted as a familiar
+alias, while `SLSKR_LOG_LEVEL` takes precedence.
 
 See [docs/install.md](./docs/install.md) for service units, state layout,
 container shape, and exposure rules.

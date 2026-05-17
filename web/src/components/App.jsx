@@ -19,6 +19,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ToastContainer } from 'react-toastify';
 import {
   Button,
+  Form,
   Header,
   Icon,
   Loader,
@@ -77,6 +78,11 @@ const normalizeTheme = (theme) => {
 };
 
 const getSemanticTheme = (theme) => (theme === 'light' ? 'light' : 'dark');
+
+const toDisplayError = (error, fallback) => {
+  const value = error?.response?.data || error?.message || fallback;
+  return typeof value === 'string' ? value : fallback;
+};
 
 const normalizePortForwardProtocol = (proto) =>
   `${proto || ''}`.trim().toUpperCase();
@@ -426,6 +432,13 @@ const initialState = {
     rooms: false,
   },
   retriesExhausted: false,
+  soulseekCredentials: {
+    error: undefined,
+    open: false,
+    password: '',
+    pending: false,
+    username: '',
+  },
   themeMenuOpen: false,
 };
 
@@ -435,6 +448,7 @@ const ModeSpecificConnectButton = ({
   mode,
   pendingReconnect,
   server,
+  onConnect,
   user,
 }) => {
   if (mode === 'Agent') {
@@ -475,7 +489,14 @@ const ModeSpecificConnectButton = ({
   } else {
     if (server?.isConnected) {
       return (
-        <Menu.Item onClick={() => disconnect()}>
+        <Menu.Item
+          disabled={server?.isDisconnecting}
+          onClick={() => {
+            if (!server?.isDisconnecting) {
+              disconnect();
+            }
+          }}
+        >
           <Icon.Group className="menu-icon-group">
             <Icon
               color={pendingReconnect ? 'yellow' : 'green'}
@@ -508,13 +529,34 @@ const ModeSpecificConnectButton = ({
       color = 'yellow';
     }
 
-    if (server?.isConnecting || server?.IsLoggingIn) {
+    const isSessionTransitioning =
+      server?.isConnecting ||
+      server?.IsConnecting ||
+      server?.isLoggingIn ||
+      server?.IsLoggingIn ||
+      connectionWatchdog?.isAttemptingConnection;
+
+    if (isSessionTransitioning) {
       icon = 'sync alternate loading';
       color = 'green';
     }
 
+    const label = isSessionTransitioning
+      ? 'Connecting'
+      : server?.lastError
+        ? 'Connection Failed'
+        : 'Disconnected';
+
     return (
-      <Menu.Item onClick={() => connect()}>
+      <Menu.Item
+        disabled={isSessionTransitioning}
+        onClick={() => {
+          if (!isSessionTransitioning) {
+            onConnect?.(server) ?? connect();
+          }
+        }}
+        title={server?.lastError || undefined}
+      >
         <Icon.Group className="menu-icon-group">
           <Icon
             color="grey"
@@ -527,7 +569,7 @@ const ModeSpecificConnectButton = ({
             name={icon}
           />
         </Icon.Group>
-        Disconnected
+        {label}
       </Menu.Item>
     );
   }
@@ -872,6 +914,93 @@ class App extends Component {
     this.setState({ themeMenuOpen: false });
   };
 
+  openSoulseekCredentials = () => {
+    this.setState((previousState) => ({
+      soulseekCredentials: {
+        ...previousState.soulseekCredentials,
+        error: undefined,
+        open: true,
+      },
+    }));
+  };
+
+  closeSoulseekCredentials = () => {
+    this.setState((previousState) => ({
+      soulseekCredentials: {
+        ...previousState.soulseekCredentials,
+        error: undefined,
+        open: false,
+        password: '',
+        pending: false,
+      },
+    }));
+  };
+
+  updateSoulseekCredential = (field, value) => {
+    this.setState((previousState) => ({
+      soulseekCredentials: {
+        ...previousState.soulseekCredentials,
+        [field]: value,
+      },
+    }));
+  };
+
+  handleSoulseekConnect = (server) => {
+    const credentialsConfigured =
+      server?.credentialsConfigured ||
+      server?.runtimeCredentialsConfigured ||
+      server?.credentialSource === 'config' ||
+      server?.credentialSource === 'runtime';
+
+    if (credentialsConfigured) {
+      connect();
+      return;
+    }
+
+    this.openSoulseekCredentials();
+  };
+
+  submitSoulseekCredentials = async () => {
+    const { soulseekCredentials = {} } = this.state;
+    const username = (soulseekCredentials.username || '').trim();
+    const password = soulseekCredentials.password || '';
+
+    if (!username || !password) {
+      this.setState((previousState) => ({
+        soulseekCredentials: {
+          ...previousState.soulseekCredentials,
+          error: 'Username and password are required.',
+        },
+      }));
+      return;
+    }
+
+    this.setState((previousState) => ({
+      soulseekCredentials: {
+        ...previousState.soulseekCredentials,
+        error: undefined,
+        pending: true,
+      },
+    }));
+
+    try {
+      await connect({ password, username });
+      this.closeSoulseekCredentials();
+    } catch (error) {
+      this.setState((previousState) => ({
+        soulseekCredentials: {
+          ...previousState.soulseekCredentials,
+          error: toDisplayError(
+            error,
+            'Unable to connect with those credentials.',
+          ),
+          password: '',
+          pending: false,
+        },
+      }));
+    }
+  };
+
   dismissVpnPortNotice = (signature, portForwards) => {
     storeDismissedVpnPortNotice(signature, portForwards);
     this.forceUpdate();
@@ -919,6 +1048,7 @@ class App extends Component {
       login,
       navActivity,
       retriesExhausted,
+      soulseekCredentials = {},
       theme = normalizeTheme(this.getSavedTheme() || 'slskr'),
       themeMenuOpen,
     } = this.state;
@@ -1013,6 +1143,64 @@ class App extends Component {
             Lost connection to slskr. {retriesExhausted ? 'Refresh to reconnect.' : 'Retrying...'}
           </Segment>
         )}
+        <Modal
+          centered
+          closeIcon={!soulseekCredentials.pending}
+          onClose={this.closeSoulseekCredentials}
+          open={soulseekCredentials.open}
+          size="mini"
+        >
+          <Modal.Header>Soulseek Authentication</Modal.Header>
+          <Modal.Content>
+            <Form
+              error={Boolean(soulseekCredentials.error)}
+              onSubmit={this.submitSoulseekCredentials}
+            >
+              <Form.Input
+                autoComplete="username"
+                disabled={soulseekCredentials.pending}
+                label="Username"
+                onChange={(_, data) =>
+                  this.updateSoulseekCredential('username', data.value)
+                }
+                value={soulseekCredentials.username}
+              />
+              <Form.Input
+                autoComplete="current-password"
+                disabled={soulseekCredentials.pending}
+                label="Password"
+                onChange={(_, data) =>
+                  this.updateSoulseekCredential('password', data.value)
+                }
+                type="password"
+                value={soulseekCredentials.password}
+              />
+              {soulseekCredentials.error && (
+                <Segment
+                  color="red"
+                  inverted
+                >
+                  {soulseekCredentials.error}
+                </Segment>
+              )}
+            </Form>
+          </Modal.Content>
+          <Modal.Actions>
+            <Button
+              disabled={soulseekCredentials.pending}
+              onClick={this.closeSoulseekCredentials}
+            >
+              Cancel
+            </Button>
+            <Button
+              loading={soulseekCredentials.pending}
+              onClick={this.submitSoulseekCredentials}
+              primary
+            >
+              Connect
+            </Button>
+          </Modal.Actions>
+        </Modal>
         <PlayerProvider>
           <Sidebar.Pushable
             as={Segment}
@@ -1147,6 +1335,7 @@ class App extends Component {
                 connectionWatchdog={connectionWatchdog}
                 controller={controller}
                 mode={mode}
+                onConnect={this.handleSoulseekConnect}
                 pendingReconnect={pendingReconnect}
                 server={server}
                 user={user}

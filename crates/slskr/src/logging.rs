@@ -58,24 +58,43 @@ impl Default for LogConfig {
 }
 
 impl LogConfig {
+    pub fn should_log(&self, level: LogLevel) -> bool {
+        self.level <= level
+    }
+
+    pub fn level_name(level: LogLevel) -> &'static str {
+        match level {
+            LogLevel::Trace => "Trace",
+            LogLevel::Debug => "Debug",
+            LogLevel::Info => "Information",
+            LogLevel::Warn => "Warning",
+            LogLevel::Error => "Error",
+        }
+    }
+
+    pub fn parse_level(value: &str) -> Option<LogLevel> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "trace" => Some(LogLevel::Trace),
+            "debug" => Some(LogLevel::Debug),
+            "info" | "information" => Some(LogLevel::Info),
+            "warn" | "warning" => Some(LogLevel::Warn),
+            "error" => Some(LogLevel::Error),
+            _ => None,
+        }
+    }
+
     /// Parse log level from environment variable
     pub fn from_env() -> Self {
-        let level = match std::env::var("RUST_LOG")
-            .unwrap_or_default()
-            .to_lowercase()
-            .as_str()
-        {
-            "trace" => LogLevel::Trace,
-            "debug" => LogLevel::Debug,
-            "warn" => LogLevel::Warn,
-            "error" => LogLevel::Error,
-            _ => LogLevel::Info,
-        };
+        let level = std::env::var("SLSKR_LOG_LEVEL")
+            .ok()
+            .or_else(|| std::env::var("RUST_LOG").ok())
+            .and_then(|value| Self::parse_level(&value))
+            .unwrap_or(LogLevel::Info);
 
         Self {
             level,
-            log_requests: level >= LogLevel::Debug,
-            log_responses: level >= LogLevel::Info,
+            log_requests: level <= LogLevel::Debug,
+            log_responses: level <= LogLevel::Info,
             log_errors_only: false,
         }
     }
@@ -105,7 +124,7 @@ pub fn status_code_from_string(status: &str) -> u16 {
 
 /// Log HTTP request
 pub fn log_request(config: &LogConfig, log: &HttpRequestLog) {
-    if !config.log_requests || config.level > LogLevel::Debug {
+    if !config.log_requests || !config.should_log(LogLevel::Debug) {
         return;
     }
 
@@ -143,7 +162,7 @@ pub fn log_response(config: &LogConfig, log: &HttpResponseLog) {
         _ => LogLevel::Info,
     };
 
-    if config.level > status_level {
+    if !config.should_log(status_level) {
         return;
     }
 
@@ -153,13 +172,7 @@ pub fn log_response(config: &LogConfig, log: &HttpResponseLog) {
         .map(|e| format!(" - {}", e))
         .unwrap_or_default();
 
-    let level_str = match status_level {
-        LogLevel::Trace => "TRACE",
-        LogLevel::Debug => "DEBUG",
-        LogLevel::Info => "INFO",
-        LogLevel::Warn => "WARN",
-        LogLevel::Error => "ERROR",
-    };
+    let level_str = LogConfig::level_name(status_level);
 
     eprintln!(
         "[{}] {} {} bytes in {}ms{}",
@@ -169,12 +182,13 @@ pub fn log_response(config: &LogConfig, log: &HttpResponseLog) {
 
 /// Log complete HTTP transaction
 pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
-    if config.level > LogLevel::Info && !config.log_errors_only {
+    // Skip logging successful requests if errors-only mode
+    if config.log_errors_only && log.response.status_code < 400 {
         return;
     }
 
-    // Skip logging successful requests if errors-only mode
-    if config.log_errors_only && log.response.status_code < 400 {
+    let status_level = response_level(log.response.status_code);
+    if !config.should_log(status_level) {
         return;
     }
 
@@ -221,6 +235,39 @@ pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
         log.response.duration_ms,
         error_str
     );
+}
+
+pub fn response_level(status_code: u16) -> LogLevel {
+    match status_code {
+        400..=499 => LogLevel::Warn,
+        500..=599 => LogLevel::Error,
+        _ => LogLevel::Info,
+    }
+}
+
+pub fn transaction_summary(log: &HttpTransactionLog) -> String {
+    let query_str = log
+        .request
+        .query
+        .as_ref()
+        .map(|_| "?<redacted>")
+        .unwrap_or_default();
+    let error_str = log
+        .response
+        .error
+        .as_ref()
+        .map(|e| format!(" - {}", e))
+        .unwrap_or_default();
+    format!(
+        "{} {}{} {} {} bytes in {}ms{}",
+        log.request.method,
+        log.request.path,
+        query_str,
+        log.response.status_code,
+        log.response.content_length,
+        log.response.duration_ms,
+        error_str
+    )
 }
 
 /// Start timing measurement

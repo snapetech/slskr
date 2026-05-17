@@ -1,13 +1,18 @@
 import '../System.css';
 import { createLogsHubConnection } from '../../../lib/hubFactory';
+import { getLogs, updateLogLevel } from '../../../lib/options';
 import { LoaderSegment } from '../../Shared';
 import React, { Component } from 'react';
-import { Button, ButtonGroup, Table } from 'semantic-ui-react';
+import { Button, ButtonGroup, Dropdown, Table } from 'semantic-ui-react';
 
 const initialState = {
   connected: false,
   filterLevel: 'all',
-  logs: [], // 'all', 'Information', 'Warning', 'Error', 'Debug'
+  level: 'Information',
+  levels: ['Trace', 'Debug', 'Information', 'Warning', 'Error'],
+  loading: true,
+  logs: [],
+  savingLevel: false,
 };
 
 const levels = {
@@ -27,19 +32,16 @@ class Logs extends Component {
   }
 
   componentDidMount() {
+    this.fetchLogs();
     const logsHub = createLogsHubConnection();
+    this.logsHub = logsHub;
 
-    logsHub.on('buffer', (buffer) => {
-      this.setState({
-        connected: true,
-        logs: buffer.reverse().slice(0, maxLogs),
-      });
-    });
+    logsHub.on('buffer', (buffer) => this.mergeLogs(buffer));
 
     logsHub.on('log', (log) => {
       this.setState((previousState) => ({
         connected: true,
-        logs: [log].concat(previousState.logs).slice(0, maxLogs),
+        logs: this.dedupeLogs([this.normalizeLog(log), ...previousState.logs]),
       }));
     });
 
@@ -58,8 +60,66 @@ class Logs extends Component {
     });
   }
 
+  componentWillUnmount() {
+    this.logsHub?.stop();
+  }
+
+  fetchLogs = async () => {
+    try {
+      const response = await getLogs();
+      this.setState({
+        level: response.level || 'Information',
+        levels: response.levels || initialState.levels,
+        loading: false,
+        logs: (response.entries || []).map(this.normalizeLog).slice(0, maxLogs),
+      });
+    } catch (error) {
+      console.error('[Logs] Failed to fetch logs:', error);
+      this.setState({ loading: false });
+    }
+  };
+
+  normalizeLog = (log = {}) => {
+    const payload = log.payload || log.data || log;
+    return {
+      ...payload,
+      category: payload.category || payload.resource || 'daemon',
+      id: payload.id || payload.timestamp || `${Date.now()}-${Math.random()}`,
+      level: payload.level || 'Information',
+      message: payload.message || payload.detail || payload.kind || '',
+      timestamp: payload.timestamp || payload.created_at || Date.now() / 1000,
+    };
+  };
+
+  dedupeLogs = (logs) => {
+    const seen = new Set();
+    return logs
+      .filter(Boolean)
+      .filter((log) => {
+        const key = log.id ?? `${log.timestamp}:${log.category}:${log.message}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, maxLogs);
+  };
+
+  mergeLogs = (buffer = []) => {
+    this.setState((previousState) => ({
+      connected: true,
+      logs: this.dedupeLogs([
+        ...buffer.map(this.normalizeLog).reverse(),
+        ...previousState.logs,
+      ]),
+    }));
+  };
+
   formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
+    const date = new Date(
+      Number(timestamp) < 10_000_000_000
+        ? Number(timestamp) * 1000
+        : Number(timestamp),
+    );
     return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`; // eslint-disable-line max-len
   };
 
@@ -76,9 +136,26 @@ class Logs extends Component {
     return logs.filter((log) => log.level === filterLevel);
   };
 
+  handleLevelChange = async (_, { value }) => {
+    this.setState({ savingLevel: true });
+    try {
+      const response = await updateLogLevel(value);
+      this.setState({ level: response.level || value, savingLevel: false });
+      await this.fetchLogs();
+    } catch (error) {
+      console.error('[Logs] Failed to update log level:', error);
+      this.setState({ savingLevel: false });
+    }
+  };
+
   render() {
-    const { connected, filterLevel } = this.state;
+    const { connected, filterLevel, level, levels: levelOptions, loading, savingLevel } = this.state;
     const filteredLogs = this.getFilteredLogs();
+    const dropdownOptions = levelOptions.map((option) => ({
+      key: option,
+      text: option,
+      value: option,
+    }));
 
     return (
       <div className="logs">
@@ -115,14 +192,24 @@ class Logs extends Component {
               Debug
             </Button>
           </ButtonGroup>
+          <Dropdown
+            compact
+            disabled={savingLevel}
+            loading={savingLevel}
+            onChange={this.handleLevelChange}
+            options={dropdownOptions}
+            selection
+            style={{ marginLeft: '1em' }}
+            value={level}
+          />
           <span style={{ color: '#666', marginLeft: '1em' }}>
             {connected
               ? `Showing ${filteredLogs.length} of ${this.state.logs.length} logs`
               : 'Connecting to logs...'}
           </span>
         </div>
-        {!connected && <LoaderSegment />}
-        {connected && (
+        {loading && <LoaderSegment />}
+        {!loading && (
           <Table
             className="logs-table"
             compact="very"
@@ -131,14 +218,15 @@ class Logs extends Component {
               <Table.Row>
                 <Table.HeaderCell>Timestamp</Table.HeaderCell>
                 <Table.HeaderCell>Level</Table.HeaderCell>
+                <Table.HeaderCell>Category</Table.HeaderCell>
                 <Table.HeaderCell>Message</Table.HeaderCell>
               </Table.Row>
             </Table.Header>
             <Table.Body className="logs-table-body">
               {filteredLogs.length === 0 ? (
-                <Table.Row>
-                  <Table.Cell
-                    colSpan="3"
+                  <Table.Row>
+                    <Table.Cell
+                    colSpan="4"
                     textAlign="center"
                   >
                     No logs match the selected filter
@@ -156,6 +244,7 @@ class Logs extends Component {
                       {this.formatTimestamp(log.timestamp)}
                     </Table.Cell>
                     <Table.Cell>{levels[log.level] || log.level}</Table.Cell>
+                    <Table.Cell>{log.category}</Table.Cell>
                     <Table.Cell className="logs-table-message">
                       {log.message}
                     </Table.Cell>
