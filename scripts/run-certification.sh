@@ -222,9 +222,13 @@ run_phase_a() {
 
     local username password server_address
 
-    # A1 — Login for all available accounts (retry until success)
+    # A1 — Login for all available accounts (with delay between each to avoid rate-limiting)
     local account_count="${SLSKR_TEST_ACCOUNT_COUNT:-4}"
     for i in $(seq 1 "$account_count"); do
+        # Wait before each login (except first) to avoid server rate-limiting
+        if [[ "$i" -gt 1 ]]; then
+            sleep "${SLSKR_LOGIN_DELAY:-10}"
+        fi
         local user_var="SLSKR_TEST_${i}_USERNAME"
         local pass_var="SLSKR_TEST_${i}_PASSWORD"
         username="${!user_var:-}"
@@ -237,7 +241,7 @@ run_phase_a() {
         local t0 t1
         t0="$(date +%s%N)"
         set +e
-        output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username" SLSK_PASSWORD="$password" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+        output="$(env SLSK_USERNAME="$username" SLSK_PASSWORD="$password" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
         local status=$?
         set -e
         t1="$(date +%s%N)"
@@ -308,7 +312,7 @@ run_phase_a() {
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 timeout 30 run_netns_command "cert-a2" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe peer-address" 2>&1)"
+    output="$(timeout 30 run_netns_command "cert-a2" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe peer-address" 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -323,7 +327,7 @@ run_phase_a() {
     # A3 — Plain peer message
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 timeout 30 run_netns_command "cert-a3" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_PLAIN_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe plain-peer" 2>&1)"
+    output="$(timeout 30 run_netns_command "cert-a3" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_PLAIN_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe plain-peer" 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -338,7 +342,7 @@ run_phase_a() {
     # A4 — Obfuscated peer message
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 timeout 30 run_netns_command "cert-a4" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_OBFUSCATED_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe obfuscated-peer" 2>&1)"
+    output="$(timeout 30 run_netns_command "cert-a4" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_OBFUSCATED_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe obfuscated-peer" 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -362,7 +366,7 @@ run_phase_a() {
 
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 timeout 70 run_netns_command "cert-a5" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_INDIRECT_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe indirect-peer" 2>&1)"
+    output="$(timeout 70 run_netns_command "cert-a5" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_INDIRECT_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe indirect-peer" 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -451,7 +455,7 @@ run_phase_b() {
     # B4 — Transfer resume: local peer transfer with non-zero offset
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b4 SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke transfer-resume 2>&1)"
+    output="$(env SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b4 SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke transfer-resume 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -466,7 +470,7 @@ run_phase_b() {
     # B5 — Transfer rejection: local peer transfer rejected gracefully
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b5 SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke transfer-reject 2>&1)"
+    output="$(env SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b5 SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke transfer-reject 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -505,10 +509,11 @@ run_phase_c() {
     fi
 
     # C1 — Private message bidirectional
+    sleep 10
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_MESSAGE_USERNAME="$username2" SLSK_MESSAGE_PASSWORD="$password2" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe private-message 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_MESSAGE_USERNAME="$username2" SLSK_MESSAGE_PASSWORD="$password2" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe private-message 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -521,9 +526,10 @@ run_phase_c() {
     fi
 
     # C2 — Room join/leave/message
+    sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe room-message 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe room-message 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -536,9 +542,10 @@ run_phase_c() {
     fi
 
     # C3 — Room create (try with login smoke to verify client can handle room ops)
+    sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -551,9 +558,10 @@ run_phase_c() {
     fi
 
     # C4 — Wishlist search
+    sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -566,9 +574,10 @@ run_phase_c() {
     fi
 
     # C5 — User watch stats
+    sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -583,7 +592,7 @@ run_phase_c() {
     # C6 — Browse complete shares
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -612,10 +621,11 @@ run_phase_d() {
     fi
 
     # D1 — Distributed ping round-trip (local distributed connection)
+    sleep 10
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_PEER_USERNAME="$username1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe distributed-peer 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_PEER_USERNAME="$username1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe distributed-peer 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -628,9 +638,10 @@ run_phase_d() {
     fi
 
     # D2 — Branch level / parent adoption (server-observed)
+    sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -643,9 +654,10 @@ run_phase_d() {
     fi
 
     # D3 — Distributed search forwarding
+    sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -658,9 +670,10 @@ run_phase_d() {
     fi
 
     # D4 — Child connection handling (local distributed listener)
+    sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -786,7 +799,7 @@ run_phase_e() {
         local t0 t1 duration_ms output status
         t0="$(date +%s%N)"
         set +e
-        output="$(retry_with_backoff 10 5 timeout 20 env \
+        output="$(timeout 20 env \
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
             SLSK_SOAK_SECONDS=10 \
@@ -825,10 +838,11 @@ run_phase_g() {
     fi
 
     # G1 — Short server soak (10s bounded)
+    sleep 10
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 timeout 20 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_SOAK_SECONDS=10 SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- soak live 2>&1)"
+    output="$(timeout 20 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_SOAK_SECONDS=10 SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- soak live 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -846,7 +860,7 @@ run_phase_g() {
     sleep 3
     t0="$(date +%s%N)"
     set +e
-    output="$(retry_with_backoff 10 5 timeout 15 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_SOAK_SECONDS=5 SLSK_LISTEN_PORT=2239 SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2240 SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- soak live 2>&1)"
+    output="$(timeout 15 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_SOAK_SECONDS=5 SLSK_LISTEN_PORT=2239 SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2240 SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- soak live 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"

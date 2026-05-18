@@ -164,7 +164,7 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       contents: write
       attestations: write
       id-token: write
@@ -207,6 +207,14 @@ jobs:
           name: slskr ${{ needs.version.outputs.version }}
           body_path: release/RELEASE_NOTES.md
           files: release/*
+      - name: Trigger downstream package publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          echo "Triggering downstream package publish for ${RELEASE_TAG}..."
+          gh workflow run release-publish.yml --ref main -f tag="${RELEASE_TAG}"
 
   discord:
     name: Announce Discord Release
