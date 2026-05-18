@@ -20,10 +20,10 @@ or if a pinned action is missing from this ledger.
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | Release archive download before publishing. |
 | `actions/attest-build-provenance` | `v4` | `a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32` | Dereferenced tag target for release asset attestations. |
 | `softprops/action-gh-release` | `v3` | `b4309332981a82ec1c5618f44dd2e27cc8bfbfda` | GitHub Release publisher. |
-| `docker/setup-qemu-action` | `v3` | `40d26e8e6b0d545536c679df1f8e8933720846e8` | QEMU setup for multi-architecture Docker release images. |
-| `docker/setup-buildx-action` | `v3` | `c47758b77c9736f4b2ef4073d4d51994fabfe349` | Docker Buildx setup for multi-architecture release images. |
-| `docker/login-action` | `v3` | `5e57cd118135c172c3672efd75eb46360885c0ef` | GHCR and Docker Hub authentication for release images. |
-| `docker/build-push-action` | `v6` | `263435318d21b8e681c14492fe198d362a7d2c83` | Multi-architecture Docker release image build and push. |
+| `docker/setup-qemu-action` | `v3` | `c7c53464625b32c7a7e944ae62b3e17d2b600130` | QEMU setup for multi-architecture Docker release images. |
+| `docker/setup-buildx-action` | `v3` | `8d2750c68a42422c14e847fe6c8ac0403b4cbd6f` | Docker Buildx setup for multi-architecture release images. |
+| `docker/login-action` | `v3` | `c94ce9fb468520275223c153574b00df6fe4bcc9` | GHCR and Docker Hub authentication for release images. |
+| `docker/build-push-action` | `v6` | `10e90e3645eae34f1e60eeb005ba3a3d33f178e8` | Multi-architecture Docker release image build and push. |
 | `github/codeql-action/init` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL initialization for GitHub code scanning. |
 | `github/codeql-action/autobuild` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL autobuild for analyzable language matrix entries. |
 | `github/codeql-action/analyze` | `v4` | `5e316336eb4f107009e477d4bfbfff13d7250fae` | CodeQL SARIF upload and alert generation. |

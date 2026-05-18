@@ -8,7 +8,17 @@ if command -v makepkg >/dev/null 2>&1; then
   exit 0
 fi
 
-docker run --rm -v "$(cd "$(dirname "$pkgbuild")" && pwd):/pkg" -w /pkg archlinux:base-devel bash -c "
+pkgdir="$(cd "$(dirname "$pkgbuild")" && pwd)"
+cleanup_owner() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo chown -R "$(id -u):$(id -g)" "$pkgdir"
+  elif [[ "$(id -u)" -eq 0 ]]; then
+    chown -R "$(id -u):$(id -g)" "$pkgdir"
+  fi
+}
+trap cleanup_owner EXIT
+
+docker run --rm -v "${pkgdir}:/pkg" -w /pkg archlinux:base-devel bash -c "
   pacman -Sy --noconfirm pacman-contrib >/dev/null
   useradd -m builder
   chown -R builder:builder /pkg

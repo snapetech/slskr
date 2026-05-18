@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          ref: main
       - name: Resolve version
         id: version
         env:
@@ -80,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.metadata.outputs.tag }}
+          ref: main
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
@@ -132,7 +132,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.metadata.outputs.tag }}
+          ref: main
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
@@ -198,7 +198,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.metadata.outputs.tag }}
+          ref: main
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
@@ -242,7 +242,7 @@ jobs:
           cp packaging/aur/slskr.sysusers "$src/usr/lib/sysusers.d/slskr.conf"
           cp packaging/aur/slskr.tmpfiles "$src/usr/lib/tmpfiles.d/slskr.conf"
           cp -R packaging/debian "$src/debian"
-          tar -czf "slskr_${version}.orig.tar.gz" "$src" --exclude "$src/debian"
+          tar --exclude "$src/debian" -czf "slskr_${version}.orig.tar.gz" "$src"
           cd "$src"
           dch --create --package slskr --newversion "${version}-1ppa$(date +%Y%m%d%H%M)~jammy" --distribution jammy "Release ${{ needs.metadata.outputs.tag }}"
           debuild -S -sa -d -k"${PPA_GPG_KEY}"
@@ -374,15 +374,15 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.metadata.outputs.tag }}
-      - uses: docker/setup-qemu-action@40d26e8e6b0d545536c679df1f8e8933720846e8
-      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349
-      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+          ref: main
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action@v3
         if: env.HAS_DOCKERHUB == 'true'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -402,7 +402,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
       - name: Build and push
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action@v6
         with:
           platforms: linux/amd64,linux/arm64
           push: true
@@ -421,7 +421,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.metadata.outputs.tag }}
+          ref: main
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
@@ -452,7 +452,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.metadata.outputs.tag }}
+          ref: main
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: slskr-release-metadata
