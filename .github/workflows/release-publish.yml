@@ -353,7 +353,7 @@ jobs:
           [slskr-ppa-sftp]
           fqdn = ppa.launchpad.net
           method = sftp
-          incoming = ~keefshape/ubuntu/slskr/
+          incoming = ~keefshape/ubuntu/slskdn/
           login = ${user}
           # We already ran `gpg --verify` on the .changes and .dsc above, and
           # Launchpad re-verifies the signature server-side. dput's own client
@@ -375,7 +375,7 @@ jobs:
           [slskr-ppa-ftp]
           fqdn = ppa.launchpad.net
           method = ftp
-          incoming = ~keefshape/ubuntu/slskr/
+          incoming = ~keefshape/ubuntu/slskdn/
           passive_ftp = 1
           login = anonymous
           # See slskr-ppa-sftp: signature is verified above and by Launchpad.
