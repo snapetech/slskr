@@ -139,6 +139,21 @@ github:sync-secrets:
           | gh secret set "$ghname" --repo "$GITHUB_REPOSITORY"
         echo "set $ghname on $GITHUB_REPOSITORY from OpenBao"
       done
+      for map in copr_kerberos_principal:COPR_KERBEROS_PRINCIPAL \
+                 copr_kerberos_keytab_b64:COPR_KERBEROS_KEYTAB_B64 \
+                 copr_fedora_username:COPR_FEDORA_USERNAME \
+                 copr_fedora_password:COPR_FEDORA_PASSWORD \
+                 copr_fedora_otp_secret:COPR_FEDORA_OTP_SECRET \
+                 aur_ssh_key:AUR_SSH_KEY; do
+        bkey="${map%%:*}"; ghname="${map##*:}"
+        if printf '%s' "$resp" | jq -e --arg k "$bkey" '.data.data[$k] | values' >/dev/null; then
+          printf '%s' "$resp" | jq -er --arg k "$bkey" '.data.data[$k]' \
+            | gh secret set "$ghname" --repo "$GITHUB_REPOSITORY"
+          echo "set $ghname on $GITHUB_REPOSITORY from OpenBao"
+        else
+          echo "skipped optional $ghname; OpenBao key $bkey is not present"
+        fi
+      done
   rules:
     - if: '$CI_COMMIT_TAG'
 
