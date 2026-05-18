@@ -7,6 +7,7 @@ mod http_server;
 mod logging;
 mod openapi;
 mod persistence;
+mod probe_output;
 mod rate_limit;
 mod routing;
 mod storage;

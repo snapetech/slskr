@@ -1,0 +1,13 @@
+Source: slskr
+Section: net
+Priority: optional
+Maintainer: slskr maintainers <slskr@proton.me>
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Build-Depends: debhelper-compat (= 13)
+
+Package: slskr
+Architecture: amd64
+Depends: ${misc:Depends}, ${shlibs:Depends}, adduser, systemd
+Description: Rust Soulseek daemon with bundled Web UI
+ slskr provides a Soulseek daemon, HTTP API, and bundled Web UI.

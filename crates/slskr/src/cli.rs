@@ -1,3 +1,4 @@
+use crate::probe_output::{emit_and_result, ProbeContext};
 use sha2::{Digest, Sha256};
 use slskr_client::protocol::{
     distributed::DistributedMessage,
@@ -61,6 +62,8 @@ where
         Some("negative-indirect-probe") => negative_indirect_probe().await,
         Some("peer-address-probe") => peer_address_probe().await,
         Some("fixture-peer-smoke") => fixture_peer_smoke().await,
+        Some("transfer-resume-smoke") => transfer_resume_smoke().await,
+        Some("transfer-reject-smoke") => transfer_reject_smoke().await,
         Some("local-peer-smoke") => local_peer_smoke().await,
         Some("live-soak") => live_soak().await,
         Some("login-smoke") => login_smoke().await,
@@ -100,6 +103,12 @@ where
         }
         "smoke" if args.get(1).map(String::as_str) == Some("fixture-peer") => {
             vec!["fixture-peer-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("transfer-resume") => {
+            vec!["transfer-resume-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("transfer-reject") => {
+            vec!["transfer-reject-smoke"]
         }
         "probe" => match args.get(1).map(String::as_str) {
             Some("peer-address") => vec!["peer-address-probe"],
@@ -162,6 +171,8 @@ async fn peer_address_probe() -> Result<(), String> {
     let timeout = Duration::from_secs(env_u64("SLSK_PEER_ADDRESS_PROBE_TIMEOUT_SECONDS", 10)?);
     let attempts = env_usize("SLSK_PEER_ADDRESS_PROBE_ATTEMPTS", 5)?;
 
+    let ctx = ProbeContext::new("peer-address").with_peer(&peer_username);
+
     let connection = ServerConnection::connect(server_address.as_str())
         .await
         .map_err(|error| format!("connect failed: {error}"))?;
@@ -169,7 +180,11 @@ async fn peer_address_probe() -> Result<(), String> {
     session
         .login(LoginCredentials::default_client(username, password))
         .await
-        .map_err(|error| format!("login failed for configured user: {error}"))?;
+        .map_err(|error| {
+            let msg = error.to_string();
+            let _ = emit_and_result(ctx.fail(msg.clone()));
+            format!("login failed for configured user: {msg}")
+        })?;
 
     for attempt in 1..=attempts {
         session
@@ -179,19 +194,20 @@ async fn peer_address_probe() -> Result<(), String> {
             .await
             .map_err(|error| format!("peer-address request failed: {error}"))?;
         let address = wait_for_peer_address_response(&mut session, timeout).await?;
-        println!(
+        let detail = format!(
             "peer address attempt={attempt}{} port={} obfuscation_type={} obfuscated_port={}",
             peer_address_ip_detail(&address)?,
             address.port,
             address.obfuscation_type,
             address.obfuscated_port
         );
+        println!("{detail}");
         if attempt < attempts {
             time::sleep(Duration::from_secs(2)).await;
         }
     }
 
-    Ok(())
+    emit_and_result(ctx.ok("peer address resolved"))
 }
 
 async fn login_smoke() -> Result<(), String> {
@@ -209,6 +225,8 @@ async fn login_smoke() -> Result<(), String> {
         .transpose()?
         .unwrap_or(DEFAULT_LISTEN_PORT);
 
+    let ctx = ProbeContext::new("login-smoke").with_peer(&username);
+
     let connection = ServerConnection::connect(server_address.as_str())
         .await
         .map_err(|error| format!("connect failed: {error}"))?;
@@ -216,7 +234,11 @@ async fn login_smoke() -> Result<(), String> {
     let info = session
         .login(LoginCredentials::default_client(username.clone(), password))
         .await
-        .map_err(|error| format!("login failed for {username}: {error}"))?;
+        .map_err(|error| {
+            let msg = error.to_string();
+            let _ = emit_and_result(ctx.fail(msg.clone()));
+            format!("login failed for {username}: {msg}")
+        })?;
     session
         .set_wait_port(listen_port)
         .await
@@ -226,8 +248,9 @@ async fn login_smoke() -> Result<(), String> {
         .await
         .map_err(|error| format!("ping failed: {error}"))?;
 
-    println!("logged in; supporter={}", info.is_supporter);
-    Ok(())
+    let detail = format!("logged in; supporter={}", info.is_supporter);
+    println!("{detail}");
+    emit_and_result(ctx.ok(&detail))
 }
 
 async fn obfuscated_peer_probe() -> Result<(), String> {
@@ -1409,6 +1432,8 @@ async fn distributed_peer_probe() -> Result<(), String> {
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
     let timeout = Duration::from_secs(env_u64("SLSK_DISTRIBUTED_PROBE_TIMEOUT_SECONDS", 15)?);
 
+    let ctx = ProbeContext::new("distributed-peer").with_peer(&peer_username);
+
     let address = resolve_peer_address(
         &username,
         &password,
@@ -1434,12 +1459,10 @@ async fn distributed_peer_probe() -> Result<(), String> {
         .await
         .map_err(|error| format!("distributed ping send failed: {error}"))?;
 
-    println!(
-        "distributed peer probe completed; peer={}; host_override={}",
-        redact_username(&peer_username),
+    emit_and_result(ctx.ok(format!(
+        "distributed peer probe completed; host_override={}",
         optional_env("SLSK_DISTRIBUTED_HOST_OVERRIDE").is_some()
-    );
-    Ok(())
+    )))
 }
 
 async fn file_transfer_peer_probe() -> Result<(), String> {
@@ -1449,6 +1472,8 @@ async fn file_transfer_peer_probe() -> Result<(), String> {
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
     let timeout = Duration::from_secs(env_u64("SLSK_FILE_PROBE_TIMEOUT_SECONDS", 15)?);
+
+    let ctx = ProbeContext::new("file-transfer-peer").with_peer(&peer_username);
 
     let address = resolve_peer_address(
         &username,
@@ -1479,17 +1504,15 @@ async fn file_transfer_peer_probe() -> Result<(), String> {
         .map_err(|_| "file-transfer token echo timed out".to_owned())?
         .map_err(|error| format!("file-transfer token echo failed: {error}"))?;
     if echoed != token {
-        return Err(format!(
+        return emit_and_result(ctx.fail(format!(
             "file-transfer token mismatch: expected {token}, received {echoed}"
-        ));
+        )));
     }
 
-    println!(
-        "file-transfer peer probe completed; peer={}; host_override={}",
-        redact_username(&peer_username),
+    emit_and_result(ctx.ok(format!(
+        "file-transfer peer probe completed; host_override={}",
         optional_env("SLSK_FILE_HOST_OVERRIDE").is_some()
-    );
-    Ok(())
+    )))
 }
 
 async fn metadata_relogin_probe() -> Result<(), String> {
@@ -1781,6 +1804,239 @@ async fn fixture_peer_smoke() -> Result<(), String> {
         bytes.len()
     );
     Ok(())
+}
+
+/// Transfer resume smoke: download with non-zero offset, verify remaining bytes match.
+async fn transfer_resume_smoke() -> Result<(), String> {
+    let ctx = ProbeContext::new("transfer-resume");
+    let full_payload = b"slskr transfer-resume probe payload data!";
+    let resume_offset: u64 = 5;
+    let remaining = &full_payload[resume_offset as usize..];
+    let filename = "slskr\\probe\\resume_test.txt";
+    let full_size = full_payload.len();
+    let local_username = optional_env("SLSKR_FIXTURE_PEER_USERNAME")
+        .unwrap_or_else(|| "slskr-transfer-resume".to_owned());
+    let timeout = Duration::from_secs(env_u64("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10)?);
+
+    let listener = Listener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("resume listener bind failed: {e}"))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| format!("resume listener addr failed: {e}"))?;
+
+    let server_payload = full_payload.to_vec();
+    let server_filename = filename.to_owned();
+    let offset_val = resume_offset;
+    let server_task = tokio::spawn(async move {
+        let (incoming, _) = listener
+            .accept()
+            .await
+            .map_err(|e| format!("resume accept failed: {e}"))?;
+        let IncomingConnection::PeerInit {
+            kind: ConnectionKind::PeerMessages,
+            stream,
+            ..
+        } = incoming
+        else {
+            return Err("resume expected peer-messages init".to_owned());
+        };
+        let mut peer = PeerMessageConnection::new(stream);
+        let req = peer
+            .receive()
+            .await
+            .map_err(|e| format!("resume request receive failed: {e}"))?;
+        let token = match req {
+            PeerMessage::TransferRequest(TransferRequest {
+                direction: 0,
+                token,
+                filename,
+                ..
+            }) if filename == server_filename => token,
+            other => return Err(format!("resume unexpected request: {other:?}")),
+        };
+        peer.send(&PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token,
+            size: Some(server_payload.len() as u64),
+        }))
+        .await
+        .map_err(|e| format!("resume response send failed: {e}"))?;
+
+        let (incoming, _) = listener
+            .accept()
+            .await
+            .map_err(|e| format!("resume file accept failed: {e}"))?;
+        let IncomingConnection::PeerInit {
+            kind: ConnectionKind::FileTransfer,
+            stream,
+            ..
+        } = incoming
+        else {
+            return Err("resume expected file-transfer init".to_owned());
+        };
+        let mut file = FileTransferConnection::new(stream);
+        file.send_token(token)
+            .await
+            .map_err(|e| format!("resume token send failed: {e}"))?;
+        let got_offset = file
+            .receive_offset()
+            .await
+            .map_err(|e| format!("resume offset receive failed: {e}"))?;
+        if got_offset != offset_val {
+            return Err(format!(
+                "resume offset mismatch: expected {offset_val}, got {got_offset}"
+            ));
+        }
+        file.write_chunk(&server_payload[offset_val as usize..])
+            .await
+            .map_err(|e| format!("resume payload send failed: {e}"))
+    });
+
+    let mut peer =
+        connect_plain_peer_messages(&local_username, "127.0.0.1", addr.port(), timeout).await?;
+    let token = 0xB4_0001;
+    peer.send(&PeerMessage::TransferRequest(TransferRequest {
+        direction: 0,
+        token,
+        filename: filename.to_owned(),
+        size: None,
+    }))
+    .await
+    .map_err(|e| format!("resume request send failed: {e}"))?;
+    let response = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "resume response timed out".to_owned())?
+        .map_err(|e| format!("resume response receive failed: {e}"))?;
+    match response {
+        PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: got,
+            size: Some(size),
+        }) if got == token && size as usize == full_size => {}
+        other => return Err(format!("resume unexpected response: {other:?}")),
+    }
+
+    let mut file =
+        connect_plain_file_transfer(&local_username, "127.0.0.1", addr.port(), timeout).await?;
+    let got_token = time::timeout(timeout, file.receive_token())
+        .await
+        .map_err(|_| "resume file token timed out".to_owned())?
+        .map_err(|e| format!("resume file token receive failed: {e}"))?;
+    if got_token != token {
+        return Err(format!(
+            "resume token mismatch: expected {token}, got {got_token}"
+        ));
+    }
+    file.send_offset(resume_offset)
+        .await
+        .map_err(|e| format!("resume offset send failed: {e}"))?;
+    let downloaded = time::timeout(timeout, file.read_chunk(remaining.len()))
+        .await
+        .map_err(|_| "resume payload timed out".to_owned())?
+        .map_err(|e| format!("resume payload read failed: {e}"))?;
+    if downloaded != remaining {
+        return Err(format!(
+            "resume payload mismatch: got {} bytes, expected {}",
+            downloaded.len(),
+            remaining.len()
+        ));
+    }
+    server_task
+        .await
+        .map_err(|e| format!("resume server task failed: {e}"))??;
+
+    emit_and_result(
+        ctx.with_bytes(remaining.len() as u64)
+            .ok(format!("resume from offset {resume_offset} verified")),
+    )
+}
+
+/// Transfer reject smoke: server rejects transfer request, verify graceful handling.
+async fn transfer_reject_smoke() -> Result<(), String> {
+    let ctx = ProbeContext::new("transfer-reject");
+    let filename = "slskr\\probe\\reject_test.txt";
+    let local_username = optional_env("SLSKR_FIXTURE_PEER_USERNAME")
+        .unwrap_or_else(|| "slskr-transfer-reject".to_owned());
+    let timeout = Duration::from_secs(env_u64("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10)?);
+
+    let listener = Listener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("reject listener bind failed: {e}"))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| format!("reject listener addr failed: {e}"))?;
+
+    let server_filename = filename.to_owned();
+    let server_task = tokio::spawn(async move {
+        let (incoming, _) = listener
+            .accept()
+            .await
+            .map_err(|e| format!("reject accept failed: {e}"))?;
+        let IncomingConnection::PeerInit {
+            kind: ConnectionKind::PeerMessages,
+            stream,
+            ..
+        } = incoming
+        else {
+            return Err("reject expected peer-messages init".to_owned());
+        };
+        let mut peer = PeerMessageConnection::new(stream);
+        let req = peer
+            .receive()
+            .await
+            .map_err(|e| format!("reject request receive failed: {e}"))?;
+        let token = match req {
+            PeerMessage::TransferRequest(TransferRequest {
+                direction: 0,
+                token,
+                filename,
+                ..
+            }) if filename == server_filename => token,
+            other => return Err(format!("reject unexpected request: {other:?}")),
+        };
+        peer.send(&PeerMessage::TransferResponse(TransferResponse::Rejected {
+            token,
+            reason: "certification reject probe".to_owned(),
+        }))
+        .await
+        .map_err(|e| format!("reject response send failed: {e}"))
+    });
+
+    let mut peer =
+        connect_plain_peer_messages(&local_username, "127.0.0.1", addr.port(), timeout).await?;
+    let token = 0xB5_0001;
+    peer.send(&PeerMessage::TransferRequest(TransferRequest {
+        direction: 0,
+        token,
+        filename: filename.to_owned(),
+        size: None,
+    }))
+    .await
+    .map_err(|e| format!("reject request send failed: {e}"))?;
+    let response = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "reject response timed out".to_owned())?
+        .map_err(|e| format!("reject response receive failed: {e}"))?;
+
+    let result = match response {
+        PeerMessage::TransferResponse(TransferResponse::Rejected { token: got, .. }) => {
+            if got == token {
+                ctx.ok("transfer rejected gracefully")
+            } else {
+                ctx.fail(format!(
+                    "rejection token mismatch: expected {token}, got {got}"
+                ))
+            }
+        }
+        PeerMessage::TransferResponse(TransferResponse::Allowed { .. }) => {
+            ctx.fail("expected rejection but got allowed")
+        }
+        other => ctx.fail(format!("unexpected response: {other:?}")),
+    };
+
+    let _ = server_task
+        .await
+        .map_err(|e| format!("reject server task failed: {e}"));
+    emit_and_result(result)
 }
 
 async fn run_fixture_browse_smoke(

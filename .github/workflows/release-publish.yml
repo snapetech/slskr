@@ -1,0 +1,472 @@
+name: Publish Downstream Packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example release-v0.2.15"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOCKERHUB_IMAGE: snapetech/slskr
+
+jobs:
+  metadata:
+    name: Prepare Dynamic Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      release_version: ${{ steps.version.outputs.release_version }}
+      pkgver: ${{ steps.version.outputs.pkgver }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          . packaging/scripts/release-assets.sh
+          tag="${{ github.event.inputs.tag || github.event.release.tag_name }}"
+          release_version="$(slskr_release_version_from_tag "$tag")"
+          pkgver="${release_version#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "release_version=${release_version}" >> "$GITHUB_OUTPUT"
+          echo "pkgver=${pkgver}" >> "$GITHUB_OUTPUT"
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          . packaging/scripts/release-assets.sh
+          mkdir -p release-assets
+          version="${{ steps.version.outputs.release_version }}"
+          for asset in \
+            "slskr-${version}-x86_64-unknown-linux-gnu.tar.gz" \
+            "slskr-${version}-aarch64-unknown-linux-gnu.tar.gz" \
+            "slskr-${version}-x86_64-unknown-linux-musl.tar.gz" \
+            "slskr-${version}-x86_64-apple-darwin.tar.gz" \
+            "slskr-${version}-aarch64-apple-darwin.tar.gz" \
+            "slskr-${version}-x86_64-pc-windows-msvc.zip"; do
+            slskr_wait_for_asset "${{ steps.version.outputs.tag }}" "$asset" "release-assets/$asset"
+          done
+      - name: Update metadata from asset hashes
+        shell: bash
+        run: packaging/scripts/update-release-metadata.sh "${{ steps.version.outputs.tag }}" release-assets
+      - name: Upload metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: slskr-release-metadata
+          path: |
+            packaging/
+          if-no-files-found: error
+
+  aur:
+    name: Publish AUR
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: slskr-release-metadata
+          path: packaging
+      - name: Validate hashes
+        run: bash packaging/scripts/validate-aur-pkgbuild-hashes.sh packaging/aur/PKGBUILD packaging/aur/PKGBUILD-bin
+      - name: Setup AUR SSH
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${AUR_SSH_KEY:-}" ]]; then
+            echo "AUR_SSH_KEY is not configured; skipping AUR publish."
+            exit 0
+          fi
+          tmp_key="$(mktemp)"
+          trap 'rm -f "$tmp_key"' EXIT
+          printf '%s\n' "$AUR_SSH_KEY" > "$tmp_key"
+          bash packaging/scripts/setup-aur-ssh.sh "$tmp_key"
+      - name: Push slskr-bin
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "${AUR_SSH_KEY:-}" ]] || exit 0
+          bash packaging/scripts/checkout-aur-repo.sh slskr-bin aur-slskr-bin
+          cp packaging/aur/PKGBUILD-bin aur-slskr-bin/PKGBUILD
+          cp packaging/aur/slskr.{service,sysusers,tmpfiles,install} aur-slskr-bin/
+          bash packaging/scripts/generate-aur-srcinfo.sh aur-slskr-bin/PKGBUILD > aur-slskr-bin/.SRCINFO
+          (cd aur-slskr-bin && git add -A)
+          bash packaging/scripts/push-aur-repo.sh aur-slskr-bin slskr-bin "Update to ${{ needs.metadata.outputs.tag }}"
+      - name: Push slskr source package
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "${AUR_SSH_KEY:-}" ]] || exit 0
+          bash packaging/scripts/checkout-aur-repo.sh slskr aur-slskr
+          cp packaging/aur/PKGBUILD aur-slskr/PKGBUILD
+          cp packaging/aur/slskr.{service,sysusers,tmpfiles,install} aur-slskr/
+          bash packaging/scripts/generate-aur-srcinfo.sh aur-slskr/PKGBUILD > aur-slskr/.SRCINFO
+          (cd aur-slskr && git add -A)
+          bash packaging/scripts/push-aur-repo.sh aur-slskr slskr "Update to ${{ needs.metadata.outputs.tag }}"
+
+  copr:
+    name: Publish COPR
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: slskr-release-metadata
+          path: packaging
+      - name: Download Linux asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          . packaging/scripts/release-assets.sh
+          mkdir -p ~/rpmbuild/{SOURCES,SPECS,SRPMS}
+          asset="slskr-${{ needs.metadata.outputs.release_version }}-x86_64-unknown-linux-gnu.tar.gz"
+          slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "$HOME/rpmbuild/SOURCES/$asset"
+          cp packaging/aur/slskr.service ~/rpmbuild/SOURCES/
+          cp packaging/aur/slskr.sysusers ~/rpmbuild/SOURCES/
+          cp packaging/aur/slskr.tmpfiles ~/rpmbuild/SOURCES/
+          cp packaging/rpm/slskr.spec ~/rpmbuild/SPECS/
+      - name: Install COPR tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm python3-pip python3-venv
+          python3 -m venv /tmp/slskr-copr
+          /tmp/slskr-copr/bin/python -m pip install --upgrade pip
+          /tmp/slskr-copr/bin/python -m pip install copr-cli rich
+          echo /tmp/slskr-copr/bin >> "$GITHUB_PATH"
+      - name: Configure COPR
+        env:
+          COPR_LOGIN: ${{ secrets.COPR_LOGIN }}
+          COPR_TOKEN: ${{ secrets.COPR_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${COPR_LOGIN:-}" || -z "${COPR_TOKEN:-}" ]]; then
+            echo "COPR credentials not configured; skipping."
+            exit 0
+          fi
+          mkdir -p ~/.config
+          cat > ~/.config/copr <<EOF
+          [copr-cli]
+          login = ${COPR_LOGIN}
+          username = slskdn
+          token = ${COPR_TOKEN}
+          copr_url = https://copr.fedorainfracloud.org
+          EOF
+      - name: Build and upload SRPM
+        env:
+          COPR_LOGIN: ${{ secrets.COPR_LOGIN }}
+          COPR_TOKEN: ${{ secrets.COPR_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${COPR_LOGIN:-}" && -n "${COPR_TOKEN:-}" ]] || exit 0
+          rpmbuild -bs ~/rpmbuild/SPECS/slskr.spec --define "_topdir $HOME/rpmbuild"
+          srpm="$(find ~/rpmbuild/SRPMS -name '*.src.rpm' -print -quit)"
+          if ! copr-cli get slskr >/dev/null 2>&1; then
+            copr-cli create slskr --chroot fedora-43-x86_64 --chroot fedora-rawhide-x86_64 --description "slskr RPM builds" --instructions "dnf copr enable slskdn/slskr && dnf install slskr"
+          fi
+          copr-cli build slskr "$srpm" --nowait
+
+  ppa:
+    name: Publish Launchpad PPA
+    needs: metadata
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: slskr-release-metadata
+          path: packaging
+      - name: Install Debian tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y devscripts debhelper gnupg dput
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GPG_PRIVATE_KEY:-}" ]]; then
+            echo "GPG_PRIVATE_KEY not configured; skipping PPA."
+            exit 0
+          fi
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          key_id="$(gpg --list-secret-keys --keyid-format long | awk '/^sec/ { split($2,a,"/"); print a[2]; exit }')"
+          echo "PPA_GPG_KEY=${key_id}" >> "$GITHUB_ENV"
+      - name: Build source package
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${GPG_PRIVATE_KEY:-}" ]] || exit 0
+          . packaging/scripts/release-assets.sh
+          version="${{ needs.metadata.outputs.pkgver }}"
+          release_version="${{ needs.metadata.outputs.release_version }}"
+          asset="slskr-${release_version}-x86_64-unknown-linux-gnu.tar.gz"
+          slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "/tmp/$asset"
+          src="slskr-${version}"
+          mkdir -p "$src/usr/lib/slskr" "$src/usr/bin" "$src/lib/systemd/system" "$src/etc/slskr" "$src/usr/lib/sysusers.d" "$src/usr/lib/tmpfiles.d"
+          tar -xzf "/tmp/$asset" -C /tmp
+          extracted="/tmp/slskr-${release_version}-x86_64-unknown-linux-gnu"
+          cp "$extracted/slskr" "$src/usr/lib/slskr/slskr"
+          cp -R "$extracted/web" "$src/usr/lib/slskr/web"
+          cp "$extracted/docs/slskr.config.example.toml" "$src/etc/slskr/config.toml"
+          cp packaging/aur/slskr.service "$src/lib/systemd/system/slskr.service"
+          cp packaging/aur/slskr.sysusers "$src/usr/lib/sysusers.d/slskr.conf"
+          cp packaging/aur/slskr.tmpfiles "$src/usr/lib/tmpfiles.d/slskr.conf"
+          cp -R packaging/debian "$src/debian"
+          tar -czf "slskr_${version}.orig.tar.gz" "$src" --exclude "$src/debian"
+          cd "$src"
+          dch --create --package slskr --newversion "${version}-1ppa$(date +%Y%m%d%H%M)~jammy" --distribution jammy "Release ${{ needs.metadata.outputs.tag }}"
+          debuild -S -sa -d -k"${PPA_GPG_KEY}"
+      - name: Preflight Launchpad PPA upload
+        env:
+          LAUNCHPAD_SFTP_KEY: ${{ secrets.LAUNCHPAD_SFTP_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${LAUNCHPAD_SFTP_KEY:-}" ]]; then
+            sftp_ipv4="$(getent ahostsv4 ppa.launchpad.net | awk '$2 == "STREAM" { print $1; exit }')"
+            if [[ -n "$sftp_ipv4" ]]; then
+              echo "Pinning ppa.launchpad.net to IPv4 ${sftp_ipv4} for PPA SFTP upload"
+              echo "${sftp_ipv4} ppa.launchpad.net" | sudo tee -a /etc/hosts
+              if python3 - <<'PY'
+          import socket
+
+          with socket.create_connection(("ppa.launchpad.net", 22), timeout=120) as sock:
+              print(f"Connected to {sock.getpeername()[0]}:{sock.getpeername()[1]} over SSH")
+          PY
+              then
+                echo "SLSKR_PPA_UPLOAD_METHOD=sftp" >> "$GITHUB_ENV"
+                exit 0
+              fi
+              echo "::warning::Launchpad PPA SFTP endpoint is not reachable; trying FTP fallback"
+            else
+              echo "::warning::Unable to resolve IPv4 for Launchpad SFTP; trying FTP fallback"
+            fi
+          fi
+
+          ftp_ipv4="$(getent ahostsv4 ppa.launchpad.net | awk '$2 == "STREAM" { print $1; exit }')"
+          if [[ -z "$ftp_ipv4" ]]; then
+            echo "::error::Unable to resolve an IPv4 address for ppa.launchpad.net"
+            getent ahosts ppa.launchpad.net || true
+            exit 1
+          fi
+
+          echo "Pinning ppa.launchpad.net to IPv4 ${ftp_ipv4} for PPA FTP upload"
+          echo "${ftp_ipv4} ppa.launchpad.net" | sudo tee -a /etc/hosts
+          if ! python3 - <<'PY'
+          import socket
+
+          with socket.create_connection(("ppa.launchpad.net", 21), timeout=120) as sock:
+              print(f"Connected to {sock.getpeername()[0]}:{sock.getpeername()[1]} over FTP")
+          PY
+          then
+            echo "::error::Launchpad PPA FTP endpoint is not reachable over IPv4"
+            exit 1
+          fi
+          echo "SLSKR_PPA_UPLOAD_METHOD=ftp" >> "$GITHUB_ENV"
+      - name: Upload to PPA
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          LAUNCHPAD_SFTP_KEY: ${{ secrets.LAUNCHPAD_SFTP_KEY }}
+          LAUNCHPAD_SFTP_USER: ${{ secrets.LAUNCHPAD_SFTP_USER }}
+        run: |
+          set -euo pipefail
+          [[ -n "${GPG_PRIVATE_KEY:-}" ]] || exit 0
+          changes="$(find . -maxdepth 1 -name '*.changes' -print -quit)"
+          if [[ -z "$changes" ]]; then
+            echo "::error::Unable to find source package .changes file"
+            exit 1
+          fi
+          gpg --verify "$changes"
+          dsc="$(awk '/\.dsc$/ { print $NF; exit }' "$changes")"
+          if [[ -z "$dsc" || ! -f "$dsc" ]]; then
+            echo "::error::Unable to find signed .dsc referenced by $changes"
+            exit 1
+          fi
+          gpg --verify "$dsc"
+          user="${LAUNCHPAD_SFTP_USER:-keefshape}"
+          uploaded=0
+          if [[ "${SLSKR_PPA_UPLOAD_METHOD:-ftp}" == "sftp" && -n "${LAUNCHPAD_SFTP_KEY:-}" ]]; then
+            mkdir -p ~/.ssh
+            printf '%s\n' "$LAUNCHPAD_SFTP_KEY" > ~/.ssh/launchpad_ppa
+            chmod 600 ~/.ssh/launchpad_ppa
+            ssh-keyscan -T 30 -t rsa,ecdsa,ed25519 ppa.launchpad.net >> ~/.ssh/known_hosts 2>/dev/null || true
+            cat >> ~/.ssh/config <<EOF
+          Host ppa.launchpad.net
+            HostName ppa.launchpad.net
+            User ${user}
+            IdentityFile ~/.ssh/launchpad_ppa
+            IdentitiesOnly yes
+            BatchMode yes
+            PasswordAuthentication no
+            KbdInteractiveAuthentication no
+            NumberOfPasswordPrompts 0
+            StrictHostKeyChecking accept-new
+            ConnectTimeout 60
+            ServerAliveInterval 30
+            ServerAliveCountMax 4
+          EOF
+            cat > ~/.dput.cf <<EOF
+          [slskr-ppa-sftp]
+          fqdn = ppa.launchpad.net
+          method = sftp
+          incoming = ~keefshape/ubuntu/slskr/
+          login = ${user}
+          allow_unsigned_uploads = 0
+          EOF
+
+            echo "Uploading $(basename "$changes") to Launchpad PPA over SFTP"
+            if timeout --preserve-status 1800 dput --config ~/.dput.cf slskr-ppa-sftp "$changes"; then
+              uploaded=1
+            else
+              echo "::warning::Launchpad SFTP upload failed; trying anonymous FTP fallback"
+            fi
+          fi
+
+          if [[ "$uploaded" -ne 1 ]]; then
+            cat > ~/.dput.cf <<'EOF'
+          [slskr-ppa-ftp]
+          fqdn = ppa.launchpad.net
+          method = ftp
+          incoming = ~keefshape/ubuntu/slskr/
+          passive_ftp = 1
+          login = anonymous
+          allow_unsigned_uploads = 0
+          EOF
+            echo "Uploading $(basename "$changes") to Launchpad PPA over anonymous FTP"
+            timeout --preserve-status 1800 dput --config ~/.dput.cf slskr-ppa-ftp "$changes"
+          fi
+
+  docker:
+    name: Publish Docker Images
+    needs: metadata
+    runs-on: ubuntu-latest
+    env:
+      HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
+      - uses: docker/setup-qemu-action@40d26e8e6b0d545536c679df1f8e8933720846e8
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        if: env.HAS_DOCKERHUB == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Prepare tags
+        id: tags
+        shell: bash
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/snapetech/slskr:${{ needs.metadata.outputs.release_version }}"
+            echo "ghcr.io/snapetech/slskr:latest"
+            if [[ "${HAS_DOCKERHUB}" == "true" ]]; then
+              echo "${DOCKERHUB_IMAGE}:${{ needs.metadata.outputs.release_version }}"
+              echo "${DOCKERHUB_IMAGE}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build and push
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.metadata.outputs.release_version }}
+            REVISION=${{ github.sha }}
+            BUILD_DATE=${{ github.event.release.published_at || github.run_id }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  homebrew:
+    name: Update Homebrew Tap
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: slskr-release-metadata
+          path: packaging
+      - name: Push tap
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "TAP_GITHUB_TOKEN not configured; skipping Homebrew tap."
+            exit 0
+          fi
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/snapetech/homebrew-slskr.git" tap
+          mkdir -p tap/Formula
+          cp packaging/homebrew/Formula/slskr.rb tap/Formula/slskr.rb
+          cd tap
+          git config user.name "slskr CI"
+          git config user.email "slskr@proton.me"
+          git add Formula/slskr.rb
+          git commit -m "Update slskr to ${{ needs.metadata.outputs.release_version }}" || exit 0
+          git push
+
+  winget:
+    name: Submit Winget PR
+    needs: metadata
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: slskr-release-metadata
+          path: packaging
+      - name: Submit manifests
+        env:
+          WINGETCREATE_GITHUB_TOKEN: ${{ secrets.WINGETCREATE_GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:WINGETCREATE_GITHUB_TOKEN)) {
+            Write-Host "WINGETCREATE_GITHUB_TOKEN not configured; skipping Winget."
+            exit 0
+          }
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          $submitPath = Join-Path "winget-submit" "manifests/s/snapetech/slskr/${{ needs.metadata.outputs.pkgver }}"
+          New-Item -ItemType Directory -Force $submitPath | Out-Null
+          Copy-Item packaging/winget/snapetech.slskr.yaml $submitPath/
+          Copy-Item packaging/winget/snapetech.slskr.installer.yaml $submitPath/
+          Copy-Item packaging/winget/snapetech.slskr.locale.en-US.yaml $submitPath/
+          .\wingetcreate.exe submit $submitPath -t $env:WINGETCREATE_GITHUB_TOKEN

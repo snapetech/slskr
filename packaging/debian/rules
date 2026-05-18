@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+
+override_dh_auto_install:
+	mkdir -p debian/slskr/usr/lib/slskr debian/slskr/usr/bin
+	cp -R usr/lib/slskr/* debian/slskr/usr/lib/slskr/
+	ln -s ../lib/slskr/slskr debian/slskr/usr/bin/slskr
+	mkdir -p debian/slskr/lib/systemd/system debian/slskr/etc/slskr debian/slskr/usr/lib/sysusers.d debian/slskr/usr/lib/tmpfiles.d
+	cp lib/systemd/system/slskr.service debian/slskr/lib/systemd/system/slskr.service
+	cp etc/slskr/config.toml debian/slskr/etc/slskr/config.toml
+	cp usr/lib/sysusers.d/slskr.conf debian/slskr/usr/lib/sysusers.d/slskr.conf
+	cp usr/lib/tmpfiles.d/slskr.conf debian/slskr/usr/lib/tmpfiles.d/slskr.conf

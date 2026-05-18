@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if command -v systemd-sysusers >/dev/null 2>&1; then
+  systemd-sysusers /usr/lib/sysusers.d/slskr.conf || true
+fi
+if command -v systemd-tmpfiles >/dev/null 2>&1; then
+  systemd-tmpfiles --create /usr/lib/tmpfiles.d/slskr.conf || true
+fi
+
+#DEBHELPER#
