@@ -3,7 +3,7 @@ FROM node:22-bookworm AS web-builder
 ARG VERSION=dev
 WORKDIR /src
 
-COPY web/package*.json web/
+COPY web/.npmrc web/package*.json web/
 RUN npm --prefix web ci
 COPY web web
 RUN npm --prefix web run build
