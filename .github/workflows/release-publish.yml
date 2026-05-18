@@ -30,11 +30,13 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
       - name: Resolve version
         id: version
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
         shell: bash
         run: |
           set -euo pipefail
           . packaging/scripts/release-assets.sh
-          tag="${{ github.event.inputs.tag || github.event.release.tag_name }}"
+          tag="${RELEASE_TAG}"
           release_version="$(slskr_release_version_from_tag "$tag")"
           pkgver="${release_version#v}"
           {
