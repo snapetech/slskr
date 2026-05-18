@@ -37,9 +37,11 @@ jobs:
           tag="${{ github.event.inputs.tag || github.event.release.tag_name }}"
           release_version="$(slskr_release_version_from_tag "$tag")"
           pkgver="${release_version#v}"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "release_version=${release_version}" >> "$GITHUB_OUTPUT"
-          echo "pkgver=${pkgver}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=${tag}"
+            echo "release_version=${release_version}"
+            echo "pkgver=${pkgver}"
+          } >> "$GITHUB_OUTPUT"
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
