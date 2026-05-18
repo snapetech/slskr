@@ -244,7 +244,7 @@ jobs:
           cp -R packaging/debian "$src/debian"
           tar --exclude "$src/debian" -czf "slskr_${version}.orig.tar.gz" "$src"
           cd "$src"
-          dch --create --package slskr --newversion "${version}-1ppa$(date +%Y%m%d%H%M)~jammy" --distribution jammy "Release ${{ needs.metadata.outputs.tag }}"
+          dch --package slskr --newversion "${version}-1ppa$(date +%Y%m%d%H%M)~jammy" --distribution jammy "Release ${{ needs.metadata.outputs.tag }}"
           debuild -S -sa -d -k"${PPA_GPG_KEY}"
       - name: Preflight Launchpad PPA upload
         env:

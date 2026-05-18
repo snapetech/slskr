@@ -1,16 +1,25 @@
+FROM node:22-bookworm AS web-builder
+
+ARG VERSION=dev
+WORKDIR /src
+
+COPY web/package*.json web/
+RUN npm --prefix web ci
+COPY web web
+RUN npm --prefix web run build
+
 FROM rust:1.93-bookworm AS builder
 
 ARG VERSION=dev
 WORKDIR /src
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates nodejs npm pkg-config \
+    && apt-get install -y --no-install-recommends ca-certificates pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
-RUN npm --prefix web ci \
-    && npm --prefix web run build \
-    && SLSKR_RELEASE_VERSION="${VERSION}" cargo build --release -p slskr
+COPY --from=web-builder /src/web/build web/build
+RUN SLSKR_RELEASE_VERSION="${VERSION}" cargo build --release -p slskr
 
 FROM debian:bookworm-slim
 
