@@ -183,6 +183,10 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "${COPR_LOGIN:-}" && -n "${COPR_TOKEN:-}" ]] || exit 0
+          if ! copr-cli whoami >/dev/null 2>&1; then
+            echo "::error title=COPR token expired::copr-cli could not authenticate. Regenerate the API token at https://copr.fedorainfracloud.org/api and update the COPR_LOGIN and COPR_TOKEN repository secrets."
+            exit 1
+          fi
           rpmbuild -bs ~/rpmbuild/SPECS/slskr.spec --define "_topdir $HOME/rpmbuild"
           srpm="$(find ~/rpmbuild/SRPMS -name '*.src.rpm' -print -quit)"
           if ! copr-cli get slskr >/dev/null 2>&1; then
@@ -194,7 +198,6 @@ jobs:
     name: Publish Launchpad PPA
     needs: metadata
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -242,7 +245,19 @@ jobs:
           cp packaging/aur/slskr.sysusers "$src/usr/lib/sysusers.d/slskr.conf"
           cp packaging/aur/slskr.tmpfiles "$src/usr/lib/tmpfiles.d/slskr.conf"
           cp -R packaging/debian "$src/debian"
-          tar --exclude "$src/debian" -czf "slskr_${version}.orig.tar.gz" "$src"
+          # Launchpad rejects re-uploads of an upstream version whose orig
+          # tarball differs byte-for-byte from one it already accepted. Pin
+          # every nondeterministic field (member order, mtime, ownership,
+          # gzip header) and anchor the timestamp to the release tag's commit
+          # so the tarball is identical across reruns of the same release.
+          epoch="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${{ needs.metadata.outputs.tag }}" \
+            --jq '.commit.committer.date' 2>/dev/null | { read -r d && date -u -d "$d" +%s; } || true)"
+          : "${epoch:=1577836800}"
+          tar --exclude "$src/debian" \
+            --sort=name --mtime="@${epoch}" \
+            --owner=0 --group=0 --numeric-owner \
+            --format=gnu -cf - "$src" \
+            | gzip -n -9 > "slskr_${version}.orig.tar.gz"
           cd "$src"
           dch --package slskr --newversion "${version}-1ppa$(date +%Y%m%d%H%M)~jammy" --distribution jammy "Release ${{ needs.metadata.outputs.tag }}"
           debuild -S -sa -d -k"${PPA_GPG_KEY}"
@@ -340,7 +355,11 @@ jobs:
           method = sftp
           incoming = ~keefshape/ubuntu/slskr/
           login = ${user}
-          allow_unsigned_uploads = 0
+          # We already ran `gpg --verify` on the .changes and .dsc above, and
+          # Launchpad re-verifies the signature server-side. dput's own client
+          # check misparses modern GnuPG status output (SignatureVerifyError: 0),
+          # which was forcing every SFTP upload to fail over to anonymous FTP.
+          allow_unsigned_uploads = 1
           EOF
 
             echo "Uploading $(basename "$changes") to Launchpad PPA over SFTP"
@@ -359,7 +378,8 @@ jobs:
           incoming = ~keefshape/ubuntu/slskr/
           passive_ftp = 1
           login = anonymous
-          allow_unsigned_uploads = 0
+          # See slskr-ppa-sftp: signature is verified above and by Launchpad.
+          allow_unsigned_uploads = 1
           EOF
             echo "Uploading $(basename "$changes") to Launchpad PPA over anonymous FTP"
             timeout --preserve-status 1800 dput --config ~/.dput.cf slskr-ppa-ftp "$changes"
@@ -392,16 +412,18 @@ jobs:
         shell: bash
         run: |
           {
-            echo "tags<<EOF"
+            echo "ghcr<<EOF"
             echo "ghcr.io/snapetech/slskr:${{ needs.metadata.outputs.release_version }}"
             echo "ghcr.io/snapetech/slskr:latest"
-            if [[ "${HAS_DOCKERHUB}" == "true" ]]; then
-              echo "${DOCKERHUB_IMAGE}:${{ needs.metadata.outputs.release_version }}"
-              echo "${DOCKERHUB_IMAGE}:latest"
-            fi
+            echo "EOF"
+            echo "dockerhub<<EOF"
+            echo "${DOCKERHUB_IMAGE}:${{ needs.metadata.outputs.release_version }}"
+            echo "${DOCKERHUB_IMAGE}:latest"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-      - name: Build and push
+      # ghcr is the registry users actually pull from and authenticates with
+      # the built-in GITHUB_TOKEN, so its publish must gate the release.
+      - name: Build and push (ghcr)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action@v6
         with:
           platforms: linux/amd64,linux/arm64
@@ -410,9 +432,25 @@ jobs:
             VERSION=${{ needs.metadata.outputs.release_version }}
             REVISION=${{ github.sha }}
             BUILD_DATE=${{ github.event.release.published_at || github.run_id }}
-          tags: ${{ steps.tags.outputs.tags }}
+          tags: ${{ steps.tags.outputs.ghcr }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # Docker Hub is a mirror. A bad/expired DOCKERHUB_TOKEN or a missing
+      # repo must not sink an otherwise-good ghcr release; it reuses the
+      # cache from the step above so this is a fast re-push, not a rebuild.
+      - name: Build and push (Docker Hub)
+        if: env.HAS_DOCKERHUB == 'true'
+        continue-on-error: true
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action@v6
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.metadata.outputs.release_version }}
+            REVISION=${{ github.sha }}
+            BUILD_DATE=${{ github.event.release.published_at || github.run_id }}
+          tags: ${{ steps.tags.outputs.dockerhub }}
+          cache-from: type=gha
 
   homebrew:
     name: Update Homebrew Tap
@@ -435,7 +473,7 @@ jobs:
             echo "TAP_GITHUB_TOKEN not configured; skipping Homebrew tap."
             exit 0
           fi
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/snapetech/homebrew-slskr.git" tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/snapetech/homebrew-slskdn.git" tap
           mkdir -p tap/Formula
           cp packaging/homebrew/Formula/slskr.rb tap/Formula/slskr.rb
           cd tap
