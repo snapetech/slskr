@@ -43,7 +43,7 @@
     "@types/node": "^25.8.0",
     "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "^4.1.6",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "eslint": "^10.3.0",
     "eslint-config-canonical": "^47.4.2",
     "eslint-import-resolver-node": "^0.3.10",
