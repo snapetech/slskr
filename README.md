@@ -39,6 +39,7 @@ otherwise.
 - [HTTP API Examples](#http-api-examples)
 - [CLI Reference](#cli-reference)
 - [Testing And Verification](#testing-and-verification)
+- [Certification And VPN Isolation](#certification-and-vpn-isolation)
 - [Deployment](#deployment)
 - [Repository Layout](#repository-layout)
 - [Documentation Index](#documentation-index)
@@ -391,6 +392,44 @@ Live interop and soak scripts are under [scripts](./scripts). They use real
 accounts and public-network behavior, so run them deliberately and provide
 credentials through your normal local secret source.
 
+## Certification And VPN Isolation
+
+`slskr` ships with a full certification runner and per-account VPN isolation to
+bypass Soulseek's per-IP rate limiting:
+
+```bash
+# Run all phases (auto-detects VPN configs)
+scripts/run-certification.sh
+
+# Run specific phases
+scripts/run-certification.sh --phases A,B,H
+
+# Machine-parseable JSON output
+scripts/run-certification.sh --log-format json
+
+# Dry-run to see the plan
+scripts/run-certification.sh --dry-run
+```
+
+Each test account is routed through its own isolated Proton WireGuard namespace
+so the Soulseek server sees different source IPs per login. The runner covers
+7 phases across 36 test cases:
+
+| Phase | Coverage | Tests |
+| --- | --- | --- |
+| **A: Foundation** | Login, peer-address, plain/obfuscated/indirect peer | 5 |
+| **B: Transfers** | Download, upload, resume, rejection | 5 |
+| **C: Social** | Private messages, rooms, wishlist, browse | 6 |
+| **D: Distributed** | Distributed ping, branch, search forwarding | 4 |
+| **E: NAT-PMP** | Port claim, renew, collision, obfuscated, soak | 5 |
+| **G: Soak** | Server soak, listener soak, NAT-PMP soak | 3 |
+| **H: Negative** | Wrong password, offline peer, failure modes | 8 |
+
+VPN isolation uses 8 Proton WireGuard configs mapped 1:1 to test accounts. See
+[docs/vpn-certification.md](./docs/vpn-certification.md) for architecture,
+credential pool setup, and troubleshooting. The full test plan and pass criteria
+are in [docs/full-network-test-plan.md](./docs/full-network-test-plan.md).
+
 ## Deployment
 
 `slskr` is designed around one daemon process, one config file, one state
@@ -450,6 +489,8 @@ The table below links the maintained entry points most users need first.
 | [client-go/README.md](./client-go/README.md) | Go client package usage. |
 | [examples/README.md](./examples/README.md) | API and automation examples. |
 | [docs/live-interop-test-matrix.md](./docs/live-interop-test-matrix.md) | Live network and cross-client verification matrix. |
+| [docs/vpn-certification.md](./docs/vpn-certification.md) | Per-account VPN isolation, credential pool setup, and certification runner. |
+| [docs/full-network-test-plan.md](./docs/full-network-test-plan.md) | Full network test phases, pass criteria, and certification plan. |
 | [docs/open-commons-fixtures.md](./docs/open-commons-fixtures.md) | Open fixture policy and source list. |
 | [docs/release.md](./docs/release.md) | Release tag, archive, and metadata policy. |
 | [COMPLIANCE.md](./COMPLIANCE.md) | Public posture, licensing, and project compliance notes. |

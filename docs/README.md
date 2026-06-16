@@ -57,6 +57,8 @@ http://127.0.0.1:5030
 | --- | --- |
 | [Release guide](release.md) | Tag, archive, manifest, checksum, and verification policy. |
 | [Live interop matrix](live-interop-test-matrix.md) | Live Soulseek-network and cross-client verification gates. |
+| [VPN certification](vpn-certification.md) | Per-account VPN isolation, credential pool setup, and certification runner. |
+| [Full network test plan](full-network-test-plan.md) | Test phases, pass criteria, and release-readiness certification plan. |
 | [Security bug burndown](security-bug-burndown.md) | Security audit findings and remediation status. |
 | [Compliance](../COMPLIANCE.md) | Project compliance and public posture notes. |
 | [Remediation plan](../REMEDIATION.md) | Historical remediation tracking. |

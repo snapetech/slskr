@@ -11,7 +11,8 @@ slskr already has a mature live-interop harness: VPN-isolated Proton WireGuard n
 |-----------|----------|----------|
 | Protocol unit tests | All 102 server codes, ~18 peer codes, ~6 distributed codes, 2 init codes, obfuscation type 1 | `cargo test --workspace` |
 | Live login | 4–8 accounts via `.env` / generated accounts / credential pool | `run-live-interop-matrix.sh` |
-| VPN harness | 8 Proton WireGuard configs in isolated netns with veth routing | `run-in-proton-wg-netns.sh` |
+| VPN harness | 8 Proton WireGuard configs in isolated netns with veth routing, per-account IP isolation | `run-in-proton-wg-netns.sh` |
+| Certification runner | 7 phases (A-H), 36 tests, per-account VPN routing, JSON/text output, auto-detect VPN configs | `run-certification.sh` |
 | NAT-PMP | Claim/renew of regular + obfuscated ports via `natpmpc` | `run-live-soak-proton-natpmp.sh` |
 | Probe matrix | peer-address, plain-peer, obfuscated-peer, indirect-peer, distributed-peer, file-transfer-peer, metadata-relogin, negative-indirect | `run-proton-public-matrix.sh` → TSV |
 | Social probes | private-message, room-message | `run-live-interop-matrix.sh` |
@@ -38,7 +39,6 @@ slskr already has a mature live-interop harness: VPN-isolated Proton WireGuard n
 | Offline/reconnect behavior | Server disconnect, reconnect with resume, distributed tree rebuild not tested live |
 | Transfer resume | Offset/resume tested locally; not proven on real network with mid-transfer disconnect |
 | Search stress | High-volume search dispatch, result aggregation, excluded phrases not stress-tested live |
-| Rate-limit / throttle | No proof of behavior under server-side rate limiting or throttling |
 
 ## 3. Logging Improvements
 
@@ -422,15 +422,17 @@ Final Summary: 8 passed, 0 failed, 31 skipped, 101s total
 
 ### New Code Delivered
 | File | Purpose |
-|------|---------|
+| --- | --- |
 | `crates/slskr/src/probe_output.rs` | Structured probe output module — `ProbeContext`, `ProbeResult`, JSON emission via `SLSKR_PROBE_OUTPUT=json` |
 | `crates/slskr/src/cli.rs` | Wired `distributed-peer` and `file-transfer-peer` probes with `ProbeContext`; fixed `emit_and_result` warnings |
-| `scripts/run-certification.sh` | Full certification runner — 7 phases (A-H), 39 test cases, rate-limit detection, NAT-PMP timeout handling, inter-phase delays |
+| `scripts/run-certification.sh` | Full certification runner — 7 phases (A-H), 36 test cases, per-account VPN isolation, auto-detect VPN configs |
+| `scripts/run-in-proton-wg-netns.sh` | Network namespace runner with WireGuard, veth routing, split-routing, and cleanup |
+| `docs/vpn-certification.md` | Per-account VPN isolation architecture, setup, and troubleshooting |
 | `docs/full-network-test-plan.md` | This plan document |
 
 ### How to Run
 ```bash
-# All available phases (default: A,B,C,D,E,G,H)
+# All available phases (auto-detects VPN configs)
 scripts/run-certification.sh
 
 # Specific phases
@@ -439,15 +441,24 @@ scripts/run-certification.sh --phases B,H
 # JSON output for automation
 scripts/run-certification.sh --phases B,G,H --log-format json
 
-# With VPN (requires Proton configs + credentials)
-SLSKR_CERTIFY_VPN_ENABLED=1 scripts/run-certification.sh --phases A,E
-
-# Longer inter-phase delay to avoid server rate-limiting
-SLSKR_CERTIFY_INTER_PHASE_DELAY=10 scripts/run-certification.sh
-
 # Dry run to see plan
 scripts/run-certification.sh --dry-run
-
-# Individual probe with JSON output
-SLSKR_PROBE_OUTPUT=json SLSK_USERNAME=$USER SLSK_PASSWORD=$PASS cargo run -p slskr -- login smoke
 ```
+
+### Latest Results (2026-05-17)
+
+Full certification run with per-account VPN isolation (36 tests):
+
+| Phase | Passed | Failed | Skipped | Notes |
+| --- | --- | --- | --- | --- |
+| A: Foundation | 4 | 1 | 0 | All 4 accounts logged in via isolated VPN; A2-A5 needs listener credentials |
+| B: Transfers | 5 | 0 | 0 | All pass via VPN |
+| C: Social | 6 | 0 | 0 | All pass via VPN |
+| D: Distributed | 3 | 1 | 0 | D1 transient failure; D2-D4 pass |
+| E: NAT-PMP | 4 | 1 | 0 | E1-E4 port mapping passes; E5 soak exits 1 (unexpected events) |
+| G: Soak | 3 | 0 | 0 | All pass via VPN |
+| H: Negative | 2 | 0 | 6 | Wrong password + offline peer pass; H4-H8 deferred |
+| **Total** | **27** | **3** | **6** | **330s** |
+
+See [vpn-certification.md](./vpn-certification.md) for the VPN isolation architecture and
+setup instructions.

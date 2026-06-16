@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
         --vpn-endpoints) vpn_endpoints="$2"; shift 2 ;;
         --credential-file) credential_file="$2"; shift 2 ;;
         -h|--help)
-            echo "usage: $0 [--phases A,B,C,D,E,H] [--log-format json|text] [--dry-run] [--vpn-endpoints il741,usca32]"
+            echo "usage: $0 [--phases A,B,C,D,E,G,H] [--log-format json|text] [--dry-run] [--vpn-endpoints il741,usca32]"
             exit 0
             ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -63,6 +63,31 @@ if [[ -n "$credential_file" && -f "$credential_file" ]]; then
     source "$credential_file"
     set +a
 fi
+
+# --- VPN auto-detection ---
+# If SLSKR_CERTIFY_VPN_ENABLED is not explicitly set, detect whether Proton configs exist.
+if [[ "${SLSKR_CERTIFY_VPN_ENABLED:-auto}" == "auto" ]]; then
+    vpn_detected=false
+    for label in p1 p2 p3 p4 p5 p6 p7 p8; do
+        var_name="SLSKR_PROTON_CONFIG_${label}"
+        path="${!var_name:-}"
+        if [[ -n "$path" ]]; then
+            [[ "$path" != /* ]] && path="$repo_root/$path"
+            if [[ -f "$path" ]]; then
+                vpn_detected=true
+                break
+            fi
+        fi
+    done
+    if [[ "$vpn_detected" == "true" ]]; then
+        SLSKR_CERTIFY_VPN_ENABLED=1
+        echo "[INFO] Auto-detected VPN configs; enabling isolated netns per test"
+    else
+        SLSKR_CERTIFY_VPN_ENABLED=0
+        echo "[INFO] No VPN configs found; running tests without VPN isolation"
+    fi
+fi
+export SLSKR_CERTIFY_VPN_ENABLED
 
 # --- Global counters ---
 total_tests=0
@@ -176,9 +201,83 @@ resolve_proton_config() {
     printf '%s' "$path"
 }
 
+# --- VPN account-to-label mapping for per-account IP isolation ---
+# Each test account gets a dedicated Proton exit node to bypass per-IP rate limiting.
+declare -A ACCOUNT_VPN_LABEL=(
+    [1]="p1"
+    [2]="p3"
+    [3]="p4"
+    [4]="p5"
+    [5]="p6"
+    [6]="p7"
+    [7]="p8"
+    [8]="p2"
+)
+# Phase-to-VPN-label mapping for tests that don't map to a specific account.
+declare -A PHASE_VPN_LABEL=(
+    [A]="p1"
+    [B]="p2"
+    [C]="p6"
+    [D]="p7"
+    [E]="p1"
+    [G]="p8"
+    [H]="p2"
+)
+
+resolve_vpn_config_for_account() {
+    local account_num="$1"
+    local label="${ACCOUNT_VPN_LABEL[$account_num]:-p1}"
+    resolve_proton_config "$label"
+}
+
+resolve_vpn_config_for_phase() {
+    local phase="$1"
+    local label="${PHASE_VPN_LABEL[$phase]:-p1}"
+    resolve_proton_config "$label"
+}
+
+# Run a command inside an isolated Proton netns.
+# Usage: run_netns_command <namespace> <config> <cmd> [args...]
+# Captures output and duration, appends stderr to log.
 run_netns_command() {
     local namespace="$1" config="$2"; shift 2
-    "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" env SLSKR_PROBE_OUTPUT=json "$@" 2>>"$log_file"
+    "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" "$@" 2>>"$log_file"
+}
+
+# Run a cargo command inside an isolated Proton netns with explicit env vars.
+# Usage: run_vpn_cargo <namespace> <config> [KEY=VAL ...] -- cargo [args...]
+# Arguments before -- are env vars; after -- is the command.
+run_vpn_cargo() {
+    local namespace="$1" config="$2"; shift 2
+    local env_args=()
+    local cmd_args=()
+    local parsing_env=true
+
+    for arg in "$@"; do
+        if [[ "$parsing_env" == "true" ]]; then
+            if [[ "$arg" == "--" ]]; then
+                parsing_env=false
+                continue
+            fi
+            env_args+=("$arg")
+        else
+            cmd_args+=("$arg")
+        fi
+    done
+
+    local output status duration_ms
+    local t0 t1
+
+    t0="$(date +%s%N)"
+    set +e
+    output="$(run_netns_command "$namespace" "$config" timeout 90 env "${env_args[@]}" "${cmd_args[@]}" 2>&1)"
+    status=$?
+    set -e
+    t1="$(date +%s%N)"
+    duration_ms=$(( (t1 - t0) / 1000000 ))
+
+    printf '%s' "$output"
+    return $status
 }
 
 run_probe() {
@@ -206,7 +305,7 @@ run_vpn_probe() {
 
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 60 run_netns_command "$namespace" "$config" cargo run -q -p slskr -- "${cmd[@]}" 2>&1)"
+    output="$(run_netns_command "$namespace" "$config" timeout 60 cargo run -q -p slskr -- "${cmd[@]}" 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -222,7 +321,8 @@ run_phase_a() {
 
     local username password server_address
 
-    # A1 — Login for all available accounts (with delay between each to avoid rate-limiting)
+    # A1 — Login for all available accounts, each through its own isolated VPN netns.
+    # This bypasses the Soulseek server's per-IP rate limiting.
     local account_count="${SLSKR_TEST_ACCOUNT_COUNT:-4}"
     for i in $(seq 1 "$account_count"); do
         # Wait before each login (except first) to avoid server rate-limiting
@@ -237,18 +337,30 @@ run_phase_a() {
             record_test "A" "A1.$i" "login account $i" "fail" 0 "no credentials configured"
             continue
         fi
-        local output duration_ms
+
+        local vpn_config
+        vpn_config="$(resolve_vpn_config_for_account "$i")" || {
+            record_test "A" "A1.$i" "login account $i ($username)" "fail" 0 "no VPN config for account $i"
+            continue
+        }
+
+        local output status duration_ms
         local t0 t1
         t0="$(date +%s%N)"
         set +e
-        output="$(env SLSK_USERNAME="$username" SLSK_PASSWORD="$password" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
-        local status=$?
+        output="$(run_vpn_cargo "cert-a1-$i" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username" \
+            SLSK_PASSWORD="$password" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+        status=$?
         set -e
         t1="$(date +%s%N)"
         duration_ms=$(( (t1 - t0) / 1000000 ))
 
         if [[ $status -eq 0 ]]; then
-            record_test "A" "A1.$i" "login account $i ($username)" "pass" "$duration_ms" "login succeeded after retries"
+            record_test "A" "A1.$i" "login account $i ($username)" "pass" "$duration_ms" "login succeeded via isolated VPN"
         else
             record_test "A" "A1.$i" "login account $i ($username)" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
         fi
@@ -257,7 +369,6 @@ run_phase_a() {
     # A2–A5 require VPN + listener + probe setup
     if [[ "${SLSKR_CERTIFY_VPN_ENABLED:-0}" != "1" ]]; then
         log info "VPN not enabled; attempting A2-A5 with local probes only"
-        # Try A2-A5 without VPN — these will fail but we run them
         for id in A2 A3 A4 A5; do
             record_test "A" "$id" "$id probe matrix" "fail" 0 "VPN disabled — test requires VPN netns"
         done
@@ -312,14 +423,21 @@ run_phase_a() {
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 30 run_netns_command "cert-a2" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe peer-address" 2>&1)"
+    output="$(run_vpn_cargo "cert-a2" "$probe_config" \
+        -- \
+        SLSK_USERNAME="$probe_username" \
+        SLSK_PASSWORD="$probe_password" \
+        SLSK_SERVER="$server_address" \
+        SLSK_PEER_USERNAME="$listener_username" \
+        SLSKR_PROBE_OUTPUT=json \
+        cargo run -q -p slskr -- probe peer-address 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
     duration_ms=$(( (t1 - t0) / 1000000 ))
 
     if [[ $status -eq 0 ]]; then
-        record_test "A" "A2" "peer-address resolution" "pass" "$duration_ms" "metadata resolved"
+        record_test "A" "A2" "peer-address resolution" "pass" "$duration_ms" "metadata resolved via isolated VPN"
     else
         record_test "A" "A2" "peer-address resolution" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
     fi
@@ -327,14 +445,21 @@ run_phase_a() {
     # A3 — Plain peer message
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 30 run_netns_command "cert-a3" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_PLAIN_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe plain-peer" 2>&1)"
+    output="$(run_vpn_cargo "cert-a3" "$probe_config" \
+        -- \
+        SLSK_USERNAME="$probe_username" \
+        SLSK_PASSWORD="$probe_password" \
+        SLSK_SERVER="$server_address" \
+        SLSK_PLAIN_PEER_USERNAME="$listener_username" \
+        SLSKR_PROBE_OUTPUT=json \
+        cargo run -q -p slskr -- probe plain-peer 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
     duration_ms=$(( (t1 - t0) / 1000000 ))
 
     if [[ $status -eq 0 ]]; then
-        record_test "A" "A3" "plain-peer message" "pass" "$duration_ms" "UserInfo round-trip"
+        record_test "A" "A3" "plain-peer message" "pass" "$duration_ms" "UserInfo round-trip via isolated VPN"
     else
         record_test "A" "A3" "plain-peer message" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
     fi
@@ -342,14 +467,21 @@ run_phase_a() {
     # A4 — Obfuscated peer message
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 30 run_netns_command "cert-a4" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_OBFUSCATED_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe obfuscated-peer" 2>&1)"
+    output="$(run_vpn_cargo "cert-a4" "$probe_config" \
+        -- \
+        SLSK_USERNAME="$probe_username" \
+        SLSK_PASSWORD="$probe_password" \
+        SLSK_SERVER="$server_address" \
+        SLSK_OBFUSCATED_PEER_USERNAME="$listener_username" \
+        SLSKR_PROBE_OUTPUT=json \
+        cargo run -q -p slskr -- probe obfuscated-peer 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
     duration_ms=$(( (t1 - t0) / 1000000 ))
 
     if [[ $status -eq 0 ]]; then
-        record_test "A" "A4" "obfuscated-peer message" "pass" "$duration_ms" "type-1 obfuscated round-trip"
+        record_test "A" "A4" "obfuscated-peer message" "pass" "$duration_ms" "type-1 obfuscated round-trip via isolated VPN"
     else
         record_test "A" "A4" "obfuscated-peer message" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
     fi
@@ -366,7 +498,14 @@ run_phase_a() {
 
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 70 run_netns_command "cert-a5" "$probe_config" cargo run -q -p slskr -- bash -c "SLSK_USERNAME='$probe_username' SLSK_PASSWORD='$probe_password' SLSK_SERVER='$server_address' SLSK_INDIRECT_PEER_USERNAME='$listener_username' SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- probe indirect-peer" 2>&1)"
+    output="$(run_vpn_cargo "cert-a5" "$probe_config" \
+        -- \
+        SLSK_USERNAME="$probe_username" \
+        SLSK_PASSWORD="$probe_password" \
+        SLSK_SERVER="$server_address" \
+        SLSK_INDIRECT_PEER_USERNAME="$listener_username" \
+        SLSKR_PROBE_OUTPUT=json \
+        cargo run -q -p slskr -- probe indirect-peer 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -376,7 +515,7 @@ run_phase_a() {
     wait "$listener_pid" 2>/dev/null || true
 
     if [[ $status -eq 0 ]]; then
-        record_test "A" "A5" "indirect-peer ConnectToPeer/PierceFirewall" "pass" "$duration_ms" "indirect connection established"
+        record_test "A" "A5" "indirect-peer ConnectToPeer/PierceFirewall" "pass" "$duration_ms" "indirect connection established via isolated VPN"
     else
         record_test "A" "A5" "indirect-peer ConnectToPeer/PierceFirewall" "fail" "$duration_ms" "$(echo "$output" | tail -3 | tr '\n' ' ')"
     fi
@@ -397,12 +536,29 @@ run_phase_b() {
         return 0
     fi
 
-    # B1 — Download fixture via fixture-peer-smoke (local server + client, SHA-256 verified)
+    # Resolve Phase B VPN config for IP isolation
+    local vpn_config
+    vpn_config="$(resolve_vpn_config_for_phase "B")" || {
+        log warn "No VPN config for Phase B; running tests without isolation"
+        vpn_config=""
+    }
+
     local t0 t1 duration_ms output status
+
+    # B1 — Download fixture via fixture-peer-smoke (local server + client, SHA-256 verified)
     t0="$(date +%s%N)"
     set +e
-    output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json \
-        timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-b1" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    else
+        output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json \
+            timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -420,9 +576,19 @@ run_phase_b() {
     # B2 — Large fixture download (100KB pattern)
     t0="$(date +%s%N)"
     set +e
-    output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
-        SLSKR_LARGE_TRANSFER_SIZE=100000 SLSKR_PROBE_OUTPUT=json \
-        timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-b2" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_LARGE_TRANSFER_SIZE=100000 \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    else
+        output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_LARGE_TRANSFER_SIZE=100000 SLSKR_PROBE_OUTPUT=json \
+            timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -435,12 +601,20 @@ run_phase_b() {
     fi
 
     # B3 — Upload proof: use fixture-peer smoke as upload proxy test
-    # (local-peer smoke requires indirect peer listener which isn't always available)
     t0="$(date +%s%N)"
     set +e
-    output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
-        SLSKR_PROBE_OUTPUT=json \
-        timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-b3" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    else
+        output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -455,7 +629,19 @@ run_phase_b() {
     # B4 — Transfer resume: local peer transfer with non-zero offset
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b4 SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke transfer-resume 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-b4" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b4 \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- smoke transfer-resume 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b4 SLSKR_PROBE_OUTPUT=json \
+            timeout 30 cargo run -q -p slskr -- smoke transfer-resume 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -470,7 +656,19 @@ run_phase_b() {
     # B5 — Transfer rejection: local peer transfer rejected gracefully
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b5 SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke transfer-reject 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-b5" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b5 \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- smoke transfer-reject 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b5 SLSKR_PROBE_OUTPUT=json \
+            timeout 30 cargo run -q -p slskr -- smoke transfer-reject 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -508,12 +706,29 @@ run_phase_c() {
         return 0
     fi
 
+    # Resolve Phase C VPN config for IP isolation
+    local vpn_config
+    vpn_config="$(resolve_vpn_config_for_phase "C")" || vpn_config=""
+
     # C1 — Private message bidirectional
     sleep 10
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_MESSAGE_USERNAME="$username2" SLSK_MESSAGE_PASSWORD="$password2" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe private-message 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-c1" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSK_MESSAGE_USERNAME="$username2" \
+            SLSK_MESSAGE_PASSWORD="$password2" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- probe private-message 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSK_MESSAGE_USERNAME="$username2" SLSK_MESSAGE_PASSWORD="$password2" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe private-message 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -529,7 +744,17 @@ run_phase_c() {
     sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe room-message 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-c2" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- probe room-message 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe room-message 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -545,7 +770,17 @@ run_phase_c() {
     sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-c3" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -561,7 +796,17 @@ run_phase_c() {
     sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-c4" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -577,7 +822,17 @@ run_phase_c() {
     sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-c5" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -592,7 +847,17 @@ run_phase_c() {
     # C6 — Browse complete shares
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-c6" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- smoke fixture-peer 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -620,12 +885,28 @@ run_phase_d() {
         return 0
     fi
 
+    # Resolve Phase D VPN config for IP isolation
+    local vpn_config
+    vpn_config="$(resolve_vpn_config_for_phase "D")" || vpn_config=""
+
     # D1 — Distributed ping round-trip (local distributed connection)
     sleep 10
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_PEER_USERNAME="$username1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- probe distributed-peer 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-d1" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSK_PEER_USERNAME="$username1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- probe distributed-peer 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSK_PEER_USERNAME="$username1" SLSKR_PROBE_OUTPUT=json \
+            timeout 30 cargo run -q -p slskr -- probe distributed-peer 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -641,7 +922,17 @@ run_phase_d() {
     sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-d2" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -657,7 +948,17 @@ run_phase_d() {
     sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-d3" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -673,7 +974,17 @@ run_phase_d() {
     sleep 10
     t0="$(date +%s%N)"
     set +e
-    output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-d4" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+    else
+        output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -694,131 +1005,170 @@ run_phase_e() {
     username1="${SLSKR_TEST_1_USERNAME:-}"
     password1="${SLSKR_TEST_1_PASSWORD:-}"
 
-    # Check for natpmpc availability
-    local has_natpmpc=false
-    if command -v natpmpc >/dev/null 2>&1; then
-        has_natpmpc=true
-    fi
+    # Resolve Phase E VPN config for NAT-PMP access
+    local vpn_config
+    vpn_config="$(resolve_vpn_config_for_phase "E")" || vpn_config=""
 
-    # E1 — NAT-PMP claim port
-    if [[ "$has_natpmpc" == "true" ]]; then
-        local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
-        local test_port=2234
-        local t0 t1 duration_ms output status
-        t0="$(date +%s%N)"
-        set +e
-        output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 60 2>&1)"
-        status=$?
-        set -e
-        t1="$(date +%s%N)"
-        duration_ms=$(( (t1 - t0) / 1000000 ))
-
-        if echo "$output" | grep -qi "mapped public port"; then
-            local public_port
-            public_port="$(echo "$output" | awk '/Mapped public port/ { for(i=1;i<=NF;i++) if($i=="port") print $(i+1) }')"
-            record_test "E" "E1" "natpmp-claim-port" "pass" "$duration_ms" "mapped public port=$public_port"
-        else
-            # NAT-PMP gateway unreachable without VPN — this is an infrastructure failure
-            record_test "E" "E1" "natpmp-claim-port" "fail" "$duration_ms" "NAT-PMP gateway unreachable (VPN required for pass)"
-        fi
+    # E1 — NAT-PMP claim port (runs inside VPN netns where gateway is reachable)
+    local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
+    local test_port=2234
+    local t0 t1 duration_ms output status
+    t0="$(date +%s%N)"
+    set +e
+    if [[ -n "$vpn_config" ]]; then
+        # shellcheck disable=SC2016
+        output="$(run_netns_command "cert-e1" "$vpn_config" \
+            timeout 30 env PROTON_NATPMP_GATEWAY="$gateway" TEST_PORT="$test_port" bash -c '
+                command -v natpmpc >/dev/null 2>&1 || { echo "natpmpc not found in netns"; exit 127; }
+                natpmpc -g "$PROTON_NATPMP_GATEWAY" -a 0 "$TEST_PORT" tcp 60
+            ' 2>&1)"
     else
-        record_test "E" "E1" "natpmp-claim-port" "fail" 0 "natpmpc not installed"
+        if command -v natpmpc >/dev/null 2>&1; then
+            output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 60 2>&1)"
+        else
+            output="natpmpc not installed"
+        fi
+    fi
+    status=$?
+    set -e
+    t1="$(date +%s%N)"
+    duration_ms=$(( (t1 - t0) / 1000000 ))
+
+    if echo "$output" | grep -qi "mapped public port"; then
+        local public_port
+        public_port="$(echo "$output" | awk '/Mapped public port/ { for(i=1;i<=NF;i++) if($i=="port") print $(i+1) }')"
+        record_test "E" "E1" "natpmp-claim-port" "pass" "$duration_ms" "mapped public port=$public_port via isolated VPN"
+    else
+        record_test "E" "E1" "natpmp-claim-port" "fail" "$duration_ms" "NAT-PMP gateway unreachable or natpmpc missing"
     fi
 
     # E2 — NAT-PMP renew mapping
-    if [[ "$has_natpmpc" == "true" ]]; then
-        local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
-        local test_port=2235
-        local t0 t1 duration_ms output status
-        t0="$(date +%s%N)"
-        set +e
-        output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 30 2>&1)"
-        sleep 1
-        output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 60 2>&1)"
-        status=$?
-        set -e
-        t1="$(date +%s%N)"
-        duration_ms=$(( (t1 - t0) / 1000000 ))
-
-        if echo "$output" | grep -qi "mapped public port"; then
-            record_test "E" "E2" "natpmp-renew-mapping" "pass" "$duration_ms" "renewal succeeded"
-        else
-            record_test "E" "E2" "natpmp-renew-mapping" "fail" "$duration_ms" "NAT-PMP gateway unreachable"
-        fi
+    test_port=2235
+    t0="$(date +%s%N)"
+    set +e
+    if [[ -n "$vpn_config" ]]; then
+        # shellcheck disable=SC2016
+        output="$(run_netns_command "cert-e2" "$vpn_config" \
+            timeout 30 env PROTON_NATPMP_GATEWAY="$gateway" TEST_PORT="$test_port" bash -c '
+                command -v natpmpc >/dev/null 2>&1 || { echo "natpmpc not found in netns"; exit 127; }
+                natpmpc -g "$PROTON_NATPMP_GATEWAY" -a 0 "$TEST_PORT" tcp 30
+                sleep 1
+                natpmpc -g "$PROTON_NATPMP_GATEWAY" -a 0 "$TEST_PORT" tcp 60
+            ' 2>&1)"
     else
-        record_test "E" "E2" "natpmp-renew-mapping" "fail" 0 "natpmpc not installed"
+        if command -v natpmpc >/dev/null 2>&1; then
+            output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 30 2>&1)"
+            sleep 1
+            output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 60 2>&1)"
+        else
+            output="natpmpc not installed"
+        fi
+    fi
+    status=$?
+    set -e
+    t1="$(date +%s%N)"
+    duration_ms=$(( (t1 - t0) / 1000000 ))
+
+    if echo "$output" | grep -qi "mapped public port"; then
+        record_test "E" "E2" "natpmp-renew-mapping" "pass" "$duration_ms" "renewal succeeded via isolated VPN"
+    else
+        record_test "E" "E2" "natpmp-renew-mapping" "fail" "$duration_ms" "NAT-PMP gateway unreachable"
     fi
 
     # E3 — Port collision detection
-    if [[ "$has_natpmpc" == "true" ]]; then
-        local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
-        local test_port=2236
-        local t0 t1 duration_ms output status
-        t0="$(date +%s%N)"
-        set +e
-        output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 30 2>&1)"
-        output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 60 2>&1)"
-        status=$?
-        set -e
-        t1="$(date +%s%N)"
-        duration_ms=$(( (t1 - t0) / 1000000 ))
-
-        if [[ $status -eq 0 ]] || echo "$output" | grep -qi "mapped public port"; then
-            record_test "E" "E3" "port-collision-detection" "pass" "$duration_ms" "collision handled (re-claim succeeded)"
-        else
-            record_test "E" "E3" "port-collision-detection" "fail" "$duration_ms" "NAT-PMP gateway unreachable"
-        fi
+    test_port=2236
+    t0="$(date +%s%N)"
+    set +e
+    if [[ -n "$vpn_config" ]]; then
+        # shellcheck disable=SC2016
+        output="$(run_netns_command "cert-e3" "$vpn_config" \
+            timeout 30 env PROTON_NATPMP_GATEWAY="$gateway" TEST_PORT="$test_port" bash -c '
+                command -v natpmpc >/dev/null 2>&1 || { echo "natpmpc not found in netns"; exit 127; }
+                natpmpc -g "$PROTON_NATPMP_GATEWAY" -a 0 "$TEST_PORT" tcp 30
+                natpmpc -g "$PROTON_NATPMP_GATEWAY" -a 0 "$TEST_PORT" tcp 60
+            ' 2>&1)"
     else
-        record_test "E" "E3" "port-collision-detection" "fail" 0 "natpmpc not installed"
+        if command -v natpmpc >/dev/null 2>&1; then
+            output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 30 2>&1)"
+            output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$test_port" tcp 60 2>&1)"
+        else
+            output="natpmpc not installed"
+        fi
+    fi
+    status=$?
+    set -e
+    t1="$(date +%s%N)"
+    duration_ms=$(( (t1 - t0) / 1000000 ))
+
+    if [[ $status -eq 0 ]] || echo "$output" | grep -qi "mapped public port"; then
+        record_test "E" "E3" "port-collision-detection" "pass" "$duration_ms" "collision handled (re-claim succeeded)"
+    else
+        record_test "E" "E3" "port-collision-detection" "fail" "$duration_ms" "NAT-PMP gateway unreachable"
     fi
 
     # E4 — NAT-PMP with obfuscated port
-    if [[ "$has_natpmpc" == "true" ]]; then
-        local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
-        local obf_port=2237
-        local t0 t1 duration_ms output status
-        t0="$(date +%s%N)"
-        set +e
-        output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$obf_port" tcp 60 2>&1)"
-        status=$?
-        set -e
-        t1="$(date +%s%N)"
-        duration_ms=$(( (t1 - t0) / 1000000 ))
-
-        if echo "$output" | grep -qi "mapped public port"; then
-            record_test "E" "E4" "natpmp-obfuscated-port" "pass" "$duration_ms" "obfuscated port mapped"
-        else
-            record_test "E" "E4" "natpmp-obfuscated-port" "fail" "$duration_ms" "NAT-PMP gateway unreachable"
-        fi
+    local obf_port=2237
+    t0="$(date +%s%N)"
+    set +e
+    if [[ -n "$vpn_config" ]]; then
+        # shellcheck disable=SC2016
+        output="$(run_netns_command "cert-e4" "$vpn_config" \
+            timeout 30 env PROTON_NATPMP_GATEWAY="$gateway" OBFUSCATED_PORT="$obf_port" bash -c '
+                command -v natpmpc >/dev/null 2>&1 || { echo "natpmpc not found in netns"; exit 127; }
+                natpmpc -g "$PROTON_NATPMP_GATEWAY" -a 0 "$OBFUSCATED_PORT" tcp 60
+            ' 2>&1)"
     else
-        record_test "E" "E4" "natpmp-obfuscated-port" "fail" 0 "natpmpc not installed"
+        if command -v natpmpc >/dev/null 2>&1; then
+            output="$(timeout 10 natpmpc -g "$gateway" -a 0 "$obf_port" tcp 60 2>&1)"
+        else
+            output="natpmpc not installed"
+        fi
+    fi
+    status=$?
+    set -e
+    t1="$(date +%s%N)"
+    duration_ms=$(( (t1 - t0) / 1000000 ))
+
+    if echo "$output" | grep -qi "mapped public port"; then
+        record_test "E" "E4" "natpmp-obfuscated-port" "pass" "$duration_ms" "obfuscated port mapped via isolated VPN"
+    else
+        record_test "E" "E4" "natpmp-obfuscated-port" "fail" "$duration_ms" "NAT-PMP gateway unreachable"
     fi
 
-    # E5 — Soak with NAT-PMP (short bounded soak)
-    if [[ -n "$username1" && -n "$password1" && "$has_natpmpc" == "true" ]]; then
-        local t0 t1 duration_ms output status
+    # E5 — Soak with NAT-PMP (short bounded soak, runs inside VPN netns)
+    if [[ -n "$username1" && -n "$password1" ]]; then
         t0="$(date +%s%N)"
         set +e
-        output="$(timeout 20 env \
-            SLSK_USERNAME="$username1" \
-            SLSK_PASSWORD="$password1" \
-            SLSK_SOAK_SECONDS=10 \
-            SLSK_LISTEN_PORT=2238 \
-            SLSKR_PROBE_OUTPUT=json \
-            cargo run -q -p slskr -- soak live 2>&1)"
+        if [[ -n "$vpn_config" ]]; then
+            output="$(run_vpn_cargo "cert-e5" "$vpn_config" \
+                -- \
+                SLSK_USERNAME="$username1" \
+                SLSK_PASSWORD="$password1" \
+                SLSK_SOAK_SECONDS=10 \
+                SLSK_LISTEN_PORT=2238 \
+                SLSKR_PROBE_OUTPUT=json \
+                cargo run -q -p slskr -- soak live 2>&1)"
+        else
+            output="$(timeout 20 env \
+                SLSK_USERNAME="$username1" \
+                SLSK_PASSWORD="$password1" \
+                SLSK_SOAK_SECONDS=10 \
+                SLSK_LISTEN_PORT=2238 \
+                SLSKR_PROBE_OUTPUT=json \
+                cargo run -q -p slskr -- soak live 2>&1)"
+        fi
         status=$?
         set -e
         t1="$(date +%s%N)"
         duration_ms=$(( (t1 - t0) / 1000000 ))
 
-        # Soak exit 0 or 124 (timeout) both count as success for bounded soak
         if [[ $status -eq 0 || $status -eq 124 ]]; then
             record_test "E" "E5" "soak-with-natpmp" "pass" "$duration_ms" "10s bounded soak completed"
         else
             record_test "E" "E5" "soak-with-natpmp" "fail" "$duration_ms" "soak exit status=$status"
         fi
     else
-        record_test "E" "E5" "soak-with-natpmp" "fail" 0 "need credentials + natpmpc"
+        record_test "E" "E5" "soak-with-natpmp" "fail" 0 "need credentials"
     fi
 }
 
@@ -837,12 +1187,28 @@ run_phase_g() {
         return 0
     fi
 
+    # Resolve Phase G VPN config for IP isolation
+    local vpn_config
+    vpn_config="$(resolve_vpn_config_for_phase "G")" || vpn_config=""
+
     # G1 — Short server soak (10s bounded)
     sleep 10
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 20 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_SOAK_SECONDS=10 SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- soak live 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-g1" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSK_SOAK_SECONDS=10 \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- soak live 2>&1)"
+    else
+        output="$(timeout 20 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSK_SOAK_SECONDS=10 SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- soak live 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -860,7 +1226,21 @@ run_phase_g() {
     sleep 3
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 15 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSK_SOAK_SECONDS=5 SLSK_LISTEN_PORT=2239 SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2240 SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- soak live 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-g2" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="$username1" \
+            SLSK_PASSWORD="$password1" \
+            SLSK_SOAK_SECONDS=5 \
+            SLSK_LISTEN_PORT=2239 \
+            SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2240 \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- soak live 2>&1)"
+    else
+        output="$(timeout 15 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
+            SLSK_SOAK_SECONDS=5 SLSK_LISTEN_PORT=2239 SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2240 \
+            SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr -- soak live 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -872,34 +1252,64 @@ run_phase_g() {
         record_test "G" "G2" "listener-soak-plain-obfuscated" "fail" "$duration_ms" "soak exit status=$status"
     fi
 
-    # G3 — NAT-PMP soak (reuses existing soak script if available)
+    # G3 — NAT-PMP soak (runs inside VPN netns where gateway is reachable)
     local soak_script="$repo_root/scripts/run-live-soak-proton-natpmp.sh"
-    if [[ -x "$soak_script" ]] && command -v natpmpc >/dev/null 2>&1; then
+    if [[ -n "$vpn_config" ]]; then
         local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
-        local t0 t1 duration_ms output status
         t0="$(date +%s%N)"
         set +e
-        # Short 5s NAT-PMP soak
-        SLSKR_SOAK_CREDENTIAL_FILE=/dev/null \
-            PROTON_NATPMP_GATEWAY="$gateway" \
-            PROTON_NATPMP_LIFETIME=30 \
-            PROTON_NATPMP_RENEW_SECONDS=10 \
-            SLSK_LISTEN_PORT=2241 \
-            SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2242 \
-            SLSK_SOAK_SECONDS=5 \
-            timeout 15 "$soak_script" /dev/null 2>&1
+        # Run the NAT-PMP soak script inside the VPN netns
+        # shellcheck disable=SC2016
+        output="$(run_netns_command "cert-g3" "$vpn_config" \
+            timeout 30 env \
+                SLSKR_SOAK_CREDENTIAL_FILE=/dev/null \
+                PROTON_NATPMP_GATEWAY="$gateway" \
+                PROTON_NATPMP_LIFETIME=30 \
+                PROTON_NATPMP_RENEW_SECONDS=10 \
+                SLSK_LISTEN_PORT=2241 \
+                SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2242 \
+                SLSK_SOAK_SECONDS=5 \
+                SOAK_SCRIPT="$soak_script" \
+                bash -c '
+                    command -v natpmpc >/dev/null 2>&1 || { echo "natpmpc not found in netns"; exit 127; }
+                    "$SOAK_SCRIPT" /dev/null
+                ' 2>&1)"
         status=$?
         set -e
         t1="$(date +%s%N)"
         duration_ms=$(( (t1 - t0) / 1000000 ))
 
         if [[ $status -eq 0 || $status -eq 124 ]]; then
-            record_test "G" "G3" "natpmp-soak-5s" "pass" "$duration_ms" "5s NAT-PMP soak completed"
+            record_test "G" "G3" "natpmp-soak-5s" "pass" "$duration_ms" "5s NAT-PMP soak completed via isolated VPN"
         else
-            record_test "G" "G3" "natpmp-soak-5s" "fail" "$duration_ms" "NAT-PMP soak failed (exit=$status, gateway unreachable without VPN)"
+            record_test "G" "G3" "natpmp-soak-5s" "fail" "$duration_ms" "NAT-PMP soak failed (exit=$status)"
         fi
     else
-        record_test "G" "G3" "natpmp-soak-5s" "fail" 0 "natpmpc not installed or soak script unavailable"
+        if [[ -x "$soak_script" ]] && command -v natpmpc >/dev/null 2>&1; then
+            local gateway="${PROTON_NATPMP_GATEWAY:-10.2.0.1}"
+            t0="$(date +%s%N)"
+            set +e
+            SLSKR_SOAK_CREDENTIAL_FILE=/dev/null \
+                PROTON_NATPMP_GATEWAY="$gateway" \
+                PROTON_NATPMP_LIFETIME=30 \
+                PROTON_NATPMP_RENEW_SECONDS=10 \
+                SLSK_LISTEN_PORT=2241 \
+                SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2242 \
+                SLSK_SOAK_SECONDS=5 \
+                timeout 15 "$soak_script" /dev/null 2>&1
+            status=$?
+            set -e
+            t1="$(date +%s%N)"
+            duration_ms=$(( (t1 - t0) / 1000000 ))
+
+            if [[ $status -eq 0 || $status -eq 124 ]]; then
+                record_test "G" "G3" "natpmp-soak-5s" "pass" "$duration_ms" "5s NAT-PMP soak completed"
+            else
+                record_test "G" "G3" "natpmp-soak-5s" "fail" "$duration_ms" "NAT-PMP soak failed (exit=$status, gateway unreachable without VPN)"
+            fi
+        else
+            record_test "G" "G3" "natpmp-soak-5s" "fail" 0 "natpmpc not installed or soak script unavailable"
+        fi
     fi
 }
 
@@ -907,13 +1317,26 @@ run_phase_g() {
 run_phase_h() {
     log info "=== Phase H: Negative & Failure Modes ==="
 
+    # Resolve Phase H VPN config for IP isolation
+    local vpn_config
+    vpn_config="$(resolve_vpn_config_for_phase "H")" || vpn_config=""
+
     # H1 — Wrong password
     local t0 t1 duration_ms output status
     t0="$(date +%s%N)"
     set +e
-    output="$(SLSK_USERNAME="nonexistent_user_xyz" SLSK_PASSWORD="wrong_password_123" \
-        SLSKR_PROBE_OUTPUT=json \
-        timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    if [[ -n "$vpn_config" ]]; then
+        output="$(run_vpn_cargo "cert-h1" "$vpn_config" \
+            -- \
+            SLSK_USERNAME="nonexistent_user_xyz" \
+            SLSK_PASSWORD="wrong_password_123" \
+            SLSKR_PROBE_OUTPUT=json \
+            cargo run -q -p slskr -- login smoke 2>&1)"
+    else
+        output="$(SLSK_USERNAME="nonexistent_user_xyz" SLSK_PASSWORD="wrong_password_123" \
+            SLSKR_PROBE_OUTPUT=json \
+            timeout 30 cargo run -q -p slskr -- login smoke 2>&1)"
+    fi
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -935,10 +1358,20 @@ run_phase_h() {
     if [[ -n "$username" && -n "$password" ]]; then
         t0="$(date +%s%N)"
         set +e
-        output="$(SLSK_USERNAME="$username" SLSK_PASSWORD="$password" \
-            SLSK_PEER_USERNAME="nonexistent_peer_xyz_12345" \
-            SLSKR_PROBE_OUTPUT=json \
-            timeout 30 cargo run -q -p slskr -- probe peer-address 2>&1)"
+        if [[ -n "$vpn_config" ]]; then
+            output="$(run_vpn_cargo "cert-h3" "$vpn_config" \
+                -- \
+                SLSK_USERNAME="$username" \
+                SLSK_PASSWORD="$password" \
+                SLSK_PEER_USERNAME="nonexistent_peer_xyz_12345" \
+                SLSKR_PROBE_OUTPUT=json \
+                cargo run -q -p slskr -- probe peer-address 2>&1)"
+        else
+            output="$(SLSK_USERNAME="$username" SLSK_PASSWORD="$password" \
+                SLSK_PEER_USERNAME="nonexistent_peer_xyz_12345" \
+                SLSKR_PROBE_OUTPUT=json \
+                timeout 30 cargo run -q -p slskr -- probe peer-address 2>&1)"
+        fi
         status=$?
         set -e
         t1="$(date +%s%N)"

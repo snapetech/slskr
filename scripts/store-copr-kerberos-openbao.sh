@@ -10,7 +10,7 @@ Requires an authenticated bao CLI session.
 EOF
 }
 
-secret_path="secret/slskr/release-publishing"
+bao_kv_path="secret/slskr/release-publishing"
 principal=""
 keytab=""
 
@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --secret-path)
-      secret_path="${2:-}"
+      bao_kv_path="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -64,8 +64,8 @@ if [[ ! -r "$keytab" ]]; then
   exit 1
 fi
 
-bao kv patch "$secret_path" \
+bao kv patch "$bao_kv_path" \
   copr_kerberos_principal="$principal" \
   copr_kerberos_keytab_b64="$(base64 -w0 "$keytab")"
 
-echo "stored Copr Kerberos credentials in $secret_path"
+echo "stored Copr Kerberos credentials in $bao_kv_path"
