@@ -708,11 +708,12 @@ describe('PlayerBar', () => {
 
     expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
 
+    const importedPlayedAt = new Date().toISOString();
     fireEvent.change(screen.getByTestId('player-listening-history-import-text'), {
       target: {
         value: [
           'playedAt,artist,album,title,genre',
-          '2026-04-30T20:00:00Z,Imported Artist,Imported Album,Imported Track,Imported Genre',
+          `${importedPlayedAt},Imported Artist,Imported Album,Imported Track,Imported Genre`,
         ].join('\n'),
       },
     });

@@ -24,14 +24,14 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^25.8.0",
-    "@typescript-eslint/eslint-plugin": "^8.59.3",
-    "@typescript-eslint/parser": "^8.59.3",
-    "eslint": "^10.3.0",
+    "@types/node": "^25.9.3",
+    "@typescript-eslint/eslint-plugin": "^8.61.1",
+    "@typescript-eslint/parser": "^8.61.1",
+    "eslint": "^10.5.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.1.0",
+    "ts-jest": "^29.4.11",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.3"
+    "typescript-eslint": "^8.61.1"
   },
   "peerDependencies": {
     "ws": "^8.0.0"
@@ -40,5 +40,8 @@
     "ws": {
       "optional": true
     }
+  },
+  "overrides": {
+    "js-yaml": "^4.2.0"
   }
 }

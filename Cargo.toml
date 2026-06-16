@@ -12,7 +12,7 @@ edition = "2021"
 license = "AGPL-3.0-only"
 homepage = "https://github.com/snapetech/slskr"
 repository = "https://github.com/snapetech/slskr"
-rust-version = "1.76"
+rust-version = "1.94"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
