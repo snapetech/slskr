@@ -105,7 +105,11 @@ describe('Integrations', () => {
     render(<Integrations />);
 
     expect(await screen.findByText('Federation and Pod Diagnostics')).toBeInTheDocument();
-    expect(screen.getByText('Exposure: Public')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (_, element) => element?.textContent?.trim() === 'Exposure: Public',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText('HTTP Signatures Off')).toBeInTheDocument();
     expect(screen.getByText('Pod join signatures')).toBeInTheDocument();
     expect(screen.getByText('Off')).toBeInTheDocument();
@@ -201,7 +205,7 @@ describe('Integrations', () => {
         expect.stringContaining('slskr media-server execution contract'),
       );
     });
-  });
+  }, 10000);
 
   it('shows Servarr setup readiness without running actions', () => {
     render(

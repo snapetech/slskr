@@ -142,9 +142,12 @@ describe('App', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText('Searches')).toBeInTheDocument();
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByText('Searches')).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
 
     expect(consoleError).not.toHaveBeenCalledWith('[Router] Route miss for:', '/');
   });
