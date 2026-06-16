@@ -64,6 +64,11 @@ class SemanticUILessFileManager {
 export default defineConfig({
   base: './',
   plugins: [react()],
+  resolve: {
+    alias: {
+      'semantic-ui-react': path.resolve(__dirname, 'src/semantic-ui-react/index.jsx'),
+    },
+  },
 
   css: {
     preprocessorOptions: {

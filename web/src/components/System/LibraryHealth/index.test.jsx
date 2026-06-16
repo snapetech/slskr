@@ -153,7 +153,7 @@ describe('LibraryHealth', () => {
         queries: ['Fixture Artist Fixture Album Fixture Track'],
       });
     });
-    expect(screen.getByTestId('library-health-report-message')).toHaveTextContent(
+    expect(await screen.findByTestId('library-health-report-message')).toHaveTextContent(
       'Started 1 bounded replacement search for selected Library Health issues.',
     );
 
@@ -178,7 +178,7 @@ describe('LibraryHealth', () => {
     await waitFor(() => {
       expect(libraryHealth.createRemediationJob).toHaveBeenCalledWith(['issue-1']);
     });
-    expect(screen.getByTestId('library-health-report-message')).toHaveTextContent(
+    expect(await screen.findByTestId('library-health-report-message')).toHaveTextContent(
       'Queued remediation job for 1 auto-fixable issue.',
     );
   });
