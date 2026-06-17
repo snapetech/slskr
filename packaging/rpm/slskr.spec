@@ -9,6 +9,8 @@ Source1:        slskr.service
 Source2:        slskr.sysusers
 Source3:        slskr.tmpfiles
 
+%global debug_package %{nil}
+
 BuildArch:      x86_64
 BuildRequires:  systemd-rpm-macros
 Requires(pre):  shadow-utils
