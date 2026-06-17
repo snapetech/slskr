@@ -8,7 +8,7 @@ RUN npm --prefix web ci
 COPY web web
 RUN npm --prefix web run build
 
-FROM rust:1.93-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
 
 ARG VERSION=dev
 WORKDIR /src
