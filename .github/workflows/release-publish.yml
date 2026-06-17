@@ -143,20 +143,16 @@ jobs:
         run: |
           set -euo pipefail
           . packaging/scripts/release-assets.sh
-          mkdir -p ~/rpmbuild/{SOURCES,SPECS,SRPMS}
+          mkdir -p dist
           asset="slskr-${{ needs.metadata.outputs.release_version }}-x86_64-unknown-linux-gnu.tar.gz"
-          slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "$HOME/rpmbuild/SOURCES/$asset"
-          cp packaging/aur/slskr.service ~/rpmbuild/SOURCES/
-          cp packaging/aur/slskr.sysusers ~/rpmbuild/SOURCES/
-          cp packaging/aur/slskr.tmpfiles ~/rpmbuild/SOURCES/
-          cp packaging/rpm/slskr.spec ~/rpmbuild/SPECS/
+          slskr_wait_for_asset "${{ needs.metadata.outputs.tag }}" "$asset" "dist/$asset"
       - name: Install COPR tooling
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates krb5-user oathtool rpm python3-pip python3-venv
           python3 -m venv /tmp/slskr-copr
           /tmp/slskr-copr/bin/python -m pip install --upgrade pip
-          /tmp/slskr-copr/bin/python -m pip install copr-cli rich
+          /tmp/slskr-copr/bin/python -m pip install copr-cli requests-gssapi rich
           echo /tmp/slskr-copr/bin >> "$GITHUB_PATH"
       - name: Configure COPR
         env:
@@ -266,12 +262,23 @@ jobs:
             echo "::error title=COPR authentication failed::copr-cli could not authenticate. Prefer COPR_KERBEROS_PRINCIPAL and COPR_KERBEROS_KEYTAB_B64; otherwise regenerate the API token at https://copr.fedorainfracloud.org/api and update COPR_LOGIN and COPR_TOKEN."
             exit 1
           fi
-          rpmbuild -bs ~/rpmbuild/SPECS/slskr.spec --define "_topdir $HOME/rpmbuild"
-          srpm="$(find ~/rpmbuild/SRPMS -name '*.src.rpm' -print -quit)"
+          version="${{ needs.metadata.outputs.pkgver }}"
+          asset="slskr-${{ needs.metadata.outputs.release_version }}-x86_64-unknown-linux-gnu.tar.gz"
+          rpm_top="$(mktemp -d "/tmp/slskr-rpmbuild-${version}.XXXXXX")"
+          mkdir -p "$rpm_top"/{SOURCES,SPECS,SRPMS}
+          cp "dist/$asset" "$rpm_top/SOURCES/"
+          cp packaging/aur/slskr.service "$rpm_top/SOURCES/"
+          cp packaging/aur/slskr.sysusers "$rpm_top/SOURCES/"
+          cp packaging/aur/slskr.tmpfiles "$rpm_top/SOURCES/"
+          cp packaging/rpm/slskr.spec "$rpm_top/SPECS/"
+          rpmbuild -bs "$rpm_top/SPECS/slskr.spec" --define "_topdir $rpm_top"
+          srpm="$rpm_top/SRPMS/slskr-${version}-1.src.rpm"
+          test -f "$srpm"
+          cp "$srpm" "dist/slskr-${version}-1.src.rpm"
           if ! copr-cli get slskr >/dev/null 2>&1; then
             copr-cli create slskr --chroot fedora-43-x86_64 --chroot fedora-rawhide-x86_64 --description "slskr RPM builds" --instructions "dnf copr enable slskdn/slskr && dnf install slskr"
           fi
-          copr-cli build slskr "$srpm" --nowait
+          copr-cli build slskr "dist/slskr-${version}-1.src.rpm" --nowait
 
   ppa:
     name: Publish Launchpad PPA
