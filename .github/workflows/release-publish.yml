@@ -512,6 +512,7 @@ jobs:
       - name: Build and push (ghcr)
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # docker/build-push-action@v7
         with:
+          file: packaging/docker/release.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
@@ -529,6 +530,7 @@ jobs:
         continue-on-error: true
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # docker/build-push-action@v7
         with:
+          file: packaging/docker/release.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
