@@ -149,7 +149,7 @@ jobs:
       - name: Install COPR tooling
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates krb5-user oathtool rpm python3-pip python3-venv
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates krb5-user libkrb5-dev oathtool rpm python3-pip python3-venv
           python3 -m venv /tmp/slskr-copr
           /tmp/slskr-copr/bin/python -m pip install --upgrade pip
           /tmp/slskr-copr/bin/python -m pip install copr-cli requests-gssapi rich
