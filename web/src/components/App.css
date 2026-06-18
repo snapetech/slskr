@@ -595,7 +595,7 @@ body {
         var(--slskr-player-reserved-height, var(--slskr-player-height, 248px))
     ) !important;
     left: 0;
-    margin: auto;
+    margin: 0;
     border: 0px !important;
     border-radius: 0% !important;
     box-shadow: none !important;
@@ -744,6 +744,8 @@ body {
 .navigation {
     align-items: stretch !important;
     display: flex !important;
+    height: var(--slskr-nav-height, 58px) !important;
+    max-height: var(--slskr-nav-height, 58px) !important;
     min-height: 58px !important;
     overflow-x: auto !important;
     overflow-y: hidden !important;

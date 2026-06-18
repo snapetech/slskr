@@ -57,6 +57,21 @@ for (const file of requiredFiles) {
   }
 }
 
+const assetDir = path.join(buildDir, 'assets');
+if (!fs.existsSync(assetDir) || !fs.statSync(assetDir).isDirectory()) {
+  fail('Built web output is missing the assets directory');
+}
+
+const assetFiles = fs.readdirSync(assetDir);
+const cssAssets = assetFiles.filter((file) => file.endsWith('.css'));
+const jsAssets = assetFiles.filter((file) => file.endsWith('.js'));
+if (cssAssets.length === 0) {
+  fail('Built web output is missing a CSS asset; the app will render unstyled');
+}
+if (jsAssets.length === 0) {
+  fail('Built web output is missing a JavaScript asset');
+}
+
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const iconSources = new Set((manifest.icons || []).map((icon) => icon.src));
 for (const iconPath of ['./logo192.png', './logo512.png']) {
