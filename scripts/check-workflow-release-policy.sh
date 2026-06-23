@@ -20,11 +20,12 @@ for expected in \
   'SLSKR_SECURITY_SCANS_REQUIRED:' \
   'SLSKR_SEMGREP_IMAGE: semgrep/semgrep:' \
   'SLSKR_TRIVY_IMAGE: aquasec/trivy:' \
+  'actions: read' \
   'concurrency:' \
   'actions/attest-build-provenance@v4' \
   'attestations: write' \
   'id-token: write'; do
-  if ! rg -n -F "$expected" .github/workflows >/dev/null; then
+  if ! rg -n -F -- "$expected" .github/workflows >/dev/null; then
     printf 'workflow release policy check failed: expected workflow hardening token missing: %s\n' "$expected" >&2
     status=1
   fi
@@ -82,7 +83,7 @@ for expected in \
   'scripts/run-live-interop-matrix.sh' \
   'target/live-interop/**' \
   'credentialed-live-interop.tsv'; do
-  if ! rg -n -F "$expected" .github/workflows/live-parity.yml >/dev/null; then
+  if ! rg -n -F -- "$expected" .github/workflows/live-parity.yml >/dev/null; then
     printf 'workflow release policy check failed: live parity workflow token missing: %s\n' "$expected" >&2
     status=1
   fi
@@ -103,19 +104,35 @@ if rg -n -F "workflow_dispatch:" .github/workflows/release.yml >/dev/null; then
   status=1
 fi
 
-if rg -n -F "branches:" .github/workflows/ci.yml >/dev/null; then
-  printf 'workflow release policy check failed: CI must not build on main pushes\n' >&2
+for expected in \
+  'push:' \
+  'branches:' \
+  '- main' \
+  'cargo audit'; do
+  if ! rg -n -F -- "$expected" .github/workflows/ci.yml >/dev/null; then
+    printf 'workflow release policy check failed: CI must run advisory coverage on main pushes; missing token: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+if ! rg -n -F 'cargo audit' .github/workflows/ci.yml .github/workflows/release.yml scripts/run-release-gate.sh >/dev/null; then
+  printf 'workflow release policy check failed: RustSec audit must stay wired into CI and release gates\n' >&2
   status=1
 fi
 
 for expected in \
   'tag_pattern=' \
   'release-v<semver>' \
+  'Require Main CI' \
+  '--workflow CI' \
+  '--branch main' \
+  '--commit "$RELEASE_SHA"' \
+  'needs: [version, main-ci]' \
   "startsWith(github.ref, 'refs/tags/release-v')" \
   'version="${GITHUB_REF_NAME#release-}"' \
   'DISCORD_RELEASE_WEBHOOK_URL' \
   'Announce Discord Release'; do
-  if ! rg -n -F "$expected" .github/workflows/release.yml >/dev/null; then
+  if ! rg -n -F -- "$expected" .github/workflows/release.yml >/dev/null; then
     printf 'workflow release policy check failed: release tag policy token missing: %s\n' "$expected" >&2
     status=1
   fi

@@ -13,6 +13,7 @@ on:
       - 'release-v*'
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -37,8 +38,57 @@ jobs:
           version="${GITHUB_REF_NAME#release-}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+  main-ci:
+    name: Require Main CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for CI on release commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          for attempt in {1..120}; do
+            run_json="$(
+              gh run list \
+                --repo "$GITHUB_REPOSITORY" \
+                --workflow CI \
+                --branch main \
+                --commit "$RELEASE_SHA" \
+                --limit 1 \
+                --json databaseId,status,conclusion,url \
+                --jq '.[0] // empty'
+            )"
+
+            if [[ -z "$run_json" ]]; then
+              printf 'No CI run for %s on main yet; waiting...\n' "$RELEASE_SHA"
+              sleep 30
+              continue
+            fi
+
+            status="$(jq -r '.status' <<<"$run_json")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
+            url="$(jq -r '.url' <<<"$run_json")"
+            printf 'CI run for %s: %s %s %s\n' "$RELEASE_SHA" "$status" "$conclusion" "$url"
+
+            if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
+              exit 0
+            fi
+
+            if [[ "$status" == "completed" ]]; then
+              printf 'Release commit CI did not pass: %s\n' "$url" >&2
+              exit 1
+            fi
+
+            sleep 30
+          done
+
+          printf 'Timed out waiting for CI on release commit %s\n' "$RELEASE_SHA" >&2
+          exit 1
+
   gate:
     name: Release Gate
+    needs: [version, main-ci]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # actions/checkout@v6
