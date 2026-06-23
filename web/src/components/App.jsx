@@ -247,11 +247,12 @@ const isIncomingRoomMessage = (message) =>
 const setNavigationHeightVariable = (element) => {
   if (!element || typeof document === 'undefined') return;
 
-  const bottom = Math.ceil(element.getBoundingClientRect().bottom);
-  if (bottom > 0) {
+  const rect = element.getBoundingClientRect();
+  const height = Math.ceil(rect.height || element.offsetHeight || 0);
+  if (height > 0) {
     document.documentElement.style.setProperty(
       '--slskr-nav-height',
-      `${bottom}px`,
+      `${height}px`,
     );
   }
 };
