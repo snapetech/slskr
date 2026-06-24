@@ -104,6 +104,11 @@ if rg -n -F "workflow_dispatch:" .github/workflows/release.yml >/dev/null; then
   status=1
 fi
 
+if rg -n -F "types: [published]" .github/workflows/release-publish.yml >/dev/null; then
+  printf 'workflow release policy check failed: downstream package publish must be dispatched after release assets are uploaded\n' >&2
+  status=1
+fi
+
 for expected in \
   'push:' \
   'branches:' \
@@ -124,6 +129,7 @@ for expected in \
   'tag_pattern=' \
   'release-v<semver>' \
   'Require Main CI' \
+  'for _ in {1..120}' \
   '--workflow CI' \
   '--branch main' \
   '--commit "$RELEASE_SHA"' \

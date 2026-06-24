@@ -48,7 +48,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          for attempt in {1..120}; do
+          for _ in {1..120}; do
             run_json="$(
               gh run list \
                 --repo "$GITHUB_REPOSITORY" \
