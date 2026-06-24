@@ -8,6 +8,8 @@ const RECONNECT_DELAYS_MS = [
 const topicAliases = {
   application: new Set(['application', 'session']),
   logs: new Set(['logs']),
+  messages: new Set(['messages']),
+  rooms: new Set(['rooms']),
   search: new Set(['searches', 'search']),
   songid: new Set(['songid']),
   'listening-party': new Set(['listening-party']),
@@ -36,6 +38,20 @@ const eventAliases = {
   logs: {
     'log.buffer': 'buffer',
     'log.created': 'log',
+  },
+  messages: {
+    'conversation.deleted': 'changed',
+    'message.acked': 'changed',
+    'message.received': 'changed',
+    'message.sent': 'changed',
+  },
+  rooms: {
+    'room.joined': 'changed',
+    'room.left': 'changed',
+    'room.list.updated': 'changed',
+    'room.message': 'changed',
+    'room.updated': 'changed',
+    'room.users.updated': 'changed',
   },
 };
 
@@ -203,6 +219,11 @@ export const createApplicationHubConnection = () =>
   createHubConnection({ topic: 'application' });
 
 export const createLogsHubConnection = () => createHubConnection({ topic: 'logs' });
+
+export const createMessagesHubConnection = () =>
+  createHubConnection({ topic: 'messages' });
+
+export const createRoomsHubConnection = () => createHubConnection({ topic: 'rooms' });
 
 export const createSearchHubConnection = () =>
   createHubConnection({ topic: 'search' });

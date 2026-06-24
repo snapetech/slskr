@@ -63,11 +63,70 @@ describe('Network', () => {
       expect(screen.getByText('Connectivity diagnostics')).toBeInTheDocument();
     });
 
+    expect(screen.getByText('Soulseek Session')).toBeInTheDocument();
     expect(
       screen.getByText(/configured Soulseek listen port is reachable/i),
     ).toBeInTheDocument();
     expect(screen.getByText('Network Health')).toBeInTheDocument();
     expect(screen.getByText('Needs attention')).toBeInTheDocument();
+  });
+
+  it('shows configured Soulseek credentials and auto-connect state', async () => {
+    render(
+      <Network
+        options={{
+          advertised_port: 50300,
+          auto_connect: true,
+          credentials_configured: true,
+          listen_port: 50300,
+          reconnect: true,
+          server_address: 'server.slsknet.org:2242',
+        }}
+        state={{
+          server: {
+            credentialSource: 'config',
+            credentialsConfigured: true,
+            isConnecting: true,
+            state: 'Connecting',
+          },
+        }}
+        theme="light"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Soulseek Session')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Connecting')).toBeInTheDocument();
+    expect(screen.getByText('credentials')).toBeInTheDocument();
+    expect(screen.getByText('config')).toBeInTheDocument();
+    expect(screen.getByText('auto-connect')).toBeInTheDocument();
+    expect(screen.getAllByText('on')).toHaveLength(2);
+    expect(screen.getByText('server.slsknet.org:2242')).toBeInTheDocument();
+  });
+
+  it('surfaces Soulseek login errors in network status', async () => {
+    render(
+      <Network
+        state={{
+          server: {
+            credentialSource: 'config',
+            credentialsConfigured: true,
+            lastError: 'login failed: invalid password',
+            state: 'Error',
+          },
+        }}
+        theme="light"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Soulseek connection failed')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Error')).toBeInTheDocument();
+    expect(screen.getByText('login failed: invalid password')).toBeInTheDocument();
   });
 
   it('copies a network health report', async () => {

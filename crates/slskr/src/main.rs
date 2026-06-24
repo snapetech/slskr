@@ -6899,7 +6899,9 @@ async fn route_http_request_with_headers(
 
     match (method, normalized_path.as_str()) {
         ("GET", "/") => Ok(index_html_response()),
+        ("HEAD", "/") => Ok(head_response(index_html_response())),
         ("GET", "/dashboard") => Ok(fallback_dashboard_response()),
+        ("HEAD", "/dashboard") => Ok(head_response(fallback_dashboard_response())),
         ("GET", "/api/health") => Ok(health_response(&state.config)),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
@@ -9846,6 +9848,13 @@ async fn route_http_request_with_headers(
               let message_id = record.id;
               drop(messages);
               persist_message_record(state, &record).await;
+              record_event(
+                  state,
+                  "message.sent",
+                  username.clone(),
+                  Some(format!("id={message_id}")),
+              )
+              .await;
               // Dispatch webhook for message.sent event
               let webhook_data = serde_json::json!({
                   "message_id": message_id,
@@ -9912,9 +9921,17 @@ async fn route_http_request_with_headers(
             if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
                 record.acknowledged = true;
                 record.updated_at = unix_timestamp();
+                let username = record.username.clone();
                 let json_response = record.json();
                 drop(messages);
                 persist_message_ack(state, id).await;
+                record_event(
+                    state,
+                    "message.acked",
+                    username,
+                    Some(format!("id={id}")),
+                )
+                .await;
 
                 send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
 
@@ -9937,9 +9954,17 @@ async fn route_http_request_with_headers(
              if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
                  record.acknowledged = true;
                  record.updated_at = unix_timestamp();
+                 let username = record.username.clone();
                  let json_response = record.json();
                  drop(messages);
                  persist_message_ack(state, id).await;
+                 record_event(
+                     state,
+                     "message.acked",
+                     username,
+                     Some(format!("id={id}")),
+                 )
+                 .await;
 
                  send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
 
@@ -9979,6 +10004,7 @@ async fn route_http_request_with_headers(
             let record = rooms.join(room_name.to_string());
             drop(rooms);
             persist_room_join(state, room_name).await;
+            record_event(state, "room.joined", room_name.to_string(), None).await;
 
             send_session_command(state, SessionCommand::JoinRoom(room_name.to_string())).await.ok();
 
@@ -9997,6 +10023,7 @@ async fn route_http_request_with_headers(
                 let json_response = record.json();
                 drop(rooms);
                 persist_room_leave(state, room_name).await;
+                record_event(state, "room.left", room_name.to_string(), None).await;
 
                 send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
 
@@ -10026,6 +10053,13 @@ async fn route_http_request_with_headers(
                 record.updated_at = unix_timestamp();
                 let json_response = record.json();
                 drop(rooms);
+                record_event(
+                    state,
+                    "room.message",
+                    room_name.to_string(),
+                    Some(format!("username={username}")),
+                )
+                .await;
 
                 send_session_command(state, SessionCommand::SayRoom { room: room_name.to_string(), body: message_body }).await.ok();
 
@@ -10458,6 +10492,7 @@ async fn route_http_request_with_headers(
             let body = record.slskd_room_json().to_string();
             drop(rooms);
             persist_room_join(state, &room_name).await;
+            record_event(state, "room.joined", room_name.clone(), None).await;
 
             send_session_command(state, SessionCommand::JoinRoom(room_name)).await.ok();
 
@@ -10494,6 +10529,13 @@ async fn route_http_request_with_headers(
                 });
                 record.updated_at = unix_timestamp();
                 drop(rooms);
+                record_event(
+                    state,
+                    "room.message",
+                    room_name.to_owned(),
+                    Some("username=local".to_owned()),
+                )
+                .await;
                 send_session_command(state, SessionCommand::SayRoom {
                     room: room_name.to_owned(),
                     body: message_body,
@@ -10554,6 +10596,9 @@ async fn route_http_request_with_headers(
                 })
                 .unwrap_or_else(routing::not_found_response);
             drop(rooms);
+            if response.status == "200 OK" {
+                record_event(state, "room.users.updated", room_name.to_string(), None).await;
+            }
             Ok(response)
         }
         ("DELETE", path) if path.starts_with("/api/rooms/joined/") => {
@@ -10573,6 +10618,7 @@ async fn route_http_request_with_headers(
                 record.updated_at = unix_timestamp();
                 let json_response = record.json();
                 drop(rooms);
+                record_event(state, "room.left", room_name.to_string(), None).await;
 
                 send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
 
@@ -14721,6 +14767,8 @@ async fn route_http_request_with_headers(
         (method, path) if native_compat_path(path) => {
             Ok(native_compat_response(method, path, state).await)
         }
+        ("GET", path) if is_spa_navigation_path(path) => Ok(index_html_response()),
+        ("HEAD", path) if is_spa_navigation_path(path) => Ok(head_response(index_html_response())),
         _ => {
             tracing::complete_request_span(404);
             Ok(routing::not_found_response())
@@ -14749,6 +14797,13 @@ fn fallback_dashboard_response() -> HttpResponse {
         status: "200 OK",
         content_type: "text/html; charset=utf-8",
         body: fallback_dashboard_html(),
+    }
+}
+
+fn head_response(response: HttpResponse) -> HttpResponse {
+    HttpResponse {
+        body: String::new(),
+        ..response
     }
 }
 
@@ -14819,6 +14874,23 @@ fn web_static_file_for_request(path: &str) -> Option<(PathBuf, &'static str)> {
 
     let root = web_build_root()?;
     web_static_file_for_request_under_root(&root, path)
+}
+
+fn is_spa_navigation_path(path: &str) -> bool {
+    let path_without_query = path.split_once('?').map_or(path, |(path, _)| path);
+    if path_without_query == "/"
+        || path_without_query == "/dashboard"
+        || path_without_query == "/api"
+        || path_without_query == "/hub"
+        || path_without_query.starts_with("/api/")
+        || path_without_query.starts_with("/hub/")
+    {
+        return false;
+    }
+
+    Path::new(path_without_query.trim_start_matches('/'))
+        .extension()
+        .is_none()
 }
 
 fn web_static_file_for_request_under_root(
@@ -14925,6 +14997,7 @@ fn web_static_error_response(error: &str) -> HttpResponse {
 async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     writer: &mut W,
     path: &str,
+    include_body: bool,
     keep_alive: bool,
     extra_headers: &str,
 ) -> Result<Option<usize>, String> {
@@ -14943,10 +15016,12 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
         .write_all(headers.as_bytes())
         .await
         .map_err(|error| error.to_string())?;
-    writer
-        .write_all(&bytes)
-        .await
-        .map_err(|error| error.to_string())?;
+    if include_body {
+        writer
+            .write_all(&bytes)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
     writer.flush().await.map_err(|error| error.to_string())?;
     Ok(Some(bytes.len()))
 }
@@ -15164,6 +15239,7 @@ fn slskd_server_state_json(
         "connected" => "Connected, LoggedIn",
         "connecting" => "Connecting",
         "disconnecting" => "Disconnecting",
+        "error" => "Error",
         _ => "Disconnected",
     };
     let config_credentials_configured = config.credentials().is_some();
@@ -17629,7 +17705,31 @@ async fn serve(once: bool) -> Result<(), String> {
     .await;
 
     if state.config.auto_connect {
+        let credential_source = if state.runtime_credentials.read().await.is_some() {
+            "stored"
+        } else if state.config.credentials().is_some() {
+            "config"
+        } else {
+            state.config.credential_store.as_str()
+        };
+        record_daemon_log(
+            &state,
+            logging::LogLevel::Info,
+            "session",
+            format!(
+                "auto-connect enabled; queuing Soulseek connect using {credential_source} credentials"
+            ),
+        )
+        .await;
         send_session_command(&state, SessionCommand::Connect).await?;
+    } else {
+        record_daemon_log(
+            &state,
+            logging::LogLevel::Info,
+            "session",
+            "auto-connect disabled; Soulseek connection will wait for an explicit connect request",
+        )
+        .await;
     }
 
     let listener = TcpListener::bind(address)
@@ -18864,15 +18964,16 @@ async fn connect_session(
         runtime_credentials.clone()
     };
     let credentials = match credentials {
-        Some(credentials) => Some(credentials),
+        Some(credentials) => Some((credentials, "runtime")),
         None => match credential_store::load(&state.config) {
             Ok(Some(stored)) => {
                 let credentials = stored.credentials;
+                let source = stored.source;
                 {
                     let mut runtime_credentials = state.runtime_credentials.write().await;
                     *runtime_credentials = Some(credentials.clone());
                 }
-                Some(credentials)
+                Some((credentials, source))
             }
             Ok(None) => None,
             Err(error) => {
@@ -18887,7 +18988,7 @@ async fn connect_session(
             }
         },
     };
-    let Some(credentials) = credentials else {
+    let Some((credentials, credential_source)) = credentials else {
         let reason =
             "Soulseek credentials are required; enter them in the web UI or configure a credential store";
         update_session(state, |snapshot| {
@@ -18908,6 +19009,13 @@ async fn connect_session(
             state.config.server_address,
             redact_username(&credentials.username)
         ),
+    )
+    .await;
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "session",
+        format!("Soulseek credential source: {credential_source}"),
     )
     .await;
     update_session(state, |snapshot| {
@@ -19269,8 +19377,16 @@ async fn project_server_message(
                 redact_username(&message.username)
             );
             let mut messages = state.messages.write().await;
-            messages.add(message.username.clone(), "inbound", message.message.clone());
+            let record = messages.add(message.username.clone(), "inbound", message.message.clone());
+            let message_id = record.id;
             drop(messages);
+            record_event(
+                state,
+                "message.received",
+                message.username.clone(),
+                Some(format!("id={message_id}")),
+            )
+            .await;
             if let Err(error) = session
                 .send_server_message(ServerMessage::MessageAcked { id: message.id })
                 .await
@@ -19284,10 +19400,15 @@ async fn project_server_message(
         ServerMessage::MessageAcked { id } => {
             let mut messages = state.messages.write().await;
             messages.ack(u64::from(*id));
+            drop(messages);
+            record_event(state, "message.acked", "messages", Some(format!("id={id}"))).await;
         }
         ServerMessage::RoomList(room_list) => {
             let mut rooms = state.rooms.write().await;
             rooms.apply_room_list(room_list);
+            drop(rooms);
+            record_event(state, "room.list.updated", "rooms", None).await;
+            record_event(state, "room.users.updated", "rooms", None).await;
         }
         ServerMessage::GetPeerAddressResponse(address) => {
             project_peer_browse_response(state, address).await;
@@ -19325,10 +19446,20 @@ async fn project_server_message(
         ServerMessage::CantCreateRoom { room } => {
             let mut rooms = state.rooms.write().await;
             rooms.fail_join(room, "server reported cant-create-room".to_owned());
+            drop(rooms);
+            record_event(
+                state,
+                "room.updated",
+                room.clone(),
+                Some("cant-create-room".to_owned()),
+            )
+            .await;
         }
         ServerMessage::JoinRoom { room } => {
             let mut rooms = state.rooms.write().await;
             rooms.join(room.clone());
+            drop(rooms);
+            record_event(state, "room.joined", room.clone(), None).await;
         }
         ServerMessage::SayChatroomResponse {
             room,
@@ -19348,10 +19479,20 @@ async fn project_server_message(
                 rooms.join(room.clone());
                 rooms.add_message(room, username.clone(), message.clone());
             }
+            drop(rooms);
+            record_event(
+                state,
+                "room.message",
+                room.clone(),
+                Some(format!("username={username}")),
+            )
+            .await;
         }
         ServerMessage::LeaveRoom { room } => {
             let mut rooms = state.rooms.write().await;
             rooms.leave(room);
+            drop(rooms);
+            record_event(state, "room.left", room.clone(), None).await;
         }
         _ => {}
     }
@@ -21615,10 +21756,18 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             continue;
         }
 
-        if method == "GET" && allowed {
+        if matches!(method, "GET" | "HEAD") && allowed {
             let fallback_host = state.config.http_bind.to_string();
             let cors_str = same_origin_cors_headers(&sec_headers, &fallback_host);
-            match write_web_static_response(&mut writer, path, keep_alive, &cors_str).await {
+            match write_web_static_response(
+                &mut writer,
+                path,
+                method == "GET",
+                keep_alive,
+                &cors_str,
+            )
+            .await
+            {
                 Ok(Some(content_length)) => {
                     let resp_log = logging::HttpResponseLog {
                         status_code: 200,
@@ -24261,6 +24410,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spa_deep_links_serve_html_shell() {
+        let (state, _receiver) = test_state();
+
+        let response = super::route_http_request("GET", "/system/network", None, "", &state)
+            .await
+            .expect("SPA deep-link response");
+
+        assert_eq!(response.status, "200 OK");
+        assert_eq!(response.content_type, "text/html; charset=utf-8");
+        assert!(response.body.contains("id=\"root\"") || response.body.contains("<h1>slskr</h1>"));
+    }
+
+    #[tokio::test]
+    async fn head_spa_routes_return_ok_without_body() {
+        let (state, _receiver) = test_state();
+
+        for path in ["/", "/system/network"] {
+            let response = super::route_http_request("HEAD", path, None, "", &state)
+                .await
+                .expect("HEAD SPA response");
+
+            assert_eq!(response.status, "200 OK");
+            assert_eq!(response.content_type, "text/html; charset=utf-8");
+            assert!(response.body.is_empty());
+        }
+    }
+
+    #[tokio::test]
     async fn fallback_dashboard_is_available_on_dashboard_route() {
         let (state, _receiver) = test_state();
 
@@ -25021,6 +25198,23 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&server_connect_put.body).unwrap();
         assert_eq!(server_connect_put_json["isConnecting"], true);
         assert!(receiver.try_recv().is_err());
+
+        {
+            let mut session = state.session.write().await;
+            session.state = "error";
+            session.last_error = Some("login failed: invalid password".to_owned());
+        }
+        let server_error = super::route_http_request("GET", "/api/v0/server", None, "", &state)
+            .await
+            .expect("server error state");
+        assert_eq!(server_error.status, "200 OK");
+        let server_error_json =
+            serde_json::from_str::<serde_json::Value>(&server_error.body).unwrap();
+        assert_eq!(server_error_json["state"], "Error");
+        assert_eq!(
+            server_error_json["lastError"],
+            "login failed: invalid password"
+        );
 
         let session_enabled =
             super::route_http_request("GET", "/api/v0/session/enabled", None, "", &state)

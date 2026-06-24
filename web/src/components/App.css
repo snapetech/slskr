@@ -742,36 +742,50 @@ body {
 }
 
 .navigation {
-    align-items: stretch !important;
+    align-items: flex-start !important;
     display: flex !important;
-    height: var(--slskr-nav-height, 58px) !important;
-    max-height: var(--slskr-nav-height, 58px) !important;
+    height: auto !important;
+    max-height: none !important;
     min-height: 58px !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
+    overflow: visible !important;
     position: sticky !important;
     top: 0 !important;
     z-index: 1000 !important; /* Above status bar */
     background: var(--slskr-nav-background, var(--smui-menu-inverted-background)) !important;
     border-bottom: 1px solid var(--slskr-nav-border, transparent) !important;
-    scrollbar-width: thin;
+}
+
+.ui.sidebar.navigation {
+    bottom: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 .navigation-primary {
+    align-content: flex-start;
+    align-items: stretch;
+    align-self: flex-start;
     display: flex;
     flex: 1 1 auto;
+    flex-wrap: wrap;
     min-width: 0;
 }
 
 .navigation-primary > a,
 .navigation .right.ui.inverted.menu > a {
+    align-self: flex-start;
     display: flex;
+    flex: 0 0 auto;
+    height: 58px;
     color: inherit;
     text-decoration: none;
 }
 
-.navigation.ui.labeled.icon.menu .item {
+.navigation .item {
+    align-items: center !important;
     justify-content: center !important;
+    height: 58px !important;
     min-width: 64px !important;
     padding: 0.58rem 0.48rem !important;
     font-size: 11px !important;
@@ -829,6 +843,11 @@ body {
 }
 
 .navigation .right.ui.inverted.menu {
+    align-self: flex-start;
+    align-items: stretch !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
     flex: 0 0 auto;
     margin-left: auto !important;
     background: var(--slskr-nav-background, var(--smui-menu-inverted-background)) !important;

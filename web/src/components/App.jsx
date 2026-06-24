@@ -501,7 +501,9 @@ const ModeSpecificConnectButton = ({
           disabled={server?.isDisconnecting}
           onClick={() => {
             if (!server?.isDisconnecting) {
-              disconnect();
+              disconnect().catch((error) => {
+                console.error('Failed to disconnect from Soulseek:', error);
+              });
             }
           }}
         >
@@ -960,7 +962,32 @@ class App extends Component {
     }));
   };
 
-  handleSoulseekConnect = (server) => {
+  updateServerState = (server) => {
+    if (!server) return;
+
+    this.setState((previousState) => ({
+      applicationState: {
+        ...previousState.applicationState,
+        server,
+      },
+    }));
+  };
+
+  setServerConnectError = (error) => {
+    this.setState((previousState) => ({
+      applicationState: {
+        ...previousState.applicationState,
+        server: {
+          ...previousState.applicationState?.server,
+          isConnecting: false,
+          isLoggingIn: false,
+          lastError: toDisplayError(error, 'Unable to connect to Soulseek.'),
+        },
+      },
+    }));
+  };
+
+  handleSoulseekConnect = async (server) => {
     const credentialsConfigured =
       server?.credentialsConfigured ||
       server?.runtimeCredentialsConfigured ||
@@ -968,7 +995,13 @@ class App extends Component {
       server?.credentialSource === 'runtime';
 
     if (credentialsConfigured) {
-      connect();
+      try {
+        const response = await connect();
+        this.updateServerState(response?.data);
+      } catch (error) {
+        console.error('Failed to connect to Soulseek:', error);
+        this.setServerConnectError(error);
+      }
       return;
     }
 
@@ -999,11 +1032,12 @@ class App extends Component {
     }));
 
     try {
-      await connect({
+      const response = await connect({
         credentialStore: soulseekCredentials.credentialStore || 'memory',
         password,
         username,
       });
+      this.updateServerState(response?.data);
       this.closeSoulseekCredentials();
     } catch (error) {
       this.setState((previousState) => ({

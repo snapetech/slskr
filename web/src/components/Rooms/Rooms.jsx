@@ -1,4 +1,5 @@
 import './Rooms.css';
+import { createRoomsHubConnection } from '../../lib/hubFactory';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import * as rooms from '../../lib/rooms';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
@@ -143,8 +144,18 @@ const Rooms = () => {
 
   useEffect(() => {
     hydrateJoinedRooms();
-    const interval = window.setInterval(hydrateJoinedRooms, 10_000);
-    return () => window.clearInterval(interval);
+    const interval = window.setInterval(hydrateJoinedRooms, 60_000);
+    const roomsHub = createRoomsHubConnection();
+    roomsHub.on('changed', () => {
+      hydrateJoinedRooms();
+    });
+    roomsHub.start().catch((error) => {
+      console.error('Failed to start rooms event feed:', error);
+    });
+    return () => {
+      window.clearInterval(interval);
+      roomsHub.stop().catch(() => {});
+    };
   }, [hydrateJoinedRooms]);
 
   const fetchAvailableRooms = async () => {

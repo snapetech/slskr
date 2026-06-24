@@ -8,10 +8,29 @@ import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { hubHandlers, makeHub } = vi.hoisted(() => {
+  const handlers = {};
+  return {
+    hubHandlers: handlers,
+    makeHub: (topic) => ({
+      on: vi.fn((event, handler) => {
+        handlers[`${topic}:${event}`] = handler;
+      }),
+      start: vi.fn(() => Promise.resolve()),
+      stop: vi.fn(() => Promise.resolve()),
+    }),
+  };
+});
+
 vi.mock('../../lib/chat', () => ({
   getAll: vi.fn(),
   remove: vi.fn(),
   sendBatch: vi.fn(),
+}));
+
+vi.mock('../../lib/hubFactory', () => ({
+  createMessagesHubConnection: vi.fn(() => makeHub('messages')),
+  createRoomsHubConnection: vi.fn(() => makeHub('rooms')),
 }));
 
 vi.mock('../../lib/pods', () => ({
@@ -52,11 +71,44 @@ vi.mock('../Player/PodListenAlongPanel', () => ({
 
 describe('Messaging', () => {
   beforeEach(() => {
+    for (const key of Object.keys(hubHandlers)) {
+      delete hubHandlers[key];
+    }
     window.localStorage.clear();
     vi.clearAllMocks();
     pods.getMembers.mockResolvedValue([]);
     pods.getMessages.mockResolvedValue([]);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  it('refreshes conversations when a message websocket event arrives', async () => {
+    chat.getAll
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          hasUnAcknowledgedMessages: true,
+          unAcknowledgedMessageCount: 1,
+          username: 'new-friend',
+        },
+      ]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Messaging state={{ user: { username: 'me' } }} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Saved Chats')).toBeInTheDocument();
+    });
+
+    hubHandlers['messages:changed']?.({ resource: 'new-friend' });
+
+    await waitFor(() => {
+      expect(screen.getByText('new-friend')).toBeInTheDocument();
+    });
   });
 
   it('opens chat and room panels and collapses them into the dock', async () => {

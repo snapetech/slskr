@@ -7,6 +7,7 @@ import { vi } from 'vitest';
 
 const {
   check,
+  connectServer,
   createApplicationHubConnection,
   getSecurityEnabled,
   getConversations,
@@ -15,6 +16,7 @@ const {
   isLoggedIn,
 } = vi.hoisted(() => ({
   check: vi.fn(),
+  connectServer: vi.fn(),
   createApplicationHubConnection: vi.fn(),
   getConversations: vi.fn(),
   getSecurityEnabled: vi.fn(),
@@ -54,7 +56,7 @@ vi.mock('../lib/relay', () => ({
 }));
 
 vi.mock('../lib/server', () => ({
-  connect: vi.fn(),
+  connect: connectServer,
   disconnect: vi.fn(),
 }));
 
@@ -118,6 +120,14 @@ describe('App', () => {
     getJoinedRooms.mockResolvedValue([]);
     getRoomMessages.mockResolvedValue([]);
     isLoggedIn.mockReturnValue(true);
+    connectServer.mockResolvedValue({
+      data: {
+        credentialsConfigured: true,
+        isConnecting: true,
+        isLoggingIn: true,
+        state: 'Connecting',
+      },
+    });
 
     window.matchMedia = vi.fn().mockReturnValue({
       addEventListener: vi.fn(),
@@ -372,5 +382,32 @@ describe('App', () => {
     expect(screen.getByText('DHT rendezvous')).toBeInTheDocument();
     expect(screen.getByText('UDP 62010')).toBeInTheDocument();
     expect(screen.getAllByText('TCP/UDP 50305')).toHaveLength(1);
+  });
+
+  it('shows connecting state after a configured Soulseek connect request is accepted', async () => {
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Searches')).toBeInTheDocument();
+    });
+
+    hubHandlers.state({
+      server: {
+        credentialSource: 'config',
+        credentialsConfigured: true,
+        isConnected: false,
+      },
+    });
+
+    fireEvent.click(await screen.findByText('Disconnected'));
+
+    await waitFor(() => {
+      expect(connectServer).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Connecting')).toBeInTheDocument();
+    });
   });
 });

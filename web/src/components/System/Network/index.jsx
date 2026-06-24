@@ -79,8 +79,130 @@ const StatCard = ({ color, icon, inverted = false, label, subLabel, value }) => 
   </Card>
 );
 
+const getServerStateText = (server = {}) =>
+  server.state ||
+  server.State ||
+  (server.isConnected || server.connected ? 'Connected' : 'Disconnected');
+
+const getCredentialSourceLabel = (server = {}, options = {}) => {
+  const source = server.credentialSource || server.CredentialSource;
+  if (source && source !== 'none') return source;
+  if (server.credentialsConfigured || options.credentials_configured) return 'config';
+  if (server.runtimeCredentialsConfigured) return 'runtime';
+  return 'not configured';
+};
+
+const getStatusColor = (server = {}) => {
+  if (server.isConnected || server.connected) return 'green';
+  if (server.isConnecting || server.isLoggingIn || server.isTransitioning) return 'yellow';
+  if (server.lastError) return 'red';
+  return 'grey';
+};
+
+const SoulseekSessionStatus = ({ options = {}, state = {} }) => {
+  const server = state.server || {};
+  const listeners = state.listeners || {};
+  const statusText = getServerStateText(server);
+  const credentialSource = getCredentialSourceLabel(server, options);
+  const autoConnect = options.auto_connect ?? options.autoConnect;
+  const reconnect = options.reconnect;
+
+  return (
+    <Segment className="network-health-panel">
+      <div className="network-health-head">
+        <Header as="h4">
+          <Icon name="plug" />
+          <Header.Content>
+            Soulseek Session
+            <Header.Subheader>
+              Login, credential source, and listener state for the public Soulseek network
+            </Header.Subheader>
+          </Header.Content>
+        </Header>
+        <Label color={getStatusColor(server)}>
+          {statusText}
+        </Label>
+      </div>
+      <Label.Group>
+        <Label color={credentialSource === 'not configured' ? 'red' : 'blue'}>
+          credentials
+          <Label.Detail>{credentialSource}</Label.Detail>
+        </Label>
+        <Label color={autoConnect ? 'green' : 'grey'}>
+          auto-connect
+          <Label.Detail>{autoConnect ? 'on' : 'off'}</Label.Detail>
+        </Label>
+        <Label color={reconnect ? 'green' : 'grey'}>
+          reconnect
+          <Label.Detail>{reconnect ? 'on' : 'off'}</Label.Detail>
+        </Label>
+        <Label color="teal">
+          server
+          <Label.Detail>{server.address || server.ipEndPoint || options.server_address || 'unset'}</Label.Detail>
+        </Label>
+        <Label color="teal">
+          listen
+          <Label.Detail>{options.listen_port ?? 'unset'}</Label.Detail>
+        </Label>
+        <Label color="teal">
+          advertised
+          <Label.Detail>{options.advertised_port ?? options.listen_port ?? 'unset'}</Label.Detail>
+        </Label>
+      </Label.Group>
+      {(listeners.regularLocalAddr || listeners.regular_local_addr ||
+        listeners.obfuscatedLocalAddr || listeners.obfuscated_local_addr ||
+        listeners.lastError || listeners.last_error) && (
+        <Label.Group>
+          <Label color="blue">
+            listener
+            <Label.Detail>
+              {listeners.regularLocalAddr || listeners.regular_local_addr || 'not bound'}
+            </Label.Detail>
+          </Label>
+          <Label color="purple">
+            obfuscated
+            <Label.Detail>
+              {listeners.obfuscatedLocalAddr || listeners.obfuscated_local_addr || 'not bound'}
+            </Label.Detail>
+          </Label>
+        </Label.Group>
+      )}
+      {server.lastError && (
+        <Message
+          className="network-diagnostic-message"
+          negative
+        >
+          <Message.Header>Soulseek connection failed</Message.Header>
+          <p>{server.lastError}</p>
+        </Message>
+      )}
+      {(listeners.lastError || listeners.last_error) && (
+        <Message
+          className="network-diagnostic-message"
+          warning
+        >
+          <Message.Header>Listener warning</Message.Header>
+          <p>{listeners.lastError || listeners.last_error}</p>
+        </Message>
+      )}
+      {credentialSource === 'not configured' && (
+        <Message
+          className="network-diagnostic-message"
+          warning
+        >
+          <Message.Header>Soulseek credentials are not configured</Message.Header>
+          <p>
+            Set <code>SLSK_USERNAME</code> and <code>SLSK_PASSWORD</code>, configure
+            a credential store, or use the Connect control in the top bar.
+          </p>
+        </Message>
+      )}
+    </Segment>
+  );
+};
+
 // eslint-disable-next-line complexity
-const Network = ({ theme }) => {
+const Network = ({ options = {}, state = {}, theme }) => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({});
   const [meshPeers, setMeshPeers] = useState([]);
@@ -228,6 +350,10 @@ const Network = ({ theme }) => {
 
   return (
     <div className="network-dashboard">
+      <SoulseekSessionStatus
+        options={options}
+        state={state}
+      />
       {shouldExplainLanOnlyDht && (
         <Message
           className="network-diagnostic-message"

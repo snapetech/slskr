@@ -1,5 +1,9 @@
 import './Messaging.css';
 import * as chat from '../../lib/chat';
+import {
+  createMessagesHubConnection,
+  createRoomsHubConnection,
+} from '../../lib/hubFactory';
 import * as pods from '../../lib/pods';
 import * as rooms from '../../lib/rooms';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
@@ -397,8 +401,27 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
       hydrate().catch((error) => {
         console.error('Failed to hydrate messaging workspace:', error);
       });
-    }, 10_000);
-    return () => window.clearInterval(interval);
+    }, 60_000);
+    const messagesHub = createMessagesHubConnection();
+    const roomsHub = createRoomsHubConnection();
+    const refresh = () => {
+      hydrate().catch((error) => {
+        console.error('Failed to hydrate messaging workspace:', error);
+      });
+    };
+    messagesHub.on('changed', refresh);
+    roomsHub.on('changed', refresh);
+    messagesHub.start().catch((error) => {
+      console.error('Failed to start messages event feed:', error);
+    });
+    roomsHub.start().catch((error) => {
+      console.error('Failed to start rooms event feed:', error);
+    });
+    return () => {
+      window.clearInterval(interval);
+      messagesHub.stop().catch(() => {});
+      roomsHub.stop().catch(() => {});
+    };
   }, [hydrate]);
 
   useEffect(() => {

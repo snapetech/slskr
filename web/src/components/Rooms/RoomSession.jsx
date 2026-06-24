@@ -1,4 +1,5 @@
 import * as rooms from '../../lib/rooms';
+import { createRoomsHubConnection } from '../../lib/hubFactory';
 import React, { Component, createRef } from 'react';
 import UserCard from '../Shared/UserCard';
 import {
@@ -36,6 +37,7 @@ class RoomSession extends Component {
     this.state = initialState;
     this.listRef = createRef();
     this.messageRef = undefined;
+    this.roomsHub = undefined;
   }
 
   componentDidMount() {
@@ -77,7 +79,17 @@ class RoomSession extends Component {
     }
 
     this.fetchRoom();
-    this.interval = window.setInterval(this.fetchRoom, 1_000);
+    this.interval = window.setInterval(this.fetchRoom, 60_000);
+    this.roomsHub = createRoomsHubConnection();
+    this.roomsHub.on('changed', (event) => {
+      const roomName = event?.resource || event?.data?.resource;
+      if (!roomName || roomName === this.props.roomName || roomName === 'rooms') {
+        this.fetchRoom();
+      }
+    });
+    this.roomsHub.start().catch((error) => {
+      console.error('Failed to start room event feed:', error);
+    });
   };
 
   stopPolling = () => {
@@ -87,6 +99,10 @@ class RoomSession extends Component {
 
     clearInterval(this.interval);
     this.interval = undefined;
+    if (this.roomsHub) {
+      this.roomsHub.stop().catch(() => {});
+      this.roomsHub = undefined;
+    }
   };
 
   fetchRoom = async () => {
