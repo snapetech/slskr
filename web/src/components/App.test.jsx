@@ -210,6 +210,17 @@ describe('App', () => {
     expect(document.title).toBe('slskr');
   });
 
+  it('groups secondary routes under the More navigation menu', async () => {
+    render(
+      <MemoryRouter initialEntries={['/searches']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('nav-search')).toBeInTheDocument();
+    expect(screen.getByTestId('nav-more')).toBeInTheDocument();
+  });
+
   it('shows chat activity in the header when conversations have unread messages', async () => {
     getConversations.mockResolvedValue([
       {

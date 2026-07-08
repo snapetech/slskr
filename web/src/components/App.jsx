@@ -19,6 +19,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ToastContainer } from 'react-toastify';
 import {
   Button,
+  Dropdown,
   Form,
   Header,
   Icon,
@@ -1306,18 +1307,6 @@ class App extends Component {
                       Search
                     </Menu.Item>
                   </NavLink>
-                  <NavLink to="/discovery-graph">
-                    <Menu.Item data-testid="nav-discovery-graph">
-                      <Icon name="crosshairs" />
-                      Discovery Graph
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/playlist-intake">
-                    <Menu.Item data-testid="nav-playlist-intake">
-                      <Icon name="list alternate outline" />
-                      Playlist Intake
-                    </Menu.Item>
-                  </NavLink>
                   <NavLink to="/wishlist">
                     <Menu.Item data-testid="nav-wishlist">
                       <Icon name="star" />
@@ -1354,42 +1343,77 @@ class App extends Component {
                       Users
                     </Menu.Item>
                   </NavLink>
-                  <NavLink to="/contacts">
-                    <Menu.Item data-testid="nav-contacts">
-                      <Icon name="address book" />
-                      Contacts
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/solid">
-                    <Menu.Item data-testid="nav-solid">
-                      <Icon name="key" />
-                      Solid
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/collections">
-                    <Menu.Item data-testid="nav-collections">
-                      <Icon name="list" />
-                      Collections
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/sharegroups">
-                    <Menu.Item data-testid="nav-groups">
-                      <Icon name="users" />
-                      Share Groups
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/shared">
-                    <Menu.Item data-testid="nav-shared-with-me">
-                      <Icon name="share" />
-                      Shared with Me
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/browse">
-                    <Menu.Item data-testid="nav-browse">
-                      <Icon name="folder open" />
-                      Browse
-                    </Menu.Item>
-                  </NavLink>
+                  <Dropdown
+                    className="navigation-more"
+                    data-testid="nav-more"
+                    icon={null}
+                    item
+                    trigger={(
+                      <span className="navigation-more-trigger">
+                        <Icon name="ellipsis horizontal" />
+                        More
+                      </span>
+                    )}
+                  >
+                    <Dropdown.Menu>
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-discovery-graph"
+                        icon="crosshairs"
+                        text="Discovery Graph"
+                        to="/discovery-graph"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-playlist-intake"
+                        icon="list alternate outline"
+                        text="Playlist Intake"
+                        to="/playlist-intake"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-contacts"
+                        icon="address book"
+                        text="Contacts"
+                        to="/contacts"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-solid"
+                        icon="key"
+                        text="Solid"
+                        to="/solid"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-collections"
+                        icon="list"
+                        text="Collections"
+                        to="/collections"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-groups"
+                        icon="users"
+                        text="Share Groups"
+                        to="/sharegroups"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-shared-with-me"
+                        icon="share"
+                        text="Shared with Me"
+                        to="/shared"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-browse"
+                        icon="folder open"
+                        text="Browse"
+                        to="/browse"
+                      />
+                    </Dropdown.Menu>
+                  </Dropdown>
                 </>
               )}
             </div>

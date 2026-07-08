@@ -794,6 +794,40 @@ body {
     white-space: normal;
 }
 
+.navigation .navigation-more.item {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    height: 58px !important;
+    min-width: 64px !important;
+}
+
+.navigation-more-trigger {
+    align-items: center;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    justify-content: center;
+    line-height: 1.15;
+}
+
+.navigation .navigation-more .menu {
+    min-width: 190px;
+    z-index: 3000;
+}
+
+.navigation .navigation-more .menu > .item {
+    align-items: center !important;
+    display: flex !important;
+    font-size: 13px !important;
+    height: auto !important;
+    justify-content: flex-start !important;
+    line-height: 1.25 !important;
+    min-width: 0 !important;
+    padding: 0.72rem 0.9rem !important;
+    text-align: left;
+    white-space: nowrap;
+}
+
 .navigation.ui.labeled.icon.menu .item > .icon:not(.dropdown) {
     margin-bottom: 0.25rem !important;
     font-size: 1.45em !important;

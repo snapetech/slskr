@@ -1392,6 +1392,14 @@ impl EventRecord {
                         "category": self.resource,
                     })
                 });
+            let category = detail
+                .get("category")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&self.resource);
+            let context = detail
+                .get("context")
+                .and_then(|v| v.as_str())
+                .unwrap_or(category);
             return serde_json::json!({
                 "id": self.id,
                 "kind": self.kind,
@@ -1402,7 +1410,8 @@ impl EventRecord {
                 "timestamp": self.created_at,
                 "level": detail.get("level").and_then(|v| v.as_str()).unwrap_or("Information"),
                 "message": detail.get("message").and_then(|v| v.as_str()).unwrap_or(""),
-                "category": detail.get("category").and_then(|v| v.as_str()).unwrap_or(&self.resource),
+                "category": category,
+                "context": context,
                 "request_id": detail.get("request_id").and_then(|v| v.as_str()),
                 "method": detail.get("method").and_then(|v| v.as_str()),
                 "path": detail.get("path").and_then(|v| v.as_str()),
@@ -2430,22 +2439,6 @@ impl SessionSnapshot {
             self.updated_at
         )
     }
-}
-
-async fn room_join_unavailable_response(state: &AppState) -> Option<HttpResponse> {
-    let session = state.session.read().await;
-    if session.state == "connected" {
-        return None;
-    }
-    let state_name = session.state;
-    let message = match state_name {
-        "connecting" => "room joins are unavailable while connecting",
-        "error" if state.config.reconnect => "room joins are unavailable while reconnecting",
-        "error" => "room joins are unavailable while the session is in error state",
-        "disconnected" => "room joins are unavailable while disconnected",
-        _ => "room joins are unavailable until the session is connected",
-    };
-    Some(routing::service_unavailable_response(message))
 }
 
 #[derive(Clone, Debug)]
@@ -7899,15 +7892,19 @@ async fn route_http_request_with_headers(
                 .map(EventRecord::data_json)
                 .collect::<Vec<_>>();
             drop(events);
-            Ok(routing::ok_response(
-                serde_json::json!({
-                    "entries": logs,
-                    "level": logging::LogConfig::level_name(*state.log_level.read().await),
-                    "levels": ["Trace", "Debug", "Information", "Warning", "Error"],
-                    "limit": EVENT_HISTORY_LIMIT,
-                })
-                .to_string(),
-            ))
+            if route.path == "/api/v0/logs" {
+                Ok(routing::ok_response(serde_json::Value::Array(logs).to_string()))
+            } else {
+                Ok(routing::ok_response(
+                    serde_json::json!({
+                        "entries": logs,
+                        "level": logging::LogConfig::level_name(*state.log_level.read().await),
+                        "levels": ["Trace", "Debug", "Information", "Warning", "Error"],
+                        "limit": EVENT_HISTORY_LIMIT,
+                    })
+                    .to_string(),
+                ))
+            }
         }
         ("GET", "/api/logs/level") => Ok(routing::ok_response(
             serde_json::json!({
@@ -9997,16 +9994,13 @@ async fn route_http_request_with_headers(
             let Some(room_name) = room_join_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
-            if let Some(response) = room_join_unavailable_response(state).await {
-                return Ok(response);
-            }
             let mut rooms = state.rooms.write().await;
             let record = rooms.join(room_name.to_string());
             drop(rooms);
             persist_room_join(state, room_name).await;
             record_event(state, "room.joined", room_name.to_string(), None).await;
 
-            send_session_command(state, SessionCommand::JoinRoom(room_name.to_string())).await.ok();
+            send_room_join_if_connected(state, room_name.to_string()).await;
 
             Ok(routing::created_response(record.json()))
         }
@@ -10484,9 +10478,6 @@ async fn route_http_request_with_headers(
             else {
                 return Ok(routing::bad_request_response("room is required"));
             };
-            if let Some(response) = room_join_unavailable_response(state).await {
-                return Ok(response);
-            }
             let mut rooms = state.rooms.write().await;
             let record = rooms.join(room_name.to_string());
             let body = record.slskd_room_json().to_string();
@@ -10494,7 +10485,7 @@ async fn route_http_request_with_headers(
             persist_room_join(state, &room_name).await;
             record_event(state, "room.joined", room_name.clone(), None).await;
 
-            send_session_command(state, SessionCommand::JoinRoom(room_name)).await.ok();
+            send_room_join_if_connected(state, room_name).await;
 
             Ok(routing::created_response(body))
         }
@@ -13465,7 +13456,7 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/options/yaml/validate") => {
-              match slskd_options_config_validate_response(body, 0, state.db.is_some()) {
+              match slskd_options_config_validate_response(body) {
                   Ok(_) => {
                       let mut runtime = state.runtime.write().await;
                       let acknowledgements = runtime.record_options_yaml_validation();
@@ -13482,7 +13473,7 @@ async fn route_http_request_with_headers(
                           )),
                       )
                       .await;
-                      match slskd_options_config_validate_response(body, acknowledgements, state.db.is_some()) {
+                      match slskd_options_config_validate_response(body) {
                           Ok(response) => Ok(response),
                           Err(error) => Ok(routing::bad_request_response(&error)),
                       }
@@ -14913,14 +14904,7 @@ fn web_static_file_for_request_under_root(
             return None;
         }
 
-        let candidate = root.join(relative_path);
-        if candidate.is_file() {
-            relative_path.to_path_buf()
-        } else if relative_path.extension().is_none() {
-            PathBuf::from("index.html")
-        } else {
-            return None;
-        }
+        resolve_web_static_relative_path(root, relative_path)?
     };
 
     let file = root.join(requested);
@@ -14933,6 +14917,44 @@ fn web_static_file_for_request_under_root(
     }
     let content_type = web_static_content_type(&file);
     Some((canonical_file, content_type))
+}
+
+fn resolve_web_static_relative_path(root: &Path, relative_path: &Path) -> Option<PathBuf> {
+    let candidate = root.join(relative_path);
+    if candidate.is_file() {
+        return Some(relative_path.to_path_buf());
+    }
+    if relative_path.extension().is_none() {
+        return Some(PathBuf::from("index.html"));
+    }
+
+    let components = relative_path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(asset_index) = components
+        .iter()
+        .position(|component| component.to_string_lossy() == "assets")
+    {
+        let nested_asset = components[asset_index..].iter().collect::<PathBuf>();
+        if root.join(&nested_asset).is_file() {
+            return Some(nested_asset);
+        }
+    }
+
+    if components.len() > 1 {
+        let basename = components.last()?.to_owned();
+        let root_file = PathBuf::from(basename);
+        if root.join(&root_file).is_file() {
+            return Some(root_file);
+        }
+    }
+
+    None
 }
 
 fn read_web_index_html() -> Option<String> {
@@ -15171,24 +15193,12 @@ fn slskd_options_config_upload_response(
     .to_string())
 }
 
-fn slskd_options_config_validate_response(
-    body: &str,
-    acknowledgements: u64,
-    acknowledgement_persistence_enabled: bool,
-) -> Result<HttpResponse, String> {
+fn slskd_options_config_validate_response(body: &str) -> Result<HttpResponse, String> {
     let _ = slskd_options_config_body(body)?;
     Ok(HttpResponse {
         status: "200 OK",
-        content_type: "application/json",
-        body: serde_json::json!({
-            "valid": true,
-            "persisted": acknowledgement_persistence_enabled,
-            "configPersisted": false,
-            "runtimeMutationEnabled": false,
-            "acknowledgements": acknowledgements,
-            "status": "compatibility_acknowledgement",
-        })
-        .to_string(),
+        content_type: "text/plain; charset=utf-8",
+        body: String::new(),
     })
 }
 
@@ -19144,6 +19154,7 @@ async fn connect_session(
     })
     .await;
     *next_ping = Instant::now() + state.config.ping_interval;
+    replay_joined_rooms(state, &mut new_session).await;
     *session = Some(new_session);
     record_daemon_log(
         state,
@@ -19156,6 +19167,64 @@ async fn connect_session(
     )
     .await;
     true
+}
+
+async fn send_room_join_if_connected(state: &AppState, room_name: String) {
+    let connected = {
+        let session = state.session.read().await;
+        session.state == "connected"
+    };
+
+    if connected {
+        send_session_command(state, SessionCommand::JoinRoom(room_name))
+            .await
+            .ok();
+    } else {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Info,
+            "rooms",
+            format!("recorded room join for {room_name}; Soulseek join will run after connect"),
+        )
+        .await;
+    }
+}
+
+async fn replay_joined_rooms(state: &AppState, session: &mut ServerSession<TcpStream>) {
+    let joined_rooms = {
+        let rooms = state.rooms.read().await;
+        rooms
+            .records
+            .iter()
+            .filter(|room| room.joined)
+            .map(|room| room.name.clone())
+            .collect::<Vec<_>>()
+    };
+
+    for room in joined_rooms {
+        match session
+            .send_server_message(ServerMessage::JoinRoom { room: room.clone() })
+            .await
+        {
+            Ok(()) => {
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Info,
+                    "rooms",
+                    format!("replayed persisted room join for {room}"),
+                )
+                .await;
+            }
+            Err(error) => {
+                let reason = format!("replay room join for {room} failed: {error}");
+                update_session(state, |snapshot| {
+                    snapshot.last_error = Some(reason.clone());
+                })
+                .await;
+                record_daemon_log(state, logging::LogLevel::Warn, "rooms", reason).await;
+            }
+        }
+    }
 }
 
 async fn send_session_ping(
@@ -20737,6 +20806,15 @@ async fn record_daemon_log(
     message: impl Into<String>,
 ) {
     let message = message.into();
+    let configured_level = *state.log_level.read().await;
+    if configured_level <= level {
+        eprintln!(
+            "[{}] {}: {}",
+            logging::LogConfig::level_name(level),
+            category,
+            message
+        );
+    }
     let detail = serde_json::json!({
         "level": logging::LogConfig::level_name(level),
         "category": category,
@@ -23981,6 +24059,7 @@ mod tests {
             ("/api/v0/telemetry", "\"health\":"),
             ("/api/v0/events", "[]"),
             ("/api/v0/events/records", "\"entries\":"),
+            ("/api/v0/logs", "[]"),
             ("/api/v0/session", "\"state\":\"disconnected\""),
             ("/api/v0/session/enabled", "false"),
             ("/api/v0/listeners", "\"regular_accepts\":0"),
@@ -24465,12 +24544,25 @@ mod tests {
         std::fs::create_dir_all(root.join("assets")).unwrap();
         std::fs::write(root.join("index.html"), "<html></html>").unwrap();
         std::fs::write(root.join("assets").join("app.js"), "console.log('ok')").unwrap();
+        std::fs::write(root.join("favicon.ico"), "ico").unwrap();
 
         let (asset, content_type) =
             super::web_static_file_for_request_under_root(&root, "/assets/app.js")
                 .expect("asset resolved");
         assert!(asset.ends_with("assets/app.js"));
         assert_eq!(content_type, "text/javascript; charset=utf-8");
+
+        let (nested_asset, nested_content_type) =
+            super::web_static_file_for_request_under_root(&root, "/system/mediacore/assets/app.js")
+                .expect("nested SPA asset resolved");
+        assert!(nested_asset.ends_with("assets/app.js"));
+        assert_eq!(nested_content_type, "text/javascript; charset=utf-8");
+
+        let (nested_icon, nested_icon_type) =
+            super::web_static_file_for_request_under_root(&root, "/system/favicon.ico")
+                .expect("nested SPA root icon resolved");
+        assert!(nested_icon.ends_with("favicon.ico"));
+        assert_eq!(nested_icon_type, "image/x-icon");
 
         let (fallback, _) = super::web_static_file_for_request_under_root(&root, "/missing-route")
             .expect("SPA fallback resolved");
@@ -27251,11 +27343,8 @@ mod tests {
         .await
         .expect("options validate");
         assert_eq!(options_validate.status, "200 OK");
-        let options_validate_json =
-            serde_json::from_str::<serde_json::Value>(&options_validate.body).unwrap();
-        assert_eq!(options_validate_json["valid"], true);
-        assert_eq!(options_validate_json["persisted"], true);
-        assert_eq!(options_validate_json["acknowledgements"], 1);
+        assert_eq!(options_validate.content_type, "text/plain; charset=utf-8");
+        assert!(options_validate.body.is_empty());
 
         let persisted = db
             .get_runtime_compat_state()
@@ -31328,6 +31417,14 @@ mod tests {
         let logs_json = serde_json::from_str::<serde_json::Value>(&logs.body).unwrap();
         assert_eq!(logs_json["entries"][0]["category"], "compat.event");
         assert_eq!(logs_json["entries"][0]["message"], "compat event");
+        let compat_logs = super::route_http_request("GET", "/api/v0/logs", None, "", &state)
+            .await
+            .expect("compat logs");
+        let compat_logs_json =
+            serde_json::from_str::<serde_json::Value>(&compat_logs.body).unwrap();
+        assert_eq!(compat_logs_json[0]["category"], "compat.event");
+        assert_eq!(compat_logs_json[0]["context"], "compat.event");
+        assert_eq!(compat_logs_json[0]["message"], "compat event");
 
         {
             let mut users = state.users.write().await;
@@ -32641,15 +32738,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn room_join_returns_503_while_disconnected_or_reconnecting() {
+    async fn room_join_records_local_projection_while_disconnected_or_reconnecting() {
         let (state, mut receiver) = test_state();
 
         let disconnected =
             super::route_http_request("POST", "/api/v0/rooms/music/join", None, "", &state)
                 .await
                 .expect("join while disconnected");
-        assert_eq!(disconnected.status, "503 Service Unavailable");
-        assert!(disconnected.body.contains("disconnected"));
+        assert_eq!(disconnected.status, "201 Created");
+        assert!(disconnected.body.contains("\"name\":\"music\""));
+        assert!(disconnected.body.contains("\"joined\":true"));
         assert!(receiver.try_recv().is_err());
 
         {
@@ -32661,8 +32759,9 @@ mod tests {
             super::route_http_request("POST", "/api/rooms/joined", None, r#""music""#, &state)
                 .await
                 .expect("join while reconnecting");
-        assert_eq!(reconnecting.status, "503 Service Unavailable");
-        assert!(reconnecting.body.contains("reconnecting"));
+        assert_eq!(reconnecting.status, "201 Created");
+        assert!(reconnecting.body.contains("\"name\":\"music\""));
+        assert!(reconnecting.body.contains("\"messages\":[]"));
         assert!(receiver.try_recv().is_err());
     }
 
@@ -33027,10 +33126,8 @@ mod tests {
         .await
         .expect("valid options validate");
         assert_eq!(validated.status, "200 OK");
-        let validated_json = serde_json::from_str::<serde_json::Value>(&validated.body).unwrap();
-        assert_eq!(validated_json["valid"], true);
-        assert_eq!(validated_json["persisted"], false);
-        assert_eq!(validated_json["configPersisted"], false);
+        assert_eq!(validated.content_type, "text/plain; charset=utf-8");
+        assert!(validated.body.is_empty());
 
         let invalid_upload =
             super::route_http_request("PUT", "/api/options/yaml", None, "{}", &state)
@@ -33072,6 +33169,12 @@ mod tests {
         let logs_json = serde_json::from_str::<serde_json::Value>(&logs.body).unwrap();
         assert_eq!(logs_json["entries"].as_array().unwrap().len(), 0);
         assert_eq!(logs_json["level"], "Information");
+        let compat_logs = super::route_http_request("GET", "/api/v0/logs", None, "", &state)
+            .await
+            .expect("compat logs");
+        let compat_logs_json =
+            serde_json::from_str::<serde_json::Value>(&compat_logs.body).unwrap();
+        assert_eq!(compat_logs_json.as_array().unwrap().len(), 0);
 
         let bridge =
             super::route_http_request("PUT", "/api/bridge/admin/config", None, "{}", &state)

@@ -5,8 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 required="${SLSKR_SECURITY_SCANS_REQUIRED:-0}"
-semgrep_image="${SLSKR_SEMGREP_IMAGE:-semgrep/semgrep:1.70.0}"
-trivy_image="${SLSKR_TRIVY_IMAGE:-aquasec/trivy:0.50.1}"
+semgrep_image="${SLSKR_SEMGREP_IMAGE:-semgrep/semgrep:1.167.0}"
+trivy_image="${SLSKR_TRIVY_IMAGE:-aquasec/trivy:0.72.0}"
 status=0
 
 section() {

@@ -1,5 +1,7 @@
 import api from './api';
 
+const defaultLogLevels = ['Trace', 'Debug', 'Information', 'Warning', 'Error'];
+
 export const getCurrent = async () => {
   return (await api.get('/options')).data;
 };
@@ -13,7 +15,24 @@ export const getCurrentDebugView = async () => {
 };
 
 export const getLogs = async () => {
-  return (await api.get('/logs')).data;
+  const logs = (await api.get('/logs')).data;
+  if (!Array.isArray(logs)) {
+    return logs;
+  }
+
+  let levelInfo;
+  try {
+    levelInfo = (await api.get('/logs/level')).data || {};
+  } catch {
+    levelInfo = null;
+  }
+
+  return {
+    entries: logs,
+    level: levelInfo?.level || 'Information',
+    levels: levelInfo?.levels || defaultLogLevels,
+    limit: logs.length,
+  };
 };
 
 export const updateLogLevel = async (level) => {
