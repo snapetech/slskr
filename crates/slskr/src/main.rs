@@ -186,6 +186,7 @@ const MAX_NOW_PLAYING_RECORDS: usize = 4_096;
 const MAX_NOW_PLAYING_ARTIST_BYTES: usize = 4 * 1024;
 const MAX_NOW_PLAYING_TITLE_BYTES: usize = 4 * 1024;
 const MAX_SECURITY_BANS: usize = 4_096;
+const MAX_SECURITY_BAN_USERNAME_BYTES: usize = MAX_USER_USERNAME_BYTES;
 const MAX_SHARE_GRANTS: usize = 4_096;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
 const MAX_DESTINATIONS: usize = 256;
@@ -6864,21 +6865,23 @@ impl SecurityState {
         let mut seen = std::collections::HashSet::new();
         let bans = records
             .into_iter()
-            .filter(|record| {
-                let value = if record.kind == "username" {
-                    record.value.to_ascii_lowercase()
+            .filter_map(|record| {
+                let value = normalize_security_ban_value(&record.kind, &record.value)?;
+                let deduplication_value = if record.kind == "username" {
+                    value.to_ascii_lowercase()
                 } else {
-                    record.value.clone()
+                    value.clone()
                 };
-                seen.insert((record.kind.clone(), value))
+                seen.insert((record.kind.clone(), deduplication_value))
+                    .then_some((record, value))
             })
             .take(MAX_SECURITY_BANS)
-            .map(|record| {
+            .map(|(record, value)| {
                 let created_at = u64::try_from(record.created_at).unwrap_or(0);
                 updated_at = updated_at.max(created_at);
                 SecurityBanRecord {
                     kind: record.kind,
-                    value: record.value,
+                    value,
                     created_at,
                 }
             })
@@ -6887,6 +6890,7 @@ impl SecurityState {
     }
 
     fn ban(&mut self, kind: &str, value: String) -> Option<SecurityBanRecord> {
+        let value = normalize_security_ban_value(kind, &value)?;
         let now = unix_timestamp();
         if let Some(record) = self.bans.iter_mut().find(|record| {
             record.kind == kind
@@ -6914,10 +6918,13 @@ impl SecurityState {
     }
 
     fn unban(&mut self, kind: &str, value: &str) -> bool {
+        let Some(value) = normalize_security_ban_value(kind, value) else {
+            return false;
+        };
         let before = self.bans.len();
         self.bans.retain(|record| {
             let value_matches = if kind == "username" {
-                record.value.eq_ignore_ascii_case(value)
+                record.value.eq_ignore_ascii_case(&value)
             } else {
                 record.value == value
             };
@@ -6952,6 +6959,22 @@ impl SecurityState {
             "count": self.bans.len(),
             "updated_at": self.updated_at,
         })
+    }
+}
+
+fn normalize_security_ban_value(kind: &str, value: &str) -> Option<String> {
+    match kind {
+        "username" => {
+            let value =
+                truncate_utf8_bytes(value.trim().to_owned(), MAX_SECURITY_BAN_USERNAME_BYTES);
+            (!value.is_empty()).then_some(value)
+        }
+        "ip" => value
+            .trim()
+            .parse::<std::net::IpAddr>()
+            .ok()
+            .map(|address| address.to_string()),
+        _ => None,
     }
 }
 
@@ -15044,9 +15067,9 @@ async fn route_http_request_with_headers(
             let username = extract_json_string_field(body, "username")
                 .or_else(|| path.split_once("/bans/username/").map(|(_, value)| decoded_path_segment(value)))
                 .unwrap_or_default();
-            if username.trim().is_empty() {
+            let Some(username) = normalize_security_ban_value("username", &username) else {
                 return Ok(routing::bad_request_response("username is required"));
-            }
+            };
             let mut security = state.security.write().await;
             let Some(record) = security.ban("username", username.clone()) else {
                 return Ok(routing::service_unavailable_response("security ban capacity is full"));
@@ -15066,6 +15089,9 @@ async fn route_http_request_with_headers(
 
         ("DELETE", path) if path.contains("/bans/username/") => {
             let username = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
+            let Some(username) = normalize_security_ban_value("username", &username) else {
+                return Ok(routing::bad_request_response("username is required"));
+            };
             let mut security = state.security.write().await;
             let removed = security.unban("username", &username);
             let active_bans = security.active_bans();
@@ -15084,9 +15110,9 @@ async fn route_http_request_with_headers(
 
         ("POST", path) if path.contains("/bans/ip") => {
             let ip = extract_json_string_field(body, "ip").unwrap_or_default();
-            if ip.trim().is_empty() {
-                return Ok(routing::bad_request_response("ip is required"));
-            }
+            let Some(ip) = normalize_security_ban_value("ip", &ip) else {
+                return Ok(routing::bad_request_response("valid ip is required"));
+            };
             let mut security = state.security.write().await;
             let Some(record) = security.ban("ip", ip.clone()) else {
                 return Ok(routing::service_unavailable_response("security ban capacity is full"));
@@ -15106,6 +15132,9 @@ async fn route_http_request_with_headers(
 
         ("DELETE", path) if path.contains("/bans/ip/") => {
             let ip = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
+            let Some(ip) = normalize_security_ban_value("ip", &ip) else {
+                return Ok(routing::bad_request_response("valid ip is required"));
+            };
             let mut security = state.security.write().await;
             let removed = security.unban("ip", &ip);
             let active_bans = security.active_bans();
@@ -23094,8 +23123,30 @@ async fn persist_security_ban(state: &AppState, record: &SecurityBanRecord) {
 }
 
 async fn persist_security_unban(state: &AppState, kind: &str, value: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_security_ban(kind, value).await;
+    let Some(db) = state.db.as_ref() else {
+        return;
+    };
+    let Some(target) = normalize_security_ban_value(kind, value) else {
+        return;
+    };
+    let Ok(records) = db.list_security_bans().await else {
+        return;
+    };
+    for record in records {
+        if record.kind != kind {
+            continue;
+        }
+        let Some(candidate) = normalize_security_ban_value(kind, &record.value) else {
+            continue;
+        };
+        let matches = if kind == "username" {
+            candidate.eq_ignore_ascii_case(&target)
+        } else {
+            candidate == target
+        };
+        if matches {
+            let _ = db.delete_security_ban(kind, &record.value).await;
+        }
     }
 }
 
@@ -34311,7 +34362,7 @@ mod tests {
         assert_eq!(security.bans.len(), 1);
         assert!(security.unban("username", "SPAMMER"));
         for index in 0..super::MAX_SECURITY_BANS {
-            security.ban("ip", format!("192.0.2.{index}")).unwrap();
+            security.ban("ip", format!("2001:db8::{index:x}")).unwrap();
         }
         assert!(security.ban("ip", "198.51.100.1".to_owned()).is_none());
         assert_eq!(security.bans.len(), super::MAX_SECURITY_BANS);
@@ -34348,6 +34399,128 @@ mod tests {
                 .id,
             format!("grant-{}", u64::MAX)
         );
+    }
+
+    #[test]
+    fn security_bans_normalize_and_reject_malformed_persisted_values() {
+        let oversized_username = format!("  {}  ", "é".repeat(super::MAX_USER_USERNAME_BYTES));
+        let mut security = super::SecurityState::new();
+        let username = security
+            .ban("username", oversized_username)
+            .expect("valid username ban");
+        assert!(username.value.len() <= super::MAX_SECURITY_BAN_USERNAME_BYTES);
+        assert!(!username.value.starts_with(char::is_whitespace));
+        assert!(!username.value.ends_with(char::is_whitespace));
+        assert!(security
+            .ban(
+                "username",
+                format!(" {} ", username.value.to_ascii_uppercase())
+            )
+            .is_some());
+        assert_eq!(security.active_bans(), 1);
+        assert!(security.ban("ip", "not-an-ip".to_owned()).is_none());
+        assert!(security.ban("unknown", "value".to_owned()).is_none());
+
+        let hydrated = super::SecurityState::from_persisted(vec![
+            crate::persistence::SecurityBanRecord {
+                kind: "ip".to_owned(),
+                value: "2001:0db8:0:0:0:0:0:1".to_owned(),
+                created_at: 1,
+            },
+            crate::persistence::SecurityBanRecord {
+                kind: "ip".to_owned(),
+                value: "2001:db8::1".to_owned(),
+                created_at: 2,
+            },
+            crate::persistence::SecurityBanRecord {
+                kind: "ip".to_owned(),
+                value: "malformed".to_owned(),
+                created_at: 3,
+            },
+            crate::persistence::SecurityBanRecord {
+                kind: "other".to_owned(),
+                value: "ignored".to_owned(),
+                created_at: 4,
+            },
+        ]);
+        assert_eq!(hydrated.active_bans(), 1);
+        assert_eq!(hydrated.bans[0].value, "2001:db8::1");
+    }
+
+    #[tokio::test]
+    async fn security_ban_routes_reject_invalid_ips_and_canonicalize_values() {
+        let (state, _receiver) = test_state();
+        let invalid = super::route_http_request(
+            "POST",
+            "/api/security/bans/ip",
+            None,
+            r#"{"ip":"attacker-controlled"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid.status, "400 Bad Request");
+        assert!(state.security.read().await.bans.is_empty());
+
+        let ip = super::route_http_request(
+            "POST",
+            "/api/security/bans/ip",
+            None,
+            r#"{"ip":" 2001:0db8:0:0:0:0:0:1 "}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ip.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&ip.body).unwrap()["ip"],
+            "2001:db8::1"
+        );
+
+        let username = super::route_http_request(
+            "POST",
+            "/api/security/bans/username",
+            None,
+            r#"{"username":"  Peer One  "}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(username.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&username.body).unwrap()["username"],
+            "Peer One"
+        );
+    }
+
+    #[tokio::test]
+    async fn security_unban_removes_legacy_noncanonical_persistence_keys() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        db.upsert_security_ban(&crate::persistence::SecurityBanRecord {
+            kind: "username".to_owned(),
+            value: "  Peer One  ".to_owned(),
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+        db.upsert_security_ban(&crate::persistence::SecurityBanRecord {
+            kind: "ip".to_owned(),
+            value: "2001:0db8:0:0:0:0:0:1".to_owned(),
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        super::persist_security_unban(&state, "username", "peer one").await;
+        super::persist_security_unban(&state, "ip", "2001:db8::1").await;
+        assert!(db.list_security_bans().await.unwrap().is_empty());
     }
 
     #[tokio::test]
