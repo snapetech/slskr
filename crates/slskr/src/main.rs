@@ -13526,7 +13526,7 @@ async fn route_http_request_with_headers(
         }
 
         // LIBRARY HEALTH ENDPOINTS
-        ("GET", path) if path.starts_with("/api/library/health/summary") => {
+        ("GET", "/api/library/health/summary") => {
             let library_path = route
                 .query
                 .and_then(|query| {
@@ -13560,21 +13560,24 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("GET", path) if path.starts_with("/api/library/health/issues/by-type") => {
-            let issue_type = path
-                .strip_prefix("/api/library/health/issues/by-type/")
-                .filter(|value| !value.is_empty());
+            let issue_type = if path == "/api/library/health/issues/by-type" {
+                None
+            } else if let Some(issue_type) =
+                path_segment_after(path, "/api/library/health/issues/by-type/")
+            {
+                Some(issue_type)
+            } else {
+                return Ok(routing::not_found_response());
+            };
             let library = state.library.read().await;
             let json = library.health_issues_by_type_json(issue_type);
             drop(library);
             Ok(routing::ok_response(json))
         }
-        ("GET", path)
-            if path.starts_with("/api/library/health/scans/")
-                && path.len() > "/api/library/health/scans/".len() =>
-        {
-            let scan_id = path
-                .strip_prefix("/api/library/health/scans/")
-                .expect("route guard requires the scan prefix");
+        ("GET", path) if path.starts_with("/api/library/health/scans/") => {
+            let Some(scan_id) = path_segment_after(path, "/api/library/health/scans/") else {
+                return Ok(routing::not_found_response());
+            };
             let library = state.library.read().await;
             let scan = library.health_scan(scan_id);
             drop(library);
@@ -36575,6 +36578,38 @@ mod tests {
         let by_artist_json = serde_json::from_str::<serde_json::Value>(&by_artist.body).unwrap();
         assert_eq!(by_artist_json["issues_by_artist"][0]["artist"], "(unknown)");
 
+        let summary = super::route_http_request(
+            "GET",
+            "/api/library/health/summary?libraryPath=%2Fmusic",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("library health summary");
+        assert_eq!(summary.status, "200 OK");
+        let by_type = super::route_http_request(
+            "GET",
+            "/api/library/health/issues/by-type/missing_artist",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("issues by type");
+        assert_eq!(by_type.status, "200 OK");
+        assert!(by_type.body.contains("missing_artist"));
+        for path in [
+            "/api/library/health/summary-untrusted",
+            "/api/library/health/issues/by-type-untrusted",
+            "/api/library/health/issues/by-type/missing_artist/untrusted",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{path}");
+        }
+
         let lidarr_missing = super::route_http_request(
             "GET",
             "/api/integrations/lidarr/wanted/missing",
@@ -36683,6 +36718,19 @@ mod tests {
         let scan_detail_json =
             serde_json::from_str::<serde_json::Value>(&scan_detail.body).unwrap();
         assert_eq!(scan_detail_json["issues_found"], 1);
+        let aliased_scan = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/library/health/scans/{}/untrusted",
+                scan_json["id"].as_str().unwrap()
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased library scan");
+        assert_eq!(aliased_scan.status, "404 Not Found");
         let fixed =
             super::route_http_request("POST", "/api/library/health/issues/fix", None, "{}", &state)
                 .await
