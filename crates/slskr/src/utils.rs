@@ -121,12 +121,9 @@ pub fn csrf_origin_allowed(
         return !config.api_cookie_auth_enabled
             || cookie_session_token(headers.cookie.as_deref()).is_none();
     };
-    let Some(source_host) = origin_host(source) else {
-        return false;
-    };
     let fallback_host = config.http_bind.to_string();
     let expected_host = headers.host.as_deref().unwrap_or(fallback_host.as_str());
-    same_origin_host(source_host, expected_host)
+    origin_matches_host(source, expected_host)
 }
 
 pub fn is_unsafe_http_method(method: &str) -> bool {
@@ -134,50 +131,80 @@ pub fn is_unsafe_http_method(method: &str) -> bool {
 }
 
 pub fn origin_host(value: &str) -> Option<&str> {
-    let without_scheme = value.split_once("://").map_or(value, |(_, rest)| rest);
-    without_scheme
-        .split(['/', '?', '#'])
-        .next()
-        .map(str::trim)
-        .filter(|host| {
-            !host.is_empty()
-                && !host
-                    .bytes()
-                    .any(|byte| matches!(byte, b'\r' | b'\n' | 0x00..=0x1f | 0x7f))
-        })
+    let (scheme, rest) = value.split_once("://")?;
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    parse_authority(authority)?;
+    Some(authority)
 }
 
 pub fn same_origin_host(left: &str, right: &str) -> bool {
-    normalize_origin_host(left) == normalize_origin_host(right)
+    matches!(
+        (parse_authority(left), parse_authority(right)),
+        (Some(left), Some(right)) if left == right
+    )
 }
 
 pub fn request_origin_matches_host(headers: &RequestSecurityHeaders, fallback_host: &str) -> bool {
     let Some(origin) = headers.origin.as_deref() else {
         return true;
     };
-    let Some(origin_host) = origin_host(origin) else {
+    let expected_host = headers.host.as_deref().unwrap_or(fallback_host);
+    origin_matches_host(origin, expected_host)
+}
+
+fn origin_matches_host(origin: &str, expected_host: &str) -> bool {
+    let Some((scheme, _)) = origin.split_once("://") else {
         return false;
     };
-    let expected_host = headers.host.as_deref().unwrap_or(fallback_host);
-    same_origin_host(origin_host, expected_host)
+    let Some(origin_authority) = origin_host(origin).and_then(parse_authority) else {
+        return false;
+    };
+    let Some(expected_authority) = parse_authority(expected_host) else {
+        return false;
+    };
+    let default_port = if scheme.eq_ignore_ascii_case("http") {
+        80
+    } else if scheme.eq_ignore_ascii_case("https") {
+        443
+    } else {
+        return false;
+    };
+    origin_authority.0 == expected_authority.0
+        && origin_authority.1.unwrap_or(default_port)
+            == expected_authority.1.unwrap_or(default_port)
 }
 
-fn normalize_origin_host(value: &str) -> String {
-    let value = value.trim();
-    if let Some((host, port)) = bracketed_ipv6_authority(value) {
-        return format!("[{}]:{}", host.to_ascii_lowercase(), port);
-    }
-    value.to_ascii_lowercase()
-}
-
-fn bracketed_ipv6_authority(value: &str) -> Option<(&str, &str)> {
-    let rest = value.strip_prefix('[')?;
-    let (host, after_host) = rest.split_once(']')?;
-    let port = after_host.strip_prefix(':')?;
-    if host.is_empty() || port.is_empty() || port.contains(':') {
+fn parse_authority(value: &str) -> Option<(String, Option<u16>)> {
+    if value.is_empty() || value.trim() != value || value.contains('@') {
         return None;
     }
-    Some((host, port))
+    let (host, port) = if let Some(rest) = value.strip_prefix('[') {
+        let (host, suffix) = rest.split_once(']')?;
+        host.parse::<std::net::Ipv6Addr>().ok()?;
+        let port = if suffix.is_empty() {
+            None
+        } else {
+            Some(suffix.strip_prefix(':')?.parse::<u16>().ok()?)
+        };
+        (host.to_ascii_lowercase(), port)
+    } else {
+        let (host, port) = match value.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port.parse::<u16>().ok()?)),
+            None => (value, None),
+        };
+        if host.is_empty()
+            || !host
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
+        {
+            return None;
+        }
+        (host.trim_end_matches('.').to_ascii_lowercase(), port)
+    };
+    (!host.is_empty()).then_some((host, port))
 }
 
 pub fn is_authorized(

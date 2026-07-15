@@ -36155,6 +36155,44 @@ mod tests {
             cookie: None,
         };
         assert!(super::request_origin_matches_host(&headers, "[::1]:5030"));
+
+        for malformed_origin in [
+            "127.0.0.1:5030",
+            "null",
+            "ftp://127.0.0.1:5030",
+            "http://user@127.0.0.1:5030",
+            "http://127.0.0.1:5030@evil.example",
+            "http://127.0.0.1:5030:80",
+        ] {
+            let headers = super::RequestSecurityHeaders {
+                host: Some("127.0.0.1:5030".to_owned()),
+                origin: Some(malformed_origin.to_owned()),
+                referer: None,
+                cookie: None,
+            };
+            assert!(!super::request_origin_matches_host(
+                &headers,
+                "127.0.0.1:5030"
+            ));
+        }
+    }
+
+    #[test]
+    fn websocket_origin_normalizes_default_ports_and_dns_case() {
+        for (host, origin) in [
+            ("example.com", "http://EXAMPLE.com:80"),
+            ("example.com:443", "https://example.com"),
+            ("example.com.", "http://example.com"),
+        ] {
+            let headers = super::RequestSecurityHeaders {
+                host: Some(host.to_owned()),
+                origin: Some(origin.to_owned()),
+                referer: None,
+                cookie: None,
+            };
+            assert!(super::request_origin_matches_host(&headers, "localhost"));
+        }
+        assert!(!super::same_origin_host("bad:port", "also:bad"));
     }
 
     #[test]
