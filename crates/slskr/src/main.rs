@@ -10991,6 +10991,57 @@ async fn route_http_request_with_headers(
 
          ("POST", _path) if transfer_action_path(normalized_path.as_str()).is_some() => {
             if let Some((id, action)) = transfer_action_path(normalized_path.as_str()) {
+                let session_command_permit = if action == "start" || action == "retry" {
+                    let transfers = state.transfers.read().await;
+                    let active_count = transfers
+                        .entries
+                        .iter()
+                        .filter(|transfer| {
+                            transfer.status == "in_progress" || transfer.status == "peer_lookup"
+                        })
+                        .count();
+                    if active_count >= state.config.transfer_max_active {
+                        return Ok(routing::conflict_response("transfer limit reached"));
+                    }
+                    let Some(entry) = transfers.entries.iter().find(|entry| entry.id == id) else {
+                        return Ok(routing::not_found_response());
+                    };
+                    if action == "retry"
+                        && (entry.direction != 0
+                            || !matches!(
+                                entry.status.as_str(),
+                                "failed" | "rejected" | "cancelled"
+                            ))
+                    {
+                        return Ok(routing::conflict_response("transfer is not retryable"));
+                    }
+                    let peer_username = entry.peer_username.clone();
+                    drop(transfers);
+
+                    if let Some(username) = peer_username {
+                        if !state.config.transfer_allow_outbound {
+                            return Ok(routing::conflict_response(
+                                "outbound transfers are disabled",
+                            ));
+                        }
+                        if test_user_endpoint_peer_address(state, &username).is_none() {
+                            match state.session_commands.reserve().await {
+                                Ok(permit) => Some(permit),
+                                Err(_) => {
+                                    return Ok(routing::service_unavailable_response(
+                                        "session manager is not running",
+                                    ));
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let mut transfers = state.transfers.write().await;
 
                 if action == "start" || action == "retry" {
@@ -11035,7 +11086,15 @@ async fn route_http_request_with_headers(
                             if let Some(address) = test_user_endpoint_peer_address(state, &username_clone) {
                                 project_peer_transfer_response(state, &address).await;
                             } else {
-                                send_session_command(state, SessionCommand::TransferPeer { id, username: username_clone }).await.ok();
+                                let Some(session_command_permit) = session_command_permit else {
+                                    return Err(
+                                        "missing reserved transfer peer dispatch capacity".to_owned(),
+                                    );
+                                };
+                                session_command_permit.send(SessionCommand::TransferPeer {
+                                    id,
+                                    username: username_clone,
+                                });
                             }
 
                             Ok(routing::ok_response(json_response))
@@ -33711,6 +33770,61 @@ mod tests {
             blocked.body,
             "{\"error\":\"outbound transfers are disabled\"}"
         );
+    }
+
+    #[tokio::test]
+    async fn peer_transfer_actions_reject_before_mutation_when_dispatch_is_unavailable() {
+        for (action, initial_status, initial_reason) in [
+            ("start", "queued", None),
+            ("retry", "failed", Some("peer offline")),
+        ] {
+            let (state, receiver) = test_state();
+            super::route_http_request(
+                "POST",
+                "/api/v0/transfers",
+                None,
+                r#"{"filename":"Remote/Song.flac","peer_username":"friend","size":10}"#,
+                &state,
+            )
+            .await
+            .expect("create transfer");
+            if action == "retry" {
+                state.transfers.write().await.update_status(
+                    1,
+                    initial_status,
+                    Some(4),
+                    initial_reason.map(str::to_owned),
+                );
+            }
+            drop(receiver);
+
+            let response = super::route_http_request(
+                "POST",
+                &format!("/api/v0/transfers/1/{action}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("unavailable transfer action response");
+            assert_eq!(response.status, "503 Service Unavailable", "{action}");
+            assert!(
+                response.body.contains("session manager is not running"),
+                "{action}"
+            );
+            let transfers = state.transfers.read().await;
+            assert_eq!(transfers.entries[0].status, initial_status, "{action}");
+            assert_eq!(
+                transfers.entries[0].reason.as_deref(),
+                initial_reason,
+                "{action}"
+            );
+            assert_eq!(
+                transfers.entries[0].bytes_transferred,
+                if action == "retry" { 4 } else { 0 },
+                "{action}"
+            );
+        }
     }
 
     #[tokio::test]
