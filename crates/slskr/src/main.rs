@@ -6422,7 +6422,7 @@ impl InterestStore {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct NowPlayingRecord {
     username: String,
     artist: String,
@@ -6442,7 +6442,7 @@ impl NowPlayingRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct NowPlayingStore {
     records: Vec<NowPlayingRecord>,
     updated_at: u64,
@@ -14262,10 +14262,19 @@ async fn route_http_request_with_headers(
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
             let title = extract_json_string_field(body, "title").unwrap_or_default();
             let mut now_playing = state.now_playing.write().await;
+            let previous = now_playing.clone();
             let record = now_playing.upsert(username, artist, title);
+            let mutated = now_playing.clone();
             let json = record.json();
             drop(now_playing);
-            persist_now_playing(state, &record).await;
+            if let Err(error) = persist_now_playing_checked(state, &record).await {
+                let mut now_playing = state.now_playing.write().await;
+                if *now_playing == mutated {
+                    *now_playing = previous;
+                }
+                drop(now_playing);
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::ok_response(json))
         }
 
@@ -15756,9 +15765,18 @@ async fn route_http_request_with_headers(
 
         ("DELETE", "/api/nowplaying") => {
             let mut now_playing = state.now_playing.write().await;
+            let previous = now_playing.clone();
             let cleared = now_playing.clear();
+            let mutated = now_playing.clone();
             drop(now_playing);
-            persist_now_playing_clear(state).await;
+            if let Err(error) = persist_now_playing_clear_checked(state).await {
+                let mut now_playing = state.now_playing.write().await;
+                if *now_playing == mutated {
+                    *now_playing = previous;
+                }
+                drop(now_playing);
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::ok_response(format!(
                 "{{\"now_playing\":[],\"count\":0,\"cleared\":true,\"cleared_count\":{}}}",
                 cleared
@@ -16213,10 +16231,19 @@ async fn route_http_request_with_headers(
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
             let title = extract_json_string_field(body, "title").unwrap_or_default();
             let mut now_playing = state.now_playing.write().await;
+            let previous = now_playing.clone();
             let record = now_playing.upsert(username, artist, title);
+            let mutated = now_playing.clone();
             let json = record.json();
             drop(now_playing);
-            persist_now_playing(state, &record).await;
+            if let Err(error) = persist_now_playing_checked(state, &record).await {
+                let mut now_playing = state.now_playing.write().await;
+                if *now_playing == mutated {
+                    *now_playing = previous;
+                }
+                drop(now_playing);
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::ok_response(json))
         }
 
@@ -16644,7 +16671,9 @@ async fn route_http_request_with_headers(
             let mut now_playing = state.now_playing.write().await;
             let playing = now_playing.upsert(room.clone(), artist, title);
             drop(now_playing);
-            persist_now_playing(state, &playing).await;
+            if let Err(error) = persist_now_playing_checked(state, &playing).await {
+                update_session(state, |snapshot| snapshot.last_error = Some(error)).await;
+            }
             Ok(routing::accepted_response(serde_json::json!({
                 "status": "queued",
                 "room": room,
@@ -24033,9 +24062,12 @@ async fn persist_library_item_delete(state: &AppState, id: &str) {
     }
 }
 
-async fn persist_now_playing(state: &AppState, record: &NowPlayingRecord) {
+async fn persist_now_playing_checked(
+    state: &AppState,
+    record: &NowPlayingRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::NowPlayingRecord {
         username: record.username.clone(),
@@ -24043,13 +24075,20 @@ async fn persist_now_playing(state: &AppState, record: &NowPlayingRecord) {
         title: record.title.clone(),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_now_playing(&persisted).await;
+    db.upsert_now_playing(&persisted)
+        .await
+        .map_err(|error| format!("now-playing persistence failed: {error}"))?;
+    Ok(true)
 }
 
-async fn persist_now_playing_clear(state: &AppState) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.clear_now_playing().await;
-    }
+async fn persist_now_playing_clear_checked(state: &AppState) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.clear_now_playing()
+        .await
+        .map_err(|error| format!("now-playing clear persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_browse_record(state: &AppState, record: &BrowseRecord) {
@@ -31389,6 +31428,74 @@ mod tests {
             .await
             .expect("delete destination");
         assert!(db.list_destinations(10, 0).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn now_playing_routes_roll_back_when_persistence_fails() {
+        for method in ["PUT", "POST"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state.now_playing.write().await.upsert(
+                "existing".to_owned(),
+                "Original".to_owned(),
+                "Track".to_owned(),
+            );
+            db.close_for_test().await;
+
+            let response = super::route_http_request(
+                method,
+                "/api/nowplaying",
+                None,
+                r#"{"username":"new","artist":"Changed","title":"Song"}"#,
+                &state,
+            )
+            .await
+            .expect("failed now-playing persistence response");
+            assert_eq!(response.status, "503 Service Unavailable", "{method}");
+            assert!(
+                response.body.contains("now-playing persistence failed"),
+                "{method}"
+            );
+            let now_playing = state.now_playing.read().await;
+            assert_eq!(now_playing.records.len(), 1, "{method}");
+            assert_eq!(now_playing.records[0].username, "existing", "{method}");
+            assert_eq!(now_playing.records[0].artist, "Original", "{method}");
+            assert_eq!(now_playing.records[0].title, "Track", "{method}");
+        }
+
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        state.now_playing.write().await.upsert(
+            "existing".to_owned(),
+            "Original".to_owned(),
+            "Track".to_owned(),
+        );
+        db.close_for_test().await;
+
+        let response = super::route_http_request("DELETE", "/api/nowplaying", None, "", &state)
+            .await
+            .expect("failed now-playing clear response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response
+            .body
+            .contains("now-playing clear persistence failed"));
+        let now_playing = state.now_playing.read().await;
+        assert_eq!(now_playing.records.len(), 1);
+        assert_eq!(now_playing.records[0].username, "existing");
+        assert_eq!(now_playing.records[0].artist, "Original");
+        assert_eq!(now_playing.records[0].title, "Track");
     }
 
     #[tokio::test]
