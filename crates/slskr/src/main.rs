@@ -13790,8 +13790,12 @@ async fn route_http_request_with_headers(
              Ok(routing::ok_response(json))
          }
 
-         ("GET", path) if path.starts_with("/api/bridge/transfer/") && path.contains("/progress") => {
-             let transfer_id = path.split('/').nth(4).unwrap_or("unknown");
+         ("GET", path) if path.starts_with("/api/bridge/transfer/") => {
+             let Some(transfer_id) =
+                 path_segment_between(path, "/api/bridge/transfer/", "/progress")
+             else {
+                 return Ok(routing::not_found_response());
+             };
              let id = transfer_id.parse::<u64>().ok();
              let transfers = state.transfers.read().await;
              let json = id
@@ -14283,7 +14287,11 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/soulseek/items/") && path.ends_with("/recommendations") => {
-            let item_id = path.split('/').nth(4).unwrap_or("unknown");
+            let Some(item_id) =
+                path_segment_between(path, "/api/soulseek/items/", "/recommendations")
+            else {
+                return Ok(routing::not_found_response());
+            };
             let interests = state.interests.read().await;
             let json = interests.item_recommendations_json(item_id);
             drop(interests);
@@ -14291,7 +14299,11 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/soulseek/items/") && path.ends_with("/similar-users") => {
-            let item_id = path.split('/').nth(4).unwrap_or("unknown");
+            let Some(item_id) =
+                path_segment_between(path, "/api/soulseek/items/", "/similar-users")
+            else {
+                return Ok(routing::not_found_response());
+            };
             let users = state.users.read().await;
             let similar_users = users
                 .records
@@ -14506,8 +14518,10 @@ async fn route_http_request_with_headers(
              Ok(routing::accepted_response(run.to_string()))
          }
 
-         ("GET", path) if path.starts_with("/api/songid/runs/") && path.len() > 17 && !path.contains("/forensic-matrix") => {
-             let run_id = &path[17..];
+         ("GET", path) if path.starts_with("/api/songid/runs/") && !path.contains("/forensic-matrix") => {
+             let Some(run_id) = path_segment_after(path, "/api/songid/runs/") else {
+                 return Ok(routing::not_found_response());
+             };
              let runtime = state.runtime.read().await;
              let run = runtime.songid_run(run_id);
              drop(runtime);
@@ -14517,7 +14531,11 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", path) if path.starts_with("/api/songid/runs/") && path.contains("/forensic-matrix") => {
-             let run_id = path.split('/').nth(4).unwrap_or("unknown");
+             let Some(run_id) =
+                 path_segment_between(path, "/api/songid/runs/", "/forensic-matrix")
+             else {
+                 return Ok(routing::not_found_response());
+             };
              let runtime = state.runtime.read().await;
              let Some(run) = runtime.songid_run(run_id) else {
                  return Ok(routing::not_found_response());
@@ -17746,6 +17764,11 @@ fn json_body_string(body: &str) -> Option<String> {
 fn path_segment_after<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
     path.strip_prefix(prefix)
         .filter(|segment| !segment.is_empty() && !segment.contains('/'))
+}
+
+fn path_segment_between<'a>(path: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
+    let segment = path.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    (!segment.is_empty() && !segment.contains('/')).then_some(segment)
 }
 
 fn decoded_path_segment(segment: &str) -> String {
@@ -34570,6 +34593,16 @@ mod tests {
         assert_eq!(bridge_json["status"], "in_progress");
         assert_eq!(bridge_json["bytesTransferred"], 40);
         assert_eq!(bridge_json["progress"], 40.0);
+        let aliased_bridge = super::route_http_request(
+            "GET",
+            "/api/bridge/transfer/1/extra/progress",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased bridge progress");
+        assert_eq!(aliased_bridge.status, "404 Not Found");
     }
 
     #[tokio::test]
