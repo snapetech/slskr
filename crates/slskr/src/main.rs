@@ -8046,7 +8046,7 @@ impl PreviewStreamTicketStore {
     }
 
     fn prune(&mut self, now: u64) {
-        self.records.retain(|_, record| record.expires_at >= now);
+        self.records.retain(|_, record| record.expires_at > now);
     }
 }
 
@@ -8127,7 +8127,7 @@ impl OAuthStateStore {
             .filter_map(|record| {
                 let created_at = u64::try_from(record.created_at).ok()?;
                 let expires_at = u64::try_from(record.expires_at).ok()?;
-                (expires_at >= now).then_some((
+                (expires_at > now).then_some((
                     record.state,
                     OAuthStateRecord {
                         provider: record.provider,
@@ -8169,11 +8169,11 @@ impl OAuthStateStore {
         let now = unix_timestamp();
         self.prune(now);
         let record = self.records.remove(state)?;
-        (record.provider == provider && record.expires_at >= now).then_some(record)
+        (record.provider == provider && record.expires_at > now).then_some(record)
     }
 
     fn prune(&mut self, now: u64) {
-        self.records.retain(|_, record| record.expires_at >= now);
+        self.records.retain(|_, record| record.expires_at > now);
     }
 }
 
@@ -27210,6 +27210,12 @@ mod tests {
 
     #[test]
     fn transient_credential_stores_refuse_bursts_at_live_capacity() {
+        let mut expired_oauth = super::OAuthStateStore::with_max_records(1);
+        let expired_state = expired_oauth
+            .issue("spotify", "http://localhost/callback", 0)
+            .unwrap();
+        assert!(expired_oauth.consume("spotify", &expired_state).is_none());
+
         let mut oauth = super::OAuthStateStore::with_max_records(1);
         let state = oauth
             .issue("spotify", "http://localhost/callback", 600)
@@ -27221,6 +27227,21 @@ mod tests {
         assert!(oauth
             .issue("spotify", "http://localhost/callback", 600)
             .is_some());
+
+        let mut expired_tickets = super::PreviewStreamTicketStore::with_max_records(1);
+        let (expired_ticket, _) = expired_tickets
+            .issue(
+                "peer",
+                "test",
+                "expired".to_owned(),
+                "expired.flac".to_owned(),
+                None,
+                0,
+                "audio/flac".to_owned(),
+                0,
+            )
+            .unwrap();
+        assert!(expired_tickets.get(&expired_ticket).is_none());
 
         let mut tickets = super::PreviewStreamTicketStore::with_max_records(1);
         assert!(tickets

@@ -1439,7 +1439,7 @@ impl DatabaseManager {
         &self,
         now: i64,
     ) -> Result<u64, Box<dyn std::error::Error>> {
-        let result = query("DELETE FROM oauth_states WHERE expires_at < ?")
+        let result = query("DELETE FROM oauth_states WHERE expires_at <= ?")
             .bind(now)
             .execute(&self.pool)
             .await?;
@@ -1457,7 +1457,7 @@ impl DatabaseManager {
             r#"
             SELECT state, provider, redirect_uri, created_at, expires_at
             FROM oauth_states
-            WHERE expires_at >= ?
+            WHERE expires_at > ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
             "#,
@@ -3497,8 +3497,8 @@ mod tests {
         assert_eq!(records[0].state, "state-token");
         assert_eq!(records[0].provider, "spotify");
 
-        assert_eq!(db.delete_expired_oauth_states(21).await.unwrap(), 1);
-        assert!(db.list_oauth_states(21, 10, 0).await.unwrap().is_empty());
+        assert!(db.list_oauth_states(20, 10, 0).await.unwrap().is_empty());
+        assert_eq!(db.delete_expired_oauth_states(20).await.unwrap(), 1);
 
         db.upsert_oauth_state(&record).await.unwrap();
         db.delete_oauth_state("state-token").await.unwrap();
