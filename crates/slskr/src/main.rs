@@ -129,6 +129,7 @@ const DEFAULT_SEARCH_TTL_SECONDS: u64 = 300;
 const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_ROOM_MESSAGES_PER_ROOM: usize = 1_000;
 
 #[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
@@ -4015,6 +4016,10 @@ impl RoomStore {
             body,
             created_at: now,
         });
+        if record.messages.len() > MAX_ROOM_MESSAGES_PER_ROOM {
+            let excess = record.messages.len() - MAX_ROOM_MESSAGES_PER_ROOM;
+            record.messages.drain(0..excess);
+        }
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -10091,13 +10096,7 @@ async fn route_http_request_with_headers(
                 .unwrap_or_default();
 
             let mut rooms = state.rooms.write().await;
-            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
-                record.messages.push(RoomMessageRecord {
-                    username: username.clone(),
-                    body: message_body.clone(),
-                    created_at: unix_timestamp(),
-                });
-                record.updated_at = unix_timestamp();
+            if let Some(record) = rooms.add_message(room_name, username.clone(), message_body.clone()) {
                 let json_response = record.json();
                 drop(rooms);
                 record_event(
@@ -10565,13 +10564,10 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "body"))
                 .unwrap_or_default();
             let mut rooms = state.rooms.write().await;
-            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
-                record.messages.push(RoomMessageRecord {
-                    username: "local".to_owned(),
-                    body: message_body.clone(),
-                    created_at: unix_timestamp(),
-                });
-                record.updated_at = unix_timestamp();
+            if rooms
+                .add_message(&room_name, "local".to_owned(), message_body.clone())
+                .is_some()
+            {
                 drop(rooms);
                 record_event(
                     state,
@@ -33095,6 +33091,30 @@ mod tests {
                 .await
                 .expect("joined room filter");
         assert!(joined_filter.body.contains("\"filtered_count\":0"));
+    }
+
+    #[test]
+    fn room_message_history_evicts_oldest_entries_at_limit() {
+        let mut rooms = super::RoomStore::new();
+        rooms.join("music".to_owned());
+
+        for index in 0..(super::MAX_ROOM_MESSAGES_PER_ROOM + 5) {
+            rooms
+                .add_message("music", "friend".to_owned(), format!("message-{index}"))
+                .expect("joined room");
+        }
+
+        let room = rooms
+            .records
+            .iter()
+            .find(|record| record.name == "music")
+            .expect("music room");
+        assert_eq!(room.messages.len(), super::MAX_ROOM_MESSAGES_PER_ROOM);
+        assert_eq!(room.messages.first().unwrap().body, "message-5");
+        assert_eq!(
+            room.messages.last().unwrap().body,
+            format!("message-{}", super::MAX_ROOM_MESSAGES_PER_ROOM + 4)
+        );
     }
 
     #[tokio::test]

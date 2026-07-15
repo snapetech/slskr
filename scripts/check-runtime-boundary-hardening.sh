@@ -17,6 +17,8 @@ for anchor in \
   'integration_json_reader_rejects_declared_oversized_response' \
   'integration_json_reader_rejects_chunked_oversized_response' \
   'integration_ssrf_filter_blocks_special_use_ipv6_ranges' \
+  'MAX_ROOM_MESSAGES_PER_ROOM' \
+  'room_message_history_evicts_oldest_entries_at_limit' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
