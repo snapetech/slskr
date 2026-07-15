@@ -12411,6 +12411,9 @@ async fn route_http_request_with_headers(
                 }
             };
             let mut transfers = state.transfers.write().await;
+            let previous_entries = transfers.entries.clone();
+            let previous_next_id = transfers.next_id;
+            let previous_next_token = transfers.next_token;
             let updated_original = transfers.update_status(
                 original.id,
                 "cancelled",
@@ -12444,10 +12447,17 @@ async fn route_http_request_with_headers(
                 .unwrap_or(replacement);
             let replacement_json = replacement.json();
             drop(transfers);
-            if let Some(entry) = updated_original.as_ref() {
-                persist_transfer_record(state, entry).await?;
+            let mut persisted = updated_original.into_iter().collect::<Vec<_>>();
+            persisted.push(replacement.clone());
+            if let Err(error) = persist_transfer_records(state, &persisted).await {
+                let mut transfers = state.transfers.write().await;
+                transfers.entries = previous_entries;
+                transfers.next_id = previous_next_id;
+                transfers.next_token = previous_next_token;
+                transfers.persist_state();
+                drop(transfers);
+                return Ok(routing::service_unavailable_response(&error));
             }
-            persist_transfer_record(state, &replacement).await?;
             session_command_permit.send(SessionCommand::TransferPeer {
                 id: replacement.id,
                 username: replacement_username,
@@ -12518,6 +12528,9 @@ async fn route_http_request_with_headers(
             let mut commands = Vec::new();
             let mut persisted = Vec::new();
             let mut transfers = state.transfers.write().await;
+            let previous_entries = transfers.entries.clone();
+            let previous_next_id = transfers.next_id;
+            let previous_next_token = transfers.next_token;
             for (original, alternative) in replacements {
                 if let Some(entry) = transfers.update_status(
                     original.id,
@@ -12571,7 +12584,15 @@ async fn route_http_request_with_headers(
                 }));
             }
             drop(transfers);
-            persist_transfer_records(state, &persisted).await?;
+            if let Err(error) = persist_transfer_records(state, &persisted).await {
+                let mut transfers = state.transfers.write().await;
+                transfers.entries = previous_entries;
+                transfers.next_id = previous_next_id;
+                transfers.next_token = previous_next_token;
+                transfers.persist_state();
+                drop(transfers);
+                return Ok(routing::service_unavailable_response(&error));
+            }
 
             for (permit, command) in session_command_permits.into_iter().zip(commands) {
                 permit.send(command);
@@ -40621,6 +40642,86 @@ mod tests {
                 Some("peer offline"),
                 "{path}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn transfer_replacements_roll_back_when_persistence_fails() {
+        for (path, body) in [
+            (
+                "/api/transfers/downloads/replace",
+                r#"{"transfer_id":1,"username":"fresh"}"#,
+            ),
+            (
+                "/api/transfers/downloads/auto-replace",
+                r#"{"transfer_id":1}"#,
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            super::route_http_request(
+                "POST",
+                "/api/v0/transfers",
+                None,
+                r#"{"filename":"Remote/Album/Song.flac","peer_username":"stale","size":100}"#,
+                &state,
+            )
+            .await
+            .expect("create transfer");
+            state.transfers.write().await.update_status(
+                1,
+                "failed",
+                Some(25),
+                Some("peer offline".to_owned()),
+            );
+            super::route_http_request(
+                "POST",
+                "/api/v0/searches",
+                None,
+                r#"{"query":"song"}"#,
+                &state,
+            )
+            .await
+            .expect("create search");
+            assert!(matches!(
+                receiver.try_recv(),
+                Ok(super::SessionCommand::Search { .. })
+            ));
+            super::route_http_request(
+                "POST",
+                "/api/v0/search-responses",
+                None,
+                r#"{"token":1,"peer_username":"fresh","filename":"Other/Path/Song.flac","size":100}"#,
+                &state,
+            )
+            .await
+            .expect("ingest alternative");
+            let (entries, next_id, next_token) = {
+                let transfers = state.transfers.read().await;
+                (
+                    transfers.entries.clone(),
+                    transfers.next_id,
+                    transfers.next_token,
+                )
+            };
+            db.close_for_test().await;
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("persistence failure response");
+
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            let transfers = state.transfers.read().await;
+            assert_eq!(transfers.entries, entries, "{path}");
+            assert_eq!(transfers.next_id, next_id, "{path}");
+            assert_eq!(transfers.next_token, next_token, "{path}");
+            assert!(receiver.try_recv().is_err(), "{path}");
         }
     }
 
