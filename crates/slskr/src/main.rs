@@ -426,7 +426,7 @@ impl ShareIndexSnapshot {
             ),
             self.cache_enabled,
             json_u64_option(self.cache_written_at),
-            json_option(self.cache_error.as_deref()),
+            json_option(public_share_cache_error(self.cache_error.as_deref())),
             self.updated_at
         )
     }
@@ -529,6 +529,10 @@ impl ShareIndexSnapshot {
             updated_at,
         }
     }
+}
+
+fn public_share_cache_error(error: Option<&str>) -> Option<&'static str> {
+    error.map(|_| "share cache unavailable")
 }
 
 fn summarize_share_roots_from_persisted(
@@ -9003,7 +9007,7 @@ async fn route_http_request_with_headers(
             let shares = state.shares.read().await;
             let shares_json = shares.summary_json();
             let share_cache_enabled = shares.cache_enabled;
-            let share_cache_error = shares.cache_error.clone();
+            let share_cache_error = public_share_cache_error(shares.cache_error.as_deref());
             drop(shares);
 
             let searches = state.searches.read().await;
@@ -29399,6 +29403,8 @@ mod tests {
     #[tokio::test]
     async fn telemetry_api_returns_runtime_health_without_secrets() {
         let (state, _receiver) = test_state();
+        state.shares.write().await.cache_error =
+            Some("share cache write failed: /private/share-index.tsv denied".to_owned());
 
         let response = super::route_http_request("GET", "/api/v0/telemetry", None, "", &state)
             .await
@@ -29422,6 +29428,12 @@ mod tests {
         assert_eq!(json["shares"]["roots"], 0);
         assert_eq!(json["shares"]["files"], 1);
         assert_eq!(json["storage"]["share_cache_enabled"], true);
+        assert_eq!(
+            json["storage"]["share_cache_error"],
+            "share cache unavailable"
+        );
+        assert!(!response.body.contains("/private"));
+        assert!(!response.body.contains("denied"));
         assert_eq!(json["shares"]["cache_enabled"], true);
         assert_eq!(json["database"]["enabled"], false);
         assert_eq!(json["health"]["database"], true);
@@ -44629,6 +44641,27 @@ mod tests {
     #[test]
     fn share_cache_escapes_fields() {
         assert_eq!(super::escape_cache_field("a\tb\\c\n"), "a\\tb\\\\c\\n");
+    }
+
+    #[test]
+    fn share_snapshot_errors_redact_internal_details() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-share-error-redaction-test-{}",
+            std::process::id()
+        ));
+        let env = MapEnv::default()
+            .with("SLSKR_STATE_DIR", &state_dir.display().to_string())
+            .with("SLSKR_SHARE_CACHE_TSV_ENABLED", "false");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("config");
+        let mut snapshot = super::build_share_index(&config);
+        snapshot.cache_error =
+            Some("share cache write failed: /private/share-index.tsv denied".to_owned());
+
+        let json = snapshot.json();
+        assert!(json.contains("\"cache_error\":\"share cache unavailable\""));
+        assert!(!json.contains("/private"));
+        assert!(!json.contains("denied"));
     }
 
     #[test]
