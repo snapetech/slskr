@@ -3438,7 +3438,7 @@ impl BrowseRecord {
             entries,
             self.entries.len(),
             total_bytes,
-            json_option(self.reason.as_deref()),
+            json_option(public_browse_reason(self.status, self.reason.as_deref())),
             json_option(self.folder.as_deref()),
             json_u32_option(self.indirect_token),
             json_u64_option(self.requested_at),
@@ -3462,7 +3462,7 @@ impl BrowseRecord {
             "fileCount": self.entries.len(),
             "directoryCount": directory_count,
             "isComplete": complete,
-            "reason": self.reason,
+            "reason": public_browse_reason(self.status, self.reason.as_deref()),
             "folder": self.folder,
             "indirectToken": self.indirect_token,
             "requestedAt": self.requested_at,
@@ -3470,6 +3470,15 @@ impl BrowseRecord {
         })
         .to_string()
     }
+}
+
+fn public_browse_reason(status: &str, reason: Option<&str>) -> Option<&'static str> {
+    reason.map(|_| match status {
+        "failed" => "browse failed",
+        "cancelled" => "browse cancelled",
+        "indirect_pending" => "direct browse failed; indirect request pending",
+        _ => "browse operation unavailable",
+    })
 }
 
 fn browse_slskd_state(status: &str) -> &'static str {
@@ -29541,6 +29550,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn browse_errors_redact_internal_details() {
+        let record = super::BrowseRecord {
+            username: "friend".to_owned(),
+            status: "failed",
+            entries: Vec::new(),
+            reason: Some(
+                "plain browse connect failed at 10.0.0.9:2242: /private/socket denied".to_owned(),
+            ),
+            folder: None,
+            indirect_token: None,
+            requested_at: Some(1),
+            updated_at: 2,
+        };
+
+        for body in [record.json(), record.slskd_status_json()] {
+            assert!(body.contains("browse failed"));
+            assert!(!body.contains("10.0.0.9"));
+            assert!(!body.contains("/private"));
+            assert!(!body.contains("denied"));
+        }
+        assert!(record.reason.as_deref().unwrap().contains("10.0.0.9"));
+    }
+
     #[tokio::test]
     async fn root_serves_webui_or_fallback_dashboard() {
         let (state, _receiver) = test_state();
@@ -41949,7 +41982,7 @@ mod tests {
         let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
         assert_eq!(status_json["status"], "failed");
         assert_eq!(status_json["state"], "Failed");
-        assert_eq!(status_json["reason"], "timed out");
+        assert_eq!(status_json["reason"], "browse failed");
 
         super::route_http_request(
             "POST",
@@ -42001,7 +42034,7 @@ mod tests {
         assert_eq!(cancelled.status, "200 OK");
         let cancelled_json = serde_json::from_str::<serde_json::Value>(&cancelled.body).unwrap();
         assert_eq!(cancelled_json["status"], "cancelled");
-        assert_eq!(cancelled_json["reason"], "user navigated away");
+        assert_eq!(cancelled_json["reason"], "browse cancelled");
 
         let status =
             super::route_http_request("GET", "/api/users/friend/browse/status", None, "", &state)
@@ -42010,7 +42043,7 @@ mod tests {
         let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
         assert_eq!(status_json["status"], "cancelled");
         assert_eq!(status_json["state"], "Cancelled");
-        assert_eq!(status_json["reason"], "user navigated away");
+        assert_eq!(status_json["reason"], "browse cancelled");
 
         let listed =
             super::route_http_request("GET", "/api/v0/browse?status=cancelled", None, "", &state)
