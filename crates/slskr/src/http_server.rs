@@ -452,6 +452,9 @@ async fn read_limited_line<R: AsyncBufRead + Unpin>(
             break;
         }
     }
+    if !bytes.ends_with(b"\r\n") {
+        return Err("HTTP lines must end with CRLF".to_string());
+    }
     String::from_utf8(bytes)
         .map(Some)
         .map_err(|_| "request headers must be valid UTF-8".to_string())
@@ -881,6 +884,33 @@ mod tests {
         let mut reader = BufReader::new(server);
         let err = read_http_request(&mut reader).await.unwrap_err();
         assert!(err.contains("folded headers"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_bare_lf_request_rejected() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET / HTTP/1.1\nHost: localhost\n\n")
+            .await
+            .unwrap();
+
+        let mut reader = BufReader::new(server);
+        let err = read_http_request(&mut reader).await.unwrap_err();
+        assert!(err.contains("CRLF"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_truncated_header_line_rejected() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost")
+            .await
+            .unwrap();
+        drop(client);
+
+        let mut reader = BufReader::new(server);
+        let err = read_http_request(&mut reader).await.unwrap_err();
+        assert!(err.contains("CRLF"), "{err}");
     }
 
     #[tokio::test]
