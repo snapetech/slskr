@@ -11463,6 +11463,24 @@ async fn route_http_request_with_headers(
             let Ok(protocol_id) = u32::try_from(id) else {
                 return Ok(routing::bad_request_response("message id exceeds u32 range"));
             };
+            if !state
+                .messages
+                .read()
+                .await
+                .records
+                .iter()
+                .any(|message| message.id == id)
+            {
+                return Ok(routing::not_found_response());
+            }
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut messages = state.messages.write().await;
 
             if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
@@ -11480,7 +11498,7 @@ async fn route_http_request_with_headers(
                 )
                 .await;
 
-                send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
+                session_command_permit.send(SessionCommand::MessageAcked { id: protocol_id });
 
                 Ok(routing::ok_response(json_response))
              } else {
@@ -11495,6 +11513,24 @@ async fn route_http_request_with_headers(
              };
              let Ok(protocol_id) = u32::try_from(id) else {
                  return Ok(routing::bad_request_response("message id exceeds u32 range"));
+             };
+             if !state
+                 .messages
+                 .read()
+                 .await
+                 .records
+                 .iter()
+                 .any(|message| message.id == id)
+             {
+                 return Ok(routing::not_found_response());
+             }
+             let session_command_permit = match state.session_commands.reserve().await {
+                 Ok(permit) => permit,
+                 Err(_) => {
+                     return Ok(routing::service_unavailable_response(
+                         "session manager is not running",
+                     ));
+                 }
              };
              let mut messages = state.messages.write().await;
 
@@ -11513,7 +11549,7 @@ async fn route_http_request_with_headers(
                  )
                  .await;
 
-                 send_session_command(state, SessionCommand::MessageAcked { id: protocol_id }).await.ok();
+                 session_command_permit.send(SessionCommand::MessageAcked { id: protocol_id });
 
                  Ok(routing::ok_response(json_response))
              } else {
@@ -39683,6 +39719,40 @@ mod tests {
             oversized_ack.body,
             "{\"error\":\"message id exceeds u32 range\"}"
         );
+    }
+
+    #[tokio::test]
+    async fn message_ack_routes_reject_before_mutation_when_dispatch_is_unavailable() {
+        for method in ["POST", "PUT"] {
+            let (state, receiver) = test_state();
+            state.messages.write().await.add(
+                "friend".to_owned(),
+                "inbound",
+                "not acknowledged".to_owned(),
+            );
+            drop(receiver);
+
+            let response =
+                super::route_http_request(method, "/api/v0/messages/1/ack", None, "", &state)
+                    .await
+                    .expect("unavailable ack response");
+            assert_eq!(response.status, "503 Service Unavailable", "{method}");
+            assert!(
+                response.body.contains("session manager is not running"),
+                "{method}"
+            );
+            assert!(!state.messages.read().await.records[0].acknowledged);
+            assert!(
+                state
+                    .events
+                    .read()
+                    .await
+                    .records
+                    .iter()
+                    .all(|event| event.kind != "message.acked"),
+                "{method}"
+            );
+        }
     }
 
     #[test]
