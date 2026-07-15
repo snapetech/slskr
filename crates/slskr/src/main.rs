@@ -120,6 +120,9 @@ const SHARE_SCAN_BUSY_ERROR: &str = "share scan already in progress";
 const SHARE_SCAN_WORKER_ERROR: &str = "share scan worker failed";
 const MAX_WEBSOCKET_CONNECTIONS: usize = 32;
 const MAX_EXTERNAL_VISUALIZER_PROCESSES: usize = 4;
+const MAX_PREVIEW_STREAMS: usize = 4;
+const MAX_PEER_ENDPOINT_RECORDS: usize = 1_024;
+const PEER_ENDPOINT_TTL_SECONDS: u64 = 300;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 
 use crate::config::{
@@ -9391,6 +9394,9 @@ struct PreviewStreamTicket {
     peer_username: Option<String>,
     size: u64,
     content_type: String,
+    source_url: Option<String>,
+    source_authorization: Option<String>,
+    expected_hash: Option<String>,
     created_at: u64,
     expires_at: u64,
 }
@@ -9444,6 +9450,9 @@ impl PreviewStreamTicketStore {
             peer_username,
             size,
             content_type,
+            source_url: None,
+            source_authorization: None,
+            expected_hash: None,
             created_at: now,
             expires_at: now.saturating_add(ttl_seconds),
         };
@@ -9455,6 +9464,22 @@ impl PreviewStreamTicketStore {
         let now = unix_timestamp();
         self.prune(now);
         self.records.get(token).cloned()
+    }
+
+    fn configure_remote_mesh(
+        &mut self,
+        token: &str,
+        source_url: String,
+        source_authorization: Option<String>,
+        expected_hash: String,
+    ) -> bool {
+        let Some(record) = self.records.get_mut(token) else {
+            return false;
+        };
+        record.source_url = Some(source_url);
+        record.source_authorization = source_authorization;
+        record.expected_hash = Some(expected_hash);
+        true
     }
 
     fn revoke_source(&mut self, source: &str) {
@@ -9513,6 +9538,8 @@ struct AppState {
     oauth_states: RwLock<OAuthStateStore>,
     stream_tickets: RwLock<PreviewStreamTicketStore>,
     multisource: Arc<RwLock<multisource::SwarmStore>>,
+    peer_endpoints: RwLock<BTreeMap<String, (PeerAddress, u64)>>,
+    preview_streams: Arc<Semaphore>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -9627,6 +9654,7 @@ enum SessionCommand {
         id: u64,
         username: String,
     },
+    RequestPeerEndpoint(String),
     IndirectTransfer {
         id: u64,
         username: String,
@@ -19522,7 +19550,16 @@ async fn route_http_request_with_headers(
                 Ok(path) => path,
                 Err(error) => return Ok(routing::bad_request_response(&error)),
             };
-            let job = multisource::new_job(id.clone(), &request, &output_path, unix_timestamp());
+            let public_output_path = output_path
+                .strip_prefix(download_root(&state.config.state_dir))
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .map_err(|_| "multisource output path escaped the download root".to_owned())?;
+            let job = multisource::new_job(
+                id.clone(),
+                &request,
+                public_output_path.clone(),
+                unix_timestamp(),
+            );
             state.multisource.write().await.insert(job.clone());
             let store = Arc::clone(&state.multisource);
             if normalized_path == "/api/multisource/swarm/async" {
@@ -19530,6 +19567,7 @@ async fn route_http_request_with_headers(
                     id.clone(),
                     request,
                     output_path,
+                    public_output_path,
                     store,
                 ));
                 return Ok(routing::accepted_response(
@@ -19541,7 +19579,14 @@ async fn route_http_request_with_headers(
                     .to_string(),
                 ));
             }
-            let result = multisource::execute(id, request, output_path, store).await;
+            let result = multisource::execute(
+                id,
+                request,
+                output_path,
+                public_output_path,
+                store,
+            )
+            .await;
             Ok(routing::ok_response(
                 serde_json::to_string(&result)
                     .map_err(|error| format!("multisource result serialization failed: {error}"))?,
@@ -21358,9 +21403,55 @@ async fn create_preview_stream_ticket(
         .or_else(|| extract_json_string_field(body, "peer_username"))
         .or_else(|| extract_json_string_field(body, "peerId"));
     let requested_size = extract_json_u64_field(body, "size").unwrap_or(0);
-    let content_type = extract_json_string_field(body, "contentType")
-        .or_else(|| extract_json_string_field(body, "content_type"))
-        .unwrap_or_else(|| preview_stream_content_type(&filename).to_owned());
+    let source_url = extract_json_string_field(body, "sourceUrl")
+        .or_else(|| extract_json_string_field(body, "source_url"));
+    let source_authorization = extract_json_string_field(body, "sourceAuthorization")
+        .or_else(|| extract_json_string_field(body, "source_authorization"));
+    let expected_hash = extract_json_string_field(body, "expectedHash")
+        .or_else(|| extract_json_string_field(body, "expected_hash"));
+    if peer_username.as_deref().is_none_or(str::is_empty) {
+        return Err(if family == "mesh" {
+            "peerId is required".to_owned()
+        } else {
+            "username is required".to_owned()
+        });
+    }
+    if family == "mesh" && content_id.as_deref().is_none_or(str::is_empty) {
+        return Err("contentId is required".to_owned());
+    }
+    let content_type = preview_stream_content_type(&filename);
+    if content_type == "application/octet-stream" {
+        return Err("only audio files can be preview streamed".to_owned());
+    }
+    let content_type = content_type.to_owned();
+    let remote_mesh = match source_url {
+        Some(_) if family != "mesh" => {
+            return Err("sourceUrl is supported only for mesh preview streams".to_owned());
+        }
+        Some(source_url) => {
+            if requested_size == 0 {
+                return Err("size is required for a remote mesh preview".to_owned());
+            }
+            if source_authorization
+                .as_ref()
+                .is_some_and(|value| value.contains(['\r', '\n']) || value.len() > 8 * 1024)
+            {
+                return Err("sourceAuthorization is invalid".to_owned());
+            }
+            let expected_hash = expected_hash
+                .as_deref()
+                .map(str::trim)
+                .filter(|hash| {
+                    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+                .ok_or_else(|| {
+                    "expectedHash must be a SHA-256 digest for a remote mesh preview".to_owned()
+                })?
+                .to_ascii_lowercase();
+            Some((source_url, source_authorization, expected_hash))
+        }
+        None => None,
+    };
 
     let shares = state.shares.read().await;
     let transfers = state.transfers.read().await;
@@ -21401,6 +21492,8 @@ async fn create_preview_stream_ticket(
         .unwrap_or(requested_size);
     let resolved_content_id = content_id
         .unwrap_or_else(|| stable_content_hash(&resolved_filename, resolved_size).to_string());
+    let resolved_peer_username =
+        peer_username.or_else(|| search_result.and_then(|entry| entry.peer_username.clone()));
     let source = if share.is_some() {
         "local-share"
     } else if transfer.is_some() {
@@ -21424,13 +21517,18 @@ async fn create_preview_stream_ticket(
         source,
         resolved_content_id,
         resolved_filename,
-        peer_username,
+        resolved_peer_username,
         resolved_size,
         content_type,
         120,
     ) else {
         return Err("preview stream ticket capacity is full".to_owned());
     };
+    if let Some((source_url, source_authorization, expected_hash)) = remote_mesh {
+        if !tickets.configure_remote_mesh(&token, source_url, source_authorization, expected_hash) {
+            return Err("preview stream ticket could not be configured".to_owned());
+        }
+    }
     drop(tickets);
 
     let body = serde_json::json!({
@@ -23390,6 +23488,8 @@ async fn serve(once: bool) -> Result<(), String> {
         oauth_states: RwLock::new(oauth_state_store),
         stream_tickets: RwLock::new(PreviewStreamTicketStore::default()),
         multisource: Arc::new(RwLock::new(multisource::SwarmStore::default())),
+        peer_endpoints: RwLock::new(BTreeMap::new()),
+        preview_streams: Arc::new(Semaphore::new(MAX_PREVIEW_STREAMS)),
     });
     match credential_store::load(&state.config) {
         Ok(Some(stored)) => {
@@ -23916,6 +24016,15 @@ async fn handle_session_command(
             )
             .await;
         }
+        SessionCommand::RequestPeerEndpoint(username) => {
+            send_active_server_message(
+                state,
+                session,
+                ServerMessage::GetPeerAddressRequest { username },
+                "request peer endpoint for preview stream",
+            )
+            .await;
+        }
         SessionCommand::IndirectTransfer {
             id,
             username,
@@ -24424,6 +24533,14 @@ struct LocalStreamFile {
     file: fs::File,
     length: u64,
     content_type: String,
+    cleanup_path: Option<PathBuf>,
+}
+
+struct PeerPreviewStream {
+    connection: slskr_client::file_transfer::FileTransferConnection<TcpStream>,
+    token: u32,
+    length: u64,
+    content_type: String,
 }
 
 fn primary_stream_id(path: &str) -> Option<String> {
@@ -24440,6 +24557,282 @@ fn primary_stream_id(path: &str) -> Option<String> {
     };
     let raw = normalized.strip_prefix("/api/streams/")?;
     (!raw.is_empty() && !raw.ends_with("/share-ticket")).then(|| decoded_path_segment(raw))
+}
+
+fn preview_stream_ticket_path(path: &str) -> Option<(&'static str, String)> {
+    let route = routing::parse_route("GET", path);
+    let normalized = if let Some(versioned) = route
+        .normalized_path
+        .strip_prefix("/api/v0/")
+        .or_else(|| route.normalized_path.strip_prefix("/api/v1/"))
+        .or_else(|| route.normalized_path.strip_prefix("/api/v2/"))
+    {
+        format!("/api/{versioned}")
+    } else {
+        route.normalized_path.to_owned()
+    };
+    let (family, token) = normalized
+        .strip_prefix("/api/peer-streams/")
+        .map(|token| ("peer", token))
+        .or_else(|| {
+            normalized
+                .strip_prefix("/api/mesh-streams/")
+                .map(|token| ("mesh", token))
+        })?;
+    (!token.is_empty() && !token.contains('/')).then(|| (family, decoded_path_segment(token)))
+}
+
+async fn open_local_preview_stream_file(
+    state: &AppState,
+    family: &str,
+    token: &str,
+) -> Result<Option<LocalStreamFile>, String> {
+    let ticket = {
+        let mut tickets = state.stream_tickets.write().await;
+        tickets.get(token)
+    };
+    let Some(ticket) = ticket.filter(|ticket| ticket.family == family) else {
+        return Ok(None);
+    };
+
+    if let Some(shared) = find_shared_local_file(state, &ticket.filename).await {
+        let file = open_shared_local_file(state, &shared.local_path)?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("shared preview metadata failed: {error}"))?;
+        if metadata.is_file() {
+            return Ok(Some(LocalStreamFile {
+                file,
+                length: metadata.len(),
+                content_type: ticket.content_type,
+                cleanup_path: None,
+            }));
+        }
+    }
+
+    let transfer = {
+        let transfers = state.transfers.read().await;
+        transfers
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.direction == 0
+                    && entry.filename == ticket.filename
+                    && matches!(entry.status.as_str(), "succeeded" | "completed")
+            })
+            .cloned()
+    };
+    let Some(local_path) = transfer.and_then(|transfer| transfer.local_path) else {
+        return Ok(None);
+    };
+    let root = download_root(&state.config.state_dir);
+    let file = open_download_file_for_read(&root, Path::new(&local_path))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("download preview metadata failed: {error}"))?;
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    Ok(Some(LocalStreamFile {
+        file,
+        length: metadata.len(),
+        content_type: ticket.content_type,
+        cleanup_path: None,
+    }))
+}
+
+async fn open_remote_peer_preview_stream(
+    state: &AppState,
+    family: &str,
+    token: &str,
+) -> Result<Option<PeerPreviewStream>, String> {
+    if family != "peer" || !state.config.transfer_allow_outbound {
+        return Ok(None);
+    }
+    let ticket = {
+        let mut tickets = state.stream_tickets.write().await;
+        tickets.get(token)
+    };
+    let Some(ticket) = ticket.filter(|ticket| ticket.family == "peer") else {
+        return Ok(None);
+    };
+    if matches!(ticket.source.as_str(), "local-share" | "transfer") {
+        return Ok(None);
+    }
+    let username = ticket
+        .peer_username
+        .clone()
+        .filter(|username| !username.trim().is_empty())
+        .ok_or_else(|| "peer preview ticket has no source username".to_owned())?;
+    let address = request_peer_endpoint(state, &username).await?;
+    let transfer_token = state.transfers.write().await.allocate_token();
+    let now = unix_timestamp();
+    let transfer = TransferEntry {
+        id: 0,
+        direction: 0,
+        token: transfer_token,
+        peer_username: Some(username),
+        filename: ticket.filename.clone(),
+        local_path: None,
+        batch_id: None,
+        request_id: None,
+        request_name: None,
+        destination_directory: None,
+        bit_rate: None,
+        sample_rate: None,
+        bit_depth: None,
+        length_seconds: None,
+        artist: None,
+        album: None,
+        title: None,
+        track_number: None,
+        year: None,
+        size: (ticket.size > 0).then_some(ticket.size),
+        bytes_transferred: 0,
+        status: "peer_negotiating".to_owned(),
+        reason: None,
+        requested_at: now,
+        updated_at: now,
+    };
+    let length = match negotiate_peer_transfer(state, &address, &transfer).await? {
+        PeerTransferNegotiation::Allowed { token, size } if token == transfer_token => size
+            .or(transfer.size)
+            .filter(|size| *size > 0)
+            .ok_or_else(|| "peer preview size is unavailable".to_owned())?,
+        PeerTransferNegotiation::Rejected { .. }
+        | PeerTransferNegotiation::QueuedInbound { .. } => {
+            return Err("peer preview source is not immediately available".to_owned());
+        }
+        PeerTransferNegotiation::Allowed { .. } => {
+            return Err("peer preview negotiation token did not match".to_owned());
+        }
+    };
+    let connection = connect_file_transfer_preferred(state, &address).await?;
+    Ok(Some(PeerPreviewStream {
+        connection,
+        token: transfer_token,
+        length,
+        content_type: ticket.content_type,
+    }))
+}
+
+async fn open_remote_mesh_preview_file(
+    state: &AppState,
+    family: &str,
+    token: &str,
+) -> Result<Option<LocalStreamFile>, String> {
+    if family != "mesh" {
+        return Ok(None);
+    }
+    let ticket = {
+        let mut tickets = state.stream_tickets.write().await;
+        tickets.get(token)
+    };
+    let Some(ticket) = ticket.filter(|ticket| ticket.family == "mesh") else {
+        return Ok(None);
+    };
+    if matches!(ticket.source.as_str(), "local-share" | "transfer") {
+        return Ok(None);
+    }
+    let source_url = ticket
+        .source_url
+        .clone()
+        .ok_or_else(|| "mesh preview ticket has no executable source endpoint".to_owned())?;
+    let expected_hash = ticket
+        .expected_hash
+        .as_deref()
+        .ok_or_else(|| "mesh preview ticket has no expected hash".to_owned())?;
+    let relative = format!(".preview/{}.part", uuid::Uuid::new_v4());
+    let path = safe_download_path(&state.config.state_dir, &relative).and_then(|path| {
+        ensure_scoped_download_path(&state.config.state_dir, path.to_string_lossy().as_ref())
+    })?;
+    multisource::fetch_single_verified_source(
+        multisource::RangeSource {
+            username: ticket
+                .peer_username
+                .clone()
+                .unwrap_or_else(|| "mesh-peer".to_owned()),
+            url: source_url,
+            authorization: ticket.source_authorization.clone(),
+        },
+        ticket.size,
+        expected_hash,
+        &path,
+    )
+    .await?;
+    let file = match open_download_file_for_read(&download_root(&state.config.state_dir), &path) {
+        Ok(file) => file,
+        Err(error) => {
+            let _ = fs::remove_file(&path);
+            return Err(error);
+        }
+    };
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("mesh preview metadata failed: {error}"))?;
+    Ok(Some(LocalStreamFile {
+        file,
+        length: metadata.len(),
+        content_type: ticket.content_type,
+        cleanup_path: Some(path),
+    }))
+}
+
+async fn write_peer_preview_response<W: tokio::io::AsyncWrite + Unpin>(
+    writer: &mut W,
+    mut preview: PeerPreviewStream,
+    include_body: bool,
+    keep_alive: bool,
+    extra_headers: &str,
+    io_timeout: Duration,
+) -> Result<http_server::FileResponseResult, String> {
+    let connection = if keep_alive { "keep-alive" } else { "close" };
+    let headers = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccept-Ranges: none\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n",
+        preview.content_type, preview.length
+    );
+    time::timeout(io_timeout, writer.write_all(headers.as_bytes()))
+        .await
+        .map_err(|_| "peer preview response header timed out".to_owned())?
+        .map_err(|error| format!("peer preview response header failed: {error}"))?;
+    if include_body {
+        let received_token = time::timeout(io_timeout, preview.connection.receive_token())
+            .await
+            .map_err(|_| "peer preview token receive timed out".to_owned())?
+            .map_err(|error| format!("peer preview token receive failed: {error}"))?;
+        if received_token != preview.token {
+            return Err("peer preview transfer token did not match".to_owned());
+        }
+        time::timeout(io_timeout, preview.connection.send_offset(0))
+            .await
+            .map_err(|_| "peer preview offset send timed out".to_owned())?
+            .map_err(|error| format!("peer preview offset send failed: {error}"))?;
+        let mut remaining = preview.length;
+        while remaining > 0 {
+            let wanted = usize::try_from(remaining.min(TRANSFER_PROGRESS_CHUNK_BYTES as u64))
+                .map_err(|_| "peer preview chunk size is invalid".to_owned())?;
+            let chunk = time::timeout(io_timeout, preview.connection.read_chunk(wanted))
+                .await
+                .map_err(|_| "peer preview chunk receive timed out".to_owned())?
+                .map_err(|error| format!("peer preview chunk receive failed: {error}"))?;
+            if chunk.is_empty() {
+                return Err("peer preview source closed before completion".to_owned());
+            }
+            time::timeout(io_timeout, writer.write_all(&chunk))
+                .await
+                .map_err(|_| "peer preview response write timed out".to_owned())?
+                .map_err(|error| format!("peer preview response write failed: {error}"))?;
+            remaining = remaining.saturating_sub(chunk.len() as u64);
+        }
+    }
+    time::timeout(io_timeout, writer.flush())
+        .await
+        .map_err(|_| "peer preview response flush timed out".to_owned())?
+        .map_err(|error| format!("peer preview response flush failed: {error}"))?;
+    Ok(http_server::FileResponseResult {
+        status_code: 200,
+        content_length: preview.length,
+    })
 }
 
 async fn open_primary_stream_file(
@@ -24482,6 +24875,7 @@ async fn open_primary_stream_file(
                     file,
                     length: metadata.len(),
                     content_type: preview_stream_content_type(&filename).to_owned(),
+                    cleanup_path: None,
                 }));
             }
         }
@@ -24522,6 +24916,7 @@ async fn open_primary_stream_file(
         file,
         length: metadata.len(),
         content_type: preview_stream_content_type(&transfer.filename).to_owned(),
+        cleanup_path: None,
     }))
 }
 
@@ -26069,6 +26464,7 @@ async fn project_server_message(
             record_event(state, "room.users.updated", "rooms", None).await;
         }
         ServerMessage::GetPeerAddressResponse(address) => {
+            remember_peer_endpoint(state, address.clone()).await;
             project_peer_browse_response(state, address).await;
             project_peer_transfer_response(state, address).await;
         }
@@ -26480,6 +26876,52 @@ fn test_user_endpoint_peer_address(state: &AppState, username: &str) -> Option<P
         obfuscation_type: 0,
         obfuscated_port: 0,
     })
+}
+
+async fn remember_peer_endpoint(state: &AppState, address: PeerAddress) {
+    let key = address.username.to_ascii_lowercase();
+    let mut endpoints = state.peer_endpoints.write().await;
+    if endpoints.len() >= MAX_PEER_ENDPOINT_RECORDS && !endpoints.contains_key(&key) {
+        if let Some(oldest) = endpoints
+            .iter()
+            .min_by_key(|(_, (_, updated_at))| *updated_at)
+            .map(|(username, _)| username.clone())
+        {
+            endpoints.remove(&oldest);
+        }
+    }
+    endpoints.insert(key, (address, unix_timestamp()));
+}
+
+async fn cached_peer_endpoint(state: &AppState, username: &str) -> Option<PeerAddress> {
+    if let Some(address) = test_user_endpoint_peer_address(state, username) {
+        return Some(address);
+    }
+    let now = unix_timestamp();
+    let mut endpoints = state.peer_endpoints.write().await;
+    endpoints
+        .retain(|_, (_, updated_at)| now.saturating_sub(*updated_at) <= PEER_ENDPOINT_TTL_SECONDS);
+    endpoints
+        .get(&username.to_ascii_lowercase())
+        .map(|(address, _)| address.clone())
+}
+
+async fn request_peer_endpoint(state: &AppState, username: &str) -> Result<PeerAddress, String> {
+    if let Some(address) = cached_peer_endpoint(state, username).await {
+        return Ok(address);
+    }
+    try_send_session_command(
+        state,
+        SessionCommand::RequestPeerEndpoint(username.to_owned()),
+    )?;
+    let deadline = Instant::now() + state.config.peer_response_timeout;
+    while Instant::now() < deadline {
+        time::sleep(Duration::from_millis(25)).await;
+        if let Some(address) = cached_peer_endpoint(state, username).await {
+            return Ok(address);
+        }
+    }
+    Err("peer endpoint lookup timed out".to_owned())
 }
 
 async fn execute_accepted_file_transfer(
@@ -29488,6 +29930,26 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             }
         };
 
+        let preview_ticket = preview_stream_ticket_path(path);
+        let preview_stream = preview_ticket.is_some();
+        let mut remote_preview = None;
+        let mut preview_permit = None;
+        if preview_stream
+            && allowed
+            && matches!(method, "GET" | "HEAD")
+            && response.status == "200 OK"
+        {
+            match Arc::clone(&state.preview_streams).try_acquire_owned() {
+                Ok(permit) => preview_permit = Some(permit),
+                Err(_) => {
+                    response = routing::HttpResponse {
+                        status: "429 Too Many Requests",
+                        content_type: "application/json",
+                        body: r#"{"error":"preview stream limit reached"}"#.to_owned(),
+                    };
+                }
+            }
+        }
         let stream_file =
             if allowed && matches!(method, "GET" | "HEAD") && response.status == "200 OK" {
                 if let Some(stream_id) = primary_stream_id(path) {
@@ -29499,6 +29961,37 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                         }
                         Err(error) => {
                             eprintln!("local stream open failed: {error}");
+                            response = routing::not_found_response();
+                            None
+                        }
+                    }
+                } else if let Some((family, ticket)) = preview_ticket.as_ref() {
+                    match open_local_preview_stream_file(&state, family, ticket).await {
+                        Ok(Some(stream)) => Some(stream),
+                        Ok(None) => {
+                            if *family == "mesh" {
+                                match open_remote_mesh_preview_file(&state, family, ticket).await {
+                                    Ok(stream) => stream,
+                                    Err(error) => {
+                                        eprintln!("remote mesh preview open failed: {error}");
+                                        response = routing::not_found_response();
+                                        None
+                                    }
+                                }
+                            } else {
+                                match open_remote_peer_preview_stream(&state, family, ticket).await
+                                {
+                                    Ok(stream) => remote_preview = stream,
+                                    Err(error) => {
+                                        eprintln!("remote preview stream open failed: {error}");
+                                        response = routing::not_found_response();
+                                    }
+                                }
+                                None
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("local preview stream open failed: {error}");
                             response = routing::not_found_response();
                             None
                         }
@@ -29539,6 +30032,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         );
 
         if let Some(stream) = stream_file {
+            let cleanup_path = stream.cleanup_path.clone();
             let stream_extra = format!(
                 "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n{}X-Request-ID: {}\r\n",
                 max_requests, remaining, reset_secs, cors_str, request_id
@@ -29549,9 +30043,63 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 stream.length,
                 &stream.content_type,
                 req.headers.range.as_deref(),
+                !preview_stream,
                 method == "GET",
                 keep_alive,
                 &stream_extra,
+            )
+            .await;
+            if let Some(path) = cleanup_path {
+                let _ = fs::remove_file(path);
+            }
+            let written = written?;
+            let resp_log = logging::HttpResponseLog {
+                status_code: written.status_code,
+                content_length: usize::try_from(written.content_length).unwrap_or(usize::MAX),
+                duration_ms: logging::elapsed_ms(request_timer),
+                error: None,
+            };
+            let log_config = logging::LogConfig {
+                level: *state.log_level.read().await,
+                log_requests: true,
+                log_responses: true,
+                log_errors_only: false,
+            };
+            logging::log_transaction(
+                &log_config,
+                &logging::HttpTransactionLog {
+                    request: req_log.clone(),
+                    response: resp_log.clone(),
+                },
+            );
+            record_http_log(
+                &state,
+                &request_id,
+                &logging::HttpTransactionLog {
+                    request: req_log,
+                    response: resp_log,
+                },
+            )
+            .await;
+            drop(preview_permit);
+            if !keep_alive {
+                break;
+            }
+            continue;
+        }
+
+        if let Some(preview) = remote_preview {
+            let stream_extra = format!(
+                "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n{}X-Request-ID: {}\r\n",
+                max_requests, remaining, reset_secs, cors_str, request_id
+            );
+            let written = write_peer_preview_response(
+                &mut writer,
+                preview,
+                method == "GET",
+                keep_alive,
+                &stream_extra,
+                state.config.peer_response_timeout,
             )
             .await?;
             let resp_log = logging::HttpResponseLog {
@@ -29582,6 +30130,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 },
             )
             .await;
+            drop(preview_permit);
             if !keep_alive {
                 break;
             }
@@ -32346,6 +32895,8 @@ mod tests {
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
             stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
             multisource: Arc::new(RwLock::new(super::multisource::SwarmStore::default())),
+            peer_endpoints: RwLock::new(BTreeMap::new()),
+            preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
         });
         (state, receiver)
     }
@@ -45001,6 +45552,344 @@ mod tests {
         assert_eq!(&raw[split + 4..], b"3456");
     }
 
+    #[tokio::test]
+    async fn preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-peer-preview-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("create preview share root");
+        std::fs::write(root.join("preview.flac"), b"preview-bytes").expect("write preview fixture");
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", "stream-token")
+                .with("SLSKR_SHARE_FIXTURE", "")
+                .with("SLSKR_SHARE_DIRS", &root.display().to_string()),
+        );
+        let virtual_filename = state.shares.read().await.entries[0].filename.clone();
+        let ticket = state
+            .stream_tickets
+            .write()
+            .await
+            .issue(
+                "peer",
+                "local-share",
+                virtual_filename.clone(),
+                virtual_filename,
+                Some("peer".to_owned()),
+                13,
+                "audio/flac".to_owned(),
+                120,
+            )
+            .expect("issue peer preview ticket")
+            .0;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind preview server");
+        let address = listener.local_addr().expect("preview server address");
+        let server_state = Arc::clone(&state);
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept preview request");
+            super::handle_http_connection(stream, server_state)
+                .await
+                .expect("serve preview response");
+        });
+        let mut client = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("connect preview client");
+        client
+            .write_all(
+                format!(
+                    "GET /api/v0/peer-streams/{} HTTP/1.1\r\nHost: localhost\r\nRange: bytes=2-4\r\nConnection: close\r\n\r\n",
+                    super::url_encode(&ticket)
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write preview request");
+        let mut raw = Vec::new();
+        client
+            .read_to_end(&mut raw)
+            .await
+            .expect("read preview response");
+        server.await.expect("preview server task");
+        std::fs::remove_dir_all(root).expect("remove preview fixture");
+
+        let split = raw
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .expect("preview response header boundary");
+        let headers = String::from_utf8(raw[..split].to_vec()).expect("preview response headers");
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(headers.contains("Content-Type: audio/flac\r\n"));
+        assert!(headers.contains("Content-Length: 13\r\n"));
+        assert!(headers.contains("Accept-Ranges: none\r\n"));
+        assert_eq!(&raw[split + 4..], b"preview-bytes");
+    }
+
+    #[tokio::test]
+    async fn peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_record() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind peer preview source");
+        let peer_address = peer_listener.local_addr().expect("peer preview address");
+        let (state, _receiver) = test_state_with_env(MapEnv::default().with(
+            "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
+            &format!("friend={peer_address}"),
+        ));
+        let ticket = state
+            .stream_tickets
+            .write()
+            .await
+            .issue(
+                "peer",
+                "peer-preview",
+                "Remote/Song.flac".to_owned(),
+                "Remote/Song.flac".to_owned(),
+                Some("friend".to_owned()),
+                4,
+                "audio/flac".to_owned(),
+                120,
+            )
+            .expect("issue remote peer preview ticket")
+            .0;
+        let peer = tokio::spawn(async move {
+            let (stream, _) = peer_listener
+                .accept()
+                .await
+                .expect("accept preview negotiation");
+            let mut init = slskr_client::stream::InitConnection::new(stream);
+            assert_eq!(
+                init.receive().await.expect("preview negotiation init"),
+                slskr_client::protocol::init::InitMessage::PeerInit {
+                    username: "tester".to_owned(),
+                    connection_type: "P".to_owned(),
+                    token: 0,
+                }
+            );
+            let mut messages = slskr_client::stream::PeerMessageConnection::new(init.into_inner());
+            assert_eq!(
+                messages.receive().await.expect("preview transfer request"),
+                super::PeerMessage::TransferRequest(super::TransferRequest {
+                    filename_encoding: Default::default(),
+                    direction: 0,
+                    token: 1,
+                    filename: "Remote/Song.flac".to_owned(),
+                    size: None,
+                })
+            );
+            messages
+                .send(&super::PeerMessage::TransferResponse(
+                    super::TransferResponse::Allowed {
+                        token: 1,
+                        size: Some(4),
+                    },
+                ))
+                .await
+                .expect("allow preview transfer");
+
+            let (stream, _) = peer_listener
+                .accept()
+                .await
+                .expect("accept preview file transfer");
+            let mut init = slskr_client::stream::InitConnection::new(stream);
+            assert_eq!(
+                init.receive().await.expect("preview file init"),
+                slskr_client::protocol::init::InitMessage::PeerInit {
+                    username: "tester".to_owned(),
+                    connection_type: "F".to_owned(),
+                    token: 0,
+                }
+            );
+            let mut file =
+                slskr_client::file_transfer::FileTransferConnection::new(init.into_inner());
+            file.send_token(1).await.expect("send preview token");
+            assert_eq!(file.receive_offset().await.expect("preview offset"), 0);
+            file.write_chunk(b"song")
+                .await
+                .expect("write preview bytes");
+        });
+
+        let http_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind peer preview HTTP server");
+        let http_address = http_listener.local_addr().expect("preview HTTP address");
+        let server_state = Arc::clone(&state);
+        let http = tokio::spawn(async move {
+            let (stream, _) = http_listener
+                .accept()
+                .await
+                .expect("accept preview HTTP request");
+            super::handle_http_connection(stream, server_state)
+                .await
+                .expect("serve remote preview response");
+        });
+        let mut client = tokio::net::TcpStream::connect(http_address)
+            .await
+            .expect("connect remote preview client");
+        client
+            .write_all(
+                format!(
+                    "GET /api/v0/peer-streams/{} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    super::url_encode(&ticket)
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("request remote preview");
+        let mut raw = Vec::new();
+        client
+            .read_to_end(&mut raw)
+            .await
+            .expect("read remote preview");
+        http.await.expect("preview HTTP task");
+        peer.await.expect("preview peer task");
+
+        let split = raw
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .expect("remote preview header boundary");
+        let headers = String::from_utf8(raw[..split].to_vec()).expect("remote preview headers");
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(headers.contains("Content-Type: audio/flac\r\n"));
+        assert!(headers.contains("Content-Length: 4\r\n"));
+        assert!(headers.contains("Accept-Ranges: none\r\n"));
+        assert_eq!(&raw[split + 4..], b"song");
+        assert!(state.transfers.read().await.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn mesh_preview_ticket_fetches_verifies_streams_and_removes_staging_file() {
+        use sha2::{Digest, Sha256};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let content = Arc::new(b"mesh-preview".to_vec());
+        let expected_hash = hex::encode(Sha256::digest(content.as_slice()));
+        let source_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mesh preview source");
+        let source_address = source_listener.local_addr().expect("mesh source address");
+        let source_content = Arc::clone(&content);
+        let source = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = source_listener
+                    .accept()
+                    .await
+                    .expect("accept mesh range request");
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                loop {
+                    let count = stream.read(&mut buffer).await.expect("read mesh request");
+                    request.extend_from_slice(&buffer[..count]);
+                    if count == 0 || request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8(request).expect("mesh request UTF-8");
+                let range = request
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(name, _)| name.eq_ignore_ascii_case("range"))
+                    .and_then(|(_, value)| value.trim().strip_prefix("bytes="))
+                    .expect("mesh range header");
+                let (start, end) = range.split_once('-').expect("mesh range bounds");
+                let start = start.parse::<usize>().expect("mesh range start");
+                let end = end.parse::<usize>().expect("mesh range end");
+                let body = &source_content[start..=end];
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/{}\r\nConnection: close\r\n\r\n",
+                            body.len(),
+                            source_content.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .expect("write mesh range headers");
+                stream.write_all(body).await.expect("write mesh range body");
+            }
+        });
+
+        let (state, _receiver) = test_state();
+        let ticket_response = super::route_http_request(
+            "POST",
+            "/api/v0/mesh-streams/tickets",
+            None,
+            &format!(
+                r#"{{"contentId":"mesh-content","filename":"Remote/Mesh.flac","peerId":"mesh-peer","size":{},"expectedHash":"{expected_hash}","sourceUrl":"http://{source_address}/content"}}"#,
+                content.len()
+            ),
+            &state,
+        )
+        .await
+        .expect("create executable mesh ticket");
+        assert_eq!(ticket_response.status, "200 OK");
+        let stream_url = serde_json::from_str::<serde_json::Value>(&ticket_response.body).unwrap()
+            ["streamUrl"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let http_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mesh preview HTTP server");
+        let http_address = http_listener
+            .local_addr()
+            .expect("mesh preview HTTP address");
+        let server_state = Arc::clone(&state);
+        let http = tokio::spawn(async move {
+            let (stream, _) = http_listener
+                .accept()
+                .await
+                .expect("accept mesh preview request");
+            super::handle_http_connection(stream, server_state)
+                .await
+                .expect("serve mesh preview response");
+        });
+        let mut client = tokio::net::TcpStream::connect(http_address)
+            .await
+            .expect("connect mesh preview client");
+        client
+            .write_all(
+                format!(
+                    "GET {stream_url} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("request mesh preview");
+        let mut raw = Vec::new();
+        client
+            .read_to_end(&mut raw)
+            .await
+            .expect("read mesh preview");
+        http.await.expect("mesh preview HTTP task");
+        source.await.expect("mesh preview source task");
+
+        let split = raw
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .expect("mesh preview header boundary");
+        let headers = String::from_utf8(raw[..split].to_vec()).expect("mesh preview headers");
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(headers.contains("Content-Type: audio/flac\r\n"));
+        assert!(headers.contains("Accept-Ranges: none\r\n"));
+        assert_eq!(&raw[split + 4..], content.as_slice());
+        let preview_dir = super::download_root(&state.config.state_dir).join(".preview");
+        assert_eq!(
+            std::fs::read_dir(preview_dir)
+                .expect("read preview staging directory")
+                .count(),
+            0
+        );
+    }
+
     #[test]
     fn library_items_bound_growth_and_checked_ids() {
         let mut library = super::LibraryStore::new();
@@ -49979,6 +50868,8 @@ mod tests {
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
             stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
             multisource: Arc::new(RwLock::new(super::multisource::SwarmStore::default())),
+            peer_endpoints: RwLock::new(BTreeMap::new()),
+            preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
         };
 
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
@@ -50142,6 +51033,8 @@ mod tests {
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
             stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
             multisource: Arc::new(RwLock::new(super::multisource::SwarmStore::default())),
+            peer_endpoints: RwLock::new(BTreeMap::new()),
+            preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",

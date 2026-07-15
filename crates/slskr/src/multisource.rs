@@ -13,7 +13,10 @@ use futures_util::{stream::FuturesUnordered, StreamExt};
 use reqwest::{header, redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::{RwLock, Semaphore};
+use tokio::{
+    io::AsyncWriteExt,
+    sync::{RwLock, Semaphore},
+};
 
 const DEFAULT_CHUNK_SIZE: u64 = 512 * 1024;
 const MIN_CHUNK_SIZE: u64 = 64 * 1024;
@@ -225,12 +228,17 @@ pub fn validate_request(request: &mut SwarmRequest) -> Result<String, String> {
     Ok(expected)
 }
 
-pub fn new_job(id: String, request: &SwarmRequest, output_path: &Path, now: u64) -> SwarmJob {
+pub fn new_job(
+    id: String,
+    request: &SwarmRequest,
+    public_output_path: String,
+    now: u64,
+) -> SwarmJob {
     SwarmJob {
         id,
         status: "queued".to_owned(),
         filename: request.filename.clone(),
-        output_path: output_path.display().to_string(),
+        output_path: public_output_path,
         file_size: request.file_size,
         chunk_size: request.chunk_size,
         sources: request
@@ -278,11 +286,22 @@ pub async fn execute(
     id: String,
     request: SwarmRequest,
     output_path: PathBuf,
+    public_output_path: String,
     store: Arc<RwLock<SwarmStore>>,
 ) -> SwarmResult {
     let started = Instant::now();
     let result = match EXECUTION_PERMITS.try_acquire() {
-        Ok(_permit) => execute_inner(&id, &request, &output_path, &store, started).await,
+        Ok(_permit) => {
+            execute_inner(
+                &id,
+                &request,
+                &output_path,
+                &public_output_path,
+                &store,
+                started,
+            )
+            .await
+        }
         Err(_) => Err("multisource execution capacity is full".to_owned()),
     };
     let result = match result {
@@ -291,7 +310,7 @@ pub async fn execute(
             id: id.clone(),
             success: false,
             filename: request.filename,
-            output_path: output_path.display().to_string(),
+            output_path: public_output_path,
             bytes_downloaded: 0,
             total_time_ms: millis(started.elapsed()),
             sources_used: 0,
@@ -307,10 +326,66 @@ pub async fn execute(
     result
 }
 
+pub async fn fetch_single_verified_source(
+    source: RangeSource,
+    file_size: u64,
+    expected_hash: &str,
+    output_path: &Path,
+) -> Result<String, String> {
+    if file_size == 0 || file_size > MAX_FILE_SIZE {
+        return Err("mesh preview size is outside the supported range".to_owned());
+    }
+    let expected_hash = expected_hash.trim().to_ascii_lowercase();
+    if expected_hash.len() != 64 || !expected_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("mesh preview expected hash is invalid".to_owned());
+    }
+    if output_path.exists() {
+        return Err("mesh preview staging path already exists".to_owned());
+    }
+    let prepared = prepare_source(&source).await?;
+    fetch_range(&prepared, 0, 0, file_size).await?;
+    let output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output_path)
+        .map_err(|_| "mesh preview staging file could not be created".to_owned())?;
+    let mut output = tokio::fs::File::from_std(output);
+    let operation = async {
+        let mut hasher = Sha256::new();
+        let mut offset = 0_u64;
+        while offset < file_size {
+            let end = offset.saturating_add(DEFAULT_CHUNK_SIZE).min(file_size) - 1;
+            let bytes = fetch_range(&prepared, offset, end, file_size).await?;
+            output
+                .write_all(&bytes)
+                .await
+                .map_err(|_| "mesh preview staging write failed".to_owned())?;
+            hasher.update(&bytes);
+            offset = end + 1;
+        }
+        output
+            .sync_all()
+            .await
+            .map_err(|_| "mesh preview staging sync failed".to_owned())?;
+        let actual_hash = hex::encode(hasher.finalize());
+        if actual_hash != expected_hash {
+            return Err("mesh preview failed SHA-256 verification".to_owned());
+        }
+        Ok(actual_hash)
+    }
+    .await;
+    drop(output);
+    if operation.is_err() {
+        let _ = fs::remove_file(output_path);
+    }
+    operation
+}
+
 async fn execute_inner(
     id: &str,
     request: &SwarmRequest,
     output_path: &Path,
+    public_output_path: &str,
     store: &Arc<RwLock<SwarmStore>>,
     started: Instant,
 ) -> Result<SwarmResult, String> {
@@ -458,7 +533,7 @@ async fn execute_inner(
             id: id.to_owned(),
             success: true,
             filename: request.filename.clone(),
-            output_path: output_path.display().to_string(),
+            output_path: public_output_path.to_owned(),
             bytes_downloaded: request.file_size,
             total_time_ms: millis(started.elapsed()),
             sources_used,
@@ -826,15 +901,23 @@ mod tests {
         store.write().await.insert(new_job(
             id.clone(),
             &request,
-            &output_path,
+            "multisource/assembled.flac".to_owned(),
             unix_timestamp(),
         ));
 
-        let result = execute(id.clone(), request, output_path.clone(), Arc::clone(&store)).await;
+        let result = execute(
+            id.clone(),
+            request,
+            output_path.clone(),
+            "multisource/assembled.flac".to_owned(),
+            Arc::clone(&store),
+        )
+        .await;
         first_server.abort();
         second_server.abort();
 
         assert!(result.success, "swarm failed: {:?}", result.error);
+        assert_eq!(result.output_path, "multisource/assembled.flac");
         assert_eq!(result.final_hash, expected_hash);
         assert_eq!(result.sources_used, 2);
         assert_eq!(result.chunks.len(), 4);
@@ -845,9 +928,41 @@ mod tests {
         let store = store.read().await;
         let job = store.get(&id).expect("completed swarm job");
         assert_eq!(job.status, "completed");
+        assert_eq!(job.output_path, "multisource/assembled.flac");
         assert_eq!(job.completed_chunks, 4);
         assert_eq!(job.bytes_downloaded, content.len() as u64);
         drop(store);
         fs::remove_dir_all(root).expect("remove swarm test root");
+    }
+
+    #[tokio::test]
+    async fn single_mesh_source_hash_failure_removes_staging_file() {
+        let content = Arc::new(b"untrusted-mesh-bytes".to_vec());
+        let (address, server) = spawn_range_source(content).await;
+        let root = std::env::temp_dir().join(format!(
+            "slskr-mesh-preview-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir(&root).expect("create mesh preview test root");
+        let output = root.join("preview.part");
+        let result = fetch_single_verified_source(
+            RangeSource {
+                username: "mesh-peer".to_owned(),
+                url: format!("http://{address}/content"),
+                authorization: None,
+            },
+            20,
+            &"00".repeat(32),
+            &output,
+        )
+        .await;
+        server.abort();
+
+        assert_eq!(
+            result.unwrap_err(),
+            "mesh preview failed SHA-256 verification"
+        );
+        assert!(!output.exists());
+        fs::remove_dir_all(root).expect("remove mesh preview test root");
     }
 }

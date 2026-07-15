@@ -49,6 +49,9 @@ pub fn check_route_auth(
     let normalized = normalize_api_path(path);
     let delegated_share_route = (matches!(method, "GET" | "HEAD")
         && normalized.starts_with("/api/streams/"))
+        || (matches!(method, "GET" | "HEAD")
+            && (normalized.starts_with("/api/peer-streams/")
+                || normalized.starts_with("/api/mesh-streams/")))
         || (method == "POST"
             && normalized.starts_with("/api/streams/")
             && normalized.ends_with("/share-ticket"))

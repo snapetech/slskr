@@ -748,11 +748,12 @@ pub async fn write_file_response<W: AsyncWrite + Unpin>(
     total_length: u64,
     content_type: &str,
     range: Option<&str>,
+    accept_ranges: bool,
     include_body: bool,
     keep_alive: bool,
     extra_headers: &str,
 ) -> Result<FileResponseResult, String> {
-    let selected = match range {
+    let selected = match range.filter(|_| accept_ranges) {
         Some(value) => match parse_byte_range(value, total_length) {
             Ok(range) => Some(range),
             Err(()) => {
@@ -791,8 +792,9 @@ pub async fn write_file_response<W: AsyncWrite + Unpin>(
         ("200 OK", 0, total_length, String::new())
     };
     let connection = if keep_alive { "keep-alive" } else { "close" };
+    let accept_ranges = if accept_ranges { "bytes" } else { "none" };
     let headers = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\n{content_range}Accept-Ranges: bytes\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n"
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\n{content_range}Accept-Ranges: {accept_ranges}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n"
     );
     time::timeout(RESPONSE_WRITE_TIMEOUT, writer.write_all(headers.as_bytes()))
         .await
@@ -1531,6 +1533,7 @@ mod tests {
             "audio/flac",
             Some("bytes=2-5"),
             true,
+            true,
             false,
             "X-Request-ID: test\r\n",
         )
@@ -1571,6 +1574,7 @@ mod tests {
             10,
             "audio/flac",
             Some("bytes=10-"),
+            true,
             true,
             false,
             "",
