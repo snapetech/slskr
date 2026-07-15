@@ -343,6 +343,12 @@ fn validate_api_token(token: &str) -> Result<(), String> {
     if token.chars().any(char::is_control) {
         return Err("HTTP API token must not contain control characters".to_owned());
     }
+    if token.len() > crate::http_server::MAX_API_TOKEN_BYTES {
+        return Err(format!(
+            "HTTP API token exceeds the maximum representable header length of {} bytes",
+            crate::http_server::MAX_API_TOKEN_BYTES
+        ));
+    }
     Ok(())
 }
 
@@ -1381,6 +1387,35 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn api_token_length_matches_http_header_capacity() {
+        let maximum = "x".repeat(crate::http_server::MAX_API_TOKEN_BYTES);
+        let config = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_API_TOKEN", &maximum),
+        )
+        .expect("maximum representable token");
+        assert_eq!(config.api_token.as_deref(), Some(maximum.as_str()));
+
+        let oversized = format!("{maximum}x");
+        let env = MapEnv::default().with("SLSKR_API_TOKEN", &oversized);
+        let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+            .expect_err("oversized environment token must fail");
+        assert!(error.contains("maximum representable"), "{error}");
+
+        let file_config = super::FileConfig {
+            auth: super::AuthFileConfig {
+                api_token: Some(oversized),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let error = super::AppConfig::from_layers(None, file_config, &MapEnv::default())
+            .expect_err("oversized file token must fail");
+        assert!(error.contains("maximum representable"), "{error}");
     }
 
     #[test]

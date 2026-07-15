@@ -28,6 +28,7 @@ impl HttpRequest {
 pub const BODY_SIZE_LIMIT: usize = 1024 * 1024; // 1 MiB
 pub const REQUEST_LINE_LIMIT: usize = 8 * 1024;
 pub const HEADER_LINE_LIMIT: usize = 8 * 1024;
+pub const MAX_API_TOKEN_BYTES: usize = HEADER_LINE_LIMIT - b"X-API-Key: \r\n".len();
 pub const HEADER_TOTAL_LIMIT: usize = 64 * 1024;
 pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 pub const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
