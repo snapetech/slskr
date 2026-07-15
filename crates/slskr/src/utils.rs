@@ -9,15 +9,38 @@ use tokio::net::TcpStream;
 
 use crate::config::AppConfig;
 
-pub(crate) fn is_non_global_special_use_ipv4(ip: Ipv4Addr) -> bool {
+pub(crate) fn is_blocked_outbound_ipv4(ip: Ipv4Addr) -> bool {
     let address = u32::from(ip);
     let in_cidr = |network: Ipv4Addr, prefix: u32| {
         address >> (32 - prefix) == u32::from(network) >> (32 - prefix)
     };
-    in_cidr(Ipv4Addr::new(100, 64, 0, 0), 10)
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.octets()[0] == 0
+        || ip.octets()[0] >= 224
+        || in_cidr(Ipv4Addr::new(100, 64, 0, 0), 10)
         || in_cidr(Ipv4Addr::new(192, 0, 0, 0), 24)
         || in_cidr(Ipv4Addr::new(192, 88, 99, 0), 24)
         || in_cidr(Ipv4Addr::new(198, 18, 0, 0), 15)
+}
+
+pub(crate) fn nat64_embedded_ipv4(ip: std::net::Ipv6Addr) -> Option<Ipv4Addr> {
+    let segments = ip.segments();
+    (segments[..6] == [0x0064, 0xff9b, 0, 0, 0, 0]).then(|| {
+        let octets = ip.octets();
+        Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15])
+    })
+}
+
+pub(crate) fn is_non_global_special_use_ipv6(ip: std::net::Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    (segments[0] == 0x0100 && segments[1..4] == [0, 0, 0])
+        || segments[..3] == [0x0064, 0xff9b, 0x0001]
+        || segments[..3] == [0x2001, 0x0002, 0]
+        || (segments[0] == 0x2001 && matches!(segments[1] & 0xfff0, 0x0010 | 0x0020))
 }
 
 // ============================================================================

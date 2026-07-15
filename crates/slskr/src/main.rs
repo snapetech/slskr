@@ -16749,19 +16749,13 @@ fn validate_integration_base_url(base_url: &str) -> Result<ResolvedIntegrationTa
 
 fn is_blocked_integration_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(ip) => {
-            ip.is_private()
-                || ip.is_loopback()
-                || ip.is_link_local()
-                || ip.is_broadcast()
-                || ip.is_documentation()
-                || is_non_global_special_use_ipv4(ip)
-                || ip.octets()[0] == 0
-                || ip.octets()[0] >= 224
-        }
+        IpAddr::V4(ip) => is_blocked_outbound_ipv4(ip),
         IpAddr::V6(ip) => {
             if let Some(v4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
                 return is_blocked_integration_ip(IpAddr::V4(v4));
+            }
+            if let Some(v4) = nat64_embedded_ipv4(ip) {
+                return is_blocked_outbound_ipv4(v4);
             }
             let segments = ip.segments();
             if segments[0] == 0x2002 || (segments[0] == 0x2001 && segments[1] == 0) {
@@ -16774,6 +16768,7 @@ fn is_blocked_integration_ip(ip: IpAddr) -> bool {
                 || (segments[0] & 0xfe00) == 0xfc00
                 || (segments[0] & 0xffc0) == 0xfe80
                 || (segments[0] & 0xffc0) == 0xfec0
+                || is_non_global_special_use_ipv6(ip)
         }
     }
 }
@@ -25761,6 +25756,12 @@ mod tests {
             "2002:c0a8:101::1",
             "2001:0000:4136:e378::1",
             "fec0::1",
+            "64:ff9b::7f00:1",
+            "64:ff9b:1::1",
+            "100::1",
+            "2001:2::1",
+            "2001:10::1",
+            "2001:20::1",
         ] {
             let ip = address.parse::<std::net::IpAddr>().expect("fixture IP");
             assert!(super::is_blocked_integration_ip(ip), "accepted {address}");

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use crate::utils::is_non_global_special_use_ipv4;
+use crate::utils::{is_blocked_outbound_ipv4, is_non_global_special_use_ipv6, nat64_embedded_ipv4};
 
 const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
 const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
@@ -608,19 +608,13 @@ fn parse_cidr_env(name: &str) -> Result<Vec<IpCidr>, String> {
 
 fn default_blocks_webhook_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(ip) => {
-            ip.is_private()
-                || ip.is_loopback()
-                || ip.is_link_local()
-                || ip.is_broadcast()
-                || ip.is_documentation()
-                || is_non_global_special_use_ipv4(ip)
-                || ip.octets()[0] == 0
-                || ip.octets()[0] >= 224
-        }
+        IpAddr::V4(ip) => is_blocked_outbound_ipv4(ip),
         IpAddr::V6(ip) => {
             if let Some(v4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
                 return is_blocked_webhook_ip(IpAddr::V4(v4));
+            }
+            if let Some(v4) = nat64_embedded_ipv4(ip) {
+                return is_blocked_outbound_ipv4(v4);
             }
             let segments = ip.segments();
             if segments[0] == 0x2002 || (segments[0] == 0x2001 && segments[1] == 0) {
@@ -632,6 +626,7 @@ fn default_blocks_webhook_ip(ip: IpAddr) -> bool {
                 || (segments[0] == 0x2001 && segments[1] == 0x0db8)
                 || (segments[0] & 0xfe00) == 0xfc00
                 || (segments[0] & 0xffc0) == 0xfe80
+                || is_non_global_special_use_ipv6(ip)
         }
     }
 }
@@ -815,6 +810,16 @@ mod tests {
         ));
         assert!(is_blocked_webhook_ip("2001:db8::1".parse().unwrap()));
         assert!(is_blocked_webhook_ip("ff02::1".parse().unwrap()));
+        for address in [
+            "64:ff9b::7f00:1",
+            "64:ff9b:1::1",
+            "100::1",
+            "2001:2::1",
+            "2001:10::1",
+            "2001:20::1",
+        ] {
+            assert!(is_blocked_webhook_ip(address.parse().unwrap()));
+        }
     }
 
     #[test]

@@ -20,7 +20,7 @@ if ! rg -n 'validate_webhook_url_for_registration\(&url\)' crates/slskr/src/main
 fi
 
 for token in 'is_private' 'is_loopback' 'is_link_local' 'is_multicast' '2001:db8' 'SLSKR_WEBHOOK_ALLOW_CIDRS' 'SLSKR_WEBHOOK_DENY_CIDRS' 'localhost' '169.254.169.254'; do
-  if ! rg -n "$token" crates/slskr/src/webhooks.rs >/dev/null; then
+  if ! rg -n "$token" crates/slskr/src/webhooks.rs crates/slskr/src/utils.rs >/dev/null; then
     printf 'webhook outbound policy check failed: expected webhook URL policy/test token missing: %s\n' "$token" >&2
     status=1
   fi
@@ -35,6 +35,11 @@ done
 
 if ! rg -n --fixed-strings -- 'test_blocked_webhook_special_use_ip_ranges' crates/slskr/src/webhooks.rs >/dev/null; then
   printf 'webhook outbound policy check failed: special-use IP regression is missing\n' >&2
+  status=1
+fi
+
+if ! rg -n --fixed-strings -- 'nat64_embedded_ipv4' crates/slskr/src/webhooks.rs crates/slskr/src/utils.rs >/dev/null; then
+  printf 'webhook outbound policy check failed: NAT64 embedded IPv4 filtering is missing\n' >&2
   status=1
 fi
 

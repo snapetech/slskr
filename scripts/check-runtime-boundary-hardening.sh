@@ -30,7 +30,8 @@ for anchor in \
   'integration_json_reader_rejects_declared_oversized_response' \
   'integration_json_reader_rejects_chunked_oversized_response' \
   'integration_ssrf_filter_blocks_special_use_ip_ranges' \
-  'is_non_global_special_use_ipv4' \
+  'is_blocked_outbound_ipv4' \
+  'nat64_embedded_ipv4' \
   'MAX_SEARCH_RESULTS_PER_SEARCH' \
   'search_store_caps_results_from_peer_responses' \
   'libc::O_NOFOLLOW' \
