@@ -3482,6 +3482,30 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Mark every queued log for one webhook dispatch with its terminal outcome.
+    pub async fn complete_webhook_logs(
+        &self,
+        webhook_id: &str,
+        correlation_id: &str,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let result = query(
+            r#"
+            UPDATE webhook_logs
+            SET status = ?, error_message = ?
+            WHERE webhook_id = ? AND correlation_id = ? AND status = 'queued'
+            "#,
+        )
+        .bind(status)
+        .bind(error_message)
+        .bind(webhook_id)
+        .bind(correlation_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Get webhook logs for a specific webhook
     pub async fn get_webhook_logs(
         &self,
@@ -3846,9 +3870,36 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].event, "search.created");
 
+        assert_eq!(
+            db.complete_webhook_logs("hook_1", "search_1", "failed", Some("delivery rejected"),)
+                .await
+                .unwrap(),
+            1
+        );
+        let logs = db.get_webhook_logs("hook_1", 10, 0).await.unwrap();
+        assert_eq!(logs[0].status, "failed");
+        assert_eq!(logs[0].error_message.as_deref(), Some("delivery rejected"));
+
+        let mut successful_log = log.clone();
+        successful_log.id = "log_2".to_owned();
+        successful_log.correlation_id = "search_2".to_owned();
+        db.insert_webhook_log(&successful_log).await.unwrap();
+        assert_eq!(
+            db.complete_webhook_logs("hook_1", "search_2", "success", None)
+                .await
+                .unwrap(),
+            1
+        );
+        let logs = db.get_webhook_logs("hook_1", 10, 0).await.unwrap();
+        assert!(logs.iter().any(|record| {
+            record.correlation_id == "search_2"
+                && record.status == "success"
+                && record.error_message.is_none()
+        }));
+
         let stats = db.get_stats().await.unwrap();
         assert_eq!(stats.webhook_count, 1);
-        assert_eq!(stats.webhook_log_count, 1);
+        assert_eq!(stats.webhook_log_count, 2);
 
         db.delete_webhook("hook_1").await.unwrap();
         assert!(db.list_webhooks().await.unwrap().is_empty());

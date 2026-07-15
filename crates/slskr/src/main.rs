@@ -25079,6 +25079,7 @@ async fn dispatch_webhook_event(
     webhooks::WebhookDispatcher::dispatch(
         &webhooks_clone,
         Arc::clone(&state.webhook_deliveries),
+        state.db.clone(),
         correlation_id,
         event,
         data,

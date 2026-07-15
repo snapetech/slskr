@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
+use crate::persistence::DatabaseManager;
 use crate::utils::{is_blocked_outbound_ipv4, is_non_global_special_use_ipv6, nat64_embedded_ipv4};
 
 const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
@@ -383,6 +384,7 @@ impl WebhookDispatcher {
     pub async fn dispatch(
         manager: &WebhookManager,
         deliveries: Arc<Semaphore>,
+        database: Option<DatabaseManager>,
         correlation_id: String,
         event: WebhookEvent,
         data: serde_json::Value,
@@ -393,7 +395,7 @@ impl WebhookDispatcher {
             return;
         }
 
-        let payload = WebhookPayload::new(event, correlation_id, data);
+        let payload = WebhookPayload::new(event, correlation_id.clone(), data);
         let payload_json = payload.to_string().unwrap_or_default();
 
         for webhook in webhooks {
@@ -402,23 +404,63 @@ impl WebhookDispatcher {
                     "[WEBHOOK] Dropped delivery to {} because the delivery pool is full",
                     sanitized_webhook_url_for_log(&webhook.url)
                 );
+                if let Some(database) = database.as_ref() {
+                    if let Err(error) = database
+                        .complete_webhook_logs(
+                            &webhook.id,
+                            &correlation_id,
+                            "failed",
+                            Some("webhook delivery pool is full"),
+                        )
+                        .await
+                    {
+                        eprintln!("[WEBHOOK] Failed to persist dropped delivery outcome: {error}");
+                    }
+                }
                 continue;
             };
             // Spawn async task for each webhook delivery (no blocking)
             let webhook_url = webhook.url.clone();
             let webhook_secret = webhook.secret.clone();
             let webhook_timeout = webhook.timeout_seconds;
+            let webhook_id = webhook.id.clone();
             let payload_clone = payload_json.clone();
+            let database = database.clone();
+            let correlation_id = correlation_id.clone();
 
             tokio::spawn(async move {
                 let _delivery_permit = delivery_permit;
-                let _ = Self::send_webhook(
+                let (status, error_message) = match Self::send_webhook(
                     &webhook_url,
                     &webhook_secret,
                     &payload_clone,
                     webhook_timeout,
                 )
-                .await;
+                .await
+                {
+                    Ok(()) => ("success", None),
+                    Err(error) => {
+                        let error = sanitized_webhook_delivery_error(&error.to_string());
+                        eprintln!(
+                            "[WEBHOOK] Delivery to {} failed: {error}",
+                            sanitized_webhook_url_for_log(&webhook_url)
+                        );
+                        ("failed", Some(error))
+                    }
+                };
+                if let Some(database) = database {
+                    if let Err(error) = database
+                        .complete_webhook_logs(
+                            &webhook_id,
+                            &correlation_id,
+                            status,
+                            error_message.as_deref(),
+                        )
+                        .await
+                    {
+                        eprintln!("[WEBHOOK] Failed to persist delivery outcome: {error}");
+                    }
+                }
             });
         }
     }
@@ -478,6 +520,14 @@ impl WebhookDispatcher {
             "description": description,
             "test": true,
         })
+    }
+}
+
+fn sanitized_webhook_delivery_error(error: &str) -> String {
+    if error.starts_with("webhook delivery failed with status ") {
+        error.to_owned()
+    } else {
+        "webhook delivery request failed".to_owned()
     }
 }
 
@@ -819,18 +869,51 @@ mod tests {
     #[tokio::test]
     async fn dispatch_does_not_spawn_when_delivery_pool_is_full() {
         let mut manager = WebhookManager::new();
-        manager
-            .register(Webhook::new(
-                "https://example.com/hook".to_owned(),
-                vec![WebhookEvent::SearchCreated],
-                Webhook::generate_secret().expect("test randomness"),
-            ))
-            .expect("register webhook");
+        let webhook = Webhook::new(
+            "https://example.com/hook".to_owned(),
+            vec![WebhookEvent::SearchCreated],
+            Webhook::generate_secret().expect("test randomness"),
+        );
+        let webhook_id = webhook.id.clone();
+        manager.register(webhook.clone()).expect("register webhook");
+        let database = DatabaseManager::in_memory().await.expect("in-memory db");
+        database
+            .insert_webhook(&crate::persistence::WebhookRecord {
+                id: webhook_id.clone(),
+                url: webhook.url.clone(),
+                events: WebhookEvent::SearchCreated.to_string(),
+                secret: webhook.secret.clone(),
+                active: true,
+                created_at: 1,
+                last_triggered: None,
+                retry_count: 0,
+                max_retries: 3,
+                timeout_seconds: 30,
+            })
+            .await
+            .expect("persist webhook");
+        database
+            .insert_webhook_log(&crate::persistence::WebhookLogRecord {
+                id: "log_pool_full".to_owned(),
+                webhook_id: webhook_id.clone(),
+                event: WebhookEvent::SearchCreated.to_string(),
+                correlation_id: "correlation".to_owned(),
+                status: "queued".to_owned(),
+                request_body: "{}".to_owned(),
+                response_status: None,
+                response_body: None,
+                error_message: None,
+                attempt: 1,
+                timestamp: 1,
+            })
+            .await
+            .expect("persist queued log");
         let deliveries = Arc::new(Semaphore::new(0));
 
         WebhookDispatcher::dispatch(
             &manager,
             Arc::clone(&deliveries),
+            Some(database.clone()),
             "correlation".to_owned(),
             WebhookEvent::SearchCreated,
             serde_json::json!({"query": "bounded"}),
@@ -839,6 +922,15 @@ mod tests {
 
         assert_eq!(Arc::strong_count(&deliveries), 1);
         assert_eq!(deliveries.available_permits(), 0);
+        let logs = database
+            .get_webhook_logs(&webhook_id, 10, 0)
+            .await
+            .expect("read delivery log");
+        assert_eq!(logs[0].status, "failed");
+        assert_eq!(
+            logs[0].error_message.as_deref(),
+            Some("webhook delivery pool is full")
+        );
     }
 
     #[test]
@@ -939,6 +1031,18 @@ mod tests {
                 "https://example.com/services/secret-path?token=secret-query"
             ),
             "https://example.com"
+        );
+        assert_eq!(
+            sanitized_webhook_delivery_error(
+                "request failed for https://example.com/hook?token=secret-query"
+            ),
+            "webhook delivery request failed"
+        );
+        assert_eq!(
+            sanitized_webhook_delivery_error(
+                "webhook delivery failed with status 503 Service Unavailable"
+            ),
+            "webhook delivery failed with status 503 Service Unavailable"
         );
     }
 
