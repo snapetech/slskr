@@ -154,6 +154,7 @@ const MAX_SHARE_GRANTS: usize = 4_096;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
+const MAX_SEARCH_RECORDS: usize = 500;
 
 #[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
@@ -841,6 +842,41 @@ struct SearchStore {
     next_token: u32,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum SearchCreateError {
+    CapacityFull,
+    DuplicateId,
+    TokenSpaceExhausted,
+}
+
+#[derive(Debug)]
+struct SearchCreateOutcome {
+    record: SearchRecord,
+    evicted: Vec<SearchRecord>,
+}
+
+fn next_search_token_hint(records: &[SearchRecord]) -> u32 {
+    records
+        .iter()
+        .map(|record| record.token)
+        .max()
+        .unwrap_or(0)
+        .wrapping_add(1)
+        .max(1)
+}
+
+fn search_create_error_response(error: SearchCreateError) -> HttpResponse {
+    match error {
+        SearchCreateError::DuplicateId => routing::conflict_response("search id already exists"),
+        SearchCreateError::CapacityFull => {
+            routing::service_unavailable_response("active search capacity is full")
+        }
+        SearchCreateError::TokenSpaceExhausted => {
+            routing::service_unavailable_response("search token space is exhausted")
+        }
+    }
+}
+
 impl SearchStore {
     fn new() -> Self {
         Self {
@@ -851,17 +887,18 @@ impl SearchStore {
 
     #[cfg(test)]
     fn from_persisted(records: Vec<persistence::SearchRecord>) -> Self {
-        let records = records
+        let parsed = records
             .iter()
             .filter_map(SearchRecord::from_persisted)
             .collect::<Vec<_>>();
-        let next_token = records
-            .iter()
-            .map(|record| record.token)
-            .max()
-            .unwrap_or(0)
-            .wrapping_add(1)
-            .max(1);
+        let next_token = next_search_token_hint(&parsed);
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_tokens = std::collections::HashSet::new();
+        let records = parsed
+            .into_iter()
+            .filter(|record| seen_ids.insert(record.id.clone()) && seen_tokens.insert(record.token))
+            .take(MAX_SEARCH_RECORDS)
+            .collect::<Vec<_>>();
         Self {
             records,
             next_token,
@@ -880,7 +917,7 @@ impl SearchStore {
                 .or_default()
                 .push(result);
         }
-        let records = records
+        let parsed = records
             .iter()
             .filter_map(|record| {
                 SearchRecord::from_persisted_with_results(
@@ -889,13 +926,14 @@ impl SearchStore {
                 )
             })
             .collect::<Vec<_>>();
-        let next_token = records
-            .iter()
-            .map(|record| record.token)
-            .max()
-            .unwrap_or(0)
-            .wrapping_add(1)
-            .max(1);
+        let next_token = next_search_token_hint(&parsed);
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_tokens = std::collections::HashSet::new();
+        let records = parsed
+            .into_iter()
+            .filter(|record| seen_ids.insert(record.id.clone()) && seen_tokens.insert(record.token))
+            .take(MAX_SEARCH_RECORDS)
+            .collect::<Vec<_>>();
         Self {
             records,
             next_token,
@@ -910,13 +948,37 @@ impl SearchStore {
         target_name: Option<String>,
         results: Vec<FileEntry>,
         ttl_seconds: u64,
-    ) -> SearchRecord {
+    ) -> Result<SearchCreateOutcome, SearchCreateError> {
+        self.expire_due();
+        let id = id.filter(|value| !value.trim().is_empty());
+        if id.as_deref().is_some_and(|id| {
+            self.records
+                .iter()
+                .any(|record| record.id == id || record.token.to_string() == id)
+        }) {
+            return Err(SearchCreateError::DuplicateId);
+        }
+        let token = self.allocate_token()?;
+        if id.as_deref().is_some_and(|id| id == token.to_string()) {
+            return Err(SearchCreateError::DuplicateId);
+        }
+        let mut evicted = Vec::new();
+        if self.records.len() >= MAX_SEARCH_RECORDS {
+            let Some(index) = self
+                .records
+                .iter()
+                .enumerate()
+                .filter(|(_, record)| record.status != "active")
+                .min_by_key(|(_, record)| record.updated_at)
+                .map(|(index, _)| index)
+            else {
+                return Err(SearchCreateError::CapacityFull);
+            };
+            evicted.push(self.records.remove(index));
+        }
         let now = unix_timestamp();
-        let token = self.next_token;
         let record = SearchRecord {
-            id: id
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| token.to_string()),
+            id: id.unwrap_or_else(|| token.to_string()),
             token,
             query,
             target,
@@ -931,13 +993,33 @@ impl SearchStore {
             created_at: now,
             updated_at: now,
         };
-        self.next_token = self.next_token.wrapping_add(1).max(1);
+        self.next_token = token.wrapping_add(1).max(1);
         self.records.push(record.clone());
-        record
+        Ok(SearchCreateOutcome { record, evicted })
     }
 
-    fn create_scheduled_wishlist(&mut self, query: String, ttl_seconds: u64) -> SearchRecord {
+    fn create_scheduled_wishlist(
+        &mut self,
+        query: String,
+        ttl_seconds: u64,
+    ) -> Result<SearchCreateOutcome, SearchCreateError> {
         self.create(None, query, "wishlist", None, Vec::new(), ttl_seconds)
+    }
+
+    fn allocate_token(&self) -> Result<u32, SearchCreateError> {
+        let mut candidate = self.next_token.max(1);
+        for _ in 0..=MAX_SEARCH_RECORDS {
+            let text = candidate.to_string();
+            if !self
+                .records
+                .iter()
+                .any(|record| record.token == candidate || record.id == text)
+            {
+                return Ok(candidate);
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        Err(SearchCreateError::TokenSpaceExhausted)
     }
 
     fn get_by_identifier(&self, id: &str) -> Option<SearchRecord> {
@@ -1383,6 +1465,16 @@ async fn delete_persisted_search(state: &AppState, record: &SearchRecord) -> Res
         db.delete_search(&record.token.to_string())
             .await
             .map_err(|error| format!("failed to delete persisted search: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn delete_persisted_searches(
+    state: &AppState,
+    records: &[SearchRecord],
+) -> Result<(), String> {
+    for record in records {
+        delete_persisted_search(state, record).await?;
     }
     Ok(())
 }
@@ -9268,9 +9360,16 @@ async fn route_http_request_with_headers(
              let result_count = matching_results.len();
 
               let target = search_target_static(&target_str);
-              let record = searches.create(external_id, query.clone(), target, target_name.clone(), matching_results, ttl_seconds);
+              let outcome = match searches.create(external_id, query.clone(), target, target_name.clone(), matching_results, ttl_seconds) {
+                  Ok(outcome) => outcome,
+                  Err(error) => return Ok(search_create_error_response(error)),
+              };
+              let record = outcome.record;
+              let evicted = outcome.evicted;
               let token = record.token;
               drop(searches);
+
+             delete_persisted_searches(state, &evicted).await?;
 
              let persisted_search = persistence::SearchRecord {
                  id: format!("{}", token),
@@ -14083,7 +14182,12 @@ async fn route_http_request_with_headers(
                   .unwrap_or_else(|| "discography".to_owned());
               let query = format!("{} discography", artist.trim()).trim().to_owned();
               let mut searches = state.searches.write().await;
-              let record = searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS);
+              let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
+                  Ok(outcome) => outcome,
+                  Err(error) => return Ok(search_create_error_response(error)),
+              };
+              let record = outcome.record;
+              let evicted = outcome.evicted;
               let response = serde_json::json!({
                   "id": record.id,
                   "search_id": record.id,
@@ -14095,6 +14199,7 @@ async fn route_http_request_with_headers(
                   "results": [],
               }).to_string();
               drop(searches);
+              delete_persisted_searches(state, &evicted).await?;
               Ok(routing::accepted_response(response))
           }
 
@@ -14110,7 +14215,12 @@ async fn route_http_request_with_headers(
                   .collect::<Vec<_>>()
                   .join(" ");
               let mut searches = state.searches.write().await;
-              let record = searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS);
+              let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
+                  Ok(outcome) => outcome,
+                  Err(error) => return Ok(search_create_error_response(error)),
+              };
+              let record = outcome.record;
+              let evicted = outcome.evicted;
               let response = serde_json::json!({
                   "id": record.id,
                   "search_id": record.id,
@@ -14123,6 +14233,7 @@ async fn route_http_request_with_headers(
                   "results": [],
               }).to_string();
               drop(searches);
+              delete_persisted_searches(state, &evicted).await?;
               Ok(routing::accepted_response(response))
           }
 
@@ -15029,7 +15140,12 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("wishlist item has no search text"));
              }
              let mut searches = state.searches.write().await;
-             let record = searches.create_scheduled_wishlist(query, DEFAULT_SEARCH_TTL_SECONDS);
+             let outcome = match searches.create_scheduled_wishlist(query, DEFAULT_SEARCH_TTL_SECONDS) {
+                 Ok(outcome) => outcome,
+                 Err(error) => return Ok(search_create_error_response(error)),
+             };
+             let record = outcome.record;
+             let evicted = outcome.evicted;
              let response = serde_json::json!({
                  "item_id": item_id,
                  "search_started": true,
@@ -15040,6 +15156,7 @@ async fn route_http_request_with_headers(
                  "target": record.target,
              }).to_string();
              drop(searches);
+             delete_persisted_searches(state, &evicted).await?;
              Ok(routing::accepted_response(response))
          }
 
@@ -20087,21 +20204,51 @@ async fn send_due_wishlist_search(
         return;
     };
 
-    let (record, message) = {
+    let (record, evicted, message) = {
         let mut searches = state.searches.write().await;
-        let token = searches.next_token;
+        let token = match searches.allocate_token() {
+            Ok(token) => token,
+            Err(error) => {
+                drop(searches);
+                update_session(state, |snapshot| {
+                    snapshot.last_error =
+                        Some(format!("wishlist search allocation failed: {error:?}"));
+                })
+                .await;
+                return;
+            }
+        };
         let Some(ServerMessage::WishlistSearch(SearchRequest { token, query })) =
             scheduler.next_search_message(token)
         else {
             return;
         };
-        let record = searches.create_scheduled_wishlist(query.clone(), 300);
-        debug_assert_eq!(record.token, token);
+        let outcome = match searches.create_scheduled_wishlist(query.clone(), 300) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                drop(searches);
+                update_session(state, |snapshot| {
+                    snapshot.last_error =
+                        Some(format!("wishlist search capacity failed: {error:?}"));
+                })
+                .await;
+                return;
+            }
+        };
+        debug_assert_eq!(outcome.record.token, token);
         (
-            record,
+            outcome.record,
+            outcome.evicted,
             ServerMessage::WishlistSearch(SearchRequest { token, query }),
         )
     };
+
+    if let Err(error) = delete_persisted_searches(state, &evicted).await {
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(error.clone());
+        })
+        .await;
+    }
 
     if let Some(db) = state.db.as_ref() {
         let persisted_search = persistence::SearchRecord {
@@ -27291,6 +27438,16 @@ mod tests {
                 target: super::SearchDispatchTarget::Global,
             }
         );
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/v0/searches",
+            None,
+            r#"{"id":"1","query":"duplicate"}"#,
+            &state,
+        )
+        .await
+        .expect("reject duplicate search id");
+        assert_eq!(duplicate.status, "409 Conflict");
 
         let listed = super::route_http_request("GET", "/api/v0/searches/records", None, "", &state)
             .await
@@ -29572,7 +29729,10 @@ mod tests {
     #[test]
     fn search_store_merges_peer_search_responses() {
         let mut store = super::SearchStore::new();
-        let record = store.create(None, "remote".to_owned(), "global", None, Vec::new(), 300);
+        let record = store
+            .create(None, "remote".to_owned(), "global", None, Vec::new(), 300)
+            .unwrap()
+            .record;
         let response = FileSearchResponse {
             username: "peer1".to_owned(),
             token: record.token,
@@ -29622,7 +29782,10 @@ mod tests {
     #[test]
     fn search_store_caps_results_from_peer_responses() {
         let mut store = super::SearchStore::new();
-        let record = store.create(None, "remote".to_owned(), "global", None, Vec::new(), 300);
+        let record = store
+            .create(None, "remote".to_owned(), "global", None, Vec::new(), 300)
+            .unwrap()
+            .record;
         let response = FileSearchResponse {
             username: "peer1".to_owned(),
             token: record.token,
@@ -32025,6 +32188,117 @@ mod tests {
         assert!(destinations.records[0].is_default);
     }
 
+    #[test]
+    fn searches_bound_active_records_and_avoid_identity_collisions() {
+        let mut searches = super::SearchStore::new();
+        for index in 0..super::MAX_SEARCH_RECORDS {
+            searches
+                .create(
+                    None,
+                    format!("query-{index}"),
+                    "global",
+                    None,
+                    Vec::new(),
+                    super::MAX_SEARCH_TTL_SECONDS,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            searches
+                .create(
+                    None,
+                    "overflow".to_owned(),
+                    "global",
+                    None,
+                    Vec::new(),
+                    super::MAX_SEARCH_TTL_SECONDS,
+                )
+                .unwrap_err(),
+            super::SearchCreateError::CapacityFull
+        );
+        searches.records[0].status = "completed";
+        let evicted = searches
+            .create(
+                None,
+                "replacement".to_owned(),
+                "global",
+                None,
+                Vec::new(),
+                super::MAX_SEARCH_TTL_SECONDS,
+            )
+            .unwrap();
+        assert_eq!(evicted.evicted.len(), 1);
+        assert_eq!(searches.records.len(), super::MAX_SEARCH_RECORDS);
+
+        let mut wrapped = super::SearchStore::new();
+        wrapped.next_token = u32::MAX;
+        let external = wrapped
+            .create(
+                Some("2".to_owned()),
+                "external".to_owned(),
+                "global",
+                None,
+                Vec::new(),
+                300,
+            )
+            .unwrap();
+        assert_eq!(external.record.token, u32::MAX);
+        let after_wrap = wrapped
+            .create(None, "wrapped".to_owned(), "global", None, Vec::new(), 300)
+            .unwrap();
+        assert_eq!(after_wrap.record.token, 1);
+        let skips_string_id = wrapped
+            .create(None, "skip".to_owned(), "global", None, Vec::new(), 300)
+            .unwrap();
+        assert_eq!(skips_string_id.record.token, 3);
+        assert_eq!(
+            wrapped
+                .create(
+                    Some("2".to_owned()),
+                    "duplicate".to_owned(),
+                    "global",
+                    None,
+                    Vec::new(),
+                    300,
+                )
+                .unwrap_err(),
+            super::SearchCreateError::DuplicateId
+        );
+
+        let mut persisted = (1..=super::MAX_SEARCH_RECORDS + 1)
+            .map(|index| crate::persistence::SearchRecord {
+                id: index.to_string(),
+                query: format!("persisted-{index}"),
+                status: "completed".to_owned(),
+                result_count: 0,
+                created_at: index as i64,
+                completed_at: Some(index as i64),
+                room: None,
+                target: Some("global".to_owned()),
+            })
+            .collect::<Vec<_>>();
+        persisted.push(crate::persistence::SearchRecord {
+            id: "1".to_owned(),
+            query: "duplicate".to_owned(),
+            status: "completed".to_owned(),
+            result_count: 0,
+            created_at: 0,
+            completed_at: Some(0),
+            room: None,
+            target: Some("global".to_owned()),
+        });
+        let hydrated = super::SearchStore::from_persisted(persisted);
+        assert_eq!(hydrated.records.len(), super::MAX_SEARCH_RECORDS);
+        assert_eq!(
+            hydrated
+                .records
+                .iter()
+                .filter(|record| record.id == "1")
+                .count(),
+            1
+        );
+    }
+
     #[tokio::test]
     async fn compatibility_projections_use_local_state_for_recommendations_and_activity() {
         let (state, _receiver) = test_state();
@@ -34197,7 +34471,10 @@ mod tests {
         );
 
         let mut searches = super::SearchStore::new();
-        let record = searches.create_scheduled_wishlist("Artist Title".to_owned(), 300);
+        let record = searches
+            .create_scheduled_wishlist("Artist Title".to_owned(), 300)
+            .unwrap()
+            .record;
         assert_eq!(record.token, 1);
         assert_eq!(record.target, "wishlist");
         assert_eq!(record.query, "Artist Title");

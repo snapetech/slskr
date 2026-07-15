@@ -70,6 +70,8 @@ for anchor in \
   'library_items_bound_growth_and_checked_ids' \
   'MAX_DESTINATIONS' \
   'destinations_bound_deduplicate_and_select_one_default' \
+  'MAX_SEARCH_RECORDS' \
+  'searches_bound_active_records_and_avoid_identity_collisions' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
