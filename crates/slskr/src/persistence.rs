@@ -205,6 +205,14 @@ pub struct ShareGrantRecord {
     pub permissions: String,
 }
 
+/// Durable delegated-share token verifier. The raw bearer token is never stored.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShareAccessTokenRecord {
+    pub token_digest: String,
+    pub grant_id: String,
+    pub expires_at: i64,
+}
+
 /// Share group record for persistence
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShareGroupRecord {
@@ -581,6 +589,16 @@ impl<'r> FromRow<'r, SqliteRow> for ShareGrantRecord {
             username: row.try_get("username")?,
             shared_at: row.try_get("shared_at")?,
             permissions: row.try_get("permissions")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for ShareAccessTokenRecord {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
+        Ok(Self {
+            token_digest: row.try_get("token_digest")?,
+            grant_id: row.try_get("grant_id")?,
+            expires_at: row.try_get("expires_at")?,
         })
     }
 }
@@ -1102,6 +1120,19 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
 
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS share_access_tokens (
+                token_digest TEXT PRIMARY KEY,
+                grant_id TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                FOREIGN KEY (grant_id) REFERENCES share_grants(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Create share groups table
         query(
             r#"
@@ -1398,6 +1429,12 @@ impl DatabaseManager {
 
         query(
             "CREATE INDEX IF NOT EXISTS idx_share_grants_collection ON share_grants(collection_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        query(
+            "CREATE INDEX IF NOT EXISTS idx_share_access_tokens_grant_expiry ON share_access_tokens(grant_id, expires_at)",
         )
         .execute(&self.pool)
         .await?;
@@ -2729,8 +2766,13 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO share_grants (id, collection_id, username, shared_at, permissions)
+            INSERT INTO share_grants (id, collection_id, username, shared_at, permissions)
             VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                collection_id = excluded.collection_id,
+                username = excluded.username,
+                shared_at = excluded.shared_at,
+                permissions = excluded.permissions
             "#,
         )
         .bind(&record.id)
@@ -2745,10 +2787,16 @@ impl DatabaseManager {
 
     /// Delete a share grant.
     pub async fn delete_share_grant(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query("DELETE FROM share_access_tokens WHERE grant_id = ?")
+            .bind(id)
+            .execute(&mut *transaction)
+            .await?;
         query("DELETE FROM share_grants WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -2761,6 +2809,79 @@ impl DatabaseManager {
         let records = query_as::<_, ShareGrantRecord>(
             "SELECT id, collection_id, username, shared_at, permissions FROM share_grants ORDER BY shared_at DESC LIMIT ? OFFSET ?",
         )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// Persist a delegated-share verifier. Callers must provide only a digest.
+    pub async fn upsert_share_access_token(
+        &self,
+        record: &ShareAccessTokenRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if record.token_digest.len() != 64
+            || !record
+                .token_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "share access token verifier must be a SHA-256 hex digest",
+            )
+            .into());
+        }
+        let result = query(
+            r#"
+            INSERT INTO share_access_tokens (token_digest, grant_id, expires_at)
+            SELECT ?, ?, ?
+            WHERE EXISTS (SELECT 1 FROM share_grants WHERE id = ?)
+            ON CONFLICT(token_digest) DO UPDATE SET
+                grant_id = excluded.grant_id,
+                expires_at = excluded.expires_at
+            "#,
+        )
+        .bind(&record.token_digest)
+        .bind(&record.grant_id)
+        .bind(record.expires_at)
+        .bind(&record.grant_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "share access token grant is unavailable",
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Delete expired delegated-share verifiers.
+    pub async fn delete_expired_share_access_tokens(
+        &self,
+        now: i64,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let result = query("DELETE FROM share_access_tokens WHERE expires_at <= ?")
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// List unexpired delegated-share verifiers without exposing raw tokens.
+    pub async fn list_share_access_tokens(
+        &self,
+        now: i64,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<ShareAccessTokenRecord>, Box<dyn std::error::Error>> {
+        let records = query_as::<_, ShareAccessTokenRecord>(
+            "SELECT token_digest, grant_id, expires_at FROM share_access_tokens WHERE expires_at > ? ORDER BY expires_at ASC LIMIT ? OFFSET ?",
+        )
+        .bind(now)
         .bind(limit)
         .bind(offset)
         .fetch_all(&self.pool)
@@ -3002,6 +3123,12 @@ impl DatabaseManager {
     /// Delete a collection, its items, and its access grants atomically.
     pub async fn delete_collection(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
+        query(
+            "DELETE FROM share_access_tokens WHERE grant_id IN (SELECT id FROM share_grants WHERE collection_id = ?)",
+        )
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
         query("DELETE FROM share_grants WHERE collection_id = ?")
             .bind(id)
             .execute(&mut *transaction)
@@ -3469,6 +3596,10 @@ impl DatabaseManager {
             .fetch_one(&self.pool)
             .await?;
 
+        let share_access_token_count: (i64,) = query_as("SELECT COUNT(*) FROM share_access_tokens")
+            .fetch_one(&self.pool)
+            .await?;
+
         let share_group_count: (i64,) = query_as("SELECT COUNT(*) FROM share_groups")
             .fetch_one(&self.pool)
             .await?;
@@ -3534,6 +3665,7 @@ impl DatabaseManager {
             wishlist_count: nonnegative_database_count(wishlist_count.0)?,
             contact_count: nonnegative_database_count(contact_count.0)?,
             share_grant_count: nonnegative_database_count(share_grant_count.0)?,
+            share_access_token_count: nonnegative_database_count(share_access_token_count.0)?,
             share_group_count: nonnegative_database_count(share_group_count.0)?,
             share_group_member_count: nonnegative_database_count(share_group_member_count.0)?,
             collection_count: nonnegative_database_count(collection_count.0)?,
@@ -3800,6 +3932,7 @@ pub struct DatabaseStats {
     pub wishlist_count: u64,
     pub contact_count: u64,
     pub share_grant_count: u64,
+    pub share_access_token_count: u64,
     pub share_group_count: u64,
     pub share_group_member_count: u64,
     pub collection_count: u64,

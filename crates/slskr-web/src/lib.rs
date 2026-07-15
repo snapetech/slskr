@@ -5676,9 +5676,69 @@ fn native_final_parity_panel_html(kind: RouteKind) -> String {
     )
 }
 
+fn wishlist_ignored_results_panel_html(responses: Option<&[EndpointBody]>) -> String {
+    let items = endpoint_array(responses, "/wishlist");
+    let groups = items
+        .iter()
+        .filter_map(|item| {
+            let item_id = value_text(item, &["id", "wishlistId", "searchId"])?;
+            let label = value_text(item, &["searchText", "query", "text"])
+                .unwrap_or_else(|| "Wanted search".to_string());
+            let rules = item
+                .get("ignoredResults")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let rule_rows = rules
+                .iter()
+                .filter_map(|rule| {
+                    let rule_id = value_text(rule, &["id"])?;
+                    let username = value_text(rule, &["username", "peer"])
+                        .unwrap_or_else(|| "unknown peer".to_string());
+                    let directory = value_text(rule, &["directory", "folder", "path"])
+                        .unwrap_or_else(|| "unknown folder".to_string());
+                    Some(format!(
+                        r#"<li class="slskr-wishlist-ignore-rule"><span><strong>{username}</strong><code>{directory}</code></span><button type="button" data-slskr-wishlist-ignore-restore data-slskr-native-wishlist-id="{item_id}" data-slskr-wishlist-ignore-rule-id="{rule_id}">Restore</button></li>"#,
+                        username = escape_html(&username),
+                        directory = escape_html(&directory),
+                        item_id = escape_html(&item_id),
+                        rule_id = escape_html(&rule_id),
+                    ))
+                })
+                .collect::<Vec<_>>();
+            let rule_count = rule_rows.len();
+            let rules_html = if rule_rows.is_empty() {
+                r#"<li class="slskr-wishlist-ignore-empty">No ignored folders for this search.</li>"#
+                    .to_string()
+            } else {
+                rule_rows.join("")
+            };
+            Some(format!(
+                r#"<details class="slskr-wishlist-ignore-group" {open}><summary><span>{label}</span><small>{rule_count} blocked</small></summary><div class="slskr-wishlist-ignore-add" data-slskr-wishlist-ignore-panel data-slskr-native-wishlist-id="{item_id}"><label><span>Peer</span><input aria-label="Peer to ignore for {label}" placeholder="username"></label><label><span>Folder</span><input aria-label="Folder to ignore for {label}" placeholder="Music/Release"></label><button type="button" data-slskr-wishlist-ignore-submit>Ignore folder</button></div><ul>{rules_html}</ul></details>"#,
+                open = if rule_count > 0 { "open" } else { "" },
+                label = escape_html(&label),
+                rule_count = rule_count,
+                item_id = escape_html(&item_id),
+                rules_html = rules_html,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let body = if groups.is_empty() {
+        r#"<p class="slskr-wishlist-ignore-panel-empty">Add a wanted search before creating folder rules.</p>"#
+            .to_string()
+    } else {
+        groups.join("")
+    };
+    format!(
+        r#"<section class="slskr-wishlist-ignore-panel" data-slskr-wishlist-ignore-manager><header><div><span class="slskr-wishlist-ignore-kicker">Noise gate</span><h3>Ignored result folders</h3></div><p>Block a peer and folder pair for one wanted search. Restoring it affects future matches; previously removed results stay removed.</p></header><div class="slskr-wishlist-ignore-groups">{body}</div></section>"#,
+        body = body,
+    )
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
+    responses: Option<&[EndpointBody]>,
 ) -> String {
     let route_table = native_route_table_html(kind, rows);
     let html = match kind {
@@ -5726,8 +5786,9 @@ fn route_native_workspace_html(
             .join(""),
         ),
         RouteKind::Wishlist => format!(
-            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{preview}{stats}<button type="button">Copy Review</button></aside></div>"#,
+            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}{ignored}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{preview}{stats}<button type="button">Copy Review</button></aside></div>"#,
             route_table = route_table,
+            ignored = wishlist_ignored_results_panel_html(responses),
             preview = native_selection_preview_html(
                 "No wishlist item selected",
                 "Choose a wanted search to run it, review matches, or send it to the discovery inbox.",
@@ -6260,7 +6321,7 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
         kind = kind,
         tabs = workflow_tabs_html(&tabs),
         reference = route_reference_panel_html(kind),
-        native = route_native_workspace_html(kind, &table_rows),
+        native = route_native_workspace_html(kind, &table_rows, responses),
         primary_title = escape_html(primary_title),
         primary_detail = escape_html(primary_detail),
         fresh = status_chip_html(
@@ -6998,6 +7059,9 @@ fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element) {
+    if handle_wishlist_ignored_result_action(document, button) {
+        return;
+    }
     let action = button
         .text_content()
         .map(|text| text.trim().to_string())
@@ -7042,6 +7106,120 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         ));
     }
     show_toast(document, &message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_wishlist_ignored_result_action(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+) -> bool {
+    let restore = button.has_attribute("data-slskr-wishlist-ignore-restore");
+    let create = button.has_attribute("data-slskr-wishlist-ignore-submit");
+    if !restore && !create {
+        return false;
+    }
+    let panel = button
+        .closest("[data-slskr-wishlist-ignore-panel]")
+        .ok()
+        .flatten();
+    let item_id = button
+        .get_attribute("data-slskr-native-wishlist-id")
+        .or_else(|| {
+            panel
+                .as_ref()
+                .and_then(|panel| panel.get_attribute("data-slskr-native-wishlist-id"))
+        });
+    let Some(item_id) = item_id.filter(|value| safe_route_segment(value)) else {
+        show_toast(document, "Choose a wanted search first");
+        return true;
+    };
+    let (method, path, body, label) = if restore {
+        let Some(rule_id) = button
+            .get_attribute("data-slskr-wishlist-ignore-rule-id")
+            .filter(|value| safe_route_segment(value))
+        else {
+            show_toast(document, "Ignored folder rule is unavailable");
+            return true;
+        };
+        (
+            "DELETE",
+            endpoint_url(&format!(
+                "/wishlist/{item_id}/ignored-results/{rule_id}"
+            )),
+            None,
+            "Restore ignored folder",
+        )
+    } else {
+        let username = panel
+            .as_ref()
+            .and_then(|panel| {
+                panel
+                    .query_selector(r#"input[aria-label^="Peer to ignore"]"#)
+                    .ok()
+                    .flatten()
+            })
+            .and_then(|input| form_control_value(&input))
+            .unwrap_or_default();
+        let directory = panel
+            .as_ref()
+            .and_then(|panel| {
+                panel
+                    .query_selector(r#"input[aria-label^="Folder to ignore"]"#)
+                    .ok()
+                    .flatten()
+            })
+            .and_then(|input| form_control_value(&input))
+            .unwrap_or_default();
+        if username.trim().is_empty() || directory.trim().is_empty() {
+            show_toast(document, "Enter both a peer and folder");
+            return true;
+        }
+        (
+            "POST",
+            endpoint_url(&format!("/wishlist/{item_id}/ignored-results")),
+            Some(format!(
+                r#"{{"username":"{}","directory":"{}"}}"#,
+                escape_json_string(username.trim()),
+                escape_json_string(directory.trim())
+            )),
+            "Ignore result folder",
+        )
+    };
+    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+        status.set_inner_html(&format!(
+            "<strong>{}</strong> sending {}",
+            escape_html(label),
+            method
+        ));
+    }
+    show_toast(document, &format!("{label} sending"));
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let document = document.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = fetch_text_with_method(&window, &path, method, body.as_deref()).await;
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            match result {
+                Ok(response) => status.set_inner_html(&format!(
+                    "<strong>{}</strong> {}",
+                    escape_html(label),
+                    escape_html(&compact_preview(&response))
+                )),
+                Err(error) => status.set_inner_html(&format!(
+                    "<strong>{}</strong> {}",
+                    escape_html(label),
+                    escape_html(
+                        &error
+                            .as_string()
+                            .unwrap_or_else(|| "request failed".to_string())
+                    )
+                )),
+            }
+        }
+        let _ = refresh_route_data(&window).await;
+    });
+    true
 }
 
 #[cfg(target_arch = "wasm32")]

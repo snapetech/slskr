@@ -49,6 +49,9 @@ for anchor in \
   'bridge_projections_redact_internal_endpoint' \
   'spotify_diagnostic_projections_redact_redirect_uri' \
   'share_tokens_use_headers_and_content_bound_stream_tickets' \
+  'share_grants_require_live_collections_and_are_revoked_on_delete' \
+  'share_access_tokens_persist_only_digests_and_rehydrate' \
+  'share_access_token_issue_rolls_back_when_persistence_fails' \
   'wishlist_ignored_folders_persist_and_suppress_existing_and_future_results' \
   'wishlist_ignored_folder_mutations_roll_back_on_persistence_failure' \
   'completed_transfer_cleanup_rolls_back_on_persistence_failure' \

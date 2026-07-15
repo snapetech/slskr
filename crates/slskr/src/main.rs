@@ -5667,7 +5667,19 @@ impl WishlistStore {
         let items = record
             .items
             .iter()
-            .map(WishlistItem::json)
+            .map(|item| {
+                let mut value = serde_json::from_str::<serde_json::Value>(&item.json())
+                    .unwrap_or_else(|_| serde_json::json!({ "id": item.id }));
+                let rules = self
+                    .ignored_results
+                    .iter()
+                    .filter(|rule| rule.wishlist_item_id == item.id)
+                    .map(WishlistIgnoredResult::json)
+                    .collect::<Vec<_>>();
+                value["ignoredResultCount"] = serde_json::json!(rules.len());
+                value["ignoredResults"] = serde_json::Value::Array(rules);
+                value.to_string()
+            })
             .collect::<Vec<_>>()
             .join(",");
         format!("[{}]", items)
@@ -7535,6 +7547,37 @@ impl ShareAccessTokenStore {
         Some((token, expires_at))
     }
 
+    fn from_persisted(
+        records: Vec<crate::persistence::ShareAccessTokenRecord>,
+        valid_grant_ids: &HashSet<&str>,
+    ) -> Self {
+        let now = unix_timestamp();
+        let mut store = Self::default();
+        for record in records.into_iter().take(store.max_records) {
+            let Ok(expires_at) = u64::try_from(record.expires_at) else {
+                continue;
+            };
+            if expires_at <= now
+                || !valid_grant_ids.contains(record.grant_id.as_str())
+                || record.token_digest.len() != 64
+                || !record
+                    .token_digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                continue;
+            }
+            store.records.insert(
+                record.token_digest.to_ascii_lowercase(),
+                ShareAccessTokenRecord {
+                    grant_id: record.grant_id,
+                    expires_at,
+                },
+            );
+        }
+        store
+    }
+
     fn validate(&mut self, token: &str) -> Option<ShareAccessTokenRecord> {
         let now = unix_timestamp();
         self.prune(now);
@@ -7543,6 +7586,12 @@ impl ShareAccessTokenStore {
 
     fn revoke_grant(&mut self, grant_id: &str) {
         self.records.retain(|_, record| record.grant_id != grant_id);
+    }
+
+    fn remove_if_unchanged(&mut self, digest: &str, expected: &ShareAccessTokenRecord) {
+        if self.records.get(digest) == Some(expected) {
+            self.records.remove(digest);
+        }
     }
 
     fn prune(&mut self, now: u64) {
@@ -8512,6 +8561,10 @@ impl PreviewStreamTicketStore {
         let now = unix_timestamp();
         self.prune(now);
         self.records.get(token).cloned()
+    }
+
+    fn revoke_source(&mut self, source: &str) {
+        self.records.retain(|_, record| record.source != source);
     }
 
     fn prune(&mut self, now: u64) {
@@ -13348,10 +13401,15 @@ async fn route_http_request_with_headers(
                 drop(collections);
                 drop(grants);
                 let mut tokens = state.share_access_tokens.write().await;
-                for grant in revoked_grants {
+                for grant in &revoked_grants {
                     tokens.revoke_grant(&grant.id);
                 }
                 drop(tokens);
+                let mut tickets = state.stream_tickets.write().await;
+                for grant in revoked_grants {
+                    tickets.revoke_source(&format!("share:{}", grant.id));
+                }
+                drop(tickets);
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 drop(collections);
@@ -14363,6 +14421,11 @@ async fn route_http_request_with_headers(
                 }
                 drop(grants);
                 state.share_access_tokens.write().await.revoke_grant(id);
+                state
+                    .stream_tickets
+                    .write()
+                    .await
+                    .revoke_source(&format!("share:{id}"));
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 drop(grants);
@@ -17622,11 +17685,10 @@ async fn route_http_request_with_headers(
                 .unwrap_or(DEFAULT_SHARE_ACCESS_TOKEN_TTL_SECONDS)
                 .clamp(1, MAX_SHARE_ACCESS_TOKEN_TTL_SECONDS);
              let issued = if grant.is_some() {
-                 state
-                     .share_access_tokens
-                     .write()
-                     .await
-                     .issue(grant_id.to_owned(), ttl_seconds)
+                 let mut tokens = state.share_access_tokens.write().await;
+                 let issued = tokens.issue(grant_id.to_owned(), ttl_seconds);
+                 drop(tokens);
+                 issued
              } else {
                  None
              };
@@ -17636,6 +17698,25 @@ async fn route_http_request_with_headers(
                  ));
              }
              let created = issued.is_some();
+             let mut persisted = false;
+             if let Some((token, expires_at)) = issued.as_ref() {
+                 let digest = share_access_token_digest(token);
+                 let record = ShareAccessTokenRecord {
+                     grant_id: grant_id.to_owned(),
+                     expires_at: *expires_at,
+                 };
+                 match persist_share_access_token(state, &digest, &record).await {
+                     Ok(was_persisted) => persisted = was_persisted,
+                     Err(error) => {
+                         state
+                             .share_access_tokens
+                             .write()
+                             .await
+                             .remove_if_unchanged(&digest, &record);
+                         return Ok(routing::service_unavailable_response(&error));
+                     }
+                 }
+             }
              let (token, expires_at) = issued
                  .map(|(token, expires_at)| (Some(token), Some(expires_at)))
                  .unwrap_or((None, None));
@@ -17645,8 +17726,8 @@ async fn route_http_request_with_headers(
                  "expiresAt": expires_at,
                  "expiresInSeconds": if created { Some(ttl_seconds) } else { None },
                  "created": created,
-                 "persisted": false,
-                 "status": if created { "ephemeral_compatibility_token" } else { "compatibility_acknowledgement" },
+                 "persisted": persisted,
+                 "status": if persisted { "persistent_token" } else if created { "ephemeral_compatibility_token" } else { "compatibility_acknowledgement" },
              }).to_string()))
          }
 
@@ -21415,6 +21496,27 @@ async fn serve(once: bool) -> Result<(), String> {
                 .map_err(|error| format!("failed to delete stale share grant: {error}"))?;
         }
     }
+    let valid_grant_ids = share_grant_store
+        .records
+        .iter()
+        .map(|grant| grant.id.as_str())
+        .collect::<HashSet<_>>();
+    let share_access_token_store = if let Some(db) = db.as_ref() {
+        let now = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
+        db.delete_expired_share_access_tokens(now)
+            .await
+            .map_err(|error| {
+                format!("failed to delete expired persisted share access tokens: {error}")
+            })?;
+        let records = db
+            .list_share_access_tokens(now, MAX_SHARE_ACCESS_TOKENS as i32, 0)
+            .await
+            .map_err(|error| format!("failed to load persisted share access tokens: {error}"))?;
+        ShareAccessTokenStore::from_persisted(records, &valid_grant_ids)
+    } else {
+        ShareAccessTokenStore::default()
+    };
+    drop(valid_grant_ids);
     let library_store = if let Some(db) = db.as_ref() {
         let records = db
             .list_library_items(EVENT_HISTORY_LIMIT as i32, 0)
@@ -21524,7 +21626,7 @@ async fn serve(once: bool) -> Result<(), String> {
         runtime: RwLock::new(runtime_compat_state),
         security: RwLock::new(security_state),
         share_grants: RwLock::new(share_grant_store),
-        share_access_tokens: RwLock::new(ShareAccessTokenStore::default()),
+        share_access_tokens: RwLock::new(share_access_token_store),
         library: RwLock::new(library_store),
         destinations: RwLock::new(destination_store),
         db,
@@ -25914,6 +26016,28 @@ async fn persist_share_grant_delete_checked(state: &AppState, id: &str) -> Resul
     Ok(true)
 }
 
+async fn persist_share_access_token(
+    state: &AppState,
+    token_digest: &str,
+    record: &ShareAccessTokenRecord,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    let now = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
+    db.delete_expired_share_access_tokens(now)
+        .await
+        .map_err(|error| format!("share access token cleanup failed: {error}"))?;
+    db.upsert_share_access_token(&crate::persistence::ShareAccessTokenRecord {
+        token_digest: token_digest.to_owned(),
+        grant_id: record.grant_id.clone(),
+        expires_at: i64::try_from(record.expires_at).unwrap_or(i64::MAX),
+    })
+    .await
+    .map_err(|error| format!("share access token persistence failed: {error}"))?;
+    Ok(true)
+}
+
 async fn persist_share_group(state: &AppState, record: &ShareGroupRecord) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
         return Ok(false);
@@ -29211,7 +29335,7 @@ fn encode_file_entry(writer: &mut Writer, entry: &FileEntry) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::BTreeMap,
+        collections::{BTreeMap, HashSet},
         ffi::OsString,
         net::{IpAddr, SocketAddr},
         path::{Path, PathBuf},
@@ -41124,6 +41248,22 @@ mod tests {
         .unwrap();
         assert_eq!(granted.status, "201 Created");
         assert_eq!(state.share_grants.read().await.records.len(), 1);
+        let grant_id = state.share_grants.read().await.records[0].id.clone();
+        state
+            .stream_tickets
+            .write()
+            .await
+            .issue(
+                "share",
+                &format!("share:{grant_id}"),
+                "content".to_owned(),
+                "track.flac".to_owned(),
+                Some("friend".to_owned()),
+                1,
+                "audio/flac".to_owned(),
+                120,
+            )
+            .expect("issue grant stream ticket");
 
         let deleted = super::route_http_request(
             "DELETE",
@@ -41136,6 +41276,7 @@ mod tests {
         .unwrap();
         assert_eq!(deleted.status, "200 OK");
         assert!(state.share_grants.read().await.records.is_empty());
+        assert!(state.stream_tickets.read().await.records.is_empty());
     }
 
     #[tokio::test]
@@ -41593,6 +41734,143 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(deleted.status, "200 OK");
+        assert!(state.share_access_tokens.read().await.records.is_empty());
+        assert!(state.stream_tickets.read().await.records.is_empty());
+        let revoked_stream = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/content%2Fone?ticket={}",
+                super::url_encode(&ticket)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(revoked_stream.status, "401 Unauthorized");
+    }
+
+    #[tokio::test]
+    async fn share_access_tokens_persist_only_digests_and_rehydrate() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Private"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let grant = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"friend"}}"#),
+            &state,
+        )
+        .await
+        .expect("create grant");
+        let grant_id = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let issued = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/token"),
+            None,
+            r#"{"expiresInSeconds":600}"#,
+            &state,
+        )
+        .await
+        .expect("issue token");
+        assert_eq!(issued.status, "201 Created");
+        let issued_json = serde_json::from_str::<serde_json::Value>(&issued.body).unwrap();
+        assert_eq!(issued_json["persisted"], true);
+        assert_eq!(issued_json["status"], "persistent_token");
+        let raw_token = issued_json["token"].as_str().unwrap();
+        let digest = super::share_access_token_digest(raw_token);
+
+        let persisted = db
+            .list_share_access_tokens(0, 10, 0)
+            .await
+            .expect("list persisted token digests");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].token_digest, digest);
+        assert_ne!(persisted[0].token_digest, raw_token);
+        assert_eq!(persisted[0].grant_id, grant_id);
+        let valid_grants = [grant_id.as_str()].into_iter().collect::<HashSet<_>>();
+        let mut rehydrated = super::ShareAccessTokenStore::from_persisted(persisted, &valid_grants);
+        assert_eq!(
+            rehydrated.validate(raw_token).map(|record| record.grant_id),
+            Some(grant_id.clone())
+        );
+
+        let revoked = super::route_http_request(
+            "DELETE",
+            &format!("/api/share-grants/{grant_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("revoke grant");
+        assert_eq!(revoked.status, "200 OK");
+        assert!(db
+            .list_share_access_tokens(0, 10, 0)
+            .await
+            .expect("list revoked token digests")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn share_access_token_issue_rolls_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        state
+            .collections
+            .write()
+            .await
+            .create("Private".to_owned(), String::new())
+            .expect("collection");
+        state
+            .share_grants
+            .write()
+            .await
+            .create("col-1".to_owned(), "friend".to_owned())
+            .expect("grant");
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/share-grants/grant-1/token",
+            None,
+            r#"{"expiresInSeconds":600}"#,
+            &state,
+        )
+        .await
+        .expect("failed persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("share access token cleanup failed"));
         assert!(state.share_access_tokens.read().await.records.is_empty());
     }
 
