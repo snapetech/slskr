@@ -2247,6 +2247,10 @@ struct TransferEntry {
     status: String,
     reason: Option<String>,
     requested_at: u64,
+    #[serde(default)]
+    started_at: Option<u64>,
+    #[serde(default)]
+    start_offset: u64,
     updated_at: u64,
 }
 
@@ -2254,7 +2258,7 @@ impl TransferEntry {
     #[allow(dead_code)]
     fn json(&self) -> String {
         format!(
-            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"batch_id\":{},\"request_id\":{},\"request_name\":{},\"destination_directory\":{},\"bit_rate\":{},\"sample_rate\":{},\"bit_depth\":{},\"length_seconds\":{},\"artist\":{},\"album\":{},\"title\":{},\"track_number\":{},\"year\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"failure_code\":{},\"recovery_action\":{},\"recovery_label\":{},\"requested_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"batch_id\":{},\"request_id\":{},\"request_name\":{},\"destination_directory\":{},\"bit_rate\":{},\"sample_rate\":{},\"bit_depth\":{},\"length_seconds\":{},\"artist\":{},\"album\":{},\"title\":{},\"track_number\":{},\"year\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"failure_code\":{},\"recovery_action\":{},\"recovery_label\":{},\"requested_at\":{},\"started_at\":{},\"start_offset\":{},\"updated_at\":{}}}",
             self.id,
             self.direction,
             self.token,
@@ -2282,8 +2286,32 @@ impl TransferEntry {
             json_option(transfer_recovery_action(&self.status, self.reason.as_deref())),
             json_option(transfer_recovery_label(&self.status, self.reason.as_deref())),
             self.requested_at,
+            json_u64_option(self.started_at),
+            self.start_offset,
             self.updated_at
         )
+    }
+
+    fn elapsed_seconds_at(&self, now: u64) -> Option<u64> {
+        let started_at = self.started_at?;
+        let ended_at = if is_terminal_transfer_status(&self.status) {
+            self.updated_at
+        } else {
+            now
+        };
+        Some(ended_at.saturating_sub(started_at))
+    }
+
+    fn average_speed_at(&self, now: u64) -> f64 {
+        let Some(elapsed) = self.elapsed_seconds_at(now) else {
+            return 0.0;
+        };
+        let transferred = self.bytes_transferred.saturating_sub(self.start_offset);
+        if transferred == 0 {
+            0.0
+        } else {
+            transferred as f64 / elapsed.max(1) as f64
+        }
     }
 
     fn slskd_file_json(&self) -> serde_json::Value {
@@ -2294,19 +2322,20 @@ impl TransferEntry {
         } else {
             (self.bytes_transferred as f64 / size as f64) * 100.0
         };
-        let started_at = if self.status == "queued" {
-            String::new()
-        } else {
+        let now = unix_timestamp();
+        let average_speed = self.average_speed_at(now);
+        let elapsed_seconds = self.elapsed_seconds_at(now);
+        let started_at = self
+            .started_at
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        let ended_at = if is_terminal_transfer_status(&self.status) {
             self.updated_at.to_string()
-        };
-        let ended_at = if matches!(
-            self.status.as_str(),
-            "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
-        ) {
-            self.updated_at.to_string()
         } else {
             String::new()
         };
+        let remaining_seconds = (average_speed > 0.0 && bytes_remaining > 0)
+            .then(|| (bytes_remaining as f64 / average_speed).ceil() as u64);
         serde_json::json!({
             "id": self.id.to_string(),
             "username": self.peer_username.as_deref().unwrap_or_default(),
@@ -2326,23 +2355,37 @@ impl TransferEntry {
             "trackNumber": self.track_number,
             "year": self.year,
             "size": size,
-            "startOffset": 0,
+            "startOffset": self.start_offset,
             "state": slskd_transfer_state(&self.status),
             "requestedAt": self.requested_at.to_string(),
             "enqueuedAt": self.requested_at.to_string(),
             "startedAt": started_at,
             "endedAt": ended_at,
             "bytesTransferred": self.bytes_transferred,
-            "averageSpeed": 0.0,
+            "averageSpeed": average_speed,
             "bytesRemaining": bytes_remaining,
-            "elapsedTime": "",
+            "elapsedTime": elapsed_seconds.map(format_transfer_duration).unwrap_or_default(),
             "percentComplete": percent_complete,
-            "remainingTime": "",
+            "remainingTime": remaining_seconds.map(format_transfer_duration).unwrap_or_default(),
             "failureCode": transfer_failure_code(&self.status, self.reason.as_deref()),
             "recoveryAction": transfer_recovery_action(&self.status, self.reason.as_deref()),
             "recoveryLabel": transfer_recovery_label(&self.status, self.reason.as_deref()),
         })
     }
+}
+
+fn is_terminal_transfer_status(status: &str) -> bool {
+    matches!(
+        status,
+        "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+    )
+}
+
+fn format_transfer_duration(seconds: u64) -> String {
+    let hours = seconds / 3_600;
+    let minutes = seconds % 3_600 / 60;
+    let seconds = seconds % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
 }
 
 fn public_transfer_reason(status: &str, reason: Option<&str>) -> Option<&'static str> {
@@ -2501,7 +2544,7 @@ fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferReco
         filesize: entry.size.unwrap_or(0) as i64,
         progress: entry.bytes_transferred as i64,
         status: entry.status.clone(),
-        started_at: entry.requested_at as i64,
+        started_at: entry.started_at.unwrap_or(entry.requested_at) as i64,
         completed_at,
         request_id: entry.request_id.clone(),
         request_name: entry.request_name.clone(),
@@ -2774,6 +2817,8 @@ impl TransferQueue {
             status: "rejected".to_owned(),
             reason: Some(reason),
             requested_at: now,
+            started_at: None,
+            start_offset: 0,
             updated_at: now,
         };
         self.push_entry(entry)
@@ -2814,6 +2859,8 @@ impl TransferQueue {
             status: "accepted".to_owned(),
             reason: None,
             requested_at: now,
+            started_at: None,
+            start_offset: 0,
             updated_at: now,
         };
         self.push_entry(entry)
@@ -2898,6 +2945,8 @@ impl TransferQueue {
             status: "queued".to_owned(),
             reason: None,
             requested_at: now,
+            started_at: None,
+            start_offset: 0,
             updated_at: now,
         };
         self.push_entry(entry)
@@ -2935,12 +2984,17 @@ impl TransferQueue {
         reason: Option<String>,
     ) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        let now = unix_timestamp();
+        if status == "in_progress" && entry.started_at.is_none() {
+            entry.started_at = Some(now);
+            entry.start_offset = entry.bytes_transferred;
+        }
         entry.status = truncate_utf8_bytes(status.to_owned(), MAX_TRANSFER_STATUS_BYTES);
         if let Some(bytes_transferred) = bytes_transferred {
             entry.bytes_transferred = bytes_transferred;
         }
         entry.reason = bounded_transfer_reason(reason);
-        entry.updated_at = unix_timestamp();
+        entry.updated_at = now;
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -2959,13 +3013,18 @@ impl TransferQueue {
         reason: Option<String>,
     ) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        let now = unix_timestamp();
+        if entry.started_at.is_none() && bytes_transferred > entry.bytes_transferred {
+            entry.started_at = Some(now);
+            entry.start_offset = entry.bytes_transferred;
+        }
         entry.status = truncate_utf8_bytes(status.to_owned(), MAX_TRANSFER_STATUS_BYTES);
         entry.bytes_transferred = bytes_transferred;
         if size.is_some() {
             entry.size = size;
         }
         entry.reason = bounded_transfer_reason(reason);
-        entry.updated_at = unix_timestamp();
+        entry.updated_at = now;
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -2977,10 +3036,15 @@ impl TransferQueue {
 
     fn update_progress(&mut self, id: u64, bytes_transferred: u64) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        let now = unix_timestamp();
+        if entry.started_at.is_none() {
+            entry.started_at = Some(now);
+            entry.start_offset = entry.bytes_transferred;
+        }
         entry.status = "in_progress".to_owned();
         entry.bytes_transferred = bytes_transferred;
         entry.reason = None;
-        entry.updated_at = unix_timestamp();
+        entry.updated_at = now;
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -3353,6 +3417,29 @@ struct AutoRetryTracker {
 
 fn auto_retry_key(username: &str, filename: &str) -> String {
     format!("{}\u{1f}{}", username.to_ascii_lowercase(), filename)
+}
+
+fn prune_auto_retry_tracker(tracker: &mut AutoRetryTracker, entries: &[TransferEntry], now: u64) {
+    let live_ids = entries.iter().map(|entry| entry.id).collect::<HashSet<_>>();
+    let live_retry_keys = entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .peer_username
+                .as_deref()
+                .map(|username| auto_retry_key(username, &entry.filename))
+        })
+        .collect::<HashSet<_>>();
+    tracker.retried_ids.retain(|id| live_ids.contains(id));
+    tracker
+        .alternate_search_requested_at
+        .retain(|id, _| live_ids.contains(id));
+    tracker
+        .retry_counts
+        .retain(|key, _| live_retry_keys.contains(key));
+    tracker
+        .peer_retry_after
+        .retain(|_, retry_after| *retry_after > now);
 }
 
 fn is_auto_retry_audio_file(filename: &str) -> bool {
@@ -22815,6 +22902,7 @@ fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue)
         .iter()
         .map(|entry| entry.bytes_transferred)
         .sum::<u64>();
+    let average_speed = average_transfer_speed_at(&entries, unix_timestamp());
     let mut by_state = BTreeMap::new();
     for entry in &entries {
         let state = slskd_transfer_state(&entry.status).to_owned();
@@ -22830,7 +22918,7 @@ fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue)
         "downloads": downloads,
         "uploads": uploads,
         "totalBytes": total_bytes,
-        "averageSpeed": 0.0,
+        "averageSpeed": average_speed,
         "byDirection": {
             "Download": { "count": downloads },
             "Upload": { "count": uploads },
@@ -22889,6 +22977,7 @@ fn slskd_transfer_matches_query(
 }
 
 fn slskd_transfer_speeds_json(transfers: &TransferQueue) -> String {
+    let now = unix_timestamp();
     let active_downloads = transfers
         .entries
         .iter()
@@ -22911,18 +23000,56 @@ fn slskd_transfer_speeds_json(transfers: &TransferQueue) -> String {
         .filter(|entry| entry.direction == 1)
         .map(|entry| entry.bytes_transferred)
         .sum::<u64>();
+    let download_speed = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 0 && is_active_transfer_status(&entry.status))
+        .map(|entry| entry.average_speed_at(now))
+        .sum::<f64>();
+    let upload_speed = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.direction == 1 && is_active_transfer_status(&entry.status))
+        .map(|entry| entry.average_speed_at(now))
+        .sum::<f64>();
+    let total_speed = download_speed + upload_speed;
+    let active_transfers = active_downloads + active_uploads;
+    let average_speed = if active_transfers == 0 {
+        0.0
+    } else {
+        total_speed / active_transfers as f64
+    };
     serde_json::json!({
-        "active_transfers": active_downloads + active_uploads,
+        "active_transfers": active_transfers,
         "activeDownloads": active_downloads,
         "activeUploads": active_uploads,
         "total_bytes_transferred": download_bytes.saturating_add(upload_bytes),
         "downloadBytesTransferred": download_bytes,
         "uploadBytesTransferred": upload_bytes,
-        "downloadSpeed": 0.0,
-        "uploadSpeed": 0.0,
-        "average_speed": 0.0,
+        "downloadSpeed": download_speed,
+        "uploadSpeed": upload_speed,
+        "average_speed": average_speed,
+        "total": total_speed,
+        "soulseek": total_speed,
+        "mesh": 0.0,
+        "download": download_speed,
+        "upload": upload_speed,
+        "sessionBytesDownloaded": download_bytes,
+        "sessionBytesUploaded": upload_bytes,
+        "sessionBytesTotal": download_bytes.saturating_add(upload_bytes),
     })
     .to_string()
+}
+
+fn average_transfer_speed_at(entries: &[&TransferEntry], now: u64) -> f64 {
+    if entries.is_empty() {
+        return 0.0;
+    }
+    entries
+        .iter()
+        .map(|entry| entry.average_speed_at(now))
+        .sum::<f64>()
+        / entries.len() as f64
 }
 
 fn slskd_download_stats_json(transfers: &TransferQueue) -> String {
@@ -23182,7 +23309,8 @@ fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQu
     let descending = slskd_transfer_query_value(query, "sortOrder")
         .map(|value| !value.eq_ignore_ascii_case("ASC"))
         .unwrap_or(true);
-    let mut by_user: BTreeMap<String, (usize, u64)> = BTreeMap::new();
+    let now = unix_timestamp();
+    let mut by_user: BTreeMap<String, (usize, u64, f64)> = BTreeMap::new();
     for entry in transfers
         .entries
         .iter()
@@ -23190,18 +23318,19 @@ fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQu
     {
         let username = entry.peer_username.clone().unwrap_or_default();
         let bytes = entry.size.unwrap_or(entry.bytes_transferred);
-        let summary = by_user.entry(username).or_insert((0, 0));
+        let summary = by_user.entry(username).or_insert((0, 0, 0.0));
         summary.0 += 1;
         summary.1 = summary.1.saturating_add(bytes);
+        summary.2 += entry.average_speed_at(now);
     }
     let mut rows = by_user
         .into_iter()
-        .map(|(username, (count, total_bytes))| {
+        .map(|(username, (count, total_bytes, total_speed))| {
             serde_json::json!({
                 "username": username,
                 "count": count,
                 "totalBytes": total_bytes,
-                "averageSpeed": 0.0,
+                "averageSpeed": total_speed / count as f64,
             })
         })
         .collect::<Vec<_>>();
@@ -24145,6 +24274,7 @@ async fn run_download_auto_retry_cycle(
                 .saturating_sub(transfers.active_count_excluding(None)),
         )
     };
+    prune_auto_retry_tracker(tracker, &entries, now);
     let plan = {
         let searches = state.searches.read().await;
         create_auto_retry_plan(
@@ -25208,6 +25338,8 @@ async fn open_remote_peer_preview_stream(
         status: "peer_negotiating".to_owned(),
         reason: None,
         requested_at: now,
+        started_at: None,
+        start_offset: 0,
         updated_at: now,
     };
     let length = match negotiate_peer_transfer(state, &address, &transfer).await? {
@@ -32441,6 +32573,8 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
         if is_active_transfer_status(&entry.status) {
             entry.status = "queued".to_owned();
             entry.reason = Some("resumed after restart".to_owned());
+            entry.started_at = None;
+            entry.start_offset = entry.bytes_transferred;
             entry.updated_at = now;
         }
     }
@@ -41403,6 +41537,8 @@ mod tests {
             status: "in_progress".to_owned(),
             reason: None,
             requested_at: 1,
+            started_at: Some(1),
+            start_offset: 0,
             updated_at: 2,
         };
 
@@ -52022,6 +52158,44 @@ mod tests {
     }
 
     #[test]
+    fn auto_retry_tracker_prunes_evicted_and_expired_state() {
+        let now = super::unix_timestamp();
+        let mut queue = super::TransferQueue::new_in_memory(4);
+        let live = queue.create(
+            0,
+            Some("live-peer".to_owned()),
+            "Remote/Live.flac".to_owned(),
+            None,
+            Some(100),
+        );
+        let mut tracker = super::AutoRetryTracker::default();
+        tracker.retried_ids.extend([live.id, live.id + 100]);
+        tracker
+            .alternate_search_requested_at
+            .extend([(live.id, now), (live.id + 100, now)]);
+        tracker.retry_counts.extend([
+            (super::auto_retry_key("live-peer", &live.filename), 1),
+            (super::auto_retry_key("evicted-peer", "Gone.mp3"), 2),
+        ]);
+        tracker.peer_retry_after.extend([
+            ("live-peer".to_owned(), now + 30),
+            ("expired".to_owned(), now),
+        ]);
+
+        super::prune_auto_retry_tracker(&mut tracker, &queue.entries, now);
+
+        assert_eq!(tracker.retried_ids, HashSet::from([live.id]));
+        assert_eq!(tracker.alternate_search_requested_at.len(), 1);
+        assert!(tracker.alternate_search_requested_at.contains_key(&live.id));
+        assert_eq!(tracker.retry_counts.len(), 1);
+        assert!(tracker
+            .retry_counts
+            .contains_key(&super::auto_retry_key("live-peer", &live.filename)));
+        assert_eq!(tracker.peer_retry_after.len(), 1);
+        assert_eq!(tracker.peer_retry_after["live-peer"], now + 30);
+    }
+
+    #[test]
     fn auto_retry_plan_is_bounded_latest_only_and_network_friendly() {
         assert!(super::alternate_size_is_eligible(Some(1_000), 1_050, 5));
         assert!(!super::alternate_size_is_eligible(Some(1_000), 1_051, 5));
@@ -52387,6 +52561,110 @@ mod tests {
     }
 
     #[test]
+    fn transfer_projection_reports_elapsed_speed_and_remaining_time() {
+        let mut queue = super::TransferQueue::new_in_memory(8);
+        let entry = queue.create(
+            0,
+            Some("friend".to_owned()),
+            "Remote/Song.flac".to_owned(),
+            None,
+            Some(325),
+        );
+        let entry = queue
+            .entries
+            .iter_mut()
+            .find(|candidate| candidate.id == entry.id)
+            .unwrap();
+        entry.status = "succeeded".to_owned();
+        entry.requested_at = 90;
+        entry.started_at = Some(100);
+        entry.start_offset = 25;
+        entry.bytes_transferred = 225;
+        entry.updated_at = 104;
+
+        let projection = entry.slskd_file_json();
+        assert_eq!(projection["startOffset"], 25);
+        assert_eq!(projection["startedAt"], "100");
+        assert_eq!(projection["endedAt"], "104");
+        assert_eq!(projection["averageSpeed"], 50.0);
+        assert_eq!(projection["elapsedTime"], "00:00:04");
+        assert_eq!(projection["remainingTime"], "00:00:02");
+
+        let encoded = serde_json::to_value(&*entry).unwrap();
+        let mut legacy = encoded.as_object().unwrap().clone();
+        legacy.remove("started_at");
+        legacy.remove("start_offset");
+        let decoded = serde_json::from_value::<super::TransferEntry>(legacy.into()).unwrap();
+        assert_eq!(decoded.started_at, None);
+        assert_eq!(decoded.start_offset, 0);
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
+    }
+
+    #[test]
+    fn transfer_reports_aggregate_measured_speeds() {
+        let mut queue = super::TransferQueue::new_in_memory(8);
+        for (direction, username, bytes, started_at, updated_at) in [
+            (0, "friend", 200, 100, 104),
+            (0, "friend", 300, 100, 103),
+            (1, "uploader", 120, 100, 104),
+        ] {
+            let created = queue.create(
+                direction,
+                Some(username.to_owned()),
+                format!("Remote/{bytes}.flac"),
+                None,
+                Some(bytes),
+            );
+            let entry = queue
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == created.id)
+                .unwrap();
+            entry.status = "succeeded".to_owned();
+            entry.started_at = Some(started_at);
+            entry.bytes_transferred = bytes;
+            entry.updated_at = updated_at;
+        }
+
+        let summary = serde_json::from_str::<serde_json::Value>(
+            &super::slskd_transfer_summary_report(Some("direction=Download"), &queue),
+        )
+        .unwrap();
+        assert_eq!(summary["averageSpeed"], 75.0);
+
+        let leaderboard = serde_json::from_str::<serde_json::Value>(
+            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue),
+        )
+        .unwrap();
+        assert_eq!(leaderboard[0]["username"], "friend");
+        assert_eq!(leaderboard[0]["averageSpeed"], 75.0);
+
+        let now = super::unix_timestamp();
+        for entry in &mut queue.entries {
+            entry.status = "in_progress".to_owned();
+            entry.started_at = Some(now.saturating_sub(4));
+            entry.start_offset = 0;
+        }
+        let speeds =
+            serde_json::from_str::<serde_json::Value>(&super::slskd_transfer_speeds_json(&queue))
+                .unwrap();
+        assert!(speeds["download"].as_f64().unwrap() > 0.0);
+        assert!(speeds["upload"].as_f64().unwrap() > 0.0);
+        assert_eq!(speeds["download"], speeds["downloadSpeed"]);
+        assert_eq!(speeds["upload"], speeds["uploadSpeed"]);
+        assert_eq!(speeds["total"], speeds["soulseek"]);
+        assert_eq!(speeds["mesh"], 0.0);
+        assert_eq!(speeds["sessionBytesDownloaded"], 500);
+        assert_eq!(speeds["sessionBytesUploaded"], 120);
+        assert_eq!(speeds["sessionBytesTotal"], 620);
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
+    }
+
+    #[test]
     fn transfer_queue_persists_and_reloads_resume_state() {
         let state_dir = std::env::temp_dir().join(format!(
             "slskr-transfer-state-test-{}-{}",
@@ -52420,6 +52698,8 @@ mod tests {
         assert_eq!(entry.status, "queued");
         assert_eq!(entry.bytes_transferred, 40);
         assert_eq!(entry.reason.as_deref(), Some("resumed after restart"));
+        assert_eq!(entry.started_at, None);
+        assert_eq!(entry.start_offset, 40);
         assert_eq!(reloaded.next_id, 2);
         assert_eq!(reloaded.next_token, 2);
 
@@ -52538,6 +52818,8 @@ mod tests {
             status: "queued".to_owned(),
             reason: None,
             requested_at: 1,
+            started_at: None,
+            start_offset: 0,
             updated_at: 1,
         };
         let error =
@@ -52646,6 +52928,8 @@ mod tests {
             status: "in_progress".to_owned(),
             reason: None,
             requested_at: 11,
+            started_at: Some(11),
+            start_offset: 0,
             updated_at: 12,
         };
         super::append_transfer_event(&events_path, &entry).expect("append rotated event");
