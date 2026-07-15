@@ -17666,12 +17666,30 @@ mod tests {
             "data-slskr-compose-history",
             "Search conversations",
             "Clear Search",
+            "data-slskr-message-gate-panel",
+            "Gate reply",
+            "data-slskr-message-gate-save",
+            "cooldownMinutes",
         ] {
             assert!(
                 messages.contains(value),
                 "messages panel should contain {value}"
             );
         }
+        let live_messages = route_workspace_result_html(
+            "/messages",
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: "/private-message-auto-response",
+                    surface: "messages",
+                },
+                body: r#"{"enabled":true,"message_configured":true,"cooldown_minutes":15,"runtimeMutable":true}"#.to_string(),
+            }],
+        );
+        assert!(live_messages.contains("<mark>armed</mark>"));
+        assert!(live_messages.contains(r#"value="15""#));
+        assert!(!live_messages.contains("Runtime human check"));
 
         let sharing = route_page_html("/sharegroups");
         for value in ["Create Share Grant", "Update Share Grant", "Permissions"] {

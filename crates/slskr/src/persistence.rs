@@ -1933,6 +1933,26 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Roll back transfers that were staged but never dispatched, including their event trail.
+    pub async fn rollback_staged_transfers(
+        &self,
+        ids: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for id in ids {
+            query("DELETE FROM transfer_events WHERE transfer_id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+            query("DELETE FROM transfers WHERE id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// Append a transfer transition/progress event.
     pub async fn insert_transfer_event(
         &self,
@@ -4195,6 +4215,31 @@ mod tests {
             .unwrap();
         let updated = db.get_transfer("transfer_1").await.unwrap().unwrap();
         assert_eq!(updated.progress, 750000);
+
+        db.insert_transfer_event(&TransferEventRecord {
+            id: 0,
+            transfer_id: "transfer_1".to_owned(),
+            direction: "download".to_owned(),
+            token: 1,
+            filename: "test.mp3".to_owned(),
+            peer_username: Some("user1".to_owned()),
+            filesize: 1_000_000,
+            progress: 750_000,
+            status: "peer_lookup".to_owned(),
+            reason: None,
+            created_at: now,
+        })
+        .await
+        .unwrap();
+        db.rollback_staged_transfers(&["transfer_1".to_owned()])
+            .await
+            .unwrap();
+        assert!(db.get_transfer("transfer_1").await.unwrap().is_none());
+        assert!(db
+            .list_transfer_events(Some("transfer_1"), 10, 0)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

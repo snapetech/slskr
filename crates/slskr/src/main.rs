@@ -27132,22 +27132,26 @@ async fn auto_download_completed_wishlist(
             .map(|(entry, _)| entry.clone())
             .collect::<Vec<_>>();
         if let Err(error) = persist_transfer_records(state, &staged_entries).await {
-            rollback_staged_auto_downloads(state, &staged_entries).await;
-            return Err(error);
+            return Err(with_auto_download_rollback(
+                error,
+                rollback_staged_auto_downloads(state, &staged_entries).await,
+            ));
         }
         let mut wishlist = state.wishlist.write().await;
         let previous = wishlist.clone();
         let Some(item) = wishlist.record_auto_downloads(item_id, enqueued) else {
             drop(wishlist);
-            rollback_staged_auto_downloads(state, &staged_entries).await;
+            rollback_staged_auto_downloads(state, &staged_entries).await?;
             return Ok(0);
         };
         let mutated = wishlist.clone();
         drop(wishlist);
         if let Err(error) = persist_wishlist_item_checked(state, &item).await {
             rollback_wishlist_if_unchanged(state, previous, &mutated).await;
-            rollback_staged_auto_downloads(state, &staged_entries).await;
-            return Err(error);
+            return Err(with_auto_download_rollback(
+                error,
+                rollback_staged_auto_downloads(state, &staged_entries).await,
+            ));
         }
         for (entry, permit) in staged {
             permit.send(SessionCommand::TransferPeer {
@@ -27166,10 +27170,28 @@ async fn auto_download_completed_wishlist(
     Ok(enqueued)
 }
 
-async fn rollback_staged_auto_downloads(state: &AppState, entries: &[TransferEntry]) {
+fn with_auto_download_rollback(error: String, rollback: Result<(), String>) -> String {
+    match rollback {
+        Ok(()) => error,
+        Err(rollback_error) => {
+            format!("{error}; staged transfer rollback failed: {rollback_error}")
+        }
+    }
+}
+
+async fn rollback_staged_auto_downloads(
+    state: &AppState,
+    entries: &[TransferEntry],
+) -> Result<(), String> {
     let ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
     state.transfers.write().await.remove_entries(&ids);
-    let _ = delete_persisted_transfers(state, entries).await;
+    let Some(db) = state.db.as_ref() else {
+        return Ok(());
+    };
+    let ids = ids.into_iter().map(|id| id.to_string()).collect::<Vec<_>>();
+    db.rollback_staged_transfers(&ids)
+        .await
+        .map_err(|error| format!("failed to remove staged transfers: {error}"))
 }
 
 async fn persist_wishlist_item_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
