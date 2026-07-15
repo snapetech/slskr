@@ -6005,7 +6005,7 @@ fn share_group_member_path(path: &str) -> Option<(&str, String)> {
 }
 
 // User Notes Models
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct UserNoteRecord {
     id: String,
     username: String,
@@ -6027,7 +6027,7 @@ impl UserNoteRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct UserNoteStore {
     records: Vec<UserNoteRecord>,
     next_id: u64,
@@ -13169,12 +13169,21 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("username is required"));
             }
             let mut notes = state.user_notes.write().await;
+            let previous = notes.clone();
             let Some(record) = notes.create(username, note) else {
                 return Ok(routing::service_unavailable_response("user note capacity is full"));
             };
+            let mutated = notes.clone();
             let json = record.json();
             drop(notes);
-            persist_user_note(state, &record).await;
+            if let Err(error) = persist_user_note_checked(state, &record).await {
+                let mut notes = state.user_notes.write().await;
+                if *notes == mutated {
+                    *notes = previous;
+                }
+                drop(notes);
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/users/notes/") => {
@@ -13197,10 +13206,19 @@ async fn route_http_request_with_headers(
             };
             let note = extract_json_string_field(body, "note").unwrap_or_default();
             let mut notes = state.user_notes.write().await;
+            let previous = notes.clone();
             if let Some(record) = notes.update(id, note) {
+                let mutated = notes.clone();
                 let json = record.json();
                 drop(notes);
-                persist_user_note(state, &record).await;
+                if let Err(error) = persist_user_note_checked(state, &record).await {
+                    let mut notes = state.user_notes.write().await;
+                    if *notes == mutated {
+                        *notes = previous;
+                    }
+                    drop(notes);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response(json))
             } else {
                 drop(notes);
@@ -13212,10 +13230,19 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut notes = state.user_notes.write().await;
+            let previous = notes.clone();
             let deleted = notes.delete(id);
+            let mutated = notes.clone();
             drop(notes);
             if deleted {
-                persist_user_note_delete(state, id).await;
+                if let Err(error) = persist_user_note_delete_checked(state, id).await {
+                    let mut notes = state.user_notes.write().await;
+                    if *notes == mutated {
+                        *notes = previous;
+                    }
+                    drop(notes);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -23754,9 +23781,12 @@ async fn persist_room_leave(state: &AppState, room: &str) {
     }
 }
 
-async fn persist_user_note(state: &AppState, record: &UserNoteRecord) {
+async fn persist_user_note_checked(
+    state: &AppState,
+    record: &UserNoteRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::UserNoteRecord {
         id: record.id.clone(),
@@ -23765,13 +23795,20 @@ async fn persist_user_note(state: &AppState, record: &UserNoteRecord) {
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_user_note(&persisted).await;
+    db.upsert_user_note(&persisted)
+        .await
+        .map_err(|error| format!("user note persistence failed: {error}"))?;
+    Ok(true)
 }
 
-async fn persist_user_note_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_user_note(id).await;
-    }
+async fn persist_user_note_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_user_note(id)
+        .await
+        .map_err(|error| format!("user note deletion persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_interest(state: &AppState, record: &InterestRecord) {
@@ -31028,6 +31065,70 @@ mod tests {
         assert_eq!(unban.status, "200 OK");
         assert!(db.list_user_notes(10, 0).await.unwrap().is_empty());
         assert!(db.list_security_bans().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn user_note_routes_roll_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        db.close_for_test().await;
+        let created = super::route_http_request(
+            "POST",
+            "/api/users/notes",
+            None,
+            r#"{"username":"friend","note":"not persisted"}"#,
+            &state,
+        )
+        .await
+        .expect("failed note creation response");
+        assert_eq!(created.status, "503 Service Unavailable");
+        assert!(created.body.contains("user note persistence failed"));
+        let notes = state.user_notes.read().await;
+        assert!(notes.records.is_empty());
+        assert_eq!(notes.next_id, 1);
+        drop(notes);
+
+        for (method, body, expected_error) in [
+            (
+                "PUT",
+                r#"{"note":"changed"}"#,
+                "user note persistence failed",
+            ),
+            ("DELETE", "", "user note deletion persistence failed"),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .user_notes
+                .write()
+                .await
+                .create("friend".to_owned(), "original".to_owned())
+                .unwrap();
+            db.close_for_test().await;
+
+            let response =
+                super::route_http_request(method, "/api/users/notes/note-1", None, body, &state)
+                    .await
+                    .expect("failed note mutation response");
+            assert_eq!(response.status, "503 Service Unavailable", "{method}");
+            assert!(response.body.contains(expected_error), "{method}");
+            let notes = state.user_notes.read().await;
+            assert_eq!(notes.records.len(), 1, "{method}");
+            assert_eq!(notes.records[0].note, "original", "{method}");
+            assert_eq!(notes.next_id, 2, "{method}");
+        }
     }
 
     #[tokio::test]
