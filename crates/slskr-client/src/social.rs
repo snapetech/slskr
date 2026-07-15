@@ -8,6 +8,7 @@ pub const MAX_PRIVATE_MESSAGE_RECIPIENTS: usize = 100;
 pub const MAX_STORED_ROOM_MESSAGES: usize = 1_000;
 pub const MAX_STORED_PRIVATE_MESSAGES: usize = 1_000;
 pub const DEFAULT_MAX_USER_WATCH_RECORDS: usize = 1_024;
+pub const DEFAULT_MAX_JOINED_ROOMS: usize = 1_024;
 
 fn retain_newest<T>(items: &mut Vec<T>, max: usize) {
     if items.len() > max {
@@ -143,10 +144,17 @@ impl UserWatchState {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoomState {
     joined: HashSet<String>,
     messages: Vec<RoomMessage>,
+    max_joined_rooms: usize,
+}
+
+impl Default for RoomState {
+    fn default() -> Self {
+        Self::with_max_joined_rooms(DEFAULT_MAX_JOINED_ROOMS)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +168,15 @@ impl RoomState {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[must_use]
+    pub fn with_max_joined_rooms(max_joined_rooms: usize) -> Self {
+        Self {
+            joined: HashSet::new(),
+            messages: Vec::new(),
+            max_joined_rooms: max_joined_rooms.max(1),
+        }
     }
 
     #[must_use]
@@ -184,6 +201,9 @@ impl RoomState {
                 username,
                 message,
             } => {
+                if self.joined.len() >= self.max_joined_rooms && !self.joined.contains(room) {
+                    return false;
+                }
                 self.joined.insert(room.clone());
                 self.messages.push(RoomMessage {
                     room: room.clone(),

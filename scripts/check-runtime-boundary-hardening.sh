@@ -79,6 +79,8 @@ done
 for anchor in \
   'DEFAULT_MAX_USER_WATCH_RECORDS' \
   'user_watch_state_rejects_new_users_at_limit_but_updates_existing_users' \
+  'DEFAULT_MAX_JOINED_ROOMS' \
+  'room_state_rejects_new_rooms_at_limit_but_keeps_existing_room_messages' \
   'with_max_records' \
   'MAX_STORED_ROOM_MESSAGES' \
   'MAX_STORED_PRIVATE_MESSAGES' \
