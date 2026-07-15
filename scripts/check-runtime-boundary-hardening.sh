@@ -49,6 +49,9 @@ for anchor in \
   'MAX_SHARE_GROUPS' \
   'MAX_SHARE_GROUP_MEMBERS' \
   'share_groups_bound_groups_and_case_insensitive_members' \
+  'MAX_COLLECTIONS' \
+  'MAX_COLLECTION_ITEMS' \
+  'collections_bound_nested_state_and_allocate_unique_item_ids' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \

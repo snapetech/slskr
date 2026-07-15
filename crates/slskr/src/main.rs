@@ -60,7 +60,7 @@ mod utils;
 mod webhooks;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     env, fs,
     net::{IpAddr, SocketAddr, SocketAddrV4, ToSocketAddrs},
     path::{Component, Path, PathBuf},
@@ -141,6 +141,8 @@ const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
 const MAX_CONTACT_RECORDS: usize = 4_096;
 const MAX_SHARE_GROUPS: usize = 256;
 const MAX_SHARE_GROUP_MEMBERS: usize = 4_096;
+const MAX_COLLECTIONS: usize = 256;
+const MAX_COLLECTION_ITEMS: usize = 10_000;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -4317,15 +4319,25 @@ impl CollectionRecord {
 struct CollectionStore {
     records: Vec<CollectionRecord>,
     next_id: u64,
+    next_item_id: u64,
     updated_at: u64,
+    max_records: usize,
+    max_items_per_collection: usize,
 }
 
 impl CollectionStore {
     fn new() -> Self {
+        Self::with_limits(MAX_COLLECTIONS, MAX_COLLECTION_ITEMS)
+    }
+
+    fn with_limits(max_records: usize, max_items_per_collection: usize) -> Self {
         Self {
             records: Vec::new(),
             next_id: 1,
+            next_item_id: 1,
             updated_at: unix_timestamp(),
+            max_records: max_records.max(1),
+            max_items_per_collection: max_items_per_collection.max(1),
         }
     }
 
@@ -4334,39 +4346,55 @@ impl CollectionStore {
         items: Vec<crate::persistence::CollectionItemRecord>,
     ) -> Self {
         let mut next_id = 1;
+        let mut next_item_id = 1;
         let mut updated_at = unix_timestamp();
-        let mut records = collections
-            .into_iter()
-            .map(|record| {
-                if let Some(number) = record
-                    .id
-                    .strip_prefix("col-")
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    next_id = next_id.max(number.saturating_add(1));
-                }
+        let mut records = Vec::new();
+        let mut seen_collection_ids = HashSet::new();
+        for record in collections {
+            if let Some(number) = record
+                .id
+                .strip_prefix("col-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                next_id = next_id.max(number.saturating_add(1));
+            }
+            if records.len() < MAX_COLLECTIONS && seen_collection_ids.insert(record.id.clone()) {
                 let created_at = u64::try_from(record.created_at).unwrap_or(0);
                 let record_updated_at = u64::try_from(record.updated_at).unwrap_or(created_at);
                 updated_at = updated_at.max(record_updated_at);
-                CollectionRecord {
+                records.push(CollectionRecord {
                     id: record.id,
                     name: record.name,
                     description: record.description,
                     items: Vec::new(),
                     created_at,
                     updated_at: record_updated_at,
-                }
-            })
-            .collect::<Vec<_>>();
+                });
+            }
+        }
         let mut items = items;
         items.sort_by_key(|item| (item.collection_id.clone(), item.position, item.added_at));
+        let mut seen_item_ids = HashSet::new();
         for item in items {
+            if let Some(number) = item
+                .id
+                .strip_prefix("item-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                next_item_id = next_item_id.max(number.saturating_add(1));
+            }
+            if !seen_item_ids.insert(item.id.clone()) {
+                continue;
+            }
             let Some(collection) = records
                 .iter_mut()
                 .find(|record| record.id == item.collection_id)
             else {
                 continue;
             };
+            if collection.items.len() >= MAX_COLLECTION_ITEMS {
+                continue;
+            }
             collection.items.push(CollectionItem {
                 id: item.id,
                 content_id: item.content_id,
@@ -4379,14 +4407,20 @@ impl CollectionStore {
         Self {
             records,
             next_id,
+            next_item_id,
             updated_at,
+            max_records: MAX_COLLECTIONS,
+            max_items_per_collection: MAX_COLLECTION_ITEMS,
         }
     }
 
-    fn create(&mut self, name: String, description: String) -> CollectionRecord {
+    fn create(&mut self, name: String, description: String) -> Option<CollectionRecord> {
+        if self.records.len() >= self.max_records {
+            return None;
+        }
         let now = unix_timestamp();
         let id = format!("col-{}", self.next_id);
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1)?;
         let record = CollectionRecord {
             id,
             name,
@@ -4397,7 +4431,7 @@ impl CollectionStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn get(&self, id: &str) -> Option<CollectionRecord> {
@@ -4424,13 +4458,35 @@ impl CollectionStore {
         }
     }
 
-    fn add_item(&mut self, collection_id: &str, item: CollectionItem) -> Option<CollectionRecord> {
+    fn add_item(
+        &mut self,
+        collection_id: &str,
+        content_id: String,
+        artist: String,
+        title: String,
+        kind: String,
+    ) -> Result<Option<CollectionItem>, ()> {
         let now = unix_timestamp();
-        let record = self.records.iter_mut().find(|r| r.id == collection_id)?;
-        record.items.push(item);
+        let Some(record) = self.records.iter_mut().find(|r| r.id == collection_id) else {
+            return Ok(None);
+        };
+        if record.items.len() >= self.max_items_per_collection {
+            return Err(());
+        }
+        let next_item_id = self.next_item_id.checked_add(1).ok_or(())?;
+        let item = CollectionItem {
+            id: format!("item-{}", self.next_item_id),
+            content_id,
+            artist,
+            title,
+            kind,
+            added_at: now,
+        };
+        self.next_item_id = next_item_id;
+        record.items.push(item.clone());
         record.updated_at = now;
         self.updated_at = now;
-        Some(record.clone())
+        Ok(Some(item))
     }
 
     fn update_item(
@@ -11121,7 +11177,11 @@ async fn route_http_request_with_headers(
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
             let description = extract_json_string_field(body, "description").unwrap_or_default();
             let mut collections = state.collections.write().await;
-            let record = collections.create(name, description);
+            let Some(record) = collections.create(name, description) else {
+                return Ok(routing::service_unavailable_response(
+                    "collection capacity is full",
+                ));
+            };
             let json = record.json();
             drop(collections);
             persist_collection(state, &record).await;
@@ -11213,23 +11273,27 @@ async fn route_http_request_with_headers(
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
 
             let mut collections = state.collections.write().await;
-            let item_id = format!("item-{}", unix_timestamp());
-            let item = CollectionItem {
-                id: item_id,
+            match collections.add_item(
+                id,
                 content_id,
                 artist,
                 title,
                 kind,
-                added_at: unix_timestamp(),
-            };
-            if let Some(_record) = collections.add_item(id, item.clone()) {
+            ) {
+              Ok(Some(item)) => {
                 let json = item.json();
                 drop(collections);
                 persist_collection_item(state, id, &item).await;
                 Ok(routing::created_response(json))
-            } else {
+              }
+              Ok(None) => {
                 drop(collections);
                 Ok(routing::not_found_response())
+              }
+              Err(()) => {
+                drop(collections);
+                Ok(routing::service_unavailable_response("collection item capacity is full"))
+              }
             }
         }
         ("DELETE", path) if path.starts_with("/api/collections/items/") => {
@@ -31343,6 +31407,58 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(groups.remove_member(&group.id, "ALICE").is_some());
+    }
+
+    #[test]
+    fn collections_bound_nested_state_and_allocate_unique_item_ids() {
+        let mut collections = super::CollectionStore::with_limits(1, 2);
+        let collection = collections
+            .create("Road Trip".to_owned(), String::new())
+            .unwrap();
+        assert!(collections
+            .create("Overflow".to_owned(), String::new())
+            .is_none());
+
+        let first = collections
+            .add_item(
+                &collection.id,
+                "content-1".to_owned(),
+                "Artist".to_owned(),
+                "First".to_owned(),
+                "Audio".to_owned(),
+            )
+            .unwrap()
+            .unwrap();
+        let second = collections
+            .add_item(
+                &collection.id,
+                "content-2".to_owned(),
+                "Artist".to_owned(),
+                "Second".to_owned(),
+                "Audio".to_owned(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_ne!(first.id, second.id);
+        assert!(collections
+            .add_item(
+                &collection.id,
+                "content-3".to_owned(),
+                String::new(),
+                "Third".to_owned(),
+                "Audio".to_owned(),
+            )
+            .is_err());
+        assert!(collections
+            .add_item(
+                "missing",
+                String::new(),
+                String::new(),
+                String::new(),
+                "Audio".to_owned(),
+            )
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
