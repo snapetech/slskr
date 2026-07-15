@@ -15315,7 +15315,10 @@ async fn route_http_request_with_headers(
             messages.records.retain(|record| record.username != username);
             let removed = before.saturating_sub(messages.records.len());
             drop(messages);
-            Ok(routing::ok_response((removed > 0).to_string()))
+            let persisted_removed = persist_conversation_delete(state, &username).await;
+            Ok(routing::ok_response(
+                (removed > 0 || persisted_removed > 0).to_string(),
+            ))
         }
 
         ("DELETE", path) if path.starts_with("/api/files/") && path.contains("/directories/") => {
@@ -23227,6 +23230,13 @@ async fn persist_message_ack(state: &AppState, id: u64) {
     }
 }
 
+async fn persist_conversation_delete(state: &AppState, username: &str) -> u64 {
+    let Some(db) = state.db.as_ref() else {
+        return 0;
+    };
+    db.delete_messages_from_user(username).await.unwrap_or(0)
+}
+
 async fn persist_room_join(state: &AppState, room: &str) {
     if let Some(db) = state.db.as_ref() {
         let _ = db.subscribe_room(room, None).await;
@@ -29853,6 +29863,54 @@ mod tests {
         assert_eq!(listed_rooms.status, "200 OK");
         assert!(listed_rooms.body.contains("\"name\":\"music\""));
         assert!(listed_rooms.body.contains("\"joined\":true"));
+    }
+
+    #[tokio::test]
+    async fn conversation_delete_removes_persisted_history() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        for (username, message) in [("friend", "private"), ("other", "retained")] {
+            let response = super::route_http_request(
+                "POST",
+                "/api/messages/inbound",
+                None,
+                &format!("{{\"username\":\"{username}\",\"body\":\"{message}\"}}"),
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status, "201 Created");
+        }
+        assert_eq!(db.list_messages(10, 0).await.unwrap().len(), 2);
+
+        let deleted =
+            super::route_http_request("DELETE", "/api/conversations/friend", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(deleted.status, "200 OK");
+        assert_eq!(deleted.body, "true");
+        assert!(state
+            .messages
+            .read()
+            .await
+            .records
+            .iter()
+            .all(|message| message.username != "friend"));
+        let persisted = db.list_messages(10, 0).await.unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].username, "other");
+
+        let rehydrated = super::MessageStore::from_persisted(persisted);
+        assert!(rehydrated
+            .records
+            .iter()
+            .all(|message| message.username != "friend"));
     }
 
     #[tokio::test]

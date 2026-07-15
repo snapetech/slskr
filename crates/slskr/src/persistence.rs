@@ -1998,6 +1998,18 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Delete every persisted message in a user's conversation.
+    pub async fn delete_messages_from_user(
+        &self,
+        username: &str,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let result = query("DELETE FROM messages WHERE username = ?")
+            .bind(username)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     // ========================================================================
     // User Statistics Operations
     // ========================================================================
