@@ -16974,6 +16974,14 @@ fn websocket_protocol_authorization(protocol_header: Option<&str>) -> Option<Str
     Some(format!("Bearer {token}"))
 }
 
+fn mixed_websocket_auth_credentials(
+    headers: &http_server::HttpHeaders,
+    websocket_authorization: Option<&str>,
+) -> bool {
+    websocket_authorization.is_some()
+        && (headers.authorization.is_some() || headers.x_api_key.is_some())
+}
+
 fn decode_websocket_auth_protocol(protocol: &str) -> Option<String> {
     if !is_websocket_protocol_token(protocol) {
         return None;
@@ -23449,6 +23457,14 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 websocket_protocol_authorization(req.headers.sec_websocket_protocol.as_deref())
             })
             .flatten();
+        if mixed_websocket_auth_credentials(
+            &req.headers,
+            websocket_protocol_authorization.as_deref(),
+        ) {
+            let response = routing::bad_request_response("multiple authentication mechanisms");
+            let _ = http_server::write_http_response(&mut writer, &response, false, "").await;
+            break;
+        }
         let api_key_authorization = req
             .headers
             .x_api_key
@@ -26014,24 +26030,28 @@ mod tests {
         )
         .expect("cookie auth config");
         let cookie = Some("slskr.session=route-token");
-        let first = super::authenticated_rate_limit_user_key(
-            &config,
-            Some("Bearer attacker-controlled-1"),
-            cookie,
-        )
-        .expect("cookie-authenticated key");
-        let second = super::authenticated_rate_limit_user_key(
-            &config,
-            Some("Bearer attacker-controlled-2"),
-            cookie,
-        )
-        .expect("cookie-authenticated key");
+        let first = super::authenticated_rate_limit_user_key(&config, None, cookie)
+            .expect("cookie-authenticated key");
+        let second =
+            super::authenticated_rate_limit_user_key(&config, Some("Bearer route-token"), cookie)
+                .expect("matching credentials key");
 
         assert_eq!(first, second);
         assert_eq!(first, super::rate_limit_user_key("route-token"));
-        assert_ne!(first, super::rate_limit_user_key("attacker-controlled-1"));
         let key = first;
         assert!(!key.contains("route-token"));
+        assert!(super::authenticated_rate_limit_user_key(
+            &config,
+            Some("Bearer attacker-controlled"),
+            cookie,
+        )
+        .is_none());
+        assert!(super::authenticated_rate_limit_user_key(
+            &config,
+            Some("Basic route-token"),
+            cookie,
+        )
+        .is_none());
     }
 
     #[test]
@@ -36596,6 +36616,30 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn websocket_auth_subprotocol_rejects_header_credentials() {
+        let websocket_auth = Some("Bearer route-token");
+        for headers in [
+            super::http_server::HttpHeaders {
+                authorization: Some("Bearer route-token".to_owned()),
+                ..Default::default()
+            },
+            super::http_server::HttpHeaders {
+                x_api_key: Some("route-token".to_owned()),
+                ..Default::default()
+            },
+        ] {
+            assert!(super::mixed_websocket_auth_credentials(
+                &headers,
+                websocket_auth
+            ));
+        }
+        assert!(!super::mixed_websocket_auth_credentials(
+            &super::http_server::HttpHeaders::default(),
+            websocket_auth
+        ));
     }
 
     #[test]

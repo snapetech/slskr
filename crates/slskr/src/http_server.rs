@@ -323,6 +323,9 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
         }
         return Err("Transfer-Encoding is not supported".to_string());
     }
+    if headers.authorization.is_some() && headers.x_api_key.is_some() {
+        return Err("multiple HTTP authentication mechanisms are not supported".to_owned());
+    }
     if http_version == "HTTP/1.1" && headers.host.is_none() {
         return Err("HTTP/1.1 requires a Host header".to_owned());
     }
@@ -769,6 +772,20 @@ mod tests {
             let error = read_http_request(&mut reader).await.unwrap_err();
             assert!(error.contains("duplicate"), "{error}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_mixed_authentication_headers_are_rejected() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(
+                b"GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer first\r\nX-API-Key: second\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let error = read_http_request(&mut reader).await.unwrap_err();
+        assert!(error.contains("authentication mechanisms"), "{error}");
     }
 
     #[tokio::test]

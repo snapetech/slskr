@@ -215,17 +215,32 @@ pub fn is_authorized(
     let Some(expected_token) = config.api_token.as_deref() else {
         return false;
     };
-    let bearer_authorized = authorization
-        .and_then(|value| {
-            value
-                .strip_prefix("Bearer ")
-                .or_else(|| value.strip_prefix("ApiKey "))
-        })
-        .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes()));
-    bearer_authorized
-        || (config.api_cookie_auth_enabled
-            && cookie_session_token(cookie)
-                .is_some_and(|token| constant_time_eq(token.as_bytes(), expected_token.as_bytes())))
+    let mut supplied_credential = false;
+    if let Some(value) = authorization {
+        supplied_credential = true;
+        let Some(token) = value
+            .strip_prefix("Bearer ")
+            .or_else(|| value.strip_prefix("ApiKey "))
+        else {
+            return false;
+        };
+        if !constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
+            return false;
+        }
+    }
+    if config.api_cookie_auth_enabled {
+        let cookie_token = match parse_cookie_session_token(cookie) {
+            Ok(token) => token,
+            Err(()) => return false,
+        };
+        if let Some(token) = cookie_token {
+            supplied_credential = true;
+            if !constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
+                return false;
+            }
+        }
+    }
+    supplied_credential
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -240,8 +255,15 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 }
 
 pub(crate) fn cookie_session_token(cookie: Option<&str>) -> Option<String> {
+    parse_cookie_session_token(cookie).ok().flatten()
+}
+
+fn parse_cookie_session_token(cookie: Option<&str>) -> Result<Option<String>, ()> {
     let mut session_token = None;
-    for part in cookie?.split(';') {
+    let Some(cookie) = cookie else {
+        return Ok(None);
+    };
+    for part in cookie.split(';') {
         let Some((name, value)) = part.trim().split_once('=') else {
             continue;
         };
@@ -249,11 +271,11 @@ pub(crate) fn cookie_session_token(cookie: Option<&str>) -> Option<String> {
             continue;
         }
         if session_token.is_some() {
-            return None;
+            return Err(());
         }
-        session_token = Some(strict_percent_decode_component(value.trim())?);
+        session_token = Some(strict_percent_decode_component(value.trim()).ok_or(())?);
     }
-    session_token
+    Ok(session_token)
 }
 
 fn strict_percent_decode_component(value: &str) -> Option<String> {
