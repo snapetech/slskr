@@ -18622,11 +18622,18 @@ fn slskd_file_storage_resource_path(path: &str) -> Option<(&str, &str, &str)> {
 }
 
 fn file_storage_error_response(error: &str) -> HttpResponse {
-    if error == STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR {
+    if matches!(
+        error,
+        STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR | STORAGE_DIRECTORY_DELETE_DEPTH_ERROR
+    ) {
         HttpResponse {
             status: "413 Payload Too Large",
             content_type: "application/json",
-            body: "{\"error\":\"storage directory is too large to list\"}".to_owned(),
+            body: if error == STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR {
+                "{\"error\":\"storage directory is too large to list\"}".to_owned()
+            } else {
+                "{\"error\":\"storage directory tree is too deep to delete\"}".to_owned()
+            },
         }
     } else if error.contains("failed:") {
         eprintln!("file storage operation failed: {error}");
@@ -19397,7 +19404,9 @@ const SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES: usize = 256;
 const SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES: usize = 1_024;
 const SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES: usize = 16_384;
 const SLSKD_STORAGE_MAX_RECURSION_DEPTH: usize = 24;
+const SLSKD_STORAGE_MAX_DELETE_DEPTH: usize = 64;
 const STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR: &str = "storage directory entry limit exceeded";
+const STORAGE_DIRECTORY_DELETE_DEPTH_ERROR: &str = "storage directory delete depth exceeded";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StorageDirectoryListOptions {
@@ -21908,7 +21917,7 @@ fn delete_scoped_storage_path_unix(
             Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
             Err(error) => return Err(format!("storage directory confined open failed: {error}")),
         };
-        remove_directory_contents_unix(&target_directory)?;
+        remove_directory_contents_unix(&target_directory, 0)?;
         unlinkat(&parent, *target, AtFlags::REMOVEDIR)
             .map_err(|error| format!("directory confined delete failed: {error}"))?;
     } else {
@@ -21922,9 +21931,15 @@ fn delete_scoped_storage_path_unix(
 }
 
 #[cfg(unix)]
-fn remove_directory_contents_unix(directory: &impl std::os::fd::AsFd) -> Result<(), String> {
+fn remove_directory_contents_unix(
+    directory: &impl std::os::fd::AsFd,
+    depth: usize,
+) -> Result<(), String> {
     use rustix::fs::{openat, unlinkat, AtFlags, Dir, Mode, OFlags};
 
+    if depth >= SLSKD_STORAGE_MAX_DELETE_DEPTH {
+        return Err(STORAGE_DIRECTORY_DELETE_DEPTH_ERROR.to_owned());
+    }
     let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let mut entries = Dir::read_from(directory)
         .map_err(|error| format!("storage directory read failed: {error}"))?;
@@ -21938,7 +21953,7 @@ fn remove_directory_contents_unix(directory: &impl std::os::fd::AsFd) -> Result<
     for name in names {
         match openat(directory, &name, directory_flags, Mode::empty()) {
             Ok(child) => {
-                remove_directory_contents_unix(&child)?;
+                remove_directory_contents_unix(&child, depth + 1)?;
                 unlinkat(directory, &name, AtFlags::REMOVEDIR)
                     .map_err(|error| format!("storage child directory delete failed: {error}"))?;
             }
@@ -29955,6 +29970,14 @@ mod tests {
         assert_eq!(
             oversized.body,
             "{\"error\":\"storage directory is too large to list\"}"
+        );
+
+        let too_deep =
+            super::file_storage_error_response(super::STORAGE_DIRECTORY_DELETE_DEPTH_ERROR);
+        assert_eq!(too_deep.status, "413 Payload Too Large");
+        assert_eq!(
+            too_deep.body,
+            "{\"error\":\"storage directory tree is too deep to delete\"}"
         );
     }
 
@@ -43980,6 +44003,35 @@ mod tests {
         );
         assert!(link.symlink_metadata().is_err());
         assert!(!missing_target.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_storage_delete_bounds_directory_depth() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-deep-delete-test-{}-{unique}",
+            std::process::id()
+        ));
+        let tree = root.join("tree");
+        let mut directory = tree.clone();
+        for depth in 0..=super::SLSKD_STORAGE_MAX_DELETE_DEPTH {
+            directory.push(format!("d{depth:02}"));
+        }
+        std::fs::create_dir_all(&directory).expect("create deep directory tree");
+
+        let encoded = super::STANDARD.encode("tree");
+        assert_eq!(
+            super::delete_scoped_file_storage_path(&root, &encoded, true).unwrap_err(),
+            super::STORAGE_DIRECTORY_DELETE_DEPTH_ERROR
+        );
+        assert!(tree.exists());
+        assert!(directory.exists());
 
         let _ = std::fs::remove_dir_all(root);
     }

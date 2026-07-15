@@ -21,6 +21,11 @@ if ! rg -n 'SLSKD_STORAGE_MAX_RECURSION_DEPTH|slskd_recursive_storage_listing_bo
   status=1
 fi
 
+if ! rg -n 'SLSKD_STORAGE_MAX_DELETE_DEPTH|scoped_storage_delete_bounds_directory_depth' crates/slskr/src/main.rs >/dev/null; then
+  printf 'storage listing pressure check failed: recursive deletion depth budget is missing\n' >&2
+  status=1
+fi
+
 if ! rg -n 'StorageDirectoryListOptions|limit.*offset|from_query' crates/slskr/src/main.rs >/dev/null; then
   printf 'storage listing pressure check failed: storage listing pagination options are missing\n' >&2
   status=1
