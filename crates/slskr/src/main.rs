@@ -10875,7 +10875,9 @@ async fn route_http_request_with_headers(
              && !path.ends_with("/start") && !path.ends_with("/progress") && !path.ends_with("/complete")
              && !path.ends_with("/speeds")
              && !path.ends_with("/stats") => {
-             let id_str = path.rsplit('/').next().unwrap_or("");
+             let Some(id_str) = transfer_resource_segment(path) else {
+                 return Ok(routing::not_found_response());
+             };
              if let Ok(id) = id_str.parse::<u64>() {
                  let transfers = state.transfers.read().await;
                  if let Some(entry) = transfers.entries.iter().find(|t| t.id == id) {
@@ -10894,7 +10896,9 @@ async fn route_http_request_with_headers(
          // DELETE individual transfer (cancel)
          ("DELETE", path) if (path.starts_with("/api/transfers/") || path.starts_with("/api/v0/transfers/"))
              && transfer_action_path(normalized_path.as_str()).is_none() => {
-             let id_str = path.rsplit('/').next().unwrap_or("");
+             let Some(id_str) = transfer_resource_segment(path) else {
+                 return Ok(routing::not_found_response());
+             };
              if let Ok(id) = id_str.parse::<u64>() {
                  let mut transfers = state.transfers.write().await;
                  if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
@@ -17719,6 +17723,11 @@ fn slskd_transfer_file_path<'a>(path: &'a str, direction: &str) -> Option<(&'a s
 
 fn slskd_transfer_position_path(path: &str) -> Option<(&str, u64)> {
     slskd_transfer_file_path(path, "downloads").filter(|_| path.ends_with("/position"))
+}
+
+fn transfer_resource_segment(path: &str) -> Option<&str> {
+    path_segment_after(path, "/api/transfers/")
+        .or_else(|| path_segment_after(path, "/api/v0/transfers/"))
 }
 
 fn slskd_files_from_body(body: &str) -> Vec<serde_json::Value> {
@@ -32538,6 +32547,15 @@ mod tests {
         .await
         .expect("create cancellable transfer");
         assert_eq!(cancelled.status, "201 Created");
+        let aliased_delete =
+            super::route_http_request("DELETE", "/api/v0/transfers/unrelated/2", None, "", &state)
+                .await
+                .expect("reject aliased transfer delete");
+        assert_eq!(aliased_delete.status, "404 Not Found");
+        assert_eq!(
+            db.get_transfer("2").await.unwrap().unwrap().status,
+            "queued"
+        );
         let deleted = super::route_http_request("DELETE", "/api/v0/transfers/2", None, "", &state)
             .await
             .expect("cancel persisted transfer");
