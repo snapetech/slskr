@@ -2824,7 +2824,7 @@ impl SessionSnapshot {
             json_option(self.username.as_deref()),
             json_bool_option(self.supporter),
             json_u32_option(self.privileges_seconds),
-            json_option(self.last_error.as_deref()),
+            json_option(public_session_error(self.last_error.as_deref())),
             json_option(self.last_server_message.as_deref()),
             self.server_messages_seen,
             self.reconnects,
@@ -2845,6 +2845,18 @@ impl SessionSnapshot {
             self.updated_at
         )
     }
+}
+
+fn public_session_error(error: Option<&str>) -> Option<&'static str> {
+    error.map(|error| {
+        if error.starts_with("login failed") {
+            "login failed"
+        } else if error.starts_with("connect failed") {
+            "connection failed"
+        } else {
+            "session operation failed"
+        }
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -17940,7 +17952,7 @@ fn slskd_server_state_json(
         "isLoggedIn": connected,
         "isLoggingIn": session.state == "connecting",
         "isTransitioning": session.state == "connecting" || session.state == "disconnecting",
-        "lastError": session.last_error,
+        "lastError": public_session_error(session.last_error.as_deref()),
         "runtimeCredentialsConfigured": runtime_credentials_configured,
     })
 }
@@ -29512,6 +29524,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_errors_redact_internal_details() {
+        let (state, _receiver) = test_state();
+        state.session.write().await.last_error =
+            Some("server receive failed from 10.0.0.9:2242: /private/session.db denied".to_owned());
+
+        for path in ["/api/v0/session", "/api/v0/server"] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("session response");
+            assert_eq!(response.status, "200 OK", "{path}");
+            assert!(response.body.contains("session operation failed"), "{path}");
+            assert!(!response.body.contains("10.0.0.9"), "{path}");
+            assert!(!response.body.contains("/private"), "{path}");
+            assert!(!response.body.contains("denied"), "{path}");
+        }
+    }
+
+    #[tokio::test]
     async fn root_serves_webui_or_fallback_dashboard() {
         let (state, _receiver) = test_state();
 
@@ -30622,10 +30652,7 @@ mod tests {
         let server_error_json =
             serde_json::from_str::<serde_json::Value>(&server_error.body).unwrap();
         assert_eq!(server_error_json["state"], "Error");
-        assert_eq!(
-            server_error_json["lastError"],
-            "login failed: invalid password"
-        );
+        assert_eq!(server_error_json["lastError"], "login failed");
 
         let session_enabled =
             super::route_http_request("GET", "/api/v0/session/enabled", None, "", &state)

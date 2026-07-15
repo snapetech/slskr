@@ -2748,46 +2748,54 @@ impl DatabaseManager {
         items: &[CollectionItemRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        query(
-            r#"
-            INSERT INTO collections (id, name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                description = excluded.description,
-                created_at = excluded.created_at,
-                updated_at = excluded.updated_at
-            "#,
-        )
-        .bind(&record.id)
-        .bind(&record.name)
-        .bind(&record.description)
-        .bind(record.created_at)
-        .bind(record.updated_at)
-        .execute(&mut *transaction)
-        .await?;
-        query("DELETE FROM collection_items WHERE collection_id = ?")
-            .bind(&record.id)
-            .execute(&mut *transaction)
-            .await?;
-        for item in items {
+        let result = async {
             query(
                 r#"
-                INSERT INTO collection_items
-                    (id, collection_id, content_id, artist, title, kind, added_at, position)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO collections (id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    description = excluded.description,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
                 "#,
             )
-            .bind(&item.id)
-            .bind(&item.collection_id)
-            .bind(&item.content_id)
-            .bind(&item.artist)
-            .bind(&item.title)
-            .bind(&item.kind)
-            .bind(item.added_at)
-            .bind(item.position)
+            .bind(&record.id)
+            .bind(&record.name)
+            .bind(&record.description)
+            .bind(record.created_at)
+            .bind(record.updated_at)
             .execute(&mut *transaction)
             .await?;
+            query("DELETE FROM collection_items WHERE collection_id = ?")
+                .bind(&record.id)
+                .execute(&mut *transaction)
+                .await?;
+            for item in items {
+                query(
+                    r#"
+                    INSERT INTO collection_items
+                        (id, collection_id, content_id, artist, title, kind, added_at, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    "#,
+                )
+                .bind(&item.id)
+                .bind(&item.collection_id)
+                .bind(&item.content_id)
+                .bind(&item.artist)
+                .bind(&item.title)
+                .bind(&item.kind)
+                .bind(item.added_at)
+                .bind(item.position)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            Ok::<(), sqlx_core::Error>(())
+        }
+        .await;
+        if let Err(error) = result {
+            transaction.rollback().await?;
+            return Err(error.into());
         }
         transaction.commit().await?;
         Ok(())
