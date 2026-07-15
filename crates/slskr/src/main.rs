@@ -1632,7 +1632,7 @@ fn parse_list_limit(value: &str) -> usize {
         .unwrap_or(DEFAULT_LIST_LIMIT)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct EventRecord {
     id: u64,
     kind: String,
@@ -1756,7 +1756,7 @@ fn topic_for_event_kind(kind: &str) -> &'static str {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct EventStore {
     records: Vec<EventRecord>,
     next_id: u64,
@@ -9315,14 +9315,18 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut events = state.events.write().await;
+            let previous = events.clone();
             let record = events.record(
                 "compat.event",
                 kind,
                 json_body_string(body).or_else(|| Some(body.to_owned())),
             );
             let count = events.records.len();
+            if let Err(error) = persist_event_record_checked(state, &record).await {
+                *events = previous;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             drop(events);
-            persist_event_record(state, &record).await;
             Ok(routing::ok_response(
                 serde_json::json!({
                     "recorded": true,
@@ -24106,7 +24110,12 @@ async fn record_event(
     let mut events = state.events.write().await;
     let record = events.record(kind, resource, detail);
     drop(events);
-    persist_event_record(state, &record).await;
+    if let Err(error) = persist_event_record_checked(state, &record).await {
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(error);
+        })
+        .await;
+    }
     let _ = state.event_tx.send(record);
 }
 
@@ -24166,9 +24175,12 @@ async fn record_http_log(
     record_event(state, "log.created", "http", Some(detail)).await;
 }
 
-async fn persist_event_record(state: &AppState, record: &EventRecord) {
+async fn persist_event_record_checked(
+    state: &AppState,
+    record: &EventRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::EventRecord {
         id: i64::try_from(record.id).unwrap_or(i64::MAX),
@@ -24177,8 +24189,10 @@ async fn persist_event_record(state: &AppState, record: &EventRecord) {
         detail: record.detail.clone(),
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
     };
-    let _ = db.insert_event(&persisted).await;
-    let _ = db.prune_events(EVENT_HISTORY_LIMIT as i32).await;
+    db.insert_event_and_prune(&persisted, EVENT_HISTORY_LIMIT as i32)
+        .await
+        .map_err(|error| format!("event persistence failed: {error}"))?;
+    Ok(true)
 }
 
 fn persisted_message_record(record: &MessageRecord) -> crate::persistence::MessageRecord {
@@ -31324,6 +31338,40 @@ mod tests {
         assert_eq!(stats_json["events"], 2);
         assert_eq!(stats_json["persisted"]["events"], 2);
         assert_eq!(stats_json["projections"]["events"], 2);
+    }
+
+    #[tokio::test]
+    async fn event_persistence_failures_roll_back_ingest_and_surface_internal_loss() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let previous = state.events.read().await.clone();
+        db.close_for_test().await;
+
+        let response =
+            super::route_http_request("POST", "/api/events/Noop", None, r#""must fail""#, &state)
+                .await
+                .expect("failed event persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("event persistence failed"));
+        assert_eq!(*state.events.read().await, previous);
+
+        super::record_event(&state, "internal.test", "resource", None).await;
+        assert_eq!(
+            state.events.read().await.records.len(),
+            previous.records.len() + 1
+        );
+        let session = state.session.read().await;
+        assert!(session
+            .last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("event persistence failed"));
     }
 
     #[test]

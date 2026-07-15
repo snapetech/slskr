@@ -1885,6 +1885,41 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Insert an event and enforce its retention limit atomically.
+    pub async fn insert_event_and_prune(
+        &self,
+        record: &EventRecord,
+        history_limit: i32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query(
+            r#"
+            INSERT OR REPLACE INTO events (id, kind, resource, detail, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(record.id)
+        .bind(&record.kind)
+        .bind(&record.resource)
+        .bind(&record.detail)
+        .bind(record.created_at)
+        .execute(&mut *transaction)
+        .await?;
+        query(
+            r#"
+            DELETE FROM events
+            WHERE id NOT IN (
+                SELECT id FROM events ORDER BY id DESC LIMIT ?
+            )
+            "#,
+        )
+        .bind(history_limit)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// List recent persisted runtime event records in ascending id order.
     pub async fn list_events(
         &self,
