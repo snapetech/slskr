@@ -12779,8 +12779,10 @@ async fn route_http_request_with_headers(
             persist_user_note(state, &record).await;
             Ok(routing::created_response(json))
         }
-        ("GET", path) if path.starts_with("/api/users/notes/") && path.len() > 17 => {
-            let id = &path[17..];
+        ("GET", path) if path.starts_with("/api/users/notes/") => {
+            let Some(id) = path_segment_after(path, "/api/users/notes/") else {
+                return Ok(routing::not_found_response());
+            };
             let notes = state.user_notes.read().await;
             if let Some(record) = notes.get(id) {
                 let json = record.json();
@@ -12791,8 +12793,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("PUT", path) if path.starts_with("/api/users/notes/") && path.len() > 17 => {
-            let id = &path[17..];
+        ("PUT", path) if path.starts_with("/api/users/notes/") => {
+            let Some(id) = path_segment_after(path, "/api/users/notes/") else {
+                return Ok(routing::not_found_response());
+            };
             let note = extract_json_string_field(body, "note").unwrap_or_default();
             let mut notes = state.user_notes.write().await;
             if let Some(record) = notes.update(id, note) {
@@ -12805,8 +12809,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("DELETE", path) if path.starts_with("/api/users/notes/") && path.len() > 17 => {
-            let id = &path[17..];
+        ("DELETE", path) if path.starts_with("/api/users/notes/") => {
+            let Some(id) = path_segment_after(path, "/api/users/notes/") else {
+                return Ok(routing::not_found_response());
+            };
             let mut notes = state.user_notes.write().await;
             let deleted = notes.delete(id);
             drop(notes);
@@ -12843,8 +12849,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::ok_response(json))
             }
         }
-        ("DELETE", path) if path.starts_with("/api/soulseek/interests/") && path.len() > 24 => {
-            let id = &path[24..];
+        ("DELETE", path) if path.starts_with("/api/soulseek/interests/") => {
+            let Some(id) = path_segment_after(path, "/api/soulseek/interests/") else {
+                return Ok(routing::not_found_response());
+            };
             let mut interests = state.interests.write().await;
             let deleted = interests.remove_liked(id);
             drop(interests);
@@ -12881,8 +12889,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::ok_response(json))
             }
         }
-        ("DELETE", path) if path.starts_with("/api/soulseek/hated-interests/") && path.len() > 30 => {
-            let id = &path[30..];
+        ("DELETE", path) if path.starts_with("/api/soulseek/hated-interests/") => {
+            let Some(id) = path_segment_after(path, "/api/soulseek/hated-interests/") else {
+                return Ok(routing::not_found_response());
+            };
             let mut interests = state.interests.write().await;
             let deleted = interests.remove_hated(id);
             drop(interests);
@@ -13016,8 +13026,10 @@ async fn route_http_request_with_headers(
             persist_library_item(state, &record).await;
             Ok(routing::created_response(json))
         }
-        ("GET", path) if path.starts_with("/api/library/items/") && path.len() > 19 => {
-            let id = &path[19..];
+        ("GET", path) if path.starts_with("/api/library/items/") => {
+            let Some(id) = path_segment_after(path, "/api/library/items/") else {
+                return Ok(routing::not_found_response());
+            };
             let library = state.library.read().await;
             if let Some(record) = library.get(id) {
                 let json = record.json();
@@ -13028,8 +13040,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("DELETE", path) if path.starts_with("/api/library/items/") && path.len() > 19 => {
-            let id = &path[19..];
+        ("DELETE", path) if path.starts_with("/api/library/items/") => {
+            let Some(id) = path_segment_after(path, "/api/library/items/") else {
+                return Ok(routing::not_found_response());
+            };
             let mut library = state.library.write().await;
             let deleted = library.delete(id);
             drop(library);
@@ -30233,6 +30247,76 @@ mod tests {
         assert_eq!(unban.status, "200 OK");
         assert!(db.list_user_notes(10, 0).await.unwrap().is_empty());
         assert!(db.list_security_bans().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn nested_resource_paths_cannot_mutate_flat_record_ids() {
+        let (state, _receiver) = test_state();
+        let now = super::unix_timestamp();
+        state
+            .user_notes
+            .write()
+            .await
+            .records
+            .push(super::UserNoteRecord {
+                id: "note/nested".to_owned(),
+                username: "friend".to_owned(),
+                note: "keep".to_owned(),
+                created_at: now,
+                updated_at: now,
+            });
+        state
+            .interests
+            .write()
+            .await
+            .liked
+            .push(super::InterestRecord {
+                id: "liked/nested".to_owned(),
+                name: "jazz".to_owned(),
+                kind: "liked".to_owned(),
+                created_at: now,
+            });
+        state
+            .library
+            .write()
+            .await
+            .records
+            .push(super::LibraryItemRecord {
+                id: "lib/nested".to_owned(),
+                artist: "artist".to_owned(),
+                title: "title".to_owned(),
+                kind: "Audio".to_owned(),
+                created_at: now,
+            });
+
+        for path in [
+            "/api/users/notes/note/nested",
+            "/api/soulseek/interests/liked/nested",
+            "/api/library/items/lib/nested",
+        ] {
+            let response = super::route_http_request("DELETE", path, None, "", &state)
+                .await
+                .unwrap();
+            assert_eq!(response.status, "404 Not Found", "{path}");
+        }
+        let update = super::route_http_request(
+            "PUT",
+            "/api/users/notes/note/nested",
+            None,
+            r#"{"note":"changed"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(update.status, "404 Not Found");
+
+        assert_eq!(
+            state.user_notes.read().await.records[0].note,
+            "keep",
+            "nested PUT must not reach the user-note store"
+        );
+        assert_eq!(state.interests.read().await.liked.len(), 1);
+        assert_eq!(state.library.read().await.records.len(), 1);
     }
 
     #[tokio::test]
