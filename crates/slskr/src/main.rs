@@ -146,6 +146,8 @@ const MAX_COLLECTION_ITEMS: usize = 10_000;
 const MAX_WISHLIST_ITEMS: usize = 10_000;
 const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
 const MAX_SONGID_RUNS: usize = 256;
+const MAX_USER_NOTES: usize = 4_096;
+const MAX_INTERESTS_PER_KIND: usize = 4_096;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -5407,16 +5409,21 @@ impl UserNoteStore {
     fn from_persisted(records: Vec<crate::persistence::UserNoteRecord>) -> Self {
         let mut next_id = 1;
         let mut updated_at = unix_timestamp();
+        for record in &records {
+            if let Some(number) = record
+                .id
+                .strip_prefix("note-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                next_id = next_id.max(number.saturating_add(1));
+            }
+        }
+        let mut seen_ids = std::collections::HashSet::new();
         let records = records
             .into_iter()
+            .filter(|record| seen_ids.insert(record.id.clone()))
+            .take(MAX_USER_NOTES)
             .map(|record| {
-                if let Some(number) = record
-                    .id
-                    .strip_prefix("note-")
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    next_id = next_id.max(number.saturating_add(1));
-                }
                 let created_at = u64::try_from(record.created_at).unwrap_or(0);
                 let record_updated_at = u64::try_from(record.updated_at).unwrap_or(created_at);
                 updated_at = updated_at.max(record_updated_at);
@@ -5436,10 +5443,14 @@ impl UserNoteStore {
         }
     }
 
-    fn create(&mut self, username: String, note: String) -> UserNoteRecord {
+    fn create(&mut self, username: String, note: String) -> Option<UserNoteRecord> {
+        if self.records.len() >= MAX_USER_NOTES {
+            return None;
+        }
+        let next_id = self.next_id.checked_add(1)?;
         let now = unix_timestamp();
         let id = format!("note-{}", self.next_id);
-        self.next_id += 1;
+        self.next_id = next_id;
         let record = UserNoteRecord {
             id,
             username,
@@ -5449,7 +5460,7 @@ impl UserNoteStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn get(&self, id: &str) -> Option<UserNoteRecord> {
@@ -5534,7 +5545,13 @@ impl InterestStore {
         let mut store = Self::new();
         store.liked.clear();
         store.hated.clear();
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_liked = std::collections::HashSet::new();
+        let mut seen_hated = std::collections::HashSet::new();
         for record in records {
+            if !seen_ids.insert(record.id.clone()) {
+                continue;
+            }
             if let Some(number) = record
                 .id
                 .split_once('-')
@@ -5550,19 +5567,37 @@ impl InterestStore {
                 kind: record.kind,
                 created_at,
             };
+            let normalized_name = record.name.to_ascii_lowercase();
             if record.kind == "hated" {
-                store.hated.push(record);
+                if store.hated.len() < MAX_INTERESTS_PER_KIND && seen_hated.insert(normalized_name)
+                {
+                    store.hated.push(record);
+                }
             } else {
-                store.liked.push(record);
+                if store.liked.len() < MAX_INTERESTS_PER_KIND && seen_liked.insert(normalized_name)
+                {
+                    store.liked.push(record);
+                }
             }
         }
         store
     }
 
-    fn add_liked(&mut self, name: String) -> InterestRecord {
+    fn add_liked(&mut self, name: String) -> Option<(InterestRecord, bool)> {
+        if let Some(record) = self
+            .liked
+            .iter()
+            .find(|record| record.name.eq_ignore_ascii_case(&name))
+        {
+            return Some((record.clone(), false));
+        }
+        if self.liked.len() >= MAX_INTERESTS_PER_KIND {
+            return None;
+        }
+        let next_id = self.next_id.checked_add(1)?;
         let now = unix_timestamp();
         let id = format!("liked-{}", self.next_id);
-        self.next_id += 1;
+        self.next_id = next_id;
         let record = InterestRecord {
             id,
             name,
@@ -5571,13 +5606,24 @@ impl InterestStore {
         };
         self.liked.push(record.clone());
         self.updated_at = now;
-        record
+        Some((record, true))
     }
 
-    fn add_hated(&mut self, name: String) -> InterestRecord {
+    fn add_hated(&mut self, name: String) -> Option<(InterestRecord, bool)> {
+        if let Some(record) = self
+            .hated
+            .iter()
+            .find(|record| record.name.eq_ignore_ascii_case(&name))
+        {
+            return Some((record.clone(), false));
+        }
+        if self.hated.len() >= MAX_INTERESTS_PER_KIND {
+            return None;
+        }
+        let next_id = self.next_id.checked_add(1)?;
         let now = unix_timestamp();
         let id = format!("hated-{}", self.next_id);
-        self.next_id += 1;
+        self.next_id = next_id;
         let record = InterestRecord {
             id,
             name,
@@ -5586,7 +5632,7 @@ impl InterestStore {
         };
         self.hated.push(record.clone());
         self.updated_at = now;
-        record
+        Some((record, true))
     }
 
     fn remove_liked(&mut self, id: &str) -> bool {
@@ -11819,7 +11865,9 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("username is required"));
             }
             let mut notes = state.user_notes.write().await;
-            let record = notes.create(username, note);
+            let Some(record) = notes.create(username, note) else {
+                return Ok(routing::service_unavailable_response("user note capacity is full"));
+            };
             let json = record.json();
             drop(notes);
             persist_user_note(state, &record).await;
@@ -11877,11 +11925,17 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("name is required"));
             }
             let mut interests = state.interests.write().await;
-            let record = interests.add_liked(name);
+            let Some((record, created)) = interests.add_liked(name) else {
+                return Ok(routing::service_unavailable_response("liked interest capacity is full"));
+            };
             let json = record.json();
             drop(interests);
-            persist_interest(state, &record).await;
-            Ok(routing::created_response(json))
+            if created {
+                persist_interest(state, &record).await;
+                Ok(routing::created_response(json))
+            } else {
+                Ok(routing::ok_response(json))
+            }
         }
         ("DELETE", path) if path.starts_with("/api/soulseek/interests/") && path.len() > 24 => {
             let id = &path[24..];
@@ -11909,11 +11963,17 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("name is required"));
             }
             let mut interests = state.interests.write().await;
-            let record = interests.add_hated(name);
+            let Some((record, created)) = interests.add_hated(name) else {
+                return Ok(routing::service_unavailable_response("hated interest capacity is full"));
+            };
             let json = record.json();
             drop(interests);
-            persist_interest(state, &record).await;
-            Ok(routing::created_response(json))
+            if created {
+                persist_interest(state, &record).await;
+                Ok(routing::created_response(json))
+            } else {
+                Ok(routing::ok_response(json))
+            }
         }
         ("DELETE", path) if path.starts_with("/api/soulseek/hated-interests/") && path.len() > 30 => {
             let id = &path[30..];
@@ -27601,6 +27661,17 @@ mod tests {
         .await
         .expect("create liked interest");
         assert_eq!(liked.status, "201 Created");
+        let duplicate_liked = super::route_http_request(
+            "POST",
+            "/api/soulseek/interests",
+            None,
+            r#"{"name":"JAZZ"}"#,
+            &state,
+        )
+        .await
+        .expect("reuse liked interest");
+        assert_eq!(duplicate_liked.status, "200 OK");
+        assert_eq!(duplicate_liked.body, liked.body);
 
         let hated = super::route_http_request(
             "POST",
@@ -31637,6 +31708,39 @@ mod tests {
         assert_eq!(runtime.songid_run_records.len(), super::MAX_SONGID_RUNS);
         assert!(runtime.songid_run(&first_id).is_none());
         assert!(runtime.songid_run("songid-does-not-exist").is_none());
+    }
+
+    #[test]
+    fn notes_and_interests_bound_growth_and_ids() {
+        let mut notes = super::UserNoteStore::new();
+        for index in 0..super::MAX_USER_NOTES {
+            notes
+                .create(format!("user-{index}"), "note".to_owned())
+                .unwrap();
+        }
+        assert!(notes.create("overflow".to_owned(), String::new()).is_none());
+        let mut exhausted_notes = super::UserNoteStore::new();
+        exhausted_notes.next_id = u64::MAX;
+        assert!(exhausted_notes
+            .create("user".to_owned(), String::new())
+            .is_none());
+
+        let mut interests = super::InterestStore::new();
+        let (liked, created) = interests.add_liked("Ambient".to_owned()).unwrap();
+        assert!(created);
+        let (duplicate_liked, created) = interests.add_liked("ambient".to_owned()).unwrap();
+        assert!(!created);
+        assert_eq!(duplicate_liked.id, liked.id);
+        let (hated, created) = interests.add_hated("Noise".to_owned()).unwrap();
+        assert!(created);
+        let (duplicate_hated, created) = interests.add_hated("NOISE".to_owned()).unwrap();
+        assert!(!created);
+        assert_eq!(duplicate_hated.id, hated.id);
+        assert_eq!(interests.liked.len(), 1);
+        assert_eq!(interests.hated.len(), 1);
+        interests.next_id = u64::MAX;
+        assert!(interests.add_liked("Jazz".to_owned()).is_none());
+        assert!(interests.add_hated("Pop".to_owned()).is_none());
     }
 
     #[tokio::test]

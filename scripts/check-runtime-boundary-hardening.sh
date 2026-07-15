@@ -58,6 +58,9 @@ for anchor in \
   'library_health_scans_are_bounded_snapshots_with_unique_ids' \
   'MAX_SONGID_RUNS' \
   'songid_runs_are_bounded_snapshots_with_real_lookup' \
+  'MAX_USER_NOTES' \
+  'MAX_INTERESTS_PER_KIND' \
+  'notes_and_interests_bound_growth_and_ids' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
