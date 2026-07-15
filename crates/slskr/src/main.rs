@@ -128,6 +128,9 @@ use config::redact_username;
 
 const TRANSFER_PROGRESS_CHUNK_BYTES: usize = 64 * 1024;
 const EVENT_HISTORY_LIMIT: usize = 500;
+const MAX_EVENT_KIND_BYTES: usize = 128;
+const MAX_EVENT_RESOURCE_BYTES: usize = 4 * 1024;
+const MAX_EVENT_DETAIL_BYTES: usize = 64 * 1024;
 const DEFAULT_LIST_LIMIT: usize = 500;
 const DEFAULT_SEARCH_TTL_SECONDS: u64 = 300;
 const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
@@ -1697,9 +1700,9 @@ impl EventStore {
             .filter_map(|record| {
                 Some(EventRecord {
                     id: u64::try_from(record.id).ok()?,
-                    kind: record.kind,
-                    resource: record.resource,
-                    detail: record.detail,
+                    kind: truncate_utf8_bytes(record.kind, MAX_EVENT_KIND_BYTES),
+                    resource: truncate_utf8_bytes(record.resource, MAX_EVENT_RESOURCE_BYTES),
+                    detail: bounded_event_detail(record.detail),
                     created_at: u64::try_from(record.created_at).ok()?,
                 })
             })
@@ -1734,9 +1737,9 @@ impl EventStore {
         let id = self.allocate_id();
         let record = EventRecord {
             id,
-            kind: kind.into(),
-            resource: resource.into(),
-            detail,
+            kind: truncate_utf8_bytes(kind.into(), MAX_EVENT_KIND_BYTES),
+            resource: truncate_utf8_bytes(resource.into(), MAX_EVENT_RESOURCE_BYTES),
+            detail: bounded_event_detail(detail),
             created_at: unix_timestamp(),
         };
         self.records.push(record.clone());
@@ -1845,6 +1848,28 @@ impl EventStore {
             .collect::<Vec<_>>();
         serde_json::Value::Array(entries).to_string()
     }
+}
+
+fn truncate_utf8_bytes(mut value: String, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
+    value
+}
+
+fn bounded_event_detail(detail: Option<String>) -> Option<String> {
+    detail.map(|detail| {
+        if detail.len() <= MAX_EVENT_DETAIL_BYTES {
+            detail
+        } else {
+            format!("<omitted oversized event detail: {} bytes>", detail.len())
+        }
+    })
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -29112,6 +29137,48 @@ mod tests {
         assert_eq!(stats_json["events"], 1);
         assert_eq!(stats_json["persisted"]["events"], 1);
         assert_eq!(stats_json["projections"]["events"], 1);
+    }
+
+    #[test]
+    fn event_store_bounds_live_and_rehydrated_text_fields() {
+        let oversized_kind = "é".repeat(super::MAX_EVENT_KIND_BYTES);
+        let oversized_resource = "r".repeat(super::MAX_EVENT_RESOURCE_BYTES + 1);
+        let oversized_detail = "d".repeat(super::MAX_EVENT_DETAIL_BYTES + 1);
+
+        let mut live = super::EventStore::new(2);
+        let record = live.record(
+            oversized_kind.clone(),
+            oversized_resource.clone(),
+            Some(oversized_detail.clone()),
+        );
+        assert!(record.kind.len() <= super::MAX_EVENT_KIND_BYTES);
+        assert!(record.kind.is_char_boundary(record.kind.len()));
+        assert_eq!(record.resource.len(), super::MAX_EVENT_RESOURCE_BYTES);
+        let expected_detail = format!(
+            "<omitted oversized event detail: {} bytes>",
+            oversized_detail.len()
+        );
+        assert_eq!(record.detail.as_deref(), Some(expected_detail.as_str()));
+
+        let rehydrated = super::EventStore::from_persisted(
+            vec![super::persistence::EventRecord {
+                id: 1,
+                kind: oversized_kind,
+                resource: oversized_resource,
+                detail: Some(oversized_detail),
+                created_at: 1,
+            }],
+            2,
+        );
+        assert!(rehydrated.records[0].kind.len() <= super::MAX_EVENT_KIND_BYTES);
+        assert_eq!(
+            rehydrated.records[0].resource.len(),
+            super::MAX_EVENT_RESOURCE_BYTES
+        );
+        assert!(rehydrated.records[0]
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.starts_with("<omitted oversized event detail:")));
     }
 
     #[tokio::test]
