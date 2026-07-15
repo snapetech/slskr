@@ -166,7 +166,14 @@ const MAX_SHARE_GROUPS: usize = 256;
 const MAX_SHARE_GROUP_MEMBERS: usize = 4_096;
 const MAX_COLLECTIONS: usize = 256;
 const MAX_COLLECTION_ITEMS: usize = 10_000;
+const MAX_TOTAL_COLLECTION_ITEMS: usize = 50_000;
 const MAX_WISHLIST_ITEMS: usize = 10_000;
+const MAX_LIST_NAME_BYTES: usize = 4 * 1024;
+const MAX_LIST_DESCRIPTION_BYTES: usize = 16 * 1024;
+const MAX_LIST_CONTENT_ID_BYTES: usize = 4 * 1024;
+const MAX_LIST_ARTIST_BYTES: usize = 4 * 1024;
+const MAX_LIST_TITLE_BYTES: usize = 4 * 1024;
+const MAX_LIST_KIND_BYTES: usize = 256;
 const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
 const MAX_SONGID_RUNS: usize = 256;
 const MAX_USER_NOTES: usize = 4_096;
@@ -4763,6 +4770,7 @@ impl CollectionStore {
         let mut next_item_id = 1;
         let mut updated_at = unix_timestamp();
         let mut records = Vec::new();
+        let mut retained_items = 0_usize;
         let mut seen_collection_ids = HashSet::new();
         for record in collections {
             if let Some(number) = record
@@ -4778,8 +4786,11 @@ impl CollectionStore {
                 updated_at = updated_at.max(record_updated_at);
                 records.push(CollectionRecord {
                     id: record.id,
-                    name: record.name,
-                    description: record.description,
+                    name: truncate_utf8_bytes(record.name, MAX_LIST_NAME_BYTES),
+                    description: truncate_utf8_bytes(
+                        record.description,
+                        MAX_LIST_DESCRIPTION_BYTES,
+                    ),
                     items: Vec::new(),
                     created_at,
                     updated_at: record_updated_at,
@@ -4806,17 +4817,22 @@ impl CollectionStore {
             else {
                 continue;
             };
-            if collection.items.len() >= MAX_COLLECTION_ITEMS {
+            if collection.items.len() >= MAX_COLLECTION_ITEMS
+                || retained_items >= MAX_TOTAL_COLLECTION_ITEMS
+            {
                 continue;
             }
-            collection.items.push(CollectionItem {
-                id: item.id,
-                content_id: item.content_id,
-                artist: item.artist,
-                title: item.title,
-                kind: item.kind,
-                added_at: u64::try_from(item.added_at).unwrap_or(0),
-            });
+            collection
+                .items
+                .push(bounded_collection_item(CollectionItem {
+                    id: item.id,
+                    content_id: item.content_id,
+                    artist: item.artist,
+                    title: item.title,
+                    kind: item.kind,
+                    added_at: u64::try_from(item.added_at).unwrap_or(0),
+                }));
+            retained_items = retained_items.saturating_add(1);
         }
         Self {
             records,
@@ -4836,8 +4852,8 @@ impl CollectionStore {
         let id = format!("col-{}", self.allocate_id());
         let record = CollectionRecord {
             id,
-            name,
-            description,
+            name: truncate_utf8_bytes(name, MAX_LIST_NAME_BYTES),
+            description: truncate_utf8_bytes(description, MAX_LIST_DESCRIPTION_BYTES),
             items: Vec::new(),
             created_at: now,
             updated_at: now,
@@ -4854,8 +4870,8 @@ impl CollectionStore {
     fn update(&mut self, id: &str, name: String, description: String) -> Option<CollectionRecord> {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == id)?;
-        record.name = name;
-        record.description = description;
+        record.name = truncate_utf8_bytes(name, MAX_LIST_NAME_BYTES);
+        record.description = truncate_utf8_bytes(description, MAX_LIST_DESCRIPTION_BYTES);
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -4883,18 +4899,20 @@ impl CollectionStore {
         let Some(index) = self.records.iter().position(|r| r.id == collection_id) else {
             return Ok(None);
         };
-        if self.records[index].items.len() >= self.max_items_per_collection {
+        if self.records[index].items.len() >= self.max_items_per_collection
+            || self.total_items() >= MAX_TOTAL_COLLECTION_ITEMS
+        {
             return Err(());
         }
         let item_id = self.allocate_item_id();
-        let item = CollectionItem {
+        let item = bounded_collection_item(CollectionItem {
             id: format!("item-{item_id}"),
             content_id,
             artist,
             title,
             kind,
             added_at: now,
-        };
+        });
         let record = &mut self.records[index];
         record.items.push(item.clone());
         record.updated_at = now;
@@ -4949,13 +4967,13 @@ impl CollectionStore {
         for record in &mut self.records {
             if let Some(item) = record.items.iter_mut().find(|item| item.id == item_id) {
                 if let Some(artist) = artist {
-                    item.artist = artist;
+                    item.artist = truncate_utf8_bytes(artist, MAX_LIST_ARTIST_BYTES);
                 }
                 if let Some(title) = title {
-                    item.title = title;
+                    item.title = truncate_utf8_bytes(title, MAX_LIST_TITLE_BYTES);
                 }
                 if let Some(kind) = kind {
-                    item.kind = kind;
+                    item.kind = truncate_utf8_bytes(kind, MAX_LIST_KIND_BYTES);
                 }
                 record.updated_at = now;
                 self.updated_at = now;
@@ -4983,6 +5001,10 @@ impl CollectionStore {
             .iter()
             .find(|record| record.items.iter().any(|item| item.id == item_id))
             .map(|record| record.id.clone())
+    }
+
+    fn total_items(&self) -> usize {
+        self.records.iter().map(|record| record.items.len()).sum()
     }
 
     fn reorder_items(&mut self, collection_id: &str, body: &str) -> Option<CollectionRecord> {
@@ -5068,6 +5090,14 @@ impl CollectionStore {
     }
 }
 
+fn bounded_collection_item(mut item: CollectionItem) -> CollectionItem {
+    item.content_id = truncate_utf8_bytes(item.content_id, MAX_LIST_CONTENT_ID_BYTES);
+    item.artist = truncate_utf8_bytes(item.artist, MAX_LIST_ARTIST_BYTES);
+    item.title = truncate_utf8_bytes(item.title, MAX_LIST_TITLE_BYTES);
+    item.kind = truncate_utf8_bytes(item.kind, MAX_LIST_KIND_BYTES);
+    item
+}
+
 // Wishlist Models
 #[derive(Clone, Debug)]
 struct WishlistItem {
@@ -5148,9 +5178,9 @@ impl WishlistStore {
             }
             items.push(WishlistItem {
                 id: record.id,
-                artist: record.artist,
-                title: record.title,
-                kind: record.kind,
+                artist: truncate_utf8_bytes(record.artist, MAX_LIST_ARTIST_BYTES),
+                title: truncate_utf8_bytes(record.title, MAX_LIST_TITLE_BYTES),
+                kind: truncate_utf8_bytes(record.kind, MAX_LIST_KIND_BYTES),
                 added_at: u64::try_from(record.added_at).unwrap_or(0),
             });
         }
@@ -5204,9 +5234,9 @@ impl WishlistStore {
         let item_id = self.allocate_item_id();
         let item = WishlistItem {
             id: format!("wish-{item_id}"),
-            artist,
-            title,
-            kind,
+            artist: truncate_utf8_bytes(artist, MAX_LIST_ARTIST_BYTES),
+            title: truncate_utf8_bytes(title, MAX_LIST_TITLE_BYTES),
+            kind: truncate_utf8_bytes(kind, MAX_LIST_KIND_BYTES),
             added_at: now,
         };
         let record = &mut self.records[index];
@@ -5276,13 +5306,13 @@ impl WishlistStore {
         let record = self.records.iter_mut().find(|r| r.id == "default")?;
         let item = record.items.iter_mut().find(|item| item.id == item_id)?;
         if let Some(artist) = artist {
-            item.artist = artist;
+            item.artist = truncate_utf8_bytes(artist, MAX_LIST_ARTIST_BYTES);
         }
         if let Some(title) = title {
-            item.title = title;
+            item.title = truncate_utf8_bytes(title, MAX_LIST_TITLE_BYTES);
         }
         if let Some(kind) = kind {
-            item.kind = kind;
+            item.kind = truncate_utf8_bytes(kind, MAX_LIST_KIND_BYTES);
         }
         record.updated_at = now;
         self.updated_at = now;
@@ -33774,6 +33804,77 @@ mod tests {
             )
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn collections_and_wishlist_bound_text_and_aggregate_items() {
+        let mut collections =
+            super::CollectionStore::with_limits(6, super::MAX_COLLECTION_ITEMS + 1);
+        let first = collections
+            .create(
+                "n".repeat(super::MAX_LIST_NAME_BYTES + 1),
+                "d".repeat(super::MAX_LIST_DESCRIPTION_BYTES + 1),
+            )
+            .unwrap();
+        assert_eq!(first.name.len(), super::MAX_LIST_NAME_BYTES);
+        assert_eq!(first.description.len(), super::MAX_LIST_DESCRIPTION_BYTES);
+        let item = collections
+            .add_item(
+                &first.id,
+                "c".repeat(super::MAX_LIST_CONTENT_ID_BYTES + 1),
+                "a".repeat(super::MAX_LIST_ARTIST_BYTES + 1),
+                "t".repeat(super::MAX_LIST_TITLE_BYTES + 1),
+                "k".repeat(super::MAX_LIST_KIND_BYTES + 1),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.content_id.len(), super::MAX_LIST_CONTENT_ID_BYTES);
+        assert_eq!(item.artist.len(), super::MAX_LIST_ARTIST_BYTES);
+        assert_eq!(item.title.len(), super::MAX_LIST_TITLE_BYTES);
+        assert_eq!(item.kind.len(), super::MAX_LIST_KIND_BYTES);
+
+        let template = super::CollectionItem {
+            id: "item".to_owned(),
+            content_id: "content".to_owned(),
+            artist: String::new(),
+            title: String::new(),
+            kind: String::new(),
+            added_at: 0,
+        };
+        collections.records[0].items.clear();
+        while collections.records.len() < 5 {
+            collections
+                .create("collection".to_owned(), String::new())
+                .unwrap();
+        }
+        for record in &mut collections.records {
+            record.items = vec![template.clone(); super::MAX_COLLECTION_ITEMS];
+        }
+        let last = collections
+            .create("last".to_owned(), String::new())
+            .unwrap();
+        assert!(collections
+            .add_item(
+                &last.id,
+                "overflow".to_owned(),
+                String::new(),
+                String::new(),
+                String::new(),
+            )
+            .is_err());
+        assert_eq!(collections.total_items(), super::MAX_TOTAL_COLLECTION_ITEMS);
+
+        let mut wishlist = super::WishlistStore::with_max_items(1);
+        let wish = wishlist
+            .add_item(
+                "a".repeat(super::MAX_LIST_ARTIST_BYTES + 1),
+                "t".repeat(super::MAX_LIST_TITLE_BYTES + 1),
+                "k".repeat(super::MAX_LIST_KIND_BYTES + 1),
+            )
+            .unwrap();
+        assert_eq!(wish.artist.len(), super::MAX_LIST_ARTIST_BYTES);
+        assert_eq!(wish.title.len(), super::MAX_LIST_TITLE_BYTES);
+        assert_eq!(wish.kind.len(), super::MAX_LIST_KIND_BYTES);
     }
 
     #[test]
