@@ -2765,6 +2765,23 @@ impl TransferQueue {
         entry
     }
 
+    fn remove_entries(&mut self, ids: &[u64]) -> Vec<TransferEntry> {
+        let mut removed = Vec::new();
+        self.entries.retain(|entry| {
+            if ids.contains(&entry.id) {
+                removed.push(entry.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if !removed.is_empty() {
+            self.updated_at = unix_timestamp();
+            self.persist_state();
+        }
+        removed
+    }
+
     fn persist_state(&mut self) {
         self.state_error = write_transfer_state(&self.state_path, &self.entries).err();
     }
@@ -9122,6 +9139,8 @@ struct AppState {
     browse: RwLock<BrowseStore>,
     remote_path_encodings: RwLock<RemotePathEncodingRegistry>,
     messages: RwLock<MessageStore>,
+    private_message_auto_response_settings:
+        RwLock<crate::config::PrivateMessageAutoResponseSettings>,
     private_message_auto_responses: RwLock<PrivateMessageAutoResponseTracker>,
     rooms: RwLock<RoomStore>,
     transfers: RwLock<TransferQueue>,
@@ -13802,6 +13821,78 @@ async fn route_http_request_with_headers(
             ))
         }
         // WEBUI PARITY: Options/Config read-write endpoints
+        ("GET", "/api/private-message-auto-response") => {
+            let settings = state.private_message_auto_response_settings.read().await;
+            let mut value = serde_json::from_str::<serde_json::Value>(&settings.sanitized_json())
+                .map_err(|error| format!("auto-response settings json failed: {error}"))?;
+            value["runtimeMutable"] = serde_json::Value::Bool(true);
+            value["persisted"] = serde_json::Value::Bool(false);
+            Ok(routing::ok_response(value.to_string()))
+        }
+        ("PUT", "/api/private-message-auto-response") => {
+            let payload = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(serde_json::Value::Object(payload)) => payload,
+                _ => return Ok(routing::bad_request_response("JSON object body is required")),
+            };
+            let enabled = payload.get("enabled").and_then(serde_json::Value::as_bool);
+            let message = payload
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .map(str::to_owned);
+            if message.as_deref().is_some_and(|message| message.is_empty()) {
+                return Ok(routing::bad_request_response(
+                    "auto-response message must not be blank",
+                ));
+            }
+            if message.as_ref().is_some_and(|message| message.len() > 4_096) {
+                return Ok(routing::bad_request_response(
+                    "auto-response message exceeds 4096 bytes",
+                ));
+            }
+            let cooldown = payload
+                .get("cooldownMinutes")
+                .or_else(|| payload.get("cooldown_minutes"))
+                .and_then(serde_json::Value::as_u64);
+            if cooldown.is_some_and(|cooldown| !(1..=1_440).contains(&cooldown)) {
+                return Ok(routing::bad_request_response(
+                    "cooldownMinutes must be between 1 and 1440",
+                ));
+            }
+            if enabled.is_none() && message.is_none() && cooldown.is_none() {
+                return Ok(routing::bad_request_response(
+                    "enabled, message, or cooldownMinutes is required",
+                ));
+            }
+            let mut settings = state.private_message_auto_response_settings.write().await;
+            if let Some(enabled) = enabled {
+                settings.enabled = enabled;
+            }
+            if let Some(message) = message {
+                settings.message = message;
+            }
+            if let Some(cooldown) = cooldown {
+                settings.cooldown_minutes = cooldown;
+            }
+            let disabled = !settings.enabled;
+            let mut value = serde_json::from_str::<serde_json::Value>(&settings.sanitized_json())
+                .map_err(|error| format!("auto-response settings json failed: {error}"))?;
+            drop(settings);
+            if disabled {
+                *state.private_message_auto_responses.write().await =
+                    PrivateMessageAutoResponseTracker::default();
+            }
+            value["runtimeMutable"] = serde_json::Value::Bool(true);
+            value["persisted"] = serde_json::Value::Bool(false);
+            record_event(
+                state,
+                "message.auto_response_settings_updated",
+                "private-message-auto-response",
+                Some(format!("enabled={}", value["enabled"])),
+            )
+            .await;
+            Ok(routing::ok_response(value.to_string()))
+        }
         ("GET", "/api/options") => {
             let runtime = state.runtime.read().await;
             let body = slskd_options_json(
@@ -22538,6 +22629,9 @@ async fn serve(once: bool) -> Result<(), String> {
         browse: RwLock::new(browse_store),
         remote_path_encodings: RwLock::new(RemotePathEncodingRegistry::default()),
         messages: RwLock::new(message_store),
+        private_message_auto_response_settings: RwLock::new(
+            config.private_message_auto_response.clone(),
+        ),
         private_message_auto_responses: RwLock::new(PrivateMessageAutoResponseTracker::default()),
         rooms: RwLock::new(room_store),
         transfers: RwLock::new(TransferQueue::new(&config)),
@@ -25042,7 +25136,11 @@ async fn project_server_message(
                 })
                 .await;
             }
-            let auto_response = &state.config.private_message_auto_response;
+            let auto_response = state
+                .private_message_auto_response_settings
+                .read()
+                .await
+                .clone();
             if message.is_new
                 && auto_response.enabled
                 && is_private_message_auto_response_candidate(&message.message)
@@ -27001,7 +27099,7 @@ async fn auto_download_completed_wishlist(
             .saturating_sub(transfers.active_count_excluding(None))
     };
     let batch_id = (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string());
-    let mut enqueued = 0_usize;
+    let mut staged = Vec::new();
     let batch_limit = available.min(usize::try_from(remaining_downloads).unwrap_or(usize::MAX));
     for file in files.into_iter().take(batch_limit) {
         let Ok(session_command_permit) = state.session_commands.try_reserve() else {
@@ -27024,25 +27122,38 @@ async fn auto_download_completed_wishlist(
                 .update_status(entry.id, "peer_lookup", None, None)
                 .unwrap_or(entry)
         };
-        persist_transfer_record(state, &entry).await?;
-        session_command_permit.send(SessionCommand::TransferPeer {
-            id: entry.id,
-            username: username.clone(),
-        });
-        enqueued = enqueued.saturating_add(1);
+        staged.push((entry, session_command_permit));
     }
 
+    let enqueued = staged.len();
     if enqueued > 0 {
+        let staged_entries = staged
+            .iter()
+            .map(|(entry, _)| entry.clone())
+            .collect::<Vec<_>>();
+        if let Err(error) = persist_transfer_records(state, &staged_entries).await {
+            rollback_staged_auto_downloads(state, &staged_entries).await;
+            return Err(error);
+        }
         let mut wishlist = state.wishlist.write().await;
         let previous = wishlist.clone();
         let Some(item) = wishlist.record_auto_downloads(item_id, enqueued) else {
-            return Ok(enqueued);
+            drop(wishlist);
+            rollback_staged_auto_downloads(state, &staged_entries).await;
+            return Ok(0);
         };
         let mutated = wishlist.clone();
         drop(wishlist);
         if let Err(error) = persist_wishlist_item_checked(state, &item).await {
             rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+            rollback_staged_auto_downloads(state, &staged_entries).await;
             return Err(error);
+        }
+        for (entry, permit) in staged {
+            permit.send(SessionCommand::TransferPeer {
+                id: entry.id,
+                username: username.clone(),
+            });
         }
         record_event(
             state,
@@ -27053,6 +27164,12 @@ async fn auto_download_completed_wishlist(
         .await;
     }
     Ok(enqueued)
+}
+
+async fn rollback_staged_auto_downloads(state: &AppState, entries: &[TransferEntry]) {
+    let ids = entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
+    state.transfers.write().await.remove_entries(&ids);
+    let _ = delete_persisted_transfers(state, entries).await;
 }
 
 async fn persist_wishlist_item_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
@@ -31123,6 +31240,9 @@ mod tests {
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(message_store),
+            private_message_auto_response_settings: RwLock::new(
+                config.private_message_auto_response.clone(),
+            ),
             private_message_auto_responses: RwLock::new(
                 super::PrivateMessageAutoResponseTracker::default(),
             ),
@@ -42404,6 +42524,75 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn private_message_auto_response_settings_are_runtime_mutable_and_redacted() {
+        let (state, _receiver) = test_state();
+        let initial = super::route_http_request(
+            "GET",
+            "/api/private-message-auto-response",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(initial.status, "200 OK");
+        assert!(initial.body.contains(r#""enabled":false"#));
+        assert!(!initial.body.contains("temporarily unavailable"));
+
+        let updated = super::route_http_request(
+            "PUT",
+            "/api/private-message-auto-response",
+            None,
+            r#"{"enabled":true,"message":"Runtime human check","cooldownMinutes":15}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.status, "200 OK");
+        assert!(updated.body.contains(r#""enabled":true"#));
+        assert!(updated.body.contains(r#""cooldown_minutes":15"#));
+        assert!(!updated.body.contains("Runtime human check"));
+        let settings = state.private_message_auto_response_settings.read().await;
+        assert!(settings.enabled);
+        assert_eq!(settings.message, "Runtime human check");
+        assert_eq!(settings.cooldown_minutes, 15);
+        drop(settings);
+
+        assert!(state
+            .private_message_auto_responses
+            .write()
+            .await
+            .should_respond("peer", super::unix_timestamp(), 60));
+        let disabled = super::route_http_request(
+            "PUT",
+            "/api/private-message-auto-response",
+            None,
+            r#"{"enabled":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(disabled.status, "200 OK");
+        assert!(state
+            .private_message_auto_responses
+            .read()
+            .await
+            .sent_at
+            .is_empty());
+
+        let invalid = super::route_http_request(
+            "PUT",
+            "/api/private-message-auto-response",
+            None,
+            r#"{"cooldownMinutes":0}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid.status, "400 Bad Request");
+    }
+
     #[test]
     fn share_grants_bound_and_deduplicate_collection_users() {
         let mut grants = super::ShareGrantStore::new();
@@ -48402,6 +48591,9 @@ mod tests {
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
+            private_message_auto_response_settings: RwLock::new(
+                config.private_message_auto_response.clone(),
+            ),
             private_message_auto_responses: RwLock::new(
                 super::PrivateMessageAutoResponseTracker::default(),
             ),
@@ -48556,6 +48748,9 @@ mod tests {
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
+            private_message_auto_response_settings: RwLock::new(
+                cookie_enabled_config.private_message_auto_response.clone(),
+            ),
             private_message_auto_responses: RwLock::new(
                 super::PrivateMessageAutoResponseTracker::default(),
             ),

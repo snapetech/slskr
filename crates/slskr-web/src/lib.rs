@@ -555,6 +555,11 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         },
         ApiEndpoint {
             method: "GET",
+            path: "/private-message-auto-response",
+            surface: "messages",
+        },
+        ApiEndpoint {
+            method: "GET",
             path: "/conversations/:username",
             surface: "messages",
         },
@@ -5446,15 +5451,44 @@ fn native_browse_workspace_html(route_table: &str) -> String {
     )
 }
 
-fn native_messaging_workspace_html(route_table: &str) -> String {
+fn private_message_auto_response_panel_html(responses: Option<&[EndpointBody]>) -> String {
+    let settings = responses
+        .and_then(|responses| endpoint_body(responses, "/private-message-auto-response"))
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let enabled = value_bool(&settings, &["enabled"]).unwrap_or(false);
+    let cooldown = settings
+        .get("cooldown_minutes")
+        .or_else(|| settings.get("cooldownMinutes"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(360);
+    format!(
+        r#"<section class="slskr-message-gate-panel" data-slskr-message-gate-panel><header><div><span>Human check</span><h4>Gate reply</h4></div><mark>{state}</mark></header><p>Reply once when a new private message asks for human or share verification. The reply text stays redacted from diagnostics.</p><div class="slskr-message-gate-controls"><label><input type="checkbox" data-slskr-message-gate-field="enabled" {enabled}> Enabled</label><label><span>Cooldown minutes</span><input inputmode="numeric" data-slskr-message-gate-field="cooldownMinutes" value="{cooldown}"></label><label><span>Reply text</span><textarea data-slskr-message-gate-field="message" placeholder="Leave blank to keep the configured reply"></textarea></label><button type="button" data-slskr-message-gate-save>Save gate reply</button></div><small>Runtime setting · startup default returns after restart</small></section>"#,
+        state = if enabled { "armed" } else { "off" },
+        enabled = if enabled { "checked" } else { "" },
+        cooldown = cooldown,
+    )
+}
+
+fn native_messaging_workspace_html(
+    route_table: &str,
+    responses: Option<&[EndpointBody]>,
+    show_gate: bool,
+) -> String {
     let preview = native_selection_preview_html(
         "Select a conversation",
         "Pick a thread, room, or pod row to load its reply and acknowledgement actions.",
         "Waiting",
         "Reply",
     );
+    let gate = if show_gate {
+        private_message_auto_response_panel_html(responses)
+    } else {
+        String::new()
+    };
     format!(
-        r#"<div class="slskr-native-grid messaging-native" data-slskr-messages-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div><div class="slskr-native-message-search"><input aria-label="Search conversations" placeholder="Search conversations, rooms, pods"><button type="button">Clear Search</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<div class="slskr-native-mini-list" data-slskr-message-lifecycle><span>Unread badges</span><span>Acknowledge state</span><span>Delete lifecycle</span><span>Compose history</span></div><h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button><button type="button">Create Room</button></div><div class="slskr-native-table-wrap"><table class="slskr-native-table" data-slskr-room-state><thead><tr><th>Room</th><th>State</th><th>Action</th></tr></thead><tbody><tr><td>public-domain</td><td>joined / 18 users / 2 unread</td><td><button type="button">Leave Room</button></td></tr><tr><td>ambient</td><td>available / 54 users</td><td><button type="button">Join Room</button></td></tr></tbody></table></div><h4>Pods</h4><div class="slskr-native-mini-list" data-slskr-pod-state><span>Pod channels stay secondary</span><span>Unread badges and room activity remain visible</span><span>Pod channel: library-review</span></div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3>{preview}<div class="slskr-native-thread-grid" data-slskr-thread-state><article data-slskr-thread-kind="direct"><strong>peer1</strong><span class="slskr-native-badge">Unread 0</span><p>Last private message and acknowledgement state.</p><button type="button">Acknowledge</button></article><article data-slskr-thread-kind="room"><strong>public-domain</strong><span class="slskr-native-badge">Room</span><p>Joined room messages and member activity.</p><button type="button">Leave Room</button></article><article data-slskr-thread-kind="pod"><strong>pod channel</strong><span class="slskr-native-badge">Pod</span><p>Pod-linked channel messages stay in the same workspace.</p><button type="button">Delete Conversation</button></article></div><div class="slskr-native-thread-transcript" data-slskr-message-transcript><article><strong>peer1</strong><p>Can you browse my shared folder?</p><time>unread</time></article><article><strong>you</strong><p>I can, sending a browse request now.</p><time>draft history</time></article></div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row" data-slskr-message-actions><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Delete Conversation</button><button type="button">Collapse All Message Panels</button></div><div class="slskr-native-mini-list" data-slskr-compose-history><span>Last draft restored</span><span>Reply target: peer1</span><span>Enter sends when enabled</span></div></section></div>"#,
+        r#"<div class="slskr-native-grid messaging-native" data-slskr-messages-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div>{gate}<div class="slskr-native-message-search"><input aria-label="Search conversations" placeholder="Search conversations, rooms, pods"><button type="button">Clear Search</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<div class="slskr-native-mini-list" data-slskr-message-lifecycle><span>Unread badges</span><span>Acknowledge state</span><span>Delete lifecycle</span><span>Compose history</span></div><h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button><button type="button">Create Room</button></div><div class="slskr-native-table-wrap"><table class="slskr-native-table" data-slskr-room-state><thead><tr><th>Room</th><th>State</th><th>Action</th></tr></thead><tbody><tr><td>public-domain</td><td>joined / 18 users / 2 unread</td><td><button type="button">Leave Room</button></td></tr><tr><td>ambient</td><td>available / 54 users</td><td><button type="button">Join Room</button></td></tr></tbody></table></div><h4>Pods</h4><div class="slskr-native-mini-list" data-slskr-pod-state><span>Pod channels stay secondary</span><span>Unread badges and room activity remain visible</span><span>Pod channel: library-review</span></div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3>{preview}<div class="slskr-native-thread-grid" data-slskr-thread-state><article data-slskr-thread-kind="direct"><strong>peer1</strong><span class="slskr-native-badge">Unread 0</span><p>Last private message and acknowledgement state.</p><button type="button">Acknowledge</button></article><article data-slskr-thread-kind="room"><strong>public-domain</strong><span class="slskr-native-badge">Room</span><p>Joined room messages and member activity.</p><button type="button">Leave Room</button></article><article data-slskr-thread-kind="pod"><strong>pod channel</strong><span class="slskr-native-badge">Pod</span><p>Pod-linked channel messages stay in the same workspace.</p><button type="button">Delete Conversation</button></article></div><div class="slskr-native-thread-transcript" data-slskr-message-transcript><article><strong>peer1</strong><p>Can you browse my shared folder?</p><time>unread</time></article><article><strong>you</strong><p>I can, sending a browse request now.</p><time>draft history</time></article></div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row" data-slskr-message-actions><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Delete Conversation</button><button type="button">Collapse All Message Panels</button></div><div class="slskr-native-mini-list" data-slskr-compose-history><span>Last draft restored</span><span>Reply target: peer1</span><span>Enter sends when enabled</span></div></section></div>"#,
+        gate = gate,
         route_table = route_table,
         preview = preview,
     )
@@ -5950,7 +5984,9 @@ fn route_native_workspace_html(
                 .join(""),
             )
         }
-        RouteKind::Messages | RouteKind::Rooms => native_messaging_workspace_html(&route_table),
+        RouteKind::Messages | RouteKind::Rooms => {
+            native_messaging_workspace_html(&route_table, responses, kind == RouteKind::Messages)
+        }
         RouteKind::Users => format!(
             r#"<div class="slskr-native-grid users-native"><section class="slskr-native-main"><h3>Users</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Search for User</button><button type="button">Clear Selected User</button><button type="button">Browse</button><button type="button">Message</button></div>{route_table}</section><aside class="slskr-native-side"><h3>User Detail</h3><p>No user info to display</p>{preview}<button type="button">Save note</button><button type="button">Watch</button></aside></div>"#,
             route_table = route_table,
@@ -7163,6 +7199,9 @@ fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element) {
+    if handle_private_message_auto_response_action(document, button) {
+        return;
+    }
     if handle_wishlist_policy_action(document, button) {
         return;
     }
@@ -7213,6 +7252,81 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         ));
     }
     show_toast(document, &message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_private_message_auto_response_action(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+) -> bool {
+    if !button.has_attribute("data-slskr-message-gate-save") {
+        return false;
+    }
+    let Some(panel) = button
+        .closest("[data-slskr-message-gate-panel]")
+        .ok()
+        .flatten()
+    else {
+        show_toast(document, "Gate reply controls are unavailable");
+        return true;
+    };
+    let field = |name: &str| {
+        panel
+            .query_selector(&format!(r#"[data-slskr-message-gate-field="{name}"]"#))
+            .ok()
+            .flatten()
+    };
+    let enabled = field("enabled")
+        .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .is_some_and(|input| input.checked());
+    let cooldown = field("cooldownMinutes")
+        .as_ref()
+        .and_then(form_control_value)
+        .unwrap_or_default();
+    let cooldown = match cooldown.trim().parse::<u64>() {
+        Ok(value) if (1..=1_440).contains(&value) => value,
+        _ => {
+            show_toast(document, "Cooldown must be between 1 and 1440 minutes");
+            return true;
+        }
+    };
+    let message = field("message")
+        .as_ref()
+        .and_then(form_control_value)
+        .unwrap_or_default();
+    let message_json = if message.trim().is_empty() {
+        String::new()
+    } else {
+        format!(r#", "message":"{}""#, escape_json_string(message.trim()))
+    };
+    let body = format!(r#"{{"enabled":{enabled},"cooldownMinutes":{cooldown}{message_json}}}"#);
+    show_toast(document, "Save gate reply sending");
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let document = document.clone();
+    let path = endpoint_url("/private-message-auto-response");
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = fetch_text_with_method(&window, &path, "PUT", Some(&body)).await;
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            match result {
+                Ok(response) => status.set_inner_html(&format!(
+                    "<strong>Save gate reply</strong> {}",
+                    escape_html(&compact_preview(&response))
+                )),
+                Err(error) => {
+                    let error = error
+                        .as_string()
+                        .unwrap_or_else(|| "gate reply request failed".to_string());
+                    status.set_inner_html(&format!(
+                        "<strong>Save gate reply</strong> {}",
+                        escape_html(&error)
+                    ));
+                }
+            }
+        }
+    });
+    true
 }
 
 #[cfg(target_arch = "wasm32")]
