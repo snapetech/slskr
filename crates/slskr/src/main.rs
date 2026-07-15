@@ -8092,7 +8092,7 @@ struct AppState {
     stream_tickets: RwLock<PreviewStreamTicketStore>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OAuthStateRecord {
     provider: String,
     redirect_uri: String,
@@ -8100,7 +8100,7 @@ struct OAuthStateRecord {
     expires_at: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OAuthStateStore {
     records: BTreeMap<String, OAuthStateRecord>,
     max_records: usize,
@@ -16130,18 +16130,25 @@ async fn route_http_request_with_headers(
             }
             let client_id = spotify.client_id.as_deref().unwrap_or_default();
             let redirect_uri = spotify_redirect_uri(state);
-            let (state_token, oauth_record) = {
+            let (state_token, oauth_record, previous, mutated) = {
                 let mut oauth_states = state.oauth_states.write().await;
+                let previous = oauth_states.clone();
                 let Some(state_token) = oauth_states.issue("spotify", &redirect_uri, 600) else {
                     return Ok(routing::service_unavailable_response(
                         "OAuth state capacity is full",
                     ));
                 };
                 let oauth_record = oauth_states.records.get(&state_token).cloned();
-                (state_token, oauth_record)
+                let mutated = oauth_states.clone();
+                (state_token, oauth_record, previous, mutated)
             };
             if let Some(oauth_record) = oauth_record.as_ref() {
-                persist_oauth_state(state, &state_token, oauth_record).await;
+                if let Err(error) =
+                    persist_oauth_state_checked(state, &state_token, oauth_record).await
+                {
+                    rollback_oauth_states_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
             }
             let auth_url = format!(
                 "https://accounts.spotify.com/authorize?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&show_dialog=false",
@@ -24479,9 +24486,13 @@ async fn persist_runtime_compat_state(state: &AppState) {
     let _ = db.upsert_runtime_compat_state(&record).await;
 }
 
-async fn persist_oauth_state(state: &AppState, token: &str, record: &OAuthStateRecord) {
+async fn persist_oauth_state_checked(
+    state: &AppState,
+    token: &str,
+    record: &OAuthStateRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::OAuthStateRecord {
         state: token.to_owned(),
@@ -24490,7 +24501,21 @@ async fn persist_oauth_state(state: &AppState, token: &str, record: &OAuthStateR
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
         expires_at: i64::try_from(record.expires_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_oauth_state(&persisted).await;
+    db.upsert_oauth_state(&persisted)
+        .await
+        .map_err(|error| format!("OAuth state persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn rollback_oauth_states_if_unchanged(
+    state: &AppState,
+    previous: OAuthStateStore,
+    mutated: &OAuthStateStore,
+) {
+    let mut oauth_states = state.oauth_states.write().await;
+    if *oauth_states == *mutated {
+        *oauth_states = previous;
+    }
 }
 
 async fn consume_oauth_state(
@@ -28328,6 +28353,45 @@ mod tests {
             .await
             .records
             .contains_key(&issued_state));
+    }
+
+    #[tokio::test]
+    async fn spotify_oauth_state_is_not_issued_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default()
+                .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_CLIENT_ID", "client-id"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        state.oauth_states.write().await.records.insert(
+            "expired".to_owned(),
+            super::OAuthStateRecord {
+                provider: "spotify".to_owned(),
+                redirect_uri: "http://localhost/callback".to_owned(),
+                created_at: 0,
+                expires_at: 0,
+            },
+        );
+        let previous = state.oauth_states.read().await.clone();
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/integrations/spotify/authorize",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("failed OAuth state persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("OAuth state persistence failed"));
+        assert_eq!(*state.oauth_states.read().await, previous);
     }
 
     #[tokio::test]
