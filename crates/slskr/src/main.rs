@@ -138,6 +138,7 @@ const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
 const MAX_MESSAGE_RECORDS: usize = 500;
 const MAX_OAUTH_STATES: usize = 256;
 const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
+const MAX_CONTACT_RECORDS: usize = 4_096;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -4775,57 +4776,79 @@ struct ContactStore {
     records: Vec<ContactRecord>,
     next_id: u64,
     updated_at: u64,
+    max_records: usize,
 }
 
 impl ContactStore {
     fn new() -> Self {
+        Self::with_max_records(MAX_CONTACT_RECORDS)
+    }
+
+    fn with_max_records(max_records: usize) -> Self {
         Self {
             records: Vec::new(),
             next_id: 1,
             updated_at: unix_timestamp(),
+            max_records: max_records.max(1),
         }
     }
 
     fn from_persisted(records: Vec<crate::persistence::ContactRecord>) -> Self {
         let mut next_id = 1;
         let mut updated_at = unix_timestamp();
-        let records = records
-            .into_iter()
-            .map(|record| {
-                if let Some(number) = record
-                    .id
-                    .strip_prefix("contact-")
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    next_id = next_id.max(number.saturating_add(1));
-                }
-                let created_at = u64::try_from(record.created_at).unwrap_or(0);
-                let record_updated_at = u64::try_from(record.updated_at).unwrap_or(created_at);
-                updated_at = updated_at.max(record_updated_at);
-                ContactRecord {
-                    id: record.id,
-                    username: record.username,
-                    online: record.online,
-                    status: record.status,
-                    free_upload_slots: record
-                        .free_upload_slots
-                        .and_then(|value| u32::try_from(value).ok()),
-                    queue_length: record
-                        .queue_length
-                        .and_then(|value| u32::try_from(value).ok()),
-                    created_at,
-                    updated_at: record_updated_at,
-                }
-            })
-            .collect();
+        let mut projected = Vec::new();
+        for record in records {
+            if let Some(number) = record
+                .id
+                .strip_prefix("contact-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                next_id = next_id.max(number.saturating_add(1));
+            }
+            if projected.len() >= MAX_CONTACT_RECORDS
+                || projected.iter().any(|existing: &ContactRecord| {
+                    existing.username.eq_ignore_ascii_case(&record.username)
+                })
+            {
+                continue;
+            }
+            let created_at = u64::try_from(record.created_at).unwrap_or(0);
+            let record_updated_at = u64::try_from(record.updated_at).unwrap_or(created_at);
+            updated_at = updated_at.max(record_updated_at);
+            projected.push(ContactRecord {
+                id: record.id,
+                username: record.username,
+                online: record.online,
+                status: record.status,
+                free_upload_slots: record
+                    .free_upload_slots
+                    .and_then(|value| u32::try_from(value).ok()),
+                queue_length: record
+                    .queue_length
+                    .and_then(|value| u32::try_from(value).ok()),
+                created_at,
+                updated_at: record_updated_at,
+            });
+        }
         Self {
-            records,
+            records: projected,
             next_id,
             updated_at,
+            max_records: MAX_CONTACT_RECORDS,
         }
     }
 
-    fn create(&mut self, username: String) -> ContactRecord {
+    fn create(&mut self, username: String) -> Result<(ContactRecord, bool), ()> {
+        if let Some(record) = self
+            .records
+            .iter()
+            .find(|record| record.username.eq_ignore_ascii_case(&username))
+        {
+            return Ok((record.clone(), false));
+        }
+        if self.records.len() >= self.max_records {
+            return Err(());
+        }
         let now = unix_timestamp();
         let id = format!("contact-{}", self.next_id);
         self.next_id += 1;
@@ -4841,7 +4864,7 @@ impl ContactStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Ok((record, true))
     }
 
     fn get(&self, id: &str) -> Option<ContactRecord> {
@@ -11288,39 +11311,70 @@ async fn route_http_request_with_headers(
                  return Ok(routing::conflict_response("username is required"));
              }
              let mut contacts = state.contacts.write().await;
-             let record = contacts.create(username);
+             let (record, created) = match contacts.create(username) {
+                 Ok(result) => result,
+                 Err(()) => {
+                     return Ok(routing::service_unavailable_response(
+                         "contact capacity is full",
+                     ));
+                 }
+             };
              let json = record.json();
              drop(contacts);
-             persist_contact(state, &record).await;
-             Ok(routing::created_response(json))
+             if created {
+                 persist_contact(state, &record).await;
+                 Ok(routing::created_response(json))
+             } else {
+                 Ok(routing::conflict_response("contact already exists"))
+             }
          }
          ("POST", "/api/contacts/from-discovery") => {
              let username = extract_json_string_field(body, "username").unwrap_or_default();
-             if !username.is_empty() {
-                 let mut contacts = state.contacts.write().await;
-                 let record = contacts.create(username.clone());
-                 drop(contacts);
+             if username.is_empty() {
+                 return Ok(routing::bad_request_response("username is required"));
+             }
+             let mut contacts = state.contacts.write().await;
+             let (record, added) = match contacts.create(username.clone()) {
+                 Ok(result) => result,
+                 Err(()) => {
+                     return Ok(routing::service_unavailable_response(
+                         "contact capacity is full",
+                     ));
+                 }
+             };
+             drop(contacts);
+             if added {
                  persist_contact(state, &record).await;
              }
              let json = format!(
-                 "{{\"username\":\"{}\",\"discovered\":true,\"added\":true}}",
-                 json_escape(&username)
+                 "{{\"username\":\"{}\",\"discovered\":true,\"added\":{added}}}",
+                 json_escape(&username),
              );
-             Ok(routing::created_response(json))
+             Ok(if added { routing::created_response(json) } else { routing::ok_response(json) })
          }
          ("POST", "/api/contacts/from-invite") => {
              let username = extract_json_string_field(body, "username").unwrap_or_default();
-             if !username.is_empty() {
-                 let mut contacts = state.contacts.write().await;
-                 let record = contacts.create(username.clone());
-                 drop(contacts);
+             if username.is_empty() {
+                 return Ok(routing::bad_request_response("username is required"));
+             }
+             let mut contacts = state.contacts.write().await;
+             let (record, added) = match contacts.create(username.clone()) {
+                 Ok(result) => result,
+                 Err(()) => {
+                     return Ok(routing::service_unavailable_response(
+                         "contact capacity is full",
+                     ));
+                 }
+             };
+             drop(contacts);
+             if added {
                  persist_contact(state, &record).await;
              }
              let json = format!(
-                 "{{\"username\":\"{}\",\"invited\":true,\"accepted\":true}}",
-                 json_escape(&username)
+                 "{{\"username\":\"{}\",\"invited\":true,\"accepted\":true,\"added\":{added}}}",
+                 json_escape(&username),
              );
-             Ok(routing::created_response(json))
+             Ok(if added { routing::created_response(json) } else { routing::ok_response(json) })
          }
          ("GET", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
             let id = &path[14..];
@@ -31167,6 +31221,50 @@ mod tests {
         assert_eq!(bridge_json["status"], "in_progress");
         assert_eq!(bridge_json["bytesTransferred"], 40);
         assert_eq!(bridge_json["progress"], 40.0);
+    }
+
+    #[tokio::test]
+    async fn contacts_are_bounded_deduplicated_and_report_discovery_truthfully() {
+        let mut store = super::ContactStore::with_max_records(1);
+        let (_, created) = store.create("Alice".to_owned()).unwrap();
+        assert!(created);
+        let (existing, created) = store.create("alice".to_owned()).unwrap();
+        assert!(!created);
+        assert_eq!(existing.username, "Alice");
+        assert!(store.create("Bob".to_owned()).is_err());
+        assert_eq!(store.records.len(), 1);
+
+        let (state, _receiver) = test_state();
+        let empty =
+            super::route_http_request("POST", "/api/contacts/from-discovery", None, "{}", &state)
+                .await
+                .expect("empty discovery response");
+        assert_eq!(empty.status, "400 Bad Request");
+
+        let first = super::route_http_request(
+            "POST",
+            "/api/contacts/from-discovery",
+            None,
+            r#"{"username":"friend"}"#,
+            &state,
+        )
+        .await
+        .expect("first discovery response");
+        assert_eq!(first.status, "201 Created");
+        assert!(first.body.contains("\"added\":true"));
+
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/contacts/from-discovery",
+            None,
+            r#"{"username":"FRIEND"}"#,
+            &state,
+        )
+        .await
+        .expect("duplicate discovery response");
+        assert_eq!(duplicate.status, "200 OK");
+        assert!(duplicate.body.contains("\"added\":false"));
+        assert_eq!(state.contacts.read().await.records.len(), 1);
     }
 
     #[tokio::test]
