@@ -8552,7 +8552,7 @@ async fn route_http_request_with_headers(
                 "count": count,
             }).to_string()))
         }
-        ("POST", path) if path.starts_with("/api/hashdb/backfill/from-history") => {
+        ("POST", "/api/hashdb/backfill/from-history") => {
             let searches = state.searches.read().await;
             let search_candidates = searches.records.len();
             let search_results = searches
@@ -8574,6 +8574,9 @@ async fn route_http_request_with_headers(
                 "sharedFiles": share_candidates,
                 "status": if candidates == 0 { "idle" } else { "queued" },
             }).to_string()))
+        }
+        ("POST", path) if path.starts_with("/api/hashdb/backfill/from-history") => {
+            Ok(routing::not_found_response())
         }
         ("GET", "/api/mesh/stats") => {
             let users = state.users.read().await;
@@ -36901,6 +36904,16 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&hash_backfill.body).unwrap();
         assert_eq!(hash_backfill_json["status"], "queued");
         assert!(hash_backfill_json["queued"].as_u64().unwrap() >= 4);
+        let aliased_hash_backfill = super::route_http_request(
+            "POST",
+            "/api/hashdb/backfill/from-history-untrusted",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("reject aliased hashdb backfill");
+        assert_eq!(aliased_hash_backfill.status, "404 Not Found");
         let runtime_backfill =
             super::route_http_request("POST", "/api/backfill", None, "{}", &state)
                 .await
