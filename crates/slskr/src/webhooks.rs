@@ -87,7 +87,7 @@ impl fmt::Display for WebhookEvent {
 }
 
 /// Webhook configuration
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Webhook {
     pub id: String,
     pub url: String,
@@ -285,7 +285,7 @@ fn webhook_timestamp_is_fresh(timestamp: i64) -> Result<bool, std::time::SystemT
 }
 
 /// Webhook manager
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebhookManager {
     webhooks: HashMap<String, Webhook>,
 }

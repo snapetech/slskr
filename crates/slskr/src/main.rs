@@ -9447,6 +9447,7 @@ async fn route_http_request_with_headers(
              let webhook = webhooks::Webhook::new(url, events, secret.clone());
 
              let mut webhooks = state.webhooks.write().await;
+             let previous = webhooks.clone();
              let webhook_id = match webhooks.register(webhook.clone()) {
                  Ok(id) => id,
                  Err(_) => {
@@ -9454,8 +9455,12 @@ async fn route_http_request_with_headers(
                      return Ok(routing::bad_request_response("webhook limit reached"));
                  }
              };
+             let mutated = webhooks.clone();
              drop(webhooks);
-             persist_webhook(state, &webhook).await;
+             if let Err(error) = persist_webhook_checked(state, &webhook).await {
+                 rollback_webhooks_if_unchanged(state, previous, &mutated).await;
+                 return Ok(routing::service_unavailable_response(&error));
+             }
 
              let response = serde_json::json!({
                  "id": webhook_id,
@@ -9474,9 +9479,14 @@ async fn route_http_request_with_headers(
              let webhook_id = webhook_resource_id(path, "/api/webhooks/")
                  .expect("guarded webhook resource path");
              let mut webhooks = state.webhooks.write().await;
+             let previous = webhooks.clone();
              if webhooks.unregister(webhook_id).is_some() {
+                 let mutated = webhooks.clone();
                  drop(webhooks);
-                 persist_webhook_delete(state, webhook_id).await;
+                 if let Err(error) = persist_webhook_delete_checked(state, webhook_id).await {
+                     rollback_webhooks_if_unchanged(state, previous, &mutated).await;
+                     return Ok(routing::service_unavailable_response(&error));
+                 }
                  Ok(routing::ok_response(serde_json::json!({"status": "deleted"}).to_string()))
              } else {
                  drop(webhooks);
@@ -9495,15 +9505,20 @@ async fn route_http_request_with_headers(
               };
 
               let mut webhooks = state.webhooks.write().await;
+              let previous = webhooks.clone();
               if let Some(webhook) = webhooks.get_mut(webhook_id) {
                   webhook.active = active;
                   let webhook = webhook.clone();
+                  let mutated = webhooks.clone();
                   let updated = serde_json::json!({
                       "id": webhook.id,
                       "active": webhook.active,
                   });
                   drop(webhooks);
-                  persist_webhook(state, &webhook).await;
+                  if let Err(error) = persist_webhook_checked(state, &webhook).await {
+                      rollback_webhooks_if_unchanged(state, previous, &mutated).await;
+                      return Ok(routing::service_unavailable_response(&error));
+                  }
                   Ok(routing::ok_response(serde_json::to_string(&updated).unwrap_or_else(|_| "{}".to_string())))
               } else {
                   drop(webhooks);
@@ -12133,6 +12148,7 @@ async fn route_http_request_with_headers(
                 secret.clone(),
             );
             let mut webhooks = state.webhooks.write().await;
+            let previous = webhooks.clone();
             let webhook_id = match webhooks.register(webhook.clone()) {
                 Ok(id) => id,
                 Err(_) => {
@@ -12140,8 +12156,12 @@ async fn route_http_request_with_headers(
                     return Ok(routing::bad_request_response("webhook limit reached"));
                 }
             };
+            let mutated = webhooks.clone();
             drop(webhooks);
-            persist_webhook(state, &webhook).await;
+            if let Err(error) = persist_webhook_checked(state, &webhook).await {
+                rollback_webhooks_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::created_response(serde_json::json!({
                 "id": webhook_id,
                 "secret": secret,
@@ -12176,9 +12196,14 @@ async fn route_http_request_with_headers(
             let webhook_id = webhook_resource_id(path, "/api/admin/webhooks/")
                 .expect("guarded admin webhook resource path");
             let mut webhooks = state.webhooks.write().await;
+            let previous = webhooks.clone();
             if webhooks.unregister(webhook_id).is_some() {
+                let mutated = webhooks.clone();
                 drop(webhooks);
-                persist_webhook_delete(state, webhook_id).await;
+                if let Err(error) = persist_webhook_delete_checked(state, webhook_id).await {
+                    rollback_webhooks_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response("{\"status\":\"deleted\"}".to_owned()))
             } else {
                 drop(webhooks);
@@ -24490,17 +24515,37 @@ async fn consume_oauth_state(
     Ok(oauth_states.records.remove(token))
 }
 
-async fn persist_webhook(state: &AppState, webhook: &webhooks::Webhook) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db
-            .insert_webhook(&webhook_persistence_record(webhook))
-            .await;
-    }
+async fn persist_webhook_checked(
+    state: &AppState,
+    webhook: &webhooks::Webhook,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.insert_webhook(&webhook_persistence_record(webhook))
+        .await
+        .map_err(|error| format!("webhook persistence failed: {error}"))?;
+    Ok(true)
 }
 
-async fn persist_webhook_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_webhook(id).await;
+async fn persist_webhook_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_webhook(id)
+        .await
+        .map_err(|error| format!("webhook deletion persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn rollback_webhooks_if_unchanged(
+    state: &AppState,
+    previous: webhooks::WebhookManager,
+    mutated: &webhooks::WebhookManager,
+) {
+    let mut webhooks = state.webhooks.write().await;
+    if *webhooks == *mutated {
+        *webhooks = previous;
     }
 }
 
@@ -33194,6 +33239,92 @@ mod tests {
         .expect("delete webhook");
         assert_eq!(deleted.status, "200 OK");
         assert!(db.list_webhooks().await.expect("list deleted").is_empty());
+    }
+
+    #[tokio::test]
+    async fn webhook_routes_roll_back_when_persistence_fails() {
+        for path in ["/api/webhooks", "/api/admin/webhooks"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let previous = state.webhooks.read().await.clone();
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "POST",
+                path,
+                None,
+                r#"{"url":"https://example.test/hook","events":"search.created"}"#,
+                &state,
+            )
+            .await
+            .expect("failed webhook create response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("webhook persistence failed"),
+                "{path}"
+            );
+            assert_eq!(*state.webhooks.read().await, previous, "{path}");
+        }
+
+        for (method, prefix, body, expected_error) in [
+            (
+                "PATCH",
+                "/api/webhooks/",
+                r#"{"active":false}"#,
+                "webhook persistence failed",
+            ),
+            (
+                "DELETE",
+                "/api/webhooks/",
+                "",
+                "webhook deletion persistence failed",
+            ),
+            (
+                "DELETE",
+                "/api/admin/webhooks/",
+                "",
+                "webhook deletion persistence failed",
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let webhook = super::webhooks::Webhook::new(
+                "https://example.test/hook".to_owned(),
+                vec![super::webhooks::WebhookEvent::SearchCreated],
+                "0123456789abcdef0123456789abcdef".to_owned(),
+            );
+            let webhook_id = webhook.id.clone();
+            state.webhooks.write().await.register(webhook).unwrap();
+            let previous = state.webhooks.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request(
+                method,
+                &format!("{prefix}{webhook_id}"),
+                None,
+                body,
+                &state,
+            )
+            .await
+            .expect("failed webhook mutation response");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{method} {prefix}"
+            );
+            assert!(response.body.contains(expected_error), "{method} {prefix}");
+            assert_eq!(*state.webhooks.read().await, previous, "{method} {prefix}");
+        }
     }
 
     #[tokio::test]
