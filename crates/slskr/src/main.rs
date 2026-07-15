@@ -5136,6 +5136,11 @@ fn joined_room_subresource(path: &str, suffix: &str) -> Option<String> {
     Some(decoded_path_segment(room))
 }
 
+fn library_health_issue_id(path: &str) -> Option<&str> {
+    let id = path.strip_prefix("/api/library/health/issues/")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
 // Wishlist Models
 #[derive(Clone, Debug)]
 struct WishlistItem {
@@ -7550,21 +7555,29 @@ impl LibraryStore {
         let mut action = "unchanged";
         match issue_type.as_str() {
             "missing_artist" => {
-                item.artist = artist
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "Unknown Artist".to_owned());
+                item.artist = truncate_utf8_bytes(
+                    artist
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "Unknown Artist".to_owned()),
+                    MAX_LIST_ARTIST_BYTES,
+                );
                 action = "defaulted_artist";
             }
             "missing_title" => {
-                item.title = title
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "Untitled".to_owned());
+                item.title = truncate_utf8_bytes(
+                    title
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "Untitled".to_owned()),
+                    MAX_LIST_TITLE_BYTES,
+                );
                 action = "defaulted_title";
             }
             "missing_kind" => {
-                item.kind = kind
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "Audio".to_owned());
+                item.kind = truncate_utf8_bytes(
+                    kind.filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "Audio".to_owned()),
+                    MAX_LIST_KIND_BYTES,
+                );
                 action = "defaulted_kind";
             }
             _ => {}
@@ -9475,8 +9488,12 @@ async fn route_http_request_with_headers(
               }
           }
 
-          ("PATCH", path) if path.starts_with("/api/library/health/issues/") && path.len() > 27 => {
-              let issue_id = path.rsplit('/').next().unwrap_or("unknown");
+          ("PATCH", path)
+              if path.starts_with("/api/library/health/issues/")
+                  && library_health_issue_id(path).is_some() =>
+          {
+              let issue_id = library_health_issue_id(path)
+                  .expect("guarded library health issue path");
               let artist = extract_json_string_field(body, "artist");
               let title = extract_json_string_field(body, "title");
               let kind = extract_json_string_field(body, "kind")
@@ -29963,6 +29980,58 @@ mod tests {
                 "/messages"
             ),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn library_health_patches_require_exact_paths_and_bound_repairs() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"","title":"Track","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let issue_id = format!("{item_id}-missing-artist");
+
+        super::route_http_request(
+            "PATCH",
+            &format!("/api/library/health/issues/extra/{issue_id}"),
+            None,
+            r#"{"artist":"wrong"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(state.library.read().await.get(&item_id).unwrap().artist, "");
+        assert_eq!(
+            super::library_health_issue_id(&format!("/api/library/health/issues/extra/{issue_id}")),
+            None
+        );
+
+        let oversized_artist = "é".repeat(super::MAX_LIST_ARTIST_BYTES);
+        let repaired = super::route_http_request(
+            "PATCH",
+            &format!("/api/library/health/issues/{issue_id}"),
+            None,
+            &format!("{{\"artist\":\"{oversized_artist}\"}}"),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(repaired.status, "200 OK");
+        let item = state.library.read().await.get(&item_id).unwrap();
+        assert_eq!(item.artist.len(), super::MAX_LIST_ARTIST_BYTES);
+        assert_eq!(
+            super::library_health_issue_id(&format!("/api/library/health/issues/{issue_id}")),
+            Some(issue_id.as_str())
         );
     }
 
