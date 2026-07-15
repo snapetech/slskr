@@ -2012,21 +2012,29 @@ impl DatabaseManager {
         records: &[MessageRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        for record in records {
-            query(
-                r#"
-                INSERT INTO messages (id, username, content, direction, read, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                "#,
-            )
-            .bind(&record.id)
-            .bind(&record.username)
-            .bind(&record.content)
-            .bind(&record.direction)
-            .bind(record.read as i32)
-            .bind(record.created_at)
-            .execute(&mut *transaction)
-            .await?;
+        let result = async {
+            for record in records {
+                query(
+                    r#"
+                    INSERT INTO messages (id, username, content, direction, read, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    "#,
+                )
+                .bind(&record.id)
+                .bind(&record.username)
+                .bind(&record.content)
+                .bind(&record.direction)
+                .bind(record.read as i32)
+                .bind(record.created_at)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            Ok::<(), sqlx_core::Error>(())
+        }
+        .await;
+        if let Err(error) = result {
+            transaction.rollback().await?;
+            return Err(error.into());
         }
         transaction.commit().await?;
         Ok(())
@@ -2606,35 +2614,43 @@ impl DatabaseManager {
         members: &[ShareGroupMemberRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        query(
-            r#"
-            INSERT OR REPLACE INTO share_groups (id, name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(&record.id)
-        .bind(&record.name)
-        .bind(&record.description)
-        .bind(record.created_at)
-        .bind(record.updated_at)
-        .execute(&mut *transaction)
-        .await?;
-        query("DELETE FROM share_group_members WHERE group_id = ?")
-            .bind(&record.id)
-            .execute(&mut *transaction)
-            .await?;
-        for member in members {
+        let result = async {
             query(
                 r#"
-                INSERT INTO share_group_members (group_id, username, added_at)
-                VALUES (?, ?, ?)
+                INSERT OR REPLACE INTO share_groups (id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
                 "#,
             )
-            .bind(&member.group_id)
-            .bind(&member.username)
-            .bind(member.added_at)
+            .bind(&record.id)
+            .bind(&record.name)
+            .bind(&record.description)
+            .bind(record.created_at)
+            .bind(record.updated_at)
             .execute(&mut *transaction)
             .await?;
+            query("DELETE FROM share_group_members WHERE group_id = ?")
+                .bind(&record.id)
+                .execute(&mut *transaction)
+                .await?;
+            for member in members {
+                query(
+                    r#"
+                    INSERT INTO share_group_members (group_id, username, added_at)
+                    VALUES (?, ?, ?)
+                    "#,
+                )
+                .bind(&member.group_id)
+                .bind(&member.username)
+                .bind(member.added_at)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            Ok::<(), sqlx_core::Error>(())
+        }
+        .await;
+        if let Err(error) = result {
+            transaction.rollback().await?;
+            return Err(error.into());
         }
         transaction.commit().await?;
         Ok(())
