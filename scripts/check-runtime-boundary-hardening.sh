@@ -55,6 +55,7 @@ for anchor in \
   'wishlist_ignored_folders_persist_and_suppress_existing_and_future_results' \
   'wishlist_ignored_folder_mutations_roll_back_on_persistence_failure' \
   'completed_transfer_cleanup_rolls_back_on_persistence_failure' \
+  'transfer_cancel_rolls_back_on_persistence_failure' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \

@@ -1342,6 +1342,162 @@ body {
   padding: 0 10px;
 }
 
+.slskr-wishlist-ignore-panel {
+  background: #0d1213;
+  border: 1px solid #34403f;
+  border-left: 4px solid #f6b84b;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.slskr-wishlist-ignore-panel > header {
+  align-items: end;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1.3fr);
+}
+
+.slskr-wishlist-ignore-panel h3,
+.slskr-wishlist-ignore-panel p {
+  margin: 0;
+}
+
+.slskr-wishlist-ignore-panel p,
+.slskr-wishlist-ignore-panel-empty {
+  color: #aeb9b4;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.slskr-wishlist-ignore-kicker {
+  color: #f6b84b;
+  display: block;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.slskr-wishlist-ignore-groups {
+  border-top: 1px solid #34403f;
+}
+
+.slskr-wishlist-ignore-group {
+  border-bottom: 1px solid #263130;
+  padding: 0 10px;
+}
+
+.slskr-wishlist-ignore-group summary {
+  align-items: center;
+  color: #f4efe7;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 42px;
+}
+
+.slskr-wishlist-ignore-group summary small {
+  color: #f6b84b;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.slskr-wishlist-ignore-add {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(200px, 1.3fr) auto;
+  padding: 4px 0 10px;
+}
+
+.slskr-wishlist-ignore-add label {
+  color: #8dd7c8;
+  display: grid;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 4px;
+  text-transform: uppercase;
+}
+
+.slskr-wishlist-ignore-add input {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.slskr-wishlist-ignore-add button,
+.slskr-wishlist-ignore-rule button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.slskr-wishlist-ignore-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 10px;
+}
+
+.slskr-wishlist-ignore-rule {
+  align-items: center;
+  background: #101819;
+  border-top: 1px solid #263130;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 7px 8px;
+}
+
+.slskr-wishlist-ignore-rule > span {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.slskr-wishlist-ignore-rule strong {
+  color: #f4efe7;
+  font-size: 12px;
+}
+
+.slskr-wishlist-ignore-rule code {
+  color: #9fd8ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.slskr-wishlist-ignore-rule button {
+  background: transparent;
+  border-color: #7a5b35;
+  color: #ffd166;
+}
+
+.slskr-wishlist-ignore-empty {
+  color: #8fa09a;
+  font-size: 12px;
+  padding: 8px 0 12px;
+}
+
+.slskr-wishlist-ignore-panel button:focus-visible,
+.slskr-wishlist-ignore-panel input:focus-visible,
+.slskr-wishlist-ignore-panel summary:focus-visible {
+  outline: 2px solid #f6b84b;
+  outline-offset: 2px;
+}
+
 .slskr-native-list {
   display: grid;
   gap: 8px;
@@ -2552,6 +2708,17 @@ body {
 
   .slskr-workbench-surface header {
     align-items: start;
+    flex-direction: column;
+  }
+
+  .slskr-wishlist-ignore-panel > header,
+  .slskr-wishlist-ignore-add {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .slskr-wishlist-ignore-rule {
+    align-items: stretch;
     flex-direction: column;
   }
 }

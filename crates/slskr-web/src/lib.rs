@@ -7143,9 +7143,7 @@ fn handle_wishlist_ignored_result_action(
         };
         (
             "DELETE",
-            endpoint_url(&format!(
-                "/wishlist/{item_id}/ignored-results/{rule_id}"
-            )),
+            endpoint_url(&format!("/wishlist/{item_id}/ignored-results/{rule_id}")),
             None,
             "Restore ignored folder",
         )
@@ -17880,6 +17878,8 @@ mod tests {
 
         let wishlist = route_page_html("/wishlist");
         assert!(wishlist.contains("data-slskr-native-search-filter"));
+        assert!(wishlist.contains("data-slskr-wishlist-ignore-manager"));
+        assert!(wishlist.contains("Ignored result folders"));
         assert_eq!(
             wishlist.matches("data-slskr-native-filter ").count(),
             1,
@@ -17894,7 +17894,7 @@ mod tests {
                     path: "/wishlist",
                     surface: "wishlist",
                 },
-                body: r#"[{"id":"wish-7","searchText":"rare live set","filter":"flac","enabled":true}]"#
+                body: r#"[{"id":"wish-7","searchText":"rare live set","filter":"flac","enabled":true,"ignoredResultCount":1,"ignoredResults":[{"id":"rule-9","username":"noisy-peer","directory":"Bootlegs/Unsorted"}]}]"#
                     .to_string(),
             }],
         );
@@ -17908,6 +17908,12 @@ mod tests {
             .contains(r#"data-slskr-native-action-menu="Run | Run Enabled | Copy Review""#));
         assert!(live_wishlist.contains("data-slskr-wishlist-row-controls"));
         assert!(live_wishlist.contains(r#"aria-label="Enabled rare live set" checked"#));
+        assert!(live_wishlist.contains("Noise gate"));
+        assert!(live_wishlist.contains("noisy-peer"));
+        assert!(live_wishlist.contains("Bootlegs/Unsorted"));
+        assert!(live_wishlist.contains(r#"data-slskr-wishlist-ignore-rule-id="rule-9""#));
+        assert!(live_wishlist.contains(r#"data-slskr-wishlist-ignore-submit"#));
+        assert!(live_wishlist.contains(">Restore</button>"));
 
         let sharing = route_page_html("/sharegroups");
         assert!(sharing.contains("data-slskr-native-share-group"));

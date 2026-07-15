@@ -11583,13 +11583,27 @@ async fn route_http_request_with_headers(
              };
              if let Ok(id) = id_str.parse::<u64>() {
                  let mut transfers = state.transfers.write().await;
+                 let previous = transfers.entries.iter().find(|entry| entry.id == id).cloned();
                  if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
                      entry.status = "cancelled".to_owned();
                      entry.updated_at = unix_timestamp();
                      let json_response = entry.json();
-                     let entry = entry.clone();
+                     let mutated = entry.clone();
                      drop(transfers);
-                     persist_transfer_record(state, &entry).await?;
+                     if let Err(error) = persist_transfer_record(state, &mutated).await {
+                         let mut transfers = state.transfers.write().await;
+                         if let Some(current) =
+                             transfers.entries.iter_mut().find(|entry| entry.id == id)
+                         {
+                             if *current == mutated {
+                                 if let Some(previous) = previous {
+                                     *current = previous;
+                                 }
+                             }
+                         }
+                         drop(transfers);
+                         return Ok(routing::service_unavailable_response(&error));
+                     }
                      Ok(routing::ok_response(json_response))
                  } else {
                      drop(transfers);
@@ -36684,6 +36698,16 @@ mod tests {
         .unwrap();
         let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
         assert_eq!(listed_json.as_array().unwrap().len(), 1);
+        let wishlist = super::route_http_request("GET", "/api/wishlist", None, "", &state)
+            .await
+            .unwrap();
+        let wishlist_json = serde_json::from_str::<serde_json::Value>(&wishlist.body).unwrap();
+        assert_eq!(wishlist_json[0]["ignoredResultCount"], 1);
+        assert_eq!(wishlist_json[0]["ignoredResults"][0]["id"], rule_id);
+        assert_eq!(
+            wishlist_json[0]["ignoredResults"][0]["directory"],
+            "Remote/Album"
+        );
         let persisted = db.list_all_wishlist_ignored_results().await.unwrap();
         assert_eq!(persisted.len(), 1);
         let rehydrated = super::WishlistStore::from_persisted_with_ignored(
@@ -37623,6 +37647,39 @@ mod tests {
 
         assert_eq!(response.status, "503 Service Unavailable");
         assert_eq!(state.transfers.read().await.entries, entries_before_failure);
+    }
+
+    #[tokio::test]
+    async fn transfer_cancel_rolls_back_on_persistence_failure() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let original = state.transfers.write().await.create(
+            0,
+            Some("friend".to_owned()),
+            "Remote/Keep.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/transfers/{}", original.id),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("cancel response");
+
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert_eq!(state.transfers.read().await.entries, vec![original]);
     }
 
     #[tokio::test]
