@@ -6916,7 +6916,7 @@ struct SecurityBanRecord {
     created_at: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct SecurityState {
     bans: Vec<SecurityBanRecord>,
     updated_at: u64,
@@ -15245,16 +15245,23 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("username is required"));
             };
             let mut security = state.security.write().await;
+            let previous = security.clone();
             let Some(record) = security.ban("username", username.clone()) else {
                 return Ok(routing::service_unavailable_response("security ban capacity is full"));
             };
+            let persisted = match persist_security_ban(state, &record).await {
+                Ok(persisted) => persisted,
+                Err(error) => {
+                    *security = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
+            };
             let active_bans = security.active_bans();
             drop(security);
-            persist_security_ban(state, &record).await;
             Ok(routing::ok_response(serde_json::json!({
                 "username": username,
                 "banned": true,
-                "persisted": true,
+                "persisted": persisted,
                 "kind": record.kind,
                 "created_at": record.created_at,
                 "activeBans": active_bans,
@@ -15293,16 +15300,23 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("valid ip is required"));
             };
             let mut security = state.security.write().await;
+            let previous = security.clone();
             let Some(record) = security.ban("ip", ip.clone()) else {
                 return Ok(routing::service_unavailable_response("security ban capacity is full"));
             };
+            let persisted = match persist_security_ban(state, &record).await {
+                Ok(persisted) => persisted,
+                Err(error) => {
+                    *security = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
+            };
             let active_bans = security.active_bans();
             drop(security);
-            persist_security_ban(state, &record).await;
             Ok(routing::ok_response(serde_json::json!({
                 "ip": ip,
                 "banned": true,
-                "persisted": true,
+                "persisted": persisted,
                 "kind": record.kind,
                 "created_at": record.created_at,
                 "activeBans": active_bans,
@@ -23353,16 +23367,22 @@ async fn persist_interest_delete(state: &AppState, id: &str) {
     }
 }
 
-async fn persist_security_ban(state: &AppState, record: &SecurityBanRecord) {
+async fn persist_security_ban(
+    state: &AppState,
+    record: &SecurityBanRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::SecurityBanRecord {
         kind: record.kind.clone(),
         value: record.value.clone(),
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_security_ban(&persisted).await;
+    db.upsert_security_ban(&persisted)
+        .await
+        .map_err(|error| format!("security ban persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_security_unban(state: &AppState, kind: &str, value: &str) {
@@ -35660,10 +35680,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(ip.status, "200 OK");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&ip.body).unwrap()["ip"],
-            "2001:db8::1"
-        );
+        let ip_json = serde_json::from_str::<serde_json::Value>(&ip.body).unwrap();
+        assert_eq!(ip_json["ip"], "2001:db8::1");
+        assert_eq!(ip_json["persisted"], false);
 
         let username = super::route_http_request(
             "POST",
@@ -35675,10 +35694,35 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(username.status, "200 OK");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&username.body).unwrap()["username"],
-            "Peer One"
+        let username_json = serde_json::from_str::<serde_json::Value>(&username.body).unwrap();
+        assert_eq!(username_json["username"], "Peer One");
+        assert_eq!(username_json["persisted"], false);
+    }
+
+    #[tokio::test]
+    async fn security_ban_rolls_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
         );
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/security/bans/username",
+            None,
+            r#"{"username":"must-persist"}"#,
+            &state,
+        )
+        .await
+        .expect("failed persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("security ban persistence failed"));
+        assert!(state.security.read().await.bans.is_empty());
     }
 
     #[tokio::test]
@@ -39584,7 +39628,7 @@ mod tests {
         let username_ban_json =
             serde_json::from_str::<serde_json::Value>(&username_ban.body).unwrap();
         assert_eq!(username_ban_json["banned"], true);
-        assert_eq!(username_ban_json["persisted"], true);
+        assert_eq!(username_ban_json["persisted"], false);
         assert_eq!(username_ban_json["activeBans"], 1);
         let bans = super::route_http_request("GET", "/api/bans", None, "", &state)
             .await
