@@ -89,7 +89,7 @@ where
         let connection = (self.connector)(username.to_owned()).await?;
         self.peer_cache
             .insert(username.to_owned(), connection)
-            .await;
+            .await?;
         Ok(true)
     }
 
@@ -158,7 +158,7 @@ where
         let stream = request.complete(incoming)?;
         self.peer_cache
             .insert(request.username.clone(), PeerMessageConnection::new(stream))
-            .await;
+            .await?;
         Ok(())
     }
 }

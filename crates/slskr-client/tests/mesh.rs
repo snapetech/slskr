@@ -53,7 +53,10 @@ fn mesh_rendezvous_defaults_to_passive_interest_tag_and_dedupes_candidates() {
 async fn mesh_probe_is_noop_when_active_probe_disabled() {
     let cache = PeerConnectionCache::new();
     let (a, _) = duplex(256);
-    cache.insert("peer", PeerMessageConnection::new(a)).await;
+    cache
+        .insert("peer", PeerMessageConnection::new(a))
+        .await
+        .unwrap();
     let local = descriptor(vec![
         FEATURE_CAPABILITIES_V1.to_owned(),
         FEATURE_MESH_V1.to_owned(),
@@ -83,7 +86,10 @@ async fn mesh_probe_sends_capability_hello_when_enabled() {
     let cache = PeerConnectionCache::new();
     let (a, b) = duplex(4096);
     let mut receiver = PeerMessageConnection::new(b);
-    cache.insert("peer", PeerMessageConnection::new(a)).await;
+    cache
+        .insert("peer", PeerMessageConnection::new(a))
+        .await
+        .unwrap();
     let local = descriptor(vec![
         FEATURE_CAPABILITIES_V1.to_owned(),
         FEATURE_MESH_V1.to_owned(),

@@ -9,6 +9,7 @@ http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
 client_social_source="crates/slskr-client/src/social.rs"
 client_capability_source="crates/slskr-client/src/capabilities.rs"
+client_peer_cache_source="crates/slskr-client/src/peer_cache.rs"
 status=0
 
 for anchor in \
@@ -34,6 +35,16 @@ for anchor in \
   'state.incoming_connections'; do
   if ! rg -n --fixed-strings -- "$anchor" "$source_file" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
+  'DEFAULT_MAX_PEER_CONNECTIONS' \
+  'PeerConnectionCacheFull' \
+  'cache_rejects_new_peers_at_limit_but_allows_replacement'; do
+  if ! rg -n --fixed-strings -- "$anchor" "$client_peer_cache_source" crates/slskr-client/src/error.rs crates/slskr-client/tests/peer_cache.rs >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing peer cache anchor %s\n' "$anchor" >&2
     status=1
   fi
 done

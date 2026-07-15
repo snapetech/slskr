@@ -12,11 +12,15 @@ async fn cache_tracks_insert_replace_remove() {
     assert!(cache
         .insert("peer", PeerMessageConnection::new(a))
         .await
+        .unwrap()
         .is_none());
     assert!(cache.contains("peer").await);
     assert_eq!(cache.len().await, 1);
 
-    let replaced = cache.insert("peer", PeerMessageConnection::new(b)).await;
+    let replaced = cache
+        .insert("peer", PeerMessageConnection::new(b))
+        .await
+        .unwrap();
     assert!(replaced.is_some());
     assert_eq!(cache.len().await, 1);
 
@@ -34,7 +38,10 @@ async fn cache_sends_to_existing_peer() {
         filename: "Music/file.flac".to_owned(),
     };
 
-    cache.insert("peer", PeerMessageConnection::new(a)).await;
+    cache
+        .insert("peer", PeerMessageConnection::new(a))
+        .await
+        .unwrap();
     assert!(cache.send_to("peer", &message).await.unwrap());
     assert_eq!(receiver.receive().await.unwrap(), message);
 }
@@ -58,8 +65,40 @@ async fn cache_receives_from_existing_peer() {
         filename: "Music/file.flac".to_owned(),
     };
 
-    cache.insert("peer", PeerMessageConnection::new(b)).await;
+    cache
+        .insert("peer", PeerMessageConnection::new(b))
+        .await
+        .unwrap();
     sender.send(&message).await.unwrap();
 
     assert_eq!(cache.receive_from("peer").await.unwrap(), Some(message));
+}
+
+#[tokio::test]
+async fn cache_rejects_new_peers_at_limit_but_allows_replacement() {
+    let cache = PeerConnectionCache::with_max_connections(1);
+    let (first, _) = duplex(64);
+    cache
+        .insert("first", PeerMessageConnection::new(first))
+        .await
+        .unwrap();
+
+    let (replacement, _) = duplex(64);
+    assert!(cache
+        .insert("first", PeerMessageConnection::new(replacement))
+        .await
+        .unwrap()
+        .is_some());
+
+    let (second, _) = duplex(64);
+    let error = cache
+        .insert("second", PeerMessageConnection::new(second))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::PeerConnectionCacheFull { max: 1 }
+    ));
+    assert_eq!(cache.len().await, 1);
+    assert!(cache.contains("first").await);
 }

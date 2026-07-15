@@ -6,15 +6,19 @@ use tokio::sync::Mutex;
 
 use crate::{stream::PeerMessageConnection, ClientError};
 
+pub const DEFAULT_MAX_PEER_CONNECTIONS: usize = 1_024;
+
 #[derive(Debug)]
 pub struct PeerConnectionCache<S> {
     connections: Arc<Mutex<HashMap<String, PeerMessageConnection<S>>>>,
+    max_connections: usize,
 }
 
 impl<S> Clone for PeerConnectionCache<S> {
     fn clone(&self) -> Self {
         Self {
             connections: Arc::clone(&self.connections),
+            max_connections: self.max_connections,
         }
     }
 }
@@ -28,8 +32,14 @@ impl<S> Default for PeerConnectionCache<S> {
 impl<S> PeerConnectionCache<S> {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_max_connections(DEFAULT_MAX_PEER_CONNECTIONS)
+    }
+
+    #[must_use]
+    pub fn with_max_connections(max_connections: usize) -> Self {
         Self {
             connections: Arc::new(Mutex::new(HashMap::new())),
+            max_connections: max_connections.max(1),
         }
     }
 
@@ -37,11 +47,15 @@ impl<S> PeerConnectionCache<S> {
         &self,
         username: impl Into<String>,
         connection: PeerMessageConnection<S>,
-    ) -> Option<PeerMessageConnection<S>> {
-        self.connections
-            .lock()
-            .await
-            .insert(username.into(), connection)
+    ) -> Result<Option<PeerMessageConnection<S>>, ClientError> {
+        let username = username.into();
+        let mut connections = self.connections.lock().await;
+        if connections.len() >= self.max_connections && !connections.contains_key(&username) {
+            return Err(ClientError::PeerConnectionCacheFull {
+                max: self.max_connections,
+            });
+        }
+        Ok(connections.insert(username, connection))
     }
 
     pub async fn remove(&self, username: &str) -> Option<PeerMessageConnection<S>> {

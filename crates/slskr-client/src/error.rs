@@ -59,6 +59,8 @@ pub enum ClientError {
     PayloadTooLarge { max: usize },
     #[error("{operation} timed out")]
     TimedOut { operation: &'static str },
+    #[error("peer connection cache is full (maximum {max} connections)")]
+    PeerConnectionCacheFull { max: usize },
 }
 
 impl ClientError {
