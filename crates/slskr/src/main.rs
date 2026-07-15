@@ -5414,7 +5414,7 @@ impl WishlistStore {
 }
 
 // Contact Models
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ContactRecord {
     id: String,
     username: String,
@@ -5442,7 +5442,7 @@ impl ContactRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ContactStore {
     records: Vec<ContactRecord>,
     next_id: u64,
@@ -12865,6 +12865,7 @@ async fn route_http_request_with_headers(
                  return Ok(routing::conflict_response("username is required"));
              }
              let mut contacts = state.contacts.write().await;
+             let previous = contacts.clone();
              let (record, created) = match contacts.create(username) {
                  Ok(result) => result,
                  Err(()) => {
@@ -12873,10 +12874,18 @@ async fn route_http_request_with_headers(
                      ));
                  }
              };
+             let mutated = contacts.clone();
              let json = record.json();
              drop(contacts);
              if created {
-                 persist_contact(state, &record).await;
+                 if let Err(error) = persist_contact_checked(state, &record).await {
+                     let mut contacts = state.contacts.write().await;
+                     if *contacts == mutated {
+                         *contacts = previous;
+                     }
+                     drop(contacts);
+                     return Ok(routing::service_unavailable_response(&error));
+                 }
                  Ok(routing::created_response(json))
              } else {
                  Ok(routing::conflict_response("contact already exists"))
@@ -12888,6 +12897,7 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("username is required"));
              }
              let mut contacts = state.contacts.write().await;
+             let previous = contacts.clone();
              let (record, added) = match contacts.create(username.clone()) {
                  Ok(result) => result,
                  Err(()) => {
@@ -12896,9 +12906,17 @@ async fn route_http_request_with_headers(
                      ));
                  }
              };
+             let mutated = contacts.clone();
              drop(contacts);
              if added {
-                 persist_contact(state, &record).await;
+                 if let Err(error) = persist_contact_checked(state, &record).await {
+                     let mut contacts = state.contacts.write().await;
+                     if *contacts == mutated {
+                         *contacts = previous;
+                     }
+                     drop(contacts);
+                     return Ok(routing::service_unavailable_response(&error));
+                 }
              }
              let json = format!(
                  "{{\"username\":\"{}\",\"discovered\":true,\"added\":{added}}}",
@@ -12912,6 +12930,7 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("username is required"));
              }
              let mut contacts = state.contacts.write().await;
+             let previous = contacts.clone();
              let (record, added) = match contacts.create(username.clone()) {
                  Ok(result) => result,
                  Err(()) => {
@@ -12920,9 +12939,17 @@ async fn route_http_request_with_headers(
                      ));
                  }
              };
+             let mutated = contacts.clone();
              drop(contacts);
              if added {
-                 persist_contact(state, &record).await;
+                 if let Err(error) = persist_contact_checked(state, &record).await {
+                     let mut contacts = state.contacts.write().await;
+                     if *contacts == mutated {
+                         *contacts = previous;
+                     }
+                     drop(contacts);
+                     return Ok(routing::service_unavailable_response(&error));
+                 }
              }
              let json = format!(
                  "{{\"username\":\"{}\",\"invited\":true,\"accepted\":true,\"added\":{added}}}",
@@ -12951,11 +12978,20 @@ async fn route_http_request_with_headers(
             let username = extract_json_string_field(body, "username");
             let online = extract_json_bool_field(body, "online");
             let mut contacts = state.contacts.write().await;
+            let previous = contacts.clone();
             match contacts.update(id, username, online) {
                 Ok(record) => {
+                    let mutated = contacts.clone();
                     let json = record.json();
                     drop(contacts);
-                    persist_contact(state, &record).await;
+                    if let Err(error) = persist_contact_checked(state, &record).await {
+                        let mut contacts = state.contacts.write().await;
+                        if *contacts == mutated {
+                            *contacts = previous;
+                        }
+                        drop(contacts);
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
                     Ok(routing::ok_response(json))
                 }
                 Err(ContactUpdateError::DuplicateUsername) => {
@@ -12973,10 +13009,19 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut contacts = state.contacts.write().await;
+            let previous = contacts.clone();
             let deleted = contacts.delete(id);
+            let mutated = contacts.clone();
             drop(contacts);
             if deleted {
-                persist_contact_delete(state, id).await;
+                if let Err(error) = persist_contact_delete_checked(state, id).await {
+                    let mut contacts = state.contacts.write().await;
+                    if *contacts == mutated {
+                        *contacts = previous;
+                    }
+                    drop(contacts);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -23966,9 +24011,9 @@ async fn persist_user_projection(state: &AppState, record: &UserRecord) -> Resul
     Ok(true)
 }
 
-async fn persist_contact(state: &AppState, record: &ContactRecord) {
+async fn persist_contact_checked(state: &AppState, record: &ContactRecord) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::ContactRecord {
         id: record.id.clone(),
@@ -23980,13 +24025,20 @@ async fn persist_contact(state: &AppState, record: &ContactRecord) {
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_contact(&persisted).await;
+    db.upsert_contact(&persisted)
+        .await
+        .map_err(|error| format!("contact persistence failed: {error}"))?;
+    Ok(true)
 }
 
-async fn persist_contact_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_contact(id).await;
-    }
+async fn persist_contact_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_contact(id)
+        .await
+        .map_err(|error| format!("contact deletion persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_share_grant(state: &AppState, record: &ShareGrantRecord) -> Result<bool, String> {
@@ -31717,6 +31769,75 @@ mod tests {
         assert_eq!(now_playing.records[0].username, "existing");
         assert_eq!(now_playing.records[0].artist, "Original");
         assert_eq!(now_playing.records[0].title, "Track");
+    }
+
+    #[tokio::test]
+    async fn contact_routes_roll_back_when_persistence_fails() {
+        for path in [
+            "/api/contacts",
+            "/api/contacts/from-discovery",
+            "/api/contacts/from-invite",
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            db.close_for_test().await;
+
+            let response =
+                super::route_http_request("POST", path, None, r#"{"username":"friend"}"#, &state)
+                    .await
+                    .expect("failed contact creation response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("contact persistence failed"),
+                "{path}"
+            );
+            let contacts = state.contacts.read().await;
+            assert!(contacts.records.is_empty(), "{path}");
+            assert_eq!(contacts.next_id, 1, "{path}");
+        }
+
+        for (method, body, expected_error) in [
+            (
+                "PUT",
+                r#"{"username":"changed","online":true}"#,
+                "contact persistence failed",
+            ),
+            ("DELETE", "", "contact deletion persistence failed"),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .contacts
+                .write()
+                .await
+                .create("friend".to_owned())
+                .unwrap();
+            db.close_for_test().await;
+
+            let response =
+                super::route_http_request(method, "/api/contacts/contact-1", None, body, &state)
+                    .await
+                    .expect("failed contact mutation response");
+            assert_eq!(response.status, "503 Service Unavailable", "{method}");
+            assert!(response.body.contains(expected_error), "{method}");
+            let contacts = state.contacts.read().await;
+            assert_eq!(contacts.records.len(), 1, "{method}");
+            assert_eq!(contacts.records[0].username, "friend", "{method}");
+            assert!(!contacts.records[0].online, "{method}");
+            assert_eq!(contacts.next_id, 2, "{method}");
+        }
     }
 
     #[tokio::test]
