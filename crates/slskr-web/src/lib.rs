@@ -485,6 +485,26 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         },
         ApiEndpoint {
             method: "GET",
+            path: "/downloads/requests",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/downloads/requests/:id",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "PATCH",
+            path: "/downloads/requests/:id/name",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/downloads/requests/:id/cancel",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "GET",
             path: "/transfers/uploads",
             surface: "transfers",
         },
@@ -5835,6 +5855,136 @@ fn wishlist_policy_history_panel_html(responses: Option<&[EndpointBody]>) -> Str
     )
 }
 
+fn download_request_workspace_html(responses: Option<&[EndpointBody]>) -> String {
+    const COLUMNS: &[(&str, &str, bool)] = &[
+        ("name", "Name", true),
+        ("peer", "Peer", true),
+        ("type", "Type", false),
+        ("size", "Size", true),
+        ("progress", "Progress", true),
+        ("bitrate", "Bitrate", true),
+        ("samplerate", "Sample rate", false),
+        ("bitdepth", "Bit depth", false),
+        ("length", "Length", true),
+        ("state", "State", true),
+        ("folder", "Folder", false),
+        ("added", "Added", false),
+        ("actions", "Actions", true),
+    ];
+    let chooser = COLUMNS
+        .iter()
+        .map(|(key, label, visible)| {
+            format!(
+                r#"<label><input type="checkbox" data-slskr-transfer-column-toggle="{key}" {checked}> {label}</label>"#,
+                key = key,
+                label = escape_html(label),
+                checked = if *visible { "checked" } else { "" },
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let headers = COLUMNS
+        .iter()
+        .map(|(key, label, visible)| {
+            format!(
+                r#"<th data-slskr-transfer-column="{key}" {hidden}>{label}</th>"#,
+                key = key,
+                label = escape_html(label),
+                hidden = if *visible { "" } else { "hidden" },
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let rows = endpoint_array(responses, "/downloads/requests")
+        .iter()
+        .take(100)
+        .filter_map(|item| {
+            let request_id = value_text(item, &["request.id"])?;
+            let name = value_text(item, &["request.name"])
+                .unwrap_or_else(|| "Download request".to_string());
+            let filename = value_text(item, &["request.originalFilename"]).unwrap_or_default();
+            let peer = value_text(item, &["current.peer_username", "current.username"])
+                .unwrap_or_else(|| "waiting for source".to_string());
+            let extension = filename
+                .rsplit_once('.')
+                .map(|(_, extension)| extension.to_ascii_uppercase())
+                .unwrap_or_else(|| "FILE".to_string());
+            let size = value_text(item, &["request.size"]).unwrap_or_else(|| "—".to_string());
+            let transferred = value_text(item, &["current.bytes_transferred"])
+                .unwrap_or_else(|| "0".to_string());
+            let bit_rate = value_text(item, &["request.bitRate"])
+                .map(|value| format!("{value} kbps"))
+                .unwrap_or_else(|| "—".to_string());
+            let sample_rate = value_text(item, &["request.sampleRate"])
+                .map(|value| format!("{value} Hz"))
+                .unwrap_or_else(|| "—".to_string());
+            let bit_depth = value_text(item, &["request.bitDepth"])
+                .map(|value| format!("{value}-bit"))
+                .unwrap_or_else(|| "—".to_string());
+            let length = value_text(item, &["request.length"])
+                .map(|value| format!("{value}s"))
+                .unwrap_or_else(|| "—".to_string());
+            let state = value_text(item, &["request.state"])
+                .unwrap_or_else(|| "Active".to_string());
+            let folder = value_text(item, &["request.destinationDirectory"])
+                .unwrap_or_else(|| "path template".to_string());
+            let added = value_text(item, &["request.createdAt"])
+                .unwrap_or_else(|| "—".to_string());
+            let attempts = value_text(item, &["attemptCount"]).unwrap_or_else(|| "1".to_string());
+            let artist = value_text(item, &["request.artist"]).unwrap_or_default();
+            let title = value_text(item, &["request.title"]).unwrap_or_default();
+            let secondary = match (artist.is_empty(), title.is_empty()) {
+                (false, false) => format!("{artist} — {title}"),
+                _ => filename.clone(),
+            };
+            let current_id = value_text(item, &["current.id"]).unwrap_or_default();
+            let recovery_action = value_text(item, &["current.recovery_action"]);
+            let recovery_label = value_text(item, &["current.recovery_label"])
+                .unwrap_or_else(|| "Retry".to_string());
+            let recovery = if recovery_action.as_deref() == Some("wait") {
+                format!(r#"<button type="button" disabled title="The peer must reconnect before this request can continue">{}</button>"#, escape_html(&recovery_label))
+            } else if recovery_action.as_deref() == Some("retry") && !current_id.is_empty() {
+                format!(r#"<button type="button" data-slskr-transfer-retry="{}">{}</button>"#, escape_html(&current_id), escape_html(&recovery_label))
+            } else {
+                String::new()
+            };
+            Some(format!(
+                r#"<tr data-slskr-download-request-row data-slskr-download-request-id="{request_id}"><td data-slskr-transfer-column="name"><span class="slskr-transfer-request-name"><strong>{name}</strong><small>{secondary}</small></span></td><td data-slskr-transfer-column="peer"><span class="slskr-transfer-attempt-spine"><i></i><span>{peer}</span><small>{attempts} attempt(s)</small></span></td><td data-slskr-transfer-column="type" hidden>{extension}</td><td data-slskr-transfer-column="size">{size}</td><td data-slskr-transfer-column="progress"><span>{transferred} / {size}</span></td><td data-slskr-transfer-column="bitrate">{bit_rate}</td><td data-slskr-transfer-column="samplerate" hidden>{sample_rate}</td><td data-slskr-transfer-column="bitdepth" hidden>{bit_depth}</td><td data-slskr-transfer-column="length">{length}</td><td data-slskr-transfer-column="state"><mark>{state}</mark></td><td data-slskr-transfer-column="folder" hidden><code>{folder}</code></td><td data-slskr-transfer-column="added" hidden>{added}</td><td data-slskr-transfer-column="actions"><div class="slskr-transfer-request-actions">{recovery}<button type="button" data-slskr-transfer-attempts>Attempts</button><button type="button" data-slskr-transfer-rename>Rename</button><button type="button" data-slskr-transfer-request-cancel>Cancel</button></div><div class="slskr-transfer-request-inline" data-slskr-transfer-request-inline><input aria-label="Rename {name}" value="{name}"><button type="button" data-slskr-transfer-rename-save>Save name</button></div><div class="slskr-transfer-attempt-results" data-slskr-transfer-attempt-results></div></td></tr>"#,
+                request_id = escape_html(&request_id),
+                name = escape_html(&name),
+                secondary = escape_html(&secondary),
+                peer = escape_html(&peer),
+                attempts = escape_html(&attempts),
+                extension = escape_html(&extension),
+                size = escape_html(&size),
+                transferred = escape_html(&transferred),
+                bit_rate = escape_html(&bit_rate),
+                sample_rate = escape_html(&sample_rate),
+                bit_depth = escape_html(&bit_depth),
+                length = escape_html(&length),
+                state = escape_html(&state),
+                folder = escape_html(&folder),
+                added = escape_html(&added),
+                recovery = recovery,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let body = if rows.is_empty() {
+        format!(
+            r#"<tr><td colspan="{}"><div class="slskr-native-empty"><strong>No download requests</strong><span>Queue a file from search or browse to create the first request.</span></div></td></tr>"#,
+            COLUMNS.len()
+        )
+    } else {
+        rows.join("")
+    };
+    format!(
+        r#"<section class="slskr-transfer-request-workspace" data-slskr-transfer-request-workspace><header><div><span class="slskr-wishlist-ignore-kicker">Request desk</span><h3>Downloads and attempts</h3><p>Each row is the file you asked for. Source changes stay in its attempt trail.</p></div><details class="slskr-transfer-column-chooser"><summary>Columns</summary><div>{chooser}</div><button type="button" data-slskr-transfer-columns-reset>Reset columns</button></details></header><div class="slskr-native-table-wrap"><table class="slskr-native-table slskr-transfer-request-table"><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table></div></section>"#,
+        chooser = chooser,
+        headers = headers,
+        body = body,
+    )
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[cfg(any(target_arch = "wasm32", test))]
 fn wishlist_history_response_html(response: &str) -> String {
@@ -5964,11 +6114,17 @@ fn route_native_workspace_html(
                 rows,
                 empty,
             );
+            let request_workspace = if kind == RouteKind::Downloads {
+                download_request_workspace_html(responses)
+            } else {
+                String::new()
+            };
             format!(
-                r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{preview}{stats}</aside></div>"#,
+                r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{request_workspace}{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{preview}{stats}</aside></div>"#,
                 title = title,
                 primary = primary,
                 secondary = secondary,
+                request_workspace = request_workspace,
                 table = table,
                 preview = native_selection_preview_html(
                     &format!("No {} selected", title.to_lowercase()),
@@ -6787,6 +6943,7 @@ fn render_current_route(
     mount_native_tables(document)?;
     mount_native_subviews(document)?;
     mount_native_actions(document)?;
+    mount_transfer_columns(document)?;
     mount_native_filters(document)?;
     mount_native_sorters(document)?;
     mount_live_controls(window, document)?;
@@ -7199,6 +7356,9 @@ fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element) {
+    if handle_transfer_request_action(document, button) {
+        return;
+    }
     if handle_private_message_auto_response_action(document, button) {
         return;
     }
@@ -7252,6 +7412,301 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         ));
     }
     show_toast(document, &message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_transfer_columns(document: &web_sys::Document) -> Result<(), JsValue> {
+    const DEFAULTS: &[&str] = &[
+        "name", "peer", "size", "progress", "bitrate", "length", "state", "actions",
+    ];
+    let Some(window) = document.default_view() else {
+        return Ok(());
+    };
+    let storage = window.local_storage().ok().flatten();
+    let saved = storage
+        .as_ref()
+        .and_then(|storage| {
+            storage
+                .get_item("slskr-transfer-columns-downloads")
+                .ok()
+                .flatten()
+        })
+        .map(|value| value.split(',').map(str::to_owned).collect::<BTreeSet<_>>());
+    let toggles = document.query_selector_all("[data-slskr-transfer-column-toggle]")?;
+    for index in 0..toggles.length() {
+        let Some(node) = toggles.item(index) else {
+            continue;
+        };
+        let input: web_sys::HtmlInputElement = node.dyn_into()?;
+        let Some(key) = input.get_attribute("data-slskr-transfer-column-toggle") else {
+            continue;
+        };
+        let visible = saved.as_ref().map_or_else(
+            || DEFAULTS.contains(&key.as_str()),
+            |saved| saved.contains(&key),
+        );
+        input.set_checked(visible);
+        set_transfer_column_visibility(document, &key, visible);
+        let document_for_click = document.clone();
+        let input_for_click = input.clone();
+        let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+            let Some(key) = input_for_click.get_attribute("data-slskr-transfer-column-toggle")
+            else {
+                return;
+            };
+            set_transfer_column_visibility(&document_for_click, &key, input_for_click.checked());
+            persist_transfer_columns(&document_for_click);
+        }));
+        input.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_transfer_column_visibility(document: &web_sys::Document, key: &str, visible: bool) {
+    if !matches!(
+        key,
+        "name"
+            | "peer"
+            | "type"
+            | "size"
+            | "progress"
+            | "bitrate"
+            | "samplerate"
+            | "bitdepth"
+            | "length"
+            | "state"
+            | "folder"
+            | "added"
+            | "actions"
+    ) {
+        return;
+    }
+    let Ok(cells) =
+        document.query_selector_all(&format!(r#"[data-slskr-transfer-column="{}"]"#, key))
+    else {
+        return;
+    };
+    for index in 0..cells.length() {
+        let Some(node) = cells.item(index) else {
+            continue;
+        };
+        let Ok(cell) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        if visible {
+            let _ = cell.remove_attribute("hidden");
+        } else {
+            let _ = cell.set_attribute("hidden", "");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_transfer_columns(document: &web_sys::Document) {
+    let Ok(toggles) = document.query_selector_all("[data-slskr-transfer-column-toggle]") else {
+        return;
+    };
+    let mut visible = Vec::new();
+    for index in 0..toggles.length() {
+        let Some(node) = toggles.item(index) else {
+            continue;
+        };
+        let Ok(input) = node.dyn_into::<web_sys::HtmlInputElement>() else {
+            continue;
+        };
+        if input.checked() {
+            if let Some(key) = input.get_attribute("data-slskr-transfer-column-toggle") {
+                visible.push(key);
+            }
+        }
+    }
+    if let Some(storage) = document
+        .default_view()
+        .and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.set_item("slskr-transfer-columns-downloads", &visible.join(","));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_transfer_request_action(document: &web_sys::Document, button: &web_sys::Element) -> bool {
+    if button.has_attribute("data-slskr-transfer-columns-reset") {
+        if let Some(storage) = document
+            .default_view()
+            .and_then(|window| window.local_storage().ok().flatten())
+        {
+            let _ = storage.remove_item("slskr-transfer-columns-downloads");
+        }
+        show_toast(document, "Transfer columns reset; reload to apply defaults");
+        return true;
+    }
+    let retry_id = button.get_attribute("data-slskr-transfer-retry");
+    let rename = button.has_attribute("data-slskr-transfer-rename");
+    let rename_save = button.has_attribute("data-slskr-transfer-rename-save");
+    let attempts = button.has_attribute("data-slskr-transfer-attempts");
+    let cancel = button.has_attribute("data-slskr-transfer-request-cancel");
+    if retry_id.is_none() && !rename && !rename_save && !attempts && !cancel {
+        return false;
+    }
+    let row = button
+        .closest("[data-slskr-download-request-row]")
+        .ok()
+        .flatten();
+    if rename {
+        if let Some(editor) = row.as_ref().and_then(|row| {
+            row.query_selector("[data-slskr-transfer-request-inline]")
+                .ok()
+                .flatten()
+        }) {
+            editor.set_class_name("slskr-transfer-request-inline is-open");
+        }
+        return true;
+    }
+    let request_id = row
+        .as_ref()
+        .and_then(|row| row.get_attribute("data-slskr-download-request-id"));
+    let (method, path, body, label, load_attempts) = if let Some(id) = retry_id {
+        if !safe_route_segment(&id) {
+            show_toast(document, "Transfer attempt is invalid");
+            return true;
+        }
+        (
+            "POST",
+            endpoint_url(&format!("/transfers/{id}/retry")),
+            None,
+            "Retry transfer",
+            false,
+        )
+    } else {
+        let Some(request_id) = request_id.filter(|id| safe_route_segment(id)) else {
+            show_toast(document, "Download request is invalid");
+            return true;
+        };
+        if rename_save {
+            let name = row
+                .as_ref()
+                .and_then(|row| {
+                    row.query_selector("[data-slskr-transfer-request-inline] input")
+                        .ok()
+                        .flatten()
+                })
+                .as_ref()
+                .and_then(form_control_value)
+                .unwrap_or_default();
+            if name.trim().is_empty() || name.len() > 512 {
+                show_toast(document, "Request name must be 1 to 512 bytes");
+                return true;
+            }
+            (
+                "PATCH",
+                endpoint_url(&format!("/downloads/requests/{request_id}/name")),
+                Some(format!(
+                    r#"{{"name":"{}"}}"#,
+                    escape_json_string(name.trim())
+                )),
+                "Save request name",
+                false,
+            )
+        } else if attempts {
+            (
+                "GET",
+                endpoint_url(&format!("/downloads/requests/{request_id}")),
+                None,
+                "Load attempts",
+                true,
+            )
+        } else {
+            (
+                "POST",
+                endpoint_url(&format!("/downloads/requests/{request_id}/cancel")),
+                None,
+                "Cancel request",
+                false,
+            )
+        }
+    };
+    show_toast(document, &format!("{label} sending"));
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let document = document.clone();
+    let row = row.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = fetch_text_with_method(&window, &path, method, body.as_deref()).await;
+        if load_attempts {
+            if let Some(target) = row.as_ref().and_then(|row| {
+                row.query_selector("[data-slskr-transfer-attempt-results]")
+                    .ok()
+                    .flatten()
+            }) {
+                target.set_inner_html(&match &result {
+                    Ok(response) => transfer_attempts_response_html(response),
+                    Err(error) => format!(
+                        "<p>{}</p>",
+                        escape_html(
+                            &error
+                                .as_string()
+                                .unwrap_or_else(|| "attempt history failed".to_string())
+                        )
+                    ),
+                });
+            }
+        }
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            status.set_inner_html(&match result {
+                Ok(response) => format!(
+                    "<strong>{}</strong> {}",
+                    escape_html(label),
+                    escape_html(&compact_preview(&response))
+                ),
+                Err(error) => format!(
+                    "<strong>{}</strong> {}",
+                    escape_html(label),
+                    escape_html(
+                        &error
+                            .as_string()
+                            .unwrap_or_else(|| "transfer request failed".to_string())
+                    )
+                ),
+            });
+        }
+    });
+    true
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn transfer_attempts_response_html(response: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(response) else {
+        return "<p>Attempt history could not be read.</p>".to_string();
+    };
+    let attempts = value
+        .get("attempts")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if attempts.is_empty() {
+        return "<p>No attempts are retained for this request.</p>".to_string();
+    }
+    let items = attempts
+        .iter()
+        .map(|attempt| {
+            let peer = value_text(attempt, &["peer_username", "username"])
+                .unwrap_or_else(|| "unknown peer".to_string());
+            let state =
+                value_text(attempt, &["status", "state"]).unwrap_or_else(|| "unknown".to_string());
+            let filename = value_text(attempt, &["filename"]).unwrap_or_default();
+            format!(
+                "<li><i></i><span><strong>{}</strong><small>{} · {}</small></span></li>",
+                escape_html(&peer),
+                escape_html(&state),
+                escape_html(&filename),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!("<ol>{items}</ol>")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -17454,6 +17909,21 @@ mod tests {
     }
 
     #[test]
+    fn transfer_attempt_renderer_escapes_attempt_history() {
+        let html = transfer_attempts_response_html(
+            r#"{"attempts":[{"peer_username":"peer<script>","status":"failed<img>","filename":"Remote/A&B.flac"}]}"#,
+        );
+        assert!(html.contains("peer&lt;script&gt;"));
+        assert!(html.contains("failed&lt;img&gt;"));
+        assert!(html.contains("Remote/A&amp;B.flac"));
+        assert!(!html.contains("<script>"));
+        assert_eq!(
+            transfer_attempts_response_html("bad"),
+            "<p>Attempt history could not be read.</p>"
+        );
+    }
+
+    #[test]
     fn rust_ui_parity_ledger_tracks_closure_instead_of_stale_gaps() {
         let ledger = include_str!("../../../docs/rust-ui-parity-ledger.md");
         assert!(ledger.contains("Estimated completion: 95-98%."));
@@ -18236,14 +18706,24 @@ mod tests {
 
         let downloads = route_workspace_result_html(
             "/downloads",
-            &[EndpointBody {
-                endpoint: ApiEndpoint {
-                    method: "GET",
-                    path: "/transfers/downloads",
-                    surface: "transfers",
+            &[
+                EndpointBody {
+                    endpoint: ApiEndpoint {
+                        method: "GET",
+                        path: "/transfers/downloads",
+                        surface: "transfers",
+                    },
+                    body: r#"[{"id":77,"username":"peer2","filename":"Remote/Song.mp3","state":"Queued","progress":0.5}]"#.to_string(),
                 },
-                body: r#"[{"id":77,"username":"peer2","filename":"Remote/Song.mp3","state":"Queued","progress":0.5}]"#.to_string(),
-            }],
+                EndpointBody {
+                    endpoint: ApiEndpoint {
+                        method: "GET",
+                        path: "/downloads/requests",
+                        surface: "transfers",
+                    },
+                    body: r#"[{"request":{"id":"11111111-1111-4111-8111-111111111111","name":"Archive Cut","originalFilename":"Remote/Song.mp3","size":1200,"state":"Failed","bitRate":320,"sampleRate":48000,"bitDepth":24,"length":180,"artist":"Archive Artist","title":"Song"},"attemptCount":2,"current":{"id":77,"peer_username":"peer2","bytes_transferred":600,"recovery_action":"retry","recovery_label":"Find other sources"}}]"#.to_string(),
+                },
+            ],
         );
         assert!(downloads.contains(r#"data-slskr-native-filename="Remote/Song.mp3""#));
         assert!(downloads.contains(r#"data-slskr-native-peer="peer2""#));
@@ -18259,6 +18739,22 @@ mod tests {
         assert!(downloads.contains(r#"data-slskr-native-action-menu="Cancel | Retry | Remove""#));
         assert!(downloads.contains(r#"<meter min="0" max="100" value="50""#));
         assert!(downloads.contains("data-slskr-transfer-state-control"));
+        for value in [
+            "data-slskr-transfer-request-workspace",
+            "Downloads and attempts",
+            "Archive Cut",
+            "Archive Artist — Song",
+            "Find other sources",
+            "data-slskr-transfer-column-toggle=\"bitrate\"",
+            "data-slskr-transfer-retry=\"77\"",
+            "data-slskr-transfer-attempts",
+            "data-slskr-transfer-rename-save",
+        ] {
+            assert!(
+                downloads.contains(value),
+                "downloads should contain {value}"
+            );
+        }
 
         let contacts = route_workspace_result_html(
             "/contacts",

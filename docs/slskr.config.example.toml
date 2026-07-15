@@ -53,6 +53,7 @@ history_limit = 500
 max_active = 3
 allow_inbound = true
 allow_outbound = true
+# completed_path_template = "{uploader}/{remote_parent}/{request_name}"
 
 [auth]
 # Loopback-only binds default to no API auth unless api_token is configured.

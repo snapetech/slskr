@@ -2612,6 +2612,14 @@ struct TransferRequestDetails {
     year: Option<u32>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct AudioTechnicalMetadata {
+    bit_rate: Option<u32>,
+    sample_rate: Option<u32>,
+    bit_depth: Option<u32>,
+    length_seconds: Option<u32>,
+}
+
 impl TransferQueue {
     fn new(config: &AppConfig) -> Self {
         let events_path = transfer_events_path(&config.state_dir);
@@ -2922,6 +2930,23 @@ impl TransferQueue {
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
+        let entry = entry.clone();
+        self.persist_state();
+        self.updated_at = unix_timestamp();
+        Some(entry)
+    }
+
+    fn update_audio_metadata(
+        &mut self,
+        id: u64,
+        metadata: AudioTechnicalMetadata,
+    ) -> Option<TransferEntry> {
+        let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        entry.bit_rate = metadata.bit_rate.or(entry.bit_rate);
+        entry.sample_rate = metadata.sample_rate.or(entry.sample_rate);
+        entry.bit_depth = metadata.bit_depth.or(entry.bit_depth);
+        entry.length_seconds = metadata.length_seconds.or(entry.length_seconds);
+        entry.updated_at = unix_timestamp();
         let entry = entry.clone();
         self.persist_state();
         self.updated_at = unix_timestamp();
@@ -26447,6 +26472,7 @@ async fn execute_accepted_file_transfer(
         transfers.update_local_execution(transfer.id, status, bytes_transferred, size, reason)
     };
     if let Some(updated) = updated {
+        let updated = enrich_completed_audio_metadata(state, updated).await;
         persist_transfer_projection(state, &updated).await;
     }
 }
@@ -26488,8 +26514,191 @@ async fn project_indirect_transfer_response(state: &AppState, response: &Connect
         transfers.update_local_execution(transfer.id, status, bytes_transferred, size, reason)
     };
     if let Some(updated) = updated {
+        let updated = enrich_completed_audio_metadata(state, updated).await;
         persist_transfer_projection(state, &updated).await;
     }
+}
+
+async fn enrich_completed_audio_metadata(
+    state: &AppState,
+    transfer: TransferEntry,
+) -> TransferEntry {
+    if transfer.direction != 0 || transfer.status != "succeeded" {
+        return transfer;
+    }
+    let Some(local_path) = transfer.local_path.as_deref() else {
+        return transfer;
+    };
+    let root = download_root(&state.config.state_dir);
+    let Ok(path) = ensure_scoped_download_path(&state.config.state_dir, local_path) else {
+        return transfer;
+    };
+    let Ok(file) = open_download_file_for_read(&root, &path) else {
+        return transfer;
+    };
+    let filename = transfer.filename.clone();
+    let metadata =
+        tokio::task::spawn_blocking(move || read_audio_technical_metadata(file, &filename))
+            .await
+            .ok()
+            .flatten();
+    let Some(metadata) = metadata else {
+        return transfer;
+    };
+    let mut transfers = state.transfers.write().await;
+    transfers
+        .update_audio_metadata(transfer.id, metadata)
+        .unwrap_or(transfer)
+}
+
+fn read_audio_technical_metadata(
+    mut file: fs::File,
+    filename: &str,
+) -> Option<AudioTechnicalMetadata> {
+    use std::io::Read;
+
+    const MAX_AUDIO_HEADER_BYTES: u64 = 1024 * 1024;
+    let file_size = file.metadata().ok()?.len();
+    let mut header = Vec::new();
+    file.by_ref()
+        .take(MAX_AUDIO_HEADER_BYTES)
+        .read_to_end(&mut header)
+        .ok()?;
+    let extension = Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "flac" => flac_technical_metadata(&header, file_size),
+        "mp3" => mp3_technical_metadata(&header, file_size),
+        "wav" | "wave" => wav_technical_metadata(&header),
+        _ => None,
+    }
+}
+
+fn flac_technical_metadata(header: &[u8], file_size: u64) -> Option<AudioTechnicalMetadata> {
+    if header.get(..4)? != b"fLaC" {
+        return None;
+    }
+    let block_header = header.get(4..8)?;
+    if block_header[0] & 0x7f != 0 {
+        return None;
+    }
+    let length = usize::from(block_header[1]) << 16
+        | usize::from(block_header[2]) << 8
+        | usize::from(block_header[3]);
+    if length < 34 {
+        return None;
+    }
+    let stream_info = header.get(8..8 + length)?;
+    let packed = u64::from_be_bytes(stream_info.get(10..18)?.try_into().ok()?);
+    let sample_rate = u32::try_from((packed >> 44) & 0x000f_ffff).ok()?;
+    let bit_depth = u32::try_from(((packed >> 36) & 0x1f) + 1).ok()?;
+    let total_samples = packed & 0x0000_000f_ffff_ffff;
+    if sample_rate == 0 || total_samples == 0 {
+        return None;
+    }
+    let length_seconds = u32::try_from(total_samples / u64::from(sample_rate)).ok()?;
+    let bit_rate = (length_seconds > 0)
+        .then(|| file_size.saturating_mul(8) / u64::from(length_seconds) / 1000)
+        .and_then(|value| u32::try_from(value).ok());
+    Some(AudioTechnicalMetadata {
+        bit_rate,
+        sample_rate: Some(sample_rate),
+        bit_depth: Some(bit_depth),
+        length_seconds: Some(length_seconds),
+    })
+}
+
+fn mp3_technical_metadata(header: &[u8], file_size: u64) -> Option<AudioTechnicalMetadata> {
+    const MPEG1_LAYER3: [u32; 16] = [
+        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+    ];
+    const MPEG2_LAYER3: [u32; 16] = [
+        0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+    ];
+    let frame = header.windows(4).find(|frame| {
+        frame[0] == 0xff
+            && frame[1] & 0xe0 == 0xe0
+            && (frame[1] >> 1) & 0x03 == 0x01
+            && frame[2] >> 4 != 0
+            && frame[2] >> 4 != 0x0f
+            && (frame[2] >> 2) & 0x03 != 0x03
+    })?;
+    let version = (frame[1] >> 3) & 0x03;
+    if version == 1 {
+        return None;
+    }
+    let bitrate_index = usize::from(frame[2] >> 4);
+    let bit_rate = if version == 3 {
+        MPEG1_LAYER3[bitrate_index]
+    } else {
+        MPEG2_LAYER3[bitrate_index]
+    };
+    let sample_index = usize::from((frame[2] >> 2) & 0x03);
+    let base_sample_rate = [44_100_u32, 48_000, 32_000][sample_index];
+    let sample_rate = match version {
+        3 => base_sample_rate,
+        2 => base_sample_rate / 2,
+        0 => base_sample_rate / 4,
+        _ => return None,
+    };
+    if bit_rate == 0 || sample_rate == 0 {
+        return None;
+    }
+    let length_seconds = u32::try_from(file_size.saturating_mul(8) / (u64::from(bit_rate) * 1000))
+        .ok()
+        .filter(|value| *value > 0);
+    Some(AudioTechnicalMetadata {
+        bit_rate: Some(bit_rate),
+        sample_rate: Some(sample_rate),
+        bit_depth: None,
+        length_seconds,
+    })
+}
+
+fn wav_technical_metadata(header: &[u8]) -> Option<AudioTechnicalMetadata> {
+    if header.get(..4)? != b"RIFF" || header.get(8..12)? != b"WAVE" {
+        return None;
+    }
+    let mut offset = 12_usize;
+    let mut sample_rate = None;
+    let mut bit_depth = None;
+    let mut byte_rate = None;
+    let mut data_length = None;
+    while offset.saturating_add(8) <= header.len() {
+        let kind = header.get(offset..offset + 4)?;
+        let length = u32::from_le_bytes(header.get(offset + 4..offset + 8)?.try_into().ok()?);
+        let length_usize = usize::try_from(length).ok()?;
+        if kind == b"data" {
+            data_length = Some(length);
+        } else if kind == b"fmt " {
+            let payload = header.get(offset + 8..offset + 8 + length_usize)?;
+            if payload.len() < 16 {
+                return None;
+            }
+            sample_rate = Some(u32::from_le_bytes(payload.get(4..8)?.try_into().ok()?));
+            byte_rate = Some(u32::from_le_bytes(payload.get(8..12)?.try_into().ok()?));
+            bit_depth = Some(u32::from(u16::from_le_bytes(
+                payload.get(14..16)?.try_into().ok()?,
+            )));
+        }
+        if sample_rate.is_some() && data_length.is_some() {
+            break;
+        }
+        offset = offset.saturating_add(8 + length_usize + (length_usize % 2));
+    }
+    let byte_rate = byte_rate.filter(|value| *value > 0)?;
+    let length_seconds = data_length
+        .map(|length| length / byte_rate)
+        .filter(|value| *value > 0);
+    Some(AudioTechnicalMetadata {
+        bit_rate: Some(byte_rate.saturating_mul(8) / 1000),
+        sample_rate,
+        bit_depth,
+        length_seconds,
+    })
 }
 
 async fn fail_indirect_transfer(state: &AppState, token: u32, reason: String) {
@@ -40173,6 +40382,34 @@ mod tests {
         assert!(json.contains(r#""recovery_label":"Find other sources""#));
         assert!(!json.contains("/secret"));
         assert!(!json.contains("File not shared"));
+    }
+
+    #[test]
+    fn completed_audio_metadata_parsers_cover_mp3_and_wav_headers() {
+        let mp3 = super::mp3_technical_metadata(&[0xff, 0xfb, 0x90, 0x00], 128_000)
+            .expect("mp3 metadata");
+        assert_eq!(mp3.bit_rate, Some(128));
+        assert_eq!(mp3.sample_rate, Some(44_100));
+        assert_eq!(mp3.length_seconds, Some(8));
+
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&176_436_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&44_100_u32.to_le_bytes());
+        wav.extend_from_slice(&176_400_u32.to_le_bytes());
+        wav.extend_from_slice(&4_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&176_400_u32.to_le_bytes());
+        let wav = super::wav_technical_metadata(&wav).expect("wav metadata");
+        assert_eq!(wav.bit_rate, Some(1_411));
+        assert_eq!(wav.sample_rate, Some(44_100));
+        assert_eq!(wav.bit_depth, Some(16));
+        assert_eq!(wav.length_seconds, Some(1));
     }
 
     #[tokio::test]
