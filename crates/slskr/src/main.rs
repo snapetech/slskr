@@ -26,6 +26,7 @@ mod openapi;
 )]
 mod persistence;
 mod pod_channels;
+mod pods;
 #[allow(
     dead_code,
     reason = "probe metadata builders are shared by optional live probes"
@@ -10468,6 +10469,7 @@ struct AppState {
     pod_join_replays: RwLock<BTreeMap<String, u64>>,
     pod_membership_workflow: RwLock<PodMembershipWorkflowStore>,
     pod_channels: RwLock<pod_channels::PodChannelStore>,
+    pods: RwLock<pods::PodStore>,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
@@ -18956,6 +18958,11 @@ async fn route_http_request_with_headers(
                   Ok(value) => value,
                   Err(error) => return Ok(routing::bad_request_response(&error)),
               };
+              let pods = state.pods.read().await;
+              if pods.get(&pod_id).is_none() || !pods.channel_exists(&pod_id, &channel_id) {
+                  return Ok(routing::not_found_response());
+              }
+              drop(pods);
               let channels = state.pod_channels.read().await;
               let messages = channels.list(&pod_id, &channel_id, since);
               drop(channels);
@@ -18979,6 +18986,14 @@ async fn route_http_request_with_headers(
                   .unwrap_or_default()
                   .trim()
                   .to_owned();
+              let pods = state.pods.read().await;
+              if pods.get(&pod_id).is_none() || !pods.channel_exists(&pod_id, &channel_id) {
+                  return Ok(routing::not_found_response());
+              }
+              if !pods.is_member(&pod_id, &sender_peer_id) {
+                  return Ok(routing::forbidden_response("Pod membership is required"));
+              }
+              drop(pods);
               let result = state.pod_channels.write().await.append(
                   pod_id,
                   channel_id,
@@ -19009,35 +19024,255 @@ async fn route_http_request_with_headers(
               }
           }
 
-          ("GET", "/api/pods") => {
-              let rooms = state.rooms.read().await;
-              let users = state.users.read().await;
-              let pods = rooms
-                  .records
-                  .iter()
-                  .filter(|room| room.joined)
-                  .map(|room| {
-                      serde_json::json!({
-                          "id": format!("room-{}", room.name),
-                          "name": room.name,
-                          "kind": "room",
-                          "memberCount": room.user_count.unwrap_or(0),
-                          "messageCount": room.messages.len(),
-                          "status": "joined",
-                      })
+          ("POST", "/api/pods") => {
+              let value = match serde_json::from_str::<serde_json::Value>(body) {
+                  Ok(value) => value,
+                  Err(error) => {
+                      return Ok(routing::bad_request_response(&format!(
+                          "Invalid pod request: {error}"
+                      )));
+                  }
+              };
+              let Some(pod_value) = value.get("pod").cloned() else {
+                  return Ok(routing::bad_request_response("Pod data is required"));
+              };
+              let pod = match serde_json::from_value::<pods::PodRecord>(pod_value) {
+                  Ok(pod) => pod,
+                  Err(error) => {
+                      return Ok(routing::bad_request_response(&format!(
+                          "Invalid pod request: {error}"
+                      )));
+                  }
+              };
+              let requested_peer = value
+                  .get("requestingPeerId")
+                  .and_then(serde_json::Value::as_str)
+                  .map(str::trim)
+                  .filter(|value| !value.is_empty())
+                  .map(str::to_owned);
+              let runtime_peer = state
+                  .runtime_credentials
+                  .read()
+                  .await
+                  .as_ref()
+                  .map(|credentials| credentials.username.trim().to_owned())
+                  .filter(|value| !value.is_empty());
+              let configured_peer = state
+                  .config
+                  .credentials()
+                  .map(|credentials| credentials.username.trim().to_owned())
+                  .filter(|value| !value.is_empty());
+              let session_peer = runtime_peer.or(configured_peer);
+              let Some(creator) = session_peer.or(requested_peer) else {
+                  return Ok(routing::forbidden_response("Authenticated peer identity is required"));
+              };
+              match state.pods.write().await.create(pod, creator) {
+                  Ok(pod) => Ok(routing::created_response(
+                      serde_json::to_string(&pod)
+                          .map_err(|error| format!("pod serialization failed: {error}"))?,
+                  )),
+                  Err(error) if error == "Pod already exists" => {
+                      Ok(routing::conflict_response(&error))
+                  }
+                  Err(error) if error.contains("capacity is full") => {
+                      Ok(routing::conflict_response(&error))
+                  }
+                  Err(error) if error.starts_with("pod state write failed") => {
+                      eprintln!("pod persistence failed: {error}");
+                      Ok(routing::service_unavailable_response(
+                          "pod storage is unavailable",
+                      ))
+                  }
+                  Err(error) => Ok(routing::bad_request_response(&error)),
+              }
+          }
+
+          ("GET", path)
+              if pod_resource_segments(path).is_some_and(|segments| segments.len() == 1) =>
+          {
+              let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              let pods = state.pods.read().await;
+              Ok(pods
+                  .get(&pod_id)
+                  .map(|pod| {
+                      routing::ok_response(
+                          serde_json::to_string(&pod).unwrap_or_else(|_| "{}".to_owned()),
+                      )
                   })
-                  .chain(users.records.iter().filter(|user| user.watched).map(|user| {
-                      serde_json::json!({
-                          "id": format!("user-{}", user.username),
-                          "name": user.username,
-                          "kind": "watched-user",
-                          "status": user.status.as_deref().unwrap_or("Unknown"),
-                      })
-                  }))
-                  .collect::<Vec<_>>();
-              drop(users);
-              drop(rooms);
-              Ok(routing::ok_response(serde_json::Value::Array(pods).to_string()))
+                  .unwrap_or_else(routing::not_found_response))
+          }
+
+          ("PUT", path)
+              if pod_resource_segments(path).is_some_and(|segments| segments.len() == 1) =>
+          {
+              let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              let value = match serde_json::from_str::<serde_json::Value>(body) {
+                  Ok(value) => value,
+                  Err(error) => {
+                      return Ok(routing::bad_request_response(&format!(
+                          "Invalid pod request: {error}"
+                      )));
+                  }
+              };
+              let Some(pod_value) = value.get("pod").cloned() else {
+                  return Ok(routing::bad_request_response("Pod data is required"));
+              };
+              let pod = match serde_json::from_value::<pods::PodRecord>(pod_value) {
+                  Ok(pod) => pod,
+                  Err(error) => {
+                      return Ok(routing::bad_request_response(&format!(
+                          "Invalid pod request: {error}"
+                      )));
+                  }
+              };
+              match state.pods.write().await.update(&pod_id, pod) {
+                  Ok(Some(pod)) => Ok(routing::ok_response(
+                      serde_json::to_string(&pod)
+                          .map_err(|error| format!("pod serialization failed: {error}"))?,
+                  )),
+                  Ok(None) => Ok(routing::not_found_response()),
+                  Err(error) if error.starts_with("pod state write failed") => {
+                      eprintln!("pod persistence failed: {error}");
+                      Ok(routing::service_unavailable_response(
+                          "pod storage is unavailable",
+                      ))
+                  }
+                  Err(error) => Ok(routing::bad_request_response(&error)),
+              }
+          }
+
+          ("DELETE", path)
+              if pod_resource_segments(path).is_some_and(|segments| segments.len() == 1) =>
+          {
+              let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              match state.pods.write().await.delete(&pod_id) {
+                  Ok(true) => Ok(routing::no_content_response()),
+                  Ok(false) => Ok(routing::not_found_response()),
+                  Err(error) => {
+                      eprintln!("pod persistence failed: {error}");
+                      Ok(routing::service_unavailable_response(
+                          "pod storage is unavailable",
+                      ))
+                  }
+              }
+          }
+
+          ("GET", path)
+              if pod_resource_segments(path)
+                  .is_some_and(|segments| segments.len() == 2 && segments[1] == "members") =>
+          {
+              let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              let pods = state.pods.read().await;
+              Ok(pods
+                  .members(&pod_id)
+                  .map(|members| {
+                      routing::ok_response(
+                          serde_json::to_string(&members).unwrap_or_else(|_| "[]".to_owned()),
+                      )
+                  })
+                  .unwrap_or_else(routing::not_found_response))
+          }
+
+          ("POST", path)
+              if pod_resource_segments(path).is_some_and(|segments| {
+                  segments.len() == 2 && matches!(segments[1].as_str(), "join" | "leave" | "ban")
+              }) =>
+          {
+              let segments = pod_resource_segments(path).unwrap_or_default();
+              let pod_id = &segments[0];
+              let action = &segments[1];
+              let peer_id = extract_json_string_field(body, "peerId")
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              if peer_id.is_empty() {
+                  return Ok(routing::bad_request_response("PeerId is required"));
+              }
+              let mut pods = state.pods.write().await;
+              let result = match action.as_str() {
+                  "join" => pods.join(pod_id, peer_id),
+                  "leave" => pods.leave(pod_id, &peer_id),
+                  _ => pods.ban(pod_id, &peer_id),
+              };
+              match result {
+                  Ok(Some(true)) => Ok(routing::ok_response(
+                      serde_json::json!({ (action): true }).to_string(),
+                  )),
+                  Ok(Some(false)) if action == "join" => Ok(routing::bad_request_response(
+                      "Failed to join pod (may already be a member)",
+                  )),
+                  Ok(Some(false)) => Ok(routing::not_found_response()),
+                  Ok(None) => Ok(routing::not_found_response()),
+                  Err(error)
+                      if error.contains("capacity")
+                          || error.contains("banned")
+                          || error.contains("approval") =>
+                  {
+                      Ok(routing::bad_request_response(&error))
+                  }
+                  Err(error) if error.contains("required") || error.contains("at most") => {
+                      Ok(routing::bad_request_response(&error))
+                  }
+                  Err(error) => {
+                      eprintln!("pod persistence failed: {error}");
+                      Ok(routing::service_unavailable_response(
+                          "pod storage is unavailable",
+                      ))
+                  }
+              }
+          }
+
+          ("POST", path)
+              if pod_resource_segments(path).is_some_and(|segments| {
+                  segments.len() == 4
+                      && segments[1] == "channels"
+                      && matches!(segments[3].as_str(), "bind" | "unbind")
+              }) =>
+          {
+              let segments = pod_resource_segments(path).unwrap_or_default();
+              let pod_id = &segments[0];
+              let channel_id = &segments[2];
+              let action = &segments[3];
+              let result = if action == "bind" {
+                  let room_name = extract_json_string_field(body, "roomName")
+                      .unwrap_or_default()
+                      .trim()
+                      .to_owned();
+                  let mode = extract_json_string_field(body, "mode")
+                      .unwrap_or_else(|| "readonly".to_owned())
+                      .trim()
+                      .to_ascii_lowercase();
+                  state
+                      .pods
+                      .write()
+                      .await
+                      .bind_room(pod_id, channel_id, room_name, mode)
+              } else {
+                  state.pods.write().await.unbind_room(pod_id, channel_id)
+              };
+              match result {
+                  Ok(Some(true)) => Ok(routing::ok_response(
+                      serde_json::json!({ (action): true }).to_string(),
+                  )),
+                  Ok(Some(false)) | Ok(None) => Ok(routing::not_found_response()),
+                  Err(error) if error.contains("required") || error.starts_with("Mode must") => {
+                      Ok(routing::bad_request_response(&error))
+                  }
+                  Err(error) => {
+                      eprintln!("pod binding persistence failed: {error}");
+                      Ok(routing::service_unavailable_response(
+                          "pod storage is unavailable",
+                      ))
+                  }
+              }
+          }
+
+          ("GET", "/api/pods") => {
+              let pods = state.pods.read().await;
+              Ok(routing::ok_response(
+                  serde_json::to_string(&pods.list())
+                      .map_err(|error| format!("pod serialization failed: {error}"))?,
+              ))
           }
 
           ("GET", "/api/solid/status") => {
@@ -23325,6 +23560,22 @@ fn pod_channel_messages_path(path: &str) -> Option<(String, String)> {
     .then_some((pod_id, channel_id))
 }
 
+fn pod_resource_segments(path: &str) -> Option<Vec<String>> {
+    let rest = path.strip_prefix("/api/pods/")?;
+    let mut segments = Vec::new();
+    for segment in rest.split('/') {
+        if segment.is_empty() {
+            return None;
+        }
+        let decoded = decoded_path_segment(segment).trim().to_owned();
+        if decoded.is_empty() || decoded.contains('/') {
+            return None;
+        }
+        segments.push(decoded);
+    }
+    (!segments.is_empty()).then_some(segments)
+}
+
 fn decoded_path_segment(segment: &str) -> String {
     percent_decode_component(segment)
 }
@@ -25935,6 +26186,7 @@ async fn serve(once: bool) -> Result<(), String> {
     let content_discovery_store =
         content_discovery::ContentDiscoveryStore::load(&config.state_dir)?;
     let pod_channel_store = pod_channels::PodChannelStore::load(&config.state_dir)?;
+    let pod_store = pods::PodStore::load(&config.state_dir)?;
     let capability_signing_key = new_capability_signing_key()?;
     let state = Arc::new(AppState {
         log_level: RwLock::new(
@@ -25960,6 +26212,7 @@ async fn serve(once: bool) -> Result<(), String> {
         pod_join_replays: RwLock::new(BTreeMap::new()),
         pod_membership_workflow: RwLock::new(PodMembershipWorkflowStore::default()),
         pod_channels: RwLock::new(pod_channel_store),
+        pods: RwLock::new(pod_store),
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
         event_tx,
@@ -36252,6 +36505,7 @@ mod tests {
             pod_channels: RwLock::new(super::pod_channels::PodChannelStore::empty(
                 &config.state_dir,
             )),
+            pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -37333,15 +37587,146 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pod_management_routes_persist_crud_members_and_bindings() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            r#"{"pod":{"podId":"pod:api","name":"API Pod","isPublic":true,"maxMembers":4,"tags":["music"],"channels":[{"channelId":"general","kind":0,"name":"General"}]},"requestingPeerId":"ignored-by-auth"}"#,
+            &state,
+        )
+        .await
+        .expect("create pod");
+        assert_eq!(created.status, "201 Created");
+        let created = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert_eq!(created["podId"], "pod:api");
+        assert_eq!(created["name"], "API Pod");
+        assert!(created.get("members").is_none());
+
+        let listed = super::route_http_request("GET", "/api/pods", None, "", &state)
+            .await
+            .expect("list pods");
+        let listed = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed[0]["podId"], "pod:api");
+
+        let detail = super::route_http_request("GET", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("pod detail");
+        assert_eq!(detail.status, "200 OK");
+
+        let members =
+            super::route_http_request("GET", "/api/pods/pod%3Aapi/members", None, "", &state)
+                .await
+                .expect("pod members");
+        let members = serde_json::from_str::<serde_json::Value>(&members.body).unwrap();
+        assert_eq!(members.as_array().unwrap().len(), 1);
+        assert_eq!(members[0]["peerId"], "tester");
+        assert_eq!(members[0]["role"], "owner");
+
+        let joined = super::route_http_request(
+            "POST",
+            "/api/pods/pod%3Aapi/join",
+            None,
+            r#"{"peerId":"member"}"#,
+            &state,
+        )
+        .await
+        .expect("join pod");
+        assert_eq!(joined.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&joined.body).unwrap()["join"],
+            true
+        );
+
+        let bound = super::route_http_request(
+            "POST",
+            "/api/pods/pod%3Aapi/channels/general/bind",
+            None,
+            r#"{"roomName":"ambient","mode":"mirror"}"#,
+            &state,
+        )
+        .await
+        .expect("bind pod channel");
+        assert_eq!(bound.status, "200 OK");
+        let detail = super::route_http_request("GET", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("bound pod detail");
+        let detail = serde_json::from_str::<serde_json::Value>(&detail.body).unwrap();
+        assert_eq!(
+            detail["channels"][0]["bindingInfo"],
+            "soulseek-room:ambient"
+        );
+
+        let banned = super::route_http_request(
+            "POST",
+            "/api/pods/pod%3Aapi/ban",
+            None,
+            r#"{"peerId":"member"}"#,
+            &state,
+        )
+        .await
+        .expect("ban pod member");
+        assert_eq!(banned.status, "200 OK");
+        let members =
+            super::route_http_request("GET", "/api/pods/pod%3Aapi/members", None, "", &state)
+                .await
+                .expect("members after ban");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&members.body)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let updated = super::route_http_request(
+            "PUT",
+            "/api/pods/pod%3Aapi",
+            None,
+            r#"{"pod":{"podId":"pod:api","name":"Renamed Pod","isPublic":true,"maxMembers":4,"channels":[{"channelId":"general","kind":0,"name":"General"}]}}"#,
+            &state,
+        )
+        .await
+        .expect("update pod");
+        assert_eq!(updated.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&updated.body).unwrap()["name"],
+            "Renamed Pod"
+        );
+
+        let deleted = super::route_http_request("DELETE", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("delete pod");
+        assert_eq!(deleted.status, "204 No Content");
+        let missing = super::route_http_request("GET", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("deleted pod");
+        assert_eq!(missing.status, "404 Not Found");
+    }
+
+    #[tokio::test]
     async fn pod_channel_messages_are_durable_shaped_and_incremental() {
         let (state, _receiver) = test_state();
         let path = "/api/v0/pods/pod-1/channels/general/messages";
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            r#"{"pod":{"podId":"pod-1","name":"Pod One","isPublic":true,"channels":[{"channelId":"general","kind":0,"name":"General"}]},"requestingPeerId":"peer-1"}"#,
+            &state,
+        )
+        .await
+        .expect("create pod for messages");
+        assert_eq!(created.status, "201 Created");
 
         let first = super::route_http_request(
             "POST",
             path,
             None,
-            r#"{"body":"first","senderPeerId":"peer-1","signature":"sig"}"#,
+            r#"{"body":"first","senderPeerId":"tester","signature":"sig"}"#,
             &state,
         )
         .await
@@ -37358,7 +37743,7 @@ mod tests {
         assert_eq!(initial.as_array().unwrap().len(), 1);
         assert_eq!(initial[0]["podId"], "pod-1");
         assert_eq!(initial[0]["channelId"], "general");
-        assert_eq!(initial[0]["senderPeerId"], "peer-1");
+        assert_eq!(initial[0]["senderPeerId"], "tester");
         assert_eq!(initial[0]["body"], "first");
         assert_eq!(initial[0]["sigVersion"], 1);
         let cursor = initial[0]["timestampUnixMs"].as_u64().unwrap();
@@ -37367,7 +37752,7 @@ mod tests {
             "POST",
             path,
             None,
-            r#"{"body":"second","senderPeerId":"peer-1"}"#,
+            r#"{"body":"second","senderPeerId":"tester"}"#,
             &state,
         )
         .await
@@ -37381,7 +37766,7 @@ mod tests {
                     .append(
                         "pod-1".to_owned(),
                         "general".to_owned(),
-                        "peer-1".to_owned(),
+                        "tester".to_owned(),
                         "third".to_owned(),
                         String::new(),
                         cursor + 1,
@@ -37411,7 +37796,7 @@ mod tests {
             "POST",
             path,
             None,
-            r#"{"body":"","senderPeerId":"peer-1"}"#,
+            r#"{"body":"","senderPeerId":"tester"}"#,
             &state,
         )
         .await
@@ -51565,6 +51950,16 @@ mod tests {
         assert!(kpis_json["count"].as_u64().unwrap() >= 7);
         assert_eq!(kpis_json["kpis"][0]["id"], "transfers.total");
 
+        let pod_created = super::route_http_request(
+            "POST",
+            "/api/pods",
+            None,
+            r#"{"pod":{"podId":"pod:mesh-peer","name":"mesh-peer","isPublic":true,"channels":[]},"requestingPeerId":"mesh-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("create compatibility pod");
+        assert_eq!(pod_created.status, "201 Created");
         let pods = super::route_http_request("GET", "/api/pods", None, "", &state)
             .await
             .expect("pods");
@@ -55314,6 +55709,7 @@ mod tests {
             pod_channels: RwLock::new(super::pod_channels::PodChannelStore::empty(
                 &config.state_dir,
             )),
+            pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -55482,6 +55878,9 @@ mod tests {
             pod_join_replays: RwLock::new(BTreeMap::new()),
             pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
             pod_channels: RwLock::new(super::pod_channels::PodChannelStore::empty(
+                &cookie_enabled_config.state_dir,
+            )),
+            pods: RwLock::new(super::pods::PodStore::empty(
                 &cookie_enabled_config.state_dir,
             )),
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
