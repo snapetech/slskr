@@ -24785,6 +24785,12 @@ fn scan_share_root(
         return;
     }
 
+    #[cfg(unix)]
+    if !options.follow_symlinks {
+        scan_share_root_unix(root, label, options, entries, local_paths, errors);
+        return;
+    }
+
     let metadata = if options.follow_symlinks {
         fs::metadata(root)
     } else {
@@ -24892,6 +24898,97 @@ fn scan_share_root(
             };
             let filename = format!("{}/{}", label, virtual_share_path(relative));
             local_paths.insert(filename.clone(), path.clone());
+            entries.push(FileEntry {
+                code: 1,
+                filename: filename.clone(),
+                size: metadata.len(),
+                extension: extension_for(&filename),
+                attributes: Vec::new(),
+            });
+        }
+    }
+}
+
+#[cfg(unix)]
+fn scan_share_root_unix(
+    root: &Path,
+    label: &str,
+    options: ShareScanOptions,
+    entries: &mut Vec<FileEntry>,
+    local_paths: &mut BTreeMap<String, PathBuf>,
+    errors: &mut Vec<String>,
+) {
+    use rustix::fs::{open, openat, Dir, Mode, OFlags};
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file_flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let root_directory = match open(root, directory_flags, Mode::empty()) {
+        Ok(directory) => directory,
+        Err(_) => {
+            errors.push(format!(
+                "{}: directory unavailable",
+                json_safe_share_label(label)
+            ));
+            return;
+        }
+    };
+    let mut stack = vec![(PathBuf::new(), root_directory)];
+    while let Some((relative_directory, directory)) = stack.pop() {
+        if entries.len() >= options.max_files {
+            errors.push("share scan stopped at SLSKR_SHARE_SCAN_MAX_FILES".to_owned());
+            return;
+        }
+        let mut reader = match Dir::read_from(&directory) {
+            Ok(reader) => reader,
+            Err(_) => {
+                errors.push(format!(
+                    "{}: directory unreadable",
+                    json_safe_share_label(label)
+                ));
+                continue;
+            }
+        };
+        while let Some(child) = reader.read() {
+            if entries.len() >= options.max_files {
+                errors.push("share scan stopped at SLSKR_SHARE_SCAN_MAX_FILES".to_owned());
+                return;
+            }
+            let Ok(child) = child else {
+                errors.push(format!(
+                    "{}: entry unreadable",
+                    json_safe_share_label(label)
+                ));
+                continue;
+            };
+            let name = child.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            let name_os = std::ffi::OsStr::from_bytes(name.to_bytes());
+            if !options.include_hidden && name_os.to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let relative = relative_directory.join(name_os);
+            if let Ok(child_directory) = openat(&directory, name, directory_flags, Mode::empty()) {
+                stack.push((relative, child_directory));
+                continue;
+            }
+            let Ok(file) = openat(&directory, name, file_flags, Mode::empty()) else {
+                continue;
+            };
+            let Ok(metadata) = fs::File::from(file).metadata() else {
+                errors.push(format!(
+                    "{}: entry metadata unavailable",
+                    json_safe_share_label(label)
+                ));
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            let filename = format!("{}/{}", label, virtual_share_path(&relative));
+            local_paths.insert(filename.clone(), root.join(&relative));
             entries.push(FileEntry {
                 code: 1,
                 filename: filename.clone(),
@@ -36826,6 +36923,41 @@ mod tests {
         assert!(scan.roots[0].json().contains("\"bytes\":5"));
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn share_scan_does_not_follow_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-share-scan-symlink-test-{}-{unique}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "slskr-share-scan-symlink-outside-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("visible.flac"), b"visible").unwrap();
+        std::fs::write(outside.join("secret.flac"), b"secret").unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let scan = super::scan_share_dirs(std::slice::from_ref(&root), false, false, 100);
+        assert_eq!(scan.entries.len(), 1);
+        assert!(scan.entries[0].filename.ends_with("/visible.flac"));
+        assert!(!scan
+            .entries
+            .iter()
+            .any(|entry| entry.filename.contains("secret.flac")));
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
     }
 
     #[test]

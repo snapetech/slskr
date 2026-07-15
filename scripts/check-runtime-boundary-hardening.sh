@@ -23,6 +23,8 @@ for anchor in \
   'open_shared_local_file_unix' \
   'shared directory confined open failed' \
   'shared_file_confined_open_rejects_symlinked_parent' \
+  'scan_share_root_unix' \
+  'share_scan_does_not_follow_symlinked_directory' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \
