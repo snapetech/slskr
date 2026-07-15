@@ -166,6 +166,9 @@ where
             .await
             .map_err(|error| error.to_string())?;
         len = u64::from(u16::from_be_bytes(extended));
+        if len < 126 {
+            return Err("client websocket frame used non-canonical length".to_owned());
+        }
     } else if len == 127 {
         let mut extended = [0_u8; 8];
         reader
@@ -173,6 +176,12 @@ where
             .await
             .map_err(|error| error.to_string())?;
         len = u64::from_be_bytes(extended);
+        if len & (1_u64 << 63) != 0 {
+            return Err("client websocket frame length used reserved high bit".to_owned());
+        }
+        if len <= u64::from(u16::MAX) {
+            return Err("client websocket frame used non-canonical length".to_owned());
+        }
     }
     if len > 64 * 1024 {
         return Err("client websocket frame is too large".to_owned());
@@ -387,6 +396,32 @@ mod tests {
         let mut reader = &frame[..];
         let error = read_client_frame(&mut reader).await.unwrap_err();
         assert_eq!(error, "client websocket frame used reserved opcode");
+    }
+
+    #[tokio::test]
+    async fn websocket_client_frame_rejects_non_canonical_lengths() {
+        let mut short_as_u16 = vec![0x81, 0xfe, 0, 125];
+        short_as_u16.extend_from_slice(&[0, 0, 0, 0]);
+        let error = read_client_frame(&mut &short_as_u16[..]).await.unwrap_err();
+        assert_eq!(error, "client websocket frame used non-canonical length");
+
+        let mut u16_as_u64 = vec![0x81, 0xff];
+        u16_as_u64.extend_from_slice(&u64::from(u16::MAX).to_be_bytes());
+        u16_as_u64.extend_from_slice(&[0, 0, 0, 0]);
+        let error = read_client_frame(&mut &u16_as_u64[..]).await.unwrap_err();
+        assert_eq!(error, "client websocket frame used non-canonical length");
+    }
+
+    #[tokio::test]
+    async fn websocket_client_frame_rejects_reserved_length_high_bit() {
+        let mut frame = vec![0x81, 0xff];
+        frame.extend_from_slice(&(1_u64 << 63).to_be_bytes());
+        frame.extend_from_slice(&[0, 0, 0, 0]);
+        let error = read_client_frame(&mut &frame[..]).await.unwrap_err();
+        assert_eq!(
+            error,
+            "client websocket frame length used reserved high bit"
+        );
     }
 
     #[tokio::test]

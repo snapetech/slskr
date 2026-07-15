@@ -7,6 +7,7 @@ cd "$repo_root"
 source_file="crates/slskr/src/main.rs"
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
+client_social_source="crates/slskr-client/src/social.rs"
 status=0
 
 for anchor in \
@@ -30,6 +31,16 @@ for anchor in \
 done
 
 for anchor in \
+  'MAX_STORED_ROOM_MESSAGES' \
+  'MAX_STORED_PRIVATE_MESSAGES' \
+  'retain_newest(&mut self.messages'; do
+  if ! rg -n --fixed-strings -- "$anchor" "$client_social_source" >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing client social anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
   'REQUEST_READ_TIMEOUT' \
   'RESPONSE_WRITE_TIMEOUT' \
   'test_request_deadline_is_not_reset_by_partial_progress' \
@@ -46,6 +57,8 @@ done
 
 for anchor in \
   'WEBSOCKET_WRITE_TIMEOUT' \
+  'websocket_client_frame_rejects_non_canonical_lengths' \
+  'websocket_client_frame_rejects_reserved_length_high_bit' \
   'websocket_write_deadline_releases_blocked_writer'; do
   if ! rg -n --fixed-strings -- "$anchor" crates/slskr/src/events_ws.rs >/dev/null; then
     printf 'runtime boundary hardening check failed: missing WebSocket anchor %s\n' "$anchor" >&2

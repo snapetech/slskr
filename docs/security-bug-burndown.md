@@ -125,6 +125,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Low | Rust module hygiene | Broad crate/module-level `#![allow(dead_code)]` hid unused backend compatibility surfaces from compiler review. | Fixed by removing module-level dead-code allowances, keeping only narrow item-level exceptions, and adding a remediation gate that blocks broad suppressions from returning. |
 | Medium | Compatibility smoke | slskd API compatibility smoke was opt-in only, so normal CI could miss automation-client regressions. | Fixed by adding the scheduled/manual `Live Parity` workflow, which runs the Rust UI headless audit, hermetic local `slskd_api` smoke, and optional credentialed public live interop matrix, uploads artifacts, and is guarded by workflow policy checks. |
 | Medium | Room message retention | Active room projections retained every message for the process lifetime, allowing memory use and API response size to grow without a bound. | Fixed by retaining the latest 1,000 messages per room, routing both room-message ingestion paths through the bounded store method, and adding regression/gate coverage. |
+| Medium | SDK social history retention | Public Rust SDK room and private-message state retained every server-supplied message for the client lifetime. | Fixed by retaining the latest 1,000 room and private messages, preserving acknowledgement behavior, and adding eviction regression coverage. |
+| Medium | WebSocket frame lengths | The server accepted non-minimal extended payload lengths and 64-bit lengths with RFC 6455's reserved high bit set. | Fixed by rejecting non-canonical 16/64-bit encodings and the reserved high bit before payload allocation, with parser and hardening-gate coverage. |
 
 ## Open Burn-Down
 

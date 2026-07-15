@@ -7,7 +7,7 @@ use slskr_client::{
     },
     social::{
         private_message_users_command, PrivateMessageInbox, RoomState, UserWatchState,
-        MAX_PRIVATE_MESSAGE_RECIPIENTS,
+        MAX_PRIVATE_MESSAGE_RECIPIENTS, MAX_STORED_PRIVATE_MESSAGES, MAX_STORED_ROOM_MESSAGES,
     },
     ClientError,
 };
@@ -167,6 +167,36 @@ fn private_message_inbox_returns_ack_messages() {
     assert!(inbox
         .apply_server_message(&ServerMessage::ServerPing)
         .is_none());
+}
+
+#[test]
+fn social_message_histories_evict_oldest_entries_at_limits() {
+    let mut rooms = RoomState::new();
+    for index in 0..(MAX_STORED_ROOM_MESSAGES + 5) {
+        assert!(
+            rooms.apply_server_message(&ServerMessage::GlobalRoomMessage {
+                room: "lobby".to_owned(),
+                username: "alice".to_owned(),
+                message: format!("room-{index}"),
+            })
+        );
+    }
+    assert_eq!(rooms.messages().len(), MAX_STORED_ROOM_MESSAGES);
+    assert_eq!(rooms.messages().first().unwrap().message, "room-5");
+
+    let mut inbox = PrivateMessageInbox::new();
+    for index in 0..(MAX_STORED_PRIVATE_MESSAGES + 5) {
+        let ack = inbox.apply_server_message(&ServerMessage::MessageUserResponse(PrivateMessage {
+            id: index as u32,
+            timestamp: 123,
+            username: "alice".to_owned(),
+            message: format!("private-{index}"),
+            is_new: true,
+        }));
+        assert_eq!(ack, Some(ServerMessage::MessageAcked { id: index as u32 }));
+    }
+    assert_eq!(inbox.messages().len(), MAX_STORED_PRIVATE_MESSAGES);
+    assert_eq!(inbox.messages().first().unwrap().message, "private-5");
 }
 
 #[test]

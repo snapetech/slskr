@@ -5,6 +5,14 @@ use slskr_protocol::server::{PrivateMessage, ServerMessage, UserStatus, WatchedU
 use crate::ClientError;
 
 pub const MAX_PRIVATE_MESSAGE_RECIPIENTS: usize = 100;
+pub const MAX_STORED_ROOM_MESSAGES: usize = 1_000;
+pub const MAX_STORED_PRIVATE_MESSAGES: usize = 1_000;
+
+fn retain_newest<T>(items: &mut Vec<T>, max: usize) {
+    if items.len() > max {
+        items.drain(..items.len() - max);
+    }
+}
 
 pub fn private_message_users_command<I, S>(
     usernames: I,
@@ -147,6 +155,7 @@ impl RoomState {
                     username: username.clone(),
                     message: message.clone(),
                 });
+                retain_newest(&mut self.messages, MAX_STORED_ROOM_MESSAGES);
                 true
             }
             ServerMessage::LeaveRoom { room } => {
@@ -183,6 +192,7 @@ impl PrivateMessageInbox {
         match message {
             ServerMessage::MessageUserResponse(message) => {
                 self.messages.push(message.clone());
+                retain_newest(&mut self.messages, MAX_STORED_PRIVATE_MESSAGES);
                 Some(ServerMessage::MessageAcked { id: message.id })
             }
             _ => None,
