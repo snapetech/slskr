@@ -188,6 +188,7 @@ const MAX_NOW_PLAYING_TITLE_BYTES: usize = 4 * 1024;
 const MAX_SECURITY_BANS: usize = 4_096;
 const MAX_SECURITY_BAN_USERNAME_BYTES: usize = MAX_USER_USERNAME_BYTES;
 const MAX_SHARE_GRANTS: usize = 4_096;
+const MAX_SHARE_GRANT_PERMISSIONS_BYTES: usize = 256;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
@@ -7061,23 +7062,23 @@ impl ShareGrantStore {
         let mut seen_grants = std::collections::HashSet::new();
         let records = records
             .into_iter()
-            .filter(|record| {
-                seen_ids.insert(record.id.clone())
-                    && seen_grants.insert((
-                        record.collection_id.clone(),
-                        record.username.to_ascii_lowercase(),
-                    ))
+            .filter_map(|record| {
+                let username = normalize_share_grant_username(&record.username)?;
+                (seen_ids.insert(record.id.clone())
+                    && seen_grants
+                        .insert((record.collection_id.clone(), username.to_ascii_lowercase())))
+                .then_some((record, username))
             })
             .take(MAX_SHARE_GRANTS)
-            .map(|record| {
+            .map(|(record, username)| {
                 let shared_at = u64::try_from(record.shared_at).unwrap_or(0);
                 updated_at = updated_at.max(shared_at);
                 ShareGrantRecord {
                     id: record.id,
                     collection_id: record.collection_id,
-                    username: record.username,
+                    username,
                     shared_at,
-                    permissions: record.permissions,
+                    permissions: bounded_share_grant_permissions(&record.permissions),
                 }
             })
             .collect();
@@ -7093,6 +7094,7 @@ impl ShareGrantStore {
         collection_id: String,
         username: String,
     ) -> Option<(ShareGrantRecord, bool)> {
+        let username = normalize_share_grant_username(&username)?;
         if let Some(record) = self.records.iter().find(|record| {
             record.collection_id == collection_id && record.username.eq_ignore_ascii_case(&username)
         }) {
@@ -7142,7 +7144,7 @@ impl ShareGrantStore {
 
     fn update(&mut self, id: &str, permissions: String) -> Option<ShareGrantRecord> {
         let record = self.records.iter_mut().find(|r| r.id == id)?;
-        record.permissions = permissions;
+        record.permissions = bounded_share_grant_permissions(&permissions);
         self.updated_at = unix_timestamp();
         Some(record.clone())
     }
@@ -7192,6 +7194,39 @@ impl ShareGrantStore {
             .join(",");
         format!("[{}]", records)
     }
+}
+
+fn normalize_share_grant_username(username: &str) -> Option<String> {
+    let username = truncate_utf8_bytes(username.trim().to_owned(), MAX_USER_USERNAME_BYTES);
+    (!username.is_empty()).then_some(username)
+}
+
+fn bounded_share_grant_permissions(permissions: &str) -> String {
+    let permissions = truncate_utf8_bytes(
+        permissions.trim().to_owned(),
+        MAX_SHARE_GRANT_PERMISSIONS_BYTES,
+    );
+    if permissions.is_empty() {
+        "read".to_owned()
+    } else {
+        permissions
+    }
+}
+
+fn share_grant_resource_id(path: &str) -> Option<&str> {
+    let id = path.strip_prefix("/api/share-grants/")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn share_grant_collection_id(path: &str) -> Option<&str> {
+    let id = path.strip_prefix("/api/share-grants/by-collection/")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn share_grant_helper_id<'a>(path: &'a str, helper: &str) -> Option<&'a str> {
+    let path = path.strip_prefix("/api/share-grants/")?;
+    let id = path.strip_suffix(&format!("/{helper}"))?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
 // Library Item Models
@@ -12801,7 +12836,10 @@ async fn route_http_request_with_headers(
         ("POST", "/api/share-grants") => {
             let collection_id = extract_json_string_field(body, "collection_id").unwrap_or_default();
             let username = extract_json_string_field(body, "username").unwrap_or_default();
-            if collection_id.is_empty() || username.is_empty() {
+            let Some(username) = normalize_share_grant_username(&username) else {
+                return Ok(routing::conflict_response("collection_id and username are required"));
+            };
+            if collection_id.is_empty() {
                 return Ok(routing::conflict_response("collection_id and username are required"));
             }
             let collections = state.collections.read().await;
@@ -12823,8 +12861,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::ok_response(json))
             }
         }
-        ("GET", path) if path.starts_with("/api/share-grants/") && !path.starts_with("/api/share-grants/by-collection/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
-            let id = &path[18..];
+        ("GET", path)
+            if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
+        {
+            let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
             let grants = state.share_grants.read().await;
             if let Some(record) = grants.get(id) {
                 let json = record.json();
@@ -12835,8 +12875,12 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("GET", path) if path.starts_with("/api/share-grants/by-collection/") && path.len() > 32 => {
-            let collection_id = &path[32..];
+        ("GET", path)
+            if path.starts_with("/api/share-grants/by-collection/")
+                && share_grant_collection_id(path).is_some() =>
+        {
+            let collection_id = share_grant_collection_id(path)
+                .expect("guarded share-grant collection path");
             let grants = state.share_grants.read().await;
             let records = grants.get_by_collection(collection_id);
             let json = records.iter()
@@ -12847,8 +12891,10 @@ async fn route_http_request_with_headers(
             drop(grants);
             Ok(routing::ok_response(response))
         }
-        ("PUT", path) if path.starts_with("/api/share-grants/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
-            let id = &path[18..];
+        ("PUT", path)
+            if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
+        {
+            let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
             let permissions = extract_json_string_field(body, "permissions").unwrap_or_else(|| "read".to_string());
             let mut grants = state.share_grants.write().await;
             if let Some(record) = grants.update(id, permissions) {
@@ -12861,8 +12907,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("DELETE", path) if path.starts_with("/api/share-grants/") && !path.contains("/token") && !path.contains("/backfill") && path.len() > 18 => {
-            let id = &path[18..];
+        ("DELETE", path)
+            if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
+        {
+            let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
             let mut grants = state.share_grants.write().await;
             let deleted = grants.delete(id);
             drop(grants);
@@ -15873,8 +15921,13 @@ async fn route_http_request_with_headers(
              }).to_string()))
          }
 
-         ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/backfill") => {
-             let grant_id = path.split('/').nth(3).unwrap_or("unknown");
+         ("POST", path)
+             if path.starts_with("/api/share-grants/")
+                 && path.ends_with("/backfill")
+                 && share_grant_helper_id(path, "backfill").is_some() =>
+         {
+             let grant_id = share_grant_helper_id(path, "backfill")
+                 .expect("guarded share-grant backfill path");
              let share_grants = state.share_grants.read().await;
              let collections = state.collections.read().await;
              let grant = share_grants.get(grant_id);
@@ -15894,8 +15947,13 @@ async fn route_http_request_with_headers(
              }).to_string()))
          }
 
-         ("POST", path) if path.starts_with("/api/share-grants/") && path.contains("/token") => {
-             let grant_id = path.split('/').nth(3).unwrap_or("unknown");
+         ("POST", path)
+             if path.starts_with("/api/share-grants/")
+                 && path.ends_with("/token")
+                 && share_grant_helper_id(path, "token").is_some() =>
+         {
+             let grant_id = share_grant_helper_id(path, "token")
+                 .expect("guarded share-grant token path");
              let share_grants = state.share_grants.read().await;
              let grant = share_grants.get(grant_id);
              drop(share_grants);
@@ -34487,10 +34545,14 @@ mod tests {
     #[test]
     fn share_grants_bound_and_deduplicate_collection_users() {
         let mut grants = super::ShareGrantStore::new();
+        assert!(grants
+            .create("collection".to_owned(), "   ".to_owned())
+            .is_none());
         let (first, created) = grants
-            .create("collection".to_owned(), "Alice".to_owned())
+            .create("collection".to_owned(), "  Alice  ".to_owned())
             .unwrap();
         assert!(created);
+        assert_eq!(first.username, "Alice");
         let (duplicate, created) = grants
             .create("collection".to_owned(), "alice".to_owned())
             .unwrap();
@@ -34514,6 +34576,45 @@ mod tests {
                 .0
                 .id,
             format!("grant-{}", u64::MAX)
+        );
+
+        let permissions = "p".repeat(super::MAX_SHARE_GRANT_PERMISSIONS_BYTES + 1);
+        let updated = exhausted
+            .update(&format!("grant-{}", u64::MAX), permissions)
+            .unwrap();
+        assert_eq!(
+            updated.permissions.len(),
+            super::MAX_SHARE_GRANT_PERMISSIONS_BYTES
+        );
+        assert_eq!(
+            exhausted
+                .update(&format!("grant-{}", u64::MAX), "   ".to_owned())
+                .unwrap()
+                .permissions,
+            "read"
+        );
+
+        let hydrated = super::ShareGrantStore::from_persisted(vec![
+            crate::persistence::ShareGrantRecord {
+                id: "grant-1".to_owned(),
+                collection_id: "collection".to_owned(),
+                username: format!("  {}  ", "é".repeat(super::MAX_USER_USERNAME_BYTES)),
+                shared_at: 1,
+                permissions: "x".repeat(super::MAX_SHARE_GRANT_PERMISSIONS_BYTES + 1),
+            },
+            crate::persistence::ShareGrantRecord {
+                id: "grant-2".to_owned(),
+                collection_id: "collection".to_owned(),
+                username: "   ".to_owned(),
+                shared_at: 2,
+                permissions: "write".to_owned(),
+            },
+        ]);
+        assert_eq!(hydrated.records.len(), 1);
+        assert!(hydrated.records[0].username.len() <= super::MAX_USER_USERNAME_BYTES);
+        assert_eq!(
+            hydrated.records[0].permissions.len(),
+            super::MAX_SHARE_GRANT_PERMISSIONS_BYTES
         );
     }
 
@@ -34738,6 +34839,127 @@ mod tests {
         .unwrap();
         assert_eq!(deleted.status, "200 OK");
         assert!(state.share_grants.read().await.records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn share_grant_routes_bound_fields_and_require_exact_helper_paths() {
+        let (state, _receiver) = test_state();
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Shared"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let oversized_username = "é".repeat(super::MAX_USER_USERNAME_BYTES);
+        let grant = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            &format!(
+                "{{\"collection_id\":\"{collection_id}\",\"username\":\"  {oversized_username}  \"}}"
+            ),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(grant.status, "201 Created");
+        let grant_json = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap();
+        let grant_id = grant_json["id"].as_str().unwrap().to_owned();
+        assert!(grant_json["username"].as_str().unwrap().len() <= super::MAX_USER_USERNAME_BYTES);
+
+        let oversized_permissions = "p".repeat(super::MAX_SHARE_GRANT_PERMISSIONS_BYTES + 1);
+        let updated = super::route_http_request(
+            "PUT",
+            &format!("/api/share-grants/{grant_id}"),
+            None,
+            &format!("{{\"permissions\":\"{oversized_permissions}\"}}"),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&updated.body).unwrap()["permissions"]
+                .as_str()
+                .unwrap()
+                .len(),
+            super::MAX_SHARE_GRANT_PERMISSIONS_BYTES
+        );
+
+        let reset = super::route_http_request(
+            "PUT",
+            &format!("/api/share-grants/{grant_id}"),
+            None,
+            r#"{"permissions":"   "}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&reset.body).unwrap()["permissions"],
+            "read"
+        );
+        super::route_http_request(
+            "PUT",
+            &format!("/api/share-grants/{grant_id}/extra"),
+            None,
+            r#"{"permissions":"corrupted"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state
+                .share_grants
+                .read()
+                .await
+                .get(&grant_id)
+                .unwrap()
+                .permissions,
+            "read"
+        );
+
+        let token = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/token"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        let malformed_token = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/extra/token"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_ne!(malformed_token.body, token.body);
+        assert_eq!(
+            super::share_grant_helper_id(
+                &format!("/api/share-grants/{grant_id}/backfill"),
+                "backfill"
+            ),
+            Some(grant_id.as_str())
+        );
+        assert_eq!(
+            super::share_grant_helper_id(
+                &format!("/api/share-grants/{grant_id}/extra/backfill"),
+                "backfill"
+            ),
+            None
+        );
     }
 
     #[test]
