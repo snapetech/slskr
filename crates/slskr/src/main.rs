@@ -11688,7 +11688,7 @@ async fn route_http_request_with_headers(
                 drop(rooms);
                 record_event(state, "room.left", room_name.to_string(), None).await;
 
-                send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
+                send_room_leave_if_connected(state, room_name.to_string()).await;
 
                 Ok(routing::ok_response(json_response))
             } else {
@@ -12522,7 +12522,7 @@ async fn route_http_request_with_headers(
                 drop(rooms);
                 record_event(state, "room.left", room_name.to_string(), None).await;
 
-                send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
+                send_room_leave_if_connected(state, room_name.to_string()).await;
 
                 Ok(routing::ok_response(json_response))
             } else {
@@ -22410,9 +22410,11 @@ async fn send_room_join_if_connected(state: &AppState, room_name: String) {
     };
 
     if connected {
-        send_session_command(state, SessionCommand::JoinRoom(room_name))
-            .await
-            .ok();
+        if let Err(error) =
+            send_session_command(state, SessionCommand::JoinRoom(room_name.clone())).await
+        {
+            record_room_dispatch_failure(state, "join", &room_name, &error).await;
+        }
     } else {
         record_daemon_log(
             state,
@@ -22422,6 +22424,43 @@ async fn send_room_join_if_connected(state: &AppState, room_name: String) {
         )
         .await;
     }
+}
+
+async fn send_room_leave_if_connected(state: &AppState, room_name: String) {
+    let connected = {
+        let session = state.session.read().await;
+        session.state == "connected"
+    };
+
+    if connected {
+        if let Err(error) =
+            send_session_command(state, SessionCommand::LeaveRoom(room_name.clone())).await
+        {
+            record_room_dispatch_failure(state, "leave", &room_name, &error).await;
+        }
+    } else {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Info,
+            "rooms",
+            format!("recorded room leave for {room_name}; no Soulseek session is connected"),
+        )
+        .await;
+    }
+}
+
+async fn record_room_dispatch_failure(
+    state: &AppState,
+    action: &str,
+    room_name: &str,
+    error: &str,
+) {
+    let reason = format!("room {action} for {room_name} dispatch failed: {error}");
+    update_session(state, |snapshot| {
+        snapshot.last_error = Some(reason.clone());
+    })
+    .await;
+    record_daemon_log(state, logging::LogLevel::Error, "rooms", reason).await;
 }
 
 async fn replay_joined_rooms(state: &AppState, session: &mut ServerSession<TcpStream>) {
@@ -42381,6 +42420,51 @@ mod tests {
                 .await
                 .expect("joined room filter");
         assert!(joined_filter.body.contains("\"filtered_count\":0"));
+    }
+
+    #[tokio::test]
+    async fn durable_room_routes_surface_connected_dispatch_failures_in_session_health() {
+        let (state, receiver) = test_state();
+        state.session.write().await.state = "connected";
+        drop(receiver);
+
+        let joined =
+            super::route_http_request("POST", "/api/v0/rooms/music/join", None, "", &state)
+                .await
+                .expect("join response");
+        assert_eq!(joined.status, "201 Created");
+        assert!(state.rooms.read().await.records[0].joined);
+        assert_eq!(
+            state.session.read().await.last_error.as_deref(),
+            Some("room join for music dispatch failed: session manager is not running")
+        );
+
+        let left =
+            super::route_http_request("DELETE", "/api/v0/rooms/music/join", None, "", &state)
+                .await
+                .expect("leave response");
+        assert_eq!(left.status, "200 OK");
+        assert!(!state.rooms.read().await.records[0].joined);
+        assert_eq!(
+            state.session.read().await.last_error.as_deref(),
+            Some("room leave for music dispatch failed: session manager is not running")
+        );
+
+        let events = state.events.read().await;
+        assert!(events.records.iter().any(|event| {
+            event.kind == "log.created"
+                && event
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("room join for music dispatch failed"))
+        }));
+        assert!(events.records.iter().any(|event| {
+            event.kind == "log.created"
+                && event
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("room leave for music dispatch failed"))
+        }));
     }
 
     #[tokio::test]
