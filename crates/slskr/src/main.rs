@@ -17818,6 +17818,7 @@ fn query_bool(query: Option<&str>, key: &str) -> Option<bool> {
         .find_map(|(name, value)| (name == key).then(|| parse_bool_value(&value))?)
 }
 
+#[cfg(not(unix))]
 fn slskd_storage_file_json(path: &Path, root: &Path) -> serde_json::Value {
     let relative = path
         .strip_prefix(root)
@@ -17841,6 +17842,7 @@ fn slskd_storage_file_json(path: &Path, root: &Path) -> serde_json::Value {
     })
 }
 
+#[cfg(not(unix))]
 fn slskd_storage_directory_value(
     root: &Path,
     directory: &Path,
@@ -17941,27 +17943,159 @@ fn slskd_storage_directory_json(
     } else {
         root.to_path_buf()
     };
-    let canonical_root = root
-        .canonicalize()
-        .map_err(|error| format!("storage root canonicalize failed: {error}"))?;
-    let canonical_parent = if path == root {
-        canonical_root.clone()
-    } else if path.exists() {
-        path.parent()
-            .unwrap_or(root)
+    #[cfg(unix)]
+    {
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| "storage path is outside the storage root".to_owned())?;
+        slskd_storage_directory_json_unix(root, relative, options)
+    }
+    #[cfg(not(unix))]
+    {
+        let canonical_root = root
             .canonicalize()
-            .map_err(|error| format!("storage parent canonicalize failed: {error}"))?
-    } else {
-        path.parent()
-            .unwrap_or(root)
-            .canonicalize()
-            .map_err(|error| format!("storage parent canonicalize failed: {error}"))?
-    };
-    if !canonical_parent.starts_with(&canonical_root) {
-        return Err("path escapes the storage root".to_owned());
+            .map_err(|error| format!("storage root canonicalize failed: {error}"))?;
+        let canonical_parent = if path == root {
+            canonical_root.clone()
+        } else if path.exists() {
+            path.parent()
+                .unwrap_or(root)
+                .canonicalize()
+                .map_err(|error| format!("storage parent canonicalize failed: {error}"))?
+        } else {
+            path.parent()
+                .unwrap_or(root)
+                .canonicalize()
+                .map_err(|error| format!("storage parent canonicalize failed: {error}"))?
+        };
+        if !canonical_parent.starts_with(&canonical_root) {
+            return Err("path escapes the storage root".to_owned());
+        }
+        let mut state = StorageDirectoryListState::new(options);
+        slskd_storage_directory_value(root, &path, &mut state, true).map(|value| value.to_string())
+    }
+}
+
+#[cfg(unix)]
+fn slskd_storage_directory_json_unix(
+    root: &Path,
+    relative: &Path,
+    options: StorageDirectoryListOptions,
+) -> Result<String, String> {
+    use rustix::fs::{open, openat, Mode, OFlags};
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, directory_flags, Mode::empty())
+        .map_err(|error| format!("storage root confined open failed: {error}"))?;
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            return Err("storage path contains a non-relative component".to_owned());
+        };
+        directory = match openat(&directory, component, directory_flags, Mode::empty()) {
+            Ok(directory) => directory,
+            Err(error) if error == rustix::io::Errno::NOENT => {
+                return Ok(slskd_empty_directory_json(&relative.to_string_lossy()).to_string());
+            }
+            Err(error) => return Err(format!("storage directory confined open failed: {error}")),
+        };
     }
     let mut state = StorageDirectoryListState::new(options);
-    slskd_storage_directory_value(root, &path, &mut state, true).map(|value| value.to_string())
+    slskd_storage_directory_value_unix(root, relative, &directory, &mut state, true)
+        .map(|value| value.to_string())
+}
+
+#[cfg(unix)]
+fn slskd_storage_directory_value_unix(
+    root: &Path,
+    relative: &Path,
+    directory: &impl std::os::fd::AsFd,
+    state: &mut StorageDirectoryListState,
+    top_level: bool,
+) -> Result<serde_json::Value, String> {
+    use rustix::fs::{openat, Dir, Mode, OFlags};
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file_flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut reader = Dir::read_from(directory)
+        .map_err(|error| format!("storage directory read failed: {error}"))?;
+    let mut names = Vec::new();
+    while let Some(entry) = reader.read() {
+        let entry = entry.map_err(|error| format!("storage directory entry failed: {error}"))?;
+        if !matches!(entry.file_name().to_bytes(), b"." | b"..") {
+            names.push(entry.file_name().to_owned());
+        }
+    }
+    names.sort_by(|left, right| left.to_bytes().cmp(right.to_bytes()));
+
+    let mut files = Vec::new();
+    let mut directories = Vec::new();
+    for name in names {
+        let child_directory = openat(directory, &name, directory_flags, Mode::empty()).ok();
+        let file_metadata = if child_directory.is_none() {
+            openat(directory, &name, file_flags, Mode::empty())
+                .ok()
+                .and_then(|file| fs::File::from(file).metadata().ok())
+                .filter(fs::Metadata::is_file)
+        } else {
+            None
+        };
+        if child_directory.is_none() && file_metadata.is_none() {
+            continue;
+        }
+        if top_level && !state.should_emit_top_level() {
+            continue;
+        }
+        if !state.reserve_entry() {
+            break;
+        }
+        let name_os = std::ffi::OsStr::from_bytes(name.to_bytes());
+        let child_relative = relative.join(name_os);
+        if let Some(child) = child_directory {
+            if state.options.recursive {
+                directories.push(slskd_storage_directory_value_unix(
+                    root,
+                    &child_relative,
+                    &child,
+                    state,
+                    false,
+                )?);
+            } else {
+                directories.push(slskd_empty_directory_json(
+                    &child_relative.to_string_lossy().replace('\\', "/"),
+                ));
+            }
+            continue;
+        }
+        let metadata = file_metadata.expect("validated file metadata");
+        files.push(serde_json::json!({
+            "name": name_os.to_string_lossy(),
+            "fullName": child_relative.to_string_lossy().replace('\\', "/"),
+            "length": metadata.len(),
+            "attributes": "",
+            "createdAt": "",
+            "modifiedAt": "",
+        }));
+    }
+    let name = relative
+        .file_name()
+        .or_else(|| root.file_name())
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    Ok(serde_json::json!({
+        "name": name,
+        "fullName": relative,
+        "attributes": "",
+        "createdAt": "",
+        "modifiedAt": "",
+        "files": files,
+        "directories": directories,
+        "offset": if top_level { state.options.offset } else { 0 },
+        "limit": state.options.limit,
+        "entryCount": state.emitted,
+        "truncated": state.truncated,
+    }))
 }
 
 fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue) -> String {
@@ -26691,17 +26825,60 @@ mod tests {
         std::fs::write(dir.join("one.txt"), b"1").unwrap();
         std::fs::write(dir.join("two.txt"), b"2").unwrap();
 
-        let remaining_entries = 1;
-        let mut state = super::StorageDirectoryListState::new(super::StorageDirectoryListOptions {
-            recursive: false,
-            limit: remaining_entries,
-            offset: 0,
-        });
-        let json =
-            super::slskd_storage_directory_value(&dir, &dir, &mut state, true).expect("listing");
+        let json = super::slskd_storage_directory_json(
+            &dir,
+            None,
+            super::StorageDirectoryListOptions {
+                recursive: false,
+                limit: 1,
+                offset: 0,
+            },
+        )
+        .and_then(|json| {
+            serde_json::from_str::<serde_json::Value>(&json).map_err(|e| e.to_string())
+        })
+        .expect("listing");
         assert_eq!(json["entryCount"], 1);
         assert_eq!(json["truncated"], true);
-        assert_eq!(state.emitted, remaining_entries);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_storage_listing_rejects_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let (state, _receiver) = test_state();
+        let root = state.config.state_dir.join("confined-listing");
+        let outside = state.config.state_dir.join("outside-listing");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let error = super::slskd_storage_directory_json_unix(
+            &root,
+            std::path::Path::new("linked"),
+            super::StorageDirectoryListOptions {
+                recursive: true,
+                limit: 100,
+                offset: 0,
+            },
+        )
+        .expect_err("symlinked directory must be rejected");
+        assert!(error.contains("confined open failed"));
+
+        let listing = super::slskd_storage_directory_json(
+            &root,
+            None,
+            super::StorageDirectoryListOptions {
+                recursive: true,
+                limit: 100,
+                offset: 0,
+            },
+        )
+        .unwrap();
+        assert!(!listing.contains("linked"));
+        assert!(!listing.contains("secret.txt"));
     }
 
     #[tokio::test]

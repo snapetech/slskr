@@ -16,6 +16,9 @@ status=0
 for anchor in \
   'ensure_private_state_dir(&config.state_dir)' \
   'state_directory_is_private_and_rejects_symlinks' \
+  'slskd_storage_directory_json_unix' \
+  'storage directory confined open failed' \
+  'scoped_storage_listing_rejects_symlinked_parent' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \
