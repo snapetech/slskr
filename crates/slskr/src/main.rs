@@ -16477,7 +16477,7 @@ async fn route_http_request_with_headers(
             persist_runtime_compat_state(state).await;
             Ok(routing::accepted_response(body))
         }
-        (method, path) if native_compat_path(path) => {
+        (method, path) if native_compat_route(method, path) => {
             Ok(native_compat_response(method, path, state).await)
         }
         ("GET", path) if is_spa_navigation_path(path) => Ok(index_html_response()),
@@ -17987,37 +17987,35 @@ fn preview_stream_content_type(path: &str) -> &'static str {
     }
 }
 
-fn native_compat_path(path: &str) -> bool {
-    let path = path.to_ascii_lowercase();
-    let prefixes = [
-        "/api/slskdn",
-        "/api/multisource",
-        "/api/podcore",
-        "/api/hashdb",
-        "/api/streams",
-        "/api/listening-party",
-        "/api/mesh",
-        "/api/jobs",
-        "/api/library/items",
-        "/api/virtualsoulfind",
-        "/api/audio",
-        "/api/mediacore",
-        "/api/playback",
-        "/api/traces",
-        "/api/fairness",
-        "/api/ranking",
-        "/api/portforwarding",
-        "/api/signals",
-        "/api/backfill",
-        "/api/discovery",
-        "/api/security",
-        "/api/pods",
-        "/api/solid",
-        "/api/federation",
-    ];
-    prefixes
-        .iter()
-        .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+fn native_compat_route(method: &str, path: &str) -> bool {
+    matches!(
+        (method, path),
+        (
+            "GET",
+            "/api/slskdn"
+                | "/api/slskdn/library/health"
+                | "/api/hashdb"
+                | "/api/hashdb/stats"
+                | "/api/mesh"
+                | "/api/mesh/health"
+                | "/api/mesh/transport"
+                | "/api/virtualsoulfind"
+                | "/api/virtualsoulfind/canonical/status"
+                | "/api/audio"
+                | "/api/mediacore"
+                | "/api/playback"
+                | "/api/security"
+                | "/api/security/status"
+                | "/api/pods"
+                | "/api/solid"
+                | "/api/solid/status"
+                | "/api/federation"
+                | "/api/federation/diagnostics"
+        ) | (
+            "POST",
+            "/api/slskdn/warm-cache" | "/api/audio/variants/dedupe" | "/api/mediacore/retrieve"
+        )
+    )
 }
 
 async fn native_compat_response(method: &str, path: &str, state: &AppState) -> HttpResponse {
@@ -29405,6 +29403,16 @@ mod tests {
                 response.status
             );
             while receiver.try_recv().is_ok() {}
+        }
+
+        for (method, path) in [
+            ("GET", "/api/hashdb/unregistered-state-projection"),
+            ("POST", "/api/security/status"),
+        ] {
+            let response = super::route_http_request(method, path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
         }
     }
 
