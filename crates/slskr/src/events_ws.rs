@@ -50,10 +50,24 @@ where
 }
 
 pub async fn stream_events<R, W>(
+    reader: R,
+    writer: &mut W,
+    events: &RwLock<EventStore>,
+    receiver: broadcast::Receiver<EventRecord>,
+) -> Result<(), String>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin,
+{
+    stream_events_with_heartbeat(reader, writer, events, receiver, HEARTBEAT_INTERVAL).await
+}
+
+async fn stream_events_with_heartbeat<R, W>(
     mut reader: R,
     writer: &mut W,
     events: &RwLock<EventStore>,
     mut receiver: broadcast::Receiver<EventRecord>,
+    heartbeat_interval: Duration,
 ) -> Result<(), String>
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -81,14 +95,16 @@ where
         }
     });
 
-    let mut heartbeat = time::interval(HEARTBEAT_INTERVAL);
+    let mut heartbeat = time::interval(heartbeat_interval);
+    let mut awaiting_pong = false;
     let result = async {
         loop {
             tokio::select! {
                 frame = frame_rx.recv() => match frame {
                     Some(Ok(ClientFrame::Close)) | None => return Ok(()),
                     Some(Ok(ClientFrame::Ping(payload))) => write_frame(writer, 0x8a, &payload).await?,
-                    Some(Ok(ClientFrame::Pong | ClientFrame::Other)) => {}
+                    Some(Ok(ClientFrame::Pong)) => awaiting_pong = false,
+                    Some(Ok(ClientFrame::Other)) => {}
                     Some(Err(error)) => return Err(error),
                 },
             received = receiver.recv() => match received {
@@ -114,7 +130,13 @@ where
             }
                 Err(broadcast::error::RecvError::Closed) => return Ok(()),
             },
-            _ = heartbeat.tick() => write_ping_frame(writer).await?,
+            _ = heartbeat.tick() => {
+                if awaiting_pong {
+                    return Err("websocket heartbeat pong deadline exceeded".to_owned());
+                }
+                write_ping_frame(writer).await?;
+                awaiting_pong = true;
+            },
             }
         }
     }
@@ -422,6 +444,31 @@ mod tests {
             error,
             "client websocket frame length used reserved high bit"
         );
+    }
+
+    #[tokio::test]
+    async fn websocket_missing_pong_releases_connection() {
+        let (reader, _idle_client) = tokio::io::duplex(64);
+        let events = RwLock::new(EventStore::new(10));
+        let (_event_tx, receiver) = broadcast::channel(1);
+        let mut writer = Vec::new();
+
+        let error = time::timeout(
+            Duration::from_millis(100),
+            stream_events_with_heartbeat(
+                reader,
+                &mut writer,
+                &events,
+                receiver,
+                Duration::from_millis(10),
+            ),
+        )
+        .await
+        .expect("heartbeat deadline")
+        .expect_err("missing pong must close websocket");
+
+        assert!(error.contains("pong deadline"), "{error}");
+        assert_eq!(writer, vec![0x89, 0]);
     }
 
     #[tokio::test]
