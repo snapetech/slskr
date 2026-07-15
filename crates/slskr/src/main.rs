@@ -11627,7 +11627,17 @@ async fn route_http_request_with_headers(
             let Some(username) = user_stats_request_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
-            send_session_command(state, SessionCommand::RequestUserStats(username.to_string())).await.ok();
+            if send_session_command(
+                state,
+                SessionCommand::RequestUserStats(username.to_string()),
+            )
+            .await
+            .is_err()
+            {
+                return Ok(routing::service_unavailable_response(
+                    "session manager is not running",
+                ));
+            }
             Ok(routing::accepted_response(format!("{{\"username\":\"{}\"}}", json_escape(username))))
         }
 
@@ -11636,6 +11646,14 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
 
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut browse = state.browse.write().await;
             let Some(record) = browse.request(username.to_string()) else {
                 return Ok(routing::service_unavailable_response(
@@ -11644,8 +11662,8 @@ async fn route_http_request_with_headers(
             };
             drop(browse);
 
-            send_session_command(state, SessionCommand::BrowseUser(username.to_string())).await.ok();
             persist_browse_record(state, &record).await;
+            session_command_permit.send(SessionCommand::BrowseUser(username.to_string()));
 
             Ok(routing::accepted_response(record.json()))
         }
@@ -11656,6 +11674,14 @@ async fn route_http_request_with_headers(
             };
             let folder = extract_json_string_field(body, "folder").unwrap_or_default();
 
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut browse = state.browse.write().await;
             let Some(record) = browse.request_folder(username.to_string(), folder.clone()) else {
                 return Ok(routing::service_unavailable_response(
@@ -11664,8 +11690,11 @@ async fn route_http_request_with_headers(
             };
             drop(browse);
 
-            send_session_command(state, SessionCommand::BrowseFolder { username: username.to_string(), folder }).await.ok();
             persist_browse_record(state, &record).await;
+            session_command_permit.send(SessionCommand::BrowseFolder {
+                username: username.to_string(),
+                folder,
+            });
 
             Ok(routing::accepted_response(record.json()))
         }
@@ -38499,6 +38528,31 @@ mod tests {
         .expect("failed browse list");
         assert_eq!(listed.status, "200 OK");
         assert!(listed.body.contains("\"filtered_count\":1"));
+    }
+
+    #[tokio::test]
+    async fn one_shot_user_requests_reject_before_mutation_when_dispatch_is_unavailable() {
+        for (path, body) in [
+            ("/api/v1/users/friend/stats/request", ""),
+            ("/api/v0/users/friend/browse/request", ""),
+            (
+                "/api/v0/users/friend/browse/folder",
+                r#"{"folder":"Remote/Album"}"#,
+            ),
+        ] {
+            let (state, receiver) = test_state();
+            drop(receiver);
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("unavailable dispatch response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("session manager is not running"),
+                "{path}"
+            );
+            assert!(state.browse.read().await.records.is_empty(), "{path}");
+        }
     }
 
     #[tokio::test]
