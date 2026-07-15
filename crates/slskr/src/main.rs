@@ -18626,6 +18626,7 @@ fn file_storage_error_response(error: &str) -> HttpResponse {
         error,
         STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR
             | STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR
+            | STORAGE_DIRECTORY_DELETE_TOTAL_LIMIT_ERROR
             | STORAGE_DIRECTORY_DELETE_DEPTH_ERROR
     ) {
         HttpResponse {
@@ -18633,7 +18634,11 @@ fn file_storage_error_response(error: &str) -> HttpResponse {
             content_type: "application/json",
             body: if error == STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR {
                 "{\"error\":\"storage directory is too large to list\"}".to_owned()
-            } else if error == STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR {
+            } else if matches!(
+                error,
+                STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR
+                    | STORAGE_DIRECTORY_DELETE_TOTAL_LIMIT_ERROR
+            ) {
                 "{\"error\":\"storage directory is too large to delete\"}".to_owned()
             } else {
                 "{\"error\":\"storage directory tree is too deep to delete\"}".to_owned()
@@ -19409,9 +19414,12 @@ const SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES: usize = 1_024;
 const SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES: usize = 16_384;
 const SLSKD_STORAGE_MAX_RECURSION_DEPTH: usize = 24;
 const SLSKD_STORAGE_MAX_DELETE_DEPTH: usize = 64;
+const SLSKD_STORAGE_MAX_DELETE_TOTAL_ENTRIES: usize = 65_536;
 const STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR: &str = "storage directory entry limit exceeded";
 const STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR: &str =
     "storage directory delete entry limit exceeded";
+const STORAGE_DIRECTORY_DELETE_TOTAL_LIMIT_ERROR: &str =
+    "storage directory delete total entry limit exceeded";
 const STORAGE_DIRECTORY_DELETE_DEPTH_ERROR: &str = "storage directory delete depth exceeded";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19498,11 +19506,15 @@ fn reserve_storage_scan_entry(scanned: &mut usize) -> Result<(), String> {
     Ok(())
 }
 
-fn reserve_storage_delete_entry(scanned: &mut usize) -> Result<(), String> {
+fn reserve_storage_delete_entry(scanned: &mut usize, total: &mut usize) -> Result<(), String> {
     if *scanned >= SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES {
         return Err(STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR.to_owned());
     }
+    if *total >= SLSKD_STORAGE_MAX_DELETE_TOTAL_ENTRIES {
+        return Err(STORAGE_DIRECTORY_DELETE_TOTAL_LIMIT_ERROR.to_owned());
+    }
     *scanned += 1;
+    *total += 1;
     Ok(())
 }
 
@@ -21931,7 +21943,8 @@ fn delete_scoped_storage_path_unix(
             Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
             Err(error) => return Err(format!("storage directory confined open failed: {error}")),
         };
-        remove_directory_contents_unix(&target_directory, 0)?;
+        let mut total = 0;
+        remove_directory_contents_unix(&target_directory, 0, &mut total)?;
         unlinkat(&parent, *target, AtFlags::REMOVEDIR)
             .map_err(|error| format!("directory confined delete failed: {error}"))?;
     } else {
@@ -21948,6 +21961,7 @@ fn delete_scoped_storage_path_unix(
 fn remove_directory_contents_unix(
     directory: &impl std::os::fd::AsFd,
     depth: usize,
+    total: &mut usize,
 ) -> Result<(), String> {
     use rustix::fs::{openat, unlinkat, AtFlags, Dir, Mode, OFlags};
 
@@ -21962,14 +21976,14 @@ fn remove_directory_contents_unix(
     while let Some(entry) = entries.read() {
         let entry = entry.map_err(|error| format!("storage directory entry failed: {error}"))?;
         if !matches!(entry.file_name().to_bytes(), b"." | b"..") {
-            reserve_storage_delete_entry(&mut scanned)?;
+            reserve_storage_delete_entry(&mut scanned, total)?;
             names.push(entry.file_name().to_owned());
         }
     }
     for name in names {
         match openat(directory, &name, directory_flags, Mode::empty()) {
             Ok(child) => {
-                remove_directory_contents_unix(&child, depth + 1)?;
+                remove_directory_contents_unix(&child, depth + 1, total)?;
                 unlinkat(directory, &name, AtFlags::REMOVEDIR)
                     .map_err(|error| format!("storage child directory delete failed: {error}"))?;
             }
@@ -30003,6 +30017,10 @@ mod tests {
             too_wide.body,
             "{\"error\":\"storage directory is too large to delete\"}"
         );
+        let aggregate =
+            super::file_storage_error_response(super::STORAGE_DIRECTORY_DELETE_TOTAL_LIMIT_ERROR);
+        assert_eq!(aggregate.status, "413 Payload Too Large");
+        assert_eq!(aggregate.body, too_wide.body);
     }
 
     #[test]
@@ -44063,11 +44081,26 @@ mod tests {
     #[test]
     fn scoped_storage_delete_bounds_directory_width() {
         let mut scanned = super::SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES - 1;
-        super::reserve_storage_delete_entry(&mut scanned).expect("last delete scan slot");
+        let mut total = 0;
+        super::reserve_storage_delete_entry(&mut scanned, &mut total)
+            .expect("last delete scan slot");
         assert_eq!(scanned, super::SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES);
         assert_eq!(
-            super::reserve_storage_delete_entry(&mut scanned).unwrap_err(),
+            super::reserve_storage_delete_entry(&mut scanned, &mut total).unwrap_err(),
             super::STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR
+        );
+    }
+
+    #[test]
+    fn scoped_storage_delete_bounds_aggregate_entries() {
+        let mut scanned = 0;
+        let mut total = super::SLSKD_STORAGE_MAX_DELETE_TOTAL_ENTRIES - 1;
+        super::reserve_storage_delete_entry(&mut scanned, &mut total)
+            .expect("last aggregate delete slot");
+        assert_eq!(total, super::SLSKD_STORAGE_MAX_DELETE_TOTAL_ENTRIES);
+        assert_eq!(
+            super::reserve_storage_delete_entry(&mut scanned, &mut total).unwrap_err(),
+            super::STORAGE_DIRECTORY_DELETE_TOTAL_LIMIT_ERROR
         );
     }
 
