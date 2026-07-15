@@ -1,6 +1,7 @@
 name: Release
 
 env:
+  CARGO_AUDIT_VERSION: 0.22.1
   ACTIONLINT_VERSION: v1.7.7
   SLSKR_SECURITY_SCANS_REQUIRED: '1'
   SLSKR_SEMGREP_IMAGE: semgrep/semgrep:1.167.0
@@ -120,8 +121,15 @@ jobs:
           sudo apt-get install -y ripgrep shellcheck
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: Restore cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_AUDIT_VERSION }}
       - name: Install cargo-audit
-        run: '"$(rustup which cargo)" install cargo-audit --locked --force'
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: '"$(rustup which cargo)" install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked'
       - name: Install wasm-bindgen CLI
         run: '"$(rustup which cargo)" install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force'
       - name: Install Playwright browsers
