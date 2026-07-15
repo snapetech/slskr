@@ -17834,12 +17834,12 @@ fn slskd_options_json(
 }
 
 fn slskd_options_config_location_json(config: &AppConfig) -> String {
-    let location = config
-        .config_file
-        .as_ref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "runtime://memory".to_owned());
-    serde_json::Value::String(location).to_string()
+    let location = if config.config_file.is_some() {
+        "config://file"
+    } else {
+        "runtime://memory"
+    };
+    serde_json::Value::String(location.to_owned()).to_string()
 }
 
 fn slskd_options_config_text_json(config: &AppConfig) -> String {
@@ -17847,11 +17847,11 @@ fn slskd_options_config_text_json(config: &AppConfig) -> String {
         "# slskr uses TOML configuration; this compatibility endpoint is read-only.\n\
          # config_file = {}\n\
          # runtime_mutation_enabled = false\n",
-        config
-            .config_file
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "(none)".to_owned())
+        if config.config_file.is_some() {
+            "config://file"
+        } else {
+            "(none)"
+        }
     );
     serde_json::Value::String(text).to_string()
 }
@@ -44019,6 +44019,22 @@ mod tests {
         assert!(events.body.contains("\"kind\":\"options.yaml.uploaded\""));
         assert!(events.body.contains("\"kind\":\"options.yaml.validated\""));
         assert!(events.body.contains("configPersisted=false"));
+    }
+
+    #[test]
+    fn options_config_endpoints_redact_file_path() {
+        let (state, _receiver) = test_state();
+        let mut config = state.config.clone();
+        config.config_file = Some("/private/config/slskr-secret.toml".into());
+
+        for body in [
+            super::slskd_options_config_location_json(&config),
+            super::slskd_options_config_text_json(&config),
+        ] {
+            assert!(body.contains("config://file"));
+            assert!(!body.contains("/private"));
+            assert!(!body.contains("slskr-secret"));
+        }
     }
 
     #[tokio::test]
