@@ -14,7 +14,30 @@ export const getEndpoint = ({ username }) => {
 };
 
 export const browse = async ({ username }) => {
-  return (await api.get(`/users/${encodeURIComponent(username)}/browse`)).data;
+  const encodedUsername = encodeURIComponent(username);
+  const statusPath = `/users/${encodedUsername}/browse/status`;
+  const browsePath = `/users/${encodedUsername}/browse`;
+  const current = (await api.get(statusPath)).data;
+
+  if (current?.isComplete) {
+    return (await api.get(browsePath)).data;
+  }
+
+  await api.post(`/users/${encodedUsername}/browse/request`);
+
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const status = (await api.get(statusPath)).data;
+    const state = String(status?.state || '').toLowerCase();
+    if (status?.isComplete) {
+      return (await api.get(browsePath)).data;
+    }
+    if (state === 'failed' || state === 'cancelled') {
+      throw new Error(status?.reason || 'The remote peer is unavailable');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error('Browse timed out while waiting for the remote peer');
 };
 
 export const getBrowseStatus = ({ username }) => {

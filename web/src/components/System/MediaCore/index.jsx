@@ -444,7 +444,9 @@ const MediaCore = () => {
     const example = contentExamples[domain]?.[type];
     if (example) {
       setExternalId(example.external);
-      setContentId(example.content);
+      setResolveId(example.external);
+      setDescriptorContentId(example.content);
+      setValidateContentIdInput(example.content);
     }
   };
 
@@ -2783,7 +2785,10 @@ const MediaCore = () => {
               <Icon name="lightbulb" />
               ContentID Examples
             </Header>
-            <p>Click any example to fill the registration form:</p>
+            <p>
+              Click any example to fill the read-only resolve and validation
+              fields, plus the advanced registration fields.
+            </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5em' }}>
               {Object.entries(contentExamples).map(([domainName, types]) =>
                 Object.entries(types).map(([typeName, example]) => (

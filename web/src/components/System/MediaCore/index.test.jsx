@@ -85,4 +85,25 @@ describe('MediaCore', () => {
     expect(await screen.findByText('MediaCore ContentID Registry')).toBeInTheDocument();
     expect(screen.getByText('Supported Hash Algorithms')).toBeInTheDocument();
   });
+
+  it('fills every relevant ContentID example field', async () => {
+    render(<MediaCore />);
+
+    fireEvent.click(await screen.findByText('audio:track'));
+
+    expect(
+      screen.getByPlaceholderText('e.g., mb:recording:12345-6789-...'),
+    ).toHaveValue('mb:recording:12345');
+    expect(
+      screen.getByPlaceholderText('e.g., content:mb:recording:12345-6789-...'),
+    ).toHaveValue('content:audio:track:mb-12345');
+    expect(
+      screen.getByPlaceholderText('Enter external ID to resolve...'),
+    ).toHaveValue('mb:recording:12345');
+    expect(
+      screen
+        .getAllByPlaceholderText('e.g., content:audio:track:mb-12345')
+        .map((input) => input.value),
+    ).toContain('content:audio:track:mb-12345');
+  });
 });

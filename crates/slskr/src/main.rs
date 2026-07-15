@@ -2320,7 +2320,7 @@ impl TransferEntry {
         let percent_complete = if size == 0 {
             0.0
         } else {
-            (self.bytes_transferred as f64 / size as f64) * 100.0
+            ((self.bytes_transferred as f64 / size as f64) * 100.0).min(100.0)
         };
         let now = unix_timestamp();
         let average_speed = self.average_speed_at(now);
@@ -2334,7 +2334,9 @@ impl TransferEntry {
         } else {
             String::new()
         };
-        let remaining_seconds = (average_speed > 0.0 && bytes_remaining > 0)
+        let remaining_seconds = (!is_terminal_transfer_status(&self.status)
+            && average_speed > 0.0
+            && bytes_remaining > 0)
             .then(|| (bytes_remaining as f64 / average_speed).ceil() as u64);
         serde_json::json!({
             "id": self.id.to_string(),
@@ -10336,8 +10338,13 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/hashdb/stats") => {
             let shares = state.shares.read().await;
-            let total_entries: usize = shares.roots.iter().map(|root| root.files).sum();
-            let total_bytes: u64 = shares.roots.iter().map(|root| root.bytes).sum();
+            let audio_entries = shares
+                .entries
+                .iter()
+                .filter(|entry| is_auto_retry_audio_file(&entry.filename))
+                .collect::<Vec<_>>();
+            let total_entries = audio_entries.len();
+            let total_bytes = audio_entries.iter().map(|entry| entry.size).sum::<u64>();
             drop(shares);
             Ok(routing::ok_response(serde_json::json!({
                 "currentSeqId": unix_timestamp(),
@@ -10351,6 +10358,7 @@ async fn route_http_request_with_headers(
             let entries = shares
                 .entries
                 .iter()
+                .filter(|entry| is_auto_retry_audio_file(&entry.filename))
                 .map(|entry| {
                     serde_json::json!({
                         "id": format!("share-{}-{}", entry.size, entry.filename),
@@ -14141,6 +14149,16 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
 
+            let connected = {
+                let session = state.session.read().await;
+                session.state == "connected"
+            };
+            if !connected {
+                return Ok(routing::service_unavailable_response(
+                    "Soulseek server connection is not ready",
+                ));
+            }
+
             let session_command_permit = match state.session_commands.reserve().await {
                 Ok(permit) => permit,
                 Err(_) => {
@@ -14331,16 +14349,6 @@ async fn route_http_request_with_headers(
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
             if let Some(username) = user_route_username(path, "/browse") {
                 let browse = state.browse.read().await;
-                if route.normalized_path.starts_with("/api/v0/") {
-                    if let Some(record) = browse.get(&username) {
-                        drop(browse);
-                        return Ok(HttpResponse {
-                            status: "200 OK",
-                            content_type: "application/json",
-                            body: record.json(),
-                        });
-                    }
-                }
                 let entries = browse
                     .records
                     .iter()
@@ -35017,6 +35025,15 @@ mod tests {
                 extension: "flac".to_owned(),
                 attributes: Vec::new(),
             });
+            shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
+                code: 1,
+                filename: "Library/Known/Release.jpg".to_owned(),
+                size: 123,
+                extension: "jpg".to_owned(),
+                attributes: Vec::new(),
+            });
             shares.local_paths.insert(
                 "Music/Test.flac".to_owned(),
                 PathBuf::from("/tmp/private/Test.flac"),
@@ -37052,6 +37069,7 @@ mod tests {
             super::SearchStore::new(),
             Some(db.clone()),
         );
+        state.session.write().await.state = "connected";
 
         let requested = super::route_http_request(
             "POST",
@@ -47711,6 +47729,11 @@ mod tests {
             .iter()
             .any(|entry| entry["filename"] == "Library/Known/Release.flac"
                 && entry["extension"] == "flac"));
+        assert!(!hash_entries_json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["filename"] == "Library/Known/Release.jpg"));
 
         let backfill_candidates =
             super::route_http_request("GET", "/api/backfill/candidates", None, "", &state)
@@ -48461,6 +48484,21 @@ mod tests {
     async fn user_browse_api_requests_and_ingests_entries() {
         let (state, mut receiver) = test_state();
 
+        let unavailable = super::route_http_request(
+            "POST",
+            "/api/v0/users/friend/browse/request",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("disconnected browse request");
+        assert_eq!(unavailable.status, "503 Service Unavailable");
+        assert!(unavailable
+            .body
+            .contains("Soulseek server connection is not ready"));
+        state.session.write().await.state = "connected";
+
         let requested = super::route_http_request(
             "POST",
             "/api/v0/users/friend/browse/request",
@@ -48546,7 +48584,13 @@ mod tests {
                 .await
                 .expect("browse fetch");
         assert_eq!(fetched.status, "200 OK");
-        assert!(fetched.body.contains("Remote/Album/Song.flac"));
+        let fetched_json = serde_json::from_str::<serde_json::Value>(&fetched.body).unwrap();
+        assert_eq!(fetched_json["directoryCount"], 1);
+        assert_eq!(fetched_json["directories"][0]["name"], "Remote/Album");
+        assert_eq!(
+            fetched_json["directories"][0]["files"][0]["filename"],
+            "Song.flac"
+        );
 
         let slskd_browse =
             super::route_http_request("GET", "/api/users/friend/browse", None, "", &state)
@@ -48629,6 +48673,7 @@ mod tests {
             ),
         ] {
             let (state, receiver) = test_state();
+            state.session.write().await.state = "connected";
             drop(receiver);
 
             let response = super::route_http_request("POST", path, None, body, &state)
@@ -48669,6 +48714,7 @@ mod tests {
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
+            state.session.write().await.state = "connected";
             let previous = state.browse.read().await.clone();
             db.close_for_test().await;
 
@@ -48790,6 +48836,7 @@ mod tests {
     #[tokio::test]
     async fn slskd_browse_status_tracks_request_failure_and_completion() {
         let (state, _receiver) = test_state();
+        state.session.write().await.state = "connected";
 
         let requested = super::route_http_request(
             "POST",
@@ -48864,6 +48911,7 @@ mod tests {
     #[tokio::test]
     async fn browse_cancel_route_preserves_terminal_status_projection() {
         let (state, _receiver) = test_state();
+        state.session.write().await.state = "connected";
 
         super::route_http_request(
             "POST",
@@ -52588,7 +52636,14 @@ mod tests {
         assert_eq!(projection["endedAt"], "104");
         assert_eq!(projection["averageSpeed"], 50.0);
         assert_eq!(projection["elapsedTime"], "00:00:04");
-        assert_eq!(projection["remainingTime"], "00:00:02");
+        assert_eq!(projection["remainingTime"], "");
+
+        entry.status = "in_progress".to_owned();
+        entry.bytes_transferred = 500;
+        let overrun = entry.slskd_file_json();
+        assert_eq!(overrun["percentComplete"], 100.0);
+        assert_eq!(overrun["bytesRemaining"], 0);
+        assert_eq!(overrun["remainingTime"], "");
 
         let encoded = serde_json::to_value(&*entry).unwrap();
         let mut legacy = encoded.as_object().unwrap().clone();
