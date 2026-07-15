@@ -228,11 +228,12 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
         let Some(colon_idx) = header_line.find(':') else {
             return Err("malformed HTTP header".to_string());
         };
-        let name = header_line[..colon_idx].trim().to_lowercase();
-        let value = header_line[colon_idx + 1..].trim();
-        if !is_http_token(&name) {
+        let raw_name = &header_line[..colon_idx];
+        if !is_http_token(raw_name) {
             return Err("invalid HTTP header name".to_string());
         }
+        let name = raw_name.to_lowercase();
+        let value = header_line[colon_idx + 1..].trim();
         if value.chars().any(|ch| ch.is_control() && ch != '\t') {
             return Err("invalid HTTP header value".to_string());
         }
@@ -872,6 +873,20 @@ mod tests {
         let mut reader = BufReader::new(server);
         let err = read_http_request(&mut reader).await.unwrap_err();
         assert!(err.contains("malformed HTTP header"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_whitespace_before_header_colon_rejected() {
+        for request in [
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length : 5\r\n\r\nhello".as_slice(),
+            b"GET / HTTP/1.1\r\nHost : localhost\r\n\r\n".as_slice(),
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            client.write_all(request).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("header name"), "{error}");
+        }
     }
 
     #[tokio::test]
