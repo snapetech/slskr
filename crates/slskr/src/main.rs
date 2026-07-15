@@ -5463,6 +5463,7 @@ impl MessageRecord {
     fn slskd_json(&self) -> serde_json::Value {
         serde_json::json!({
             "timestamp": self.created_at.to_string(),
+            "createdAtMs": self.created_at_ms,
             "id": self.id,
             "username": self.username,
             "direction": if self.direction == "inbound" { "In" } else { "Out" },
@@ -5520,6 +5521,13 @@ impl MessageStore {
             .collect();
         store.records.sort_by_key(|record| record.id);
         store.records.dedup_by_key(|record| record.id);
+        let mut previous_created_at_ms = 0_u64;
+        for record in &mut store.records {
+            record.created_at_ms = record
+                .created_at_ms
+                .max(previous_created_at_ms.saturating_add(1));
+            previous_created_at_ms = record.created_at_ms;
+        }
         if store.records.len() > store.max_records {
             let excess = store.records.len() - store.max_records;
             store.records.drain(0..excess);
@@ -5542,7 +5550,14 @@ impl MessageStore {
 
     fn add(&mut self, username: String, direction: &'static str, body: String) -> MessageRecord {
         let now = unix_timestamp();
-        let now_ms = unix_timestamp_millis();
+        let now_ms = unix_timestamp_millis().max(
+            self.records
+                .iter()
+                .map(|record| record.created_at_ms)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
+        );
         let id = self.allocate_id();
         let record = MessageRecord {
             id,
@@ -5922,6 +5937,7 @@ impl RoomMessageRecord {
         serde_json::json!({
             "id": self.id.to_string(),
             "timestamp": self.created_at.to_string(),
+            "createdAtMs": self.created_at_ms,
             "username": self.username,
             "message": self.body,
             "roomName": room_name,
@@ -6199,7 +6215,15 @@ impl RoomStore {
             self.evict_oldest_message()?;
         }
         let now = unix_timestamp();
-        let now_ms = unix_timestamp_millis();
+        let now_ms = unix_timestamp_millis().max(
+            self.records
+                .iter()
+                .flat_map(|record| record.messages.iter())
+                .map(|message| message.created_at_ms)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
+        );
         let id = self.allocate_message_id();
         let record = &mut self.records[record_index];
         record.messages.push(RoomMessageRecord {
@@ -21362,6 +21386,137 @@ async fn route_http_request_with_headers(
 
         ("GET", "/api/fairness") | ("GET", "/api/ranking") => {
             Ok(native_compat_response(method, path, state).await)
+        }
+
+        ("GET", "/api/port-forwarding/status") => {
+            Ok(routing::ok_response("[]".to_owned()))
+        }
+
+        ("GET", path) if path.starts_with("/api/port-forwarding/status/") => {
+            let Some(local_port) = path_segment_after(path, "/api/port-forwarding/status/") else {
+                return Ok(routing::not_found_response());
+            };
+            if local_port.parse::<u16>().is_err() || local_port == "0" {
+                return Ok(routing::not_found_response());
+            }
+            Ok(routing::not_found_response())
+        }
+
+        ("GET", "/api/port-forwarding/available-ports") => {
+            let start_port = match query_bounded_usize(route.query, "startPort", 1, 65_535) {
+                Ok(value) => value.unwrap_or(1_024),
+                Err(()) => {
+                    return Ok(routing::bad_request_response("Invalid port range"));
+                }
+            };
+            let end_port = match query_bounded_usize(route.query, "endPort", 1, 65_535) {
+                Ok(value) => value.unwrap_or(65_535),
+                Err(()) => {
+                    return Ok(routing::bad_request_response("Invalid port range"));
+                }
+            };
+            if start_port > end_port {
+                return Ok(routing::bad_request_response("Invalid port range"));
+            }
+            let limit = match query_bounded_usize(route.query, "limit", 1, 1_000) {
+                Ok(value) => value,
+                Err(()) => {
+                    return Ok(routing::bad_request_response(
+                        "Limit must be between 1 and 1000",
+                    ));
+                }
+            };
+            let available_port_count = end_port - start_port + 1;
+            let returned_port_count = limit.unwrap_or(available_port_count).min(available_port_count);
+            let available_ports = (start_port..=end_port)
+                .take(returned_port_count)
+                .collect::<Vec<_>>();
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "availablePortCount": available_port_count,
+                    "availablePorts": available_ports,
+                    "usedPortCount": 0,
+                })
+                .to_string(),
+            ))
+        }
+
+        ("GET", "/api/port-forwarding/stream-stats") => {
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "totalForwardingRules": 0,
+                    "activeRules": 0,
+                    "totalConnections": 0,
+                    "totalBytesForwarded": 0,
+                    "rules": [],
+                })
+                .to_string(),
+            ))
+        }
+
+        ("POST", "/api/port-forwarding/start") => {
+            let request = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(value) if value.is_object() => value,
+                _ => return Ok(routing::bad_request_response("Request is required")),
+            };
+            let local_port = request.get("localPort").and_then(serde_json::Value::as_u64);
+            let destination_port = request
+                .get("destinationPort")
+                .and_then(serde_json::Value::as_u64);
+            let pod_id = request
+                .get("podId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            let destination_host = request
+                .get("destinationHost")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            let service_name = request
+                .get("serviceName")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim);
+            if !matches!(local_port, Some(1_024..=65_535)) {
+                return Ok(routing::bad_request_response(
+                    "Local port must be between 1024 and 65535",
+                ));
+            }
+            if pod_id.is_empty() || pod_id.len() > 100 {
+                return Ok(routing::bad_request_response(
+                    "PodId must be between 1 and 100 characters",
+                ));
+            }
+            if destination_host.is_empty() || destination_host.len() > 253 {
+                return Ok(routing::bad_request_response(
+                    "Destination host must be between 1 and 253 characters",
+                ));
+            }
+            if !matches!(destination_port, Some(1..=65_535)) {
+                return Ok(routing::bad_request_response(
+                    "Destination port must be between 1 and 65535",
+                ));
+            }
+            if service_name.is_some_and(|value| value.len() > 100) {
+                return Ok(routing::bad_request_response(
+                    "Service name must be at most 100 characters",
+                ));
+            }
+            Ok(routing::service_unavailable_response(
+                "Pod private-gateway tunnel transport is unavailable",
+            ))
+        }
+
+        ("POST", path) if path.starts_with("/api/port-forwarding/stop/") => {
+            let Some(local_port) = path_segment_after(path, "/api/port-forwarding/stop/") else {
+                return Ok(routing::not_found_response());
+            };
+            if local_port.parse::<u16>().is_err() || local_port == "0" {
+                return Ok(routing::not_found_response());
+            }
+            Ok(routing::ok_response(
+                r#"{"message":"Port forwarding stopped"}"#.to_owned(),
+            ))
         }
 
         ("GET", "/api/portforwarding/status") => {
@@ -36823,6 +36978,7 @@ mod tests {
             let mut messages = state.messages.write().await;
             messages.add("friend".to_owned(), "inbound", "old".to_owned());
             messages.add("friend".to_owned(), "inbound", "new".to_owned());
+            assert!(messages.records[1].created_at_ms > messages.records[0].created_at_ms);
             messages.records[0].created_at_ms = 1_000;
             messages.records[1].created_at_ms = 2_000;
         }
@@ -36839,6 +36995,7 @@ mod tests {
         assert_eq!(conversation["unAcknowledgedMessageCount"], 2);
         assert_eq!(conversation["messages"].as_array().unwrap().len(), 1);
         assert_eq!(conversation["messages"][0]["message"], "new");
+        assert_eq!(conversation["messages"][0]["createdAtMs"], 2_000);
 
         {
             let mut rooms = state.rooms.write().await;
@@ -36854,6 +37011,7 @@ mod tests {
                 .iter_mut()
                 .find(|room| room.name == "music")
                 .unwrap();
+            assert!(room.messages[1].created_at_ms > room.messages[0].created_at_ms);
             room.messages[0].created_at_ms = 1_000;
             room.messages[1].created_at_ms = 2_000;
         }
@@ -36870,6 +37028,7 @@ mod tests {
         assert_eq!(room.as_array().unwrap().len(), 1);
         assert_eq!(room[0]["message"], "new");
         assert!(room[0]["id"].as_str().is_some());
+        assert_eq!(room[0]["createdAtMs"], 2_000);
 
         for path in [
             "/api/transfers/changes?since=-1",
@@ -36995,6 +37154,79 @@ mod tests {
                 .expect("invalid swarm analytics query");
             assert_eq!(response.status, "400 Bad Request", "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn port_forwarding_reads_are_bounded_and_mutations_fail_truthfully() {
+        let (state, _receiver) = test_state();
+
+        let status =
+            super::route_http_request("GET", "/api/v0/port-forwarding/status", None, "", &state)
+                .await
+                .expect("port forwarding status");
+        assert_eq!(status.status, "200 OK");
+        assert_eq!(status.body, "[]");
+
+        let available = super::route_http_request(
+            "GET",
+            "/api/v0/port-forwarding/available-ports?startPort=2000&endPort=2010&limit=3",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("available port page");
+        let available = serde_json::from_str::<serde_json::Value>(&available.body).unwrap();
+        assert_eq!(available["availablePortCount"], 11);
+        assert_eq!(available["usedPortCount"], 0);
+        assert_eq!(
+            available["availablePorts"],
+            serde_json::json!([2000, 2001, 2002])
+        );
+
+        let stats =
+            super::route_http_request("GET", "/api/port-forwarding/stream-stats", None, "", &state)
+                .await
+                .expect("port forwarding stream stats");
+        let stats = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats["totalForwardingRules"], 0);
+        assert_eq!(stats["rules"], serde_json::json!([]));
+
+        for path in [
+            "/api/port-forwarding/available-ports?startPort=0",
+            "/api/port-forwarding/available-ports?startPort=3000&endPort=2000",
+            "/api/port-forwarding/available-ports?limit=0",
+            "/api/port-forwarding/available-ports?limit=1001",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("invalid port forwarding query");
+            assert_eq!(response.status, "400 Bad Request", "{path}");
+        }
+
+        let missing =
+            super::route_http_request("GET", "/api/port-forwarding/status/2000", None, "", &state)
+                .await
+                .expect("missing port forwarding status");
+        assert_eq!(missing.status, "404 Not Found");
+
+        let start = super::route_http_request(
+            "POST",
+            "/api/v0/port-forwarding/start",
+            None,
+            r#"{"localPort":2000,"podId":"pod-1","destinationHost":"service","destinationPort":80}"#,
+            &state,
+        )
+        .await
+        .expect("unsupported port forwarding start");
+        assert_eq!(start.status, "503 Service Unavailable");
+        assert!(start.body.contains("private-gateway"));
+
+        let stop =
+            super::route_http_request("POST", "/api/port-forwarding/stop/2000", None, "", &state)
+                .await
+                .expect("idempotent port forwarding stop");
+        assert_eq!(stop.status, "200 OK");
     }
 
     fn test_capability_descriptor(
@@ -52521,20 +52753,30 @@ mod tests {
         assert!(live.username.is_char_boundary(live.username.len()));
         assert_eq!(live.body.len(), super::MAX_MESSAGE_BODY_BYTES);
 
-        let rehydrated =
-            super::MessageStore::from_persisted(vec![super::persistence::MessageRecord {
+        let rehydrated = super::MessageStore::from_persisted(vec![
+            super::persistence::MessageRecord {
                 id: "1".to_owned(),
+                username: oversized_username.clone(),
+                content: oversized_body.clone(),
+                direction: "incoming".to_owned(),
+                read: false,
+                created_at: 1,
+            },
+            super::persistence::MessageRecord {
+                id: "2".to_owned(),
                 username: oversized_username,
                 content: oversized_body,
                 direction: "incoming".to_owned(),
                 read: false,
                 created_at: 1,
-            }]);
+            },
+        ]);
         assert!(rehydrated.records[0].username.len() <= super::MAX_MESSAGE_USERNAME_BYTES);
         assert_eq!(
             rehydrated.records[0].body.len(),
             super::MAX_MESSAGE_BODY_BYTES
         );
+        assert!(rehydrated.records[1].created_at_ms > rehydrated.records[0].created_at_ms);
     }
 
     #[tokio::test]
