@@ -19396,6 +19396,7 @@ const SLSKD_STORAGE_DIRECT_LIST_MAX_ENTRIES: usize = 4_096;
 const SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES: usize = 256;
 const SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES: usize = 1_024;
 const SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES: usize = 16_384;
+const SLSKD_STORAGE_MAX_RECURSION_DEPTH: usize = 24;
 const STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR: &str = "storage directory entry limit exceeded";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19518,6 +19519,7 @@ fn slskd_storage_directory_value(
     directory: &Path,
     state: &mut StorageDirectoryListState,
     top_level: bool,
+    depth: usize,
 ) -> Result<serde_json::Value, String> {
     let relative = directory
         .strip_prefix(root)
@@ -19573,8 +19575,14 @@ fn slskd_storage_directory_value(
         if metadata.is_file() {
             files.push(slskd_storage_file_json(&path, root));
         } else if metadata.is_dir() {
-            if state.options.recursive {
-                directories.push(slskd_storage_directory_value(root, &path, state, false)?);
+            if state.options.recursive && depth < SLSKD_STORAGE_MAX_RECURSION_DEPTH {
+                directories.push(slskd_storage_directory_value(
+                    root,
+                    &path,
+                    state,
+                    false,
+                    depth + 1,
+                )?);
             } else {
                 let child_relative = path
                     .strip_prefix(root)
@@ -19583,6 +19591,9 @@ fn slskd_storage_directory_value(
                     .unwrap_or_default()
                     .replace('\\', "/");
                 directories.push(slskd_empty_directory_json(&child_relative));
+                if state.options.recursive {
+                    state.truncated = true;
+                }
             }
         }
     }
@@ -19644,7 +19655,8 @@ fn slskd_storage_directory_json(
             return Err("path escapes the storage root".to_owned());
         }
         let mut state = StorageDirectoryListState::new(options);
-        slskd_storage_directory_value(root, &path, &mut state, true).map(|value| value.to_string())
+        slskd_storage_directory_value(root, &path, &mut state, true, 0)
+            .map(|value| value.to_string())
     }
 }
 
@@ -19672,7 +19684,7 @@ fn slskd_storage_directory_json_unix(
         };
     }
     let mut state = StorageDirectoryListState::new(options);
-    slskd_storage_directory_value_unix(root, relative, &directory, &mut state, true)
+    slskd_storage_directory_value_unix(root, relative, &directory, &mut state, true, 0)
         .map(|value| value.to_string())
 }
 
@@ -19683,6 +19695,7 @@ fn slskd_storage_directory_value_unix(
     directory: &impl std::os::fd::AsFd,
     state: &mut StorageDirectoryListState,
     top_level: bool,
+    depth: usize,
 ) -> Result<serde_json::Value, String> {
     use rustix::fs::{openat, Dir, Mode, OFlags};
     use std::os::unix::ffi::OsStrExt;
@@ -19726,18 +19739,22 @@ fn slskd_storage_directory_value_unix(
         let name_os = std::ffi::OsStr::from_bytes(name.to_bytes());
         let child_relative = relative.join(name_os);
         if let Some(child) = child_directory {
-            if state.options.recursive {
+            if state.options.recursive && depth < SLSKD_STORAGE_MAX_RECURSION_DEPTH {
                 directories.push(slskd_storage_directory_value_unix(
                     root,
                     &child_relative,
                     &child,
                     state,
                     false,
+                    depth + 1,
                 )?);
             } else {
                 directories.push(slskd_empty_directory_json(
                     &child_relative.to_string_lossy().replace('\\', "/"),
                 ));
+                if state.options.recursive {
+                    state.truncated = true;
+                }
             }
             continue;
         }
@@ -30069,6 +30086,51 @@ mod tests {
             super::SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES
         );
         assert_eq!(json["truncated"], true);
+    }
+
+    #[test]
+    fn slskd_recursive_storage_listing_bounds_directory_depth() {
+        let (state, _receiver) = test_state();
+        let root = state.config.state_dir.join("deep-storage-listing");
+        let mut directory = root.clone();
+        let mut relative = PathBuf::new();
+        for depth in 0..(super::SLSKD_STORAGE_MAX_RECURSION_DEPTH + 3) {
+            let component = format!("d{depth:02}");
+            directory.push(&component);
+            relative.push(component);
+            std::fs::create_dir_all(&directory).unwrap();
+        }
+
+        let json = super::slskd_storage_directory_json(
+            &root,
+            None,
+            super::StorageDirectoryListOptions {
+                recursive: true,
+                limit: super::SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES,
+                offset: 0,
+            },
+        )
+        .and_then(|json| {
+            serde_json::from_str::<serde_json::Value>(&json).map_err(|error| error.to_string())
+        })
+        .expect("deep listing");
+        assert_eq!(json["truncated"], true);
+
+        let included = relative
+            .components()
+            .take(super::SLSKD_STORAGE_MAX_RECURSION_DEPTH + 1)
+            .collect::<PathBuf>()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let excluded = relative
+            .components()
+            .take(super::SLSKD_STORAGE_MAX_RECURSION_DEPTH + 2)
+            .collect::<PathBuf>()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let serialized = json.to_string();
+        assert!(serialized.contains(&included), "{included}");
+        assert!(!serialized.contains(&excluded), "{excluded}");
     }
 
     #[tokio::test]
