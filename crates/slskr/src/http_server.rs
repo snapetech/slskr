@@ -179,7 +179,7 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
     if !matches!(http_version, "HTTP/1.0" | "HTTP/1.1") {
         return Err("unsupported HTTP version".into());
     }
-    if !(request_target.starts_with('/') || request_target == "*") {
+    if !valid_request_target(&method, request_target) {
         return Err("unsupported request target".into());
     }
 
@@ -423,6 +423,58 @@ fn is_http_token(value: &str) -> bool {
                     | b'a'..=b'z'
             )
         })
+}
+
+fn valid_request_target(method: &str, target: &str) -> bool {
+    if target == "*" {
+        return method == "OPTIONS";
+    }
+    if !target.starts_with('/') {
+        return false;
+    }
+
+    let bytes = target.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'%' {
+            if bytes
+                .get(index + 1..index + 3)
+                .is_none_or(|digits| !digits.iter().all(u8::is_ascii_hexdigit))
+            {
+                return false;
+            }
+            index += 3;
+            continue;
+        }
+        if !(byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'.'
+                    | b'_'
+                    | b'~'
+                    | b'!'
+                    | b'$'
+                    | b'&'
+                    | b'\''
+                    | b'('
+                    | b')'
+                    | b'*'
+                    | b'+'
+                    | b','
+                    | b';'
+                    | b'='
+                    | b':'
+                    | b'@'
+                    | b'/'
+                    | b'?'
+            ))
+        {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 async fn read_limited_line<R: AsyncBufRead + Unpin>(
@@ -877,6 +929,38 @@ mod tests {
         let mut reader = BufReader::new(server);
         let err = read_http_request(&mut reader).await.unwrap_err();
         assert!(err.contains("request target"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_ambiguous_request_targets_are_rejected() {
+        for target in [
+            "/api\\health",
+            "/api/health#fragment",
+            "/api/health%",
+            "/api/health%2",
+            "/api/health%GG",
+            "/api/\0health",
+            "/api/❤",
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            client.write_all(request.as_bytes()).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("request target"), "{target:?}: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_asterisk_request_target_is_options_only() {
+        for (method, accepted) in [("OPTIONS", true), ("GET", false)] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!("{method} * HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            client.write_all(request.as_bytes()).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let result = read_http_request(&mut reader).await;
+            assert_eq!(result.is_ok(), accepted, "{method}: {result:?}");
+        }
     }
 
     #[tokio::test]
