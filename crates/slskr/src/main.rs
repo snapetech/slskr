@@ -7090,7 +7090,7 @@ impl ShareGrantRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ShareGrantStore {
     records: Vec<ShareGrantRecord>,
     next_id: u64,
@@ -13053,12 +13053,17 @@ async fn route_http_request_with_headers(
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
             let mut grants = state.share_grants.write().await;
+            let previous = grants.clone();
             let deleted = grants.delete(id);
-            drop(grants);
             if deleted {
-                persist_share_grant_delete(state, id).await;
+                if let Err(error) = persist_share_grant_delete_checked(state, id).await {
+                    *grants = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
+                drop(grants);
                 Ok(routing::ok_response("{}".to_string()))
             } else {
+                drop(grants);
                 Ok(routing::not_found_response())
             }
         }
@@ -23510,9 +23515,17 @@ async fn persist_share_grant(state: &AppState, record: &ShareGrantRecord) {
 }
 
 async fn persist_share_grant_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_share_grant(id).await;
-    }
+    let _ = persist_share_grant_delete_checked(state, id).await;
+}
+
+async fn persist_share_grant_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_share_grant(id)
+        .await
+        .map_err(|error| format!("share grant revocation persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_share_group(state: &AppState, record: &ShareGroupRecord) {
@@ -35914,6 +35927,35 @@ mod tests {
         .unwrap();
         assert_eq!(deleted.status, "200 OK");
         assert!(state.share_grants.read().await.records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn share_grant_revocation_rolls_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        state
+            .share_grants
+            .write()
+            .await
+            .create("private-collection".to_owned(), "friend".to_owned())
+            .expect("grant");
+        db.close_for_test().await;
+
+        let response =
+            super::route_http_request("DELETE", "/api/share-grants/grant-1", None, "", &state)
+                .await
+                .expect("failed persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response
+            .body
+            .contains("share grant revocation persistence failed"));
+        assert!(state.share_grants.read().await.get("grant-1").is_some());
     }
 
     #[tokio::test]
