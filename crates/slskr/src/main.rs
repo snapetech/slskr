@@ -1246,14 +1246,21 @@ impl SearchStore {
         Some((record.clone(), transitioned))
     }
 
-    fn set_status_by_token(&mut self, token: u32, status: &'static str) -> Option<SearchRecord> {
+    fn set_status_by_token(
+        &mut self,
+        token: u32,
+        status: &'static str,
+    ) -> Option<(SearchRecord, bool)> {
         let record = self
             .records
             .iter_mut()
             .find(|record| record.token == token)?;
+        let transitioned = record.status != status;
         record.status = status;
-        record.updated_at = unix_timestamp();
-        Some(record.clone())
+        if transitioned {
+            record.updated_at = unix_timestamp();
+        }
+        Some((record.clone(), transitioned))
     }
 
     fn update_by_identifier(
@@ -11414,11 +11421,13 @@ async fn route_http_request_with_headers(
                     return Ok(routing::not_found_response());
                 };
             let mut searches = state.searches.write().await;
-            if let Some(record) = searches.set_status_by_token(token, status) {
+            if let Some((record, transitioned)) = searches.set_status_by_token(token, status) {
                 let body_json = record.json();
                 drop(searches);
-                persist_search_record(state, &record).await?;
-                record_event(state, event_kind, token.to_string(), None).await;
+                if transitioned {
+                    persist_search_record(state, &record).await?;
+                    record_event(state, event_kind, token.to_string(), None).await;
+                }
                 Ok(routing::ok_response(body_json))
             } else {
                 drop(searches);
@@ -38436,6 +38445,14 @@ mod tests {
             assert_eq!(json["state"], state_name);
             assert_eq!(json["isComplete"], true);
         }
+
+        let event_count = state.events.read().await.records.len();
+        let repeated =
+            super::route_http_request("POST", "/api/v0/searches/1/cancel", None, "", &state)
+                .await
+                .expect("repeat cancelled search action");
+        assert_eq!(repeated.status, "200 OK");
+        assert_eq!(state.events.read().await.records.len(), event_count);
 
         let listed = super::route_http_request(
             "GET",
