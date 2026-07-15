@@ -899,15 +899,17 @@ async fn negotiate_download_size(
             PeerMessage::TransferResponse(TransferResponse::Rejected { token: got, reason }) => {
                 if got != token {
                     return Err(format!(
-                        "download transfer rejection token mismatch: expected {token}, received {got}; reason={reason}"
+                        "download transfer rejection token mismatch: expected {token}, received {got}; reason={}",
+                        redact_peer_text(&reason)
                     ));
                 }
                 let queued = reason.eq_ignore_ascii_case("queued")
                     || reason.to_ascii_lowercase().contains("queue");
-                last_rejection = Some(reason.clone());
+                last_rejection = Some(redact_peer_text(&reason));
                 if !queued || attempt == attempts {
                     return Err(format!(
-                        "download transfer rejected; token={got}; reason={reason}; filename={filename}; attempt={attempt}/{attempts}"
+                        "download transfer rejected; token={got}; reason={}; filename={filename}; attempt={attempt}/{attempts}",
+                        redact_peer_text(&reason)
                     ));
                 }
                 time::sleep(delay).await;
@@ -923,7 +925,8 @@ async fn negotiate_download_size(
             }
             other => {
                 return Err(format!(
-                    "unexpected download negotiation response: {other:?}"
+                    "unexpected download negotiation response: {}",
+                    peer_message_name(&other)
                 ))
             }
         }
@@ -1099,7 +1102,10 @@ async fn wait_for_queued_transfer_request(
                         if reason.eq_ignore_ascii_case("queued") || reason.to_ascii_lowercase().contains("queue") {
                             queued_seen = true;
                         } else {
-                            return Err(format!("queued download rejected; token={got}; reason={reason}; filename={filename}"));
+                            return Err(format!(
+                                "queued download rejected; token={got}; reason={}; filename={filename}",
+                                redact_peer_text(&reason)
+                            ));
                         }
                     }
                     PeerMessage::PlaceInQueueResponse { filename: got_filename, place } if got_filename == filename => {
@@ -1107,7 +1113,10 @@ async fn wait_for_queued_transfer_request(
                         println!("queued download place={place}; filename={filename}");
                     }
                     other => {
-                        println!("queued download ignored peer message: {other:?}");
+                        println!(
+                            "queued download ignored peer message: {}",
+                            peer_message_name(&other)
+                        );
                     }
                 }
             }
@@ -1121,7 +1130,10 @@ async fn wait_for_queued_transfer_request(
                         let size = size.ok_or_else(|| "queued inbound transfer request did not include size".to_owned())?;
                         return Ok((token, size, inbound));
                     }
-                    other => return Err(format!("queued download unexpected inbound message: {other:?}")),
+                    other => return Err(format!(
+                        "queued download unexpected inbound message: {}",
+                        peer_message_name(&other)
+                    )),
                 }
             }
             receive_result = session.receive() => {
@@ -1240,7 +1252,7 @@ async fn classify_queued_file_stream(
             println!("queued download file stream classified as peer-init");
             Ok((FileTransferConnection::new(stream), false))
         }
-        other => Err(format!("queued download file unexpected init: {other:?}")),
+        _ => Err("queued download file received unexpected init message".to_owned()),
     }
 }
 
@@ -1853,7 +1865,12 @@ async fn transfer_resume_smoke() -> Result<(), String> {
                 filename,
                 ..
             }) if filename == server_filename => token,
-            other => return Err(format!("resume unexpected request: {other:?}")),
+            other => {
+                return Err(format!(
+                    "resume unexpected request: {}",
+                    peer_message_name(&other)
+                ))
+            }
         };
         peer.send(&PeerMessage::TransferResponse(TransferResponse::Allowed {
             token,
@@ -1912,7 +1929,12 @@ async fn transfer_resume_smoke() -> Result<(), String> {
             token: got,
             size: Some(size),
         }) if got == token && size as usize == full_size => {}
-        other => return Err(format!("resume unexpected response: {other:?}")),
+        other => {
+            return Err(format!(
+                "resume unexpected response: {}",
+                peer_message_name(&other)
+            ))
+        }
     }
 
     let mut file =
@@ -1991,7 +2013,12 @@ async fn transfer_reject_smoke() -> Result<(), String> {
                 filename,
                 ..
             }) if filename == server_filename => token,
-            other => return Err(format!("reject unexpected request: {other:?}")),
+            other => {
+                return Err(format!(
+                    "reject unexpected request: {}",
+                    peer_message_name(&other)
+                ))
+            }
         };
         peer.send(&PeerMessage::TransferResponse(TransferResponse::Rejected {
             token,
@@ -2030,7 +2057,10 @@ async fn transfer_reject_smoke() -> Result<(), String> {
         PeerMessage::TransferResponse(TransferResponse::Allowed { .. }) => {
             ctx.fail("expected rejection but got allowed")
         }
-        other => ctx.fail(format!("unexpected response: {other:?}")),
+        other => ctx.fail(format!(
+            "unexpected response: {}",
+            peer_message_name(&other)
+        )),
     };
 
     let _ = server_task
@@ -2143,7 +2173,12 @@ async fn run_fixture_download_smoke(
                 filename,
                 ..
             }) if direction == 0 && filename == server_filename => token,
-            other => return Err(format!("fixture download unexpected request: {other:?}")),
+            other => {
+                return Err(format!(
+                    "fixture download unexpected request: {}",
+                    peer_message_name(&other)
+                ))
+            }
         };
         peer.send(&PeerMessage::TransferResponse(TransferResponse::Allowed {
             token,
@@ -2200,7 +2235,12 @@ async fn run_fixture_download_smoke(
             token: got,
             size: Some(size),
         }) if got == token && size == expected_size => {}
-        other => return Err(format!("fixture download unexpected response: {other:?}")),
+        other => {
+            return Err(format!(
+                "fixture download unexpected response: {}",
+                peer_message_name(&other)
+            ))
+        }
     }
 
     let mut file =
@@ -3454,7 +3494,10 @@ async fn handle_live_soak_connect_to_peer_response(
                 })?;
             }
             other => {
-                return Err(format!("unexpected live soak indirect response: {other:?}"));
+                return Err(format!(
+                    "unexpected live soak indirect response: {}",
+                    peer_message_name(&other)
+                ));
             }
         }
     } else if kind == ConnectionKind::Distributed {
@@ -3886,6 +3929,14 @@ fn redact_path(path: &str) -> String {
     }
 }
 
+fn redact_peer_text(value: &str) -> String {
+    if value.is_empty() {
+        "<empty>".to_owned()
+    } else {
+        format!("len{}", value.chars().count())
+    }
+}
+
 fn peer_close_reason(error: &str) -> &'static str {
     if error.contains("Connection reset by peer") {
         "connection reset by peer"
@@ -4032,8 +4083,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        incoming_connection_name, normalize_command, peer_probe_messages, scrub_socket_addr,
-        validated_duration_secs,
+        incoming_connection_name, normalize_command, peer_probe_messages, redact_peer_text,
+        scrub_socket_addr, validated_duration_secs,
     };
     use slskr_client::{
         listener::IncomingConnection, protocol::server::ServerMessage,
@@ -4084,6 +4135,13 @@ mod tests {
     fn scrub_socket_addr_hides_host_address() {
         let address = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 10), 2234));
         assert_eq!(scrub_socket_addr(address), "ipv4:2234");
+    }
+
+    #[test]
+    fn peer_text_redaction_removes_terminal_controls() {
+        let redacted = redact_peer_text("rejected\n\x1b[31mforged");
+        assert_eq!(redacted, "len20");
+        assert!(!redacted.chars().any(char::is_control));
     }
 
     #[test]
