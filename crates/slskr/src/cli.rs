@@ -168,7 +168,7 @@ async fn peer_address_probe() -> Result<(), String> {
     let peer_username = required_env_any(&["SLSK_PEER_USERNAME", "SLSK_OBFUSCATED_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_PEER_ADDRESS_PROBE_TIMEOUT_SECONDS", 10)?);
+    let timeout = env_duration_secs("SLSK_PEER_ADDRESS_PROBE_TIMEOUT_SECONDS", 10, false)?;
     let attempts = env_usize("SLSK_PEER_ADDRESS_PROBE_ATTEMPTS", 5)?;
 
     let ctx = ProbeContext::new("peer-address").with_peer(&peer_username);
@@ -259,7 +259,7 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
     let peer_username = required_env_any(&["SLSK_OBFUSCATED_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_OBFUSCATED_PROBE_TIMEOUT_SECONDS", 15)?);
+    let timeout = env_duration_secs("SLSK_OBFUSCATED_PROBE_TIMEOUT_SECONDS", 15, false)?;
 
     let attempts = env_usize("SLSK_OBFUSCATED_PEER_ADDRESS_ATTEMPTS", 5)?;
     let mut last_error = None;
@@ -549,7 +549,7 @@ async fn plain_peer_probe() -> Result<(), String> {
     let peer_username = required_env_any(&["SLSK_PLAIN_PEER_USERNAME", "SLSK_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_PLAIN_PROBE_TIMEOUT_SECONDS", 15)?);
+    let timeout = env_duration_secs("SLSK_PLAIN_PROBE_TIMEOUT_SECONDS", 15, false)?;
 
     let connection = ServerConnection::connect(server_address.as_str())
         .await
@@ -615,7 +615,7 @@ async fn browse_peer_probe() -> Result<(), String> {
     let expected = optional_env("SLSK_BROWSE_EXPECTED");
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_BROWSE_PROBE_TIMEOUT_SECONDS", 20)?);
+    let timeout = env_duration_secs("SLSK_BROWSE_PROBE_TIMEOUT_SECONDS", 20, false)?;
 
     let address = resolve_peer_address(
         &username,
@@ -664,7 +664,7 @@ async fn search_peer_probe() -> Result<(), String> {
     let expected = optional_env("SLSK_SEARCH_EXPECTED").unwrap_or_else(|| query.clone());
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_SEARCH_PROBE_TIMEOUT_SECONDS", 20)?);
+    let timeout = env_duration_secs("SLSK_SEARCH_PROBE_TIMEOUT_SECONDS", 20, false)?;
     let token = env_u32("SLSK_SEARCH_TOKEN", 0x51ab_5001)?;
     let attempts = env_u32("SLSK_SEARCH_PROBE_ATTEMPTS", 1)?.max(1);
 
@@ -771,7 +771,7 @@ async fn download_peer_probe() -> Result<(), String> {
     let expected = optional_env("SLSK_DOWNLOAD_EXPECTED");
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_DOWNLOAD_PROBE_TIMEOUT_SECONDS", 30)?);
+    let timeout = env_duration_secs("SLSK_DOWNLOAD_PROBE_TIMEOUT_SECONDS", 30, false)?;
     let token = env_u32("SLSK_DOWNLOAD_TOKEN", 0x51ab_4001)?;
 
     if optional_env("SLSK_DOWNLOAD_LISTENER_BIND").is_some() {
@@ -855,7 +855,7 @@ async fn negotiate_download_size(
     filename: &str,
 ) -> Result<u64, String> {
     let attempts = env_usize("SLSK_DOWNLOAD_QUEUE_ATTEMPTS", 6)?;
-    let delay = Duration::from_secs(env_u64("SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS", 3)?);
+    let delay = env_duration_secs("SLSK_DOWNLOAD_QUEUE_RETRY_SECONDS", 3, true)?;
     let mut last_rejection = None;
 
     for attempt in 1..=attempts {
@@ -1273,7 +1273,7 @@ async fn handle_download_server_event(
             let host = optional_env("SLSK_DOWNLOAD_INDIRECT_HOST_OVERRIDE")
                 .unwrap_or_else(|| response.ip.to_string());
             let stream = time::timeout(
-                Duration::from_secs(env_u64("SLSK_DOWNLOAD_INDIRECT_TIMEOUT_SECONDS", 20)?),
+                env_duration_secs("SLSK_DOWNLOAD_INDIRECT_TIMEOUT_SECONDS", 20, false)?,
                 TcpStream::connect((host.as_str(), port)),
             )
             .await
@@ -1332,7 +1332,7 @@ async fn private_message_probe() -> Result<(), String> {
     let receiver_password = required_env_any(&["SLSK_MESSAGE_PASSWORD", "SLSK_PEER_PASSWORD"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_MESSAGE_PROBE_TIMEOUT_SECONDS", 20)?);
+    let timeout = env_duration_secs("SLSK_MESSAGE_PROBE_TIMEOUT_SECONDS", 20, false)?;
     let message = optional_env("SLSK_MESSAGE_BODY").unwrap_or_else(|| {
         format!(
             "slskr-private-message-probe-{}",
@@ -1385,7 +1385,7 @@ async fn room_message_probe() -> Result<(), String> {
     let password = required_env_any(&["SLSK_PASSWORD"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_ROOM_PROBE_TIMEOUT_SECONDS", 20)?);
+    let timeout = env_duration_secs("SLSK_ROOM_PROBE_TIMEOUT_SECONDS", 20, false)?;
     let room = optional_env("SLSK_ROOM_NAME").unwrap_or_else(|| "slskr-live-interop".to_owned());
     let message = optional_env("SLSK_ROOM_MESSAGE").unwrap_or_else(|| {
         format!(
@@ -1430,7 +1430,7 @@ async fn distributed_peer_probe() -> Result<(), String> {
         required_env_any(&["SLSK_DISTRIBUTED_PEER_USERNAME", "SLSK_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_DISTRIBUTED_PROBE_TIMEOUT_SECONDS", 15)?);
+    let timeout = env_duration_secs("SLSK_DISTRIBUTED_PROBE_TIMEOUT_SECONDS", 15, false)?;
 
     let ctx = ProbeContext::new("distributed-peer").with_peer(&peer_username);
 
@@ -1471,7 +1471,7 @@ async fn file_transfer_peer_probe() -> Result<(), String> {
     let peer_username = required_env_any(&["SLSK_FILE_PEER_USERNAME", "SLSK_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_FILE_PROBE_TIMEOUT_SECONDS", 15)?);
+    let timeout = env_duration_secs("SLSK_FILE_PROBE_TIMEOUT_SECONDS", 15, false)?;
 
     let ctx = ProbeContext::new("file-transfer-peer").with_peer(&peer_username);
 
@@ -1521,8 +1521,8 @@ async fn metadata_relogin_probe() -> Result<(), String> {
     let peer_username = required_env_any(&["SLSK_PEER_USERNAME", "SLSK_OBFUSCATED_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_METADATA_RELOGIN_TIMEOUT_SECONDS", 15)?);
-    let delay = Duration::from_secs(env_u64("SLSK_METADATA_RELOGIN_DELAY_SECONDS", 5)?);
+    let timeout = env_duration_secs("SLSK_METADATA_RELOGIN_TIMEOUT_SECONDS", 15, false)?;
+    let delay = env_duration_secs("SLSK_METADATA_RELOGIN_DELAY_SECONDS", 5, true)?;
 
     let before = resolve_peer_address(
         &username,
@@ -1560,7 +1560,7 @@ async fn negative_indirect_probe() -> Result<(), String> {
     let peer_username = required_env_any(&["SLSK_INDIRECT_PEER_USERNAME", "SLSK_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_NEGATIVE_INDIRECT_TIMEOUT_SECONDS", 20)?);
+    let timeout = env_duration_secs("SLSK_NEGATIVE_INDIRECT_TIMEOUT_SECONDS", 20, false)?;
 
     let connection = ServerConnection::connect(server_address.as_str())
         .await
@@ -1593,7 +1593,7 @@ async fn indirect_peer_probe() -> Result<(), String> {
     let peer_username = required_env_any(&["SLSK_INDIRECT_PEER_USERNAME", "SLSK_PEER_USERNAME"])?;
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSK_INDIRECT_PROBE_TIMEOUT_SECONDS", 20)?);
+    let timeout = env_duration_secs("SLSK_INDIRECT_PROBE_TIMEOUT_SECONDS", 20, false)?;
     let listener_bind =
         std::env::var("SLSK_INDIRECT_LISTENER_BIND").unwrap_or_else(|_| "0.0.0.0:0".to_owned());
 
@@ -1793,7 +1793,7 @@ async fn fixture_peer_smoke() -> Result<(), String> {
         .unwrap_or_else(|| "slskr-fixture-peer".to_owned());
     let virtual_filename = optional_env("SLSKR_FIXTURE_PEER_VIRTUAL_FILENAME")
         .unwrap_or_else(|| "open-commons\\commons-click-track.ogg".to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10)?);
+    let timeout = env_duration_secs("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10, false)?;
 
     run_fixture_browse_smoke(&local_username, &virtual_filename, bytes.len(), timeout).await?;
     run_fixture_download_smoke(&local_username, &virtual_filename, bytes.clone(), timeout).await?;
@@ -1816,7 +1816,7 @@ async fn transfer_resume_smoke() -> Result<(), String> {
     let full_size = full_payload.len();
     let local_username = optional_env("SLSKR_FIXTURE_PEER_USERNAME")
         .unwrap_or_else(|| "slskr-transfer-resume".to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10)?);
+    let timeout = env_duration_secs("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10, false)?;
 
     let listener = Listener::bind("127.0.0.1:0")
         .await
@@ -1956,7 +1956,7 @@ async fn transfer_reject_smoke() -> Result<(), String> {
     let filename = "slskr\\probe\\reject_test.txt";
     let local_username = optional_env("SLSKR_FIXTURE_PEER_USERNAME")
         .unwrap_or_else(|| "slskr-transfer-reject".to_owned());
-    let timeout = Duration::from_secs(env_u64("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10)?);
+    let timeout = env_duration_secs("SLSKR_FIXTURE_PEER_TIMEOUT_SECONDS", 10, false)?;
 
     let listener = Listener::bind("127.0.0.1:0")
         .await
@@ -2405,6 +2405,8 @@ async fn live_soak() -> Result<(), String> {
     let watchdog_task = tokio::spawn(run_live_soak_server_watchdog(
         server_progress.clone(),
         config.duration,
+        config.watchdog_interval,
+        config.watchdog_stale_seconds,
     ));
     let server_result = run_server_soak(&mut session, &config, server_progress).await;
     watchdog_task.abort();
@@ -2453,7 +2455,7 @@ impl PeerSmokeConfig {
             indirect_listener_bind: std::env::var("SLSKR_INDIRECT_LISTENER_BIND")
                 .unwrap_or_else(|_| "0.0.0.0:0".to_owned()),
             indirect_host_override: optional_env("SLSKR_INDIRECT_HOST_OVERRIDE"),
-            indirect_timeout: Duration::from_secs(env_u64("SLSKR_INDIRECT_TIMEOUT_SECONDS", 10)?),
+            indirect_timeout: env_duration_secs("SLSKR_INDIRECT_TIMEOUT_SECONDS", 10, false)?,
         })
     }
 }
@@ -3130,6 +3132,8 @@ struct LiveSoakConfig {
     search_token: u32,
     shared_folders: u32,
     shared_files: u32,
+    watchdog_interval: Duration,
+    watchdog_stale_seconds: u64,
 }
 
 impl LiveSoakConfig {
@@ -3167,6 +3171,8 @@ impl LiveSoakConfig {
             search_token: env_u32("SLSK_SOAK_SEARCH_TOKEN", 1_000_001)?,
             shared_folders: env_u32("SLSK_SOAK_SHARED_FOLDERS", 0)?,
             shared_files: env_u32("SLSK_SOAK_SHARED_FILES", 0)?,
+            watchdog_interval: env_duration_secs("SLSK_SOAK_WATCHDOG_SECONDS", 120, false)?,
+            watchdog_stale_seconds: env_u64("SLSK_SOAK_WATCHDOG_STALE_SECONDS", 240)?,
         })
     }
 }
@@ -3235,14 +3241,17 @@ where
     Ok(())
 }
 
-async fn run_live_soak_server_watchdog(progress: Arc<AtomicU64>, duration: Duration) {
+async fn run_live_soak_server_watchdog(
+    progress: Arc<AtomicU64>,
+    duration: Duration,
+    interval: Duration,
+    stale_seconds: u64,
+) {
     let deadline = Instant::now() + duration;
-    let interval_seconds = env_u64("SLSK_SOAK_WATCHDOG_SECONDS", 120).unwrap_or(120);
-    let stale_seconds = env_u64("SLSK_SOAK_WATCHDOG_STALE_SECONDS", 240).unwrap_or(240);
     let mut last_reported = 0_u64;
 
     while Instant::now() < deadline {
-        time::sleep(Duration::from_secs(interval_seconds)).await;
+        time::sleep(interval).await;
         let now = unix_seconds();
         let last = progress.load(Ordering::Relaxed);
         let idle = now.saturating_sub(last);
@@ -3395,7 +3404,7 @@ async fn handle_live_soak_connect_to_peer_response(
     let kind = ConnectionKind::try_from_connection_type(&response.connection_type)
         .map_err(|error| format!("connect-to-peer response kind failed: {error}"))?;
 
-    let timeout = Duration::from_secs(env_u64("SLSK_SOAK_INDIRECT_TIMEOUT_SECONDS", 20)?);
+    let timeout = env_duration_secs("SLSK_SOAK_INDIRECT_TIMEOUT_SECONDS", 20, false)?;
     let host =
         optional_env("SLSK_SOAK_INDIRECT_HOST_OVERRIDE").unwrap_or_else(|| response.ip.to_string());
     let port = u16::try_from(response.port).map_err(|_| {
