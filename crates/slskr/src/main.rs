@@ -6412,7 +6412,7 @@ impl RuntimeCompatState {
         library_items: usize,
         shared_files: usize,
     ) -> Option<serde_json::Value> {
-        self.songid_runs = self.songid_runs.checked_add(1)?;
+        self.songid_runs = self.allocate_songid_run_id();
         self.updated_at = unix_timestamp();
         let match_count = matches.len();
         let record = serde_json::json!({
@@ -6431,6 +6431,20 @@ impl RuntimeCompatState {
         }
         self.songid_run_records.push(record.clone());
         Some(record)
+    }
+
+    fn allocate_songid_run_id(&self) -> u64 {
+        let mut candidate = self.songid_runs.wrapping_add(1).max(1);
+        for _ in 0..=self.songid_run_records.len() {
+            let id = format!("songid-{candidate}");
+            if !self.songid_run_records.iter().any(|record| {
+                record.get("id").and_then(serde_json::Value::as_str) == Some(id.as_str())
+            }) {
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded SongID run history must leave an available u64 id")
     }
 
     fn songid_run(&self, id: &str) -> Option<serde_json::Value> {
@@ -32249,6 +32263,13 @@ mod tests {
         assert_eq!(runtime.songid_run_records.len(), super::MAX_SONGID_RUNS);
         assert!(runtime.songid_run(&first_id).is_none());
         assert!(runtime.songid_run("songid-does-not-exist").is_none());
+
+        runtime.songid_runs = u64::MAX;
+        let wrapped = runtime.record_songid_run(Vec::new(), 0, 0).unwrap();
+        assert_eq!(wrapped["id"], "songid-1");
+        runtime.songid_runs = u64::MAX;
+        let collision_avoiding = runtime.record_songid_run(Vec::new(), 0, 0).unwrap();
+        assert_eq!(collision_avoiding["id"], "songid-2");
     }
 
     #[test]

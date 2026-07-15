@@ -155,6 +155,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | High | Browse indirect-token wraparound | Indirect browse fallback tokens wrapped without checking retained pending records, while failed lookups consumed tokens and persisted hydration allowed duplicate username projections. | Fixed with collision-aware nonzero token allocation, lookup-before-allocation, username-deduplicated hydration, and wraparound regression coverage. |
 | High | Bounded content ID exhaustion | User notes, interests, share grants, library items, and library health scans used checked increment as allocation, so a persisted maximum ID permanently rejected new records despite free IDs. | Fixed with collision-aware nonzero allocation across all five stores and maximum/wrap regression and gate coverage. |
 | High | Collection and wishlist ID exhaustion | Collection, nested collection-item, and wishlist-item creation used checked increment, so maximum persisted ID hints rejected new records and bulk source-feed imports despite retained capacity. | Fixed with collision-aware nonzero allocation across all three namespaces, capacity-only bulk admission, and maximum/wrap regression and gate coverage. |
+| Low | SongID run counter exhaustion | Bounded SongID snapshots used checked increment for their externally addressable run IDs, leaving a terminal failure at `u64::MAX` instead of reusing an unoccupied ID. | Fixed with collision-aware nonzero wraparound allocation against retained snapshots and regression/gate coverage. |
 
 ## Open Burn-Down
 
