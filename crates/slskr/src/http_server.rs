@@ -165,14 +165,20 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
         return Ok(None); // Connection closed
     };
 
-    let parts: Vec<&str> = request_line.split_whitespace().collect();
-    if parts.len() != 3 {
+    let request_line = request_line
+        .strip_suffix("\r\n")
+        .ok_or_else(|| "Invalid request line".to_owned())?;
+    let mut parts = request_line.split(' ');
+    let (Some(method), Some(request_target), Some(http_version), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err("Invalid request line".into());
+    };
+    if method.is_empty() || request_target.is_empty() || http_version.is_empty() {
         return Err("Invalid request line".into());
     }
 
-    let method = parts[0].to_string();
-    let request_target = parts[1];
-    let http_version = parts[2];
+    let method = method.to_string();
     if !is_http_token(&method) {
         return Err("invalid HTTP method".into());
     }
@@ -218,7 +224,7 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
                 total_header_bytes, HEADER_TOTAL_LIMIT
             ));
         }
-        if header_line.trim().is_empty() {
+        if header_line == "\r\n" {
             break;
         }
 
@@ -964,6 +970,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_noncanonical_request_line_whitespace_rejected() {
+        for request_line in ["GET  / HTTP/1.1", "GET\t/\tHTTP/1.1", " GET / HTTP/1.1"] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!("{request_line}\r\nHost: localhost\r\n\r\n");
+            client.write_all(request.as_bytes()).await.unwrap();
+
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("request line"), "{request_line:?}: {error}");
+        }
+    }
+
+    #[tokio::test]
     async fn test_invalid_http_version_rejected() {
         let (mut client, server) = tokio::io::duplex(4096);
         client.write_all(b"GET / FOO\r\n\r\n").await.unwrap();
@@ -1073,6 +1092,21 @@ mod tests {
         let mut reader = BufReader::new(server);
         let err = read_http_request(&mut reader).await.unwrap_err();
         assert!(err.contains("folded headers"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_whitespace_only_header_line_rejected() {
+        for whitespace in [" ", "\t", " \t"] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!(
+                "GET / HTTP/1.1\r\nHost: localhost\r\n{whitespace}\r\nX-Ignored: value\r\n\r\n"
+            );
+            client.write_all(request.as_bytes()).await.unwrap();
+
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("folded headers"), "{whitespace:?}: {error}");
+        }
     }
 
     #[tokio::test]
