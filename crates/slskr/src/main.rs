@@ -5118,6 +5118,15 @@ fn wishlist_search_item_id(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+fn user_route_username(path: &str, suffix: &str) -> Option<String> {
+    let path = path.strip_prefix("/api/users/")?;
+    let username = path.strip_suffix(suffix)?;
+    if username.is_empty() || username.contains('/') {
+        return None;
+    }
+    Some(decoded_path_segment(username))
+}
+
 // Wishlist Models
 #[derive(Clone, Debug)]
 struct WishlistItem {
@@ -11057,18 +11066,10 @@ async fn route_http_request_with_headers(
         ("GET", path)
             if path.starts_with("/api/users/")
                 && path.ends_with("/status")
-                && path
-                    .trim_start_matches("/api/users/")
-                    .trim_end_matches("/status")
-                    .trim_end_matches('/')
-                    .find('/')
-                    .is_none() =>
+                && user_route_username(path, "/status").is_some() =>
         {
-            let username = path
-                .strip_prefix("/api/users/")
-                .and_then(|p| p.strip_suffix("/status"))
-                .map(decoded_path_segment)
-                .unwrap_or_else(|| "unknown".to_owned());
+            let username = user_route_username(path, "/status")
+                .expect("guarded user status path");
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
                 let json = record.slskd_status_json().to_string();
@@ -13039,8 +13040,13 @@ async fn route_http_request_with_headers(
             drop(browse);
             Ok(routing::ok_response(body))
         }
-        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse/status") => {
-            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
+        ("GET", path)
+            if path.starts_with("/api/users/")
+                && path.ends_with("/browse/status")
+                && user_route_username(path, "/browse/status").is_some() =>
+        {
+            let username = user_route_username(path, "/browse/status")
+                .expect("guarded user browse status path");
             let browse = state.browse.read().await;
             let body = browse
                 .records
@@ -13178,8 +13184,13 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(body))
         }
 
-        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/status") => {
-            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
+        ("GET", path)
+            if path.starts_with("/api/users/")
+                && path.ends_with("/status")
+                && user_route_username(path, "/status").is_some() =>
+        {
+            let username = user_route_username(path, "/status")
+                .expect("guarded user status path");
             let users = state.users.read().await;
             let body = users
                 .records
@@ -34317,6 +34328,62 @@ mod tests {
         let searches = state.searches.read().await;
         assert_eq!(searches.records.len(), 1);
         assert_eq!(searches.records[0].query, "Artist Track");
+    }
+
+    #[tokio::test]
+    async fn user_status_routes_require_exact_user_segments() {
+        let (state, _receiver) = test_state();
+        {
+            let mut users = state.users.write().await;
+            let record = users.watch("friend".to_owned()).unwrap();
+            users
+                .records
+                .iter_mut()
+                .find(|candidate| candidate.username == record.username)
+                .unwrap()
+                .status = Some("Online".to_owned());
+        }
+        state
+            .browse
+            .write()
+            .await
+            .request("friend".to_owned())
+            .unwrap();
+
+        let exact_status =
+            super::route_http_request("GET", "/api/users/friend/status", None, "", &state)
+                .await
+                .unwrap();
+        let malformed_status =
+            super::route_http_request("GET", "/api/users/friend/extra/status", None, "", &state)
+                .await
+                .unwrap();
+        assert!(exact_status.body.contains("Online"));
+        assert_ne!(malformed_status.body, exact_status.body);
+
+        let exact_browse =
+            super::route_http_request("GET", "/api/users/friend/browse/status", None, "", &state)
+                .await
+                .unwrap();
+        let malformed_browse = super::route_http_request(
+            "GET",
+            "/api/users/friend/extra/browse/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert!(exact_browse.body.contains("\"username\":\"friend\""));
+        assert_ne!(malformed_browse.body, exact_browse.body);
+        assert_eq!(
+            super::user_route_username("/api/users/friend/status", "/status"),
+            Some("friend".to_owned())
+        );
+        assert_eq!(
+            super::user_route_username("/api/users/friend/extra/status", "/status"),
+            None
+        );
     }
 
     #[tokio::test]
