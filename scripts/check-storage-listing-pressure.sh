@@ -11,6 +11,11 @@ if ! rg -n 'SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES|SLSKD_STORAGE_RECURSIVE
   status=1
 fi
 
+if ! rg -n 'SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES|reserve_storage_scan_entry' crates/slskr/src/main.rs >/dev/null; then
+  printf 'storage listing pressure check failed: per-directory scan budget is missing\n' >&2
+  status=1
+fi
+
 if ! rg -n 'StorageDirectoryListOptions|limit.*offset|from_query' crates/slskr/src/main.rs >/dev/null; then
   printf 'storage listing pressure check failed: storage listing pagination options are missing\n' >&2
   status=1

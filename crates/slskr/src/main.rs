@@ -18622,7 +18622,13 @@ fn slskd_file_storage_resource_path(path: &str) -> Option<(&str, &str, &str)> {
 }
 
 fn file_storage_error_response(error: &str) -> HttpResponse {
-    if error.contains("failed:") {
+    if error == STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR {
+        HttpResponse {
+            status: "413 Payload Too Large",
+            content_type: "application/json",
+            body: "{\"error\":\"storage directory is too large to list\"}".to_owned(),
+        }
+    } else if error.contains("failed:") {
         eprintln!("file storage operation failed: {error}");
         routing::service_unavailable_response("file storage unavailable")
     } else {
@@ -19389,6 +19395,8 @@ const SLSKD_STORAGE_DIRECT_LIST_DEFAULT_ENTRIES: usize = 1_024;
 const SLSKD_STORAGE_DIRECT_LIST_MAX_ENTRIES: usize = 4_096;
 const SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES: usize = 256;
 const SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES: usize = 1_024;
+const SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES: usize = 16_384;
+const STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR: &str = "storage directory entry limit exceeded";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StorageDirectoryListOptions {
@@ -19466,6 +19474,14 @@ impl StorageDirectoryListState {
     }
 }
 
+fn reserve_storage_scan_entry(scanned: &mut usize) -> Result<(), String> {
+    if *scanned >= SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES {
+        return Err(STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR.to_owned());
+    }
+    *scanned += 1;
+    Ok(())
+}
+
 fn query_bool(query: Option<&str>, key: &str) -> Option<bool> {
     query_params(query.unwrap_or_default())
         .into_iter()
@@ -19529,10 +19545,12 @@ fn slskd_storage_directory_value(
     }
 
     let mut entries = Vec::new();
+    let mut scanned = 0;
     for entry in
         fs::read_dir(directory).map_err(|error| format!("directory read failed: {error}"))?
     {
         let entry = entry.map_err(|error| format!("directory entry read failed: {error}"))?;
+        reserve_storage_scan_entry(&mut scanned)?;
         entries.push(entry.path());
     }
     entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
@@ -19674,9 +19692,11 @@ fn slskd_storage_directory_value_unix(
     let mut reader = Dir::read_from(directory)
         .map_err(|error| format!("storage directory read failed: {error}"))?;
     let mut names = Vec::new();
+    let mut scanned = 0;
     while let Some(entry) = reader.read() {
         let entry = entry.map_err(|error| format!("storage directory entry failed: {error}"))?;
         if !matches!(entry.file_name().to_bytes(), b"." | b"..") {
+            reserve_storage_scan_entry(&mut scanned)?;
             names.push(entry.file_name().to_owned());
         }
     }
@@ -29911,6 +29931,14 @@ mod tests {
         );
         assert_eq!(client.status, "400 Bad Request");
         assert!(client.body.contains("path must be relative"));
+
+        let oversized =
+            super::file_storage_error_response(super::STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR);
+        assert_eq!(oversized.status, "413 Payload Too Large");
+        assert_eq!(
+            oversized.body,
+            "{\"error\":\"storage directory is too large to list\"}"
+        );
     }
 
     #[test]
@@ -29936,6 +29964,14 @@ mod tests {
         .expect("listing");
         assert_eq!(json["entryCount"], 1);
         assert_eq!(json["truncated"], true);
+
+        let mut scanned = super::SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES - 1;
+        super::reserve_storage_scan_entry(&mut scanned).expect("last scan slot");
+        assert_eq!(scanned, super::SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES);
+        assert_eq!(
+            super::reserve_storage_scan_entry(&mut scanned).unwrap_err(),
+            super::STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR
+        );
     }
 
     #[cfg(unix)]
