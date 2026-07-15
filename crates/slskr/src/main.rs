@@ -5127,6 +5127,15 @@ fn user_route_username(path: &str, suffix: &str) -> Option<String> {
     Some(decoded_path_segment(username))
 }
 
+fn joined_room_subresource(path: &str, suffix: &str) -> Option<String> {
+    let path = path.strip_prefix("/api/rooms/joined/")?;
+    let room = path.strip_suffix(suffix)?;
+    if room.is_empty() || room.contains('/') {
+        return None;
+    }
+    Some(decoded_path_segment(room))
+}
+
 // Wishlist Models
 #[derive(Clone, Debug)]
 struct WishlistItem {
@@ -11444,12 +11453,13 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
-        ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/users") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 5 {
-                return Ok(routing::not_found_response());
-            }
-            let room_name = decoded_path_segment(parts[4]);
+        ("GET", path)
+            if path.starts_with("/api/rooms/joined/")
+                && path.ends_with("/users")
+                && joined_room_subresource(path, "/users").is_some() =>
+        {
+            let room_name = joined_room_subresource(path, "/users")
+                .expect("guarded joined-room users path");
             let rooms = state.rooms.read().await;
             if let Some(_room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let json = "[]".to_string();
@@ -11461,12 +11471,13 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("GET", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/messages") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 5 {
-                return Ok(routing::not_found_response());
-            }
-            let room_name = decoded_path_segment(parts[4]);
+        ("GET", path)
+            if path.starts_with("/api/rooms/joined/")
+                && path.ends_with("/messages")
+                && joined_room_subresource(path, "/messages").is_some() =>
+        {
+            let room_name = joined_room_subresource(path, "/messages")
+                .expect("guarded joined-room messages path");
             let rooms = state.rooms.read().await;
             if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let messages = room
@@ -11911,12 +11922,13 @@ async fn route_http_request_with_headers(
             drop(rooms);
             Ok(response)
         }
-        ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/messages") => {
-            let room_name = path
-                .trim_start_matches("/api/rooms/joined/")
-                .strip_suffix("/messages")
-                .unwrap_or("");
-            let room_name = decoded_path_segment(room_name);
+        ("POST", path)
+            if path.starts_with("/api/rooms/joined/")
+                && path.ends_with("/messages")
+                && joined_room_subresource(path, "/messages").is_some() =>
+        {
+            let room_name = joined_room_subresource(path, "/messages")
+                .expect("guarded joined-room messages path");
             let message_body = json_body_string(body)
                 .or_else(|| extract_json_string_field(body, "message"))
                 .or_else(|| extract_json_string_field(body, "body"))
@@ -11944,13 +11956,13 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/ticker") => {
-            let room_name = path
-                .strip_prefix("/api/rooms/joined/")
-                .and_then(|rest| rest.strip_suffix("/ticker"))
-                .unwrap_or_default()
-                .trim_matches('/');
-            let room_name = decoded_path_segment(room_name);
+        ("POST", path)
+            if path.starts_with("/api/rooms/joined/")
+                && path.ends_with("/ticker")
+                && joined_room_subresource(path, "/ticker").is_some() =>
+        {
+            let room_name = joined_room_subresource(path, "/ticker")
+                .expect("guarded joined-room ticker path");
             let ticker = json_body_string(body)
                 .or_else(|| extract_json_string_field(body, "ticker"))
                 .or_else(|| extract_json_string_field(body, "message"))
@@ -11968,13 +11980,13 @@ async fn route_http_request_with_headers(
             drop(rooms);
             Ok(response)
         }
-        ("POST", path) if path.starts_with("/api/rooms/joined/") && path.ends_with("/members") => {
-            let room_name = path
-                .strip_prefix("/api/rooms/joined/")
-                .and_then(|rest| rest.strip_suffix("/members"))
-                .unwrap_or_default()
-                .trim_matches('/');
-            let room_name = decoded_path_segment(room_name);
+        ("POST", path)
+            if path.starts_with("/api/rooms/joined/")
+                && path.ends_with("/members")
+                && joined_room_subresource(path, "/members").is_some() =>
+        {
+            let room_name = joined_room_subresource(path, "/members")
+                .expect("guarded joined-room members path");
             let username = json_body_string(body)
                 .or_else(|| extract_json_string_field(body, "username"))
                 .or_else(|| extract_json_string_field(body, "name"))
@@ -29874,6 +29886,84 @@ mod tests {
             .iter()
             .any(|room| room.name == "room space" && !room.joined));
         assert!(db.list_subscribed_rooms().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn joined_room_subresources_require_exact_room_segments() {
+        let (state, _receiver) = test_state();
+        super::route_http_request(
+            "POST",
+            "/api/rooms/joined",
+            None,
+            r#""private room""#,
+            &state,
+        )
+        .await
+        .unwrap();
+        super::route_http_request(
+            "POST",
+            "/api/rooms/joined/private%20room/messages",
+            None,
+            r#""secret message""#,
+            &state,
+        )
+        .await
+        .unwrap();
+
+        let exact = super::route_http_request(
+            "GET",
+            "/api/rooms/joined/private%20room/messages",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let malformed = super::route_http_request(
+            "GET",
+            "/api/rooms/joined/private%20room/extra/messages",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert!(exact.body.contains("secret message"));
+        assert_ne!(malformed.body, exact.body);
+
+        super::route_http_request(
+            "POST",
+            "/api/rooms/joined/private%20room/extra/messages",
+            None,
+            r#""wrong message""#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let room = state
+            .rooms
+            .read()
+            .await
+            .records
+            .iter()
+            .find(|room| room.name == "private room")
+            .cloned()
+            .unwrap();
+        assert_eq!(room.messages.len(), 1);
+        assert_eq!(
+            super::joined_room_subresource(
+                "/api/rooms/joined/private%20room/messages",
+                "/messages"
+            ),
+            Some("private room".to_owned())
+        );
+        assert_eq!(
+            super::joined_room_subresource(
+                "/api/rooms/joined/private%20room/extra/messages",
+                "/messages"
+            ),
+            None
+        );
     }
 
     #[tokio::test]
