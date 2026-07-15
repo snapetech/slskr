@@ -3422,6 +3422,166 @@ struct AutoRetryTracker {
     alternate_search_requested_at: BTreeMap<u64, u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UnderperformanceReason {
+    QueuedTooLong,
+    ThroughputTooLow,
+    Stalled,
+}
+
+impl UnderperformanceReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::QueuedTooLong => "queued_too_long",
+            Self::ThroughputTooLow => "throughput_too_low",
+            Self::Stalled => "stalled",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum RescueAction {
+    Search,
+    Replace(SearchResultEntry),
+}
+
+#[derive(Clone, Debug)]
+struct RescueCandidate {
+    source: TransferEntry,
+    reason: UnderperformanceReason,
+    action: RescueAction,
+}
+
+#[derive(Debug, Default)]
+struct RescueTracker {
+    last_progress: BTreeMap<u64, (u64, u64)>,
+    search_requested_at: BTreeMap<u64, u64>,
+    retry_after: BTreeMap<u64, u64>,
+}
+
+fn prune_rescue_tracker(tracker: &mut RescueTracker, entries: &[TransferEntry]) {
+    let active_ids = entries
+        .iter()
+        .filter(|entry| {
+            entry.direction == 0 && matches!(entry.status.as_str(), "queued" | "in_progress")
+        })
+        .map(|entry| entry.id)
+        .collect::<HashSet<_>>();
+    tracker
+        .last_progress
+        .retain(|id, _| active_ids.contains(id));
+    tracker
+        .search_requested_at
+        .retain(|id, _| active_ids.contains(id));
+    tracker.retry_after.retain(|id, _| active_ids.contains(id));
+}
+
+fn underperformance_reason(
+    entry: &TransferEntry,
+    tracker: &mut RescueTracker,
+    settings: &crate::config::TransferRescueSettings,
+    now: u64,
+) -> Option<UnderperformanceReason> {
+    if entry.status == "queued"
+        && now.saturating_sub(entry.requested_at) >= settings.max_queue_time.as_secs()
+    {
+        return Some(UnderperformanceReason::QueuedTooLong);
+    }
+    if entry.status != "in_progress" {
+        return None;
+    }
+    let duration = entry
+        .started_at
+        .map(|started_at| now.saturating_sub(started_at))
+        .unwrap_or(0);
+    if duration >= settings.min_duration.as_secs()
+        && entry.average_speed_at(now) < settings.min_throughput_bytes_per_second as f64
+    {
+        return Some(UnderperformanceReason::ThroughputTooLow);
+    }
+    let (last_bytes, last_progress_at) = tracker
+        .last_progress
+        .entry(entry.id)
+        .or_insert((entry.bytes_transferred, now));
+    if entry.bytes_transferred > *last_bytes {
+        *last_bytes = entry.bytes_transferred;
+        *last_progress_at = now;
+        return None;
+    }
+    (now.saturating_sub(*last_progress_at) >= settings.stalled_timeout.as_secs())
+        .then_some(UnderperformanceReason::Stalled)
+}
+
+fn create_rescue_plan(
+    entries: &[TransferEntry],
+    searches: &SearchStore,
+    tracker: &mut RescueTracker,
+    settings: &crate::config::TransferRescueSettings,
+    now: u64,
+) -> Vec<RescueCandidate> {
+    prune_rescue_tracker(tracker, entries);
+    let latest = latest_download_attempts(entries);
+    let mut candidates = entries
+        .iter()
+        .filter(|entry| {
+            if entry.direction != 0
+                || !matches!(entry.status.as_str(), "queued" | "in_progress")
+                || !is_auto_retry_audio_file(&entry.filename)
+                || entry.peer_username.is_none()
+                || tracker
+                    .retry_after
+                    .get(&entry.id)
+                    .is_some_and(|retry_after| *retry_after > now)
+            {
+                return false;
+            }
+            let identity = entry.request_id.clone().unwrap_or_else(|| {
+                auto_retry_key(
+                    entry.peer_username.as_deref().unwrap_or_default(),
+                    &entry.filename,
+                )
+            });
+            latest.get(&identity) == Some(&entry.id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|entry| (entry.requested_at, entry.id));
+
+    let mut plan = Vec::new();
+    for source in candidates {
+        let Some(reason) = underperformance_reason(&source, tracker, settings, now) else {
+            continue;
+        };
+        let alternative = searches.best_transfer_alternative(
+            &source,
+            settings.alternate_source_size_tolerance_percent,
+            |_| false,
+        );
+        let action = if let Some(alternative) = alternative {
+            RescueAction::Replace(alternative)
+        } else if tracker
+            .search_requested_at
+            .get(&source.id)
+            .is_none_or(|requested_at| {
+                requested_at.saturating_add(settings.retry_cooldown.as_secs()) <= now
+            })
+        {
+            RescueAction::Search
+        } else {
+            continue;
+        };
+        plan.push(RescueCandidate {
+            source,
+            reason,
+            action,
+        });
+        if plan.len() >= settings.max_files_per_cycle {
+            break;
+        }
+    }
+    plan
+}
+
 fn auto_retry_key(username: &str, filename: &str) -> String {
     format!("{}\u{1f}{}", username.to_ascii_lowercase(), filename)
 }
@@ -23687,20 +23847,6 @@ impl PodJoinSignatureInput {
                 return Err(format!("pod join {name} exceeds {limit} bytes"));
             }
         }
-        if [
-            &input.pod_id,
-            &input.peer_id,
-            &input.requested_role,
-            &input.message,
-            &input.nonce,
-        ]
-        .iter()
-        .any(|value| value.contains('|'))
-        {
-            return Err(
-                "pod join signed fields must not contain the canonical delimiter".to_owned(),
-            );
-        }
         if input.pod_id.trim().is_empty() {
             return Err("pod join podId is required".to_owned());
         }
@@ -23711,15 +23857,17 @@ impl PodJoinSignatureInput {
     }
 
     fn canonical_payload(&self) -> String {
-        format!(
-            "1|join-request|{}|{}|{}|{}|{}|{}",
-            self.pod_id,
-            self.peer_id,
-            self.requested_role,
+        serde_json::to_string(&(
+            1,
+            "join-request",
+            &self.pod_id,
+            &self.peer_id,
+            &self.requested_role,
             self.timestamp_unix_ms,
-            self.message,
-            self.nonce
-        )
+            &self.message,
+            &self.nonce,
+        ))
+        .expect("pod join request canonical tuple is serializable")
     }
 }
 
@@ -23770,15 +23918,17 @@ impl PodJoinAcceptanceInput {
     }
 
     fn canonical_payload(&self) -> String {
-        format!(
-            "1|join-acceptance|{}|{}|{}|{}|{}|{}",
-            self.pod_id,
-            self.peer_id,
-            self.accepted_role,
-            self.acceptor_peer_id,
+        serde_json::to_string(&(
+            1,
+            "join-acceptance",
+            &self.pod_id,
+            &self.peer_id,
+            &self.accepted_role,
+            &self.acceptor_peer_id,
             self.timestamp_unix_ms,
-            self.message
-        )
+            &self.message,
+        ))
+        .expect("pod join acceptance canonical tuple is serializable")
     }
 }
 
@@ -23820,10 +23970,15 @@ impl PodLeaveRequestInput {
     }
 
     fn canonical_payload(&self) -> String {
-        format!(
-            "1|leave-request|{}|{}|{}|{}",
-            self.pod_id, self.peer_id, self.timestamp_unix_ms, self.message
-        )
+        serde_json::to_string(&(
+            1,
+            "leave-request",
+            &self.pod_id,
+            &self.peer_id,
+            self.timestamp_unix_ms,
+            &self.message,
+        ))
+        .expect("pod leave request canonical tuple is serializable")
     }
 }
 
@@ -23868,10 +24023,16 @@ impl PodLeaveAcceptanceInput {
     }
 
     fn canonical_payload(&self) -> String {
-        format!(
-            "1|leave-acceptance|{}|{}|{}|{}|{}",
-            self.pod_id, self.peer_id, self.acceptor_peer_id, self.timestamp_unix_ms, self.message
-        )
+        serde_json::to_string(&(
+            1,
+            "leave-acceptance",
+            &self.pod_id,
+            &self.peer_id,
+            &self.acceptor_peer_id,
+            self.timestamp_unix_ms,
+            &self.message,
+        ))
+        .expect("pod leave acceptance canonical tuple is serializable")
     }
 }
 
@@ -23886,11 +24047,6 @@ fn validate_pod_fields(operation: &str, fields: &[(&str, &String, usize)]) -> Re
     for (name, value, limit) in fields {
         if value.len() > *limit {
             return Err(format!("{operation} {name} exceeds {limit} bytes"));
-        }
-        if value.contains('|') {
-            return Err(format!(
-                "{operation} signed fields must not contain the canonical delimiter"
-            ));
         }
     }
     Ok(())
@@ -23990,18 +24146,6 @@ fn verify_pod_join_signature(
     input: &PodJoinSignatureInput,
     now_millis: u64,
 ) -> Result<bool, String> {
-    if [
-        &input.pod_id,
-        &input.peer_id,
-        &input.requested_role,
-        &input.message,
-        &input.nonce,
-    ]
-    .iter()
-    .any(|value| value.contains('|'))
-    {
-        return Err("pod join signed fields must not contain the canonical delimiter".to_owned());
-    }
     verify_pod_signed_payload(
         mode,
         &input.signature,
@@ -24780,6 +24924,7 @@ async fn serve(once: bool) -> Result<(), String> {
     }
     spawn_session_manager(Arc::clone(&state), session_receiver);
     spawn_download_auto_retry(Arc::clone(&state));
+    spawn_transfer_rescue(Arc::clone(&state));
     spawn_configured_listeners(Arc::clone(&state));
     spawn_rate_limit_cleanup(Arc::clone(&state));
     record_daemon_log(
@@ -25072,6 +25217,211 @@ fn spawn_download_auto_retry(state: Arc<AppState>) {
             }
         }
     });
+}
+
+fn spawn_transfer_rescue(state: Arc<AppState>) {
+    if !state.config.transfer_rescue.enabled {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut tracker = RescueTracker::default();
+        let mut interval = time::interval(state.config.transfer_rescue.check_interval);
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if state.session.read().await.state != "connected" {
+                continue;
+            }
+            if let Err(error) = run_transfer_rescue_cycle(&state, &mut tracker).await {
+                record_daemon_log(
+                    &state,
+                    logging::LogLevel::Warn,
+                    "transfers",
+                    format!("transfer rescue cycle failed: {error}"),
+                )
+                .await;
+            }
+        }
+    });
+}
+
+async fn create_rescue_search(state: &AppState, query: String) -> Result<SearchRecord, String> {
+    let (record, evicted, previous_next_token, created_next_token) = {
+        let mut searches = state.searches.write().await;
+        let previous_next_token = searches.next_token;
+        let outcome = searches
+            .create(
+                None,
+                query,
+                "global",
+                None,
+                Vec::new(),
+                DEFAULT_SEARCH_TTL_SECONDS,
+            )
+            .map_err(|error| format!("rescue alternative search failed: {error:?}"))?;
+        (
+            outcome.record,
+            outcome.evicted,
+            previous_next_token,
+            searches.next_token,
+        )
+    };
+    if let Err(error) = persist_search_record(state, &record).await {
+        rollback_auto_retry_search(
+            &mut *state.searches.write().await,
+            &record,
+            evicted,
+            previous_next_token,
+            created_next_token,
+        );
+        return Err(error);
+    }
+    if let Err(error) = delete_persisted_searches(state, &evicted).await {
+        let _ = delete_persisted_searches(state, std::slice::from_ref(&record)).await;
+        rollback_auto_retry_search(
+            &mut *state.searches.write().await,
+            &record,
+            evicted,
+            previous_next_token,
+            created_next_token,
+        );
+        return Err(error);
+    }
+    Ok(record)
+}
+
+async fn run_transfer_rescue_cycle(
+    state: &AppState,
+    tracker: &mut RescueTracker,
+) -> Result<usize, String> {
+    if !state.config.transfer_allow_outbound {
+        return Ok(0);
+    }
+    let now = unix_timestamp();
+    let entries = state.transfers.read().await.entries.clone();
+    let plan = {
+        let searches = state.searches.read().await;
+        create_rescue_plan(
+            &entries,
+            &searches,
+            tracker,
+            &state.config.transfer_rescue,
+            now,
+        )
+    };
+    let mut activated = 0usize;
+    for candidate in plan {
+        let permit = state
+            .session_commands
+            .reserve()
+            .await
+            .map_err(|_| "session manager is not running".to_owned())?;
+        let alternative = match candidate.action {
+            RescueAction::Search => {
+                let query = virtual_basename(&candidate.source.filename).to_owned();
+                let record = create_rescue_search(state, query.clone()).await?;
+                permit.send(SessionCommand::Search {
+                    token: record.token,
+                    query,
+                    target: SearchDispatchTarget::Global,
+                });
+                tracker.search_requested_at.insert(candidate.source.id, now);
+                tracker.retry_after.insert(
+                    candidate.source.id,
+                    now.saturating_add(state.config.transfer_rescue.check_interval.as_secs()),
+                );
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Info,
+                    "transfers",
+                    format!(
+                        "searching for rescue sources for underperforming transfer {} ({})",
+                        candidate.source.id,
+                        candidate.reason.as_str()
+                    ),
+                )
+                .await;
+                continue;
+            }
+            RescueAction::Replace(alternative) => alternative,
+        };
+        let Some(username) = alternative.peer_username.clone() else {
+            continue;
+        };
+        let replacement = {
+            let mut transfers = state.transfers.write().await;
+            let Some(current) = transfers
+                .entries
+                .iter()
+                .find(|entry| entry.id == candidate.source.id)
+                .cloned()
+            else {
+                continue;
+            };
+            if !matches!(current.status.as_str(), "queued" | "in_progress")
+                || current.bytes_transferred != candidate.source.bytes_transferred
+            {
+                continue;
+            }
+            let previous_entries = transfers.entries.clone();
+            let previous_next_id = transfers.next_id;
+            let previous_next_token = transfers.next_token;
+            let original = transfers
+                .update_status(
+                    current.id,
+                    "cancelled",
+                    Some(current.bytes_transferred),
+                    Some(format!(
+                        "rescued underperforming transfer: {}",
+                        candidate.reason.as_str()
+                    )),
+                )
+                .expect("current rescue transfer exists");
+            let replacement = transfers.create_with_details(
+                0,
+                Some(username.clone()),
+                alternative.filename.clone(),
+                current.local_path.clone(),
+                Some(alternative.size),
+                current.batch_id.clone(),
+                retry_request_details(&current),
+            );
+            let replacement = transfers
+                .update_status(replacement.id, "peer_lookup", None, None)
+                .unwrap_or(replacement);
+            let persisted = [original, replacement.clone()];
+            if let Err(error) = persist_transfer_records(state, &persisted).await {
+                transfers.entries = previous_entries;
+                transfers.next_id = previous_next_id;
+                transfers.next_token = previous_next_token;
+                transfers.persist_state();
+                return Err(error);
+            }
+            replacement
+        };
+        permit.send(SessionCommand::TransferPeer {
+            id: replacement.id,
+            username: username.clone(),
+        });
+        tracker.retry_after.insert(
+            candidate.source.id,
+            now.saturating_add(state.config.transfer_rescue.retry_cooldown.as_secs()),
+        );
+        activated += 1;
+        record_event(
+            state,
+            "transfer.rescue.activated",
+            candidate.source.id.to_string(),
+            Some(format!(
+                "replacement={};reason={};source={}",
+                replacement.id,
+                candidate.reason.as_str(),
+                username
+            )),
+        )
+        .await;
+    }
+    Ok(activated)
 }
 
 fn retry_request_details(source: &TransferEntry) -> TransferRequestDetails {
@@ -28488,6 +28838,14 @@ async fn execute_accepted_file_transfer(
 
     {
         let mut transfers = state.transfers.write().await;
+        if transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == transfer.id)
+            .is_some_and(|entry| entry.status == "cancelled")
+        {
+            return;
+        }
         transfers.update_status(transfer.id, "in_progress", None, None);
     }
 
@@ -28496,6 +28854,9 @@ async fn execute_accepted_file_transfer(
     } else {
         download_file_transfer(state, address, transfer).await
     };
+    if transfer_is_cancelled(state, transfer.id).await {
+        return;
+    }
     let (status, bytes_transferred, size, reason) = match result {
         Ok((bytes_transferred, size)) => ("succeeded", bytes_transferred, Some(size), None),
         Err(error) => {
@@ -28577,6 +28938,14 @@ async fn project_indirect_transfer_response(state: &AppState, response: &Connect
     };
     let in_progress = {
         let mut transfers = state.transfers.write().await;
+        if transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == transfer.id)
+            .is_some_and(|entry| entry.status == "cancelled")
+        {
+            return;
+        }
         transfers.update_status(transfer.id, "in_progress", None, None)
     };
     if let Some(in_progress) = in_progress {
@@ -28584,6 +28953,9 @@ async fn project_indirect_transfer_response(state: &AppState, response: &Connect
     }
 
     let result = execute_indirect_file_transfer(state, response, &transfer).await;
+    if transfer_is_cancelled(state, transfer.id).await {
+        return;
+    }
     let (status, bytes_transferred, size, reason) = match result {
         Ok((bytes_transferred, size)) => ("succeeded", bytes_transferred, Some(size), None),
         Err(error) => (
@@ -28912,6 +29284,9 @@ async fn upload_file_with_progress(
     let mut sent = 0_u64;
     let mut buffer = vec![0_u8; TRANSFER_PROGRESS_CHUNK_BYTES];
     loop {
+        if transfer_is_cancelled(state, transfer.id).await {
+            return Err("transfer cancelled".to_owned());
+        }
         let read = file
             .read(&mut buffer)
             .map_err(|error| format!("local file read failed: {error}"))?;
@@ -29008,6 +29383,9 @@ async fn download_file_with_progress(
 
     let mut bytes_received = 0_usize;
     while bytes_received < remaining {
+        if transfer_is_cancelled(state, transfer.id).await {
+            return Err("transfer cancelled".to_owned());
+        }
         let next_len = (remaining - bytes_received).min(TRANSFER_PROGRESS_CHUNK_BYTES);
         let chunk = time::timeout(
             state.config.peer_response_timeout,
@@ -29027,7 +29405,26 @@ async fn download_file_with_progress(
 
 async fn update_transfer_progress(state: &AppState, transfer_id: u64, bytes_transferred: u64) {
     let mut transfers = state.transfers.write().await;
+    if transfers
+        .entries
+        .iter()
+        .find(|entry| entry.id == transfer_id)
+        .is_some_and(|entry| entry.status == "cancelled")
+    {
+        return;
+    }
     transfers.update_progress(transfer_id, bytes_transferred);
+}
+
+async fn transfer_is_cancelled(state: &AppState, transfer_id: u64) -> bool {
+    state
+        .transfers
+        .read()
+        .await
+        .entries
+        .iter()
+        .find(|entry| entry.id == transfer_id)
+        .is_some_and(|entry| entry.status == "cancelled")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52008,9 +52405,17 @@ mod tests {
             .expect("test pod");
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let timestamp = super::unix_timestamp().saturating_mul(1_000);
-        let payload = format!(
-            "1|join-request|pod:ambient|peer-one|member|{timestamp}|Please add me|nonce-one"
-        );
+        let payload = serde_json::to_string(&(
+            1,
+            "join-request",
+            "pod:ambient",
+            "peer-one",
+            "member",
+            timestamp,
+            "Please add me",
+            "nonce-one",
+        ))
+        .unwrap();
         let signature = base64::engine::general_purpose::STANDARD
             .encode(signing_key.sign(payload.as_bytes()).to_bytes());
         let public_key = base64::engine::general_purpose::STANDARD
@@ -53363,7 +53768,7 @@ mod tests {
     }
 
     #[test]
-    fn pod_join_signatures_match_frozen_canonical_payload_and_reject_delimiters() {
+    fn pod_join_signatures_match_frozen_unambiguous_canonical_payload() {
         use ed25519_dalek::{Signer as _, SigningKey};
 
         let now_millis = super::unix_timestamp().saturating_mul(1_000);
@@ -53390,7 +53795,9 @@ mod tests {
 
         assert_eq!(
             input.canonical_payload(),
-            format!("1|join-request|pod-alpha|peer|member|{now_millis}|hello world|nonce-one")
+            format!(
+                "[1,\"join-request\",\"pod-alpha\",\"peer\",\"member\",{now_millis},\"hello world\",\"nonce-one\"]"
+            )
         );
         input.message = "hello|world".to_owned();
         let delimiter_signature = signing_key.sign(input.canonical_payload().as_bytes());
@@ -53403,7 +53810,7 @@ mod tests {
             &input,
             now_millis,
         )
-        .is_err());
+        .unwrap());
 
         input.message = "hello".to_owned();
         input.nonce = "world|nonce-one".to_owned();
@@ -53718,6 +54125,230 @@ mod tests {
             "Other/Album/Song.flac"
         );
         assert!(tracker.retried_ids.contains(&source_id));
+    }
+
+    #[test]
+    fn rescue_plan_detects_queue_throughput_and_stall_but_skips_sidecars() {
+        let config = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_TRANSFER_RESCUE_MAX_QUEUE_TIME_SECONDS", "60")
+                .with("SLSKR_TRANSFER_RESCUE_MIN_THROUGHPUT_KBPS", "1")
+                .with("SLSKR_TRANSFER_RESCUE_MIN_DURATION_SECONDS", "60")
+                .with("SLSKR_TRANSFER_RESCUE_STALLED_TIMEOUT_SECONDS", "30")
+                .with("SLSKR_TRANSFER_RESCUE_MAX_FILES_PER_CYCLE", "20"),
+        )
+        .expect("rescue config");
+        let now = super::unix_timestamp();
+        let mut queue = super::TransferQueue::new_in_memory(16);
+        let queued_audio = queue.create(
+            0,
+            Some("slow-peer".to_owned()),
+            "Remote/Queued.flac".to_owned(),
+            None,
+            Some(100),
+        );
+        let sidecar = queue.create(
+            0,
+            Some("slow-peer".to_owned()),
+            "Remote/Cover.jpg".to_owned(),
+            None,
+            Some(100),
+        );
+        let stalled = queue.create(
+            0,
+            Some("stalled-peer".to_owned()),
+            "Remote/Stalled.mp3".to_owned(),
+            None,
+            Some(2_000_000),
+        );
+        for id in [queued_audio.id, sidecar.id] {
+            queue
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == id)
+                .unwrap()
+                .requested_at = now - 61;
+        }
+        let stalled_entry = queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == stalled.id)
+            .unwrap();
+        stalled_entry.status = "in_progress".to_owned();
+        stalled_entry.started_at = Some(now - 61);
+        stalled_entry.bytes_transferred = 1_000_000;
+
+        let searches = super::SearchStore::new();
+        let mut tracker = super::RescueTracker::default();
+        let initial = super::create_rescue_plan(
+            &queue.entries,
+            &searches,
+            &mut tracker,
+            &config.transfer_rescue,
+            now,
+        );
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].source.id, queued_audio.id);
+        assert_eq!(
+            initial[0].reason,
+            super::UnderperformanceReason::QueuedTooLong
+        );
+        assert!(initial
+            .iter()
+            .all(|candidate| candidate.source.id != sidecar.id));
+
+        tracker
+            .retry_after
+            .insert(queued_audio.id, now.saturating_add(300));
+        let stalled_plan = super::create_rescue_plan(
+            &queue.entries,
+            &searches,
+            &mut tracker,
+            &config.transfer_rescue,
+            now + 31,
+        );
+        assert_eq!(stalled_plan.len(), 1);
+        assert_eq!(stalled_plan[0].source.id, stalled.id);
+        assert_eq!(
+            stalled_plan[0].reason,
+            super::UnderperformanceReason::Stalled
+        );
+    }
+
+    #[tokio::test]
+    async fn rescue_cycle_atomically_swaps_an_underperforming_audio_source() {
+        let mut searches = super::SearchStore::new();
+        let search = searches
+            .create(
+                None,
+                "Song.flac".to_owned(),
+                "global",
+                None,
+                Vec::new(),
+                super::DEFAULT_SEARCH_TTL_SECONDS,
+            )
+            .expect("search")
+            .record;
+        searches
+            .add_peer_response(&FileSearchResponse {
+                username: "rescue-peer".to_owned(),
+                token: search.token,
+                results: vec![FileEntry {
+                    filename_encoding: Default::default(),
+                    extension_encoding: Default::default(),
+                    code: 1,
+                    filename: "Alternate/Album/Song.flac".to_owned(),
+                    size: 1_020,
+                    extension: "flac".to_owned(),
+                    attributes: Vec::new(),
+                }],
+                slot_free: true,
+                average_speed: 100_000,
+                queue_length: 0,
+                unknown: 0,
+                private_results: Vec::new(),
+            })
+            .expect("search response");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default()
+                .with("SLSKR_TRANSFER_RESCUE_MAX_QUEUE_TIME_SECONDS", "60")
+                .with(
+                    "SLSKR_TRANSFER_RESCUE_ALTERNATE_SOURCE_SIZE_TOLERANCE_PERCENT",
+                    "5",
+                ),
+            searches,
+            None,
+        );
+        let now = super::unix_timestamp();
+        let source = {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create_with_details(
+                0,
+                Some("original-peer".to_owned()),
+                "Remote/Album/Song.flac".to_owned(),
+                Some("downloads/Song.flac".to_owned()),
+                Some(1_000),
+                Some("batch-rescue".to_owned()),
+                super::TransferRequestDetails {
+                    request_id: Some("request-rescue".to_owned()),
+                    artist: Some("Artist".to_owned()),
+                    ..Default::default()
+                },
+            );
+            let source = transfers
+                .entries
+                .iter_mut()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap();
+            source.requested_at = now - 61;
+            source.clone()
+        };
+        let mut tracker = super::RescueTracker::default();
+
+        assert_eq!(
+            super::run_transfer_rescue_cycle(&state, &mut tracker)
+                .await
+                .expect("rescue cycle"),
+            1
+        );
+        let super::SessionCommand::TransferPeer { id, username } =
+            receiver.recv().await.expect("rescue dispatch")
+        else {
+            panic!("expected rescue transfer dispatch");
+        };
+        assert_eq!(username, "rescue-peer");
+        let transfers = state.transfers.read().await;
+        let original = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == source.id)
+            .unwrap();
+        let replacement = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+        assert_eq!(original.status, "cancelled");
+        assert_eq!(replacement.status, "peer_lookup");
+        assert_eq!(replacement.peer_username.as_deref(), Some("rescue-peer"));
+        assert_eq!(replacement.request_id.as_deref(), Some("request-rescue"));
+        assert_eq!(replacement.batch_id.as_deref(), Some("batch-rescue"));
+        assert_eq!(replacement.artist.as_deref(), Some("Artist"));
+        assert_eq!(replacement.local_path, source.local_path);
+        drop(transfers);
+        assert!(super::transfer_is_cancelled(&state, source.id).await);
+    }
+
+    #[tokio::test]
+    async fn cancelled_transfer_progress_cannot_revive_or_advance_the_attempt() {
+        let (state, _receiver) =
+            test_state_with_env_parts(MapEnv::default(), super::SearchStore::new(), None);
+        let transfer = {
+            let mut transfers = state.transfers.write().await;
+            let transfer = transfers.create(
+                0,
+                Some("slow-peer".to_owned()),
+                "Remote/Song.flac".to_owned(),
+                Some("downloads/Song.flac".to_owned()),
+                Some(1_000),
+            );
+            transfers.update_status(transfer.id, "in_progress", Some(400), None);
+            transfers.update_status(transfer.id, "cancelled", Some(400), None)
+        }
+        .expect("cancelled transfer");
+
+        super::update_transfer_progress(&state, transfer.id, 900).await;
+
+        let transfers = state.transfers.read().await;
+        let current = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == transfer.id)
+            .expect("transfer remains projected");
+        assert_eq!(current.status, "cancelled");
+        assert_eq!(current.bytes_transferred, 400);
     }
 
     #[test]

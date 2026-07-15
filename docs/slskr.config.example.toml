@@ -79,6 +79,19 @@ alternate_sources_enabled = true
 max_alternate_source_searches_per_cycle = 1
 alternate_source_size_tolerance_percent = 5
 
+[transfers.rescue]
+# Detect queued, low-throughput, and stalled audio attempts. When an alternate
+# is cached, atomically swap sources; otherwise issue one bounded global search.
+enabled = true
+max_queue_time_seconds = 1800
+min_throughput_kbps = 10
+min_duration_seconds = 300
+stalled_timeout_seconds = 120
+check_interval_seconds = 45
+retry_cooldown_seconds = 1800
+max_files_per_cycle = 2
+alternate_source_size_tolerance_percent = 5
+
 [auth]
 # Loopback-only binds default to no API auth unless api_token is configured.
 # Non-loopback binds require an API token unless auth is explicitly disabled.

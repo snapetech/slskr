@@ -50,6 +50,7 @@ pub struct AppConfig {
     pub transfer_allow_inbound: bool,
     pub transfer_allow_outbound: bool,
     pub transfer_auto_retry: TransferAutoRetrySettings,
+    pub transfer_rescue: TransferRescueSettings,
     pub download_completed_path_template: String,
     pub private_message_auto_response: PrivateMessageAutoResponseSettings,
     pub pod_join_signature_mode: PodSignatureMode,
@@ -224,6 +225,8 @@ impl AppConfig {
         )?;
         let transfer_auto_retry =
             TransferAutoRetrySettings::from_layers(file_config.transfers.auto_retry, env)?;
+        let transfer_rescue =
+            TransferRescueSettings::from_layers(file_config.transfers.rescue, env)?;
         let download_completed_path_template = optional_env_any(
             env,
             &[
@@ -330,6 +333,7 @@ impl AppConfig {
             transfer_allow_inbound,
             transfer_allow_outbound,
             transfer_auto_retry,
+            transfer_rescue,
             download_completed_path_template,
             private_message_auto_response,
             pod_join_signature_mode,
@@ -353,7 +357,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -397,6 +401,7 @@ impl AppConfig {
             self.transfer_allow_inbound,
             self.transfer_allow_outbound,
             self.transfer_auto_retry.sanitized_json(),
+            self.transfer_rescue.sanitized_json(),
             !self.download_completed_path_template.is_empty(),
             self.private_message_auto_response.sanitized_json(),
             self.pod_join_signature_mode.as_str(),
@@ -632,6 +637,140 @@ impl TransferAutoRetrySettings {
             self.peer_cooldown.as_secs(),
             self.alternate_sources_enabled,
             self.max_alternate_source_searches_per_cycle,
+            self.alternate_source_size_tolerance_percent,
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferRescueSettings {
+    pub enabled: bool,
+    pub max_queue_time: Duration,
+    pub min_throughput_bytes_per_second: u64,
+    pub min_duration: Duration,
+    pub stalled_timeout: Duration,
+    pub check_interval: Duration,
+    pub retry_cooldown: Duration,
+    pub max_files_per_cycle: usize,
+    pub alternate_source_size_tolerance_percent: u32,
+}
+
+impl TransferRescueSettings {
+    fn from_layers<E: ConfigEnv>(file: TransferRescueFileConfig, env: &E) -> Result<Self, String> {
+        let max_queue_time_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_RESCUE_MAX_QUEUE_TIME_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_RESCUE_MAX_QUEUE_TIME_SECONDS",
+                file.max_queue_time_seconds,
+                1_800_u64,
+            )?,
+            60,
+            86_400,
+        )?;
+        let min_throughput_kbps = bounded_config_value(
+            "SLSKR_TRANSFER_RESCUE_MIN_THROUGHPUT_KBPS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_RESCUE_MIN_THROUGHPUT_KBPS",
+                file.min_throughput_kbps,
+                10_u64,
+            )?,
+            1,
+            10_000,
+        )?;
+        let min_duration_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_RESCUE_MIN_DURATION_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_RESCUE_MIN_DURATION_SECONDS",
+                file.min_duration_seconds,
+                300_u64,
+            )?,
+            60,
+            3_600,
+        )?;
+        let stalled_timeout_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_RESCUE_STALLED_TIMEOUT_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_RESCUE_STALLED_TIMEOUT_SECONDS",
+                file.stalled_timeout_seconds,
+                120_u64,
+            )?,
+            30,
+            600,
+        )?;
+        let check_interval_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_RESCUE_CHECK_INTERVAL_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_RESCUE_CHECK_INTERVAL_SECONDS",
+                file.check_interval_seconds,
+                45_u64,
+            )?,
+            15,
+            300,
+        )?;
+        let retry_cooldown_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_RESCUE_RETRY_COOLDOWN_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_RESCUE_RETRY_COOLDOWN_SECONDS",
+                file.retry_cooldown_seconds,
+                1_800_u64,
+            )?,
+            60,
+            86_400,
+        )?;
+        Ok(Self {
+            enabled: env_bool_layer(
+                env,
+                "SLSKR_TRANSFER_RESCUE_ENABLED",
+                file.enabled.unwrap_or(true),
+            )?,
+            max_queue_time: Duration::from_secs(max_queue_time_seconds),
+            min_throughput_bytes_per_second: min_throughput_kbps.saturating_mul(1_024),
+            min_duration: Duration::from_secs(min_duration_seconds),
+            stalled_timeout: Duration::from_secs(stalled_timeout_seconds),
+            check_interval: Duration::from_secs(check_interval_seconds),
+            retry_cooldown: Duration::from_secs(retry_cooldown_seconds),
+            max_files_per_cycle: bounded_config_value(
+                "SLSKR_TRANSFER_RESCUE_MAX_FILES_PER_CYCLE",
+                env_parse_layer(
+                    env,
+                    "SLSKR_TRANSFER_RESCUE_MAX_FILES_PER_CYCLE",
+                    file.max_files_per_cycle,
+                    2_usize,
+                )?,
+                1,
+                20,
+            )?,
+            alternate_source_size_tolerance_percent: bounded_config_value(
+                "SLSKR_TRANSFER_RESCUE_ALTERNATE_SOURCE_SIZE_TOLERANCE_PERCENT",
+                env_parse_layer(
+                    env,
+                    "SLSKR_TRANSFER_RESCUE_ALTERNATE_SOURCE_SIZE_TOLERANCE_PERCENT",
+                    file.alternate_source_size_tolerance_percent,
+                    5_u32,
+                )?,
+                0,
+                100,
+            )?,
+        })
+    }
+
+    fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"max_queue_time_seconds\":{},\"min_throughput_kbps\":{},\"min_duration_seconds\":{},\"stalled_timeout_seconds\":{},\"check_interval_seconds\":{},\"retry_cooldown_seconds\":{},\"max_files_per_cycle\":{},\"alternate_source_size_tolerance_percent\":{}}}",
+            self.enabled,
+            self.max_queue_time.as_secs(),
+            self.min_throughput_bytes_per_second / 1_024,
+            self.min_duration.as_secs(),
+            self.stalled_timeout.as_secs(),
+            self.check_interval.as_secs(),
+            self.retry_cooldown.as_secs(),
+            self.max_files_per_cycle,
             self.alternate_source_size_tolerance_percent,
         )
     }
@@ -1186,6 +1325,7 @@ pub struct TransferFileConfig {
     allow_inbound: Option<bool>,
     allow_outbound: Option<bool>,
     auto_retry: TransferAutoRetryFileConfig,
+    rescue: TransferRescueFileConfig,
     completed_path_template: Option<String>,
 }
 
@@ -1201,6 +1341,20 @@ pub struct TransferAutoRetryFileConfig {
     peer_cooldown_seconds: Option<u64>,
     alternate_sources_enabled: Option<bool>,
     max_alternate_source_searches_per_cycle: Option<usize>,
+    alternate_source_size_tolerance_percent: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TransferRescueFileConfig {
+    enabled: Option<bool>,
+    max_queue_time_seconds: Option<u64>,
+    min_throughput_kbps: Option<u64>,
+    min_duration_seconds: Option<u64>,
+    stalled_timeout_seconds: Option<u64>,
+    check_interval_seconds: Option<u64>,
+    retry_cooldown_seconds: Option<u64>,
+    max_files_per_cycle: Option<usize>,
     alternate_source_size_tolerance_percent: Option<u32>,
 }
 
@@ -1984,6 +2138,49 @@ mod tests {
                 &MapEnv::default().with(name, value),
             )
             .expect_err("out-of-range auto-retry config must fail");
+            assert!(error.contains("must be between"), "{name}={value}: {error}");
+        }
+    }
+
+    #[test]
+    fn transfer_rescue_defaults_match_the_frozen_client_policy() {
+        let config =
+            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
+                .expect("default rescue config");
+        let rescue = &config.transfer_rescue;
+        assert!(rescue.enabled);
+        assert_eq!(rescue.max_queue_time.as_secs(), 1_800);
+        assert_eq!(rescue.min_throughput_bytes_per_second, 10 * 1_024);
+        assert_eq!(rescue.min_duration.as_secs(), 300);
+        assert_eq!(rescue.stalled_timeout.as_secs(), 120);
+        assert_eq!(rescue.check_interval.as_secs(), 45);
+        assert_eq!(rescue.retry_cooldown.as_secs(), 1_800);
+        assert_eq!(rescue.max_files_per_cycle, 2);
+        assert_eq!(rescue.alternate_source_size_tolerance_percent, 5);
+        assert!(config.sanitized_json().contains("\"transfer_rescue\""));
+    }
+
+    #[test]
+    fn transfer_rescue_bounds_are_enforced_at_startup() {
+        for (name, value) in [
+            ("SLSKR_TRANSFER_RESCUE_MAX_QUEUE_TIME_SECONDS", "59"),
+            ("SLSKR_TRANSFER_RESCUE_MIN_THROUGHPUT_KBPS", "0"),
+            ("SLSKR_TRANSFER_RESCUE_MIN_DURATION_SECONDS", "59"),
+            ("SLSKR_TRANSFER_RESCUE_STALLED_TIMEOUT_SECONDS", "29"),
+            ("SLSKR_TRANSFER_RESCUE_CHECK_INTERVAL_SECONDS", "14"),
+            ("SLSKR_TRANSFER_RESCUE_RETRY_COOLDOWN_SECONDS", "59"),
+            ("SLSKR_TRANSFER_RESCUE_MAX_FILES_PER_CYCLE", "0"),
+            (
+                "SLSKR_TRANSFER_RESCUE_ALTERNATE_SOURCE_SIZE_TOLERANCE_PERCENT",
+                "101",
+            ),
+        ] {
+            let error = super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default().with(name, value),
+            )
+            .expect_err("out-of-range rescue config must fail");
             assert!(error.contains("must be between"), "{name}={value}: {error}");
         }
     }
