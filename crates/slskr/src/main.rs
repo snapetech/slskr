@@ -24924,6 +24924,8 @@ async fn persist_webhook_dispatch_logs(
     let Some(db) = state.db.as_ref() else {
         return;
     };
+    let mut failures = 0_usize;
+    let mut first_error = None;
     for webhook in manager.get_for_event(event) {
         let record = crate::persistence::WebhookLogRecord {
             id: format!("log_{}", uuid::Uuid::new_v4()),
@@ -24938,7 +24940,20 @@ async fn persist_webhook_dispatch_logs(
             attempt: 1,
             timestamp: i64::try_from(unix_timestamp()).unwrap_or(i64::MAX),
         };
-        let _ = db.insert_webhook_log(&record).await;
+        if let Err(error) = db.insert_webhook_log(&record).await {
+            failures = failures.saturating_add(1);
+            if first_error.is_none() {
+                first_error = Some(error.to_string());
+            }
+        }
+    }
+    if let Some(error) = first_error {
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(format!(
+                "webhook audit persistence failed for {failures} delivery record(s): {error}"
+            ));
+        })
+        .await;
     }
 }
 
@@ -33900,6 +33915,40 @@ mod tests {
         .expect("delete webhook");
         assert_eq!(deleted.status, "200 OK");
         assert!(db.list_webhooks().await.expect("list deleted").is_empty());
+    }
+
+    #[tokio::test]
+    async fn webhook_audit_persistence_failures_surface_in_session_health() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let mut manager = super::webhooks::WebhookManager::new();
+        manager
+            .register(super::webhooks::Webhook::new(
+                "https://example.com/hook".to_owned(),
+                vec![super::webhooks::WebhookEvent::SearchCreated],
+                "secret_0123456789abcdef0123456789abcdef".to_owned(),
+            ))
+            .expect("register webhook");
+        db.close_for_test().await;
+
+        super::persist_webhook_dispatch_logs(
+            &state,
+            &manager,
+            super::webhooks::WebhookEvent::SearchCreated,
+            "correlation-test",
+            r#"{"query":"test"}"#,
+        )
+        .await;
+
+        let session = state.session.read().await;
+        let error = session.last_error.as_deref().unwrap_or_default();
+        assert!(error.contains("webhook audit persistence failed for 1 delivery record"));
     }
 
     #[tokio::test]
