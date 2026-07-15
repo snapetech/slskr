@@ -3,6 +3,7 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::SysRng, TryRng};
+use std::collections::HashSet;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{self, Duration};
 
@@ -197,6 +198,8 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
     let mut content_length: usize = 0;
     let mut saw_content_length = false;
     let mut saw_transfer_encoding = false;
+    let mut saw_connection = false;
+    let mut singleton_headers = HashSet::new();
 
     let mut total_header_bytes = request_line.len();
 
@@ -233,11 +236,26 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
         }
 
         match name.as_str() {
-            "host" => headers.host = Some(value.to_string()),
-            "origin" => headers.origin = Some(value.to_string()),
-            "referer" => headers.referer = Some(value.to_string()),
-            "cookie" => headers.cookie = Some(value.to_string()),
-            "content-type" => headers.content_type = Some(value.to_string()),
+            "host" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                if value.is_empty() {
+                    return Err("Host header must not be empty".to_owned());
+                }
+                headers.host = Some(value.to_string());
+            }
+            "origin" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.origin = Some(value.to_string());
+            }
+            "referer" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.referer = Some(value.to_string());
+            }
+            "cookie" => append_cookie_header(&mut headers.cookie, value),
+            "content-type" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.content_type = Some(value.to_string());
+            }
             "content-length" => {
                 if saw_content_length {
                     return Err("duplicate Content-Length header".to_string());
@@ -255,19 +273,42 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
                 headers.transfer_encoding = Some(value.to_lowercase());
                 saw_transfer_encoding = true;
             }
-            "authorization" => headers.authorization = Some(value.to_string()),
-            "x-api-key" => headers.x_api_key = Some(value.to_string()),
-            "forwarded" => headers.forwarded = Some(value.to_string()),
-            "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
-            "upgrade" => headers.upgrade = Some(value.to_lowercase()),
-            "sec-websocket-key" => headers.sec_websocket_key = Some(value.to_string()),
+            "authorization" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.authorization = Some(value.to_string());
+            }
+            "x-api-key" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.x_api_key = Some(value.to_string());
+            }
+            "forwarded" => append_list_header(&mut headers.forwarded, value),
+            "x-forwarded-for" => append_list_header(&mut headers.x_forwarded_for, value),
+            "upgrade" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.upgrade = Some(value.to_lowercase());
+            }
+            "sec-websocket-key" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.sec_websocket_key = Some(value.to_string());
+            }
             "sec-websocket-protocol" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.sec_websocket_protocol = Some(value.to_string());
             }
             "sec-websocket-version" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.sec_websocket_version = Some(value.to_string());
             }
-            "connection" => headers.connection = value.to_lowercase(),
+            "connection" => {
+                let value = value.to_lowercase();
+                if saw_connection {
+                    headers.connection.push_str(", ");
+                    headers.connection.push_str(&value);
+                } else {
+                    headers.connection = value;
+                    saw_connection = true;
+                }
+            }
             "user-agent" => headers.user_agent = Some(value.to_string()),
             _ => {}
         }
@@ -278,6 +319,9 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
             return Err("Transfer-Encoding with Content-Length is not supported".to_string());
         }
         return Err("Transfer-Encoding is not supported".to_string());
+    }
+    if http_version == "HTTP/1.1" && headers.host.is_none() {
+        return Err("HTTP/1.1 requires a Host header".to_owned());
     }
 
     // Reject oversized bodies before reading
@@ -316,6 +360,31 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
         },
         keep_alive,
     )))
+}
+
+fn reject_duplicate_singleton(seen: &mut HashSet<String>, name: &str) -> Result<(), String> {
+    if !seen.insert(name.to_owned()) {
+        return Err(format!("duplicate {name} header"));
+    }
+    Ok(())
+}
+
+fn append_list_header(header: &mut Option<String>, value: &str) {
+    if let Some(existing) = header {
+        existing.push_str(", ");
+        existing.push_str(value);
+    } else {
+        *header = Some(value.to_owned());
+    }
+}
+
+fn append_cookie_header(header: &mut Option<String>, value: &str) {
+    if let Some(existing) = header {
+        existing.push_str("; ");
+        existing.push_str(value);
+    } else {
+        *header = Some(value.to_owned());
+    }
 }
 
 fn header_has_token(value: &str, token: &str) -> bool {
@@ -634,6 +703,72 @@ mod tests {
         let mut reader = BufReader::new(server);
         let err = read_http_request(&mut reader).await.unwrap_err();
         assert!(err.contains("duplicate Content-Length"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_http11_requires_one_nonempty_host_header() {
+        for request in [
+            b"GET / HTTP/1.1\r\n\r\n".as_slice(),
+            b"GET / HTTP/1.1\r\nHost:\r\n\r\n".as_slice(),
+            b"GET / HTTP/1.1\r\nHost: first.example\r\nHost: second.example\r\n\r\n".as_slice(),
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            client.write_all(request).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("Host") || error.contains("host"), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_authentication_headers_are_rejected() {
+        for header in ["Authorization", "X-Api-Key", "Origin"] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!(
+                "GET / HTTP/1.1\r\nHost: localhost\r\n{header}: first\r\n{header}: second\r\n\r\n"
+            );
+            client.write_all(request.as_bytes()).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("duplicate"), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_repeated_forwarding_headers_are_combined_in_wire_order() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(
+                b"GET / HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: 198.51.100.1\r\nX-Forwarded-For: 10.0.0.2\r\nForwarded: for=198.51.100.1\r\nForwarded: for=10.0.0.2\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
+        assert_eq!(
+            request.headers.x_forwarded_for.as_deref(),
+            Some("198.51.100.1, 10.0.0.2")
+        );
+        assert_eq!(
+            request.headers.forwarded.as_deref(),
+            Some("for=198.51.100.1, for=10.0.0.2")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repeated_list_headers_preserve_all_values() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(
+                b"GET / HTTP/1.1\r\nHost: localhost\r\nCookie: first=1\r\nCookie: second=2\r\nConnection: keep-alive\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let (request, keep_alive) = read_http_request(&mut reader).await.unwrap().unwrap();
+        assert_eq!(request.headers.cookie.as_deref(), Some("first=1; second=2"));
+        assert_eq!(request.headers.connection, "keep-alive, close");
+        assert!(!keep_alive);
     }
 
     #[tokio::test]

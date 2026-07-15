@@ -8,6 +8,9 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 
 | Severity | Area | Finding | Status |
 | --- | --- | --- | --- |
+| High | Backend integrations | Lidarr SSRF filtering allowed IPv6 multicast, documentation, 6to4, Teredo, and deprecated site-local targets. | Fixed by blocking special-use IPv6 and embedded-transition ranges with direct regression coverage. |
+| Medium | HTTP parsing | HTTP/1.1 accepted missing/duplicate Host and duplicate authentication/origin headers by silently keeping one value; repeated forwarding, cookie, and connection fields lost values. | Fixed by enforcing singleton security headers, requiring a non-empty Host, and combining list-valued fields in wire order. |
+| Low | Credential storage | Credential hardening forcibly changed permissions on existing operator-managed parent directories and mishandled empty relative parents. | Fixed by preserving secure existing modes, rejecting shared-writable parents, and securing only newly created directories. |
 | Medium | Credential storage | File-backed credential writes followed an existing symlink and truncated its target; credential reads had no size ceiling. | Fixed with symlink rejection, private Unix directory/file permissions, atomic replacement, a 64 KiB read cap, and regression tests. |
 | Medium | HTTP availability | The per-read header timeout reset after every partial byte, allowing a slow client to occupy an HTTP connection slot indefinitely. | Fixed with a hard 60-second end-to-end request deadline and slow-progress regression coverage. |
 | High | Peer protocol | Compressed file-search responses used unbounded zlib decompression, allowing a small peer-controlled payload to expand until memory exhaustion. | Fixed with a 64 MiB decompression ceiling and adversarial expansion coverage. |

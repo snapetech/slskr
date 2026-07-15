@@ -15702,10 +15702,16 @@ fn is_blocked_integration_ip(ip: IpAddr) -> bool {
                 return is_blocked_integration_ip(IpAddr::V4(v4));
             }
             let segments = ip.segments();
+            if segments[0] == 0x2002 || (segments[0] == 0x2001 && segments[1] == 0) {
+                return true;
+            }
             ip.is_loopback()
                 || ip.is_unspecified()
+                || ip.is_multicast()
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
                 || (segments[0] & 0xfe00) == 0xfc00
                 || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] & 0xffc0) == 0xfec0
         }
     }
 }
@@ -24144,6 +24150,25 @@ mod tests {
             .expect_err("chunked oversized response must be rejected");
         assert!(error.contains("response exceeds"), "{error}");
         server.await.expect("fixture server task");
+    }
+
+    #[test]
+    fn integration_ssrf_filter_blocks_special_use_ipv6_ranges() {
+        for address in [
+            "ff02::1",
+            "2001:db8::1",
+            "2002:c0a8:101::1",
+            "2001:0000:4136:e378::1",
+            "fec0::1",
+        ] {
+            let ip = address.parse::<std::net::IpAddr>().expect("fixture IP");
+            assert!(super::is_blocked_integration_ip(ip), "accepted {address}");
+        }
+        assert!(!super::is_blocked_integration_ip(
+            "2606:4700:4700::1111"
+                .parse::<std::net::IpAddr>()
+                .expect("global fixture IP")
+        ));
     }
 
     #[test]

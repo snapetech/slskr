@@ -209,36 +209,11 @@ fn load_file(path: &Path) -> Result<Option<StoredCredentials>, String> {
 }
 
 fn store_file(path: &Path, credentials: &LoginCredentials) -> Result<&'static str, String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "failed to create Soulseek credential directory {}: {error}",
-                parent.display()
-            )
-        })?;
-        let metadata = fs::symlink_metadata(parent).map_err(|error| {
-            format!(
-                "failed to inspect Soulseek credential directory {}: {error}",
-                parent.display()
-            )
-        })?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(format!(
-                "Soulseek credential directory {} must be a real directory",
-                parent.display()
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|error| {
-                format!(
-                    "failed to restrict Soulseek credential directory {}: {error}",
-                    parent.display()
-                )
-            })?;
-        }
-    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    ensure_secure_credential_parent(parent)?;
 
     let payload = serde_json::to_string_pretty(&FileCredentials {
         username: credentials.username.clone(),
@@ -248,6 +223,47 @@ fn store_file(path: &Path, credentials: &LoginCredentials) -> Result<&'static st
 
     write_secret_file(path, payload.as_bytes())?;
     Ok("file")
+}
+
+fn ensure_secure_credential_parent(parent: &Path) -> Result<(), String> {
+    let existed = parent.exists();
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "failed to create Soulseek credential directory {}: {error}",
+            parent.display()
+        )
+    })?;
+    let metadata = fs::symlink_metadata(parent).map_err(|error| {
+        format!(
+            "failed to inspect Soulseek credential directory {}: {error}",
+            parent.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "Soulseek credential directory {} must be a real directory",
+            parent.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if existed && metadata.permissions().mode() & 0o022 != 0 {
+            return Err(format!(
+                "Soulseek credential directory {} must not be writable by group or other users",
+                parent.display()
+            ));
+        }
+        if !existed {
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|error| {
+                format!(
+                    "failed to restrict Soulseek credential directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -356,6 +372,43 @@ mod tests {
         let error = read_bounded_secret_file(&path, "credential fixture")
             .expect_err("reject oversized credential file");
         assert!(error.contains("exceeds"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_parent_validation_does_not_mutate_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_dir("parent-mode");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create fixture directory");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755))
+            .expect("set fixture permissions");
+
+        ensure_secure_credential_parent(&root).expect("accept non-writable existing parent");
+        let mode = fs::metadata(&root)
+            .expect("read fixture metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o755);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_parent_validation_rejects_shared_writable_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_dir("shared-parent");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create fixture directory");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o777))
+            .expect("set fixture permissions");
+
+        let error = ensure_secure_credential_parent(&root)
+            .expect_err("reject shared-writable credential parent");
+        assert!(error.contains("writable by group or other"));
         let _ = fs::remove_dir_all(root);
     }
 }

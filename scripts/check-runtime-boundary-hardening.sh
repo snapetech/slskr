@@ -16,6 +16,7 @@ for anchor in \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \
   'integration_json_reader_rejects_chunked_oversized_response' \
+  'integration_ssrf_filter_blocks_special_use_ipv6_ranges' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'state.config.peer_response_timeout' \
   'state.incoming_connections'; do
@@ -27,7 +28,10 @@ done
 
 for anchor in \
   'REQUEST_READ_TIMEOUT' \
-  'test_request_deadline_is_not_reset_by_partial_progress'; do
+  'test_request_deadline_is_not_reset_by_partial_progress' \
+  'test_http11_requires_one_nonempty_host_header' \
+  'test_duplicate_authentication_headers_are_rejected' \
+  'test_repeated_forwarding_headers_are_combined_in_wire_order'; do
   if ! rg -n --fixed-strings -- "$anchor" "$http_source" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing HTTP anchor %s\n' "$anchor" >&2
     status=1
@@ -37,7 +41,9 @@ done
 for anchor in \
   'MAX_CREDENTIAL_FILE_BYTES' \
   'credential_file_write_rejects_symlink_without_touching_target' \
-  'credential_file_read_rejects_oversized_input'; do
+  'credential_file_read_rejects_oversized_input' \
+  'credential_parent_validation_does_not_mutate_existing_permissions' \
+  'credential_parent_validation_rejects_shared_writable_directory'; do
   if ! rg -n --fixed-strings -- "$anchor" "$credential_source" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing credential anchor %s\n' "$anchor" >&2
     status=1
