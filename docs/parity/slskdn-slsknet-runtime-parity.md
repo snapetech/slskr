@@ -73,7 +73,7 @@ those snapshots is:
 The classifications below cover every commit touching `src` at the frozen
 heads. More specific rows above override a group's conservative default.
 `scripts/check-upstream-parity-classification.sh` always validates the committed
-registry's exact counts, prefix format, and uniqueness. When the sibling
+registry's exact counts, prefix identities, format, and uniqueness. When the sibling
 repositories are present, it additionally fails when a source/config commit at
 either snapshot is absent. Commits that touch only docs, memory, tests,
 examples, or release/packaging automation are classified by that script as

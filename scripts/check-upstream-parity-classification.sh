@@ -29,17 +29,33 @@ check_committed_registry() {
       tr -d '`'
   )"
 
-  check_prefix_set "slskdN" 164 "$slskdn_prefixes"
-  check_prefix_set "slskNet.Runtime" 6 "$runtime_prefixes"
+  check_prefix_set \
+    "slskdN" \
+    164 \
+    "6aaafb3ecd577eed22c195cdb508d77fec0de5d70cf8add46a588213bd1c00ed" \
+    "$slskdn_prefixes"
+  check_prefix_set \
+    "slskNet.Runtime" \
+    6 \
+    "0d6017964b7b9b22c98482dd0856b667c45be2dee325bcb85aee67f6d02f06df" \
+    "$runtime_prefixes"
 }
 
 check_prefix_set() {
   local label="$1"
   local expected="$2"
-  local prefixes="$3"
-  local total unique
+  local expected_digest="$3"
+  local prefixes="$4"
+  local total unique actual_digest
   total="$(printf '%s\n' "$prefixes" | sed '/^$/d' | wc -l)"
   unique="$(printf '%s\n' "$prefixes" | sed '/^$/d' | sort -u | wc -l)"
+  actual_digest="$(
+    printf '%s\n' "$prefixes" |
+      sed '/^$/d' |
+      sort |
+      sha256sum |
+      cut -d ' ' -f 1
+  )"
   if [[ "$total" -ne "$expected" ]]; then
     printf 'upstream parity classification failed: %s registry has %d prefixes, expected %d\n' \
       "$label" "$total" "$expected" >&2
@@ -47,6 +63,11 @@ check_prefix_set() {
   fi
   if [[ "$unique" -ne "$total" ]]; then
     printf 'upstream parity classification failed: %s registry contains duplicate prefixes\n' \
+      "$label" >&2
+    status=1
+  fi
+  if [[ "$actual_digest" != "$expected_digest" ]]; then
+    printf 'upstream parity classification failed: %s registry identity digest changed\n' \
       "$label" >&2
     status=1
   fi
