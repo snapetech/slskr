@@ -2481,6 +2481,47 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Replace a share group and its complete membership snapshot atomically.
+    pub async fn replace_share_group(
+        &self,
+        record: &ShareGroupRecord,
+        members: &[ShareGroupMemberRecord],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query(
+            r#"
+            INSERT OR REPLACE INTO share_groups (id, name, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&record.id)
+        .bind(&record.name)
+        .bind(&record.description)
+        .bind(record.created_at)
+        .bind(record.updated_at)
+        .execute(&mut *transaction)
+        .await?;
+        query("DELETE FROM share_group_members WHERE group_id = ?")
+            .bind(&record.id)
+            .execute(&mut *transaction)
+            .await?;
+        for member in members {
+            query(
+                r#"
+                INSERT INTO share_group_members (group_id, username, added_at)
+                VALUES (?, ?, ?)
+                "#,
+            )
+            .bind(&member.group_id)
+            .bind(&member.username)
+            .bind(member.added_at)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// Delete a share group and its members.
     pub async fn delete_share_group(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;

@@ -12687,14 +12687,18 @@ async fn route_http_request_with_headers(
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
             let description = extract_json_string_field(body, "description").unwrap_or_default();
             let mut sharegroups = state.sharegroups.write().await;
+            let previous = sharegroups.clone();
             let Some(record) = sharegroups.create(name, description) else {
                 return Ok(routing::service_unavailable_response(
                     "share group capacity is full",
                 ));
             };
             let json = record.json();
+            if let Err(error) = persist_share_group(state, &record).await {
+                *sharegroups = previous;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             drop(sharegroups);
-            persist_share_group(state, &record).await;
             Ok(routing::created_response(json))
         }
         ("GET", path)
@@ -12718,10 +12722,14 @@ async fn route_http_request_with_headers(
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
             let description = extract_json_string_field(body, "description").unwrap_or_default();
             let mut sharegroups = state.sharegroups.write().await;
+            let previous = sharegroups.clone();
             if let Some(record) = sharegroups.update(id, name, description) {
                 let json = record.json();
+                if let Err(error) = persist_share_group(state, &record).await {
+                    *sharegroups = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 drop(sharegroups);
-                persist_share_group(state, &record).await;
                 Ok(routing::ok_response(json))
             } else {
                 drop(sharegroups);
@@ -12778,6 +12786,7 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("username is required"));
             }
             let mut sharegroups = state.sharegroups.write().await;
+            let previous = sharegroups.clone();
             match sharegroups.add_member(id, username.clone()) {
               Ok(Some((record, added))) => {
                 let member = record
@@ -12795,10 +12804,13 @@ async fn route_http_request_with_headers(
                             unix_timestamp()
                         )
                     });
-                drop(sharegroups);
                 if added {
-                    persist_share_group(state, &record).await;
+                    if let Err(error) = persist_share_group(state, &record).await {
+                        *sharegroups = previous;
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
                 }
+                drop(sharegroups);
                 Ok(if added { routing::created_response(json) } else { routing::ok_response(json) })
               }
               Ok(None) => {
@@ -12828,7 +12840,7 @@ async fn route_http_request_with_headers(
                     return Ok(routing::service_unavailable_response(&error));
                 }
                 drop(sharegroups);
-                persist_share_group(state, &record).await;
+                let _ = persist_share_group(state, &record).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 drop(sharegroups);
@@ -23552,9 +23564,9 @@ async fn persist_share_grant_delete_checked(state: &AppState, id: &str) -> Resul
     Ok(true)
 }
 
-async fn persist_share_group(state: &AppState, record: &ShareGroupRecord) {
+async fn persist_share_group(state: &AppState, record: &ShareGroupRecord) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::ShareGroupRecord {
         id: record.id.clone(),
@@ -23563,10 +23575,19 @@ async fn persist_share_group(state: &AppState, record: &ShareGroupRecord) {
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_share_group(&persisted).await;
-    for member in &record.members {
-        persist_share_group_member(state, &record.id, member).await;
-    }
+    let members = record
+        .members
+        .iter()
+        .map(|member| crate::persistence::ShareGroupMemberRecord {
+            group_id: record.id.clone(),
+            username: member.username.clone(),
+            added_at: i64::try_from(member.added_at).unwrap_or(i64::MAX),
+        })
+        .collect::<Vec<_>>();
+    db.replace_share_group(&persisted, &members)
+        .await
+        .map_err(|error| format!("share group persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_share_group_delete(state: &AppState, id: &str) -> Result<bool, String> {
@@ -23577,18 +23598,6 @@ async fn persist_share_group_delete(state: &AppState, id: &str) -> Result<bool, 
         .await
         .map_err(|error| format!("share group revocation persistence failed: {error}"))?;
     Ok(true)
-}
-
-async fn persist_share_group_member(state: &AppState, group_id: &str, member: &ShareGroupMember) {
-    let Some(db) = state.db.as_ref() else {
-        return;
-    };
-    let persisted = crate::persistence::ShareGroupMemberRecord {
-        group_id: group_id.to_owned(),
-        username: member.username.clone(),
-        added_at: i64::try_from(member.added_at).unwrap_or(i64::MAX),
-    };
-    let _ = db.upsert_share_group_member(&persisted).await;
 }
 
 async fn persist_share_group_member_delete(
@@ -34806,6 +34815,104 @@ mod tests {
             .expect("rolled-back group");
         assert_eq!(group.members.len(), 1);
         assert_eq!(group.members[0].username, "friend");
+    }
+
+    #[tokio::test]
+    async fn share_group_writes_roll_back_when_persistence_fails() {
+        let create_db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (create_state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(create_db.clone()),
+        );
+        create_db.close_for_test().await;
+        let create = super::route_http_request(
+            "POST",
+            "/api/sharegroups",
+            None,
+            r#"{"name":"Transient"}"#,
+            &create_state,
+        )
+        .await
+        .expect("failed create response");
+        assert_eq!(create.status, "503 Service Unavailable");
+        assert!(create.body.contains("share group persistence failed"));
+        assert!(create_state.sharegroups.read().await.records.is_empty());
+
+        let update_db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (update_state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(update_db.clone()),
+        );
+        let update_id = update_state
+            .sharegroups
+            .write()
+            .await
+            .create("Original".to_owned(), String::new())
+            .expect("share group")
+            .id;
+        update_db.close_for_test().await;
+        let update = super::route_http_request(
+            "PUT",
+            &format!("/api/sharegroups/{update_id}"),
+            None,
+            r#"{"name":"Changed"}"#,
+            &update_state,
+        )
+        .await
+        .expect("failed update response");
+        assert_eq!(update.status, "503 Service Unavailable");
+        assert_eq!(
+            update_state
+                .sharegroups
+                .read()
+                .await
+                .get(&update_id)
+                .expect("rolled-back group")
+                .name,
+            "Original"
+        );
+
+        let member_db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (member_state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(member_db.clone()),
+        );
+        let member_group_id = member_state
+            .sharegroups
+            .write()
+            .await
+            .create("Trusted".to_owned(), String::new())
+            .expect("share group")
+            .id;
+        member_db.close_for_test().await;
+        let member = super::route_http_request(
+            "POST",
+            &format!("/api/sharegroups/{member_group_id}/members"),
+            None,
+            r#"{"username":"friend"}"#,
+            &member_state,
+        )
+        .await
+        .expect("failed member response");
+        assert_eq!(member.status, "503 Service Unavailable");
+        assert!(member.body.contains("share group persistence failed"));
+        assert!(member_state
+            .sharegroups
+            .read()
+            .await
+            .get(&member_group_id)
+            .expect("rolled-back group")
+            .members
+            .is_empty());
     }
 
     #[tokio::test]
