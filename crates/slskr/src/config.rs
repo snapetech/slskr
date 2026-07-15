@@ -193,11 +193,8 @@ impl AppConfig {
             file_config.transfers.allow_outbound.unwrap_or(true),
         )?;
         let api_token = env.var("SLSKR_API_TOKEN").or(file_config.auth.api_token);
-        if api_token
-            .as_deref()
-            .is_some_and(|token| token.trim().is_empty())
-        {
-            return Err("HTTP API token must not be empty or whitespace-only".to_owned());
+        if let Some(token) = api_token.as_deref() {
+            validate_api_token(token)?;
         }
         let auth_disabled = env_bool_layer(
             env,
@@ -334,6 +331,19 @@ impl AppConfig {
             self.integrations.sanitized_json()
         )
     }
+}
+
+fn validate_api_token(token: &str) -> Result<(), String> {
+    if token.trim().is_empty() {
+        return Err("HTTP API token must not be empty or whitespace-only".to_owned());
+    }
+    if token != token.trim() {
+        return Err("HTTP API token must not have surrounding whitespace".to_owned());
+    }
+    if token.chars().any(char::is_control) {
+        return Err("HTTP API token must not contain control characters".to_owned());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1334,6 +1344,42 @@ mod tests {
             let error = super::AppConfig::from_layers(None, file_config, &MapEnv::default())
                 .expect_err("blank file API token must fail");
             assert!(error.contains("must not be empty"));
+        }
+    }
+
+    #[test]
+    fn api_token_rejects_unrepresentable_env_and_file_values() {
+        for token in [
+            " leading",
+            "trailing ",
+            "token\tvalue",
+            "token\nvalue",
+            "token\u{7f}value",
+        ] {
+            let env = MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", token);
+            let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+                .expect_err("unrepresentable environment API token must fail");
+            assert!(
+                error.contains("whitespace") || error.contains("control"),
+                "{error}"
+            );
+
+            let file_config = super::FileConfig {
+                auth: super::AuthFileConfig {
+                    disabled: Some(false),
+                    api_token: Some(token.to_owned()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let error = super::AppConfig::from_layers(None, file_config, &MapEnv::default())
+                .expect_err("unrepresentable file API token must fail");
+            assert!(
+                error.contains("whitespace") || error.contains("control"),
+                "{error}"
+            );
         }
     }
 
