@@ -7106,6 +7106,22 @@ impl ShareGrantStore {
         }
     }
 
+    fn delete_by_collection(&mut self, collection_id: &str) -> Vec<ShareGrantRecord> {
+        let mut removed = Vec::new();
+        self.records.retain(|record| {
+            if record.collection_id == collection_id {
+                removed.push(record.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if !removed.is_empty() {
+            self.updated_at = unix_timestamp();
+        }
+        removed
+    }
+
     #[allow(dead_code)]
     fn json(&self) -> String {
         format!(
@@ -12141,7 +12157,13 @@ async fn route_http_request_with_headers(
             let deleted = collections.delete(id);
             drop(collections);
             if deleted {
+                let mut grants = state.share_grants.write().await;
+                let removed_grants = grants.delete_by_collection(id);
+                drop(grants);
                 persist_collection_delete(state, id).await;
+                for grant in removed_grants {
+                    persist_share_grant_delete(state, &grant.id).await;
+                }
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -12739,6 +12761,12 @@ async fn route_http_request_with_headers(
             let username = extract_json_string_field(body, "username").unwrap_or_default();
             if collection_id.is_empty() || username.is_empty() {
                 return Ok(routing::conflict_response("collection_id and username are required"));
+            }
+            let collections = state.collections.read().await;
+            let collection_exists = collections.get(&collection_id).is_some();
+            drop(collections);
+            if !collection_exists {
+                return Ok(routing::not_found_response());
             }
             let mut grants = state.share_grants.write().await;
             let Some((record, created)) = grants.create(collection_id, username) else {
@@ -19259,7 +19287,7 @@ async fn serve(once: bool) -> Result<(), String> {
     } else {
         ContactStore::new()
     };
-    let share_grant_store = if let Some(db) = db.as_ref() {
+    let mut share_grant_store = if let Some(db) = db.as_ref() {
         let records = db
             .list_share_grants(EVENT_HISTORY_LIMIT as i32, 0)
             .await
@@ -19294,6 +19322,27 @@ async fn serve(once: bool) -> Result<(), String> {
     } else {
         CollectionStore::new()
     };
+    let collection_ids = collection_store
+        .records
+        .iter()
+        .map(|record| record.id.as_str())
+        .collect::<HashSet<_>>();
+    let stale_grant_ids = share_grant_store
+        .records
+        .iter()
+        .filter(|grant| !collection_ids.contains(grant.collection_id.as_str()))
+        .map(|grant| grant.id.clone())
+        .collect::<Vec<_>>();
+    share_grant_store
+        .records
+        .retain(|grant| collection_ids.contains(grant.collection_id.as_str()));
+    if let Some(db) = db.as_ref() {
+        for id in stale_grant_ids {
+            db.delete_share_grant(&id)
+                .await
+                .map_err(|error| format!("failed to delete stale share grant: {error}"))?;
+        }
+    }
     let library_store = if let Some(db) = db.as_ref() {
         let records = db
             .list_library_items(EVENT_HISTORY_LIMIT as i32, 0)
@@ -29788,21 +29837,34 @@ mod tests {
         .expect("update contact");
         assert_eq!(updated_contact.status, "200 OK");
 
-        let grant = super::route_http_request(
+        let collection = super::route_http_request(
             "POST",
-            "/api/share-grants",
+            "/api/collections",
             None,
-            r#"{"collection_id":"collection-1","username":"friend"}"#,
+            r#"{"name":"Shared"}"#,
             &state,
         )
         .await
-        .expect("create share grant");
+        .expect("create grant collection");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let grant_body =
+            format!("{{\"collection_id\":\"{collection_id}\",\"username\":\"friend\"}}");
+        let grant =
+            super::route_http_request("POST", "/api/share-grants", None, &grant_body, &state)
+                .await
+                .expect("create share grant");
         assert_eq!(grant.status, "201 Created");
+        let duplicate_grant_body =
+            format!("{{\"collection_id\":\"{collection_id}\",\"username\":\"FRIEND\"}}");
         let duplicate_grant = super::route_http_request(
             "POST",
             "/api/share-grants",
             None,
-            r#"{"collection_id":"collection-1","username":"FRIEND"}"#,
+            &duplicate_grant_body,
             &state,
         )
         .await
@@ -34286,6 +34348,60 @@ mod tests {
                 .id,
             format!("grant-{}", u64::MAX)
         );
+    }
+
+    #[tokio::test]
+    async fn share_grants_require_live_collections_and_are_revoked_on_delete() {
+        let (state, _receiver) = test_state();
+        let missing = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            r#"{"collection_id":"col-1","username":"friend"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(missing.status, "404 Not Found");
+        assert!(state.share_grants.read().await.records.is_empty());
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Private"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let granted = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            &format!("{{\"collection_id\":\"{collection_id}\",\"username\":\"friend\"}}"),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(granted.status, "201 Created");
+        assert_eq!(state.share_grants.read().await.records.len(), 1);
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/collections/{collection_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted.status, "200 OK");
+        assert!(state.share_grants.read().await.records.is_empty());
     }
 
     #[test]
