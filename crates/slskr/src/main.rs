@@ -9261,8 +9261,10 @@ async fn route_http_request_with_headers(
                 body: events.slskd_json(route.query),
             })
         }
-        ("POST", path) if path.starts_with("/api/events/") && path.len() > 12 => {
-            let kind = &path[12..];
+        ("POST", path) if path.starts_with("/api/events/") => {
+            let Some(kind) = path_segment_after(path, "/api/events/") else {
+                return Ok(routing::not_found_response());
+            };
             let mut events = state.events.write().await;
             let record = events.record(
                 "compat.event",
@@ -9271,6 +9273,7 @@ async fn route_http_request_with_headers(
             );
             let count = events.records.len();
             drop(events);
+            persist_event_record(state, &record).await;
             Ok(routing::ok_response(
                 serde_json::json!({
                     "recorded": true,
@@ -29780,15 +29783,42 @@ mod tests {
         )
         .await;
 
+        let compatibility_event = super::route_http_request(
+            "POST",
+            "/api/events/Noop",
+            None,
+            r#""durable compatibility event""#,
+            &state,
+        )
+        .await
+        .expect("record compatibility event");
+        assert_eq!(compatibility_event.status, "200 OK");
+        let nested_event = super::route_http_request(
+            "POST",
+            "/api/events/Noop/extra",
+            None,
+            r#""must not persist""#,
+            &state,
+        )
+        .await
+        .expect("reject nested event route");
+        assert_eq!(nested_event.status, "404 Not Found");
+
         let persisted = db.list_events(10, 0).await.expect("list events");
-        assert_eq!(persisted.len(), 1);
-        assert_eq!(persisted[0].id, 1);
-        assert_eq!(persisted[0].kind, "search.started");
-        assert_eq!(persisted[0].resource, "42");
-        assert_eq!(persisted[0].detail.as_deref(), Some("query=durable"));
+        assert_eq!(persisted.len(), 2);
+        assert!(persisted.iter().any(|record| {
+            record.kind == "search.started"
+                && record.resource == "42"
+                && record.detail.as_deref() == Some("query=durable")
+        }));
+        assert!(persisted.iter().any(|record| {
+            record.kind == "compat.event"
+                && record.resource == "Noop"
+                && record.detail.as_deref() == Some("durable compatibility event")
+        }));
 
         let rehydrated = super::EventStore::from_persisted(persisted, super::EVENT_HISTORY_LIMIT);
-        assert_eq!(rehydrated.next_id, 2);
+        assert_eq!(rehydrated.next_id, 3);
         assert!(rehydrated.json(None).contains("\"topic\":\"searches\""));
         assert!(rehydrated
             .slskd_json(Some("topic=searches"))
@@ -29799,9 +29829,9 @@ mod tests {
             .expect("event database stats");
         assert_eq!(stats.status, "200 OK");
         let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
-        assert_eq!(stats_json["events"], 1);
-        assert_eq!(stats_json["persisted"]["events"], 1);
-        assert_eq!(stats_json["projections"]["events"], 1);
+        assert_eq!(stats_json["events"], 2);
+        assert_eq!(stats_json["persisted"]["events"], 2);
+        assert_eq!(stats_json["projections"]["events"], 2);
     }
 
     #[test]
