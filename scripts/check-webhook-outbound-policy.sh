@@ -59,6 +59,11 @@ if ! rg -n 'deliveries: Arc<Semaphore>' crates/slskr/src/webhooks.rs >/dev/null 
   status=1
 fi
 
+if ! rg -n --fixed-strings -- 'dispatch_does_not_spawn_when_delivery_pool_is_full' crates/slskr/src/webhooks.rs >/dev/null; then
+  printf 'webhook outbound policy check failed: pre-spawn delivery admission regression is missing\n' >&2
+  status=1
+fi
+
 if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi

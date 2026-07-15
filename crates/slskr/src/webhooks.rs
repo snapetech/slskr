@@ -383,21 +383,21 @@ impl WebhookDispatcher {
         let payload_json = payload.to_string().unwrap_or_default();
 
         for webhook in webhooks {
+            let Ok(delivery_permit) = Arc::clone(&deliveries).try_acquire_owned() else {
+                eprintln!(
+                    "[WEBHOOK] Dropped delivery to {} because the delivery pool is full",
+                    sanitized_webhook_url_for_log(&webhook.url)
+                );
+                continue;
+            };
             // Spawn async task for each webhook delivery (no blocking)
             let webhook_url = webhook.url.clone();
             let webhook_secret = webhook.secret.clone();
             let webhook_timeout = webhook.timeout_seconds;
             let payload_clone = payload_json.clone();
-            let deliveries = Arc::clone(&deliveries);
 
             tokio::spawn(async move {
-                let Ok(_delivery_permit) = deliveries.try_acquire_owned() else {
-                    eprintln!(
-                        "[WEBHOOK] Dropped delivery to {} because the delivery pool is full",
-                        sanitized_webhook_url_for_log(&webhook_url)
-                    );
-                    return;
-                };
+                let _delivery_permit = delivery_permit;
                 let _ = Self::send_webhook(
                     &webhook_url,
                     &webhook_secret,
@@ -782,6 +782,31 @@ mod tests {
 
         manager.unregister(&id);
         assert!(manager.get(&id).is_none());
+    }
+
+    #[tokio::test]
+    async fn dispatch_does_not_spawn_when_delivery_pool_is_full() {
+        let mut manager = WebhookManager::new();
+        manager
+            .register(Webhook::new(
+                "https://example.com/hook".to_owned(),
+                vec![WebhookEvent::SearchCreated],
+                Webhook::generate_secret(),
+            ))
+            .expect("register webhook");
+        let deliveries = Arc::new(Semaphore::new(0));
+
+        WebhookDispatcher::dispatch(
+            &manager,
+            Arc::clone(&deliveries),
+            "correlation".to_owned(),
+            WebhookEvent::SearchCreated,
+            serde_json::json!({"query": "bounded"}),
+        )
+        .await;
+
+        assert_eq!(Arc::strong_count(&deliveries), 1);
+        assert_eq!(deliveries.available_permits(), 0);
     }
 
     #[test]
