@@ -1805,6 +1805,19 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Delete a set of transfer records atomically.
+    pub async fn delete_transfers(&self, ids: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for id in ids {
+            query("DELETE FROM transfers WHERE id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// Append a transfer transition/progress event.
     pub async fn insert_transfer_event(
         &self,

@@ -4,7 +4,9 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::SysRng, TryRng};
 use std::collections::HashSet;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt,
+};
 use tokio::time::{self, Duration};
 
 use crate::routing::HttpResponse;
@@ -48,6 +50,7 @@ pub struct HttpHeaders {
     pub authorization: Option<String>,
     pub x_api_key: Option<String>,
     pub x_share_token: Option<String>,
+    pub range: Option<String>,
     pub forwarded: Option<String>,
     pub x_forwarded_for: Option<String>,
     pub upgrade: Option<String>,
@@ -89,6 +92,7 @@ impl HttpHeaders {
                     "authorization" => headers.authorization = Some(value.to_string()),
                     "x-api-key" => headers.x_api_key = Some(value.to_string()),
                     "x-share-token" => headers.x_share_token = Some(value.to_string()),
+                    "range" => headers.range = Some(value.to_string()),
                     "forwarded" => headers.forwarded = Some(value.to_string()),
                     "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
                     "upgrade" => headers.upgrade = Some(value.to_lowercase()),
@@ -296,6 +300,10 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.x_share_token = Some(value.to_string());
             }
+            "range" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.range = Some(value.to_string());
+            }
             "forwarded" => append_list_header(&mut headers.forwarded, value),
             "x-forwarded-for" => append_list_header(&mut headers.x_forwarded_for, value),
             "upgrade" => {
@@ -454,6 +462,15 @@ fn valid_request_target(method: &str, target: &str) -> bool {
 
     let bytes = target.as_bytes();
     let path_end = target.find('?').unwrap_or(target.len());
+    let path = &target[..path_end];
+    let encoded_stream_separator_allowed = [
+        "/api/streams/",
+        "/api/v0/streams/",
+        "/api/v1/streams/",
+        "/api/v2/streams/",
+    ]
+    .iter()
+    .any(|prefix| path.starts_with(prefix));
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
@@ -466,7 +483,10 @@ fn valid_request_target(method: &str, target: &str) -> bool {
                 return false;
             };
             let decoded_byte = (high << 4) | low;
-            if index < path_end && matches!(decoded_byte, b'/' | b'?' | b'#') {
+            if index < path_end
+                && (matches!(decoded_byte, b'?' | b'#')
+                    || (decoded_byte == b'/' && !encoded_stream_separator_allowed))
+            {
                 return false;
             }
             decoded.push(decoded_byte);
@@ -665,6 +685,160 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileResponseResult {
+    pub status_code: u16,
+    pub content_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ByteRange {
+    start: u64,
+    length: u64,
+}
+
+fn parse_byte_range(value: &str, total_length: u64) -> Result<ByteRange, ()> {
+    let value = value.trim();
+    let Some(spec) = value.strip_prefix("bytes=") else {
+        return Err(());
+    };
+    if total_length == 0 || spec.contains(',') {
+        return Err(());
+    }
+    let (start, end) = spec.split_once('-').ok_or(())?;
+    if start.is_empty() {
+        let suffix_length = end.parse::<u64>().map_err(|_| ())?;
+        if suffix_length == 0 {
+            return Err(());
+        }
+        let length = suffix_length.min(total_length);
+        return Ok(ByteRange {
+            start: total_length - length,
+            length,
+        });
+    }
+
+    let start = start.parse::<u64>().map_err(|_| ())?;
+    if start >= total_length {
+        return Err(());
+    }
+    let end = if end.is_empty() {
+        total_length - 1
+    } else {
+        end.parse::<u64>().map_err(|_| ())?.min(total_length - 1)
+    };
+    if end < start {
+        return Err(());
+    }
+    Ok(ByteRange {
+        start,
+        length: end - start + 1,
+    })
+}
+
+/// Write a regular file without buffering its contents in memory. Only a single
+/// HTTP byte range is accepted; multipart ranges are rejected with 416.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the streaming response boundary requires explicit HTTP metadata"
+)]
+pub async fn write_file_response<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    file: std::fs::File,
+    total_length: u64,
+    content_type: &str,
+    range: Option<&str>,
+    include_body: bool,
+    keep_alive: bool,
+    extra_headers: &str,
+) -> Result<FileResponseResult, String> {
+    let selected = match range {
+        Some(value) => match parse_byte_range(value, total_length) {
+            Ok(range) => Some(range),
+            Err(()) => {
+                let connection = if keep_alive { "keep-alive" } else { "close" };
+                let headers = format!(
+                    "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Type: application/json\r\nContent-Length: 0\r\nContent-Range: bytes */{total_length}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n"
+                );
+                time::timeout(RESPONSE_WRITE_TIMEOUT, async {
+                    writer.write_all(headers.as_bytes()).await?;
+                    writer.flush().await
+                })
+                .await
+                .map_err(|_| "response write deadline exceeded".to_owned())?
+                .map_err(|error| error.to_string())?;
+                return Ok(FileResponseResult {
+                    status_code: 416,
+                    content_length: 0,
+                });
+            }
+        },
+        None => None,
+    };
+    let (status, start, content_length, content_range) = if let Some(range) = selected {
+        (
+            "206 Partial Content",
+            range.start,
+            range.length,
+            format!(
+                "Content-Range: bytes {}-{}/{}\r\n",
+                range.start,
+                range.start + range.length - 1,
+                total_length
+            ),
+        )
+    } else {
+        ("200 OK", 0, total_length, String::new())
+    };
+    let connection = if keep_alive { "keep-alive" } else { "close" };
+    let headers = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\n{content_range}Accept-Ranges: bytes\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n"
+    );
+    time::timeout(RESPONSE_WRITE_TIMEOUT, writer.write_all(headers.as_bytes()))
+        .await
+        .map_err(|_| "response write deadline exceeded".to_owned())?
+        .map_err(|error| error.to_string())?;
+
+    if include_body && content_length > 0 {
+        let mut file = tokio::fs::File::from_std(file);
+        if start > 0 {
+            time::timeout(
+                RESPONSE_WRITE_TIMEOUT,
+                file.seek(std::io::SeekFrom::Start(start)),
+            )
+            .await
+            .map_err(|_| "file seek deadline exceeded".to_owned())?
+            .map_err(|error| error.to_string())?;
+        }
+        let mut remaining = content_length;
+        let mut buffer = vec![0_u8; 64 * 1024];
+        while remaining > 0 {
+            let wanted = usize::try_from(remaining.min(buffer.len() as u64))
+                .expect("bounded by stream buffer length");
+            let read = time::timeout(RESPONSE_WRITE_TIMEOUT, file.read(&mut buffer[..wanted]))
+                .await
+                .map_err(|_| "file read deadline exceeded".to_owned())?
+                .map_err(|error| error.to_string())?;
+            if read == 0 {
+                return Err("file ended before the advertised content length".to_owned());
+            }
+            time::timeout(RESPONSE_WRITE_TIMEOUT, writer.write_all(&buffer[..read]))
+                .await
+                .map_err(|_| "response write deadline exceeded".to_owned())?
+                .map_err(|error| error.to_string())?;
+            remaining -= read as u64;
+        }
+    }
+    time::timeout(RESPONSE_WRITE_TIMEOUT, writer.flush())
+        .await
+        .map_err(|_| "response write deadline exceeded".to_owned())?
+        .map_err(|error| error.to_string())?;
+    Ok(FileResponseResult {
+        status_code: if selected.is_some() { 206 } else { 200 },
+        content_length,
+    })
+}
+
 fn body_with_content_security_policy(response: &HttpResponse) -> Result<(String, String), String> {
     if response.content_type.starts_with("text/html") {
         let nonce = csp_nonce()?;
@@ -728,6 +902,7 @@ mod tests {
             "Authorization: Bearer token123",
             "X-API-Key: key123",
             "X-Share-Token: share-secret",
+            "Range: bytes=10-19",
             "Forwarded: for=198.51.100.24;proto=https",
             "X-Forwarded-For: 198.51.100.24, 127.0.0.1",
             "Connection: keep-alive",
@@ -740,6 +915,7 @@ mod tests {
         assert_eq!(headers.authorization, Some("Bearer token123".to_string()));
         assert_eq!(headers.x_api_key, Some("key123".to_string()));
         assert_eq!(headers.x_share_token, Some("share-secret".to_string()));
+        assert_eq!(headers.range, Some("bytes=10-19".to_string()));
         assert_eq!(
             headers.forwarded,
             Some("for=198.51.100.24;proto=https".to_string())
@@ -1082,6 +1258,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_targets_accept_encoded_content_separators_only() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(
+                b"GET /api/v0/streams/Library%2Ftrack.flac HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
+        assert_eq!(request.path, "/api/v0/streams/Library%2Ftrack.flac");
+
+        for target in [
+            "/api/health%2Fadmin",
+            "/api/v0/streams/Library%2F..%2Fsecret",
+            "/api/v0/streams/Library%2F%2Fsecret",
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            client
+                .write_all(format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+                .await
+                .unwrap();
+            let mut reader = BufReader::new(server);
+            assert!(read_http_request(&mut reader).await.is_err(), "{target}");
+        }
+    }
+
+    #[tokio::test]
     async fn test_canonical_trailing_slash_is_accepted() {
         let (mut client, server) = tokio::io::duplex(4096);
         client
@@ -1304,6 +1508,103 @@ mod tests {
         assert!(raw.contains("<script nonce=\""));
         assert!(!raw.contains("'unsafe-inline'"));
         assert!(!raw.contains("wasm-unsafe-eval"));
+    }
+
+    #[tokio::test]
+    async fn file_response_streams_a_bounded_single_range() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-http-stream-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"0123456789").unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let (client, mut server) = tokio::io::duplex(4096);
+        let mut writer = BufWriter::new(client);
+        let result = write_file_response(
+            &mut writer,
+            file,
+            10,
+            "audio/flac",
+            Some("bytes=2-5"),
+            true,
+            false,
+            "X-Request-ID: test\r\n",
+        )
+        .await
+        .unwrap();
+        drop(writer);
+        let mut raw = Vec::new();
+        server.read_to_end(&mut raw).await.unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(result.status_code, 206);
+        assert_eq!(result.content_length, 4);
+        let split = raw
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .unwrap();
+        let headers = String::from_utf8(raw[..split].to_vec()).unwrap();
+        assert!(headers.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+        assert!(headers.contains("Content-Range: bytes 2-5/10\r\n"));
+        assert!(headers.contains("Accept-Ranges: bytes\r\n"));
+        assert_eq!(&raw[split + 4..], b"2345");
+
+        let path = std::env::temp_dir().join(format!(
+            "slskr-http-stream-invalid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"0123456789").unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let (client, mut server) = tokio::io::duplex(4096);
+        let mut writer = BufWriter::new(client);
+        let result = write_file_response(
+            &mut writer,
+            file,
+            10,
+            "audio/flac",
+            Some("bytes=10-"),
+            true,
+            false,
+            "",
+        )
+        .await
+        .unwrap();
+        drop(writer);
+        let mut raw = String::new();
+        server.read_to_string(&mut raw).await.unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(result.status_code, 416);
+        assert!(raw.starts_with("HTTP/1.1 416 Range Not Satisfiable\r\n"));
+        assert!(raw.contains("Content-Range: bytes */10\r\n"));
+    }
+
+    #[test]
+    fn byte_range_parser_rejects_multipart_and_handles_suffixes() {
+        assert_eq!(
+            parse_byte_range("bytes=-3", 10),
+            Ok(ByteRange {
+                start: 7,
+                length: 3
+            })
+        );
+        assert_eq!(
+            parse_byte_range("bytes=8-99", 10),
+            Ok(ByteRange {
+                start: 8,
+                length: 2
+            })
+        );
+        assert!(parse_byte_range("bytes=10-", 10).is_err());
+        assert!(parse_byte_range("bytes=0-1,4-5", 10).is_err());
+        assert!(parse_byte_range("items=0-1", 10).is_err());
     }
 
     // ── round-trip over a real TCP socket ─────────────────────────────────────

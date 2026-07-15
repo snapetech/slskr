@@ -2049,7 +2049,7 @@ fn bounded_event_detail(detail: Option<String>) -> Option<String> {
     })
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct TransferEntry {
     id: u64,
     direction: u32,
@@ -2219,11 +2219,18 @@ async fn persist_transfer_records(
     Ok(())
 }
 
-async fn delete_persisted_transfer(state: &AppState, entry: &TransferEntry) -> Result<(), String> {
+async fn delete_persisted_transfers(
+    state: &AppState,
+    entries: &[TransferEntry],
+) -> Result<(), String> {
     if let Some(db) = state.db.as_ref() {
-        db.delete_transfer(&entry.id.to_string())
+        let ids = entries
+            .iter()
+            .map(|entry| entry.id.to_string())
+            .collect::<Vec<_>>();
+        db.delete_transfers(&ids)
             .await
-            .map_err(|error| format!("failed to delete persisted transfer: {error}"))?;
+            .map_err(|error| format!("failed to delete persisted transfers: {error}"))?;
     }
     Ok(())
 }
@@ -11418,6 +11425,7 @@ async fn route_http_request_with_headers(
          | ("DELETE", "/api/transfers/uploads/all/completed") => {
              let direction = if normalized_path.contains("/downloads/") { 0 } else { 1 };
              let mut transfers = state.transfers.write().await;
+             let previous_entries = transfers.entries.clone();
              let before = transfers.entries.len();
              let mut removed_entries = Vec::new();
              transfers.entries.retain(|entry| {
@@ -11432,9 +11440,15 @@ async fn route_http_request_with_headers(
                  !remove
              });
              let removed = before.saturating_sub(transfers.entries.len());
+             let mutated_entries = transfers.entries.clone();
              drop(transfers);
-             for entry in &removed_entries {
-                 delete_persisted_transfer(state, entry).await?;
+             if let Err(error) = delete_persisted_transfers(state, &removed_entries).await {
+                 let mut transfers = state.transfers.write().await;
+                 if transfers.entries == mutated_entries {
+                     transfers.entries = previous_entries;
+                 }
+                 drop(transfers);
+                 return Ok(routing::service_unavailable_response(&error));
              }
              Ok(routing::ok_response((removed > 0).to_string()))
          }
@@ -17765,7 +17779,7 @@ async fn route_http_request_with_headers(
             ))
         }
 
-        ("GET", path) if path.starts_with("/api/streams/") && path.len() > 13 => {
+        ("GET" | "HEAD", path) if path.starts_with("/api/streams/") && path.len() > 13 => {
             let stream_id = decoded_path_segment(&path[13..]);
             if query_parameter(route.query, "token").is_some() {
                 return Ok(routing::bad_request_response(
@@ -22549,6 +22563,111 @@ fn open_shared_local_file(state: &AppState, local_path: &Path) -> Result<fs::Fil
         .map_err(|error| format!("local file open failed: {error}"))
 }
 
+struct LocalStreamFile {
+    file: fs::File,
+    length: u64,
+    content_type: String,
+}
+
+fn primary_stream_id(path: &str) -> Option<String> {
+    let route = routing::parse_route("GET", path);
+    let normalized = if let Some(versioned) = route
+        .normalized_path
+        .strip_prefix("/api/v0/")
+        .or_else(|| route.normalized_path.strip_prefix("/api/v1/"))
+        .or_else(|| route.normalized_path.strip_prefix("/api/v2/"))
+    {
+        format!("/api/{versioned}")
+    } else {
+        route.normalized_path.to_owned()
+    };
+    let raw = normalized.strip_prefix("/api/streams/")?;
+    (!raw.is_empty() && !raw.ends_with("/share-ticket")).then(|| decoded_path_segment(raw))
+}
+
+async fn open_primary_stream_file(
+    state: &AppState,
+    stream_id: &str,
+    query: Option<&str>,
+) -> Result<Option<LocalStreamFile>, String> {
+    let ticket_filename = if let Some(token) = query_parameter(query, "ticket") {
+        let mut tickets = state.stream_tickets.write().await;
+        let ticket = tickets.get(&token);
+        drop(tickets);
+        ticket
+            .filter(|ticket| ticket.family == "share" && ticket.content_id == stream_id)
+            .map(|ticket| ticket.filename)
+    } else {
+        None
+    };
+
+    let shared_filename = {
+        let shares = state.shares.read().await;
+        shares
+            .entries
+            .iter()
+            .find(|entry| {
+                let hash = stable_content_hash(&entry.filename, entry.size).to_string();
+                entry.filename == stream_id
+                    || hash == stream_id
+                    || ticket_filename.as_deref() == Some(entry.filename.as_str())
+            })
+            .map(|entry| entry.filename.clone())
+    };
+    if let Some(filename) = shared_filename {
+        if let Some(shared) = find_shared_local_file(state, &filename).await {
+            let file = open_shared_local_file(state, &shared.local_path)?;
+            let metadata = file
+                .metadata()
+                .map_err(|error| format!("shared stream metadata failed: {error}"))?;
+            if metadata.is_file() {
+                return Ok(Some(LocalStreamFile {
+                    file,
+                    length: metadata.len(),
+                    content_type: preview_stream_content_type(&filename).to_owned(),
+                }));
+            }
+        }
+    }
+
+    let transfer = {
+        let transfers = state.transfers.read().await;
+        transfers
+            .entries
+            .iter()
+            .find(|entry| {
+                let matches_id = stream_id
+                    .strip_prefix("transfer-")
+                    .and_then(|id| id.parse::<u64>().ok())
+                    == Some(entry.id);
+                entry.direction == 0
+                    && matches!(entry.status.as_str(), "succeeded" | "completed")
+                    && (matches_id || ticket_filename.as_deref() == Some(entry.filename.as_str()))
+            })
+            .cloned()
+    };
+    let Some(transfer) = transfer else {
+        return Ok(None);
+    };
+    let Some(local_path) = transfer.local_path.as_deref() else {
+        return Ok(None);
+    };
+    let root = download_root(&state.config.state_dir);
+    let path = PathBuf::from(local_path);
+    let file = open_download_file_for_read(&root, &path)?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("download stream metadata failed: {error}"))?;
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    Ok(Some(LocalStreamFile {
+        file,
+        length: metadata.len(),
+        content_type: preview_stream_content_type(&transfer.filename).to_owned(),
+    }))
+}
+
 #[cfg(unix)]
 fn open_shared_local_file_unix(roots: &[PathBuf], local_path: &Path) -> Result<fs::File, String> {
     use rustix::fs::{open, openat, Mode, OFlags};
@@ -22959,6 +23078,57 @@ fn open_download_file(_root: &Path, path: &Path) -> Result<fs::File, String> {
     }
     options
         .open(path)
+        .map_err(|error| format!("download file open failed: {error}"))
+}
+
+#[cfg(unix)]
+fn open_download_file_for_read(root: &Path, path: &Path) -> Result<fs::File, String> {
+    use rustix::fs::{open, openat, Mode, OFlags};
+
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| "download path is outside the download root".to_owned())?;
+    let components = relative
+        .components()
+        .map(|component| match component {
+            Component::Normal(value) => Ok(value),
+            _ => Err("download path contains a non-relative component".to_owned()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (filename, parents) = components
+        .split_last()
+        .ok_or_else(|| "download filename is empty".to_owned())?;
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, directory_flags, Mode::empty())
+        .map_err(|error| format!("download root confined open failed: {error}"))?;
+    for component in parents {
+        directory = openat(&directory, *component, directory_flags, Mode::empty())
+            .map_err(|error| format!("download directory confined open failed: {error}"))?;
+    }
+    let fd = openat(
+        &directory,
+        *filename,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("download file confined open failed: {error}"))?;
+    Ok(fs::File::from(fd))
+}
+
+#[cfg(not(unix))]
+fn open_download_file_for_read(root: &Path, path: &Path) -> Result<fs::File, String> {
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("download root canonicalize failed: {error}"))?;
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|error| format!("download file canonicalize failed: {error}"))?;
+    if !canonical_path.starts_with(canonical_root) {
+        return Err("download path is outside the download root".to_owned());
+    }
+    fs::OpenOptions::new()
+        .read(true)
+        .open(canonical_path)
         .map_err(|error| format!("download file open failed: {error}"))
 }
 
@@ -26796,7 +26966,9 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             }
         }
 
-        let response = if !allowed {
+        let request_target = req.query.as_deref().map(|query| format!("{path}?{query}"));
+        let routed_path = request_target.as_deref().unwrap_or(path);
+        let mut response = if !allowed {
             routing::HttpResponse {
                 status: "429 Too Many Requests",
                 content_type: "application/json",
@@ -26805,7 +26977,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         } else {
             match route_http_request_with_headers(
                 method,
-                path,
+                routed_path,
                 authorization,
                 body,
                 &state,
@@ -26821,6 +26993,28 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 },
             }
         };
+
+        let stream_file =
+            if allowed && matches!(method, "GET" | "HEAD") && response.status == "200 OK" {
+                if let Some(stream_id) = primary_stream_id(path) {
+                    match open_primary_stream_file(&state, &stream_id, req.query.as_deref()).await {
+                        Ok(Some(stream)) => Some(stream),
+                        Ok(None) => {
+                            response = routing::not_found_response();
+                            None
+                        }
+                        Err(error) => {
+                            eprintln!("local stream open failed: {error}");
+                            response = routing::not_found_response();
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
         // Build extra headers
         let remaining = state
@@ -26849,6 +27043,56 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n{}{}{}X-Request-ID: {}\r\n",
             max_requests, remaining, reset_secs, cache_hdr, etag_hdr, cors_str, request_id
         );
+
+        if let Some(stream) = stream_file {
+            let stream_extra = format!(
+                "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n{}X-Request-ID: {}\r\n",
+                max_requests, remaining, reset_secs, cors_str, request_id
+            );
+            let written = http_server::write_file_response(
+                &mut writer,
+                stream.file,
+                stream.length,
+                &stream.content_type,
+                req.headers.range.as_deref(),
+                method == "GET",
+                keep_alive,
+                &stream_extra,
+            )
+            .await?;
+            let resp_log = logging::HttpResponseLog {
+                status_code: written.status_code,
+                content_length: usize::try_from(written.content_length).unwrap_or(usize::MAX),
+                duration_ms: logging::elapsed_ms(request_timer),
+                error: None,
+            };
+            let log_config = logging::LogConfig {
+                level: *state.log_level.read().await,
+                log_requests: true,
+                log_responses: true,
+                log_errors_only: false,
+            };
+            logging::log_transaction(
+                &log_config,
+                &logging::HttpTransactionLog {
+                    request: req_log.clone(),
+                    response: resp_log.clone(),
+                },
+            );
+            record_http_log(
+                &state,
+                &request_id,
+                &logging::HttpTransactionLog {
+                    request: req_log,
+                    response: resp_log,
+                },
+            )
+            .await;
+            if !keep_alive {
+                break;
+            }
+            continue;
+        }
 
         // Write response
         http_server::write_http_response(&mut writer, &response, keep_alive, &extra).await?;
@@ -37213,6 +37457,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completed_transfer_cleanup_rolls_back_on_persistence_failure() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"filename":"Remote/Completed.flac","size":10}"#,
+            &state,
+        )
+        .await
+        .expect("create transfer");
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers/1/complete",
+            None,
+            r#"{"bytes_transferred":10}"#,
+            &state,
+        )
+        .await
+        .expect("complete transfer");
+        let entries_before_failure = state.transfers.read().await.entries.clone();
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "DELETE",
+            "/api/v0/transfers/downloads/all/completed",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("cleanup response");
+
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert_eq!(state.transfers.read().await.entries, entries_before_failure);
+    }
+
+    #[tokio::test]
     async fn transfer_start_enforces_max_active_policy() {
         let (state, _receiver) =
             test_state_with_env(MapEnv::default().with("SLSKR_TRANSFER_MAX_ACTIVE", "1"));
@@ -41305,6 +41594,96 @@ mod tests {
         .unwrap();
         assert_eq!(deleted.status, "200 OK");
         assert!(state.share_access_tokens.read().await.records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn primary_stream_route_serves_authenticated_file_ranges() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-stream-share-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create stream share root");
+        std::fs::write(root.join("track.flac"), b"0123456789").expect("write stream fixture");
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", "stream-token")
+                .with("SLSKR_SHARE_FIXTURE", "")
+                .with("SLSKR_SHARE_DIRS", &root.display().to_string()),
+        );
+        let virtual_filename = {
+            let shares = state.shares.read().await;
+            shares.entries[0].filename.clone()
+        };
+        let ticket = state
+            .stream_tickets
+            .write()
+            .await
+            .issue(
+                "share",
+                "share:test",
+                virtual_filename.clone(),
+                virtual_filename.clone(),
+                Some("friend".to_owned()),
+                10,
+                "audio/flac".to_owned(),
+                120,
+            )
+            .expect("issue stream ticket")
+            .0;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stream server");
+        let address = listener.local_addr().expect("stream server address");
+        let server_state = Arc::clone(&state);
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept stream request");
+            super::handle_http_connection(stream, server_state)
+                .await
+                .expect("serve stream response");
+        });
+        let mut client = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("connect stream client");
+        client
+            .write_all(
+                format!(
+                    "GET /api/v0/streams/{}?ticket={} HTTP/1.1\r\nHost: localhost\r\nRange: bytes=3-6\r\nConnection: close\r\n\r\n",
+                    super::url_encode(&virtual_filename),
+                    super::url_encode(&ticket)
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write stream request");
+        let mut raw = Vec::new();
+        client
+            .read_to_end(&mut raw)
+            .await
+            .expect("read stream response");
+        server.await.expect("stream server task");
+        std::fs::remove_dir_all(root).expect("remove stream fixture");
+
+        let split = raw
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .expect("stream response header boundary");
+        let headers = String::from_utf8(raw[..split].to_vec()).expect("stream response headers");
+        assert!(
+            headers.starts_with("HTTP/1.1 206 Partial Content\r\n"),
+            "unexpected stream response: {headers}"
+        );
+        assert!(headers.contains("Content-Type: audio/flac\r\n"));
+        assert!(headers.contains("Content-Length: 4\r\n"));
+        assert!(headers.contains("Content-Range: bytes 3-6/10\r\n"));
+        assert!(headers.contains("Accept-Ranges: bytes\r\n"));
+        assert_eq!(&raw[split + 4..], b"3456");
     }
 
     #[test]
