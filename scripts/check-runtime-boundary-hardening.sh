@@ -37,7 +37,7 @@ for anchor in \
   'share_rebuild_errors_redact_internal_details' \
   'share_snapshot_errors_redact_internal_details' \
   'transfer_storage_errors_redact_internal_details' \
-  'transfer_json_redacts_local_storage_path' \
+  'transfer_json_redacts_local_storage_details' \
   'listener_errors_redact_internal_details' \
   'session_errors_redact_internal_details' \
   'browse_errors_redact_internal_details' \

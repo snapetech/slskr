@@ -2006,7 +2006,7 @@ impl TransferEntry {
             json_u64_option(self.size),
             self.bytes_transferred,
             json_escape(&self.status),
-            json_option(self.reason.as_deref()),
+            json_option(public_transfer_reason(&self.status, self.reason.as_deref())),
             self.requested_at,
             self.updated_at
         )
@@ -2054,6 +2054,15 @@ impl TransferEntry {
             "remainingTime": "",
         })
     }
+}
+
+fn public_transfer_reason(status: &str, reason: Option<&str>) -> Option<&'static str> {
+    reason.map(|_| match status {
+        "failed" => "transfer failed",
+        "rejected" => "transfer rejected",
+        "cancelled" => "transfer cancelled",
+        _ => "transfer operation unavailable",
+    })
 }
 
 fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferRecord {
@@ -20140,7 +20149,7 @@ fn slskd_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueue) ->
                 "state": slskd_transfer_state(&entry.status),
                 "bytesTransferred": entry.bytes_transferred,
                 "size": entry.size.unwrap_or(0),
-                "reason": entry.reason.as_deref().unwrap_or(""),
+                "reason": public_transfer_reason(&entry.status, entry.reason.as_deref()).unwrap_or(""),
                 "updatedAt": entry.updated_at.to_string(),
             })
         })
@@ -20349,7 +20358,8 @@ fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQue
                 "direction": if entry.direction == 0 { "Download" } else { "Upload" },
                 "filename": entry.filename,
                 "state": slskd_transfer_state(&entry.status),
-                "exception": entry.reason.as_deref().unwrap_or(slskd_transfer_state(&entry.status)),
+                "exception": public_transfer_reason(&entry.status, entry.reason.as_deref())
+                    .unwrap_or(slskd_transfer_state(&entry.status)),
                 "requestedAt": entry.requested_at.to_string(),
             })
         })
@@ -20376,10 +20386,9 @@ fn slskd_transfer_exceptions_pareto_report(
             )
         })
     {
-        let exception = entry
-            .reason
-            .clone()
-            .unwrap_or_else(|| slskd_transfer_state(&entry.status).to_owned());
+        let exception = public_transfer_reason(&entry.status, entry.reason.as_deref())
+            .unwrap_or(slskd_transfer_state(&entry.status))
+            .to_owned();
         let group = grouped.entry(exception).or_insert((0, BTreeMap::new()));
         group.0 += 1;
         group
@@ -29516,7 +29525,7 @@ mod tests {
     }
 
     #[test]
-    fn transfer_json_redacts_local_storage_path() {
+    fn transfer_json_redacts_local_storage_details() {
         let mut transfers = super::TransferQueue::new_in_memory(8);
         let entry = transfers.create(
             0,
@@ -29530,9 +29539,17 @@ mod tests {
             entry.local_path.as_deref(),
             Some("/private/downloads/Track.flac")
         );
+        transfers.update_status(
+            entry.id,
+            "failed",
+            None,
+            Some("write failed at /private/downloads/Track.flac: denied".to_owned()),
+        );
         let json = transfers.json(None);
         assert!(json.contains("\"local_path\":null"));
+        assert!(json.contains("\"reason\":\"transfer failed\""));
         assert!(!json.contains("/private/downloads"));
+        assert!(!json.contains("denied"));
     }
 
     #[tokio::test]
@@ -36243,14 +36260,12 @@ mod tests {
         let stuck_json = serde_json::from_str::<serde_json::Value>(&stuck.body).unwrap();
         assert_eq!(stuck_json["count"], 2);
         assert_eq!(stuck_json["stuck"].as_array().unwrap().len(), 2);
-        assert!(
-            stuck_json["stuck"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|entry| entry["filename"] == "Remote/Failed.flac"
-                    && entry["reason"] == "timeout")
-        );
+        assert!(stuck_json["stuck"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["filename"] == "Remote/Failed.flac"
+                && entry["reason"] == "transfer failed"));
 
         let user_stats = super::route_http_request(
             "GET",
