@@ -11960,12 +11960,10 @@ async fn route_http_request_with_headers(
             }
             Ok(response)
         }
-        ("DELETE", path) if path.starts_with("/api/rooms/joined/") => {
-            let room_name = path
-                .trim_start_matches("/api/rooms/joined/")
-                .split('/')
-                .next()
-                .unwrap_or("");
+        ("DELETE", path)
+            if path.starts_with("/api/rooms/joined/") && path.matches('/').count() == 4 =>
+        {
+            let room_name = path.strip_prefix("/api/rooms/joined/").unwrap_or("");
             let room_name = decoded_path_segment(room_name);
             if room_name.is_empty() {
                 return Ok(routing::bad_request_response("room is required"));
@@ -11977,6 +11975,7 @@ async fn route_http_request_with_headers(
                 record.updated_at = unix_timestamp();
                 let json_response = record.json();
                 drop(rooms);
+                persist_room_leave(state, &room_name).await;
                 record_event(state, "room.left", room_name.to_string(), None).await;
 
                 send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
@@ -29770,6 +29769,56 @@ mod tests {
         assert_eq!(listed_rooms.status, "200 OK");
         assert!(listed_rooms.body.contains("\"name\":\"music\""));
         assert!(listed_rooms.body.contains("\"joined\":true"));
+    }
+
+    #[tokio::test]
+    async fn joined_room_delete_requires_exact_path_and_persists_leave() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let joined =
+            super::route_http_request("POST", "/api/rooms/joined", None, r#""room space""#, &state)
+                .await
+                .unwrap();
+        assert_eq!(joined.status, "201 Created");
+        assert_eq!(db.list_subscribed_rooms().await.unwrap().len(), 1);
+
+        super::route_http_request(
+            "DELETE",
+            "/api/rooms/joined/room%20space/extra",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert!(state
+            .rooms
+            .read()
+            .await
+            .records
+            .iter()
+            .any(|room| room.name == "room space" && room.joined));
+        assert_eq!(db.list_subscribed_rooms().await.unwrap().len(), 1);
+
+        let left =
+            super::route_http_request("DELETE", "/api/rooms/joined/room%20space", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(left.status, "200 OK");
+        assert!(state
+            .rooms
+            .read()
+            .await
+            .records
+            .iter()
+            .any(|room| room.name == "room space" && !room.joined));
+        assert!(db.list_subscribed_rooms().await.unwrap().is_empty());
     }
 
     #[tokio::test]
