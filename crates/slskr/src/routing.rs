@@ -129,6 +129,14 @@ pub fn ok_response(body: String) -> HttpResponse {
     }
 }
 
+pub fn no_content_response() -> HttpResponse {
+    HttpResponse {
+        status: "204 No Content",
+        content_type: "application/json",
+        body: String::new(),
+    }
+}
+
 pub fn conflict_response(message: &str) -> HttpResponse {
     HttpResponse {
         status: "409 Conflict",

@@ -172,6 +172,16 @@ pub struct WishlistItemRecord {
     pub added_at: i64,
 }
 
+/// Persisted per-wishlist peer-directory suppression rule.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WishlistIgnoredResultRecord {
+    pub id: String,
+    pub wishlist_item_id: String,
+    pub username: String,
+    pub directory: String,
+    pub created_at: i64,
+}
+
 /// Contact record for persistence
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ContactRecord {
@@ -532,6 +542,18 @@ impl<'r> FromRow<'r, SqliteRow> for WishlistItemRecord {
             title: row.try_get("title")?,
             kind: row.try_get("kind")?,
             added_at: row.try_get("added_at")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for WishlistIgnoredResultRecord {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            wishlist_item_id: row.try_get("wishlist_item_id")?,
+            username: row.try_get("username")?,
+            directory: row.try_get("directory")?,
+            created_at: row.try_get("created_at")?,
         })
     }
 }
@@ -1031,6 +1053,22 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
 
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS wishlist_ignored_results (
+                id TEXT PRIMARY KEY,
+                wishlist_item_id TEXT NOT NULL,
+                username TEXT COLLATE NOCASE NOT NULL,
+                directory TEXT COLLATE NOCASE NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE (wishlist_item_id, username, directory),
+                FOREIGN KEY (wishlist_item_id) REFERENCES wishlist_items(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Create contacts table
         query(
             r#"
@@ -1344,6 +1382,12 @@ impl DatabaseManager {
 
         query(
             "CREATE INDEX IF NOT EXISTS idx_wishlist_items_added ON wishlist_items(added_at DESC)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        query(
+            "CREATE INDEX IF NOT EXISTS idx_wishlist_ignored_item ON wishlist_ignored_results(wishlist_item_id, created_at DESC)",
         )
         .execute(&self.pool)
         .await?;
@@ -2468,10 +2512,16 @@ impl DatabaseManager {
 
     /// Delete a wishlist item.
     pub async fn delete_wishlist_item(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query("DELETE FROM wishlist_ignored_results WHERE wishlist_item_id = ?")
+            .bind(id)
+            .execute(&mut *transaction)
+            .await?;
         query("DELETE FROM wishlist_items WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -2486,6 +2536,78 @@ impl DatabaseManager {
         )
         .bind(limit)
         .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// Insert a durable ignored wishlist result rule.
+    pub async fn upsert_wishlist_ignored_result(
+        &self,
+        record: &WishlistIgnoredResultRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        query(
+            r#"
+            INSERT OR REPLACE INTO wishlist_ignored_results
+                (id, wishlist_item_id, username, directory, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&record.id)
+        .bind(&record.wishlist_item_id)
+        .bind(&record.username)
+        .bind(&record.directory)
+        .bind(record.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Remove one ignored result rule, scoped to its wishlist item.
+    pub async fn delete_wishlist_ignored_result(
+        &self,
+        wishlist_item_id: &str,
+        id: &str,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let result =
+            query("DELETE FROM wishlist_ignored_results WHERE wishlist_item_id = ? AND id = ?")
+                .bind(wishlist_item_id)
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// List ignored result rules for one wishlist item, newest first.
+    pub async fn list_wishlist_ignored_results(
+        &self,
+        wishlist_item_id: &str,
+    ) -> Result<Vec<WishlistIgnoredResultRecord>, Box<dyn std::error::Error>> {
+        let records = query_as::<_, WishlistIgnoredResultRecord>(
+            r#"
+            SELECT id, wishlist_item_id, username, directory, created_at
+            FROM wishlist_ignored_results
+            WHERE wishlist_item_id = ?
+            ORDER BY created_at DESC, id DESC
+            "#,
+        )
+        .bind(wishlist_item_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// List all ignored result rules for daemon rehydration.
+    pub async fn list_all_wishlist_ignored_results(
+        &self,
+    ) -> Result<Vec<WishlistIgnoredResultRecord>, Box<dyn std::error::Error>> {
+        let records = query_as::<_, WishlistIgnoredResultRecord>(
+            r#"
+            SELECT id, wishlist_item_id, username, directory, created_at
+            FROM wishlist_ignored_results
+            ORDER BY created_at DESC, id DESC
+            "#,
+        )
         .fetch_all(&self.pool)
         .await?;
         Ok(records)

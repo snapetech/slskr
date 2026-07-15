@@ -178,6 +178,8 @@ const MAX_COLLECTIONS: usize = 256;
 const MAX_COLLECTION_ITEMS: usize = 10_000;
 const MAX_TOTAL_COLLECTION_ITEMS: usize = 50_000;
 const MAX_WISHLIST_ITEMS: usize = 10_000;
+const MAX_WISHLIST_IGNORED_RESULTS: usize = 50_000;
+const MAX_WISHLIST_IGNORED_RESULTS_PER_ITEM: usize = 10_000;
 const MAX_LIST_NAME_BYTES: usize = 4 * 1024;
 const MAX_LIST_DESCRIPTION_BYTES: usize = 16 * 1024;
 const MAX_LIST_CONTENT_ID_BYTES: usize = 4 * 1024;
@@ -784,6 +786,12 @@ struct SearchRecord {
 }
 
 impl SearchRecord {
+    fn wishlist_item_id(&self) -> Option<&str> {
+        (self.target == "wishlist")
+            .then_some(self.target_name.as_deref())
+            .flatten()
+    }
+
     fn extend_results_bounded(
         &mut self,
         results: impl IntoIterator<Item = SearchResultEntry>,
@@ -827,13 +835,14 @@ impl SearchRecord {
             format!("\"{}\"", self.updated_at)
         };
         format!(
-            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"wishlistItemId\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
             json_escape(&self.id),
             self.token,
             json_escape(&self.query),
             json_escape(&self.query),
             self.target,
             json_option(self.target_name.as_deref()),
+            json_option(self.wishlist_item_id()),
             self.status,
             state,
             self.status != "active",
@@ -925,6 +934,7 @@ impl SearchRecord {
         let target_name = match target {
             "user" => record.target.clone(),
             "room" => record.room.clone(),
+            "wishlist" => record.room.clone(),
             _ => None,
         };
         Some(Self {
@@ -1116,12 +1126,29 @@ impl SearchStore {
         Ok(SearchCreateOutcome { record, evicted })
     }
 
+    #[cfg(test)]
     fn create_scheduled_wishlist(
         &mut self,
         query: String,
         ttl_seconds: u64,
     ) -> Result<SearchCreateOutcome, SearchCreateError> {
-        self.create(None, query, "wishlist", None, Vec::new(), ttl_seconds)
+        self.create_scheduled_wishlist_for_item(query, None, ttl_seconds)
+    }
+
+    fn create_scheduled_wishlist_for_item(
+        &mut self,
+        query: String,
+        wishlist_item_id: Option<String>,
+        ttl_seconds: u64,
+    ) -> Result<SearchCreateOutcome, SearchCreateError> {
+        self.create(
+            None,
+            query,
+            "wishlist",
+            wishlist_item_id,
+            Vec::new(),
+            ttl_seconds,
+        )
     }
 
     fn allocate_token(&self) -> Result<u32, SearchCreateError> {
@@ -1236,7 +1263,16 @@ impl SearchStore {
         pruned
     }
 
+    #[cfg(test)]
     fn add_peer_response(&mut self, response: &FileSearchResponse) -> Option<SearchRecord> {
+        self.add_peer_response_filtered(response, &[])
+    }
+
+    fn add_peer_response_filtered(
+        &mut self,
+        response: &FileSearchResponse,
+        ignored_results: &[WishlistIgnoredResult],
+    ) -> Option<SearchRecord> {
         let aggregate_remaining = MAX_TOTAL_SEARCH_RESULTS.saturating_sub(self.total_results());
         let record = self
             .records
@@ -1247,6 +1283,11 @@ impl SearchStore {
             response
                 .results
                 .iter()
+                .filter(|entry| {
+                    !ignored_results
+                        .iter()
+                        .any(|rule| rule.matches(&response.username, &entry.filename))
+                })
                 .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, false)),
             aggregate_remaining,
         );
@@ -1255,11 +1296,37 @@ impl SearchStore {
             response
                 .private_results
                 .iter()
+                .filter(|entry| {
+                    !ignored_results
+                        .iter()
+                        .any(|rule| rule.matches(&response.username, &entry.filename))
+                })
                 .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, true)),
             aggregate_remaining,
         );
         record.updated_at = unix_timestamp();
         Some(record.clone())
+    }
+
+    fn suppress_ignored_result(&mut self, rule: &WishlistIgnoredResult) -> Vec<SearchRecord> {
+        let mut changed = Vec::new();
+        for record in &mut self.records {
+            if record.wishlist_item_id() != Some(rule.wishlist_item_id.as_str()) {
+                continue;
+            }
+            let before = record.results.len();
+            record.results.retain(|entry| {
+                let Some(username) = entry.peer_username.as_deref() else {
+                    return true;
+                };
+                !rule.matches(username, &entry.filename)
+            });
+            if record.results.len() != before {
+                record.updated_at = unix_timestamp();
+                changed.push(record.clone());
+            }
+        }
+        changed
     }
 
     fn get(&self, token: u32) -> Option<SearchRecord> {
@@ -1530,7 +1597,7 @@ fn persisted_search_record(record: &SearchRecord) -> persistence::SearchRecord {
     let (room, target) = match record.target {
         "room" => (record.target_name.clone(), Some("room".to_owned())),
         "user" => (None, Some("user".to_owned())),
-        "wishlist" => (None, Some("wishlist".to_owned())),
+        "wishlist" => (record.target_name.clone(), Some("wishlist".to_owned())),
         _ => (None, Some("global".to_owned())),
     };
     persistence::SearchRecord {
@@ -5248,6 +5315,19 @@ fn wishlist_search_item_id(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+fn wishlist_ignored_results_item_id(path: &str) -> Option<&str> {
+    let path = path.strip_prefix("/api/wishlist/")?;
+    let id = path.strip_suffix("/ignored-results")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn wishlist_ignored_result_ids(path: &str) -> Option<(&str, &str)> {
+    let path = path.strip_prefix("/api/wishlist/")?;
+    let (item_id, rule_id) = path.split_once("/ignored-results/")?;
+    (!item_id.is_empty() && !rule_id.is_empty() && !item_id.contains('/') && !rule_id.contains('/'))
+        .then_some((item_id, rule_id))
+}
+
 fn share_contents_id(path: &str) -> Option<String> {
     let path = path.strip_prefix("/api/shares/")?;
     let id = path.strip_suffix("/contents")?;
@@ -5308,7 +5388,7 @@ impl WishlistItem {
     fn json(&self) -> String {
         let search_text = self.search_text();
         format!(
-            "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{},\"searchText\":\"{}\",\"filter\":\"\",\"enabled\":true,\"autoDownload\":false,\"maxResults\":100,\"lastSearchedAt\":null,\"lastMatchCount\":0,\"totalSearchCount\":0,\"lastSearchId\":null}}",
+            "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{},\"searchText\":\"{}\",\"filter\":\"\",\"enabled\":true,\"autoDownload\":false,\"maxResults\":100,\"lastSearchedAt\":null,\"lastMatchCount\":0,\"lastIgnoredResultHitCount\":0,\"totalSearchCount\":0,\"lastSearchId\":null}}",
             json_escape(&self.id),
             json_escape(&self.artist),
             json_escape(&self.title),
@@ -5327,8 +5407,37 @@ struct WishlistRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct WishlistIgnoredResult {
+    id: String,
+    wishlist_item_id: String,
+    username: String,
+    directory: String,
+    created_at: u64,
+}
+
+impl WishlistIgnoredResult {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "wishlistItemId": self.wishlist_item_id,
+            "username": self.username,
+            "directory": self.directory,
+            "createdAt": self.created_at,
+        })
+    }
+
+    fn matches(&self, username: &str, filename: &str) -> bool {
+        self.username.eq_ignore_ascii_case(username)
+            && self
+                .directory
+                .eq_ignore_ascii_case(&wishlist_parent_directory(filename))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct WishlistStore {
     records: Vec<WishlistRecord>,
+    ignored_results: Vec<WishlistIgnoredResult>,
     next_item_id: u64,
     updated_at: u64,
     max_items: usize,
@@ -5342,13 +5451,17 @@ impl WishlistStore {
     fn with_max_items(max_items: usize) -> Self {
         Self {
             records: Vec::new(),
+            ignored_results: Vec::new(),
             next_item_id: 1,
             updated_at: unix_timestamp(),
             max_items: max_items.max(1),
         }
     }
 
-    fn from_persisted(records: Vec<crate::persistence::WishlistItemRecord>) -> Self {
+    fn from_persisted_with_ignored(
+        records: Vec<crate::persistence::WishlistItemRecord>,
+        ignored_results: Vec<crate::persistence::WishlistIgnoredResultRecord>,
+    ) -> Self {
         let mut store = Self::new();
         let mut items = Vec::new();
         let mut seen_ids = HashSet::new();
@@ -5382,6 +5495,40 @@ impl WishlistStore {
             items,
             updated_at,
         });
+        let known_items = store
+            .records
+            .iter()
+            .flat_map(|record| record.items.iter())
+            .map(|item| item.id.as_str())
+            .collect::<HashSet<_>>();
+        let mut seen = HashSet::new();
+        store.ignored_results = ignored_results
+            .into_iter()
+            .filter(|rule| known_items.contains(rule.wishlist_item_id.as_str()))
+            .filter_map(|rule| {
+                let username = truncate_utf8_bytes(
+                    rule.username.trim().to_owned(),
+                    MAX_SEARCH_RESULT_USERNAME_BYTES,
+                );
+                let directory = normalize_wishlist_directory(&rule.directory);
+                let key = format!(
+                    "{}\0{}\0{}",
+                    rule.wishlist_item_id.to_lowercase(),
+                    username.to_lowercase(),
+                    directory.to_lowercase()
+                );
+                (!username.is_empty() && !directory.is_empty() && seen.insert(key)).then_some(
+                    WishlistIgnoredResult {
+                        id: rule.id,
+                        wishlist_item_id: rule.wishlist_item_id,
+                        username,
+                        directory,
+                        created_at: u64::try_from(rule.created_at).unwrap_or(0),
+                    },
+                )
+            })
+            .take(MAX_WISHLIST_IGNORED_RESULTS)
+            .collect();
         store.updated_at = updated_at;
         store
     }
@@ -5474,6 +5621,8 @@ impl WishlistStore {
         let record = self.records.iter_mut().find(|r| r.id == "default")?;
         if let Some(pos) = record.items.iter().position(|i| i.id == item_id) {
             record.items.remove(pos);
+            self.ignored_results
+                .retain(|rule| rule.wishlist_item_id != item_id);
             record.updated_at = now;
             self.updated_at = now;
             Some(record.clone())
@@ -5541,6 +5690,113 @@ impl WishlistStore {
             .find(|item| item.id == item_id)
             .cloned()
     }
+
+    fn list_ignored_results(&self, item_id: &str) -> Option<Vec<WishlistIgnoredResult>> {
+        self.get_item(item_id)?;
+        let mut rules = self
+            .ignored_results
+            .iter()
+            .filter(|rule| rule.wishlist_item_id == item_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        rules.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        Some(rules)
+    }
+
+    fn ignore_result(
+        &mut self,
+        item_id: &str,
+        username: &str,
+        directory: &str,
+    ) -> Result<(WishlistIgnoredResult, bool), &'static str> {
+        if self.get_item(item_id).is_none() {
+            return Err("not_found");
+        }
+        let username =
+            truncate_utf8_bytes(username.trim().to_owned(), MAX_SEARCH_RESULT_USERNAME_BYTES);
+        let directory = normalize_wishlist_directory(directory);
+        if username.is_empty() || directory.is_empty() {
+            return Err("invalid");
+        }
+        if let Some(existing) = self.ignored_results.iter().find(|rule| {
+            rule.wishlist_item_id == item_id
+                && rule.username.eq_ignore_ascii_case(&username)
+                && rule.directory.eq_ignore_ascii_case(&directory)
+        }) {
+            return Ok((existing.clone(), false));
+        }
+        if self.ignored_results.len() >= MAX_WISHLIST_IGNORED_RESULTS
+            || self
+                .ignored_results
+                .iter()
+                .filter(|rule| rule.wishlist_item_id == item_id)
+                .count()
+                >= MAX_WISHLIST_IGNORED_RESULTS_PER_ITEM
+        {
+            return Err("capacity");
+        }
+        let rule = WishlistIgnoredResult {
+            id: uuid::Uuid::new_v4().to_string(),
+            wishlist_item_id: item_id.to_owned(),
+            username,
+            directory,
+            created_at: unix_timestamp(),
+        };
+        self.ignored_results.push(rule.clone());
+        self.updated_at = rule.created_at;
+        Ok((rule, true))
+    }
+
+    fn delete_ignored_result(&mut self, item_id: &str, rule_id: &str) -> bool {
+        let before = self.ignored_results.len();
+        self.ignored_results
+            .retain(|rule| !(rule.wishlist_item_id == item_id && rule.id == rule_id));
+        let deleted = self.ignored_results.len() != before;
+        if deleted {
+            self.updated_at = unix_timestamp();
+        }
+        deleted
+    }
+
+    fn ignored_results_for(&self, item_id: &str) -> Vec<WishlistIgnoredResult> {
+        self.ignored_results
+            .iter()
+            .filter(|rule| rule.wishlist_item_id == item_id)
+            .cloned()
+            .collect()
+    }
+
+    fn item_id_for_search_text(&self, query: &str) -> Option<String> {
+        self.records
+            .iter()
+            .flat_map(|record| record.items.iter())
+            .find(|item| item.search_text() == query)
+            .map(|item| item.id.clone())
+    }
+}
+
+fn normalize_wishlist_directory(directory: &str) -> String {
+    truncate_utf8_bytes(
+        directory
+            .replace('\\', "/")
+            .trim()
+            .trim_matches('/')
+            .to_owned(),
+        MAX_SEARCH_RESULT_FILENAME_BYTES,
+    )
+}
+
+fn wishlist_parent_directory(filename: &str) -> String {
+    let normalized = filename.replace('\\', "/");
+    normalized
+        .rsplit_once('/')
+        .map(|(directory, _)| normalize_wishlist_directory(directory))
+        .unwrap_or_default()
 }
 
 // Contact Models
@@ -10389,6 +10645,8 @@ async fn route_http_request_with_headers(
             let external_id = extract_json_string_field(body, "id");
             let username_opt = extract_json_string_field(body, "username");
             let room_opt = extract_json_string_field(body, "room");
+            let wishlist_item_id = extract_json_string_field(body, "wishlistItemId")
+                .or_else(|| extract_json_string_field(body, "wishlist_item_id"));
             let ttl_seconds = match search_ttl_seconds_from_body(body) {
                 Ok(ttl_seconds) => ttl_seconds,
                 Err(error) => return Ok(routing::bad_request_response(error)),
@@ -10418,7 +10676,15 @@ async fn route_http_request_with_headers(
             };
 
              let mut searches = state.searches.write().await;
-             let target_name = if target_str == "user" { username_opt.clone() } else if target_str == "room" { room_opt.clone() } else { None };
+             let target_name = if target_str == "user" {
+                 username_opt.clone()
+             } else if target_str == "room" {
+                 room_opt.clone()
+             } else if target_str == "wishlist" {
+                 wishlist_item_id.clone()
+             } else {
+                 None
+             };
              let result_count = matching_results.len();
 
               let target = search_target_static(&target_str);
@@ -10633,6 +10899,24 @@ async fn route_http_request_with_headers(
                     extension: String::new(),
                 }));
                 entries.push(entry);
+            }
+
+            let wishlist_item_id = {
+                let searches = state.searches.read().await;
+                searches
+                    .get(token)
+                    .and_then(|record| record.wishlist_item_id().map(str::to_owned))
+            };
+            if let Some(item_id) = wishlist_item_id.as_deref() {
+                let ignored_results = state.wishlist.read().await.ignored_results_for(item_id);
+                entries.retain(|entry| {
+                    let Some(username) = entry.peer_username.as_deref() else {
+                        return true;
+                    };
+                    !ignored_results
+                        .iter()
+                        .any(|rule| rule.matches(username, &entry.filename))
+                });
             }
 
             let mut searches = state.searches.write().await;
@@ -13219,6 +13503,83 @@ async fn route_http_request_with_headers(
               }
             }
         }
+        ("GET", path) if wishlist_ignored_results_item_id(path).is_some() => {
+            let item_id = wishlist_ignored_results_item_id(path).expect("guarded ignored path");
+            let wishlist = state.wishlist.read().await;
+            let Some(rules) = wishlist.list_ignored_results(item_id) else {
+                return Ok(routing::not_found_response());
+            };
+            let json = serde_json::Value::Array(
+                rules.iter().map(WishlistIgnoredResult::json).collect(),
+            )
+            .to_string();
+            Ok(routing::ok_response(json))
+        }
+        ("POST", path) if wishlist_ignored_results_item_id(path).is_some() => {
+            let item_id = wishlist_ignored_results_item_id(path).expect("guarded ignored path");
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
+            let directory = extract_json_string_field(body, "directory").unwrap_or_default();
+            if username.trim().is_empty() || normalize_wishlist_directory(&directory).is_empty() {
+                return Ok(routing::bad_request_response(
+                    "username and directory are required",
+                ));
+            }
+
+            let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
+            let (rule, created) = match wishlist.ignore_result(item_id, &username, &directory) {
+                Ok(result) => result,
+                Err("not_found") => return Ok(routing::not_found_response()),
+                Err("capacity") => {
+                    return Ok(routing::service_unavailable_response(
+                        "wishlist ignored-result capacity is full",
+                    ));
+                }
+                Err(_) => {
+                    return Ok(routing::bad_request_response(
+                        "username and directory are required",
+                    ));
+                }
+            };
+            let mutated = wishlist.clone();
+            drop(wishlist);
+            if created {
+                if let Err(error) = persist_wishlist_ignored_result_checked(state, &rule).await {
+                    rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
+                let changed_searches = state
+                    .searches
+                    .write()
+                    .await
+                    .suppress_ignored_result(&rule);
+                persist_search_records(state, &changed_searches).await?;
+            }
+            let json = rule.json().to_string();
+            if created {
+                Ok(routing::created_response(json))
+            } else {
+                Ok(routing::ok_response(json))
+            }
+        }
+        ("DELETE", path) if wishlist_ignored_result_ids(path).is_some() => {
+            let (item_id, rule_id) =
+                wishlist_ignored_result_ids(path).expect("guarded ignored rule path");
+            let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
+            if !wishlist.delete_ignored_result(item_id, rule_id) {
+                return Ok(routing::not_found_response());
+            }
+            let mutated = wishlist.clone();
+            drop(wishlist);
+            if let Err(error) =
+                persist_wishlist_ignored_result_delete_checked(state, item_id, rule_id).await
+            {
+                rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
+            Ok(routing::no_content_response())
+        }
         ("DELETE", path) if path.starts_with("/api/wishlist/") => {
             let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
                 return Ok(routing::not_found_response());
@@ -13854,14 +14215,18 @@ async fn route_http_request_with_headers(
         {
             let grant_id = share_grant_manifest_id(path)
                 .expect("guarded share-grant manifest path");
+            if query_parameter(route.query, "token").is_some() {
+                return Ok(routing::bad_request_response(
+                    "share tokens must be sent in X-Share-Token",
+                ));
+            }
             let api_authorized = !state.config.auth_required
                 || is_authorized(
                     &state.config,
                     authorization,
                     headers.cookie.as_deref(),
                 );
-            let share_token = request_share_token(authorization, &headers)
-                .or_else(|| query_parameter(route.query, "token"));
+            let share_token = request_share_token(authorization, &headers);
             if let Some(token) = share_token {
                 let mut tokens = state.share_access_tokens.write().await;
                 let token_record = tokens.validate(&token);
@@ -17106,7 +17471,11 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("wishlist item has no search text"));
              }
              let mut searches = state.searches.write().await;
-             let outcome = match searches.create_scheduled_wishlist(query, DEFAULT_SEARCH_TTL_SECONDS) {
+             let outcome = match searches.create_scheduled_wishlist_for_item(
+                 query,
+                 Some(item_id.to_owned()),
+                 DEFAULT_SEARCH_TTL_SECONDS,
+             ) {
                  Ok(outcome) => outcome,
                  Err(error) => return Ok(search_create_error_response(error)),
              };
@@ -17386,6 +17755,11 @@ async fn route_http_request_with_headers(
 
         ("GET", path) if path.starts_with("/api/streams/") && path.len() > 13 => {
             let stream_id = decoded_path_segment(&path[13..]);
+            if query_parameter(route.query, "token").is_some() {
+                return Ok(routing::bad_request_response(
+                    "share tokens must be exchanged for stream tickets",
+                ));
+            }
             let api_authorized = !state.config.auth_required
                 || is_authorized(
                     &state.config,
@@ -17404,36 +17778,6 @@ async fn route_http_request_with_headers(
             if ticket.is_some() && ticket_record.is_none() {
                 return Ok(routing::unauthorized_response());
             }
-            let legacy_share_token = query_parameter(route.query, "token");
-            let legacy_share_authorized = if let Some(token) = legacy_share_token.as_deref() {
-                let mut tokens = state.share_access_tokens.write().await;
-                let token_record = tokens.validate(token);
-                drop(tokens);
-                if let Some(token_record) = token_record {
-                    let grants = state.share_grants.read().await;
-                    let grant = grants.get(&token_record.grant_id);
-                    drop(grants);
-                    if let Some(grant) = grant {
-                        let collections = state.collections.read().await;
-                        let allowed = collections
-                            .get(&grant.collection_id)
-                            .is_some_and(|collection| {
-                                collection
-                                    .items
-                                    .iter()
-                                    .any(|item| item.content_id == stream_id)
-                            });
-                        drop(collections);
-                        allowed
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
             let transfers = state.transfers.read().await;
             let shares = state.shares.read().await;
             let transfer = stream_id
@@ -17443,19 +17787,14 @@ async fn route_http_request_with_headers(
             let share = shares.entries.iter().find(|entry| {
                 entry.filename == stream_id || stable_content_hash(&entry.filename, entry.size).to_string() == stream_id
             });
-            if legacy_share_token.is_some() && !legacy_share_authorized {
-                drop(shares);
-                drop(transfers);
-                return Ok(routing::unauthorized_response());
-            }
-            if !api_authorized && ticket_record.is_none() && !legacy_share_authorized {
+            if !api_authorized && ticket_record.is_none() {
                 drop(shares);
                 drop(transfers);
                 return Ok(routing::unauthorized_response());
             }
             let body = serde_json::json!({
                 "id": stream_id,
-                "status": if transfer.is_some() || share.is_some() || ticket_record.is_some() || legacy_share_authorized { "available" } else { "not_found" },
+                "status": if transfer.is_some() || share.is_some() || ticket_record.is_some() { "available" } else { "not_found" },
                 "ticket": ticket.as_ref().map(|_| "accepted"),
                 "transfer": transfer.map(|entry| serde_json::json!({
                     "id": entry.id,
@@ -20975,7 +21314,13 @@ async fn serve(once: bool) -> Result<(), String> {
             .list_wishlist_items(EVENT_HISTORY_LIMIT as i32, 0)
             .await
             .map_err(|error| format!("failed to load persisted wishlist items: {error}"))?;
-        WishlistStore::from_persisted(records)
+        let ignored_results = db
+            .list_all_wishlist_ignored_results()
+            .await
+            .map_err(|error| {
+                format!("failed to load persisted wishlist ignored results: {error}")
+            })?;
+        WishlistStore::from_persisted_with_ignored(records, ignored_results)
     } else {
         WishlistStore::new()
     };
@@ -22688,9 +23033,22 @@ where
                 .write()
                 .await
                 .remember_search_response(&response);
+            let wishlist_item_id = {
+                let searches = state.searches.read().await;
+                searches
+                    .get(response.token)
+                    .and_then(|record| record.wishlist_item_id().map(str::to_owned))
+            };
+            let ignored_results = if let Some(item_id) = wishlist_item_id.as_deref() {
+                state.wishlist.read().await.ignored_results_for(item_id)
+            } else {
+                Vec::new()
+            };
             let accepted = {
                 let mut searches = state.searches.write().await;
-                searches.add_peer_response(&response).is_some()
+                searches
+                    .add_peer_response_filtered(&response, &ignored_results)
+                    .is_some()
             };
             update_listeners(state, |snapshot| {
                 snapshot.file_search_responses += 1;
@@ -23157,9 +23515,18 @@ async fn send_due_wishlist_search(
     scheduler: &mut WishlistSearchScheduler,
     next_wishlist_search: &mut Instant,
 ) {
-    let terms = {
+    let (terms, wishlist_item_ids) = {
         let wishlist = state.wishlist.read().await;
-        wishlist.search_terms()
+        let terms = wishlist.search_terms();
+        let item_ids = terms
+            .iter()
+            .filter_map(|term| {
+                wishlist
+                    .item_id_for_search_text(term)
+                    .map(|item_id| (term.clone(), item_id))
+            })
+            .collect::<BTreeMap<_, _>>();
+        (terms, item_ids)
     };
     scheduler.replace_terms(terms);
     *next_wishlist_search = Instant::now() + scheduler.interval();
@@ -23187,7 +23554,12 @@ async fn send_due_wishlist_search(
         else {
             return;
         };
-        let outcome = match searches.create_scheduled_wishlist(query.clone(), 300) {
+        let wishlist_item_id = wishlist_item_ids.get(&query).cloned();
+        let outcome = match searches.create_scheduled_wishlist_for_item(
+            query.clone(),
+            wishlist_item_id.clone(),
+            300,
+        ) {
             Ok(outcome) => outcome,
             Err(error) => {
                 drop(searches);
@@ -23222,7 +23594,7 @@ async fn send_due_wishlist_search(
             result_count: 0,
             created_at: record.created_at as i64,
             completed_at: None,
-            room: None,
+            room: record.target_name.clone(),
             target: Some("wishlist".to_owned()),
         };
         let persist_error = db
@@ -25217,6 +25589,46 @@ async fn persist_wishlist_item_delete_checked(state: &AppState, id: &str) -> Res
         .await
         .map_err(|error| format!("wishlist deletion persistence failed: {error}"))?;
     Ok(true)
+}
+
+fn persisted_wishlist_ignored_result(
+    rule: &WishlistIgnoredResult,
+) -> crate::persistence::WishlistIgnoredResultRecord {
+    crate::persistence::WishlistIgnoredResultRecord {
+        id: rule.id.clone(),
+        wishlist_item_id: rule.wishlist_item_id.clone(),
+        username: rule.username.clone(),
+        directory: rule.directory.clone(),
+        created_at: i64::try_from(rule.created_at).unwrap_or(i64::MAX),
+    }
+}
+
+async fn persist_wishlist_ignored_result_checked(
+    state: &AppState,
+    rule: &WishlistIgnoredResult,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.upsert_wishlist_ignored_result(&persisted_wishlist_ignored_result(rule))
+        .await
+        .map_err(|error| format!("wishlist ignored-result persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn persist_wishlist_ignored_result_delete_checked(
+    state: &AppState,
+    item_id: &str,
+    rule_id: &str,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    let deleted = db
+        .delete_wishlist_ignored_result(item_id, rule_id)
+        .await
+        .map_err(|error| format!("wishlist ignored-result deletion failed: {error}"))?;
+    Ok(deleted > 0)
 }
 
 async fn rollback_wishlist_if_unchanged(
@@ -33572,7 +33984,8 @@ mod tests {
         assert_eq!(persisted_now_playing[0].username, "peer");
         assert_eq!(persisted_now_playing[0].title, "Currently Playing");
 
-        let mut rehydrated_wishlist = super::WishlistStore::from_persisted(persisted_wishlist);
+        let mut rehydrated_wishlist =
+            super::WishlistStore::from_persisted_with_ignored(persisted_wishlist, Vec::new());
         let rehydrated_contacts = super::ContactStore::from_persisted(persisted_contacts);
         let rehydrated_grants = super::ShareGrantStore::from_persisted(persisted_grants);
         let rehydrated_sharegroups = super::ShareGroupStore::from_persisted(
@@ -35764,6 +36177,207 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wishlist_ignored_folders_persist_and_suppress_existing_and_future_results() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let created = super::route_http_request(
+            "POST",
+            "/api/wishlist",
+            None,
+            r#"{"artist":"Artist","title":"Album"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let search = super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{item_id}/search"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(search.status, "202 Accepted");
+        assert_eq!(
+            state.searches.read().await.records[0].wishlist_item_id(),
+            Some(item_id.as_str())
+        );
+
+        for (username, filename) in [
+            ("PeerOne", "Remote/Album/One.flac"),
+            ("PeerTwo", "Remote/Album/Two.flac"),
+        ] {
+            super::route_http_request(
+                "POST",
+                "/api/v0/search-responses",
+                None,
+                &format!(
+                    r#"{{"token":1,"username":"{username}","filename":"{filename}","size":1}}"#
+                ),
+                &state,
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(state.searches.read().await.records[0].results.len(), 2);
+
+        let ignored = super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{item_id}/ignored-results"),
+            None,
+            r#"{"username":"PeerOne","directory":"/Remote\\Album/"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ignored.status, "201 Created");
+        let ignored_json = serde_json::from_str::<serde_json::Value>(&ignored.body).unwrap();
+        let rule_id = ignored_json["id"].as_str().unwrap().to_owned();
+        assert_eq!(ignored_json["directory"], "Remote/Album");
+        assert_eq!(state.searches.read().await.records[0].results.len(), 1);
+
+        let duplicate = super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{item_id}/ignored-results"),
+            None,
+            r#"{"username":"peerone","directory":"remote/album"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(duplicate.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&duplicate.body).unwrap()["id"],
+            rule_id
+        );
+
+        for filename in ["Remote/Album/Again.flac", "Remote/Other/Allowed.flac"] {
+            super::route_http_request(
+                "POST",
+                "/api/v0/search-responses",
+                None,
+                &format!(r#"{{"token":1,"username":"PEERONE","filename":"{filename}","size":1}}"#),
+                &state,
+            )
+            .await
+            .unwrap();
+        }
+        let search = state.searches.read().await.records[0].clone();
+        assert_eq!(search.results.len(), 2);
+        assert!(search
+            .results
+            .iter()
+            .any(|result| result.filename == "Remote/Other/Allowed.flac"));
+
+        let listed = super::route_http_request(
+            "GET",
+            &format!("/api/wishlist/{item_id}/ignored-results"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        assert_eq!(listed_json.as_array().unwrap().len(), 1);
+        let persisted = db.list_all_wishlist_ignored_results().await.unwrap();
+        assert_eq!(persisted.len(), 1);
+        let rehydrated = super::WishlistStore::from_persisted_with_ignored(
+            db.list_wishlist_items(10, 0).await.unwrap(),
+            persisted,
+        );
+        assert_eq!(rehydrated.list_ignored_results(&item_id).unwrap().len(), 1);
+
+        let restored = super::route_http_request(
+            "DELETE",
+            &format!("/api/wishlist/{item_id}/ignored-results/{rule_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.status, "204 No Content");
+        assert!(db
+            .list_all_wishlist_ignored_results()
+            .await
+            .unwrap()
+            .is_empty());
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            r#"{"token":1,"username":"PeerOne","filename":"Remote/Album/Restored.flac","size":1}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(state.searches.read().await.records[0].results.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn wishlist_ignored_folder_mutations_roll_back_on_persistence_failure() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        state
+            .wishlist
+            .write()
+            .await
+            .add_item("Artist".to_owned(), "Album".to_owned(), "Audio".to_owned())
+            .unwrap();
+        db.close_for_test().await;
+
+        let create = super::route_http_request(
+            "POST",
+            "/api/wishlist/wish-1/ignored-results",
+            None,
+            r#"{"username":"friend","directory":"Remote/Album"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(create.status, "503 Service Unavailable");
+        assert!(state.wishlist.read().await.ignored_results.is_empty());
+
+        let rule = state
+            .wishlist
+            .write()
+            .await
+            .ignore_result("wish-1", "friend", "Remote/Album")
+            .unwrap()
+            .0;
+        let delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/wishlist/wish-1/ignored-results/{}", rule.id),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(delete.status, "503 Service Unavailable");
+        assert_eq!(state.wishlist.read().await.ignored_results, vec![rule]);
+    }
+
+    #[tokio::test]
     async fn search_response_api_accepts_slskd_group_payload() {
         let (state, _receiver) = test_state();
         super::route_http_request(
@@ -36150,6 +36764,54 @@ mod tests {
             responses[0]["lockedFiles"][0]["filename"],
             "Private/Locked.flac"
         );
+    }
+
+    #[test]
+    fn peer_search_responses_suppress_only_matching_wishlist_peer_folder() {
+        let mut store = super::SearchStore::new();
+        let record = store
+            .create_scheduled_wishlist_for_item(
+                "artist album".to_owned(),
+                Some("wish-1".to_owned()),
+                300,
+            )
+            .unwrap()
+            .record;
+        let response = FileSearchResponse {
+            username: "PeerOne".to_owned(),
+            token: record.token,
+            results: ["Remote/Album/Blocked.flac", "Remote/Other/Allowed.flac"]
+                .into_iter()
+                .map(|filename| FileEntry {
+                    filename_encoding: Default::default(),
+                    extension_encoding: Default::default(),
+                    code: 1,
+                    filename: filename.to_owned(),
+                    size: 1,
+                    extension: "flac".to_owned(),
+                    attributes: Vec::new(),
+                })
+                .collect(),
+            slot_free: true,
+            average_speed: 0,
+            queue_length: 0,
+            unknown: 0,
+            private_results: Vec::new(),
+        };
+        let ignored = super::WishlistIgnoredResult {
+            id: "ignored-1".to_owned(),
+            wishlist_item_id: "wish-1".to_owned(),
+            username: "peerone".to_owned(),
+            directory: "Remote/Album".to_owned(),
+            created_at: 1,
+        };
+
+        let updated = store
+            .add_peer_response_filtered(&response, &[ignored])
+            .unwrap();
+
+        assert_eq!(updated.results.len(), 1);
+        assert_eq!(updated.results[0].filename, "Remote/Other/Allowed.flac");
     }
 
     #[test]
@@ -40505,8 +41167,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(query_token.status, "200 OK");
-        assert!(!query_token.body.contains(&token));
+        assert_eq!(query_token.status, "400 Bad Request");
 
         let share_headers = super::RequestSecurityHeaders {
             x_share_token: Some(token.clone()),
@@ -40528,7 +41189,7 @@ mod tests {
         assert_eq!(manifest_json["items"][0]["contentId"], "content/one");
         assert!(!manifest.body.contains(&token));
 
-        let legacy_stream = super::route_http_request(
+        let query_stream = super::route_http_request(
             "GET",
             &format!(
                 "/api/v0/streams/content%2Fone?token={}",
@@ -40540,12 +41201,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(legacy_stream.status, "200 OK");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&legacy_stream.body).unwrap()["status"],
-            "available"
-        );
-        assert!(!legacy_stream.body.contains(&token));
+        assert_eq!(query_stream.status, "400 Bad Request");
 
         let ticket_response = super::route_http_request_with_headers(
             "POST",
