@@ -175,6 +175,16 @@ pub struct WishlistItemRecord {
     pub max_results: i64,
     pub max_downloads: Option<i64>,
     pub last_viewed_at: Option<i64>,
+    pub last_searched_at: Option<i64>,
+    pub last_match_count: i64,
+    pub last_visible_hit_count: i64,
+    pub last_hidden_locked_hit_count: i64,
+    pub last_filtered_out_hit_count: i64,
+    pub last_ignored_result_hit_count: i64,
+    pub last_response_count: i64,
+    pub total_search_count: i64,
+    pub total_download_count: i64,
+    pub last_search_id: Option<String>,
     pub added_at: i64,
 }
 
@@ -561,6 +571,16 @@ impl<'r> FromRow<'r, SqliteRow> for WishlistItemRecord {
             max_results: row.try_get("max_results")?,
             max_downloads: row.try_get("max_downloads")?,
             last_viewed_at: row.try_get("last_viewed_at")?,
+            last_searched_at: row.try_get("last_searched_at")?,
+            last_match_count: row.try_get("last_match_count")?,
+            last_visible_hit_count: row.try_get("last_visible_hit_count")?,
+            last_hidden_locked_hit_count: row.try_get("last_hidden_locked_hit_count")?,
+            last_filtered_out_hit_count: row.try_get("last_filtered_out_hit_count")?,
+            last_ignored_result_hit_count: row.try_get("last_ignored_result_hit_count")?,
+            last_response_count: row.try_get("last_response_count")?,
+            total_search_count: row.try_get("total_search_count")?,
+            total_download_count: row.try_get("total_download_count")?,
+            last_search_id: row.try_get("last_search_id")?,
             added_at: row.try_get("added_at")?,
         })
     }
@@ -1082,6 +1102,16 @@ impl DatabaseManager {
                 max_results INTEGER NOT NULL DEFAULT 100,
                 max_downloads INTEGER,
                 last_viewed_at INTEGER,
+                last_searched_at INTEGER,
+                last_match_count INTEGER NOT NULL DEFAULT 0,
+                last_visible_hit_count INTEGER NOT NULL DEFAULT 0,
+                last_hidden_locked_hit_count INTEGER NOT NULL DEFAULT 0,
+                last_filtered_out_hit_count INTEGER NOT NULL DEFAULT 0,
+                last_ignored_result_hit_count INTEGER NOT NULL DEFAULT 0,
+                last_response_count INTEGER NOT NULL DEFAULT 0,
+                total_search_count INTEGER NOT NULL DEFAULT 0,
+                total_download_count INTEGER NOT NULL DEFAULT 0,
+                last_search_id TEXT,
                 added_at INTEGER NOT NULL
             )
             "#,
@@ -1519,6 +1549,16 @@ impl DatabaseManager {
             "ALTER TABLE wishlist_items ADD COLUMN max_results INTEGER NOT NULL DEFAULT 100",
             "ALTER TABLE wishlist_items ADD COLUMN max_downloads INTEGER",
             "ALTER TABLE wishlist_items ADD COLUMN last_viewed_at INTEGER",
+            "ALTER TABLE wishlist_items ADD COLUMN last_searched_at INTEGER",
+            "ALTER TABLE wishlist_items ADD COLUMN last_match_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN last_visible_hit_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN last_hidden_locked_hit_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN last_filtered_out_hit_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN last_ignored_result_hit_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN last_response_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN total_search_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN total_download_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN last_search_id TEXT",
         ] {
             if let Err(error) = query(statement).execute(&self.pool).await {
                 let message = error.to_string();
@@ -2561,8 +2601,12 @@ impl DatabaseManager {
             r#"
             INSERT INTO wishlist_items
                 (id, artist, title, kind, filter, enabled, auto_download, max_results,
-                 max_downloads, last_viewed_at, added_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 max_downloads, last_viewed_at, last_searched_at, last_match_count,
+                 last_visible_hit_count, last_hidden_locked_hit_count,
+                 last_filtered_out_hit_count, last_ignored_result_hit_count,
+                 last_response_count, total_search_count, total_download_count,
+                 last_search_id, added_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 artist = excluded.artist,
                 title = excluded.title,
@@ -2573,6 +2617,16 @@ impl DatabaseManager {
                 max_results = excluded.max_results,
                 max_downloads = excluded.max_downloads,
                 last_viewed_at = excluded.last_viewed_at,
+                last_searched_at = excluded.last_searched_at,
+                last_match_count = excluded.last_match_count,
+                last_visible_hit_count = excluded.last_visible_hit_count,
+                last_hidden_locked_hit_count = excluded.last_hidden_locked_hit_count,
+                last_filtered_out_hit_count = excluded.last_filtered_out_hit_count,
+                last_ignored_result_hit_count = excluded.last_ignored_result_hit_count,
+                last_response_count = excluded.last_response_count,
+                total_search_count = excluded.total_search_count,
+                total_download_count = excluded.total_download_count,
+                last_search_id = excluded.last_search_id,
                 added_at = excluded.added_at
             "#,
         )
@@ -2586,6 +2640,16 @@ impl DatabaseManager {
         .bind(record.max_results)
         .bind(record.max_downloads)
         .bind(record.last_viewed_at)
+        .bind(record.last_searched_at)
+        .bind(record.last_match_count)
+        .bind(record.last_visible_hit_count)
+        .bind(record.last_hidden_locked_hit_count)
+        .bind(record.last_filtered_out_hit_count)
+        .bind(record.last_ignored_result_hit_count)
+        .bind(record.last_response_count)
+        .bind(record.total_search_count)
+        .bind(record.total_download_count)
+        .bind(&record.last_search_id)
         .bind(record.added_at)
         .execute(&self.pool)
         .await?;
@@ -2603,8 +2667,12 @@ impl DatabaseManager {
                 r#"
                 INSERT INTO wishlist_items
                     (id, artist, title, kind, filter, enabled, auto_download, max_results,
-                     max_downloads, last_viewed_at, added_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     max_downloads, last_viewed_at, last_searched_at, last_match_count,
+                     last_visible_hit_count, last_hidden_locked_hit_count,
+                     last_filtered_out_hit_count, last_ignored_result_hit_count,
+                     last_response_count, total_search_count, total_download_count,
+                     last_search_id, added_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     artist = excluded.artist,
                     title = excluded.title,
@@ -2615,6 +2683,16 @@ impl DatabaseManager {
                     max_results = excluded.max_results,
                     max_downloads = excluded.max_downloads,
                     last_viewed_at = excluded.last_viewed_at,
+                    last_searched_at = excluded.last_searched_at,
+                    last_match_count = excluded.last_match_count,
+                    last_visible_hit_count = excluded.last_visible_hit_count,
+                    last_hidden_locked_hit_count = excluded.last_hidden_locked_hit_count,
+                    last_filtered_out_hit_count = excluded.last_filtered_out_hit_count,
+                    last_ignored_result_hit_count = excluded.last_ignored_result_hit_count,
+                    last_response_count = excluded.last_response_count,
+                    total_search_count = excluded.total_search_count,
+                    total_download_count = excluded.total_download_count,
+                    last_search_id = excluded.last_search_id,
                     added_at = excluded.added_at
                 "#,
             )
@@ -2628,6 +2706,16 @@ impl DatabaseManager {
             .bind(record.max_results)
             .bind(record.max_downloads)
             .bind(record.last_viewed_at)
+            .bind(record.last_searched_at)
+            .bind(record.last_match_count)
+            .bind(record.last_visible_hit_count)
+            .bind(record.last_hidden_locked_hit_count)
+            .bind(record.last_filtered_out_hit_count)
+            .bind(record.last_ignored_result_hit_count)
+            .bind(record.last_response_count)
+            .bind(record.total_search_count)
+            .bind(record.total_download_count)
+            .bind(&record.last_search_id)
             .bind(record.added_at)
             .execute(&mut *transaction)
             .await?;
@@ -2658,7 +2746,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<WishlistItemRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, WishlistItemRecord>(
-            "SELECT id, artist, title, kind, filter, enabled, auto_download, max_results, max_downloads, last_viewed_at, added_at FROM wishlist_items ORDER BY added_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, artist, title, kind, filter, enabled, auto_download, max_results, max_downloads, last_viewed_at, last_searched_at, last_match_count, last_visible_hit_count, last_hidden_locked_hit_count, last_filtered_out_hit_count, last_ignored_result_hit_count, last_response_count, total_search_count, total_download_count, last_search_id, added_at FROM wishlist_items ORDER BY added_at DESC LIMIT ? OFFSET ?",
         )
         .bind(limit)
         .bind(offset)

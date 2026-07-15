@@ -784,6 +784,10 @@ struct SearchRecord {
     target_name: Option<String>,
     status: &'static str,
     results: Vec<SearchResultEntry>,
+    raw_response_count: usize,
+    filtered_out_count: usize,
+    ignored_result_count: usize,
+    hidden_locked_count: usize,
     expires_at: u64,
     created_at: u64,
     updated_at: u64,
@@ -796,12 +800,14 @@ impl SearchRecord {
             .flatten()
     }
 
-    fn extend_results_bounded(
+    fn extend_results_with_limit_bounded(
         &mut self,
         results: impl IntoIterator<Item = SearchResultEntry>,
         aggregate_remaining: usize,
+        result_limit: usize,
     ) {
-        let remaining = MAX_SEARCH_RESULTS_PER_SEARCH
+        let remaining = result_limit
+            .min(MAX_SEARCH_RESULTS_PER_SEARCH)
             .saturating_sub(self.results.len())
             .min(aggregate_remaining);
         self.results.extend(results.into_iter().take(remaining));
@@ -809,6 +815,37 @@ impl SearchRecord {
 
     fn json(&self) -> String {
         self.json_with_result_page(0, None)
+    }
+
+    fn history_summary(&self) -> serde_json::Value {
+        let response_count = self
+            .results
+            .iter()
+            .filter_map(|entry| entry.peer_username.as_deref())
+            .collect::<HashSet<_>>()
+            .len();
+        let locked_file_count = self.results.iter().filter(|entry| entry.locked).count();
+        serde_json::json!({
+            "id": self.id,
+            "token": self.token,
+            "query": self.query,
+            "searchText": self.query,
+            "target": self.target,
+            "target_name": self.target_name,
+            "wishlistItemId": self.wishlist_item_id(),
+            "status": self.status,
+            "state": search_state_for_status(self.status),
+            "isComplete": self.status != "active",
+            "result_count": self.results.len(),
+            "fileCount": self.results.len(),
+            "lockedFileCount": locked_file_count,
+            "responseCount": response_count,
+            "startedAt": self.created_at.to_string(),
+            "endedAt": (self.status != "active").then(|| self.updated_at.to_string()),
+            "expires_at": self.expires_at,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        })
     }
 
     fn json_with_query(&self, query: Option<&str>) -> String {
@@ -954,6 +991,10 @@ impl SearchRecord {
                 .map(SearchResultEntry::from_persisted)
                 .take(MAX_SEARCH_RESULTS_PER_SEARCH)
                 .collect(),
+            raw_response_count: 0,
+            filtered_out_count: 0,
+            ignored_result_count: 0,
+            hidden_locked_count: 0,
             expires_at: 0,
             created_at: record.created_at.max(0) as u64,
             updated_at: record.completed_at.unwrap_or(record.created_at).max(0) as u64,
@@ -1121,6 +1162,10 @@ impl SearchStore {
                 .map(SearchResultEntry::from_file_entry)
                 .take(MAX_SEARCH_RESULTS_PER_SEARCH.min(aggregate_remaining))
                 .collect(),
+            raw_response_count: 0,
+            filtered_out_count: 0,
+            ignored_result_count: 0,
+            hidden_locked_count: 0,
             expires_at: now.saturating_add(ttl_seconds),
             created_at: now,
             updated_at: now,
@@ -1190,14 +1235,15 @@ impl SearchStore {
         }
     }
 
-    fn complete(&mut self, token: u32) -> Option<SearchRecord> {
+    fn complete(&mut self, token: u32) -> Option<(SearchRecord, bool)> {
         let record = self
             .records
             .iter_mut()
             .find(|record| record.token == token)?;
+        let transitioned = record.status != "completed";
         record.status = "completed";
         record.updated_at = unix_timestamp();
-        Some(record.clone())
+        Some((record.clone(), transitioned))
     }
 
     fn set_status_by_token(&mut self, token: u32, status: &'static str) -> Option<SearchRecord> {
@@ -1269,45 +1315,76 @@ impl SearchStore {
 
     #[cfg(test)]
     fn add_peer_response(&mut self, response: &FileSearchResponse) -> Option<SearchRecord> {
-        self.add_peer_response_filtered(response, &[])
+        self.add_peer_response_filtered(response, &[], None)
     }
 
     fn add_peer_response_filtered(
         &mut self,
         response: &FileSearchResponse,
         ignored_results: &[WishlistIgnoredResult],
+        wishlist_policy: Option<&WishlistResultPolicy>,
     ) -> Option<SearchRecord> {
         let aggregate_remaining = MAX_TOTAL_SEARCH_RESULTS.saturating_sub(self.total_results());
         let record = self
             .records
             .iter_mut()
             .find(|record| record.token == response.token)?;
+        let result_limit = wishlist_policy
+            .map(|policy| policy.max_results)
+            .unwrap_or(MAX_SEARCH_RESULTS_PER_SEARCH);
+        if let Some(policy) = wishlist_policy {
+            record.raw_response_count = record.raw_response_count.saturating_add(1);
+            for (entry, locked) in response
+                .results
+                .iter()
+                .map(|entry| (entry, false))
+                .chain(response.private_results.iter().map(|entry| (entry, true)))
+            {
+                if !policy.filter.matches(&entry.filename) {
+                    record.filtered_out_count = record.filtered_out_count.saturating_add(1);
+                } else if ignored_results
+                    .iter()
+                    .any(|rule| rule.matches(&response.username, &entry.filename))
+                {
+                    record.ignored_result_count = record.ignored_result_count.saturating_add(1);
+                } else if locked {
+                    record.hidden_locked_count = record.hidden_locked_count.saturating_add(1);
+                }
+            }
+        }
         let before = record.results.len();
-        record.extend_results_bounded(
+        record.extend_results_with_limit_bounded(
             response
                 .results
                 .iter()
                 .filter(|entry| {
-                    !ignored_results
-                        .iter()
-                        .any(|rule| rule.matches(&response.username, &entry.filename))
+                    wishlist_policy.is_none_or(|policy| policy.filter.matches(&entry.filename))
+                        && !ignored_results
+                            .iter()
+                            .any(|rule| rule.matches(&response.username, &entry.filename))
                 })
                 .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, false)),
             aggregate_remaining,
+            result_limit,
         );
         let aggregate_remaining = aggregate_remaining.saturating_sub(record.results.len() - before);
-        record.extend_results_bounded(
-            response
-                .private_results
-                .iter()
-                .filter(|entry| {
-                    !ignored_results
-                        .iter()
-                        .any(|rule| rule.matches(&response.username, &entry.filename))
-                })
-                .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, true)),
-            aggregate_remaining,
-        );
+        if wishlist_policy.is_none() {
+            record.extend_results_with_limit_bounded(
+                response
+                    .private_results
+                    .iter()
+                    .filter(|entry| {
+                        !ignored_results
+                            .iter()
+                            .any(|rule| rule.matches(&response.username, &entry.filename))
+                    })
+                    .map(|entry| {
+                        SearchResultEntry::from_peer_response_entry(response, entry, true)
+                    }),
+                aggregate_remaining,
+                result_limit,
+            );
+        }
         record.updated_at = unix_timestamp();
         Some(record.clone())
     }
@@ -1383,6 +1460,20 @@ impl SearchStore {
             .collect::<Vec<_>>()
             .join(",");
         format!("[{}]", records)
+    }
+
+    fn wishlist_history_json(&self, item_id: &str, query: Option<&str>) -> String {
+        let filter = RecordListFilter::from_query(query);
+        let records = self
+            .records
+            .iter()
+            .rev()
+            .filter(|record| record.wishlist_item_id() == Some(item_id))
+            .skip(filter.offset)
+            .take(filter.limit.unwrap_or(DEFAULT_LIST_LIMIT))
+            .map(SearchRecord::history_summary)
+            .collect::<Vec<_>>();
+        serde_json::Value::Array(records).to_string()
     }
 
     fn filtered_records<'a>(&'a self, filter: &RecordListFilter) -> Vec<&'a SearchRecord> {
@@ -5477,6 +5568,12 @@ fn wishlist_search_item_id(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+fn wishlist_item_action_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
+    let path = path.strip_prefix("/api/wishlist/")?;
+    let id = path.strip_suffix(suffix)?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
 fn wishlist_ignored_results_item_id(path: &str) -> Option<&str> {
     let path = path.strip_prefix("/api/wishlist/")?;
     let id = path.strip_suffix("/ignored-results")?;
@@ -5540,6 +5637,16 @@ struct WishlistItem {
     max_results: usize,
     max_downloads: Option<u64>,
     last_viewed_at: Option<u64>,
+    last_searched_at: Option<u64>,
+    last_match_count: usize,
+    last_visible_hit_count: usize,
+    last_hidden_locked_hit_count: usize,
+    last_filtered_out_hit_count: usize,
+    last_ignored_result_hit_count: usize,
+    last_response_count: usize,
+    total_search_count: u64,
+    total_download_count: u64,
+    last_search_id: Option<String>,
     added_at: u64,
 }
 
@@ -5569,16 +5676,16 @@ impl WishlistItem {
             "maxResults": self.max_results,
             "maxDownloads": self.max_downloads,
             "lastViewedAt": self.last_viewed_at,
-            "lastSearchedAt": null,
-            "lastMatchCount": 0,
-            "lastVisibleHitCount": 0,
-            "lastHiddenLockedHitCount": 0,
-            "lastFilteredOutHitCount": 0,
-            "lastIgnoredResultHitCount": 0,
-            "lastResponseCount": 0,
-            "totalSearchCount": 0,
-            "totalDownloadCount": 0,
-            "lastSearchId": null,
+            "lastSearchedAt": self.last_searched_at,
+            "lastMatchCount": self.last_match_count,
+            "lastVisibleHitCount": self.last_visible_hit_count,
+            "lastHiddenLockedHitCount": self.last_hidden_locked_hit_count,
+            "lastFilteredOutHitCount": self.last_filtered_out_hit_count,
+            "lastIgnoredResultHitCount": self.last_ignored_result_hit_count,
+            "lastResponseCount": self.last_response_count,
+            "totalSearchCount": self.total_search_count,
+            "totalDownloadCount": self.total_download_count,
+            "lastSearchId": self.last_search_id,
         })
         .to_string()
     }
@@ -5598,6 +5705,78 @@ struct WishlistIgnoredResult {
     username: String,
     directory: String,
     created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WishlistResultFilter {
+    include: Vec<String>,
+    exclude: Vec<String>,
+}
+
+impl WishlistResultFilter {
+    fn parse(filter: &str) -> Self {
+        let mut terms = Vec::new();
+        let mut current = String::new();
+        let mut quoted = false;
+        for character in filter.chars() {
+            match character {
+                '"' => quoted = !quoted,
+                character if character.is_whitespace() && !quoted => {
+                    if !current.is_empty() {
+                        terms.push(std::mem::take(&mut current));
+                    }
+                }
+                character => current.push(character),
+            }
+        }
+        if !current.is_empty() {
+            terms.push(current);
+        }
+
+        let mut include = Vec::new();
+        let mut exclude = Vec::new();
+        for raw_term in terms {
+            if raw_term.eq_ignore_ascii_case("OR") {
+                continue;
+            }
+            let (target, term) = if let Some(term) = raw_term.strip_prefix('-') {
+                (&mut exclude, term)
+            } else {
+                (&mut include, raw_term.as_str())
+            };
+            let term = term
+                .trim()
+                .trim_matches('"')
+                .trim_start_matches('.')
+                .to_ascii_lowercase();
+            if !term.is_empty() && !target.contains(&term) {
+                target.push(term);
+            }
+        }
+        Self { include, exclude }
+    }
+
+    fn matches(&self, filename: &str) -> bool {
+        let filename = filename.replace('\\', "/").to_ascii_lowercase();
+        let extension = virtual_basename(&filename)
+            .rsplit_once('.')
+            .map(|(_, extension)| extension)
+            .unwrap_or_default();
+        if self.exclude.iter().any(|term| filename.contains(term)) {
+            return false;
+        }
+        self.include.is_empty()
+            || self
+                .include
+                .iter()
+                .any(|term| extension == term || filename.contains(term))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WishlistResultPolicy {
+    filter: WishlistResultFilter,
+    max_results: usize,
 }
 
 impl WishlistIgnoredResult {
@@ -5680,6 +5859,25 @@ impl WishlistStore {
                 last_viewed_at: record
                     .last_viewed_at
                     .and_then(|value| u64::try_from(value).ok()),
+                last_searched_at: record
+                    .last_searched_at
+                    .and_then(|value| u64::try_from(value).ok()),
+                last_match_count: usize::try_from(record.last_match_count).unwrap_or(0),
+                last_visible_hit_count: usize::try_from(record.last_visible_hit_count).unwrap_or(0),
+                last_hidden_locked_hit_count: usize::try_from(record.last_hidden_locked_hit_count)
+                    .unwrap_or(0),
+                last_filtered_out_hit_count: usize::try_from(record.last_filtered_out_hit_count)
+                    .unwrap_or(0),
+                last_ignored_result_hit_count: usize::try_from(
+                    record.last_ignored_result_hit_count,
+                )
+                .unwrap_or(0),
+                last_response_count: usize::try_from(record.last_response_count).unwrap_or(0),
+                total_search_count: u64::try_from(record.total_search_count).unwrap_or(0),
+                total_download_count: u64::try_from(record.total_download_count).unwrap_or(0),
+                last_search_id: record
+                    .last_search_id
+                    .map(|id| truncate_utf8_bytes(id, MAX_SEARCH_TARGET_NAME_BYTES)),
                 added_at: u64::try_from(record.added_at).unwrap_or(0),
             });
         }
@@ -5791,6 +5989,16 @@ impl WishlistStore {
             max_results: max_results.clamp(1, MAX_WISHLIST_RESULTS),
             max_downloads: max_downloads.map(|value| value.min(MAX_WISHLIST_DOWNLOADS)),
             last_viewed_at: None,
+            last_searched_at: None,
+            last_match_count: 0,
+            last_visible_hit_count: 0,
+            last_hidden_locked_hit_count: 0,
+            last_filtered_out_hit_count: 0,
+            last_ignored_result_hit_count: 0,
+            last_response_count: 0,
+            total_search_count: 0,
+            total_download_count: 0,
+            last_search_id: None,
             added_at: now,
         };
         let record = &mut self.records[index];
@@ -5943,6 +6151,92 @@ impl WishlistStore {
             .flat_map(|record| record.items.iter())
             .find(|item| item.id == item_id)
             .cloned()
+    }
+
+    fn result_policy_for(&self, item_id: &str) -> Option<WishlistResultPolicy> {
+        let item = self.get_item(item_id)?;
+        Some(WishlistResultPolicy {
+            filter: WishlistResultFilter::parse(&item.filter),
+            max_results: item.max_results,
+        })
+    }
+
+    fn mark_viewed(&mut self, item_id: &str) -> Option<WishlistItem> {
+        let now = unix_timestamp();
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == "default")?;
+        let item = record.items.iter_mut().find(|item| item.id == item_id)?;
+        item.last_viewed_at = Some(now);
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(item.clone())
+    }
+
+    fn mark_all_viewed(&mut self) -> Vec<WishlistItem> {
+        let now = unix_timestamp();
+        let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == "default")
+        else {
+            return Vec::new();
+        };
+        for item in &mut record.items {
+            item.last_viewed_at = Some(now);
+        }
+        record.updated_at = now;
+        self.updated_at = now;
+        record.items.clone()
+    }
+
+    fn record_completed_search(&mut self, search: &SearchRecord) -> Option<WishlistItem> {
+        let item_id = search.wishlist_item_id()?;
+        let now = unix_timestamp();
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == "default")?;
+        let item = record.items.iter_mut().find(|item| item.id == item_id)?;
+        item.last_searched_at = Some(now);
+        item.last_match_count = search.results.len();
+        item.last_visible_hit_count = search.results.len();
+        item.last_hidden_locked_hit_count = search.hidden_locked_count;
+        item.last_filtered_out_hit_count = search.filtered_out_count;
+        item.last_ignored_result_hit_count = search.ignored_result_count;
+        item.last_response_count = search.raw_response_count;
+        item.total_search_count = item.total_search_count.saturating_add(1);
+        item.last_search_id = Some(search.id.clone());
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(item.clone())
+    }
+
+    fn record_auto_downloads(
+        &mut self,
+        item_id: &str,
+        enqueued_count: usize,
+    ) -> Option<WishlistItem> {
+        let now = unix_timestamp();
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == "default")?;
+        let item = record.items.iter_mut().find(|item| item.id == item_id)?;
+        item.total_download_count = item
+            .total_download_count
+            .saturating_add(u64::try_from(enqueued_count).unwrap_or(u64::MAX));
+        if enqueued_count > 0
+            && item
+                .max_downloads
+                .is_none_or(|limit| item.total_download_count >= limit)
+        {
+            item.enabled = false;
+        }
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(item.clone())
     }
 
     fn list_ignored_results(&self, item_id: &str) -> Option<Vec<WishlistIgnoredResult>> {
@@ -11044,7 +11338,7 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut searches = state.searches.write().await;
-            if let Some(record) = searches.complete(token) {
+            if let Some((record, transitioned)) = searches.complete(token) {
                 let body_json = record.json();
 
                 // Dispatch webhook for search.completed event
@@ -11058,14 +11352,44 @@ async fn route_http_request_with_headers(
                 let correlation_id = format!("search_{}", token);
 
                 drop(searches);
-                persist_search_record(state, &record).await?;
+                if transitioned {
+                    persist_search_record(state, &record).await?;
+                }
+                if transitioned && record.wishlist_item_id().is_some() {
+                    let mut wishlist = state.wishlist.write().await;
+                    let previous = wishlist.clone();
+                    if let Some(item) = wishlist.record_completed_search(&record) {
+                        let mutated = wishlist.clone();
+                        drop(wishlist);
+                        if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                            rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                            return Ok(routing::service_unavailable_response(&error));
+                        }
+                    }
+                    if let Err(error) = auto_download_completed_wishlist(state, &record).await {
+                        update_session(state, |snapshot| {
+                            snapshot.last_error = Some(error.clone());
+                        })
+                        .await;
+                        record_daemon_log(
+                            state,
+                            logging::LogLevel::Warn,
+                            "wishlist",
+                            error,
+                        )
+                        .await;
+                    }
+                }
 
-                dispatch_webhook_event(
-                    state,
-                    correlation_id,
-                    webhooks::WebhookEvent::SearchCompleted,
-                    webhook_data,
-                ).await;
+                if transitioned {
+                    dispatch_webhook_event(
+                        state,
+                        correlation_id,
+                        webhooks::WebhookEvent::SearchCompleted,
+                        webhook_data,
+                    )
+                    .await;
+                }
 
                 Ok(routing::ok_response(body_json))
             } else {
@@ -11213,9 +11537,37 @@ async fn route_http_request_with_headers(
                     .get(token)
                     .and_then(|record| record.wishlist_item_id().map(str::to_owned))
             };
-            if let Some(item_id) = wishlist_item_id.as_deref() {
-                let ignored_results = state.wishlist.read().await.ignored_results_for(item_id);
+            let (wishlist_policy, wishlist_counts) = if let Some(item_id) = wishlist_item_id.as_deref() {
+                let wishlist = state.wishlist.read().await;
+                let ignored_results = wishlist.ignored_results_for(item_id);
+                let policy = wishlist.result_policy_for(item_id);
+                let mut filtered_out = 0_usize;
+                let mut ignored = 0_usize;
+                let mut hidden_locked = 0_usize;
+                for entry in &entries {
+                    if policy
+                        .as_ref()
+                        .is_some_and(|policy| !policy.filter.matches(&entry.filename))
+                    {
+                        filtered_out = filtered_out.saturating_add(1);
+                    } else if entry.peer_username.as_deref().is_some_and(|username| {
+                        ignored_results
+                            .iter()
+                            .any(|rule| rule.matches(username, &entry.filename))
+                    }) {
+                        ignored = ignored.saturating_add(1);
+                    } else if entry.locked {
+                        hidden_locked = hidden_locked.saturating_add(1);
+                    }
+                }
                 entries.retain(|entry| {
+                    if entry.locked
+                        || policy
+                            .as_ref()
+                            .is_some_and(|policy| !policy.filter.matches(&entry.filename))
+                    {
+                        return false;
+                    }
                     let Some(username) = entry.peer_username.as_deref() else {
                         return true;
                     };
@@ -11223,13 +11575,32 @@ async fn route_http_request_with_headers(
                         .iter()
                         .any(|rule| rule.matches(username, &entry.filename))
                 });
-            }
+                (policy, Some((filtered_out, ignored, hidden_locked)))
+            } else {
+                (None, None)
+            };
 
             let mut searches = state.searches.write().await;
             let aggregate_remaining =
                 MAX_TOTAL_SEARCH_RESULTS.saturating_sub(searches.total_results());
             if let Some(record) = searches.records.iter_mut().find(|r| r.token == token) {
-                record.extend_results_bounded(entries, aggregate_remaining);
+                if let Some((filtered_out, ignored, hidden_locked)) = wishlist_counts {
+                    record.raw_response_count = record.raw_response_count.saturating_add(1);
+                    record.filtered_out_count =
+                        record.filtered_out_count.saturating_add(filtered_out);
+                    record.ignored_result_count =
+                        record.ignored_result_count.saturating_add(ignored);
+                    record.hidden_locked_count =
+                        record.hidden_locked_count.saturating_add(hidden_locked);
+                }
+                record.extend_results_with_limit_bounded(
+                    entries,
+                    aggregate_remaining,
+                    wishlist_policy
+                        .as_ref()
+                        .map(|policy| policy.max_results)
+                        .unwrap_or(MAX_SEARCH_RESULTS_PER_SEARCH),
+                );
                 record.updated_at = unix_timestamp();
                 let response_json = record.json();
                 let record = record.clone();
@@ -13877,6 +14248,59 @@ async fn route_http_request_with_headers(
                 Ok(routing::service_unavailable_response("wishlist item capacity is full"))
               }
             }
+        }
+        ("GET", path)
+            if wishlist_item_action_id(path, "/searches").is_some() =>
+        {
+            let item_id = wishlist_item_action_id(path, "/searches")
+                .expect("guarded wishlist history path");
+            if state.wishlist.read().await.get_item(item_id).is_none() {
+                return Ok(routing::not_found_response());
+            }
+            let searches = state.searches.read().await;
+            let json = searches.wishlist_history_json(item_id, route.query);
+            drop(searches);
+            Ok(routing::ok_response(json))
+        }
+        ("GET", path) if path.starts_with("/api/wishlist/") && !path.contains("/ignored-results") => {
+            let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
+                return Ok(routing::not_found_response());
+            };
+            let wishlist = state.wishlist.read().await;
+            let Some(item) = wishlist.get_item(item_id) else {
+                return Ok(routing::not_found_response());
+            };
+            Ok(routing::ok_response(item.json()))
+        }
+        ("POST", "/api/wishlist/mark-all-viewed") => {
+            let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
+            let items = wishlist.mark_all_viewed();
+            let mutated = wishlist.clone();
+            drop(wishlist);
+            if let Err(error) = persist_wishlist_items_checked(state, &items).await {
+                rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
+            Ok(routing::no_content_response())
+        }
+        ("POST", path)
+            if wishlist_item_action_id(path, "/mark-viewed").is_some() =>
+        {
+            let item_id = wishlist_item_action_id(path, "/mark-viewed")
+                .expect("guarded wishlist viewed path");
+            let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
+            let Some(item) = wishlist.mark_viewed(item_id) else {
+                return Ok(routing::not_found_response());
+            };
+            let mutated = wishlist.clone();
+            drop(wishlist);
+            if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
+            Ok(routing::no_content_response())
         }
         ("GET", path) if wishlist_ignored_results_item_id(path).is_some() => {
             let item_id = wishlist_ignored_results_item_id(path).expect("guarded ignored path");
@@ -17897,6 +18321,14 @@ async fn route_http_request_with_headers(
              if query.trim().is_empty() {
                  return Ok(routing::bad_request_response("wishlist item has no search text"));
              }
+             let session_command_permit = match state.session_commands.reserve().await {
+                 Ok(permit) => permit,
+                 Err(_) => {
+                     return Ok(routing::service_unavailable_response(
+                         "session manager is not running",
+                     ));
+                 }
+             };
              let mut searches = state.searches.write().await;
              let outcome = match searches.create_scheduled_wishlist_for_item(
                  query,
@@ -17919,6 +18351,13 @@ async fn route_http_request_with_headers(
              }).to_string();
              drop(searches);
              delete_persisted_searches(state, &evicted).await?;
+             persist_search_record(state, &record).await?;
+             session_command_permit.send(SessionCommand::Search {
+                 token: record.token,
+                 query: record.query.clone(),
+                 target: SearchDispatchTarget::Wishlist,
+             });
+             record_event(state, "search.started", record.token.to_string(), None).await;
              Ok(routing::accepted_response(response))
          }
 
@@ -23809,15 +24248,24 @@ where
                     .get(response.token)
                     .and_then(|record| record.wishlist_item_id().map(str::to_owned))
             };
-            let ignored_results = if let Some(item_id) = wishlist_item_id.as_deref() {
-                state.wishlist.read().await.ignored_results_for(item_id)
-            } else {
-                Vec::new()
-            };
+            let (ignored_results, wishlist_policy) =
+                if let Some(item_id) = wishlist_item_id.as_deref() {
+                    let wishlist = state.wishlist.read().await;
+                    (
+                        wishlist.ignored_results_for(item_id),
+                        wishlist.result_policy_for(item_id),
+                    )
+                } else {
+                    (Vec::new(), None)
+                };
             let accepted = {
                 let mut searches = state.searches.write().await;
                 searches
-                    .add_peer_response_filtered(&response, &ignored_results)
+                    .add_peer_response_filtered(
+                        &response,
+                        &ignored_results,
+                        wishlist_policy.as_ref(),
+                    )
                     .is_some()
             };
             update_listeners(state, |snapshot| {
@@ -24304,6 +24752,45 @@ async fn send_due_wishlist_search(
     let Some(active_session) = session.as_mut() else {
         return;
     };
+
+    let expired_searches = {
+        let mut searches = state.searches.write().await;
+        searches.expire_due()
+    };
+    for record in expired_searches {
+        if let Err(error) = persist_search_record(state, &record).await {
+            update_session(state, |snapshot| {
+                snapshot.last_error = Some(error.clone());
+            })
+            .await;
+            continue;
+        }
+        if record.wishlist_item_id().is_none() {
+            continue;
+        }
+        let mut wishlist = state.wishlist.write().await;
+        let previous = wishlist.clone();
+        let item = wishlist.record_completed_search(&record);
+        let mutated = wishlist.clone();
+        drop(wishlist);
+        if let Some(item) = item {
+            if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                update_session(state, |snapshot| {
+                    snapshot.last_error = Some(error.clone());
+                })
+                .await;
+                continue;
+            }
+        }
+        if let Err(error) = auto_download_completed_wishlist(state, &record).await {
+            update_session(state, |snapshot| {
+                snapshot.last_error = Some(error.clone());
+            })
+            .await;
+            record_daemon_log(state, logging::LogLevel::Warn, "wishlist", error).await;
+        }
+    }
 
     let (record, evicted, message) = {
         let mut searches = state.searches.write().await;
@@ -26378,6 +26865,21 @@ fn persisted_wishlist_item(item: &WishlistItem) -> crate::persistence::WishlistI
         last_viewed_at: item
             .last_viewed_at
             .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+        last_searched_at: item
+            .last_searched_at
+            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+        last_match_count: i64::try_from(item.last_match_count).unwrap_or(i64::MAX),
+        last_visible_hit_count: i64::try_from(item.last_visible_hit_count).unwrap_or(i64::MAX),
+        last_hidden_locked_hit_count: i64::try_from(item.last_hidden_locked_hit_count)
+            .unwrap_or(i64::MAX),
+        last_filtered_out_hit_count: i64::try_from(item.last_filtered_out_hit_count)
+            .unwrap_or(i64::MAX),
+        last_ignored_result_hit_count: i64::try_from(item.last_ignored_result_hit_count)
+            .unwrap_or(i64::MAX),
+        last_response_count: i64::try_from(item.last_response_count).unwrap_or(i64::MAX),
+        total_search_count: i64::try_from(item.total_search_count).unwrap_or(i64::MAX),
+        total_download_count: i64::try_from(item.total_download_count).unwrap_or(i64::MAX),
+        last_search_id: item.last_search_id.clone(),
         added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
     }
 }
@@ -26413,6 +26915,135 @@ async fn persist_wishlist_items_checked(
         .await
         .map_err(|error| format!("wishlist persistence failed: {error}"))?;
     Ok(true)
+}
+
+async fn auto_download_completed_wishlist(
+    state: &AppState,
+    search: &SearchRecord,
+) -> Result<usize, String> {
+    let Some(item_id) = search.wishlist_item_id() else {
+        return Ok(0);
+    };
+    let item = state.wishlist.read().await.get_item(item_id);
+    let Some(item) = item else {
+        return Ok(0);
+    };
+    if !item.auto_download || search.results.is_empty() {
+        return Ok(0);
+    }
+    let remaining_downloads = item
+        .max_downloads
+        .map(|limit| limit.saturating_sub(item.total_download_count))
+        .unwrap_or(u64::MAX);
+    if remaining_downloads == 0 {
+        return Ok(0);
+    }
+    if !state.config.transfer_allow_outbound {
+        return Err("wishlist auto-download is blocked by outbound transfer policy".to_owned());
+    }
+
+    let mut groups = BTreeMap::<(String, String), Vec<SearchResultEntry>>::new();
+    for result in &search.results {
+        let Some(username) = result.peer_username.as_deref() else {
+            continue;
+        };
+        if result.locked {
+            continue;
+        }
+        groups
+            .entry((
+                username.to_owned(),
+                wishlist_parent_directory(&result.filename),
+            ))
+            .or_default()
+            .push(result.clone());
+    }
+    let Some(((username, _directory), files)) =
+        groups
+            .into_iter()
+            .max_by(|(left_key, left_files), (right_key, right_files)| {
+                let left = &left_files[0];
+                let right = &right_files[0];
+                left.slot_free
+                    .unwrap_or(true)
+                    .cmp(&right.slot_free.unwrap_or(true))
+                    .then_with(|| {
+                        left.average_speed
+                            .unwrap_or(0)
+                            .cmp(&right.average_speed.unwrap_or(0))
+                    })
+                    .then_with(|| {
+                        right
+                            .queue_length
+                            .unwrap_or(u32::MAX)
+                            .cmp(&left.queue_length.unwrap_or(u32::MAX))
+                    })
+                    .then_with(|| right_key.cmp(left_key))
+            })
+    else {
+        return Ok(0);
+    };
+
+    let available = {
+        let transfers = state.transfers.read().await;
+        state
+            .config
+            .transfer_max_active
+            .saturating_sub(transfers.active_count_excluding(None))
+    };
+    let batch_id = (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string());
+    let mut enqueued = 0_usize;
+    let batch_limit = available.min(usize::try_from(remaining_downloads).unwrap_or(usize::MAX));
+    for file in files.into_iter().take(batch_limit) {
+        let Ok(session_command_permit) = state.session_commands.try_reserve() else {
+            break;
+        };
+        let local_path = safe_download_path(&state.config.state_dir, &file.filename)?
+            .display()
+            .to_string();
+        let entry = {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create_with_batch(
+                0,
+                Some(username.clone()),
+                file.filename,
+                Some(local_path),
+                Some(file.size),
+                batch_id.clone(),
+            );
+            transfers
+                .update_status(entry.id, "peer_lookup", None, None)
+                .unwrap_or(entry)
+        };
+        persist_transfer_record(state, &entry).await?;
+        session_command_permit.send(SessionCommand::TransferPeer {
+            id: entry.id,
+            username: username.clone(),
+        });
+        enqueued = enqueued.saturating_add(1);
+    }
+
+    if enqueued > 0 {
+        let mut wishlist = state.wishlist.write().await;
+        let previous = wishlist.clone();
+        let Some(item) = wishlist.record_auto_downloads(item_id, enqueued) else {
+            return Ok(enqueued);
+        };
+        let mutated = wishlist.clone();
+        drop(wishlist);
+        if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+            rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+            return Err(error);
+        }
+        record_event(
+            state,
+            "wishlist.auto_downloaded",
+            item_id.to_owned(),
+            Some(format!("enqueued={enqueued}")),
+        )
+        .await;
+    }
+    Ok(enqueued)
 }
 
 async fn persist_wishlist_item_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
@@ -37218,7 +37849,7 @@ mod tests {
         let db = super::persistence::DatabaseManager::in_memory()
             .await
             .expect("in-memory db");
-        let (state, _receiver) = test_state_with_env_parts(
+        let (state, mut receiver) = test_state_with_env_parts(
             MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(db.clone()),
@@ -37249,6 +37880,14 @@ mod tests {
         .unwrap();
         assert_eq!(search.status, "202 Accepted");
         assert_eq!(
+            receiver.try_recv().expect("wishlist search dispatch"),
+            super::SessionCommand::Search {
+                token: 1,
+                query: "Artist Album".to_owned(),
+                target: super::SearchDispatchTarget::Wishlist,
+            }
+        );
+        assert_eq!(
             state.searches.read().await.records[0].wishlist_item_id(),
             Some(item_id.as_str())
         );
@@ -37270,6 +37909,42 @@ mod tests {
             .unwrap();
         }
         assert_eq!(state.searches.read().await.records[0].results.len(), 2);
+
+        let history = super::route_http_request(
+            "GET",
+            &format!("/api/wishlist/{item_id}/searches?limit=1"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(history.status, "200 OK");
+        let history_json = serde_json::from_str::<serde_json::Value>(&history.body).unwrap();
+        assert_eq!(history_json.as_array().unwrap().len(), 1);
+        assert_eq!(history_json[0]["wishlistItemId"], item_id);
+        assert_eq!(history_json[0]["result_count"], 2);
+        assert!(history_json[0].get("results").is_none());
+        assert!(history_json[0].get("responses").is_none());
+
+        let viewed = super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{item_id}/mark-viewed"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(viewed.status, "204 No Content");
+        assert!(state
+            .wishlist
+            .read()
+            .await
+            .get_item(&item_id)
+            .unwrap()
+            .last_viewed_at
+            .is_some());
 
         let ignored = super::route_http_request(
             "POST",
@@ -37322,7 +37997,7 @@ mod tests {
             rule_id
         );
 
-        for filename in ["Remote/Album/Again.flac", "Remote/Other/Allowed.flac"] {
+        for filename in ["Remote/Album/Again.mp3", "Remote/Other/Allowed.mp3"] {
             super::route_http_request(
                 "POST",
                 "/api/v0/search-responses",
@@ -37338,7 +38013,7 @@ mod tests {
         assert!(search
             .results
             .iter()
-            .any(|result| result.filename == "Remote/Other/Allowed.flac"));
+            .any(|result| result.filename == "Remote/Other/Allowed.mp3"));
 
         let listed = super::route_http_request(
             "GET",
@@ -37399,12 +38074,56 @@ mod tests {
             "POST",
             "/api/v0/search-responses",
             None,
-            r#"{"token":1,"username":"PeerOne","filename":"Remote/Album/Restored.flac","size":1}"#,
+            r#"{"token":1,"username":"PeerOne","filename":"Remote/Album/Restored.mp3","size":1}"#,
             &state,
         )
         .await
         .unwrap();
         assert_eq!(state.searches.read().await.records[0].results.len(), 3);
+
+        let completed =
+            super::route_http_request("POST", "/api/searches/1/complete", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(completed.status, "200 OK");
+        let item = state.wishlist.read().await.get_item(&item_id).unwrap();
+        assert_eq!(item.last_visible_hit_count, 3);
+        assert_eq!(item.last_match_count, 3);
+        assert_eq!(item.last_ignored_result_hit_count, 1);
+        assert_eq!(item.last_filtered_out_hit_count, 0);
+        assert_eq!(item.last_hidden_locked_hit_count, 0);
+        assert_eq!(item.last_response_count, 5);
+        assert_eq!(item.total_search_count, 1);
+        assert_eq!(item.last_search_id.as_deref(), Some("1"));
+        assert!(item.last_searched_at.is_some());
+        let persisted_item = db.list_wishlist_items(10, 0).await.unwrap().remove(0);
+        assert_eq!(persisted_item.last_visible_hit_count, 3);
+        assert_eq!(persisted_item.last_ignored_result_hit_count, 1);
+        assert_eq!(persisted_item.total_search_count, 1);
+
+        let repeated =
+            super::route_http_request("POST", "/api/searches/1/complete", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(repeated.status, "200 OK");
+        assert_eq!(
+            state
+                .wishlist
+                .read()
+                .await
+                .get_item(&item_id)
+                .unwrap()
+                .total_search_count,
+            1
+        );
+        assert_eq!(
+            db.list_wishlist_items(10, 0)
+                .await
+                .unwrap()
+                .remove(0)
+                .total_search_count,
+            1
+        );
     }
 
     #[tokio::test]
@@ -37903,7 +38622,7 @@ mod tests {
         };
 
         let updated = store
-            .add_peer_response_filtered(&response, &[ignored])
+            .add_peer_response_filtered(&response, &[ignored], None)
             .unwrap();
 
         assert_eq!(updated.results.len(), 1);
@@ -45784,6 +46503,111 @@ mod tests {
         assert_eq!(record.target, "wishlist");
         assert_eq!(record.query, "Artist Title");
         assert_eq!(searches.summary_json(), "{\"total\":1,\"active\":1,\"completed\":0,\"expired\":0,\"results\":0,\"global\":0,\"user\":0,\"room\":0,\"wishlist\":1,\"next_token\":2}");
+    }
+
+    #[test]
+    fn wishlist_result_filter_is_literal_case_insensitive_and_bounded_by_policy() {
+        let filter = super::WishlistResultFilter::parse(r#"flac OR "studio mix" -live -.cue"#);
+        assert!(filter.matches("Artist/STUDIO MIX.FLAC"));
+        assert!(filter.matches("Artist/Album/Track.flac"));
+        assert!(!filter.matches("Artist/Live/Track.flac"));
+        assert!(!filter.matches("Artist/Album/disc.cue"));
+        assert!(!filter.matches("Artist/Album/Track.mp3"));
+
+        let literal = super::WishlistResultFilter::parse("[a-z]+.flac");
+        assert!(literal.matches("Remote/[a-z]+.flac"));
+        assert!(!literal.matches("Remote/track.flac"));
+    }
+
+    #[tokio::test]
+    async fn wishlist_auto_download_enqueues_best_folder_and_applies_one_shot_limit() {
+        let (state, mut receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/wishlist",
+            None,
+            r#"{"searchText":"rare album","filter":"flac","autoDownload":true,"maxResults":10,"maxDownloads":null}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let search = super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{item_id}/search"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(search.status, "202 Accepted");
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            super::SessionCommand::Search { token: 1, .. }
+        ));
+
+        for filename in ["Remote/Album/One.flac", "Remote/Album/Two.flac"] {
+            super::route_http_request(
+                "POST",
+                "/api/search-responses",
+                None,
+                &format!(
+                    r#"{{"token":1,"username":"fast-peer","filename":"{filename}","size":12,"slot_free":true,"average_speed":100,"queue_length":0}}"#
+                ),
+                &state,
+            )
+            .await
+            .unwrap();
+        }
+        super::route_http_request(
+            "POST",
+            "/api/search-responses",
+            None,
+            r#"{"token":1,"username":"slow-peer","filename":"Other/Album/Track.flac","size":12,"slot_free":false,"average_speed":1,"queue_length":9}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+
+        let completed =
+            super::route_http_request("POST", "/api/searches/1/complete", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(completed.status, "200 OK");
+
+        let first = receiver.try_recv().expect("first automatic download");
+        let second = receiver.try_recv().expect("second automatic download");
+        assert!(matches!(
+            first,
+            super::SessionCommand::TransferPeer {
+                username,
+                ..
+            } if username == "fast-peer"
+        ));
+        assert!(matches!(
+            second,
+            super::SessionCommand::TransferPeer {
+                username,
+                ..
+            } if username == "fast-peer"
+        ));
+        assert!(receiver.try_recv().is_err());
+
+        let transfers = state.transfers.read().await;
+        assert_eq!(transfers.entries.len(), 2);
+        assert!(transfers
+            .entries
+            .iter()
+            .all(|entry| entry.status == "peer_lookup" && entry.batch_id.is_some()));
+        drop(transfers);
+        let item = state.wishlist.read().await.get_item(&item_id).unwrap();
+        assert_eq!(item.total_download_count, 2);
+        assert!(!item.enabled);
+        assert_eq!(item.total_search_count, 1);
     }
 
     #[tokio::test]
