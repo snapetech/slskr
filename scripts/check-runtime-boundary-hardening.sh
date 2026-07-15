@@ -76,6 +76,9 @@ for anchor in \
   'finite transfer history must leave an available u64 id' \
   'bounded_store_ids_wrap_without_collisions' \
   'bounded event history must leave an available u64 id' \
+  'bounded_content_store_ids_wrap_without_collisions' \
+  'bounded user-note store must leave an available u64 id' \
+  'bounded library scan store must leave an available u64 id' \
   'browse_indirect_tokens_wrap_without_aliasing_pending_records' \
   'bounded browse store must leave an available u32 token' \
   'MAX_INCOMING_CONNECTION_TASKS' \

@@ -5636,10 +5636,8 @@ impl UserNoteStore {
         if self.records.len() >= MAX_USER_NOTES {
             return None;
         }
-        let next_id = self.next_id.checked_add(1)?;
+        let id = format!("note-{}", self.allocate_id());
         let now = unix_timestamp();
-        let id = format!("note-{}", self.next_id);
-        self.next_id = next_id;
         let record = UserNoteRecord {
             id,
             username,
@@ -5650,6 +5648,19 @@ impl UserNoteStore {
         self.records.push(record.clone());
         self.updated_at = now;
         Some(record)
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            let id = format!("note-{candidate}");
+            if !self.records.iter().any(|record| record.id == id) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded user-note store must leave an available u64 id")
     }
 
     fn get(&self, id: &str) -> Option<UserNoteRecord> {
@@ -5783,10 +5794,8 @@ impl InterestStore {
         if self.liked.len() >= MAX_INTERESTS_PER_KIND {
             return None;
         }
-        let next_id = self.next_id.checked_add(1)?;
+        let id = format!("liked-{}", self.allocate_id());
         let now = unix_timestamp();
-        let id = format!("liked-{}", self.next_id);
-        self.next_id = next_id;
         let record = InterestRecord {
             id,
             name,
@@ -5809,10 +5818,8 @@ impl InterestStore {
         if self.hated.len() >= MAX_INTERESTS_PER_KIND {
             return None;
         }
-        let next_id = self.next_id.checked_add(1)?;
+        let id = format!("hated-{}", self.allocate_id());
         let now = unix_timestamp();
-        let id = format!("hated-{}", self.next_id);
-        self.next_id = next_id;
         let record = InterestRecord {
             id,
             name,
@@ -5822,6 +5829,24 @@ impl InterestStore {
         self.hated.push(record.clone());
         self.updated_at = now;
         Some((record, true))
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=(self.liked.len() + self.hated.len()) {
+            let suffix = format!("-{candidate}");
+            if !self
+                .liked
+                .iter()
+                .chain(&self.hated)
+                .any(|record| record.id.ends_with(&suffix))
+            {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded interest store must leave an available u64 id")
     }
 
     fn remove_liked(&mut self, id: &str) -> bool {
@@ -6629,10 +6654,8 @@ impl ShareGrantStore {
         if self.records.len() >= MAX_SHARE_GRANTS {
             return None;
         }
-        let next_id = self.next_id.checked_add(1)?;
+        let id = format!("grant-{}", self.allocate_id());
         let now = unix_timestamp();
-        let id = format!("grant-{}", self.next_id);
-        self.next_id = next_id;
         let record = ShareGrantRecord {
             id,
             collection_id,
@@ -6643,6 +6666,19 @@ impl ShareGrantStore {
         self.records.push(record.clone());
         self.updated_at = now;
         Some((record, true))
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            let id = format!("grant-{candidate}");
+            if !self.records.iter().any(|record| record.id == id) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded share-grant store must leave an available u64 id")
     }
 
     fn get(&self, id: &str) -> Option<ShareGrantRecord> {
@@ -6801,15 +6837,14 @@ impl LibraryStore {
     }
 
     fn create_health_scan(&mut self, library_path: String) -> Option<LibraryHealthScanRecord> {
-        let next_id = self.next_health_scan_id.checked_add(1)?;
+        let id = format!("scan-{}", self.allocate_health_scan_id());
         let record = LibraryHealthScanRecord {
-            id: format!("scan-{}", self.next_health_scan_id),
+            id,
             library_path,
             items: self.records.len(),
             issues: self.health_issues(),
             updated_at: self.updated_at,
         };
-        self.next_health_scan_id = next_id;
         if self.health_scans.len() == MAX_LIBRARY_HEALTH_SCANS {
             self.health_scans.remove(0);
         }
@@ -6825,10 +6860,8 @@ impl LibraryStore {
         if self.records.len() >= MAX_LIBRARY_ITEMS {
             return None;
         }
-        let next_id = self.next_id.checked_add(1)?;
+        let id = format!("lib-{}", self.allocate_id());
         let now = unix_timestamp();
-        let id = format!("lib-{}", self.next_id);
-        self.next_id = next_id;
         let record = LibraryItemRecord {
             id,
             artist,
@@ -6839,6 +6872,32 @@ impl LibraryStore {
         self.records.push(record.clone());
         self.updated_at = now;
         Some(record)
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            let id = format!("lib-{candidate}");
+            if !self.records.iter().any(|record| record.id == id) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded library store must leave an available u64 id")
+    }
+
+    fn allocate_health_scan_id(&mut self) -> u64 {
+        let mut candidate = self.next_health_scan_id.max(1);
+        for _ in 0..=self.health_scans.len() {
+            let id = format!("scan-{candidate}");
+            if !self.health_scans.iter().any(|record| record.id == id) {
+                self.next_health_scan_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded library scan store must leave an available u64 id")
     }
 
     fn get(&self, id: &str) -> Option<LibraryItemRecord> {
@@ -32101,9 +32160,13 @@ mod tests {
         assert!(notes.create("overflow".to_owned(), String::new()).is_none());
         let mut exhausted_notes = super::UserNoteStore::new();
         exhausted_notes.next_id = u64::MAX;
-        assert!(exhausted_notes
-            .create("user".to_owned(), String::new())
-            .is_none());
+        assert_eq!(
+            exhausted_notes
+                .create("user".to_owned(), String::new())
+                .unwrap()
+                .id,
+            format!("note-{}", u64::MAX)
+        );
 
         let mut interests = super::InterestStore::new();
         let (liked, created) = interests.add_liked("Ambient".to_owned()).unwrap();
@@ -32119,8 +32182,14 @@ mod tests {
         assert_eq!(interests.liked.len(), 1);
         assert_eq!(interests.hated.len(), 1);
         interests.next_id = u64::MAX;
-        assert!(interests.add_liked("Jazz".to_owned()).is_none());
-        assert!(interests.add_hated("Pop".to_owned()).is_none());
+        assert_eq!(
+            interests.add_liked("Jazz".to_owned()).unwrap().0.id,
+            format!("liked-{}", u64::MAX)
+        );
+        assert_eq!(
+            interests.add_hated("Pop".to_owned()).unwrap().0.id,
+            "hated-3"
+        );
     }
 
     #[test]
@@ -32187,9 +32256,14 @@ mod tests {
         assert_eq!(grants.records.len(), super::MAX_SHARE_GRANTS);
         let mut exhausted = super::ShareGrantStore::new();
         exhausted.next_id = u64::MAX;
-        assert!(exhausted
-            .create("collection".to_owned(), "user".to_owned())
-            .is_none());
+        assert_eq!(
+            exhausted
+                .create("collection".to_owned(), "user".to_owned())
+                .unwrap()
+                .0
+                .id,
+            format!("grant-{}", u64::MAX)
+        );
     }
 
     #[test]
@@ -32210,9 +32284,13 @@ mod tests {
         assert_eq!(library.records.len(), super::MAX_LIBRARY_ITEMS);
         let mut exhausted = super::LibraryStore::new();
         exhausted.next_id = u64::MAX;
-        assert!(exhausted
-            .create(String::new(), "Track".to_owned(), "Audio".to_owned())
-            .is_none());
+        assert_eq!(
+            exhausted
+                .create(String::new(), "Track".to_owned(), "Audio".to_owned())
+                .unwrap()
+                .id,
+            format!("lib-{}", u64::MAX)
+        );
 
         let mut persisted = (1..=super::MAX_LIBRARY_ITEMS + 1)
             .map(|index| crate::persistence::LibraryItemRecord {
@@ -32456,6 +32534,89 @@ mod tests {
         let wrapped_group = groups.create("Wrapped".to_owned(), String::new()).unwrap();
         assert_eq!(max_group.id, format!("sg-{}", u64::MAX));
         assert_eq!(wrapped_group.id, "sg-1");
+    }
+
+    #[test]
+    fn bounded_content_store_ids_wrap_without_collisions() {
+        let mut notes = super::UserNoteStore::new();
+        notes.next_id = u64::MAX;
+        assert_eq!(
+            notes
+                .create("alice".to_owned(), "max".to_owned())
+                .unwrap()
+                .id,
+            format!("note-{}", u64::MAX)
+        );
+        assert_eq!(
+            notes
+                .create("bob".to_owned(), "wrapped".to_owned())
+                .unwrap()
+                .id,
+            "note-1"
+        );
+
+        let mut interests = super::InterestStore::new();
+        interests.next_id = u64::MAX;
+        assert_eq!(
+            interests.add_liked("max".to_owned()).unwrap().0.id,
+            format!("liked-{}", u64::MAX)
+        );
+        assert_eq!(
+            interests.add_hated("wrapped".to_owned()).unwrap().0.id,
+            "hated-1"
+        );
+
+        let mut grants = super::ShareGrantStore::new();
+        grants.next_id = u64::MAX;
+        assert_eq!(
+            grants
+                .create("one".to_owned(), "alice".to_owned())
+                .unwrap()
+                .0
+                .id,
+            format!("grant-{}", u64::MAX)
+        );
+        assert_eq!(
+            grants
+                .create("two".to_owned(), "bob".to_owned())
+                .unwrap()
+                .0
+                .id,
+            "grant-1"
+        );
+
+        let mut library = super::LibraryStore::new();
+        library.next_id = u64::MAX;
+        assert_eq!(
+            library
+                .create("artist".to_owned(), "max".to_owned(), "audio".to_owned())
+                .unwrap()
+                .id,
+            format!("lib-{}", u64::MAX)
+        );
+        assert_eq!(
+            library
+                .create(
+                    "artist".to_owned(),
+                    "wrapped".to_owned(),
+                    "audio".to_owned()
+                )
+                .unwrap()
+                .id,
+            "lib-1"
+        );
+        library.next_health_scan_id = u64::MAX;
+        assert_eq!(
+            library.create_health_scan("/max".to_owned()).unwrap().id,
+            format!("scan-{}", u64::MAX)
+        );
+        assert_eq!(
+            library
+                .create_health_scan("/wrapped".to_owned())
+                .unwrap()
+                .id,
+            "scan-1"
+        );
     }
 
     #[test]
