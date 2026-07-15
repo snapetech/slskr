@@ -9594,7 +9594,11 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", path) if path.starts_with("/api/webhooks/") && path.ends_with("/logs") => {
-             let webhook_id = path.rsplit('/').nth(1).unwrap_or("");
+             let Some(webhook_id) =
+                 path_segment_between(path, "/api/webhooks/", "/logs")
+             else {
+                 return Ok(routing::not_found_response());
+             };
              let limit = if let Some(q) = route.query {
                  query_params(q).iter().find(|(k, _)| k == "limit").map(|(_, v)| parse_list_limit(v) as i32).unwrap_or(50)
              } else {
@@ -31613,6 +31617,29 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].event, "search.created");
         assert_eq!(logs[0].status, "queued");
+
+        let routed_logs = super::route_http_request(
+            "GET",
+            &format!("/api/webhooks/{webhook_id}/logs"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("route webhook logs");
+        assert_eq!(routed_logs.status, "200 OK");
+        assert!(routed_logs.body.contains("search.created"));
+
+        let aliased_logs = super::route_http_request(
+            "GET",
+            &format!("/api/webhooks/unrelated/{webhook_id}/logs"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased webhook logs");
+        assert_eq!(aliased_logs.status, "404 Not Found");
 
         let deleted = super::route_http_request(
             "DELETE",
