@@ -6546,7 +6546,7 @@ impl NowPlayingStore {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RelayState {
     enabled: bool,
     updated_at: u64,
@@ -6583,7 +6583,7 @@ impl RelayState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RuntimeCompatState {
     application_restart_requested: bool,
     gc_runs: u64,
@@ -8329,24 +8329,36 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(serde_json::json!(APP_VERSION).to_string()))
         }
         ("PUT", "/api/application") => {
-            let mut runtime = state.runtime.write().await;
-            let body = runtime.set_restart_requested(true).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.set_restart_requested(true).to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::accepted_response(body))
         }
         ("DELETE", "/api/application") => {
-            let mut runtime = state.runtime.write().await;
-            let body = runtime.set_restart_requested(false).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.set_restart_requested(false).to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::accepted_response(body))
         }
         ("POST", "/api/application/gc") => {
-            let mut runtime = state.runtime.write().await;
-            let body = runtime.record_gc().to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.record_gc().to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/server") => {
@@ -14181,39 +14193,52 @@ async fn route_http_request_with_headers(
         }
 
         ("PUT", "/api/config/preferences") => {
-            let mut runtime = state.runtime.write().await;
-            if let Some(enabled) = extract_json_bool_field(body, "autoreplace_enabled")
-                .or_else(|| extract_json_bool_field(body, "autoreplaceEnabled"))
+            let requested = extract_json_bool_field(body, "autoreplace_enabled")
+                .or_else(|| extract_json_bool_field(body, "autoreplaceEnabled"));
+            let response = match mutate_runtime_compat_state(state, |runtime, _| {
+                if let Some(enabled) = requested {
+                    runtime.set_autoreplace(enabled);
+                }
+                serde_json::json!({
+                    "auto_connect": state.config.auto_connect,
+                    "transfer_allow_outbound": state.config.transfer_allow_outbound,
+                    "transfer_max_active": state.config.transfer_max_active,
+                    "autoreplace_enabled": runtime.autoreplace_enabled,
+                    "persisted": true,
+                    "updated_at": runtime.updated_at,
+                })
+                .to_string()
+            })
+            .await
             {
-                runtime.set_autoreplace(enabled);
-            }
-            let response = serde_json::json!({
-                "auto_connect": state.config.auto_connect,
-                "transfer_allow_outbound": state.config.transfer_allow_outbound,
-                "transfer_max_active": state.config.transfer_max_active,
-                "autoreplace_enabled": runtime.autoreplace_enabled,
-                "persisted": true,
-                "updated_at": runtime.updated_at,
-            }).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+                Ok(response) => response,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(response))
         }
 
         // ADDITIONAL MISSING PUT ENDPOINTS (Phase 5)
         ("PUT", "/api/autoreplace/disable") => {
-            let mut runtime = state.runtime.write().await;
-            let body = runtime.set_autoreplace(false).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.set_autoreplace(false).to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(body))
         }
 
         ("PUT", "/api/autoreplace/enable") => {
-            let mut runtime = state.runtime.write().await;
-            let body = runtime.set_autoreplace(true).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.set_autoreplace(true).to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(body))
         }
 
@@ -14646,19 +14671,27 @@ async fn route_http_request_with_headers(
 
         ("PUT", "/api/relay") => {
             let relay_enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
-            let mut relay = state.relay.write().await;
-            let json = relay.set_enabled(relay_enabled).to_string();
-            drop(relay);
-            persist_runtime_compat_state(state).await;
+            let json = match mutate_runtime_compat_state(state, |_, relay| {
+                relay.set_enabled(relay_enabled).to_string()
+            })
+            .await
+            {
+                Ok(json) => json,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(json))
         }
 
         ("PUT", "/api/relay/agent") => {
             let enabled = extract_json_bool_field(body, "enabled").unwrap_or(true);
-            let mut runtime = state.runtime.write().await;
-            let json = runtime.set_relay_agent(enabled).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let json = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.set_relay_agent(enabled).to_string()
+            })
+            .await
+            {
+                Ok(json) => json,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(json))
         }
 
@@ -16082,18 +16115,24 @@ async fn route_http_request_with_headers(
         }
 
         ("DELETE", "/api/relay") => {
-            let mut relay = state.relay.write().await;
-            let json = relay.set_enabled(false);
-            drop(relay);
-            persist_runtime_compat_state(state).await;
+            let json = match mutate_runtime_compat_state(state, |_, relay| relay.set_enabled(false))
+                .await
+            {
+                Ok(json) => json,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(json.to_string()))
         }
 
         ("DELETE", "/api/relay/agent") => {
-            let mut runtime = state.runtime.write().await;
-            let json = runtime.set_relay_agent(false).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let json = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.set_relay_agent(false).to_string()
+            })
+            .await
+            {
+                Ok(json) => json,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::ok_response(json))
         }
 
@@ -16566,10 +16605,14 @@ async fn route_http_request_with_headers(
 
          ("POST", "/api/relay") => {
              let relay_enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
-             let mut relay = state.relay.write().await;
-             let json = relay.set_enabled(relay_enabled).to_string();
-             drop(relay);
-             persist_runtime_compat_state(state).await;
+             let json = match mutate_runtime_compat_state(state, |_, relay| {
+                 relay.set_enabled(relay_enabled).to_string()
+             })
+             .await
+             {
+                 Ok(json) => json,
+                 Err(error) => return Ok(routing::service_unavailable_response(&error)),
+             };
              Ok(routing::ok_response(json))
          }
 
@@ -24653,6 +24696,26 @@ async fn persist_browse_projection(state: &AppState, record: &BrowseRecord) {
         })
         .await;
     }
+}
+
+async fn mutate_runtime_compat_state<T>(
+    state: &AppState,
+    mutate: impl FnOnce(&mut RuntimeCompatState, &mut RelayState) -> T,
+) -> Result<T, String> {
+    let mut runtime = state.runtime.write().await;
+    let mut relay = state.relay.write().await;
+    let previous_runtime = runtime.clone();
+    let previous_relay = relay.clone();
+    let result = mutate(&mut runtime, &mut relay);
+    if let Some(db) = state.db.as_ref() {
+        let record = runtime.persistence_record(&relay);
+        if let Err(error) = db.upsert_runtime_compat_state(&record).await {
+            *runtime = previous_runtime;
+            *relay = previous_relay;
+            return Err(format!("runtime compatibility persistence failed: {error}"));
+        }
+    }
+    Ok(result)
 }
 
 async fn persist_runtime_compat_state(state: &AppState) {
@@ -32969,6 +33032,76 @@ mod tests {
         let vacuum_json = serde_json::from_str::<serde_json::Value>(&vacuum.body).unwrap();
         assert_eq!(vacuum_json["enabled"], true);
         assert_eq!(vacuum_json["vacuumed"], true);
+    }
+
+    #[tokio::test]
+    async fn runtime_control_routes_roll_back_when_persistence_fails() {
+        for (method, path, body, seed_runtime, seed_relay) in [
+            ("PUT", "/api/application", "{}", "", false),
+            ("DELETE", "/api/application", "", "restart", false),
+            ("POST", "/api/application/gc", "", "", false),
+            (
+                "PUT",
+                "/api/config/preferences",
+                r#"{"autoreplace_enabled":true}"#,
+                "",
+                false,
+            ),
+            ("PUT", "/api/autoreplace/enable", "", "", false),
+            ("PUT", "/api/autoreplace/disable", "", "autoreplace", false),
+            ("PUT", "/api/relay", r#"{"enabled":true}"#, "", false),
+            ("POST", "/api/relay", r#"{"enabled":true}"#, "", false),
+            ("DELETE", "/api/relay", "", "", true),
+            ("PUT", "/api/relay/agent", r#"{"enabled":true}"#, "", false),
+            ("DELETE", "/api/relay/agent", "", "relay_agent", false),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            match seed_runtime {
+                "restart" => {
+                    state.runtime.write().await.set_restart_requested(true);
+                }
+                "autoreplace" => {
+                    state.runtime.write().await.set_autoreplace(true);
+                }
+                "relay_agent" => {
+                    state.runtime.write().await.set_relay_agent(true);
+                }
+                _ => {}
+            }
+            if seed_relay {
+                state.relay.write().await.set_enabled(true);
+            }
+            let previous_runtime = state.runtime.read().await.clone();
+            let previous_relay = state.relay.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .expect("failed runtime compatibility persistence response");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{method} {path}"
+            );
+            assert!(
+                response
+                    .body
+                    .contains("runtime compatibility persistence failed"),
+                "{method} {path}"
+            );
+            assert_eq!(
+                *state.runtime.read().await,
+                previous_runtime,
+                "{method} {path}"
+            );
+            assert_eq!(*state.relay.read().await, previous_relay, "{method} {path}");
+        }
     }
 
     #[tokio::test]
