@@ -1689,6 +1689,10 @@ impl EventStore {
                 })
             })
             .collect::<Vec<_>>();
+        let mut seen_ids = std::collections::HashSet::new();
+        records.reverse();
+        records.retain(|record| seen_ids.insert(record.id));
+        records.reverse();
         if records.len() > history_limit {
             let extra = records.len() - history_limit;
             records.drain(0..extra);
@@ -1712,20 +1716,32 @@ impl EventStore {
         resource: impl Into<String>,
         detail: Option<String>,
     ) -> EventRecord {
+        let id = self.allocate_id();
         let record = EventRecord {
-            id: self.next_id,
+            id,
             kind: kind.into(),
             resource: resource.into(),
             detail,
             created_at: unix_timestamp(),
         };
-        self.next_id += 1;
         self.records.push(record.clone());
         if self.records.len() > self.history_limit {
             let extra = self.records.len() - self.history_limit;
             self.records.drain(0..extra);
         }
         record
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            if !self.records.iter().any(|record| record.id == candidate) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded event history must leave an available u64 id")
     }
 
     #[allow(dead_code)]
@@ -3280,8 +3296,10 @@ impl BrowseStore {
     fn from_persisted(records: Vec<crate::persistence::BrowseRecord>) -> Self {
         let mut next_indirect_token = 1_u32;
         let mut updated_at = unix_timestamp();
+        let mut seen_usernames = std::collections::HashSet::new();
         let records = records
             .into_iter()
+            .filter(|record| seen_usernames.insert(record.username.clone()))
             .take(MAX_BROWSE_RECORDS)
             .map(|record| {
                 let entries = serde_json::from_str::<serde_json::Value>(&record.entries_json)
@@ -3326,9 +3344,19 @@ impl BrowseStore {
     }
 
     fn next_indirect_token(&mut self) -> u32 {
-        let token = self.next_indirect_token;
-        self.next_indirect_token = self.next_indirect_token.wrapping_add(1).max(1);
-        token
+        let mut candidate = self.next_indirect_token.max(1);
+        for _ in 0..=self.records.len() {
+            if !self
+                .records
+                .iter()
+                .any(|record| record.indirect_token == Some(candidate))
+            {
+                self.next_indirect_token = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded browse store must leave an available u32 token")
     }
 
     fn request(&mut self, username: String) -> Option<BrowseRecord> {
@@ -3407,12 +3435,13 @@ impl BrowseStore {
     }
 
     fn mark_indirect_pending(&mut self, username: &str, reason: String) -> Option<u32> {
+        let index = self
+            .records
+            .iter()
+            .position(|record| record.username == username && record.status == "requested")?;
         let token = self.next_indirect_token();
         let now = unix_timestamp();
-        let record = self
-            .records
-            .iter_mut()
-            .find(|record| record.username == username && record.status == "requested")?;
+        let record = &mut self.records[index];
         record.status = "indirect_pending";
         record.reason = Some(reason);
         record.indirect_token = Some(token);
@@ -3739,6 +3768,7 @@ impl MessageStore {
             })
             .collect();
         store.records.sort_by_key(|record| record.id);
+        store.records.dedup_by_key(|record| record.id);
         if store.records.len() > store.max_records {
             let excess = store.records.len() - store.max_records;
             store.records.drain(0..excess);
@@ -3761,8 +3791,9 @@ impl MessageStore {
 
     fn add(&mut self, username: String, direction: &'static str, body: String) -> MessageRecord {
         let now = unix_timestamp();
+        let id = self.allocate_id();
         let record = MessageRecord {
-            id: self.next_id,
+            id,
             username,
             direction,
             body,
@@ -3770,7 +3801,6 @@ impl MessageStore {
             created_at: now,
             updated_at: now,
         };
-        self.next_id += 1;
         self.records.push(record.clone());
         if self.records.len() > self.max_records {
             let excess = self.records.len() - self.max_records;
@@ -3778,6 +3808,18 @@ impl MessageStore {
         }
         self.updated_at = now;
         record
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            if !self.records.iter().any(|record| record.id == candidate) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded message history must leave an available u64 id")
     }
 
     fn ack(&mut self, id: u64) -> Option<MessageRecord> {
@@ -5038,6 +5080,7 @@ impl ContactStore {
         let mut next_id = 1;
         let mut updated_at = unix_timestamp();
         let mut projected = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
         for record in records {
             if let Some(number) = record
                 .id
@@ -5047,6 +5090,7 @@ impl ContactStore {
                 next_id = next_id.max(number.saturating_add(1));
             }
             if projected.len() >= MAX_CONTACT_RECORDS
+                || !seen_ids.insert(record.id.clone())
                 || projected.iter().any(|existing: &ContactRecord| {
                     existing.username.eq_ignore_ascii_case(&record.username)
                 })
@@ -5091,8 +5135,7 @@ impl ContactStore {
             return Err(());
         }
         let now = unix_timestamp();
-        let id = format!("contact-{}", self.next_id);
-        self.next_id += 1;
+        let id = format!("contact-{}", self.allocate_id());
         let record = ContactRecord {
             id,
             username,
@@ -5106,6 +5149,19 @@ impl ContactStore {
         self.records.push(record.clone());
         self.updated_at = now;
         Ok((record, true))
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            let id = format!("contact-{candidate}");
+            if !self.records.iter().any(|record| record.id == id) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded contact store must leave an available u64 id")
     }
 
     fn get(&self, id: &str) -> Option<ContactRecord> {
@@ -5264,6 +5320,7 @@ impl ShareGroupStore {
     ) -> Self {
         let mut store = Self::new();
         let mut max_id = 0_u64;
+        let mut seen_ids = std::collections::HashSet::new();
         for record in groups {
             if let Some(value) = record
                 .id
@@ -5272,7 +5329,7 @@ impl ShareGroupStore {
             {
                 max_id = max_id.max(value);
             }
-            if store.records.len() < store.max_records {
+            if store.records.len() < store.max_records && seen_ids.insert(record.id.clone()) {
                 store.records.push(ShareGroupRecord {
                     id: record.id,
                     name: record.name,
@@ -5324,8 +5381,7 @@ impl ShareGroupStore {
             return None;
         }
         let now = unix_timestamp();
-        let id = format!("sg-{}", self.next_id);
-        self.next_id += 1;
+        let id = format!("sg-{}", self.allocate_id());
         let record = ShareGroupRecord {
             id,
             name,
@@ -5337,6 +5393,19 @@ impl ShareGroupStore {
         self.records.push(record.clone());
         self.updated_at = now;
         Some(record)
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            let id = format!("sg-{candidate}");
+            if !self.records.iter().any(|record| record.id == id) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded share-group store must leave an available u64 id")
     }
 
     fn get(&self, id: &str) -> Option<ShareGroupRecord> {
@@ -32358,6 +32427,60 @@ mod tests {
         assert_eq!(loaded[0].filename, "newest");
         let _ = std::fs::remove_file(&queue.state_path);
         let _ = std::fs::remove_file(&queue.events_path);
+    }
+
+    #[test]
+    fn bounded_store_ids_wrap_without_collisions() {
+        let mut events = super::EventStore::new(4);
+        events.next_id = u64::MAX;
+        let max_event = events.record("test", "max", None);
+        let wrapped_event = events.record("test", "wrapped", None);
+        assert_eq!((max_event.id, wrapped_event.id), (u64::MAX, 1));
+
+        let mut messages = super::MessageStore::with_max_records(4);
+        messages.next_id = u64::MAX;
+        let max_message = messages.add("peer".to_owned(), "inbound", "max".to_owned());
+        let wrapped_message = messages.add("peer".to_owned(), "inbound", "wrapped".to_owned());
+        assert_eq!((max_message.id, wrapped_message.id), (u64::MAX, 1));
+
+        let mut contacts = super::ContactStore::with_max_records(4);
+        contacts.next_id = u64::MAX;
+        let (max_contact, _) = contacts.create("Alice".to_owned()).unwrap();
+        let (wrapped_contact, _) = contacts.create("Bob".to_owned()).unwrap();
+        assert_eq!(max_contact.id, format!("contact-{}", u64::MAX));
+        assert_eq!(wrapped_contact.id, "contact-1");
+
+        let mut groups = super::ShareGroupStore::with_limits(4, 4);
+        groups.next_id = u64::MAX;
+        let max_group = groups.create("Max".to_owned(), String::new()).unwrap();
+        let wrapped_group = groups.create("Wrapped".to_owned(), String::new()).unwrap();
+        assert_eq!(max_group.id, format!("sg-{}", u64::MAX));
+        assert_eq!(wrapped_group.id, "sg-1");
+    }
+
+    #[test]
+    fn browse_indirect_tokens_wrap_without_aliasing_pending_records() {
+        let mut browse = super::BrowseStore::with_limits(4, 4);
+        browse.request("alice".to_owned()).unwrap();
+        browse.next_indirect_token = u32::MAX;
+        assert_eq!(
+            browse.mark_indirect_pending("alice", "fallback".to_owned()),
+            Some(u32::MAX)
+        );
+        browse.request("bob".to_owned()).unwrap();
+        assert_eq!(
+            browse.mark_indirect_pending("bob", "fallback".to_owned()),
+            Some(1)
+        );
+        browse.request("carol".to_owned()).unwrap();
+        browse.next_indirect_token = u32::MAX;
+        assert_eq!(
+            browse.mark_indirect_pending("carol", "fallback".to_owned()),
+            Some(2)
+        );
+        let next_token = browse.next_indirect_token;
+        assert_eq!(browse.mark_indirect_pending("missing", String::new()), None);
+        assert_eq!(browse.next_indirect_token, next_token);
     }
 
     #[tokio::test]

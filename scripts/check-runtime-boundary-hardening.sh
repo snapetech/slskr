@@ -74,6 +74,10 @@ for anchor in \
   'searches_bound_active_records_and_avoid_identity_collisions' \
   'transfer_ids_and_tokens_wrap_without_collisions' \
   'finite transfer history must leave an available u64 id' \
+  'bounded_store_ids_wrap_without_collisions' \
+  'bounded event history must leave an available u64 id' \
+  'browse_indirect_tokens_wrap_without_aliasing_pending_records' \
+  'bounded browse store must leave an available u32 token' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
