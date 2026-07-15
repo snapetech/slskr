@@ -14,6 +14,7 @@ use slskr_client::{
 };
 
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -44,6 +45,7 @@ pub struct AppConfig {
     pub transfer_max_active: usize,
     pub transfer_allow_inbound: bool,
     pub transfer_allow_outbound: bool,
+    pub private_message_auto_response: PrivateMessageAutoResponseSettings,
     pub auth_required: bool,
     pub api_token: Option<String>,
     pub api_cookie_auth_enabled: bool,
@@ -193,6 +195,10 @@ impl AppConfig {
             "SLSKR_TRANSFER_ALLOW_OUTBOUND",
             file_config.transfers.allow_outbound.unwrap_or(true),
         )?;
+        let private_message_auto_response = PrivateMessageAutoResponseSettings::from_layers(
+            file_config.network.private_message_auto_response,
+            env,
+        )?;
         let api_token = env.var("SLSKR_API_TOKEN").or(file_config.auth.api_token);
         if let Some(token) = api_token.as_deref() {
             validate_api_token(token)?;
@@ -268,6 +274,7 @@ impl AppConfig {
             transfer_max_active,
             transfer_allow_inbound,
             transfer_allow_outbound,
+            private_message_auto_response,
             auth_required,
             api_token,
             api_cookie_auth_enabled,
@@ -288,7 +295,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -324,6 +331,7 @@ impl AppConfig {
             self.transfer_max_active,
             self.transfer_allow_inbound,
             self.transfer_allow_outbound,
+            self.private_message_auto_response.sanitized_json(),
             self.auth_required,
             self.api_token.is_some(),
             self.api_cookie_auth_enabled,
@@ -685,6 +693,65 @@ impl ExternalVisualizerSettings {
 }
 
 #[derive(Clone, Debug)]
+pub struct PrivateMessageAutoResponseSettings {
+    pub enabled: bool,
+    pub message: String,
+    pub cooldown_minutes: u64,
+}
+
+impl PrivateMessageAutoResponseSettings {
+    fn from_layers<E: ConfigEnv>(
+        file_config: PrivateMessageAutoResponseFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        let enabled = env_bool_layer(
+            env,
+            "SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE",
+            file_config.enabled.unwrap_or(false),
+        )?;
+        let message = env
+            .var("SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE_MESSAGE")
+            .or(file_config.message)
+            .unwrap_or_else(|| {
+                "Hi, I'm human and testing a slskr client. Shares may be temporarily unavailable while I validate the client."
+                    .to_owned()
+            });
+        if message.trim().is_empty() {
+            return Err("private-message auto response must not be blank".to_owned());
+        }
+        if message.len() > MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_BYTES {
+            return Err(format!(
+                "private-message auto response exceeds {MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_BYTES} bytes"
+            ));
+        }
+        let cooldown_minutes = env_parse_layer(
+            env,
+            "SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE_COOLDOWN_MINUTES",
+            file_config.cooldown_minutes,
+            360_u64,
+        )?;
+        if !(1..=1_440).contains(&cooldown_minutes) {
+            return Err(
+                "private-message auto-response cooldown must be between 1 and 1440 minutes"
+                    .to_owned(),
+            );
+        }
+        Ok(Self {
+            enabled,
+            message: message.trim().to_owned(),
+            cooldown_minutes,
+        })
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"message_configured\":true,\"cooldown_minutes\":{}}}",
+            self.enabled, self.cooldown_minutes
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ShareSettings {
     pub fixture_entries: Vec<FileEntry>,
     pub roots: Vec<PathBuf>,
@@ -771,6 +838,15 @@ pub struct NetworkFileConfig {
     password: Option<String>,
     credential_store: Option<String>,
     credential_file: Option<PathBuf>,
+    private_message_auto_response: PrivateMessageAutoResponseFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PrivateMessageAutoResponseFileConfig {
+    enabled: Option<bool>,
+    message: Option<String>,
+    cooldown_minutes: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1488,6 +1564,45 @@ mod tests {
         let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
             .expect_err("zero peer timeout should fail");
         assert!(error.contains("must be greater than zero"), "{error}");
+    }
+
+    #[test]
+    fn private_message_auto_response_is_opt_in_bounded_and_redacted() {
+        let env = MapEnv::default()
+            .with("SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE", "true")
+            .with(
+                "SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE_MESSAGE",
+                "human response",
+            )
+            .with("SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE_COOLDOWN_MINUTES", "15");
+        let config = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+            .expect("auto-response config");
+        assert!(config.private_message_auto_response.enabled);
+        assert_eq!(
+            config.private_message_auto_response.message,
+            "human response"
+        );
+        assert_eq!(config.private_message_auto_response.cooldown_minutes, 15);
+        let sanitized = config.sanitized_json();
+        assert!(sanitized.contains("private_message_auto_response"));
+        assert!(!sanitized.contains("human response"));
+
+        for (name, value) in [
+            ("SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE_MESSAGE", ""),
+            ("SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE_COOLDOWN_MINUTES", "0"),
+            (
+                "SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE_COOLDOWN_MINUTES",
+                "1441",
+            ),
+        ] {
+            let error = super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default().with(name, value),
+            )
+            .expect_err("invalid auto-response config");
+            assert!(error.contains("auto response") || error.contains("auto-response"));
+        }
     }
 
     #[test]

@@ -93,6 +93,9 @@ for anchor in \
   'message_store_evicts_oldest_records_at_limit' \
   'MAX_OAUTH_STATES' \
   'MAX_PREVIEW_STREAM_TICKETS' \
+  'MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_PEERS' \
+  'is_private_message_auto_response_candidate' \
+  'private_message_auto_response_classifier_and_cooldown_are_bounded' \
   'transient_credential_stores_refuse_bursts_at_live_capacity' \
   'MAX_CONTACT_RECORDS' \
   'contacts_are_bounded_deduplicated_and_report_discovery_truthfully' \

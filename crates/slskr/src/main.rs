@@ -163,6 +163,7 @@ const MAX_REMOTE_PATH_ENCODINGS: usize = 50_000;
 const MAX_MESSAGE_RECORDS: usize = 500;
 const MAX_MESSAGE_USERNAME_BYTES: usize = 1024;
 const MAX_MESSAGE_BODY_BYTES: usize = 64 * 1024;
+const MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_PEERS: usize = 4_096;
 const MAX_OAUTH_STATES: usize = 256;
 const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
 const MAX_SHARE_ACCESS_TOKENS: usize = 4_096;
@@ -4398,6 +4399,132 @@ impl MessageStore {
     fn has_unacknowledged_messages(&self) -> bool {
         self.records.iter().any(|record| !record.acknowledged)
     }
+}
+
+#[derive(Debug, Default)]
+struct PrivateMessageAutoResponseTracker {
+    sent_at: BTreeMap<String, u64>,
+}
+
+impl PrivateMessageAutoResponseTracker {
+    fn should_respond(&mut self, username: &str, now: u64, cooldown_seconds: u64) -> bool {
+        self.sent_at
+            .retain(|_, sent_at| now.saturating_sub(*sent_at) < cooldown_seconds);
+        let key = truncate_utf8_bytes(
+            username.trim().to_ascii_lowercase(),
+            MAX_MESSAGE_USERNAME_BYTES,
+        );
+        if key.is_empty()
+            || self
+                .sent_at
+                .get(&key)
+                .is_some_and(|sent_at| now.saturating_sub(*sent_at) < cooldown_seconds)
+        {
+            return false;
+        }
+        if self.sent_at.len() >= MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_PEERS {
+            if let Some(oldest) = self
+                .sent_at
+                .iter()
+                .min_by_key(|(_, sent_at)| **sent_at)
+                .map(|(username, _)| username.clone())
+            {
+                self.sent_at.remove(&oldest);
+            }
+        }
+        self.sent_at.insert(key, now);
+        true
+    }
+
+    fn release(&mut self, username: &str) {
+        let key = truncate_utf8_bytes(
+            username.trim().to_ascii_lowercase(),
+            MAX_MESSAGE_USERNAME_BYTES,
+        );
+        self.sent_at.remove(&key);
+    }
+}
+
+fn is_private_message_auto_response_candidate(message: &str) -> bool {
+    if message.trim().is_empty() || message.len() > MAX_MESSAGE_BODY_BYTES {
+        return false;
+    }
+    let normalized = message
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    let direct_human_check = [
+        "are you human",
+        "are you a human",
+        "are u human",
+        "are u a human",
+        "r u human",
+        "are you real",
+        "are u real",
+        "are you a bot",
+        "are u a bot",
+        "you human?",
+        "u human?",
+        "bot?",
+        "human?",
+    ]
+    .iter()
+    .any(|phrase| normalized.contains(phrase));
+    if direct_human_check {
+        return true;
+    }
+
+    let tokens = normalized
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect::<HashSet<_>>();
+    let has_intent = [
+        "prove", "verify", "confirm", "show", "tell", "say", "reply", "respond", "answer", "type",
+        "write", "pass", "solve",
+    ]
+    .iter()
+    .any(|token| tokens.contains(token));
+    let has_identity = [
+        "human",
+        "person",
+        "real",
+        "bot",
+        "robot",
+        "automated",
+        "automation",
+        "script",
+        "client",
+        "captcha",
+    ]
+    .iter()
+    .any(|token| tokens.contains(token));
+    let named_check = [
+        "check",
+        "test",
+        "verification",
+        "gate",
+        "screen",
+        "challenge",
+    ]
+    .iter()
+    .any(|token| tokens.contains(token))
+        && has_identity;
+    let share_gate = [
+        "not sharing",
+        "no sharing",
+        "share something",
+        "share more",
+        "share files",
+        "empty share",
+        "empty shares",
+        "no leechers",
+        "anti-leech",
+        "anti leech",
+    ]
+    .iter()
+    .any(|phrase| normalized.contains(phrase));
+    named_check || (has_intent && has_identity) || share_gate
 }
 
 fn slskd_conversation_json(
@@ -8694,6 +8821,7 @@ struct AppState {
     browse: RwLock<BrowseStore>,
     remote_path_encodings: RwLock<RemotePathEncodingRegistry>,
     messages: RwLock<MessageStore>,
+    private_message_auto_responses: RwLock<PrivateMessageAutoResponseTracker>,
     rooms: RwLock<RoomStore>,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
@@ -21962,6 +22090,7 @@ async fn serve(once: bool) -> Result<(), String> {
         browse: RwLock::new(browse_store),
         remote_path_encodings: RwLock::new(RemotePathEncodingRegistry::default()),
         messages: RwLock::new(message_store),
+        private_message_auto_responses: RwLock::new(PrivateMessageAutoResponseTracker::default()),
         rooms: RwLock::new(room_store),
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
@@ -24416,6 +24545,60 @@ async fn project_server_message(
                     snapshot.last_error = Some(format!("message ack failed: {error}"));
                 })
                 .await;
+            }
+            let auto_response = &state.config.private_message_auto_response;
+            if message.is_new
+                && auto_response.enabled
+                && is_private_message_auto_response_candidate(&message.message)
+            {
+                let cooldown_seconds = auto_response.cooldown_minutes.saturating_mul(60);
+                let should_respond = state
+                    .private_message_auto_responses
+                    .write()
+                    .await
+                    .should_respond(&message.username, unix_timestamp(), cooldown_seconds);
+                if should_respond {
+                    let response_body = auto_response.message.clone();
+                    match session
+                        .send_server_message(ServerMessage::MessageUserRequest {
+                            username: message.username.clone(),
+                            message: response_body.clone(),
+                        })
+                        .await
+                    {
+                        Ok(()) => {
+                            let mut messages = state.messages.write().await;
+                            let response =
+                                messages.add(message.username.clone(), "outbound", response_body);
+                            drop(messages);
+                            if let Err(error) =
+                                persist_message_record_checked(state, &response).await
+                            {
+                                update_session(state, |snapshot| snapshot.last_error = Some(error))
+                                    .await;
+                            }
+                            record_event(
+                                state,
+                                "message.auto_responded",
+                                message.username.clone(),
+                                Some(format!("id={}", response.id)),
+                            )
+                            .await;
+                        }
+                        Err(error) => {
+                            state
+                                .private_message_auto_responses
+                                .write()
+                                .await
+                                .release(&message.username);
+                            update_session(state, |snapshot| {
+                                snapshot.last_error =
+                                    Some(format!("private-message auto response failed: {error}"));
+                            })
+                            .await;
+                        }
+                    }
+                }
             }
         }
         ServerMessage::MessageAcked { id } => {
@@ -30300,6 +30483,9 @@ mod tests {
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(message_store),
+            private_message_auto_responses: RwLock::new(
+                super::PrivateMessageAutoResponseTracker::default(),
+            ),
             rooms: RwLock::new(room_store),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
@@ -41440,6 +41626,49 @@ mod tests {
     }
 
     #[test]
+    fn private_message_auto_response_classifier_and_cooldown_are_bounded() {
+        for candidate in [
+            "Are you human?",
+            "Please prove you are not a bot",
+            "Human verification challenge",
+            "You are not sharing anything; share more files",
+        ] {
+            assert!(
+                super::is_private_message_auto_response_candidate(candidate),
+                "{candidate}"
+            );
+        }
+        for ordinary in [
+            "hello",
+            "what music do you like?",
+            "the robots album is good",
+        ] {
+            assert!(
+                !super::is_private_message_auto_response_candidate(ordinary),
+                "{ordinary}"
+            );
+        }
+        assert!(!super::is_private_message_auto_response_candidate(
+            &"x".repeat(super::MAX_MESSAGE_BODY_BYTES + 1)
+        ));
+
+        let mut tracker = super::PrivateMessageAutoResponseTracker::default();
+        assert!(tracker.should_respond("Peer", 1_000, 600));
+        assert!(!tracker.should_respond("peer", 1_599, 600));
+        tracker.release(" PEER ");
+        assert!(tracker.should_respond("peer", 1_599, 600));
+        assert!(!tracker.should_respond("PEER", 1_600, 600));
+        assert!(tracker.should_respond("PEER", 2_199, 600));
+        for index in 0..=super::MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_PEERS {
+            assert!(tracker.should_respond(&format!("peer-{index}"), 2_000, 600));
+        }
+        assert_eq!(
+            tracker.sent_at.len(),
+            super::MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_PEERS
+        );
+    }
+
+    #[test]
     fn share_grants_bound_and_deduplicate_collection_users() {
         let mut grants = super::ShareGrantStore::new();
         assert!(grants
@@ -47332,6 +47561,9 @@ mod tests {
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
+            private_message_auto_responses: RwLock::new(
+                super::PrivateMessageAutoResponseTracker::default(),
+            ),
             rooms: RwLock::new(super::RoomStore::new()),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
@@ -47483,6 +47715,9 @@ mod tests {
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
+            private_message_auto_responses: RwLock::new(
+                super::PrivateMessageAutoResponseTracker::default(),
+            ),
             rooms: RwLock::new(super::RoomStore::new()),
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
