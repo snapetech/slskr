@@ -499,7 +499,14 @@ const MediaCore = () => {
   const loadSupportedAlgorithms = async () => {
     try {
       const result = await mediacore.getSupportedHashAlgorithms();
-      setSupportedAlgorithms(result);
+      setSupportedAlgorithms({
+        ...result,
+        algorithms: Array.isArray(result?.algorithms) ? result.algorithms : [],
+        descriptions:
+          result?.descriptions && typeof result.descriptions === 'object'
+            ? result.descriptions
+            : {},
+      });
     } catch (error_) {
       console.error('Failed to load hash algorithms:', error_);
     }

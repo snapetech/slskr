@@ -1,18 +1,62 @@
+#[allow(
+    dead_code,
+    reason = "batch compatibility types are retained for the public API surface"
+)]
 mod batch;
 mod cli;
 mod config;
 mod credential_store;
 mod events_ws;
 mod http_server;
+#[allow(
+    dead_code,
+    reason = "structured logging helpers are retained for optional runtime instrumentation"
+)]
 mod logging;
+#[allow(
+    dead_code,
+    reason = "OpenAPI generation is a supported developer surface"
+)]
 mod openapi;
+#[allow(
+    dead_code,
+    reason = "persistence exposes operations used by optional compatibility routes"
+)]
 mod persistence;
+#[allow(
+    dead_code,
+    reason = "probe metadata builders are shared by optional live probes"
+)]
 mod probe_output;
+#[allow(
+    dead_code,
+    reason = "rate-limit administration types are retained for API reporting"
+)]
 mod rate_limit;
+#[allow(
+    dead_code,
+    reason = "routing response variants form the compatibility response surface"
+)]
 mod routing;
+#[allow(
+    dead_code,
+    reason = "storage codecs are retained for cache and compatibility formats"
+)]
 mod storage;
+#[allow(
+    dead_code,
+    reason = "tracing context helpers are retained for optional instrumentation"
+)]
 mod tracing;
+#[allow(
+    dead_code,
+    reason = "utility parsers support compatibility and test-only request shapes"
+)]
 mod utils;
+#[allow(
+    dead_code,
+    reason = "webhook verification and administration form the supported webhook surface"
+)]
 mod webhooks;
 
 use std::{
@@ -1032,16 +1076,16 @@ impl SearchStore {
                 filter
                     .status
                     .as_deref()
-                    .map_or(true, |status| record.status == status)
+                    .is_none_or(|status| record.status == status)
             })
             .filter(|record| {
                 filter
                     .target
                     .as_deref()
-                    .map_or(true, |target| record.target == target)
+                    .is_none_or(|target| record.target == target)
             })
             .filter(|record| {
-                filter.q.as_deref().map_or(true, |q| {
+                filter.q.as_deref().is_none_or(|q| {
                     record.query.to_ascii_lowercase().contains(q)
                         || record
                             .target_name
@@ -1567,16 +1611,16 @@ impl EventStore {
                 filter
                     .kind
                     .as_deref()
-                    .map_or(true, |kind| record.kind == kind)
+                    .is_none_or(|kind| record.kind == kind)
             })
             .filter(|record| {
                 filter
                     .topic
                     .as_deref()
-                    .map_or(true, |topic| record.topic() == topic)
+                    .is_none_or(|topic| record.topic() == topic)
             })
             .filter(|record| {
-                filter.q.as_deref().map_or(true, |q| {
+                filter.q.as_deref().is_none_or(|q| {
                     record.kind.to_ascii_lowercase().contains(q)
                         || record.topic().contains(q)
                         || record.resource.to_ascii_lowercase().contains(q)
@@ -1617,16 +1661,16 @@ impl EventStore {
                 filter
                     .kind
                     .as_deref()
-                    .map_or(true, |kind| record.kind == kind)
+                    .is_none_or(|kind| record.kind == kind)
             })
             .filter(|record| {
                 filter
                     .topic
                     .as_deref()
-                    .map_or(true, |topic| record.topic() == topic)
+                    .is_none_or(|topic| record.topic() == topic)
             })
             .filter(|record| {
-                filter.q.as_deref().map_or(true, |q| {
+                filter.q.as_deref().is_none_or(|q| {
                     record.kind.to_ascii_lowercase().contains(q)
                         || record.topic().contains(q)
                         || record.resource.to_ascii_lowercase().contains(q)
@@ -2107,7 +2151,7 @@ impl TransferQueue {
             .find(|entry| {
                 entry.local_path.is_some()
                     && (entry.status == "accepted" || entry.status == "in_progress")
-                    && token.map_or(true, |token| entry.token == token)
+                    && token.is_none_or(|token| entry.token == token)
             })
             .cloned()
     }
@@ -2259,9 +2303,7 @@ impl TransferQueue {
         let mut grouped: BTreeMap<String, Vec<&TransferEntry>> = BTreeMap::new();
         for entry in self.entries.iter().filter(|entry| {
             entry.direction == direction
-                && username.map_or(true, |username| {
-                    entry.peer_username.as_deref() == Some(username)
-                })
+                && username.is_none_or(|username| entry.peer_username.as_deref() == Some(username))
         }) {
             grouped
                 .entry(entry.peer_username.clone().unwrap_or_default())
@@ -2299,16 +2341,19 @@ impl TransferQueue {
     }
 
     fn slskd_transfer_position(&self, direction: u32, username: &str, id: u64) -> usize {
-        let mut position = 0;
-        for entry in self.entries.iter().filter(|entry| {
-            entry.direction == direction
-                && entry.peer_username.as_deref() == Some(username)
-                && (entry.status == "queued" || is_active_transfer_status(&entry.status))
-        }) {
+        for (position, entry) in self
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.direction == direction
+                    && entry.peer_username.as_deref() == Some(username)
+                    && (entry.status == "queued" || is_active_transfer_status(&entry.status))
+            })
+            .enumerate()
+        {
             if entry.id == id {
                 return position;
             }
-            position += 1;
         }
         0
     }
@@ -2322,22 +2367,23 @@ impl TransferQueue {
                 filter
                     .status
                     .as_deref()
-                    .map_or(true, |status| entry.status == status)
+                    .is_none_or(|status| entry.status == status)
             })
             .filter(|entry| {
                 filter
                     .direction
                     .as_deref()
                     .and_then(|direction| direction.parse::<u32>().ok())
-                    .map_or(true, |direction| entry.direction == direction)
+                    .is_none_or(|direction| entry.direction == direction)
             })
             .filter(|entry| {
-                filter.username.as_deref().map_or(true, |username| {
-                    entry.peer_username.as_deref() == Some(username)
-                })
+                filter
+                    .username
+                    .as_deref()
+                    .is_none_or(|username| entry.peer_username.as_deref() == Some(username))
             })
             .filter(|entry| {
-                filter.q.as_deref().map_or(true, |q| {
+                filter.q.as_deref().is_none_or(|q| {
                     entry.filename.to_ascii_lowercase().contains(q)
                         || entry
                             .peer_username
@@ -2922,12 +2968,12 @@ impl BrowseEntry {
             .or_else(|| file.get("name"))?
             .as_str()?
             .to_owned();
-        let filename =
-            if raw_filename.contains('/') || raw_filename.contains('\\') || directory.is_none() {
-                raw_filename
-            } else {
-                join_virtual_path(directory.unwrap().trim_matches('/'), &raw_filename)
-            };
+        let filename = match directory {
+            Some(directory) if !raw_filename.contains('/') && !raw_filename.contains('\\') => {
+                join_virtual_path(directory.trim_matches('/'), &raw_filename)
+            }
+            _ => raw_filename,
+        };
         let extension = file
             .get("extension")
             .and_then(serde_json::Value::as_str)
@@ -3328,13 +3374,13 @@ impl BrowseStore {
                 filter
                     .status
                     .as_deref()
-                    .map_or(true, |status| record.status == status)
+                    .is_none_or(|status| record.status == status)
             })
             .filter(|record| {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.username.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.username.to_ascii_lowercase().contains(q))
             })
             .collect::<Vec<_>>();
         let filtered_count = records.len();
@@ -3538,21 +3584,21 @@ impl MessageStore {
         let records = self
             .records
             .iter()
-            .filter(|record| username.map_or(true, |username| record.username == username))
+            .filter(|record| username.is_none_or(|username| record.username == username))
             .filter(|record| {
                 filter
                     .username
                     .as_deref()
-                    .map_or(true, |username| record.username == username)
+                    .is_none_or(|username| record.username == username)
             })
             .filter(|record| {
                 filter
                     .direction
                     .as_deref()
-                    .map_or(true, |direction| record.direction == direction)
+                    .is_none_or(|direction| record.direction == direction)
             })
             .filter(|record| {
-                filter.q.as_deref().map_or(true, |q| {
+                filter.q.as_deref().is_none_or(|q| {
                     record.username.to_ascii_lowercase().contains(q)
                         || record.body.to_ascii_lowercase().contains(q)
                 })
@@ -4005,12 +4051,12 @@ impl RoomStore {
         let filtered_count = self
             .records
             .iter()
-            .filter(|record| filter.joined.map_or(true, |joined| record.joined == joined))
+            .filter(|record| filter.joined.is_none_or(|joined| record.joined == joined))
             .filter(|record| {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.name.to_ascii_lowercase().contains(q))
             })
             .count();
         format!(
@@ -4029,12 +4075,12 @@ impl RoomStore {
         let records = self
             .records
             .iter()
-            .filter(|record| filter.joined.map_or(true, |joined| record.joined == joined))
+            .filter(|record| filter.joined.is_none_or(|joined| record.joined == joined))
             .filter(|record| {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.name.to_ascii_lowercase().contains(q))
             })
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
@@ -4362,7 +4408,7 @@ impl CollectionStore {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.name.to_ascii_lowercase().contains(q))
             })
             .count();
         format!(
@@ -4385,7 +4431,7 @@ impl CollectionStore {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.name.to_ascii_lowercase().contains(q))
             })
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
@@ -4727,7 +4773,7 @@ impl ContactStore {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.username.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.username.to_ascii_lowercase().contains(q))
             })
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
@@ -4747,7 +4793,7 @@ impl ContactStore {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.username.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.username.to_ascii_lowercase().contains(q))
             })
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
@@ -4988,7 +5034,7 @@ impl ShareGroupStore {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.name.to_ascii_lowercase().contains(q))
             })
             .count();
         format!(
@@ -5011,7 +5057,7 @@ impl ShareGroupStore {
                 filter
                     .q
                     .as_deref()
-                    .map_or(true, |q| record.name.to_ascii_lowercase().contains(q))
+                    .is_none_or(|q| record.name.to_ascii_lowercase().contains(q))
             })
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
@@ -6637,6 +6683,10 @@ struct PreviewStreamTicketStore {
 }
 
 impl PreviewStreamTicketStore {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "ticket fields are explicit at the single construction boundary"
+    )]
     fn issue(
         &mut self,
         family: &str,
@@ -8389,7 +8439,7 @@ async fn route_http_request_with_headers(
                 } else {
                     format!("{selected_folder}/{child}")
                 };
-                if q.map_or(false, |q| {
+                if q.is_some_and(|q| {
                     !directory_path.to_ascii_lowercase().contains(q)
                         && !format!("{root_label}/{directory_path}")
                             .to_ascii_lowercase()
@@ -8399,7 +8449,7 @@ async fn route_http_request_with_headers(
                 }
                 if extension_filter
                     .as_deref()
-                    .map_or(false, |ext| entry.extension != ext)
+                    .is_some_and(|ext| entry.extension != ext)
                 {
                     continue;
                 }
@@ -8423,10 +8473,10 @@ async fn route_http_request_with_headers(
                 })
                 .filter(|e| {
                     extension_filter.as_deref()
-                        .map_or(true, |ext| e.extension == ext)
+                        .is_none_or(|ext| e.extension == ext)
                 })
                 .filter(|entry| {
-                    q.map_or(true, |q| {
+                    q.is_none_or(|q| {
                         entry
                             .filename
                             .strip_prefix(&root_prefix)
@@ -8593,7 +8643,7 @@ async fn route_http_request_with_headers(
                 body,
             })
         }
-        ("GET", path) if search_token_path(normalized_path.as_str(), "").is_some() => {
+        ("GET", _path) if search_token_path(normalized_path.as_str(), "").is_some() => {
             let Some(token) = search_token_path(normalized_path.as_str(), "") else {
                 return Ok(routing::not_found_response());
             };
@@ -8732,7 +8782,7 @@ async fn route_http_request_with_headers(
              Ok(routing::created_response(record.json()))
         }
 
-        ("POST", path) if search_token_path(normalized_path.as_str(), "/complete").is_some() => {
+        ("POST", _path) if search_token_path(normalized_path.as_str(), "/complete").is_some() => {
             let Some(token) = search_token_path(normalized_path.as_str(), "/complete") else {
                 return Ok(routing::not_found_response());
             };
@@ -8767,7 +8817,7 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("POST", path)
+        ("POST", _path)
             if search_token_path(normalized_path.as_str(), "/cancel").is_some()
                 || search_token_path(normalized_path.as_str(), "/fail").is_some()
                 || search_token_path(normalized_path.as_str(), "/expire").is_some() =>
@@ -9246,7 +9296,7 @@ async fn route_http_request_with_headers(
                 .filter(|entry| {
                     entry.direction == 0
                         && matches!(entry.status.as_str(), "failed" | "rejected")
-                        && requested_transfer_id.map_or(true, |id| entry.id == id)
+                        && requested_transfer_id.is_none_or(|id| entry.id == id)
                 })
                 .cloned()
                 .collect::<Vec<_>>();
@@ -9490,7 +9540,7 @@ async fn route_http_request_with_headers(
              }
          }
 
-         ("POST", path) if transfer_action_path(normalized_path.as_str()).is_some() => {
+         ("POST", _path) if transfer_action_path(normalized_path.as_str()).is_some() => {
             if let Some((id, action)) = transfer_action_path(normalized_path.as_str()) {
                 let mut transfers = state.transfers.write().await;
 
@@ -9507,17 +9557,16 @@ async fn route_http_request_with_headers(
                     }
 
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
-                        if action == "retry" {
-                            if entry.direction != 0
+                        if action == "retry"
+                            && (entry.direction != 0
                                 || !matches!(
                                     entry.status.as_str(),
                                     "failed" | "rejected" | "cancelled"
-                                )
+                                ))
                             {
                                 drop(transfers);
                                 return Ok(routing::conflict_response("transfer is not retryable"));
                             }
-                        }
                         // Check outbound transfer policy
                         if let Some(ref username) = entry.peer_username {
                             if !state.config.transfer_allow_outbound {
@@ -9906,7 +9955,7 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(record.json()))
         }
 
-        ("POST", path) if message_ack_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if message_ack_path(normalized_path.as_str()).is_some() => {
             let Some(id) = message_ack_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -9939,7 +9988,7 @@ async fn route_http_request_with_headers(
              }
           }
 
-          ("PUT", path) if message_ack_path(normalized_path.as_str()).is_some() => {
+          ("PUT", _path) if message_ack_path(normalized_path.as_str()).is_some() => {
              let Some(id) = message_ack_path(normalized_path.as_str()) else {
                  return Ok(routing::not_found_response());
              };
@@ -9972,7 +10021,7 @@ async fn route_http_request_with_headers(
              }
           }
 
-          ("GET", path) if messages_user_path(normalized_path.as_str()).is_some() => {
+          ("GET", _path) if messages_user_path(normalized_path.as_str()).is_some() => {
             let Some(username) = messages_user_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -9990,7 +10039,7 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response("{}".to_string()))
         }
 
-        ("POST", path) if room_join_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if room_join_path(normalized_path.as_str()).is_some() => {
             let Some(room_name) = room_join_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10005,7 +10054,7 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(record.json()))
         }
 
-        ("DELETE", path) if room_join_path(normalized_path.as_str()).is_some() => {
+        ("DELETE", _path) if room_join_path(normalized_path.as_str()).is_some() => {
             let Some(room_name) = room_join_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10028,7 +10077,7 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("POST", path) if room_messages_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if room_messages_path(normalized_path.as_str()).is_some() => {
             let Some(room_name) = room_messages_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10127,7 +10176,7 @@ async fn route_http_request_with_headers(
             Ok(routing::created_response(record.json()))
         }
 
-        ("DELETE", path) if user_watch_path(normalized_path.as_str()).is_some() => {
+        ("DELETE", _path) if user_watch_path(normalized_path.as_str()).is_some() => {
             let Some(username) = user_watch_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10146,7 +10195,7 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("POST", path) if user_stats_request_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if user_stats_request_path(normalized_path.as_str()).is_some() => {
             let Some(username) = user_stats_request_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10154,7 +10203,7 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(format!("{{\"username\":\"{}\"}}", json_escape(username))))
         }
 
-        ("POST", path) if user_browse_request_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if user_browse_request_path(normalized_path.as_str()).is_some() => {
             let Some(username) = user_browse_request_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10169,7 +10218,7 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(record.json()))
         }
 
-        ("POST", path) if user_browse_folder_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if user_browse_folder_path(normalized_path.as_str()).is_some() => {
             let Some(username) = user_browse_folder_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10185,7 +10234,7 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(record.json()))
         }
 
-        ("POST", path) if user_browse_fail_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if user_browse_fail_path(normalized_path.as_str()).is_some() => {
             let Some(username) = user_browse_fail_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -10199,7 +10248,7 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(format!("{{\"username\":\"{}\",\"status\":\"failed\",\"reason\":\"{}\"}}", json_escape(username), json_escape(&reason))))
         }
 
-        ("POST", path) if user_browse_cancel_path(normalized_path.as_str()).is_some() => {
+        ("POST", _path) if user_browse_cancel_path(normalized_path.as_str()).is_some() => {
             let Some(username) = user_browse_cancel_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
@@ -14974,10 +15023,10 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
 
 fn web_static_content_security_policy(file: &Path) -> &'static str {
     if is_rust_wasm_shell(file) {
-        return "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:";
+        return "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-AVTm08UMHPqpttgoudpSsvenKKfidtwuSnUVJLIuqcA='; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:";
     }
 
-    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:"
+    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'sha256-AVTm08UMHPqpttgoudpSsvenKKfidtwuSnUVJLIuqcA='; style-src-attr 'unsafe-inline'; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:"
 }
 
 fn is_rust_wasm_shell(file: &Path) -> bool {
@@ -15280,6 +15329,10 @@ fn slskd_server_state_json(
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "application state intentionally aggregates independent runtime stores"
+)]
 fn slskd_application_state_json(
     session: &SessionSnapshot,
     shares: &ShareIndexSnapshot,
@@ -16398,9 +16451,7 @@ fn share_entry_matches_prefix(entry: &FileEntry, share_id: &str) -> bool {
 fn slskd_share_directories_json(entries: &[FileEntry], share_id: Option<&str>) -> String {
     let filtered = entries
         .iter()
-        .filter(|entry| {
-            share_id.map_or(true, |share_id| share_entry_matches_prefix(entry, share_id))
-        })
+        .filter(|entry| share_id.is_none_or(|share_id| share_entry_matches_prefix(entry, share_id)))
         .cloned()
         .collect::<Vec<_>>();
     let directories = group_share_entries(&filtered)
@@ -16433,7 +16484,7 @@ fn slskd_user_directories_json(
             filter
                 .q
                 .as_deref()
-                .map_or(true, |q| entry.filename.to_ascii_lowercase().contains(q))
+                .is_none_or(|q| entry.filename.to_ascii_lowercase().contains(q))
         })
         .collect::<Vec<_>>();
     let filtered_file_count = filtered_files.len();
@@ -16464,7 +16515,7 @@ fn slskd_user_root_json(entries: &[BrowseEntry], query: Option<&str>) -> String 
     let filtered = grouped
         .into_iter()
         .filter(|(name, files)| {
-            filter.q.as_deref().map_or(true, |q| {
+            filter.q.as_deref().is_none_or(|q| {
                 name.to_ascii_lowercase().contains(q)
                     || files
                         .iter()
@@ -16524,7 +16575,7 @@ fn slskd_user_root_json(entries: &[BrowseEntry], query: Option<&str>) -> String 
                     filter
                         .q
                         .as_deref()
-                        .map_or(true, |q| entry.filename.to_ascii_lowercase().contains(q))
+                        .is_none_or(|q| entry.filename.to_ascii_lowercase().contains(q))
                 })
                 .collect::<Vec<_>>();
             serde_json::json!({
@@ -16879,10 +16930,8 @@ fn slskd_transfer_matches_query(
     direction: Option<u32>,
     username: Option<&str>,
 ) -> bool {
-    direction.map_or(true, |direction| entry.direction == direction)
-        && username.map_or(true, |username| {
-            entry.peer_username.as_deref() == Some(username)
-        })
+    direction.is_none_or(|direction| entry.direction == direction)
+        && username.is_none_or(|username| entry.peer_username.as_deref() == Some(username))
 }
 
 fn slskd_transfer_speeds_json(transfers: &TransferQueue) -> String {

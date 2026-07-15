@@ -3920,7 +3920,7 @@ fn log_live_soak_indirect_close(reason: &'static str) {
 
     if log.total <= VERBOSE_LIMIT {
         println!("live soak indirect peer-message closed before response: {reason}");
-    } else if log.total % SUMMARY_INTERVAL == 0 {
+    } else if log.total.is_multiple_of(SUMMARY_INTERVAL) {
         println!(
             "live soak indirect peer-message close summary total={} connection_reset={} unexpected_eof={} timed_out={} other={}",
             log.total, log.connection_reset, log.unexpected_eof, log.timed_out, log.other

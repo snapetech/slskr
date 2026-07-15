@@ -71,4 +71,18 @@ describe('MediaCore', () => {
 
     expect(screen.queryByText(/Showing DHT Publishing/)).not.toBeInTheDocument();
   });
+
+  it('renders when the compatibility API does not provide algorithm metadata', async () => {
+    mediacore.getSupportedHashAlgorithms.mockResolvedValue({
+      family: 'mediacore',
+      items: [],
+      status: 'empty',
+      supported: true,
+    });
+
+    render(<MediaCore />);
+
+    expect(await screen.findByText('MediaCore ContentID Registry')).toBeInTheDocument();
+    expect(screen.getByText('Supported Hash Algorithms')).toBeInTheDocument();
+  });
 });
