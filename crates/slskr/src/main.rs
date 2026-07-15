@@ -9419,7 +9419,14 @@ async fn route_http_request_with_headers(
                      }
                      secret
                  }
-                 None => webhooks::Webhook::generate_secret(),
+                 None => {
+                     let Some(secret) = webhooks::Webhook::generate_secret() else {
+                         return Ok(routing::service_unavailable_response(
+                             "webhook secret generation unavailable",
+                         ));
+                     };
+                     secret
+                 }
              };
              let webhook = webhooks::Webhook::new(url, events, secret.clone());
 
@@ -11817,7 +11824,14 @@ async fn route_http_request_with_headers(
                     }
                     secret
                 }
-                None => webhooks::Webhook::generate_secret(),
+                None => {
+                    let Some(secret) = webhooks::Webhook::generate_secret() else {
+                        return Ok(routing::service_unavailable_response(
+                            "webhook secret generation unavailable",
+                        ));
+                    };
+                    secret
+                }
             };
             let webhook = webhooks::Webhook::new(
                 url,
@@ -31566,7 +31580,7 @@ mod tests {
             super::SearchStore::new(),
             Some(db.clone()),
         );
-        let secret = super::webhooks::Webhook::generate_secret();
+        let secret = super::webhooks::Webhook::generate_secret().expect("test randomness");
         let created = super::route_http_request(
             "POST",
             "/api/webhooks",

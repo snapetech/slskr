@@ -122,12 +122,13 @@ impl Webhook {
     }
 
     /// Generate signing secret
-    pub fn generate_secret() -> String {
+    pub fn generate_secret() -> Option<String> {
+        Self::generate_secret_with(|secret| SysRng.try_fill_bytes(secret).is_ok())
+    }
+
+    fn generate_secret_with(fill: impl FnOnce(&mut [u8; 32]) -> bool) -> Option<String> {
         let mut secret = [0_u8; 32];
-        SysRng
-            .try_fill_bytes(&mut secret)
-            .expect("operating system randomness is unavailable");
-        format!("secret_{}", hex::encode(secret))
+        fill(&mut secret).then(|| format!("secret_{}", hex::encode(secret)))
     }
 
     /// Check if webhook should handle event
@@ -697,7 +698,7 @@ mod tests {
 
     #[test]
     fn test_webhook_creation() {
-        let secret = Webhook::generate_secret();
+        let secret = Webhook::generate_secret().expect("test randomness");
         validate_webhook_secret(&secret).expect("generated secret is strong enough");
         let webhook = Webhook::new(
             "http://example.com/hook".to_string(),
@@ -713,6 +714,18 @@ mod tests {
     }
 
     #[test]
+    fn webhook_secret_generation_fails_closed_when_randomness_is_unavailable() {
+        assert!(Webhook::generate_secret_with(|_| false).is_none());
+
+        let secret = Webhook::generate_secret_with(|bytes| {
+            bytes.fill(0xcd);
+            true
+        })
+        .expect("deterministic randomness fixture");
+        assert_eq!(secret, format!("secret_{}", "cd".repeat(32)));
+    }
+
+    #[test]
     fn test_webhook_secret_validation() {
         assert!(validate_webhook_secret("short").is_err());
         assert!(validate_webhook_secret("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_err());
@@ -722,7 +735,7 @@ mod tests {
 
     #[test]
     fn test_webhook_event_handling() {
-        let secret = Webhook::generate_secret();
+        let secret = Webhook::generate_secret().expect("test randomness");
         let webhook = Webhook::new(
             "http://example.com/hook".to_string(),
             vec![WebhookEvent::SearchCreated],
@@ -782,7 +795,7 @@ mod tests {
     #[test]
     fn test_webhook_manager() {
         let mut manager = WebhookManager::new();
-        let secret = Webhook::generate_secret();
+        let secret = Webhook::generate_secret().expect("test randomness");
 
         let webhook = Webhook::new(
             "http://example.com/hook".to_string(),
@@ -810,7 +823,7 @@ mod tests {
             .register(Webhook::new(
                 "https://example.com/hook".to_owned(),
                 vec![WebhookEvent::SearchCreated],
-                Webhook::generate_secret(),
+                Webhook::generate_secret().expect("test randomness"),
             ))
             .expect("register webhook");
         let deliveries = Arc::new(Semaphore::new(0));

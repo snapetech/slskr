@@ -3512,7 +3512,7 @@ mod tests {
             id: "hook_1".to_owned(),
             url: "https://example.com/hook".to_owned(),
             events: "search.created,message.sent".to_owned(),
-            secret: crate::webhooks::Webhook::generate_secret(),
+            secret: crate::webhooks::Webhook::generate_secret().expect("test randomness"),
             active: true,
             created_at: 10,
             last_triggered: None,
