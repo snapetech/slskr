@@ -25142,16 +25142,7 @@ fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), Strin
 
     rotate_transfer_events_if_needed(path)?;
 
-    let mut options = fs::OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|error| format!("transfer event open failed: {error}"))?;
+    let mut file = open_transfer_event_file(path)?;
     writeln!(
         file,
         "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -25165,6 +25156,26 @@ fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), Strin
         escape_cache_field(&entry.filename)
     )
     .map_err(|error| format!("transfer event append failed: {error}"))
+}
+
+fn open_transfer_event_file(path: &Path) -> Result<fs::File, String> {
+    let mut options = fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .map_err(|error| format!("transfer event open failed: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("transfer event metadata read failed: {error}"))?;
+    if !metadata.is_file() {
+        return Err("transfer event path must be a regular file".to_owned());
+    }
+    Ok(file)
 }
 
 fn escape_cache_field(value: &str) -> String {
@@ -37001,6 +37012,32 @@ mod tests {
             std::fs::read_to_string(&target).expect("target still unchanged"),
             "keep"
         );
+
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transfer_event_open_rejects_fifo_without_blocking() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-transfer-events-fifo-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&state_dir).expect("state dir");
+        let events_path = super::transfer_events_path(&state_dir);
+        let status = std::process::Command::new("mkfifo")
+            .arg(&events_path)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success());
+
+        let error = super::open_transfer_event_file(&events_path)
+            .expect_err("FIFO transfer event path must be rejected");
+        assert!(error.contains("transfer event open failed"));
 
         let _ = std::fs::remove_dir_all(state_dir);
     }

@@ -33,6 +33,8 @@ for anchor in \
   'libc::O_NOFOLLOW' \
   '.take(MAX_TRANSFER_STATE_BYTES + 1)' \
   'transfer event path must be a regular file' \
+  'open_transfer_event_file' \
+  'transfer_event_open_rejects_fifo_without_blocking' \
   'write_file_atomic_with_temp_path' \
   'state_file_io_rejects_symlinks_without_touching_targets' \
   'MAX_ROOM_MESSAGES_PER_ROOM' \
