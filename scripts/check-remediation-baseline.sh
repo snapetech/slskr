@@ -39,6 +39,7 @@ GATES=(
   scripts/check-kubernetes-public-posture.sh
   scripts/check-compatibility-noop-documentation.sh
   scripts/check-local-identity-leaks.sh
+  scripts/check-upstream-parity-classification.sh
   scripts/check-remediation-script-registry.sh
 )
 

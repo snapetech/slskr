@@ -50,7 +50,7 @@ and regression coverage match the parity target.
 
 The previous ledger date is not a current upstream baseline. At the frozen
 heads above, the sibling repositories contain 451 non-merge `slskdN` commits
-and 42 non-merge `slskNet.Runtime` commits since 2026-05-13. Of those, 163 and
+and 42 non-merge `slskNet.Runtime` commits since 2026-05-13. Of those, 164 and
 6 respectively touch `src`. The behavior/security classification against
 those snapshots is:
 
@@ -60,7 +60,7 @@ those snapshots is:
 | `slskdN` incoming filter and blacklist regex timeouts (`efffb49d4`, `fedc1e9e7`) | Implemented/hermetic | `slskR` does not expose the sibling's user-supplied .NET backtracking-regex matchers. Excluded search phrases use bounded literal substring matching, with caps on phrase count, phrase bytes, and evaluated query bytes. Username bans are bounded exact case-insensitive values. Regressions prove regex metacharacters are literal and oversized remote inputs are rejected or truncated before matching. |
 | `slskNet.Runtime` legacy peer path encodings (`192c5e4a`) | Implemented/needs-live-proof | Protocol strings now distinguish UTF-8, Windows-1251, and Latin-1; peer file entries, folder requests, and transfer requests retain that metadata and reproduce legacy wire bytes. The daemon keeps a bounded per-peer path-encoding registry learned from search and browse responses, then reuses it for folder browsing and transfer negotiation. Hermetic tests cover exact wire bytes, share-list parsing, registry learning, and outbound folder/transfer reuse. Remaining: optional live interop with legacy peers. |
 | `slskdN` persisted ignored wishlist result folders (`9f2826466`) | Implemented/hermetic | Ignored peer/directory rules are bounded, normalized, deduplicated, persisted, rehydrated, and exposed through wishlist-scoped CRUD routes. Adding a rule suppresses retained matching results, and future peer responses are filtered before storage. The Rust wishlist workspace embeds each item's rules and provides keyboard-accessible add and restore controls, with responsive layout and explicit future-result semantics. Hermetic daemon, renderer, WebAssembly, and UI tests cover persistence, rollback, duplicate rules, deletion, management controls, and existing/future result suppression. |
-| `slskdN` wishlist edit/search/download policy (`8a244699a`, `f96ef06a1`, `47bd6c599`, `d91ea7b5c`, `ac3c08101`, `ffddef278`, `a1984f8f9`, `9a06ffa8c`) | Partially implemented/missing behavior | Filter text, enabled state, auto-download state, maximum results, and nullable maximum downloads are now bounded, persisted, rehydrated, mutable through the API, and no longer returned as fixed placeholders. Item updates use `ON CONFLICT DO UPDATE`, preserving child ignored-result rules; a restart regression covers the fields and explicit `maxDownloads: null`. Disabled terms are excluded from scheduled wishlist searches. Missing: last-viewed/new-result bookkeeping, per-search hit counters, filter application to retained results, automatic download execution, max-download auto-disable, and paged history UI. |
+| `slskdN` wishlist edit/search/download policy (`8a244699a`, `f96ef06a1`, `47bd6c599`, `d91ea7b5c`, `73767889b`, `ac3c08101`, `ffddeff27`, `a1984f8f9`, `9a06ffa8c`) | Partially implemented/missing behavior | Filter text, enabled state, auto-download state, maximum results, and nullable maximum downloads are now bounded, persisted, rehydrated, mutable through the API, and no longer returned as fixed placeholders. Item updates use `ON CONFLICT DO UPDATE`, preserving child ignored-result rules; a restart regression covers the fields and explicit `maxDownloads: null`. Disabled terms are excluded from scheduled wishlist searches. Missing: last-viewed/new-result bookkeeping, per-search hit counters, filter application to retained results, automatic download execution, max-download auto-disable, and paged history UI. |
 | `slskdN` transfer race/optional-port fixes (`e22877f25`) | Implemented/hermetic | Server decoders accept omitted obfuscation fields and treat zero or out-of-range type-1 obfuscated ports as absent while retaining the valid plain endpoint; protocol regressions cover both 16-bit peer-address and 32-bit connect-to-peer forms. The sibling's late-fault observation change is .NET task-specific: Rust transfer reads/writes are directly awaited inside bounded `tokio::time::timeout` futures, with no detached race participant whose exception can go unobserved. Existing loopback tests cover transfer error propagation and direct, obfuscated, indirect, and plain-fallback paths. |
 | `slskdN` bounded streaming fallback cache and forwarded async reads (`e2289348e`) | Implemented/hermetic | The primary `/api/v0/streams/:contentId` route now streams confined local-share or completed-download files through direct Tokio async reads in bounded 64 KiB chunks, with per-I/O deadlines, single-range `206` support, and `416` rejection for invalid or multipart ranges. The .NET forwarding wrapper and fallback-miss cache are not applicable because Rust reads the opened file directly and performs no fallback scan/cache; preview-ticket storage remains bounded. Hermetic writer and loopback HTTP range tests cover the behavior; live browser/player interoperability remains unproven. |
 | `slskdN` bounded dashboard and messaging polling (`46a58cc1`, `a1255f02`, `2783158e`, `1860dfd6`, `d46a1ad7`, `e2487ccb`) | Implemented/hermetic | The canonical inventory now includes `GET /network/stats`, `GET /rooms/activity`, and `GET /conversations/activity/unacknowledged`. The Rust daemon projects each response from bounded local stores; peer-heavy network arrays are omitted unless `includePeers=true`, room activity excludes local messages and non-joined rooms, and unread activity is a scalar. Focused route tests cover exact shapes and versioned aliases. Rust UI ownership tests already enforce one active workspace and no hidden-pane polling fan-out. The .NET SQL count/index changes are storage-engine-specific. |
@@ -68,8 +68,27 @@ those snapshots is:
 | `slskdN` private-message gate auto-response (`a87768464`) | Partially implemented/missing UI | Inbound new messages now pass through a bounded, literal human-check/share-gate classifier. The feature is opt-in through sibling-compatible `SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE*` configuration, validates response and cooldown bounds, keeps a capped case-insensitive per-peer cooldown registry, dispatches the automatic reply through the live server session, records the outbound message, and redacts configured reply text from options diagnostics. Hermetic tests cover candidates, false positives, oversized input, cooldown, capacity, configuration bounds, and redaction. Missing: a runtime-mutable Rust UI toggle; current options remain startup-configured/read-only. |
 | `slskdN` transfer request metadata and single-pane failure UX (`683aeee20`, `0076a542d`, `ad4c8d4e`, `b2f68ed17`, `47bd6c599`) | Partially implemented/missing behavior | Rust transfers retain peer, filename, size, local path, status, progress, queue position, and failure reason, and expose retry/cancel/remove actions. Missing: durable request-level path templates, enriched audio metadata columns, configurable table columns, and failure-specific UI affordances matching the sibling workflow. |
 
-This table is intentionally incomplete. Every remaining non-doc upstream commit
-must still be classified before full parity can be claimed.
+### Frozen source-commit registry
+
+The classifications below cover every commit touching `src` at the frozen
+heads. More specific rows above override a group's conservative default.
+`scripts/check-upstream-parity-classification.sh` always validates the committed
+registry's exact counts, prefix format, and uniqueness. When the sibling
+repositories are present, it additionally fails when a source/config commit at
+either snapshot is absent. Commits that touch only docs, memory, tests,
+examples, or release/packaging automation are classified by that script as
+non-runtime or gate-backed rather than copied into this ledger individually.
+
+- `needs-proof` behavior default (65): `d46a1ad77` `1860dfd6c` `2783158e1` `a1255f028` `46a58cc14` `1100d415d` `efffb49d4` `fedc1e9e7` `9ca597045` `c2557f0fd` `e6a0522db` `e2289348e` `6ae55d576` `9f2826466` `34113e245` `1bd0bfb8f` `0ed04b456` `9654eac5f` `063317d64` `9a06ffa8c` `649fd40c7` `c6ca8ebb6` `9e277c701` `de82ad218` `8a244699a` `f96ef06a1` `47bd6c599` `d91ea7b5c` `73767889b` `ac3c08101` `683aeee20` `0076a542d` `ad4c8d4ed` `b2f68ed17` `ffddeff27` `a1984f8f9` `a87768464` `556fe3500` `170ea341b` `cb9940d97` `b2ebabc43` `d43687540` `369f73169` `af668195f` `cc0dc2d0d` `b5a280088` `18f816414` `401ac6b42` `3c837c168` `e73f72f93` `36145133c` `90d2a57aa` `57326ef1f` `8a7e3753b` `b781b218c` `d1e9ad7c3` `835fb8d27` `8880c3a8b` `76684f853` `35bdec282` `86872bc31` `b6f3b54be` `a58bf7f8d` `617033e47` `631902e2a`.
+- `needs-proof` security/advisory default (37): `081302e43` `0f9799305` `f5a128d1a` `f3b90f12f` `a835151e8` `a7b73bd05` `97b8de60e` `3eaa675a6` `49ed4e89f` `9f59bc111` `459838c8f` `118a5c360` `b13872b7e` `f96d68296` `8944a7751` `6edad2aa4` `34745e114` `1ca284972` `0db03dd8b` `206b4c866` `3088c7eae` `f01388bde` `17f922a21` `dd6f45d1a` `7f909ab2a` `2f4031597` `099ff7952` `dcd980806` `7229ba6b5` `6fcdafd6a` `70e498e08` `643852d09` `8ec8d2aa2` `51c857a81` `88940a84a` `9bd3645d3` `763da549f`.
+- `not-applicable` dependency/release/test-only default (23): `5a87a1aa9` `a5b05fba9` `a238c1d5a` `d5fed7d6e` `ca7639348` `e6099f133` `da9c2299b` `baef05557` `51b169ad2` `f57f4d862` `5b6895a50` `178ecfb75` `f904fe10a` `d97e08f6a` `02e21e78c` `22e86d0d1` `40ccd22be` `c828cf873` `2f4b16ffa` `5b4fe84f2` `b35fac890` `d57af6229` `ce61428e7`.
+- `not-applicable` .NET/logging/lifecycle default (17): `2be213804` `ee802eb03` `59f1a7fe5` `f837b5111` `e124b2f46` `2540c8332` `01631fc74` `983466e9c` `8490eda02` `8e36ad2e1` `60039cee8` `72bba6c23` `47b0840d3` `f31965fac` `a51e25e3b` `546ac8a5e` `7a2c8cb37`.
+- `needs-proof` manual-review default (22): `e2487ccb5` `1eb0a4951` `8928aef73` `4f3d6657a` `1d2f21348` `c6b31866a` `454797904` `cf692c036` `ffce1d305` `ee04c5818` `230549f93` `1bcef0404` `ea4362e2e` `25feed2ee` `c39a604ac` `dd87b7fe1` `82368a51a` `c6105a56e` `bcfcc7319` `5cebdb63c` `f5a49bc50` `765a4db82`.
+- `slskNet.Runtime` source registry: `192c5e4a` is implemented/needs-live-proof; `af73ff3f` is not-applicable logging severity; `1fce75fa`, `681c48c9`, `0fa803d5`, and `09b16f96` are not-applicable .NET dependency changes covered by dependency gates.
+
+The inventory is now exhaustive at the frozen heads, but parity is not closed:
+all `needs-proof`, partial, and missing classifications must be resolved or
+explicitly accepted before full parity can be claimed.
 
 ## Upstream Delta Buckets
 
@@ -116,6 +135,7 @@ Required classification values:
 
 - `scripts/check-endpoint-parity-drift.sh`
 - `scripts/check-openapi-docs-drift.sh`
+- `scripts/check-upstream-parity-classification.sh`
 - `scripts/check-remediation-baseline.sh`
 - `cargo test --workspace`
 - Rust WebUI audit when UI behavior changes
