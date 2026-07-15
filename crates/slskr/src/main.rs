@@ -13287,14 +13287,11 @@ async fn route_http_request_with_headers(
             let mut sharegroups = state.sharegroups.write().await;
             let previous = sharegroups.clone();
             if let Some(record) = sharegroups.remove_member(id, &username) {
-                if let Err(error) =
-                    persist_share_group_member_delete(state, id, &username).await
-                {
+                if let Err(error) = persist_share_group(state, &record).await {
                     *sharegroups = previous;
                     return Ok(routing::service_unavailable_response(&error));
                 }
                 drop(sharegroups);
-                let _ = persist_share_group(state, &record).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 drop(sharegroups);
@@ -24300,20 +24297,6 @@ async fn persist_share_group_delete(state: &AppState, id: &str) -> Result<bool, 
     db.delete_share_group(id)
         .await
         .map_err(|error| format!("share group revocation persistence failed: {error}"))?;
-    Ok(true)
-}
-
-async fn persist_share_group_member_delete(
-    state: &AppState,
-    group_id: &str,
-    username: &str,
-) -> Result<bool, String> {
-    let Some(db) = state.db.as_ref() else {
-        return Ok(false);
-    };
-    db.delete_share_group_member(group_id, username)
-        .await
-        .map_err(|error| format!("share group member revocation persistence failed: {error}"))?;
     Ok(true)
 }
 
@@ -36671,9 +36654,7 @@ mod tests {
         .await
         .expect("failed persistence response");
         assert_eq!(response.status, "503 Service Unavailable");
-        assert!(response
-            .body
-            .contains("share group member revocation persistence failed"));
+        assert!(response.body.contains("share group persistence failed"));
         let group = state
             .sharegroups
             .read()
@@ -36731,6 +36712,44 @@ mod tests {
             .expect("rolled-back group");
         assert_eq!(group.members.len(), 1);
         assert_eq!(group.members[0].username, "friend");
+    }
+
+    #[tokio::test]
+    async fn share_group_snapshot_database_write_is_atomic() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let original = super::persistence::ShareGroupRecord {
+            id: "group-1".to_owned(),
+            name: "Original".to_owned(),
+            description: String::new(),
+            created_at: 1,
+            updated_at: 1,
+        };
+        let member = super::persistence::ShareGroupMemberRecord {
+            group_id: original.id.clone(),
+            username: "friend".to_owned(),
+            added_at: 1,
+        };
+        db.upsert_share_group(&original).await.unwrap();
+        db.upsert_share_group_member(&member).await.unwrap();
+
+        let changed = super::persistence::ShareGroupRecord {
+            name: "Changed".to_owned(),
+            updated_at: 2,
+            ..original.clone()
+        };
+        assert!(db
+            .replace_share_group(&changed, &[member.clone(), member.clone()])
+            .await
+            .is_err());
+
+        let groups = db.list_share_groups(10, 0).await.unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Original");
+        let members = db.list_share_group_members(10, 0).await.unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].username, "friend");
     }
 
     #[tokio::test]
