@@ -147,6 +147,7 @@ const MAX_ROOM_MESSAGE_BODY_BYTES: usize = 4 * 1024;
 const MAX_ROOM_TICKER_BYTES: usize = 16 * 1024;
 const MAX_ROOM_ERROR_BYTES: usize = 4 * 1024;
 const MAX_USER_RECORDS: usize = 4_096;
+const MAX_USER_USERNAME_BYTES: usize = 1024;
 const MAX_BROWSE_RECORDS: usize = 1_024;
 const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
 const MAX_TOTAL_BROWSE_ENTRIES: usize = 50_000;
@@ -2878,8 +2879,14 @@ impl UserStore {
 
     fn from_persisted(records: Vec<crate::persistence::UserProjectionRecord>) -> Self {
         let mut updated_at = unix_timestamp();
+        let mut seen_usernames = HashSet::new();
         let records = records
             .into_iter()
+            .map(|mut record| {
+                record.username = bounded_user_username(&record.username);
+                record
+            })
+            .filter(|record| seen_usernames.insert(record.username.clone()))
             .take(MAX_USER_RECORDS)
             .map(|record| {
                 updated_at = updated_at.max(record.updated_at as u64);
@@ -2905,6 +2912,7 @@ impl UserStore {
     }
 
     fn watch(&mut self, username: String) -> Option<UserRecord> {
+        let username = bounded_user_username(&username);
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -2935,6 +2943,7 @@ impl UserStore {
     }
 
     fn unwatch(&mut self, username: &str) -> Option<UserRecord> {
+        let username = bounded_user_username(username);
         let now = unix_timestamp();
         let record = self
             .records
@@ -2947,12 +2956,13 @@ impl UserStore {
     }
 
     fn apply_watched_user(&mut self, user: &WatchedUser) -> Option<UserRecord> {
+        let username = bounded_user_username(&user.username);
         let now = unix_timestamp();
         let status = user.status.map(|status| status.to_string());
         if let Some(record) = self
             .records
             .iter_mut()
-            .find(|record| record.username == user.username)
+            .find(|record| record.username == username)
         {
             record.status = status;
             if let Some(stats) = user.stats.as_ref() {
@@ -2969,7 +2979,7 @@ impl UserStore {
             return None;
         }
         let record = UserRecord {
-            username: user.username.clone(),
+            username,
             watched: true,
             status,
             average_speed: user.stats.as_ref().map(|stats| stats.average_speed),
@@ -2984,11 +2994,12 @@ impl UserStore {
     }
 
     fn apply_status(&mut self, status: &UserStatus) -> Option<UserRecord> {
+        let username = bounded_user_username(&status.username);
         let now = unix_timestamp();
         if let Some(record) = self
             .records
             .iter_mut()
-            .find(|record| record.username == status.username)
+            .find(|record| record.username == username)
         {
             record.status = Some(status.status.to_string());
             record.updated_at = now;
@@ -2999,7 +3010,7 @@ impl UserStore {
             return None;
         }
         let record = UserRecord {
-            username: status.username.clone(),
+            username,
             watched: false,
             status: Some(status.status.to_string()),
             average_speed: None,
@@ -3014,6 +3025,7 @@ impl UserStore {
     }
 
     fn apply_stats(&mut self, username: String, stats: &UserStats) -> Option<UserRecord> {
+        let username = bounded_user_username(&username);
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3070,6 +3082,10 @@ impl UserStore {
             self.updated_at
         )
     }
+}
+
+fn bounded_user_username(username: &str) -> String {
+    truncate_utf8_bytes(username.to_owned(), MAX_USER_USERNAME_BYTES)
 }
 
 #[derive(Debug)]
@@ -33130,6 +33146,28 @@ mod tests {
             .is_none());
         assert_eq!(users.records.len(), 1);
         assert_eq!(users.records[0].username, "alice");
+    }
+
+    #[test]
+    fn user_store_bounds_and_normalizes_retained_usernames() {
+        let oversized_username = "é".repeat(super::MAX_USER_USERNAME_BYTES);
+        let mut users = super::UserStore::with_max_records(2);
+        let watched = users.watch(oversized_username.clone()).unwrap();
+        assert!(watched.username.len() <= super::MAX_USER_USERNAME_BYTES);
+
+        let updated = users
+            .apply_status(&super::UserStatus {
+                username: oversized_username.clone(),
+                status: 2,
+                privileged: false,
+            })
+            .unwrap();
+        assert_eq!(updated.status.as_deref(), Some("2"));
+        assert_eq!(users.records.len(), 1);
+
+        let unwatched = users.unwatch(&oversized_username).unwrap();
+        assert!(!unwatched.watched);
+        assert_eq!(users.records.len(), 1);
     }
 
     #[tokio::test]
