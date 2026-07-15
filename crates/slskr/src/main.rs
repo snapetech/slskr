@@ -5106,6 +5106,12 @@ fn bounded_collection_item(mut item: CollectionItem) -> CollectionItem {
     item
 }
 
+fn collection_items_id(path: &str) -> Option<&str> {
+    let path = path.strip_prefix("/api/collections/")?;
+    let id = path.strip_suffix("/items")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
 // Wishlist Models
 #[derive(Clone, Debug)]
 struct WishlistItem {
@@ -12255,15 +12261,12 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("GET", path) if path.starts_with("/api/collections/") && path.ends_with("/items") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 5 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
-            if id.is_empty() {
-                return Ok(routing::not_found_response());
-            }
+        ("GET", path)
+            if path.starts_with("/api/collections/")
+                && path.ends_with("/items")
+                && collection_items_id(path).is_some() =>
+        {
+            let id = collection_items_id(path).expect("guarded collection items path");
             let collections = state.collections.read().await;
             if let Some(record) = collections.get(id) {
                 let items = record.items.iter()
@@ -12278,15 +12281,12 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("POST", path) if path.starts_with("/api/collections/") && path.ends_with("/items") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 5 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
-            if id.is_empty() {
-                return Ok(routing::not_found_response());
-            }
+        ("POST", path)
+            if path.starts_with("/api/collections/")
+                && path.ends_with("/items")
+                && collection_items_id(path).is_some() =>
+        {
+            let id = collection_items_id(path).expect("guarded collection items path");
             let content_id = extract_json_string_field(body, "content_id").unwrap_or_default();
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
             let title = extract_json_string_field(body, "title").unwrap_or_default();
@@ -34027,6 +34027,73 @@ mod tests {
         assert_eq!(bridge_json["status"], "in_progress");
         assert_eq!(bridge_json["bytesTransferred"], 40);
         assert_eq!(bridge_json["progress"], 40.0);
+    }
+
+    #[tokio::test]
+    async fn collection_item_collection_routes_require_exact_paths() {
+        let (state, _receiver) = test_state();
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Exact"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/extra/items"),
+            None,
+            r#"{"content_id":"wrong","title":"Wrong"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert!(state
+            .collections
+            .read()
+            .await
+            .get(&collection_id)
+            .unwrap()
+            .items
+            .is_empty());
+        assert_eq!(
+            super::collection_items_id(&format!("/api/collections/{collection_id}/extra/items")),
+            None
+        );
+
+        let exact = super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/items"),
+            None,
+            r#"{"content_id":"right","title":"Right"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(exact.status, "201 Created");
+        assert_eq!(
+            super::collection_items_id(&format!("/api/collections/{collection_id}/items")),
+            Some(collection_id.as_str())
+        );
+        assert_eq!(
+            state
+                .collections
+                .read()
+                .await
+                .get(&collection_id)
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
