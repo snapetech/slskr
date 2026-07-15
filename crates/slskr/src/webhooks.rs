@@ -207,14 +207,10 @@ impl WebhookSignature {
 
     /// Create signature for payload using secret
     pub fn create(payload: &[u8], secret: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        type HmacSha256 = Hmac<Sha256>;
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
-        mac.update(payload);
-        let signature = hex::encode(mac.finalize().into_bytes());
-
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
+        let signature = sign_webhook_payload(payload, secret, timestamp)?;
 
         Ok(WebhookSignature {
             signature,
@@ -225,10 +221,10 @@ impl WebhookSignature {
 
     /// Verify signature
     pub fn verify(&self, payload: &[u8], secret: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        type HmacSha256 = Hmac<Sha256>;
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
-        mac.update(payload);
-        let expected = hex::encode(mac.finalize().into_bytes());
+        if !webhook_timestamp_is_fresh(self.timestamp)? {
+            return Ok(false);
+        }
+        let expected = sign_webhook_payload(payload, secret, self.timestamp)?;
 
         Ok(constant_time_compare(
             self.signature.as_bytes(),
@@ -244,7 +240,7 @@ impl WebhookSignature {
     /// Parse from header
     pub fn from_header(header: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let parts: Vec<&str> = header.split(", ").collect();
-        if parts.len() < 2 {
+        if parts.len() != 2 {
             return Err("Invalid signature header format".into());
         }
 
@@ -255,10 +251,7 @@ impl WebhookSignature {
             .strip_prefix("t=")
             .ok_or("Missing timestamp")?
             .parse::<i64>()?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() as i64;
-        if (now - timestamp).abs() > Self::MAX_TIMESTAMP_AGE_SECONDS {
+        if !webhook_timestamp_is_fresh(timestamp)? {
             return Err("signature timestamp is stale".into());
         }
 
@@ -268,6 +261,26 @@ impl WebhookSignature {
             algorithm: "hmac-sha256".to_string(),
         })
     }
+}
+
+fn sign_webhook_payload(
+    payload: &[u8],
+    secret: &str,
+    timestamp: i64,
+) -> Result<String, hmac::digest::InvalidLength> {
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
+    mac.update(timestamp.to_string().as_bytes());
+    mac.update(b".");
+    mac.update(payload);
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
+fn webhook_timestamp_is_fresh(timestamp: i64) -> Result<bool, std::time::SystemTimeError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs() as i64;
+    Ok(now.abs_diff(timestamp) <= WebhookSignature::MAX_TIMESTAMP_AGE_SECONDS as u64)
 }
 
 /// Webhook manager
@@ -749,6 +762,16 @@ mod tests {
     }
 
     #[test]
+    fn test_webhook_signature_authenticates_timestamp() {
+        let secret = "test-secret";
+        let payload = b"test payload";
+        let mut signature = WebhookSignature::create(payload, secret).unwrap();
+
+        signature.timestamp += 1;
+        assert!(!signature.verify(payload, secret).unwrap());
+    }
+
+    #[test]
     fn test_webhook_signature_header_format() {
         let secret = "test-secret";
         let payload = b"test payload";
@@ -902,6 +925,9 @@ mod tests {
             .as_secs() as i64
             - 600;
         let err = WebhookSignature::from_header(&format!("t={old}, abc")).unwrap_err();
+        assert!(err.to_string().contains("stale"), "{err}");
+
+        let err = WebhookSignature::from_header(&format!("t={}, abc", i64::MIN)).unwrap_err();
         assert!(err.to_string().contains("stale"), "{err}");
     }
 }

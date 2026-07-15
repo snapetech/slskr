@@ -8,7 +8,7 @@ Webhook endpoints are protected API routes. Requests must use the same bearer or
 
 If the creation response is lost, delete and recreate the webhook with a new generated secret or provide a new explicit `secret` field at creation time.
 
-Webhook deliveries sign the JSON payload with `X-Webhook-Signature` using HMAC-SHA256. Delivery validation rejects localhost, private, loopback, link-local, documentation, multicast, and otherwise blocked webhook targets at registration where possible and again at delivery after DNS resolution.
+Webhook deliveries sign `<unix-timestamp>.<json-payload>` with `X-Webhook-Signature` using HMAC-SHA256. Receivers must verify the signature and reject timestamps more than five minutes from their current time. Binding the timestamp into the signature prevents an intercepted delivery from being replayed with a refreshed timestamp. Delivery validation rejects localhost, private, loopback, link-local, documentation, multicast, and otherwise blocked webhook targets at registration where possible and again at delivery after DNS resolution.
 
 Operators can extend the outbound policy with comma-separated CIDRs:
 
