@@ -15277,17 +15277,26 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("username is required"));
             };
             let mut security = state.security.write().await;
+            let previous = security.clone();
             let removed = security.unban("username", &username);
+            let persisted = if removed {
+                match persist_security_unban(state, "username", &username).await {
+                    Ok(persisted) => persisted,
+                    Err(error) => {
+                        *security = previous;
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
+                }
+            } else {
+                state.db.is_some()
+            };
             let active_bans = security.active_bans();
             drop(security);
-            if removed {
-                persist_security_unban(state, "username", &username).await;
-            }
             Ok(routing::ok_response(serde_json::json!({
                 "username": username,
                 "banned": false,
                 "removed": removed,
-                "persisted": true,
+                "persisted": persisted,
                 "activeBans": active_bans,
             }).to_string()))
         }
@@ -15332,17 +15341,26 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("valid ip is required"));
             };
             let mut security = state.security.write().await;
+            let previous = security.clone();
             let removed = security.unban("ip", &ip);
+            let persisted = if removed {
+                match persist_security_unban(state, "ip", &ip).await {
+                    Ok(persisted) => persisted,
+                    Err(error) => {
+                        *security = previous;
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
+                }
+            } else {
+                state.db.is_some()
+            };
             let active_bans = security.active_bans();
             drop(security);
-            if removed {
-                persist_security_unban(state, "ip", &ip).await;
-            }
             Ok(routing::ok_response(serde_json::json!({
                 "ip": ip,
                 "banned": false,
                 "removed": removed,
-                "persisted": true,
+                "persisted": persisted,
                 "activeBans": active_bans,
             }).to_string()))
         }
@@ -23385,16 +23403,17 @@ async fn persist_security_ban(
     Ok(true)
 }
 
-async fn persist_security_unban(state: &AppState, kind: &str, value: &str) {
+async fn persist_security_unban(state: &AppState, kind: &str, value: &str) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let Some(target) = normalize_security_ban_value(kind, value) else {
-        return;
+        return Err("invalid security unban value".to_owned());
     };
-    let Ok(records) = db.list_security_bans().await else {
-        return;
-    };
+    let records = db
+        .list_security_bans()
+        .await
+        .map_err(|error| format!("security unban persistence failed: {error}"))?;
     for record in records {
         if record.kind != kind {
             continue;
@@ -23408,9 +23427,12 @@ async fn persist_security_unban(state: &AppState, kind: &str, value: &str) {
             candidate == target
         };
         if matches {
-            let _ = db.delete_security_ban(kind, &record.value).await;
+            db.delete_security_ban(kind, &record.value)
+                .await
+                .map_err(|error| format!("security unban persistence failed: {error}"))?;
         }
     }
+    Ok(true)
 }
 
 async fn persist_wishlist_item(state: &AppState, item: &WishlistItem) {
@@ -35797,9 +35819,47 @@ mod tests {
             Some(db.clone()),
         );
 
-        super::persist_security_unban(&state, "username", "peer one").await;
-        super::persist_security_unban(&state, "ip", "2001:db8::1").await;
+        assert!(
+            super::persist_security_unban(&state, "username", "peer one")
+                .await
+                .unwrap()
+        );
+        assert!(super::persist_security_unban(&state, "ip", "2001:db8::1")
+            .await
+            .unwrap());
         assert!(db.list_security_bans().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn security_unban_rolls_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        state
+            .security
+            .write()
+            .await
+            .ban("username", "must-remain".to_owned())
+            .expect("ban");
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "DELETE",
+            "/api/security/bans/username/must-remain",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("failed persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("security unban persistence failed"));
+        assert_eq!(state.security.read().await.active_bans(), 1);
     }
 
     #[tokio::test]
@@ -39642,6 +39702,7 @@ mod tests {
                 .expect("username unban");
         let unban_json = serde_json::from_str::<serde_json::Value>(&unban.body).unwrap();
         assert_eq!(unban_json["removed"], true);
+        assert_eq!(unban_json["persisted"], false);
         assert_eq!(unban_json["activeBans"], 0);
 
         let share_token = super::route_http_request(
