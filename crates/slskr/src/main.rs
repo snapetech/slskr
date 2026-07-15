@@ -18195,6 +18195,9 @@ fn validate_integration_base_url(base_url: &str) -> Result<ResolvedIntegrationTa
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("integration URL must not contain embedded credentials".to_owned());
     }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("integration URL must not contain a query or fragment".to_owned());
+    }
     let allow_private = matches!(
         env::var("SLSKR_ALLOW_PRIVATE_INTEGRATION_URLS")
             .unwrap_or_default()
@@ -28081,6 +28084,18 @@ mod tests {
         );
         assert!(!error.contains("operator"));
         assert!(!error.contains("secret"));
+
+        for url in [
+            "https://example.com/lidarr?api_key=secret",
+            "https://example.com/lidarr#ignored-api-path",
+        ] {
+            assert_eq!(
+                super::validate_integration_base_url(url)
+                    .err()
+                    .expect("non-base integration URL should be rejected"),
+                "integration URL must not contain a query or fragment"
+            );
+        }
 
         for address in ["100.64.0.1", "192.0.0.8", "192.88.99.1", "198.18.0.1"] {
             let ip = address.parse::<std::net::IpAddr>().expect("fixture IP");

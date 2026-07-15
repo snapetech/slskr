@@ -553,8 +553,17 @@ impl LidarrIntegrationSettings {
         if let Some(url) = url.as_deref() {
             let parsed = reqwest::Url::parse(url)
                 .map_err(|error| format!("Lidarr URL is invalid: {error}"))?;
+            if !matches!(parsed.scheme(), "http" | "https") {
+                return Err("Lidarr URL scheme must be http or https".to_owned());
+            }
+            if parsed.host_str().is_none() {
+                return Err("Lidarr URL must include a host".to_owned());
+            }
             if !parsed.username().is_empty() || parsed.password().is_some() {
                 return Err("Lidarr URL must not contain embedded credentials".to_owned());
+            }
+            if parsed.query().is_some() || parsed.fragment().is_some() {
+                return Err("Lidarr URL must not contain a query or fragment".to_owned());
             }
         }
         Ok(Self {
@@ -1338,6 +1347,17 @@ mod tests {
         assert_eq!(error, "Lidarr URL must not contain embedded credentials");
         assert!(!error.contains("operator"));
         assert!(!error.contains("secret"));
+
+        for url in [
+            "ftp://example.com/lidarr",
+            "https://example.com/lidarr?api_key=secret",
+            "https://example.com/lidarr#ignored-api-path",
+        ] {
+            let env = MapEnv::default().with("SLSKR_LIDARR_URL", url);
+            let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+                .expect_err("non-base Lidarr URL should be rejected");
+            assert!(!error.contains("api_key=secret"), "{error}");
+        }
     }
 
     #[test]
