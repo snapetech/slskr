@@ -19143,9 +19143,25 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
             }
 
             if reconnect_requested && session.is_none() {
-                time::sleep(state.config.reconnect_delay).await;
-                let connected = connect_session(&state, &mut session, &mut next_ping).await;
-                reconnect_requested = !connected && state.config.reconnect;
+                match wait_for_reconnect_or_command(&mut receiver, state.config.reconnect_delay)
+                    .await
+                {
+                    ReconnectWake::DelayElapsed => {
+                        let connected = connect_session(&state, &mut session, &mut next_ping).await;
+                        reconnect_requested = !connected && state.config.reconnect;
+                    }
+                    ReconnectWake::Command(command) => {
+                        handle_session_command(
+                            &state,
+                            command,
+                            &mut session,
+                            &mut next_ping,
+                            &mut reconnect_requested,
+                        )
+                        .await;
+                    }
+                    ReconnectWake::ChannelClosed => break,
+                }
                 continue;
             }
 
@@ -19215,6 +19231,24 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
             }
         }
     });
+}
+
+enum ReconnectWake {
+    DelayElapsed,
+    Command(SessionCommand),
+    ChannelClosed,
+}
+
+async fn wait_for_reconnect_or_command(
+    receiver: &mut mpsc::Receiver<SessionCommand>,
+    delay: Duration,
+) -> ReconnectWake {
+    tokio::select! {
+        () = time::sleep(delay) => ReconnectWake::DelayElapsed,
+        command = receiver.recv() => command
+            .map(ReconnectWake::Command)
+            .unwrap_or(ReconnectWake::ChannelClosed),
+    }
 }
 
 fn spawn_rate_limit_cleanup(state: Arc<AppState>) {
@@ -25574,6 +25608,28 @@ mod tests {
 
     fn test_state() -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
         test_state_with_env(MapEnv::default())
+    }
+
+    #[tokio::test]
+    async fn reconnect_backoff_is_interrupted_by_session_commands() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let waiter = tokio::spawn(async move {
+            super::wait_for_reconnect_or_command(&mut receiver, Duration::from_secs(3_600)).await
+        });
+        tokio::task::yield_now().await;
+        sender
+            .send(super::SessionCommand::Disconnect)
+            .await
+            .expect("send disconnect");
+
+        let wake = tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("command must interrupt reconnect delay")
+            .expect("wait task");
+        assert!(matches!(
+            wake,
+            super::ReconnectWake::Command(super::SessionCommand::Disconnect)
+        ));
     }
 
     fn test_state_with_env(

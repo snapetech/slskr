@@ -17,6 +17,8 @@ status=0
 for anchor in \
   'ensure_private_state_dir(&config.state_dir)' \
   'state_directory_is_private_and_rejects_symlinks' \
+  'wait_for_reconnect_or_command' \
+  'reconnect_backoff_is_interrupted_by_session_commands' \
   'slskd_storage_directory_json_unix' \
   'storage directory confined open failed' \
   'scoped_storage_listing_rejects_symlinked_parent' \
