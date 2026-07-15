@@ -7013,6 +7013,17 @@ fn security_ban_route_tail(path: &str) -> Option<Vec<&str>> {
     }
 }
 
+fn webhook_resource_id<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    let id = path.strip_prefix(prefix)?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn webhook_test_id<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    let path = path.strip_prefix(prefix)?;
+    let id = path.strip_suffix("/test")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
 // Share Grant Models
 #[derive(Clone, Debug)]
 struct ShareGrantRecord {
@@ -9368,8 +9379,12 @@ async fn route_http_request_with_headers(
              Ok(routing::created_response(serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string())))
          }
 
-         ("DELETE", path) if path.starts_with("/api/webhooks/") => {
-             let webhook_id = path.rsplit('/').next().unwrap_or("");
+         ("DELETE", path)
+             if path.starts_with("/api/webhooks/")
+                 && webhook_resource_id(path, "/api/webhooks/").is_some() =>
+         {
+             let webhook_id = webhook_resource_id(path, "/api/webhooks/")
+                 .expect("guarded webhook resource path");
              let mut webhooks = state.webhooks.write().await;
              if webhooks.unregister(webhook_id).is_some() {
                  drop(webhooks);
@@ -9381,8 +9396,12 @@ async fn route_http_request_with_headers(
              }
          }
 
-         ("PATCH", path) if path.starts_with("/api/webhooks/") => {
-              let webhook_id = path.rsplit('/').next().unwrap_or("");
+         ("PATCH", path)
+             if path.starts_with("/api/webhooks/")
+                 && webhook_resource_id(path, "/api/webhooks/").is_some() =>
+         {
+              let webhook_id = webhook_resource_id(path, "/api/webhooks/")
+                  .expect("guarded webhook resource path");
               let Some(active) = extract_json_bool_field(body, "active") else {
                   return Ok(routing::bad_request_response("active boolean is required"));
               };
@@ -9471,8 +9490,13 @@ async fn route_http_request_with_headers(
               Ok(response)
           }
 
-          ("POST", path) if path.starts_with("/api/webhooks/") && path.ends_with("/test") => {
-             let webhook_id = path.rsplit('/').nth(1).unwrap_or("");
+          ("POST", path)
+              if path.starts_with("/api/webhooks/")
+                  && path.ends_with("/test")
+                  && webhook_test_id(path, "/api/webhooks/").is_some() =>
+          {
+             let webhook_id = webhook_test_id(path, "/api/webhooks/")
+                 .expect("guarded webhook test path");
              let webhooks = state.webhooks.read().await;
              if let Some(webhook) = webhooks.get(webhook_id) {
                  let payload = webhooks::WebhookDispatcher::test_payload(
@@ -11761,8 +11785,12 @@ async fn route_http_request_with_headers(
                 body: serde_json::json!({"webhooks": webhook_list, "total": total}).to_string(),
             })
         }
-        ("DELETE", path) if path.starts_with("/api/admin/webhooks/") => {
-            let webhook_id = path.rsplit('/').next().unwrap_or("");
+        ("DELETE", path)
+            if path.starts_with("/api/admin/webhooks/")
+                && webhook_resource_id(path, "/api/admin/webhooks/").is_some() =>
+        {
+            let webhook_id = webhook_resource_id(path, "/api/admin/webhooks/")
+                .expect("guarded admin webhook resource path");
             let mut webhooks = state.webhooks.write().await;
             if webhooks.unregister(webhook_id).is_some() {
                 drop(webhooks);
@@ -11773,8 +11801,13 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("POST", path) if path.starts_with("/api/admin/webhooks/") && path.ends_with("/test") => {
-            let webhook_id = path.rsplit('/').nth(1).unwrap_or("");
+        ("POST", path)
+            if path.starts_with("/api/admin/webhooks/")
+                && path.ends_with("/test")
+                && webhook_test_id(path, "/api/admin/webhooks/").is_some() =>
+        {
+            let webhook_id = webhook_test_id(path, "/api/admin/webhooks/")
+                .expect("guarded admin webhook test path");
             let webhooks = state.webhooks.read().await;
             if webhooks.get(webhook_id).is_some() {
                 drop(webhooks);
@@ -31154,6 +31187,85 @@ mod tests {
         .expect("patch webhook");
         assert_eq!(patched.status, "200 OK");
         assert!(patched.body.contains("\"active\":false"));
+    }
+
+    #[tokio::test]
+    async fn webhook_mutations_and_tests_require_exact_paths() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/webhooks",
+            None,
+            r#"{"url":"https://example.test/hook","events":"search.created"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        super::route_http_request(
+            "PATCH",
+            &format!("/api/webhooks/extra/{id}"),
+            None,
+            r#"{"active":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert!(state.webhooks.read().await.get(&id).unwrap().active);
+
+        let _all_delivery_permits = Arc::clone(&state.webhook_deliveries)
+            .acquire_many_owned(super::MAX_WEBHOOK_DELIVERY_TASKS as u32)
+            .await
+            .unwrap();
+        let malformed_test = super::route_http_request(
+            "POST",
+            &format!("/api/webhooks/extra/{id}/test"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_ne!(malformed_test.status, "429 Too Many Requests");
+        let malformed_admin_test = super::route_http_request(
+            "POST",
+            &format!("/api/admin/webhooks/extra/{id}/test"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_ne!(malformed_admin_test.body, "{\"status\":\"test_sent\"}");
+
+        for path in [
+            format!("/api/webhooks/extra/{id}"),
+            format!("/api/admin/webhooks/extra/{id}"),
+        ] {
+            super::route_http_request("DELETE", &path, None, "", &state)
+                .await
+                .unwrap();
+            assert!(state.webhooks.read().await.get(&id).is_some());
+        }
+
+        assert_eq!(
+            super::webhook_resource_id(&format!("/api/webhooks/{id}"), "/api/webhooks/"),
+            Some(id.as_str())
+        );
+        assert_eq!(
+            super::webhook_resource_id(&format!("/api/webhooks/extra/{id}"), "/api/webhooks/"),
+            None
+        );
+        let deleted =
+            super::route_http_request("DELETE", &format!("/api/webhooks/{id}"), None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(deleted.status, "200 OK");
+        assert!(state.webhooks.read().await.get(&id).is_none());
     }
 
     #[tokio::test]
