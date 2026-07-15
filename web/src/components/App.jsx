@@ -4,7 +4,7 @@ import * as chat from '../lib/chat';
 import { createApplicationHubConnection } from '../lib/hubFactory';
 import * as relayAPI from '../lib/relay';
 import * as rooms from '../lib/rooms';
-import { connect, disconnect } from '../lib/server';
+import { connect, disconnect, getState as getServerState } from '../lib/server';
 import * as session from '../lib/session';
 import { getLocalStorageItem, setLocalStorageItem } from '../lib/storage';
 import { isPassthroughEnabled } from '../lib/token';
@@ -859,6 +859,8 @@ class App extends Component {
           }
 
           if (await session.check()) {
+            const server = await getServerState();
+            this.updateServerState(server);
             this.startApplicationHub();
           }
 

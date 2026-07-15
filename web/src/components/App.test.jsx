@@ -13,6 +13,7 @@ const {
   getConversations,
   getJoinedRooms,
   getRoomMessages,
+  getServerState,
   isLoggedIn,
 } = vi.hoisted(() => ({
   check: vi.fn(),
@@ -22,6 +23,7 @@ const {
   getSecurityEnabled: vi.fn(),
   getJoinedRooms: vi.fn(),
   getRoomMessages: vi.fn(),
+  getServerState: vi.fn(),
   isLoggedIn: vi.fn(),
 }));
 
@@ -58,6 +60,7 @@ vi.mock('../lib/relay', () => ({
 vi.mock('../lib/server', () => ({
   connect: connectServer,
   disconnect: vi.fn(),
+  getState: getServerState,
 }));
 
 vi.mock('./Browse/Browse', () => ({ default: () => <div>Browse</div> }));
@@ -119,6 +122,11 @@ describe('App', () => {
     getConversations.mockResolvedValue([]);
     getJoinedRooms.mockResolvedValue([]);
     getRoomMessages.mockResolvedValue([]);
+    getServerState.mockResolvedValue({
+      credentialsConfigured: true,
+      isConnected: false,
+      state: 'Disconnected',
+    });
     isLoggedIn.mockReturnValue(true);
     connectServer.mockResolvedValue({
       data: {
@@ -177,6 +185,24 @@ describe('App', () => {
 
     expect(createApplicationHubConnection).toHaveBeenCalledTimes(1);
     expect(check).toHaveBeenCalled();
+  });
+
+  it('renders an already-connected Soulseek session from the initial server snapshot', async () => {
+    getServerState.mockResolvedValue({
+      credentialsConfigured: true,
+      isConnected: true,
+      isLoggedIn: true,
+      state: 'Connected, LoggedIn',
+    });
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(getServerState).toHaveBeenCalledTimes(1);
   });
 
   it('opens the theme menu and applies the selected theme', async () => {
