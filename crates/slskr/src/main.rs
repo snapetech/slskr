@@ -9180,10 +9180,13 @@ async fn route_http_request_with_headers(
             let runtime_lidarr_sync_runs = runtime.lidarr_sync_runs;
             let runtime_lidarr_manual_imports = runtime.lidarr_manual_imports;
             drop(runtime);
-            let database_stats = if let Some(db) = state.db.as_ref() {
-                db.get_stats().await.ok()
+            let (database_stats, database_stats_available) = if let Some(db) = state.db.as_ref() {
+                match db.get_stats().await {
+                    Ok(stats) => (Some(stats), 1),
+                    Err(_) => (None, 0),
+                }
             } else {
-                None
+                (None, 0)
             };
             let database_enabled = if state.db.is_some() { 1 } else { 0 };
             let persisted_searches = database_stats
@@ -9254,6 +9257,9 @@ async fn route_http_request_with_headers(
                  # HELP slskr_database_enabled SQLite persistence availability\n\
                  # TYPE slskr_database_enabled gauge\n\
                  slskr_database_enabled {}\n\
+                 # HELP slskr_database_stats_available Whether SQLite statistics were collected successfully\n\
+                 # TYPE slskr_database_stats_available gauge\n\
+                 slskr_database_stats_available {}\n\
                  # HELP slskr_database_rows Persisted SQLite row counts by store\n\
                  # TYPE slskr_database_rows gauge\n\
                  slskr_database_rows{{store=\"searches\"}} {}\n\
@@ -9280,6 +9286,7 @@ async fn route_http_request_with_headers(
                 runtime_lidarr_sync_runs,
                 runtime_lidarr_manual_imports,
                 database_enabled,
+                database_stats_available,
                 persisted_searches,
                 persisted_search_results,
                 persisted_transfers,
@@ -28897,6 +28904,7 @@ mod tests {
             .contains("slskr_transfers{state=\"active\"} 0"));
         assert!(response.body.contains("slskr_events_total 0"));
         assert!(response.body.contains("slskr_database_enabled 0"));
+        assert!(response.body.contains("slskr_database_stats_available 0"));
         assert!(response
             .body
             .contains("slskr_database_rows{store=\"searches\"} 0"));
@@ -28904,6 +28912,31 @@ mod tests {
             .body
             .contains("slskr_runtime_operations_total{operation=\"backfill\"} 0"));
         assert!(!response.body.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn metrics_distinguish_database_stats_failure_from_empty_database() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let healthy = super::route_http_request("GET", "/api/metrics", None, "", &state)
+            .await
+            .expect("healthy metrics response");
+        assert!(healthy.body.contains("slskr_database_enabled 1"));
+        assert!(healthy.body.contains("slskr_database_stats_available 1"));
+
+        db.close_for_test().await;
+        let failed = super::route_http_request("GET", "/api/metrics", None, "", &state)
+            .await
+            .expect("failed database metrics response");
+        assert!(failed.body.contains("slskr_database_enabled 1"));
+        assert!(failed.body.contains("slskr_database_stats_available 0"));
     }
 
     #[tokio::test]
