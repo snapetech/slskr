@@ -450,9 +450,7 @@ fn read_state(path: &Path) -> Result<Option<ContentDiscoveryState>, String> {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!(
-                    "content discovery state metadata failed: {error}"
-                ));
+                return Err(format!("content discovery state metadata failed: {error}"));
             }
         };
         if metadata.file_type().is_symlink() || !metadata.is_file() {
