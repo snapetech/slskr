@@ -12302,8 +12302,33 @@ async fn route_http_request_with_headers(
             let webhook_id = webhook_test_id(path, "/api/admin/webhooks/")
                 .expect("guarded admin webhook test path");
             let webhooks = state.webhooks.read().await;
-            if webhooks.get(webhook_id).is_some() {
+            if let Some(webhook) = webhooks.get(webhook_id) {
+                let payload = webhooks::WebhookDispatcher::test_payload(
+                    webhooks::WebhookEvent::SearchCreated,
+                    "test webhook delivery",
+                );
+                let webhook_clone = webhook.clone();
                 drop(webhooks);
+                let Ok(delivery_permit) = Arc::clone(&state.webhook_deliveries).try_acquire_owned()
+                else {
+                    return Ok(HttpResponse {
+                        status: "429 Too Many Requests",
+                        content_type: "application/json",
+                        body: "{\"error\":\"too many webhook deliveries in progress\"}".to_owned(),
+                    });
+                };
+
+                tokio::spawn(async move {
+                    let _delivery_permit = delivery_permit;
+                    let _ = webhooks::WebhookDispatcher::send_webhook(
+                        &webhook_clone.url,
+                        &webhook_clone.secret,
+                        &payload.to_string(),
+                        webhook_clone.timeout_seconds,
+                    )
+                    .await;
+                });
+
                 Ok(routing::ok_response("{\"status\":\"test_sent\"}".to_owned()))
             } else {
                 drop(webhooks);
@@ -34075,7 +34100,11 @@ mod tests {
             .expect("webhook logs");
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].event, "search.created");
-        assert_eq!(logs[0].status, "queued");
+        assert!(
+            matches!(logs[0].status.as_str(), "queued" | "success" | "failed"),
+            "unexpected webhook delivery status: {}",
+            logs[0].status
+        );
 
         let routed_logs = super::route_http_request(
             "GET",
@@ -34266,6 +34295,19 @@ mod tests {
 
         assert_eq!(response.status, "429 Too Many Requests");
         assert!(response.body.contains("webhook deliveries"));
+
+        let admin_response = super::route_http_request(
+            "POST",
+            &format!("/api/admin/webhooks/{webhook_id}/test"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("admin test webhook");
+
+        assert_eq!(admin_response.status, "429 Too Many Requests");
+        assert!(admin_response.body.contains("webhook deliveries"));
     }
 
     #[tokio::test]
