@@ -21792,30 +21792,29 @@ fn delete_scoped_file_storage_path(
 ) -> Result<bool, String> {
     let decoded = decode_slskd_base64_path_segment(encoded_name)?;
     let path = scoped_relative_storage_path(root, &decoded)?;
-    if !path.exists() {
-        return Ok(false);
-    }
     fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
-    let canonical_root = root
-        .canonicalize()
-        .map_err(|error| format!("storage root canonicalize failed: {error}"))?;
-    let canonical_parent = path
-        .parent()
-        .unwrap_or(root)
-        .canonicalize()
-        .map_err(|error| format!("storage parent canonicalize failed: {error}"))?;
-    if !canonical_parent.starts_with(&canonical_root) {
-        return Err("path escapes the storage root".to_owned());
-    }
     #[cfg(unix)]
     {
         delete_scoped_storage_path_unix(root, &path, directory)
     }
     #[cfg(not(unix))]
     {
-        let metadata = path
-            .symlink_metadata()
-            .map_err(|error| format!("storage path metadata failed: {error}"))?;
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|error| format!("storage root canonicalize failed: {error}"))?;
+        let canonical_parent = match path.parent().unwrap_or(root).canonicalize() {
+            Ok(parent) => parent,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(format!("storage parent canonicalize failed: {error}")),
+        };
+        if !canonical_parent.starts_with(&canonical_root) {
+            return Err("path escapes the storage root".to_owned());
+        }
+        let metadata = match path.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(format!("storage path metadata failed: {error}")),
+        };
         if metadata.file_type().is_symlink() {
             return Err("storage path must not be a symlink".to_owned());
         }
@@ -21860,8 +21859,11 @@ fn delete_scoped_storage_path_unix(
     let mut parent = open(root, directory_flags, Mode::empty())
         .map_err(|error| format!("storage root confined open failed: {error}"))?;
     for component in parents {
-        parent = openat(&parent, *component, directory_flags, Mode::empty())
-            .map_err(|error| format!("storage parent confined open failed: {error}"))?;
+        parent = match openat(&parent, *component, directory_flags, Mode::empty()) {
+            Ok(parent) => parent,
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
+            Err(error) => return Err(format!("storage parent confined open failed: {error}")),
+        };
     }
     if directory {
         let target_directory = match openat(&parent, *target, directory_flags, Mode::empty()) {
@@ -43851,6 +43853,37 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_file_storage_delete_removes_dangling_symlink_without_following_it() {
+        use std::os::unix::fs::symlink;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-dangling-delete-test-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create root");
+        let link = root.join("dangling.flac");
+        let missing_target = root.join("missing-target.flac");
+        symlink(&missing_target, &link).expect("create dangling symlink");
+        assert!(!link.exists(), "fixture must be dangling");
+        assert!(link.symlink_metadata().is_ok(), "symlink must exist");
+
+        let encoded = super::STANDARD.encode("dangling.flac");
+        assert_eq!(
+            super::delete_scoped_file_storage_path(&root, &encoded, false),
+            Ok(true)
+        );
+        assert!(link.symlink_metadata().is_err());
+        assert!(!missing_target.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
