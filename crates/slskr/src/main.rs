@@ -24589,17 +24589,31 @@ fn render_completed_download_path(
             "batch_id" => batch_id.unwrap_or("_no-batch").to_owned(),
             "request_name" => request_name.unwrap_or("_").to_owned(),
             "search_text" => String::new(),
-            "date" => requested_at
-                .format(if format.is_empty() {
+            "date" => {
+                let format = if format.is_empty() {
                     "%Y-%m-%d"
                 } else {
                     format
-                })
-                .to_string(),
+                };
+                if chrono::format::StrftimeItems::new(format)
+                    .any(|item| matches!(item, chrono::format::Item::Error))
+                {
+                    return Err(
+                        "download completed path template has an invalid date format".to_owned(),
+                    );
+                }
+                requested_at.format(format).to_string()
+            }
             _ => String::new(),
         };
+        if rendered.len().saturating_add(value.len()) > MAX_TRANSFER_LOCAL_PATH_BYTES {
+            return Err("download completed path exceeds the local path limit".to_owned());
+        }
         rendered.push_str(&value);
         rest = &after_open[close + 1..];
+    }
+    if rendered.len().saturating_add(rest.len()) > MAX_TRANSFER_LOCAL_PATH_BYTES {
+        return Err("download completed path exceeds the local path limit".to_owned());
     }
     rendered.push_str(rest);
 
@@ -24624,7 +24638,11 @@ fn render_completed_download_path(
         }
     }
     output.push(basename.to_owned());
-    Ok(output.join("/"))
+    let output = output.join("/");
+    if output.len() > MAX_TRANSFER_LOCAL_PATH_BYTES {
+        return Err("download completed path exceeds the local path limit".to_owned());
+    }
+    Ok(output)
 }
 
 fn download_root(state_dir: &Path) -> PathBuf {
@@ -41113,6 +41131,33 @@ mod tests {
                 .expect_err("absolute and traversal paths must fail");
             assert!(error.contains("must be relative"), "{filename:?}: {error}");
         }
+    }
+
+    #[test]
+    fn completed_download_path_templates_reject_invalid_or_oversized_expansion() {
+        let invalid_date = super::render_completed_download_path(
+            "{date:%Q}",
+            "friend",
+            "Remote/Song.flac",
+            None,
+            None,
+            1,
+        )
+        .expect_err("invalid date format must not reach Chrono display");
+        assert!(invalid_date.contains("invalid date format"));
+
+        let remote_folder = "x".repeat(super::MAX_TRANSFER_LOCAL_PATH_BYTES);
+        let remote_filename = format!("{remote_folder}/Song.flac");
+        let oversized = super::render_completed_download_path(
+            "{remote_folder}/{remote_folder}",
+            "friend",
+            &remote_filename,
+            None,
+            None,
+            1,
+        )
+        .expect_err("repeated tokens must remain bounded");
+        assert!(oversized.contains("local path limit"));
     }
 
     #[cfg(unix)]
