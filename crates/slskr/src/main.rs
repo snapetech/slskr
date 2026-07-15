@@ -143,6 +143,8 @@ const MAX_USER_RECORDS: usize = 4_096;
 const MAX_BROWSE_RECORDS: usize = 1_024;
 const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
 const MAX_MESSAGE_RECORDS: usize = 500;
+const MAX_MESSAGE_USERNAME_BYTES: usize = 1024;
+const MAX_MESSAGE_BODY_BYTES: usize = 64 * 1024;
 const MAX_OAUTH_STATES: usize = 256;
 const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
 const MAX_CONTACT_RECORDS: usize = 4_096;
@@ -3795,12 +3797,12 @@ impl MessageStore {
                 let id = record.id.parse::<u64>().ok()?;
                 Some(MessageRecord {
                     id,
-                    username: record.username,
+                    username: truncate_utf8_bytes(record.username, MAX_MESSAGE_USERNAME_BYTES),
                     direction: match record.direction.as_str() {
                         "inbound" | "incoming" | "In" => "inbound",
                         _ => "outbound",
                     },
-                    body: record.content,
+                    body: truncate_utf8_bytes(record.content, MAX_MESSAGE_BODY_BYTES),
                     acknowledged: record.read,
                     created_at: u64::try_from(record.created_at).unwrap_or_default(),
                     updated_at: u64::try_from(record.created_at).unwrap_or_default(),
@@ -3834,9 +3836,9 @@ impl MessageStore {
         let id = self.allocate_id();
         let record = MessageRecord {
             id,
-            username,
+            username: truncate_utf8_bytes(username, MAX_MESSAGE_USERNAME_BYTES),
             direction,
-            body,
+            body: truncate_utf8_bytes(body, MAX_MESSAGE_BODY_BYTES),
             acknowledged: false,
             created_at: now,
             updated_at: now,
@@ -36132,6 +36134,36 @@ mod tests {
         assert_eq!(messages.records[1].id, third.id);
         assert!(messages.ack(second.id).is_some());
         assert!(messages.ack(1).is_none());
+    }
+
+    #[test]
+    fn message_store_bounds_live_and_rehydrated_text_fields() {
+        let oversized_username = "é".repeat(super::MAX_MESSAGE_USERNAME_BYTES);
+        let oversized_body = "b".repeat(super::MAX_MESSAGE_BODY_BYTES + 1);
+        let mut messages = super::MessageStore::with_max_records(2);
+        let live = messages.add(
+            oversized_username.clone(),
+            "inbound",
+            oversized_body.clone(),
+        );
+        assert!(live.username.len() <= super::MAX_MESSAGE_USERNAME_BYTES);
+        assert!(live.username.is_char_boundary(live.username.len()));
+        assert_eq!(live.body.len(), super::MAX_MESSAGE_BODY_BYTES);
+
+        let rehydrated =
+            super::MessageStore::from_persisted(vec![super::persistence::MessageRecord {
+                id: "1".to_owned(),
+                username: oversized_username,
+                content: oversized_body,
+                direction: "incoming".to_owned(),
+                read: false,
+                created_at: 1,
+            }]);
+        assert!(rehydrated.records[0].username.len() <= super::MAX_MESSAGE_USERNAME_BYTES);
+        assert_eq!(
+            rehydrated.records[0].body.len(),
+            super::MAX_MESSAGE_BODY_BYTES
+        );
     }
 
     #[tokio::test]
