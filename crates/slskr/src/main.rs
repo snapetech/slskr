@@ -18998,7 +18998,12 @@ async fn route_http_request_with_headers(
                   {
                       Ok(routing::bad_request_response(&error))
                   }
-                  Err(error) => Ok(routing::service_unavailable_response(&error)),
+                  Err(error) => {
+                      eprintln!("pod channel message persistence failed: {error}");
+                      Ok(routing::service_unavailable_response(
+                          "pod channel message storage is unavailable",
+                      ))
+                  }
               }
           }
 

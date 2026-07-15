@@ -16,6 +16,7 @@ const MAX_PEER_ID_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 16 * 1024;
 const MAX_SIGNATURE_BYTES: usize = 2 * 1024;
 const MAX_MESSAGE_ID_BYTES: usize = 2 * 1024;
+const MAX_SUPPORTED_UNIX_MILLIS: u64 = 253_402_300_799_999;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +96,19 @@ impl PodChannelStore {
                 "Signature must be at most {MAX_SIGNATURE_BYTES} bytes"
             ));
         }
+
+        let timestamp_unix_ms = match self
+            .messages
+            .iter()
+            .filter(|message| message.pod_id == pod_id && message.channel_id == channel_id)
+            .map(|message| message.timestamp_unix_ms)
+            .max()
+        {
+            Some(latest) if timestamp_unix_ms <= latest => latest
+                .checked_add(1)
+                .ok_or_else(|| "Pod channel message cursor space is exhausted".to_owned())?,
+            _ => timestamp_unix_ms,
+        };
 
         let message = PodChannelMessage {
             message_id: uuid::Uuid::new_v4().simple().to_string(),
@@ -199,11 +213,14 @@ fn load_state(path: &Path) -> Result<Vec<PodChannelMessage>, String> {
     let mut messages = state.messages;
     messages.retain(|message| {
         validate_field("MessageId", &message.message_id, MAX_MESSAGE_ID_BYTES).is_ok()
+            && uuid::Uuid::parse_str(&message.message_id).is_ok()
             && validate_field("PodId", &message.pod_id, MAX_POD_ID_BYTES).is_ok()
             && validate_field("ChannelId", &message.channel_id, MAX_CHANNEL_ID_BYTES).is_ok()
             && validate_field("SenderPeerId", &message.sender_peer_id, MAX_PEER_ID_BYTES).is_ok()
             && validate_field("Message body", &message.body, MAX_BODY_BYTES).is_ok()
             && message.signature.len() <= MAX_SIGNATURE_BYTES
+            && message.sig_version == 1
+            && message.timestamp_unix_ms <= MAX_SUPPORTED_UNIX_MILLIS
     });
     messages.sort_by_key(|message| (message.timestamp_unix_ms, message.message_id.clone()));
     let mut message_ids = HashSet::new();
@@ -270,6 +287,40 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].body, "message-105");
         assert!(!messages[0].message_id.is_empty());
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn timestamps_remain_monotonic_when_the_clock_does_not_advance() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-channel-cursors-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodChannelStore::empty(&state_dir);
+        let first = store
+            .append(
+                "pod-1".to_owned(),
+                "chat".to_owned(),
+                "peer-1".to_owned(),
+                "first".to_owned(),
+                String::new(),
+                50,
+            )
+            .unwrap();
+        let second = store
+            .append(
+                "pod-1".to_owned(),
+                "chat".to_owned(),
+                "peer-1".to_owned(),
+                "second".to_owned(),
+                String::new(),
+                40,
+            )
+            .unwrap();
+        assert_eq!(first.timestamp_unix_ms, 50);
+        assert_eq!(second.timestamp_unix_ms, 51);
+        assert_eq!(store.list("pod-1", "chat", Some(50)).len(), 1);
         std::fs::remove_dir_all(state_dir).unwrap();
     }
 }
