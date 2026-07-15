@@ -3152,13 +3152,10 @@ impl LiveSoakConfig {
                     })
                 })
                 .transpose()?,
-            duration: Duration::from_secs(env_u64("SLSK_SOAK_SECONDS", 60)?),
+            duration: env_duration_secs("SLSK_SOAK_SECONDS", 60, false)?,
             max_events: env_usize("SLSK_SOAK_MAX_EVENTS", 40)?,
-            ping_interval: Duration::from_secs(env_u64("SLSK_SOAK_PING_SECONDS", 30)?),
-            search_interval: Duration::from_secs(env_u64(
-                "SLSK_SOAK_SEARCH_INTERVAL_SECONDS",
-                900,
-            )?),
+            ping_interval: env_duration_secs("SLSK_SOAK_PING_SECONDS", 30, false)?,
+            search_interval: env_duration_secs("SLSK_SOAK_SEARCH_INTERVAL_SECONDS", 900, false)?,
             active_probes: env_bool("SLSK_SOAK_ACTIVE_PROBES", true)?,
             peer_username: optional_env("SLSK_SOAK_PEER_USERNAME"),
             search_query: optional_env("SLSK_SOAK_SEARCH_QUERY").or_else(|| {
@@ -3185,7 +3182,7 @@ where
     let deadline = Instant::now() + config.duration;
     let mut next_ping = Instant::now() + config.ping_interval;
     let mut next_search = Instant::now() + config.search_interval;
-    let send_timeout = Duration::from_secs(env_u64("SLSK_SOAK_SERVER_SEND_TIMEOUT_SECONDS", 20)?);
+    let send_timeout = env_duration_secs("SLSK_SOAK_SERVER_SEND_TIMEOUT_SECONDS", 20, false)?;
     let mut search_token = config.search_token;
     let mut events = 0usize;
 
@@ -3329,8 +3326,14 @@ where
                 response.token,
                 optional_env("SLSK_SOAK_INDIRECT_HOST_OVERRIDE").is_some()
             );
-            let timeout =
-                Duration::from_secs(env_u64("SLSK_SOAK_INDIRECT_TIMEOUT_SECONDS", 20)? + 5);
+            let timeout_seconds = env_u64("SLSK_SOAK_INDIRECT_TIMEOUT_SECONDS", 20)?
+                .checked_add(5)
+                .ok_or_else(|| "SLSK_SOAK_INDIRECT_TIMEOUT_SECONDS is too large".to_owned())?;
+            let timeout = validated_duration_secs(
+                "SLSK_SOAK_INDIRECT_TIMEOUT_SECONDS",
+                timeout_seconds,
+                false,
+            )?;
             match time::timeout(timeout, handle_live_soak_connect_to_peer_response(response)).await
             {
                 Ok(result) => result?,
@@ -3973,6 +3976,21 @@ fn env_u64(name: &str, default: u64) -> Result<u64, String> {
     env_parse(name, default)
 }
 
+fn env_duration_secs(name: &str, default: u64, allow_zero: bool) -> Result<Duration, String> {
+    validated_duration_secs(name, env_u64(name, default)?, allow_zero)
+}
+
+fn validated_duration_secs(name: &str, seconds: u64, allow_zero: bool) -> Result<Duration, String> {
+    if !allow_zero && seconds == 0 {
+        return Err(format!("{name} must be greater than zero"));
+    }
+    let duration = Duration::from_secs(seconds);
+    if Instant::now().checked_add(duration).is_none() {
+        return Err(format!("{name} exceeds the runtime timer range"));
+    }
+    Ok(duration)
+}
+
 fn env_usize(name: &str, default: usize) -> Result<usize, String> {
     env_parse(name, default)
 }
@@ -4006,13 +4024,17 @@ where
 mod tests {
     use super::{
         incoming_connection_name, normalize_command, peer_probe_messages, scrub_socket_addr,
+        validated_duration_secs,
     };
     use slskr_client::{
         listener::IncomingConnection, protocol::server::ServerMessage,
         stream::PeerMessageConnection,
     };
     use std::ffi::OsString;
-    use std::net::{Ipv4Addr, SocketAddr};
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        time::Duration,
+    };
     use tokio::io::duplex;
 
     fn normalize(args: &[&str]) -> Vec<String> {
@@ -4053,6 +4075,22 @@ mod tests {
     fn scrub_socket_addr_hides_host_address() {
         let address = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 10), 2234));
         assert_eq!(scrub_socket_addr(address), "ipv4:2234");
+    }
+
+    #[test]
+    fn duration_validation_rejects_zero_and_unrepresentable_timers() {
+        let zero = validated_duration_secs("TEST_SECONDS", 0, false)
+            .expect_err("zero interval should fail");
+        assert!(zero.contains("greater than zero"), "{zero}");
+
+        let oversized = validated_duration_secs("TEST_SECONDS", u64::MAX, false)
+            .expect_err("unrepresentable interval should fail");
+        assert!(oversized.contains("timer range"), "{oversized}");
+
+        assert_eq!(
+            validated_duration_secs("TEST_SECONDS", 0, true).unwrap(),
+            Duration::ZERO
+        );
     }
 
     #[test]
