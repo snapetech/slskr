@@ -31,6 +31,9 @@ for anchor in \
   'share_scan_bounds_aggregate_directory_entries' \
   'MAX_SHARE_SCAN_PENDING_DIRECTORIES' \
   'share_scan_bounds_pending_directory_descriptors' \
+  'MAX_SHARE_SCAN_TASKS' \
+  'share_rebuild_routes_reject_concurrent_scans' \
+  'spawn_blocking(move || build_share_index(&config))' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \

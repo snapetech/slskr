@@ -114,6 +114,7 @@ use tokio::{
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
+const MAX_SHARE_SCAN_TASKS: usize = 1;
 const MAX_WEBSOCKET_CONNECTIONS: usize = 32;
 const MAX_EXTERNAL_VISUALIZER_PROCESSES: usize = 4;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
@@ -8095,6 +8096,7 @@ struct AppState {
     event_tx: broadcast::Sender<EventRecord>,
     webhooks: RwLock<webhooks::WebhookManager>,
     webhook_deliveries: Arc<Semaphore>,
+    share_scans: Arc<Semaphore>,
     incoming_connections: Arc<Semaphore>,
     websocket_connections: Arc<Semaphore>,
     external_visualizer_processes: Arc<Semaphore>,
@@ -20714,6 +20716,7 @@ async fn serve(once: bool) -> Result<(), String> {
         event_tx,
         webhooks: RwLock::new(webhook_manager),
         webhook_deliveries: Arc::new(Semaphore::new(MAX_WEBHOOK_DELIVERY_TASKS)),
+        share_scans: Arc::new(Semaphore::new(MAX_SHARE_SCAN_TASKS)),
         incoming_connections: Arc::new(Semaphore::new(MAX_INCOMING_CONNECTION_TASKS)),
         websocket_connections: Arc::new(Semaphore::new(MAX_WEBSOCKET_CONNECTIONS)),
         external_visualizer_processes: Arc::new(Semaphore::new(MAX_EXTERNAL_VISUALIZER_PROCESSES)),
@@ -27039,7 +27042,13 @@ pub fn fallback_dashboard_html() -> String {
 }
 
 async fn rebuild_share_index(state: &AppState) -> Result<ShareIndexSnapshot, String> {
-    let snapshot = build_share_index(&state.config);
+    let _scan_permit = Arc::clone(&state.share_scans)
+        .try_acquire_owned()
+        .map_err(|_| "share scan already in progress".to_owned())?;
+    let config = state.config.clone();
+    let snapshot = tokio::task::spawn_blocking(move || build_share_index(&config))
+        .await
+        .map_err(|_| "share scan worker failed".to_owned())?;
     let mut shares = state.shares.write().await;
     let previous = std::mem::replace(&mut *shares, snapshot.clone());
     if let Err(error) = persist_share_index_checked(state, &snapshot).await {
@@ -28624,6 +28633,7 @@ mod tests {
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
+            share_scans: Arc::new(super::Semaphore::new(super::MAX_SHARE_SCAN_TASKS)),
             incoming_connections: Arc::new(super::Semaphore::new(
                 super::MAX_INCOMING_CONNECTION_TASKS,
             )),
@@ -31418,6 +31428,26 @@ mod tests {
         assert_eq!(response.status, "202 Accepted");
         assert!(response.body.contains("\"files\":1"));
         assert_eq!(state.shares.read().await.entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn share_rebuild_routes_reject_concurrent_scans() {
+        let (state, _receiver) = test_state();
+        let _permit = Arc::clone(&state.share_scans)
+            .acquire_owned()
+            .await
+            .expect("share scan permit");
+
+        for (method, path) in [("PUT", "/api/shares"), ("POST", "/api/v0/shares/rescan")] {
+            let response = super::route_http_request(method, path, None, "", &state)
+                .await
+                .expect("route response");
+            assert_eq!(response.status, "503 Service Unavailable");
+            assert_eq!(
+                response.body,
+                "{\"error\":\"share scan already in progress\"}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -44182,6 +44212,7 @@ mod tests {
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
+            share_scans: Arc::new(super::Semaphore::new(super::MAX_SHARE_SCAN_TASKS)),
             incoming_connections: Arc::new(super::Semaphore::new(
                 super::MAX_INCOMING_CONNECTION_TASKS,
             )),
@@ -44327,6 +44358,7 @@ mod tests {
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
+            share_scans: Arc::new(super::Semaphore::new(super::MAX_SHARE_SCAN_TASKS)),
             incoming_connections: Arc::new(super::Semaphore::new(
                 super::MAX_INCOMING_CONNECTION_TASKS,
             )),
