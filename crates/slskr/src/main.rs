@@ -139,6 +139,8 @@ const MAX_MESSAGE_RECORDS: usize = 500;
 const MAX_OAUTH_STATES: usize = 256;
 const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
 const MAX_CONTACT_RECORDS: usize = 4_096;
+const MAX_SHARE_GROUPS: usize = 256;
+const MAX_SHARE_GROUP_MEMBERS: usize = 4_096;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -4998,14 +5000,22 @@ struct ShareGroupStore {
     records: Vec<ShareGroupRecord>,
     next_id: u64,
     updated_at: u64,
+    max_records: usize,
+    max_members_per_group: usize,
 }
 
 impl ShareGroupStore {
     fn new() -> Self {
+        Self::with_limits(MAX_SHARE_GROUPS, MAX_SHARE_GROUP_MEMBERS)
+    }
+
+    fn with_limits(max_records: usize, max_members_per_group: usize) -> Self {
         Self {
             records: Vec::new(),
             next_id: 1,
             updated_at: unix_timestamp(),
+            max_records: max_records.max(1),
+            max_members_per_group: max_members_per_group.max(1),
         }
     }
 
@@ -5015,36 +5025,42 @@ impl ShareGroupStore {
     ) -> Self {
         let mut store = Self::new();
         let mut max_id = 0_u64;
-        store.records = groups
-            .into_iter()
-            .map(|record| {
-                if let Some(value) = record
-                    .id
-                    .strip_prefix("sg-")
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    max_id = max_id.max(value);
-                }
-                ShareGroupRecord {
+        for record in groups {
+            if let Some(value) = record
+                .id
+                .strip_prefix("sg-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                max_id = max_id.max(value);
+            }
+            if store.records.len() < store.max_records {
+                store.records.push(ShareGroupRecord {
                     id: record.id,
                     name: record.name,
                     description: record.description,
                     members: Vec::new(),
                     created_at: u64::try_from(record.created_at).unwrap_or_default(),
                     updated_at: u64::try_from(record.updated_at).unwrap_or_default(),
-                }
-            })
-            .collect();
+                });
+            }
+        }
         for member in members {
             if let Some(group) = store
                 .records
                 .iter_mut()
                 .find(|record| record.id == member.group_id)
             {
-                group.members.push(ShareGroupMember {
-                    username: member.username,
-                    added_at: u64::try_from(member.added_at).unwrap_or_default(),
-                });
+                if group.members.len() < store.max_members_per_group
+                    && !group
+                        .members
+                        .iter()
+                        .any(|existing| existing.username.eq_ignore_ascii_case(&member.username))
+                {
+                    group.members.push(ShareGroupMember {
+                        username: member.username,
+                        added_at: u64::try_from(member.added_at).unwrap_or_default(),
+                    });
+                }
             }
         }
         for group in &mut store.records {
@@ -5064,7 +5080,10 @@ impl ShareGroupStore {
         store
     }
 
-    fn create(&mut self, name: String, description: String) -> ShareGroupRecord {
+    fn create(&mut self, name: String, description: String) -> Option<ShareGroupRecord> {
+        if self.records.len() >= self.max_records {
+            return None;
+        }
         let now = unix_timestamp();
         let id = format!("sg-{}", self.next_id);
         self.next_id += 1;
@@ -5078,7 +5097,7 @@ impl ShareGroupStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn get(&self, id: &str) -> Option<ShareGroupRecord> {
@@ -5105,24 +5124,44 @@ impl ShareGroupStore {
         }
     }
 
-    fn add_member(&mut self, group_id: &str, username: String) -> Option<ShareGroupRecord> {
+    fn add_member(
+        &mut self,
+        group_id: &str,
+        username: String,
+    ) -> Result<Option<(ShareGroupRecord, bool)>, ()> {
         let now = unix_timestamp();
-        let record = self.records.iter_mut().find(|r| r.id == group_id)?;
-        if !record.members.iter().any(|m| m.username == username) {
+        let Some(record) = self.records.iter_mut().find(|r| r.id == group_id) else {
+            return Ok(None);
+        };
+        let added = if record
+            .members
+            .iter()
+            .any(|member| member.username.eq_ignore_ascii_case(&username))
+        {
+            false
+        } else {
+            if record.members.len() >= self.max_members_per_group {
+                return Err(());
+            }
             record.members.push(ShareGroupMember {
                 username,
                 added_at: now,
             });
             record.updated_at = now;
             self.updated_at = now;
-        }
-        Some(record.clone())
+            true
+        };
+        Ok(Some((record.clone(), added)))
     }
 
     fn remove_member(&mut self, group_id: &str, username: &str) -> Option<ShareGroupRecord> {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == group_id)?;
-        if let Some(pos) = record.members.iter().position(|m| m.username == username) {
+        if let Some(pos) = record
+            .members
+            .iter()
+            .position(|member| member.username.eq_ignore_ascii_case(username))
+        {
             record.members.remove(pos);
             record.updated_at = now;
             self.updated_at = now;
@@ -11427,7 +11466,11 @@ async fn route_http_request_with_headers(
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
             let description = extract_json_string_field(body, "description").unwrap_or_default();
             let mut sharegroups = state.sharegroups.write().await;
-            let record = sharegroups.create(name, description);
+            let Some(record) = sharegroups.create(name, description) else {
+                return Ok(routing::service_unavailable_response(
+                    "share group capacity is full",
+                ));
+            };
             let json = record.json();
             drop(sharegroups);
             persist_share_group(state, &record).await;
@@ -11515,11 +11558,12 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("username is required"));
             }
             let mut sharegroups = state.sharegroups.write().await;
-            if let Some(record) = sharegroups.add_member(id, username.clone()) {
+            match sharegroups.add_member(id, username.clone()) {
+              Ok(Some((record, added))) => {
                 let member = record
                     .members
                     .iter()
-                    .find(|member| member.username == username)
+                    .find(|member| member.username.eq_ignore_ascii_case(&username))
                     .cloned();
                 let json = member
                     .as_ref()
@@ -11532,11 +11576,19 @@ async fn route_http_request_with_headers(
                         )
                     });
                 drop(sharegroups);
-                persist_share_group(state, &record).await;
-                Ok(routing::created_response(json))
-            } else {
+                if added {
+                    persist_share_group(state, &record).await;
+                }
+                Ok(if added { routing::created_response(json) } else { routing::ok_response(json) })
+              }
+              Ok(None) => {
                 drop(sharegroups);
                 Ok(routing::not_found_response())
+              }
+              Err(()) => {
+                drop(sharegroups);
+                Ok(routing::service_unavailable_response("share group member capacity is full"))
+              }
             }
         }
         ("DELETE", path) if path.starts_with("/api/sharegroups/") && path.contains("/members/") => {
@@ -31265,6 +31317,32 @@ mod tests {
         assert_eq!(duplicate.status, "200 OK");
         assert!(duplicate.body.contains("\"added\":false"));
         assert_eq!(state.contacts.read().await.records.len(), 1);
+    }
+
+    #[test]
+    fn share_groups_bound_groups_and_case_insensitive_members() {
+        let mut groups = super::ShareGroupStore::with_limits(1, 1);
+        let group = groups.create("Trusted".to_owned(), String::new()).unwrap();
+        assert!(groups
+            .create("Overflow".to_owned(), String::new())
+            .is_none());
+
+        let (_, added) = groups
+            .add_member(&group.id, "Alice".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(added);
+        let (_, added) = groups
+            .add_member(&group.id, "alice".to_owned())
+            .unwrap()
+            .unwrap();
+        assert!(!added);
+        assert!(groups.add_member(&group.id, "Bob".to_owned()).is_err());
+        assert!(groups
+            .add_member("missing", "Bob".to_owned())
+            .unwrap()
+            .is_none());
+        assert!(groups.remove_member(&group.id, "ALICE").is_some());
     }
 
     #[tokio::test]

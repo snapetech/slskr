@@ -46,6 +46,9 @@ for anchor in \
   'transient_credential_stores_refuse_bursts_at_live_capacity' \
   'MAX_CONTACT_RECORDS' \
   'contacts_are_bounded_deduplicated_and_report_discovery_truthfully' \
+  'MAX_SHARE_GROUPS' \
+  'MAX_SHARE_GROUP_MEMBERS' \
+  'share_groups_bound_groups_and_case_insensitive_members' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \

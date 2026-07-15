@@ -134,7 +134,7 @@ The first app shell exposes:
 - `GET /api/*/bans`, `POST /api/*/bans/username`, `DELETE /api/*/bans/username/:username`, `POST /api/*/bans/ip`, and `DELETE /api/*/bans/ip/:ip`: maintain local username/IP ban projections used by security dashboards, with SQLite write-through when persistence is enabled
 - `GET/POST/PUT/DELETE /api/wishlist` item routes, `/api/wishlist/import/csv`, and release-radar/source-feed wishlist helpers: maintain wishlist projections with SQLite write-through when persistence is enabled
 - `GET/POST/PUT/DELETE /api/contacts` plus discovery/invite contact helpers: maintain contact projections with SQLite write-through when persistence is enabled
-- `GET/POST/PUT/DELETE /api/sharegroups` and `/api/sharegroups/:id/members` routes: maintain share-group and membership projections used by user-group compatibility routes, with SQLite write-through when persistence is enabled
+- `GET/POST/PUT/DELETE /api/sharegroups` and `/api/sharegroups/:id/members` routes: maintain up to 256 share-group projections with 4,096 case-insensitively unique members per group, used by user-group compatibility routes, with bounded SQLite hydration and write-through when persistence is enabled
 - `GET/POST/PUT/DELETE /api/share-grants` plus collection lookup/token/backfill helpers: maintain share-grant projections with SQLite write-through when persistence is enabled
 - `GET/POST/PUT/DELETE /api/nowplaying` plus listening-party content helpers: maintain current playback projections with SQLite write-through when persistence is enabled
 - `GET /api/session`: current Soulseek session state, including last server message name and counters
