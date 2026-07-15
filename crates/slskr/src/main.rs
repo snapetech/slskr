@@ -859,6 +859,7 @@ impl SearchRecord {
             "fileCount": self.results.len(),
             "lockedFileCount": locked_file_count,
             "responseCount": response_count,
+            "responsesAvailable": self.status != "active" || !self.results.is_empty(),
             "startedAt": self.created_at.to_string(),
             "endedAt": (self.status != "active").then(|| self.updated_at.to_string()),
             "expires_at": self.expires_at,
@@ -895,7 +896,7 @@ impl SearchRecord {
             format!("\"{}\"", self.updated_at)
         };
         format!(
-            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"wishlistItemId\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"wishlistItemId\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responsesAvailable\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
             json_escape(&self.id),
             self.token,
             json_escape(&self.query),
@@ -910,6 +911,7 @@ impl SearchRecord {
             self.results.len(),
             locked_file_count,
             response_count,
+            self.status != "active" || !self.results.is_empty(),
             responses,
             results,
             offset,
@@ -40057,6 +40059,7 @@ mod tests {
         assert!(created.body.contains("\"query\":\"test flac\""));
         assert!(created.body.contains("\"target\":\"global\""));
         assert!(created.body.contains("\"status\":\"active\""));
+        assert!(created.body.contains("\"responsesAvailable\":true"));
         assert!(created.body.contains("\"result_count\":1"));
         assert_eq!(
             receiver.try_recv().expect("search command"),
@@ -40096,6 +40099,28 @@ mod tests {
                 .expect("complete search");
         assert_eq!(completed.status, "200 OK");
         assert!(completed.body.contains("\"status\":\"completed\""));
+    }
+
+    #[test]
+    fn search_response_availability_tracks_durable_payloads_and_completion() {
+        let mut searches = super::SearchStore::new();
+        let created = searches
+            .create(
+                None,
+                "empty active".to_owned(),
+                "global",
+                None,
+                Vec::new(),
+                60,
+            )
+            .unwrap()
+            .record;
+        let active = serde_json::from_str::<serde_json::Value>(&created.json()).unwrap();
+        assert_eq!(active["responsesAvailable"], false);
+
+        let completed = searches.complete(created.token).unwrap().0;
+        let completed = serde_json::from_str::<serde_json::Value>(&completed.json()).unwrap();
+        assert_eq!(completed["responsesAvailable"], true);
     }
 
     #[tokio::test]
