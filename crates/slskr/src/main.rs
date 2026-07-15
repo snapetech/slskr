@@ -26035,6 +26035,34 @@ mod tests {
     }
 
     #[test]
+    fn cookie_auth_rejects_noncanonical_token_encodings() {
+        let config = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_API_TOKEN", "token-�")
+                .with("SLSKR_API_COOKIE_AUTH_ENABLED", "true"),
+        )
+        .expect("cookie auth config");
+
+        assert!(super::is_authorized(
+            &config,
+            None,
+            Some("slskr.session=token-%EF%BF%BD")
+        ));
+        for cookie in [
+            "slskr.session=token-%FF",
+            "slskr.session=token-%",
+            "slskr.session=token-%G0",
+        ] {
+            assert!(
+                !super::is_authorized(&config, None, Some(cookie)),
+                "{cookie}"
+            );
+        }
+    }
+
+    #[test]
     fn trusted_proxy_rate_limit_addr_parses_forwarded_header_ipv6() {
         let env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "::1/128");
         let config =

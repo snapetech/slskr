@@ -244,8 +244,28 @@ pub(crate) fn cookie_session_token(cookie: Option<&str>) -> Option<String> {
         .split(';')
         .filter_map(|part| part.trim().split_once('='))
         .find_map(|(name, value)| {
-            (name == "slskr.session").then(|| percent_decode_component(value.trim()))
+            (name == "slskr.session")
+                .then(|| strict_percent_decode_component(value.trim()))
+                .flatten()
         })
+}
+
+fn strict_percent_decode_component(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = hex_value(*bytes.get(index + 1)?)?;
+            let low = hex_value(*bytes.get(index + 2)?)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 pub fn percent_decode_component(value: &str) -> String {
