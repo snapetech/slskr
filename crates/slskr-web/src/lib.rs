@@ -5735,6 +5735,109 @@ fn wishlist_ignored_results_panel_html(responses: Option<&[EndpointBody]>) -> St
     )
 }
 
+fn wishlist_policy_history_panel_html(responses: Option<&[EndpointBody]>) -> String {
+    let items = endpoint_array(responses, "/wishlist");
+    let rows = items
+        .iter()
+        .filter_map(|item| {
+            let item_id = value_text(item, &["id", "wishlistId", "searchId"])?;
+            let label = value_text(item, &["searchText", "query", "text"])
+                .unwrap_or_else(|| "Wanted search".to_string());
+            let filter = value_text(item, &["filter", "searchFilter"]).unwrap_or_default();
+            let enabled = value_bool(item, &["enabled"]).unwrap_or(true);
+            let automatic =
+                value_bool(item, &["autoDownload", "autoDownloadEnabled"]).unwrap_or(false);
+            let number = |key: &str| {
+                item.get(key)
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            };
+            let max_results = number("maxResults").max(1);
+            let max_downloads = item
+                .get("maxDownloads")
+                .and_then(serde_json::Value::as_u64)
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            let last_searched = item
+                .get("lastSearchedAt")
+                .and_then(serde_json::Value::as_u64);
+            let last_viewed = item
+                .get("lastViewedAt")
+                .and_then(serde_json::Value::as_u64);
+            let unseen = last_searched.is_some_and(|searched| {
+                last_viewed.is_none_or(|viewed| searched > viewed)
+            });
+            Some(format!(
+                r#"<details class="slskr-wishlist-policy-row" {open} data-slskr-wishlist-policy-panel data-slskr-native-wishlist-id="{item_id}"><summary><span><strong>{label}</strong><small>{filter_summary}</small></span><mark class="{status_class}">{status}</mark></summary><div class="slskr-wishlist-run-ledger"><span><strong>{visible}</strong> visible</span><span><strong>{locked}</strong> locked</span><span><strong>{filtered}</strong> filtered</span><span><strong>{ignored}</strong> ignored</span><span><strong>{responses}</strong> responses</span><span><strong>{searches}</strong> runs</span><span><strong>{downloads}</strong> downloads</span></div><div class="slskr-wishlist-policy-grid"><label><span>Result filter</span><input data-slskr-wishlist-policy-field="filter" aria-label="Result filter for {label}" value="{filter}"></label><label><span>Maximum results</span><input data-slskr-wishlist-policy-field="maxResults" aria-label="Maximum results for {label}" inputmode="numeric" value="{max_results}"></label><label><span>Maximum downloads</span><input data-slskr-wishlist-policy-field="maxDownloads" aria-label="Maximum downloads for {label}" inputmode="numeric" placeholder="One-shot" value="{max_downloads}"></label><label class="slskr-wishlist-policy-check"><input type="checkbox" data-slskr-wishlist-policy-field="enabled" {enabled}> Enabled</label><label class="slskr-wishlist-policy-check"><input type="checkbox" data-slskr-wishlist-policy-field="autoDownload" {automatic}> Auto-download</label></div><div class="slskr-wishlist-policy-actions"><button type="button" data-slskr-wishlist-policy-save>Save policy</button><button type="button" data-slskr-wishlist-mark-viewed>Mark viewed</button><button type="button" data-slskr-wishlist-load-history>Load run ledger</button></div><div class="slskr-wishlist-history-results" data-slskr-wishlist-history-results><p>Load the run ledger to inspect recent searches.</p></div></details>"#,
+                open = if unseen { "open" } else { "" },
+                item_id = escape_html(&item_id),
+                label = escape_html(&label),
+                filter_summary = escape_html(if filter.is_empty() { "all formats" } else { &filter }),
+                status_class = if unseen { "is-unseen" } else { "" },
+                status = if unseen { "new results" } else { "reviewed" },
+                visible = number("lastVisibleHitCount"),
+                locked = number("lastHiddenLockedHitCount"),
+                filtered = number("lastFilteredOutHitCount"),
+                ignored = number("lastIgnoredResultHitCount"),
+                responses = number("lastResponseCount"),
+                searches = number("totalSearchCount"),
+                downloads = number("totalDownloadCount"),
+                filter = escape_html(&filter),
+                max_results = max_results,
+                max_downloads = escape_html(&max_downloads),
+                enabled = if enabled { "checked" } else { "" },
+                automatic = if automatic { "checked" } else { "" },
+            ))
+        })
+        .collect::<Vec<_>>();
+    let body = if rows.is_empty() {
+        r#"<p class="slskr-wishlist-policy-empty">Add a wanted search to configure its policy and inspect runs.</p>"#.to_string()
+    } else {
+        rows.join("")
+    };
+    format!(
+        r#"<section class="slskr-wishlist-policy-panel" data-slskr-wishlist-policy-manager><header><div><span class="slskr-wishlist-ignore-kicker">Run ledger</span><h3>Search policy and history</h3></div><p>Control result limits and automation, then inspect what each run kept or rejected.</p></header><div class="slskr-wishlist-policy-rows">{body}</div></section>"#,
+        body = body,
+    )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(target_arch = "wasm32", test))]
+fn wishlist_history_response_html(response: &str) -> String {
+    let Ok(serde_json::Value::Array(records)) = serde_json::from_str(response) else {
+        return "<p>Run history could not be read.</p>".to_string();
+    };
+    if records.is_empty() {
+        return "<p>No completed or active runs are retained for this search.</p>".to_string();
+    }
+    let rows = records
+        .iter()
+        .take(20)
+        .map(|record| {
+            let query = value_text(record, &["searchText", "query"])
+                .unwrap_or_else(|| "search".to_string());
+            let status = value_text(record, &["status", "state"])
+                .unwrap_or_else(|| "unknown".to_string());
+            let started = value_text(record, &["startedAt", "created_at"])
+                .unwrap_or_else(|| "unknown time".to_string());
+            let results = record
+                .get("result_count")
+                .or_else(|| record.get("fileCount"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            format!(
+                "<li><time>{}</time><span><strong>{}</strong><small>{} · {} results</small></span></li>",
+                escape_html(&started),
+                escape_html(&query),
+                escape_html(&status),
+                results,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(r#"<ol class="slskr-wishlist-history-list">{rows}</ol>"#)
+}
+
 fn route_native_workspace_html(
     kind: RouteKind,
     rows: &[(String, String, String, String)],
@@ -5786,8 +5889,9 @@ fn route_native_workspace_html(
             .join(""),
         ),
         RouteKind::Wishlist => format!(
-            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}{ignored}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{preview}{stats}<button type="button">Copy Review</button></aside></div>"#,
+            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}{policy}{ignored}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{preview}{stats}<button type="button">Copy Review</button></aside></div>"#,
             route_table = route_table,
+            policy = wishlist_policy_history_panel_html(responses),
             ignored = wishlist_ignored_results_panel_html(responses),
             preview = native_selection_preview_html(
                 "No wishlist item selected",
@@ -7059,6 +7163,9 @@ fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element) {
+    if handle_wishlist_policy_action(document, button) {
+        return;
+    }
     if handle_wishlist_ignored_result_action(document, button) {
         return;
     }
@@ -7106,6 +7213,151 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         ));
     }
     show_toast(document, &message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_wishlist_policy_action(document: &web_sys::Document, button: &web_sys::Element) -> bool {
+    let save = button.has_attribute("data-slskr-wishlist-policy-save");
+    let mark_viewed = button.has_attribute("data-slskr-wishlist-mark-viewed");
+    let load_history = button.has_attribute("data-slskr-wishlist-load-history");
+    if !save && !mark_viewed && !load_history {
+        return false;
+    }
+    let panel = button
+        .closest("[data-slskr-wishlist-policy-panel]")
+        .ok()
+        .flatten();
+    let Some(item_id) = panel
+        .as_ref()
+        .and_then(|panel| panel.get_attribute("data-slskr-native-wishlist-id"))
+        .filter(|value| safe_route_segment(value))
+    else {
+        show_toast(document, "Choose a wanted search first");
+        return true;
+    };
+
+    let field = |name: &str| {
+        panel.as_ref().and_then(|panel| {
+            panel
+                .query_selector(&format!(r#"[data-slskr-wishlist-policy-field="{name}"]"#))
+                .ok()
+                .flatten()
+        })
+    };
+    let (method, path, body, label) = if save {
+        let filter = field("filter")
+            .as_ref()
+            .and_then(form_control_value)
+            .unwrap_or_default();
+        let max_results = field("maxResults")
+            .as_ref()
+            .and_then(form_control_value)
+            .unwrap_or_default();
+        let max_downloads = field("maxDownloads")
+            .as_ref()
+            .and_then(form_control_value)
+            .unwrap_or_default();
+        let checked = |name: &str| {
+            field(name)
+                .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+                .is_some_and(|input| input.checked())
+        };
+        let max_results = match max_results.trim().parse::<u64>() {
+            Ok(value) if value > 0 => value,
+            _ => {
+                show_toast(document, "Maximum results must be a positive number");
+                return true;
+            }
+        };
+        let max_downloads_json = if max_downloads.trim().is_empty() {
+            "null".to_string()
+        } else {
+            match max_downloads.trim().parse::<u64>() {
+                Ok(value) if value > 0 => value.to_string(),
+                _ => {
+                    show_toast(document, "Maximum downloads must be blank or positive");
+                    return true;
+                }
+            }
+        };
+        (
+            "PUT",
+            endpoint_url(&format!("/wishlist/{item_id}")),
+            Some(format!(
+                r#"{{"filter":"{}","enabled":{},"autoDownload":{},"maxResults":{},"maxDownloads":{}}}"#,
+                escape_json_string(filter.trim()),
+                checked("enabled"),
+                checked("autoDownload"),
+                max_results,
+                max_downloads_json,
+            )),
+            "Save policy",
+        )
+    } else if mark_viewed {
+        (
+            "POST",
+            endpoint_url(&format!("/wishlist/{item_id}/mark-viewed")),
+            None,
+            "Mark viewed",
+        )
+    } else {
+        (
+            "GET",
+            endpoint_url(&format!("/wishlist/{item_id}/searches?limit=20")),
+            None,
+            "Load run ledger",
+        )
+    };
+
+    show_toast(document, &format!("{label} sending"));
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let document = document.clone();
+    let panel = panel.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = fetch_text_with_method(&window, &path, method, body.as_deref()).await;
+        if load_history {
+            if let Some(target) = panel.as_ref().and_then(|panel| {
+                panel
+                    .query_selector("[data-slskr-wishlist-history-results]")
+                    .ok()
+                    .flatten()
+            }) {
+                target.set_inner_html(&match &result {
+                    Ok(response) => wishlist_history_response_html(response),
+                    Err(error) => format!(
+                        "<p>{}</p>",
+                        escape_html(
+                            &error
+                                .as_string()
+                                .unwrap_or_else(|| "run history request failed".to_string()),
+                        )
+                    ),
+                });
+            }
+        }
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            match result {
+                Ok(response) => status.set_inner_html(&format!(
+                    "<strong>{}</strong> {}",
+                    escape_html(label),
+                    escape_html(&compact_preview(&response))
+                )),
+                Err(error) => {
+                    let error = error
+                        .as_string()
+                        .unwrap_or_else(|| "wishlist request failed".to_string());
+                    status.set_inner_html(&format!(
+                        "<strong>{}</strong> {}",
+                        escape_html(label),
+                        escape_html(&error)
+                    ));
+                }
+            }
+        }
+    });
+    true
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -17073,6 +17325,21 @@ mod tests {
     }
 
     #[test]
+    fn wishlist_history_renderer_escapes_remote_fields_and_rejects_malformed_json() {
+        let html = wishlist_history_response_html(
+            r#"[{"searchText":"<script>alert(1)</script>","status":"completed<img>","startedAt":"now&later","result_count":2}]"#,
+        );
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(html.contains("completed&lt;img&gt;"));
+        assert!(html.contains("now&amp;later"));
+        assert!(!html.contains("<script>"));
+        assert_eq!(
+            wishlist_history_response_html("not json"),
+            "<p>Run history could not be read.</p>"
+        );
+    }
+
+    #[test]
     fn rust_ui_parity_ledger_tracks_closure_instead_of_stale_gaps() {
         let ledger = include_str!("../../../docs/rust-ui-parity-ledger.md");
         assert!(ledger.contains("Estimated completion: 95-98%."));
@@ -17894,7 +18161,7 @@ mod tests {
                     path: "/wishlist",
                     surface: "wishlist",
                 },
-                body: r#"[{"id":"wish-7","searchText":"rare live set","filter":"flac","enabled":true,"ignoredResultCount":1,"ignoredResults":[{"id":"rule-9","username":"noisy-peer","directory":"Bootlegs/Unsorted"}]}]"#
+                body: r#"[{"id":"wish-7","searchText":"rare live set","filter":"flac","enabled":true,"autoDownload":true,"maxResults":25,"maxDownloads":3,"lastSearchedAt":200,"lastViewedAt":100,"lastVisibleHitCount":8,"lastHiddenLockedHitCount":2,"lastFilteredOutHitCount":4,"lastIgnoredResultHitCount":1,"lastResponseCount":6,"totalSearchCount":9,"totalDownloadCount":2,"ignoredResultCount":1,"ignoredResults":[{"id":"rule-9","username":"noisy-peer","directory":"Bootlegs/Unsorted"}]}]"#
                     .to_string(),
             }],
         );
@@ -17902,18 +18169,33 @@ mod tests {
         assert!(live_wishlist
             .contains(r#"data-slskr-native-action-summary="Run wishlist wish-7: rare live set""#));
         assert!(live_wishlist.contains(
-            r#"data-slskr-native-detail-list="Wanted search: rare live set | Filter: flac | Automation: enabled=true / auto=false / id=wish-7 | Next action: Run""#
+            r#"data-slskr-native-detail-list="Wanted search: rare live set | Filter: flac | Automation: enabled=true / auto=true / id=wish-7 | Next action: Run""#
         ));
         assert!(live_wishlist
             .contains(r#"data-slskr-native-action-menu="Run | Run Enabled | Copy Review""#));
         assert!(live_wishlist.contains("data-slskr-wishlist-row-controls"));
         assert!(live_wishlist.contains(r#"aria-label="Enabled rare live set" checked"#));
+        assert!(live_wishlist.contains("data-slskr-wishlist-policy-manager"));
+        assert!(live_wishlist.contains("Search policy and history"));
+        assert!(live_wishlist.contains("new results"));
+        assert!(live_wishlist.contains("<strong>8</strong> visible"));
+        assert!(live_wishlist.contains(r#"data-slskr-wishlist-policy-save"#));
+        assert!(live_wishlist.contains(r#"data-slskr-wishlist-mark-viewed"#));
+        assert!(live_wishlist.contains(r#"data-slskr-wishlist-load-history"#));
+        assert!(live_wishlist.contains(r#"data-slskr-wishlist-policy-field="maxDownloads""#));
         assert!(live_wishlist.contains("Noise gate"));
         assert!(live_wishlist.contains("noisy-peer"));
         assert!(live_wishlist.contains("Bootlegs/Unsorted"));
         assert!(live_wishlist.contains(r#"data-slskr-wishlist-ignore-rule-id="rule-9""#));
         assert!(live_wishlist.contains(r#"data-slskr-wishlist-ignore-submit"#));
         assert!(live_wishlist.contains(">Restore</button>"));
+
+        let history = wishlist_history_response_html(
+            r#"[{"searchText":"rare live set","status":"completed","startedAt":"200","result_count":8}]"#,
+        );
+        assert!(history.contains("slskr-wishlist-history-list"));
+        assert!(history.contains("rare live set"));
+        assert!(history.contains("completed · 8 results"));
 
         let sharing = route_page_html("/sharegroups");
         assert!(sharing.contains("data-slskr-native-share-group"));

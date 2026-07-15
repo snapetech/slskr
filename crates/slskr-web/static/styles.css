@@ -1498,6 +1498,193 @@ body {
   outline-offset: 2px;
 }
 
+.slskr-wishlist-policy-panel {
+  background: #0c1112;
+  border: 1px solid #34403f;
+  border-left: 4px solid #73c7b6;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.slskr-wishlist-policy-panel > header {
+  align-items: end;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1.3fr);
+}
+
+.slskr-wishlist-policy-panel h3,
+.slskr-wishlist-policy-panel p {
+  margin: 0;
+}
+
+.slskr-wishlist-policy-panel > header p,
+.slskr-wishlist-policy-empty {
+  color: #aeb9b4;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.slskr-wishlist-policy-rows {
+  border-top: 1px solid #34403f;
+}
+
+.slskr-wishlist-policy-row {
+  border-bottom: 1px solid #263130;
+  padding: 0 10px 10px;
+}
+
+.slskr-wishlist-policy-row summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 48px;
+}
+
+.slskr-wishlist-policy-row summary > span {
+  display: grid;
+  gap: 2px;
+}
+
+.slskr-wishlist-policy-row summary small {
+  color: #9fb0aa;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+}
+
+.slskr-wishlist-policy-row mark {
+  background: #18211f;
+  border: 1px solid #3d5c55;
+  color: #8dd7c8;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 4px 7px;
+  text-transform: uppercase;
+}
+
+.slskr-wishlist-policy-row mark.is-unseen {
+  background: #392910;
+  border-color: #7a5b35;
+  color: #ffd166;
+}
+
+.slskr-wishlist-run-ledger {
+  background: #080b0c;
+  border: 1px solid #263130;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(70px, 1fr));
+  margin-bottom: 10px;
+}
+
+.slskr-wishlist-run-ledger span {
+  color: #8fa09a;
+  display: grid;
+  font-size: 9px;
+  gap: 2px;
+  padding: 8px;
+  text-transform: uppercase;
+}
+
+.slskr-wishlist-run-ledger strong {
+  color: #f4efe7;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 14px;
+}
+
+.slskr-wishlist-policy-grid {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(110px, 0.7fr) minmax(120px, 0.8fr) auto auto;
+}
+
+.slskr-wishlist-policy-grid label:not(.slskr-wishlist-policy-check) {
+  color: #8dd7c8;
+  display: grid;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 4px;
+  text-transform: uppercase;
+}
+
+.slskr-wishlist-policy-grid input:not([type="checkbox"]) {
+  background: #080b0c;
+  border: 1px solid #34403f;
+  color: #f4efe7;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.slskr-wishlist-policy-check {
+  align-items: center;
+  color: #c6d0ca;
+  display: flex;
+  font-size: 11px;
+  gap: 5px;
+  min-height: 32px;
+}
+
+.slskr-wishlist-policy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.slskr-wishlist-policy-actions button {
+  background: #253734;
+  border: 1px solid #3d5c55;
+  color: #f4efe7;
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.slskr-wishlist-history-results {
+  color: #aeb9b4;
+  font-size: 11px;
+}
+
+.slskr-wishlist-history-list {
+  border-left: 1px solid #3d5c55;
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 10px 0 0 6px;
+  padding: 0 0 0 14px;
+}
+
+.slskr-wishlist-history-list li {
+  align-items: baseline;
+  border-bottom: 1px solid #263130;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(90px, 0.5fr) minmax(180px, 1.5fr);
+  padding: 7px 0;
+}
+
+.slskr-wishlist-history-list time,
+.slskr-wishlist-history-list small {
+  color: #8fa09a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+}
+
+.slskr-wishlist-history-list span {
+  display: grid;
+  gap: 2px;
+}
+
+.slskr-wishlist-policy-panel button:focus-visible,
+.slskr-wishlist-policy-panel input:focus-visible,
+.slskr-wishlist-policy-panel summary:focus-visible {
+  outline: 2px solid #73c7b6;
+  outline-offset: 2px;
+}
+
 .slskr-native-list {
   display: grid;
   gap: 8px;
@@ -2712,9 +2899,15 @@ body {
   }
 
   .slskr-wishlist-ignore-panel > header,
-  .slskr-wishlist-ignore-add {
+  .slskr-wishlist-ignore-add,
+  .slskr-wishlist-policy-panel > header,
+  .slskr-wishlist-policy-grid {
     align-items: stretch;
     grid-template-columns: 1fr;
+  }
+
+  .slskr-wishlist-run-ledger {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .slskr-wishlist-ignore-rule {
