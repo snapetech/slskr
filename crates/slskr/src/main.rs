@@ -180,6 +180,9 @@ const MAX_TOTAL_COLLECTION_ITEMS: usize = 50_000;
 const MAX_WISHLIST_ITEMS: usize = 10_000;
 const MAX_WISHLIST_IGNORED_RESULTS: usize = 50_000;
 const MAX_WISHLIST_IGNORED_RESULTS_PER_ITEM: usize = 10_000;
+const MAX_WISHLIST_FILTER_BYTES: usize = 4 * 1024;
+const MAX_WISHLIST_RESULTS: usize = 10_000;
+const MAX_WISHLIST_DOWNLOADS: u64 = 1_000_000;
 const MAX_LIST_NAME_BYTES: usize = 4 * 1024;
 const MAX_LIST_DESCRIPTION_BYTES: usize = 16 * 1024;
 const MAX_LIST_CONTENT_ID_BYTES: usize = 4 * 1024;
@@ -4391,6 +4394,10 @@ impl MessageStore {
         }
         updated
     }
+
+    fn has_unacknowledged_messages(&self) -> bool {
+        self.records.iter().any(|record| !record.acknowledged)
+    }
 }
 
 fn slskd_conversation_json(
@@ -4728,6 +4735,27 @@ impl RoomStore {
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
+    }
+
+    fn activity_json(&self, local_username: &str) -> String {
+        let activity = self
+            .records
+            .iter()
+            .filter(|room| room.joined)
+            .filter_map(|room| {
+                room.messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.username != local_username)
+                    .map(|message| {
+                        (
+                            room.name.clone(),
+                            serde_json::Value::from(message.created_at.saturating_mul(1_000)),
+                        )
+                    })
+            })
+            .collect::<serde_json::Map<String, serde_json::Value>>();
+        serde_json::Value::Object(activity).to_string()
     }
 
     fn set_ticker(&mut self, room: &str, ticker: String) -> Option<RoomRecord> {
@@ -5379,6 +5407,12 @@ struct WishlistItem {
     artist: String,
     title: String,
     kind: String,
+    filter: String,
+    enabled: bool,
+    auto_download: bool,
+    max_results: usize,
+    max_downloads: Option<u64>,
+    last_viewed_at: Option<u64>,
     added_at: u64,
 }
 
@@ -5394,15 +5428,32 @@ impl WishlistItem {
 
     fn json(&self) -> String {
         let search_text = self.search_text();
-        format!(
-            "{{\"id\":\"{}\",\"artist\":\"{}\",\"title\":\"{}\",\"kind\":\"{}\",\"added_at\":{},\"searchText\":\"{}\",\"filter\":\"\",\"enabled\":true,\"autoDownload\":false,\"maxResults\":100,\"lastSearchedAt\":null,\"lastMatchCount\":0,\"lastIgnoredResultHitCount\":0,\"totalSearchCount\":0,\"lastSearchId\":null}}",
-            json_escape(&self.id),
-            json_escape(&self.artist),
-            json_escape(&self.title),
-            json_escape(&self.kind),
-            self.added_at,
-            json_escape(&search_text)
-        )
+        serde_json::json!({
+            "id": self.id,
+            "artist": self.artist,
+            "title": self.title,
+            "kind": self.kind,
+            "added_at": self.added_at,
+            "createdAt": self.added_at,
+            "searchText": search_text,
+            "filter": self.filter,
+            "enabled": self.enabled,
+            "autoDownload": self.auto_download,
+            "maxResults": self.max_results,
+            "maxDownloads": self.max_downloads,
+            "lastViewedAt": self.last_viewed_at,
+            "lastSearchedAt": null,
+            "lastMatchCount": 0,
+            "lastVisibleHitCount": 0,
+            "lastHiddenLockedHitCount": 0,
+            "lastFilteredOutHitCount": 0,
+            "lastIgnoredResultHitCount": 0,
+            "lastResponseCount": 0,
+            "totalSearchCount": 0,
+            "totalDownloadCount": 0,
+            "lastSearchId": null,
+        })
+        .to_string()
     }
 }
 
@@ -5488,6 +5539,20 @@ impl WishlistStore {
                 artist: truncate_utf8_bytes(record.artist, MAX_LIST_ARTIST_BYTES),
                 title: truncate_utf8_bytes(record.title, MAX_LIST_TITLE_BYTES),
                 kind: truncate_utf8_bytes(record.kind, MAX_LIST_KIND_BYTES),
+                filter: truncate_utf8_bytes(record.filter, MAX_WISHLIST_FILTER_BYTES),
+                enabled: record.enabled,
+                auto_download: record.auto_download,
+                max_results: usize::try_from(record.max_results)
+                    .unwrap_or(100)
+                    .clamp(1, MAX_WISHLIST_RESULTS),
+                max_downloads: record
+                    .max_downloads
+                    .and_then(|value| u64::try_from(value).ok())
+                    .filter(|value| *value > 0)
+                    .map(|value| value.min(MAX_WISHLIST_DOWNLOADS)),
+                last_viewed_at: record
+                    .last_viewed_at
+                    .and_then(|value| u64::try_from(value).ok()),
                 added_at: u64::try_from(record.added_at).unwrap_or(0),
             });
         }
@@ -5562,6 +5627,21 @@ impl WishlistStore {
         title: String,
         kind: String,
     ) -> Result<WishlistItem, ()> {
+        self.add_item_with_settings(artist, title, kind, String::new(), true, false, 100, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_item_with_settings(
+        &mut self,
+        artist: String,
+        title: String,
+        kind: String,
+        filter: String,
+        enabled: bool,
+        auto_download: bool,
+        max_results: usize,
+        max_downloads: Option<u64>,
+    ) -> Result<WishlistItem, ()> {
         let now = unix_timestamp();
         self.get_or_create();
         let index = self
@@ -5578,6 +5658,12 @@ impl WishlistStore {
             artist: truncate_utf8_bytes(artist, MAX_LIST_ARTIST_BYTES),
             title: truncate_utf8_bytes(title, MAX_LIST_TITLE_BYTES),
             kind: truncate_utf8_bytes(kind, MAX_LIST_KIND_BYTES),
+            filter: truncate_utf8_bytes(filter.trim().to_owned(), MAX_WISHLIST_FILTER_BYTES),
+            enabled,
+            auto_download,
+            max_results: max_results.clamp(1, MAX_WISHLIST_RESULTS),
+            max_downloads: max_downloads.map(|value| value.min(MAX_WISHLIST_DOWNLOADS)),
+            last_viewed_at: None,
             added_at: now,
         };
         let record = &mut self.records[index];
@@ -5638,12 +5724,18 @@ impl WishlistStore {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_item(
         &mut self,
         item_id: &str,
         artist: Option<String>,
         title: Option<String>,
         kind: Option<String>,
+        filter: Option<String>,
+        enabled: Option<bool>,
+        auto_download: Option<bool>,
+        max_results: Option<usize>,
+        max_downloads: Option<Option<u64>>,
     ) -> Option<WishlistItem> {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == "default")?;
@@ -5656,6 +5748,21 @@ impl WishlistStore {
         }
         if let Some(kind) = kind {
             item.kind = truncate_utf8_bytes(kind, MAX_LIST_KIND_BYTES);
+        }
+        if let Some(filter) = filter {
+            item.filter = truncate_utf8_bytes(filter.trim().to_owned(), MAX_WISHLIST_FILTER_BYTES);
+        }
+        if let Some(enabled) = enabled {
+            item.enabled = enabled;
+        }
+        if let Some(auto_download) = auto_download {
+            item.auto_download = auto_download;
+        }
+        if let Some(max_results) = max_results {
+            item.max_results = max_results.clamp(1, MAX_WISHLIST_RESULTS);
+        }
+        if let Some(max_downloads) = max_downloads {
+            item.max_downloads = max_downloads.map(|value| value.min(MAX_WISHLIST_DOWNLOADS));
         }
         record.updated_at = now;
         self.updated_at = now;
@@ -5689,6 +5796,7 @@ impl WishlistStore {
         self.records
             .iter()
             .flat_map(|record| record.items.iter())
+            .filter(|item| item.enabled)
             .map(|item| {
                 if item.title.is_empty() {
                     item.artist.clone()
@@ -9069,6 +9177,16 @@ async fn route_http_request_with_headers(
                 "count": count,
             }).to_string()))
         }
+        ("GET", "/api/network/stats") => {
+            let include_peers = query_params(route.query.unwrap_or_default())
+                .into_iter()
+                .find(|(key, _)| key == "includePeers")
+                .and_then(|(_, value)| parse_bool_value(&value))
+                .unwrap_or(false);
+            Ok(routing::ok_response(
+                network_stats_value(state, include_peers).await.to_string(),
+            ))
+        }
         ("GET", "/api/hashdb/stats") => {
             let shares = state.shares.read().await;
             let total_entries: usize = shares.roots.iter().map(|root| root.files).sum();
@@ -12329,6 +12447,20 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
+        ("GET", "/api/rooms/activity") => {
+            let session = state.session.read().await;
+            let local_username = session
+                .username
+                .clone()
+                .or_else(|| state.config.username.clone())
+                .unwrap_or_else(|| "local".to_owned());
+            drop(session);
+            let rooms = state.rooms.read().await;
+            let json = rooms.activity_json(&local_username);
+            drop(rooms);
+            Ok(routing::ok_response(json))
+        }
+
         ("GET", path)
             if path.starts_with("/api/rooms/joined/")
                 && path.ends_with("/users")
@@ -13569,10 +13701,39 @@ async fn route_http_request_with_headers(
             let artist = extract_json_string_field(body, "artist").unwrap_or_else(|| search_text.clone());
             let title = extract_json_string_field(body, "title").unwrap_or_default();
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
+            if artist.trim().is_empty() && title.trim().is_empty() {
+                return Ok(routing::bad_request_response("SearchText is required"));
+            }
+            let filter = extract_json_string_field(body, "filter").unwrap_or_default();
+            let enabled = extract_json_bool_field(body, "enabled").unwrap_or(true);
+            let auto_download = extract_json_bool_field(body, "autoDownload").unwrap_or(false);
+            let max_results = extract_json_u64_field(body, "maxResults").unwrap_or(100);
+            if max_results == 0 || max_results > MAX_WISHLIST_RESULTS as u64 {
+                return Ok(routing::bad_request_response(
+                    "MaxResults must be between 1 and 10000",
+                ));
+            }
+            let max_downloads = extract_json_optional_u64_field(body, "maxDownloads");
+            if max_downloads.flatten().is_some_and(|value| {
+                value == 0 || value > MAX_WISHLIST_DOWNLOADS
+            }) {
+                return Ok(routing::bad_request_response(
+                    "MaxDownloads must be null or between 1 and 1000000",
+                ));
+            }
 
             let mut wishlist = state.wishlist.write().await;
             let previous = wishlist.clone();
-            match wishlist.add_item(artist, title, kind) {
+            match wishlist.add_item_with_settings(
+                artist,
+                title,
+                kind,
+                filter,
+                enabled,
+                auto_download,
+                usize::try_from(max_results).unwrap_or(MAX_WISHLIST_RESULTS),
+                max_downloads.flatten(),
+            ) {
               Ok(item) => {
                 let mutated = wishlist.clone();
                 let json = item.json();
@@ -14626,6 +14787,12 @@ async fn route_http_request_with_headers(
             drop(messages);
             Ok(routing::ok_response(body))
         }
+        ("GET", "/api/conversations/activity/unacknowledged") => {
+            let messages = state.messages.read().await;
+            let body = messages.has_unacknowledged_messages().to_string();
+            drop(messages);
+            Ok(routing::ok_response(body))
+        }
         ("GET", path) if conversation_messages_path(path).is_some() => {
             let Some(username) = conversation_messages_path(path) else {
                 return Ok(routing::not_found_response());
@@ -15545,9 +15712,38 @@ async fn route_http_request_with_headers(
             let title = extract_json_string_field(body, "title")
                 .or_else(|| extract_json_string_field(body, "searchText"));
             let kind = extract_json_string_field(body, "kind");
+            let filter = extract_json_string_field(body, "filter");
+            let enabled = extract_json_bool_field(body, "enabled");
+            let auto_download = extract_json_bool_field(body, "autoDownload");
+            let max_results = extract_json_u64_field(body, "maxResults");
+            if max_results.is_some_and(|value| {
+                value == 0 || value > MAX_WISHLIST_RESULTS as u64
+            }) {
+                return Ok(routing::bad_request_response(
+                    "MaxResults must be between 1 and 10000",
+                ));
+            }
+            let max_downloads = extract_json_optional_u64_field(body, "maxDownloads");
+            if max_downloads.flatten().is_some_and(|value| {
+                value == 0 || value > MAX_WISHLIST_DOWNLOADS
+            }) {
+                return Ok(routing::bad_request_response(
+                    "MaxDownloads must be null or between 1 and 1000000",
+                ));
+            }
             let mut wishlist = state.wishlist.write().await;
             let previous = wishlist.clone();
-            if let Some(item) = wishlist.update_item(item_id, artist, title, kind) {
+            if let Some(item) = wishlist.update_item(
+                item_id,
+                artist,
+                title,
+                kind,
+                filter,
+                enabled,
+                auto_download,
+                max_results.and_then(|value| usize::try_from(value).ok()),
+                max_downloads,
+            ) {
                 let mutated = wishlist.clone();
                 let json = item.json();
                 drop(wishlist);
@@ -18849,6 +19045,143 @@ fn capabilities_response() -> HttpResponse {
     }
 }
 
+async fn network_stats_value(state: &AppState, include_peers: bool) -> serde_json::Value {
+    let searches = state.searches.read().await;
+    let search_count = searches.records.len();
+    let search_result_count = searches
+        .records
+        .iter()
+        .map(|record| record.results.len())
+        .sum::<usize>();
+    drop(searches);
+
+    let shares = state.shares.read().await;
+    let shared_file_count = shares.entries.len();
+    let shared_bytes = shares.entries.iter().map(|entry| entry.size).sum::<u64>();
+    drop(shares);
+
+    let events = state.events.read().await;
+    let completed_backfills = events
+        .records
+        .iter()
+        .filter(|event| event.kind.contains("backfill") || event.kind.contains("hashdb"))
+        .count();
+    drop(events);
+
+    let users = state.users.read().await;
+    let mesh = state.mesh.read().await;
+    let candidate_usernames = mesh.candidate_usernames(&users);
+    let discovered_peers = if include_peers {
+        mesh.capability_records_json()
+    } else {
+        Vec::new()
+    };
+    let mesh_peers = if include_peers {
+        candidate_usernames
+            .iter()
+            .map(|username| {
+                serde_json::json!({
+                    "username": username,
+                    "meshCapable": mesh.capability_records.iter().any(|descriptor| {
+                        descriptor.username.eq_ignore_ascii_case(username)
+                            && MeshRendezvous::accepts_descriptor(descriptor)
+                    }),
+                })
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let capability_record_count = mesh.capability_records.len();
+    drop(mesh);
+    drop(users);
+
+    let transfers = state.transfers.read().await;
+    let swarm_jobs = transfers
+        .entries
+        .iter()
+        .filter(|entry| entry.status == "in_progress")
+        .map(|entry| {
+            let total_bytes = entry.size.unwrap_or_default();
+            let progress_percent = if total_bytes == 0 {
+                0.0
+            } else {
+                entry.bytes_transferred as f64 * 100.0 / total_bytes as f64
+            };
+            serde_json::json!({
+                "activeSources": usize::from(entry.peer_username.is_some()),
+                "downloadedBytes": entry.bytes_transferred,
+                "filename": entry.filename,
+                "jobId": format!("transfer-{}", entry.id),
+                "progressPercent": progress_percent,
+                "totalBytes": total_bytes,
+            })
+        })
+        .collect::<Vec<_>>();
+    drop(transfers);
+
+    let queued_backfills = search_count + search_result_count + shared_file_count;
+    let now = unix_timestamp();
+    serde_json::json!({
+        "backfill": {
+            "isActive": queued_backfills > 0,
+            "isRunning": false,
+            "queued": queued_backfills,
+            "completed": completed_backfills,
+            "searches": search_count,
+            "searchResults": search_result_count,
+            "sharedFiles": shared_file_count,
+        },
+        "capabilitiesJson": capabilities_response().body,
+        "capabilitiesVersion": APP_VERSION,
+        "dht": {
+            "dhtNodeCount": 0,
+            "isLanOnly": false,
+            "lanOnly": false,
+            "isBeaconCapable": false,
+            "isDhtRunning": false,
+            "verifiedBeaconCount": 0,
+        },
+        "discoveredPeers": discovered_peers,
+        "hashDb": {
+            "currentSeqId": now,
+            "totalHashEntries": shared_file_count,
+            "totalEntries": shared_file_count,
+            "totalBytes": shared_bytes,
+        },
+        "mesh": {
+            "currentSeqId": now,
+            "localSeqId": now,
+            "isSyncing": false,
+            "knownMeshPeers": candidate_usernames.len(),
+            "connectedPeerCount": 0,
+            "capabilityRecords": capability_record_count,
+            "interestTag": MESH_RENDEZVOUS_INTEREST_TAG,
+            "warnings": [],
+        },
+        "meshPeers": mesh_peers,
+        "swarmJobs": swarm_jobs,
+        "transport": {
+            "status": "Healthy",
+            "health": "Healthy",
+            "description": "Mesh transport unavailable in this runtime",
+            "transportPreference": "Auto",
+            "connectedPeers": 0,
+            "totalPeers": 0,
+            "activeCircuits": 0,
+            "activeStreams": 0,
+            "bootstrapPeers": [],
+            "isolatedPeers": 0,
+            "quorumPeers": 0,
+            "relayedPeers": 0,
+            "natType": "Unknown",
+            "publicEndpoint": null,
+            "lastDhtError": null,
+            "lastDhtPublishUtc": null,
+        },
+    })
+}
+
 fn capabilities_negotiate_response(body: &str) -> HttpResponse {
     let server_capabilities = ["shares", "telemetry"];
 
@@ -19236,6 +19569,16 @@ fn extract_json_u64_field(body: &str, field: &str) -> Option<u64> {
         .ok()?
         .get(field)?
         .as_u64()
+}
+
+fn extract_json_optional_u64_field(body: &str, field: &str) -> Option<Option<u64>> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let value = value.get(field)?;
+    if value.is_null() {
+        Some(None)
+    } else {
+        value.as_u64().map(Some)
+    }
 }
 
 fn extract_json_i32_field(body: &str, field: &str) -> Option<i32> {
@@ -25842,6 +26185,16 @@ fn persisted_wishlist_item(item: &WishlistItem) -> crate::persistence::WishlistI
         artist: item.artist.clone(),
         title: item.title.clone(),
         kind: item.kind.clone(),
+        filter: item.filter.clone(),
+        enabled: item.enabled,
+        auto_download: item.auto_download,
+        max_results: i64::try_from(item.max_results).unwrap_or(i64::MAX),
+        max_downloads: item
+            .max_downloads
+            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+        last_viewed_at: item
+            .last_viewed_at
+            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
         added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
     }
 }
@@ -30077,6 +30430,97 @@ mod tests {
                 response.body
             );
         }
+    }
+
+    #[tokio::test]
+    async fn bounded_activity_and_network_polling_routes_project_local_state() {
+        let (state, _receiver) = test_state();
+
+        let message_id = {
+            let mut messages = state.messages.write().await;
+            messages
+                .add("peer-unread".to_owned(), "inbound", "hello".to_owned())
+                .id
+        };
+        let unread = super::route_http_request(
+            "GET",
+            "/api/v0/conversations/activity/unacknowledged",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unacknowledged activity");
+        assert_eq!(unread.status, "200 OK");
+        assert_eq!(unread.body, "true");
+        state.messages.write().await.ack(message_id);
+        let acknowledged = super::route_http_request(
+            "GET",
+            "/api/conversations/activity/unacknowledged",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("acknowledged activity");
+        assert_eq!(acknowledged.body, "false");
+
+        let local_username = state
+            .session
+            .read()
+            .await
+            .username
+            .clone()
+            .unwrap_or_else(|| "local".to_owned());
+        {
+            let mut rooms = state.rooms.write().await;
+            rooms.join("active-room".to_owned()).expect("room capacity");
+            rooms
+                .add_message("active-room", local_username, "outbound".to_owned())
+                .expect("joined room");
+            rooms
+                .add_message("active-room", "peer-room".to_owned(), "inbound".to_owned())
+                .expect("joined room");
+            rooms.join("left-room".to_owned()).expect("room capacity");
+            rooms
+                .add_message("left-room", "peer-room".to_owned(), "ignored".to_owned())
+                .expect("joined room");
+            rooms.leave("left-room").expect("existing room");
+        }
+        let activity = super::route_http_request("GET", "/api/v0/rooms/activity", None, "", &state)
+            .await
+            .expect("room activity");
+        let activity_json = serde_json::from_str::<serde_json::Value>(&activity.body).unwrap();
+        assert!(activity_json["active-room"].as_u64().unwrap_or_default() > 0);
+        assert!(activity_json.get("left-room").is_none());
+
+        let network = super::route_http_request(
+            "GET",
+            "/api/v0/network/stats?includePeers=false",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("network stats");
+        assert_eq!(network.status, "200 OK");
+        let network_json = serde_json::from_str::<serde_json::Value>(&network.body).unwrap();
+        for key in [
+            "backfill",
+            "capabilitiesJson",
+            "capabilitiesVersion",
+            "dht",
+            "discoveredPeers",
+            "hashDb",
+            "mesh",
+            "meshPeers",
+            "swarmJobs",
+            "transport",
+        ] {
+            assert!(network_json.get(key).is_some(), "missing {key}");
+        }
+        assert_eq!(network_json["discoveredPeers"], serde_json::json!([]));
+        assert_eq!(network_json["meshPeers"], serde_json::json!([]));
     }
 
     #[tokio::test]
@@ -36597,15 +37041,17 @@ mod tests {
             "POST",
             "/api/wishlist",
             None,
-            r#"{"artist":"Artist","title":"Album"}"#,
+            r#"{"artist":"Artist","title":"Album","filter":"flac","enabled":true,"autoDownload":true,"maxResults":25,"maxDownloads":3}"#,
             &state,
         )
         .await
         .unwrap();
-        let item_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let item_id = created_json["id"].as_str().unwrap().to_owned();
+        assert_eq!(created_json["filter"], "flac");
+        assert_eq!(created_json["autoDownload"], true);
+        assert_eq!(created_json["maxResults"], 25);
+        assert_eq!(created_json["maxDownloads"], 3);
         let search = super::route_http_request(
             "POST",
             &format!("/api/wishlist/{item_id}/search"),
@@ -36653,6 +37099,27 @@ mod tests {
         let rule_id = ignored_json["id"].as_str().unwrap().to_owned();
         assert_eq!(ignored_json["directory"], "Remote/Album");
         assert_eq!(state.searches.read().await.records[0].results.len(), 1);
+
+        let updated = super::route_http_request(
+            "PUT",
+            &format!("/api/wishlist/{item_id}"),
+            None,
+            r#"{"title":"Updated Album","filter":"mp3","enabled":false,"autoDownload":false,"maxResults":10,"maxDownloads":null}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let updated_json = serde_json::from_str::<serde_json::Value>(&updated.body).unwrap();
+        assert_eq!(updated_json["title"], "Updated Album");
+        assert_eq!(updated_json["filter"], "mp3");
+        assert_eq!(updated_json["enabled"], false);
+        assert_eq!(updated_json["autoDownload"], false);
+        assert_eq!(updated_json["maxResults"], 10);
+        assert!(updated_json["maxDownloads"].is_null());
+        assert_eq!(
+            db.list_all_wishlist_ignored_results().await.unwrap().len(),
+            1
+        );
 
         let duplicate = super::route_http_request(
             "POST",
@@ -36703,6 +37170,10 @@ mod tests {
             .unwrap();
         let wishlist_json = serde_json::from_str::<serde_json::Value>(&wishlist.body).unwrap();
         assert_eq!(wishlist_json[0]["ignoredResultCount"], 1);
+        assert_eq!(wishlist_json[0]["filter"], "mp3");
+        assert_eq!(wishlist_json[0]["enabled"], false);
+        assert_eq!(wishlist_json[0]["maxResults"], 10);
+        assert!(wishlist_json[0]["maxDownloads"].is_null());
         assert_eq!(wishlist_json[0]["ignoredResults"][0]["id"], rule_id);
         assert_eq!(
             wishlist_json[0]["ignoredResults"][0]["directory"],
@@ -36715,6 +37186,12 @@ mod tests {
             persisted,
         );
         assert_eq!(rehydrated.list_ignored_results(&item_id).unwrap().len(), 1);
+        let rehydrated_item = rehydrated.get_item(&item_id).unwrap();
+        assert_eq!(rehydrated_item.title, "Updated Album");
+        assert_eq!(rehydrated_item.filter, "mp3");
+        assert!(!rehydrated_item.enabled);
+        assert_eq!(rehydrated_item.max_results, 10);
+        assert_eq!(rehydrated_item.max_downloads, None);
 
         let restored = super::route_http_request(
             "DELETE",
@@ -40951,6 +41428,10 @@ mod tests {
         assert_eq!(first.value, duplicate.value);
         assert_eq!(security.bans.len(), 1);
         assert!(security.unban("username", "SPAMMER"));
+        let literal_pattern = security.ban("username", "user.*".to_owned()).unwrap();
+        assert_eq!(literal_pattern.value, "user.*");
+        assert!(!security.unban("username", "user123"));
+        assert!(security.unban("username", "USER.*"));
         for index in 0..super::MAX_SECURITY_BANS {
             security.ban("ip", format!("2001:db8::{index:x}")).unwrap();
         }

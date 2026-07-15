@@ -169,6 +169,12 @@ pub struct WishlistItemRecord {
     pub artist: String,
     pub title: String,
     pub kind: String,
+    pub filter: String,
+    pub enabled: bool,
+    pub auto_download: bool,
+    pub max_results: i64,
+    pub max_downloads: Option<i64>,
+    pub last_viewed_at: Option<i64>,
     pub added_at: i64,
 }
 
@@ -549,6 +555,12 @@ impl<'r> FromRow<'r, SqliteRow> for WishlistItemRecord {
             artist: row.try_get("artist")?,
             title: row.try_get("title")?,
             kind: row.try_get("kind")?,
+            filter: row.try_get("filter")?,
+            enabled: row.try_get("enabled")?,
+            auto_download: row.try_get("auto_download")?,
+            max_results: row.try_get("max_results")?,
+            max_downloads: row.try_get("max_downloads")?,
+            last_viewed_at: row.try_get("last_viewed_at")?,
             added_at: row.try_get("added_at")?,
         })
     }
@@ -1064,6 +1076,12 @@ impl DatabaseManager {
                 artist TEXT NOT NULL,
                 title TEXT NOT NULL,
                 kind TEXT NOT NULL,
+                filter TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                auto_download INTEGER NOT NULL DEFAULT 0,
+                max_results INTEGER NOT NULL DEFAULT 100,
+                max_downloads INTEGER,
+                last_viewed_at INTEGER,
                 added_at INTEGER NOT NULL
             )
             "#,
@@ -1288,6 +1306,7 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
         self.ensure_runtime_compat_columns().await?;
+        self.ensure_wishlist_item_columns().await?;
 
         // Create pending OAuth states table
         query(
@@ -1481,6 +1500,25 @@ impl DatabaseManager {
             "ALTER TABLE runtime_compat_state ADD COLUMN options_updates INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE runtime_compat_state ADD COLUMN options_yaml_uploads INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE runtime_compat_state ADD COLUMN options_yaml_validations INTEGER NOT NULL DEFAULT 0",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                let message = error.to_string();
+                if !message.contains("duplicate column name") {
+                    return Err(Box::new(error));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn ensure_wishlist_item_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE wishlist_items ADD COLUMN filter TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE wishlist_items ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE wishlist_items ADD COLUMN auto_download INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE wishlist_items ADD COLUMN max_results INTEGER NOT NULL DEFAULT 100",
+            "ALTER TABLE wishlist_items ADD COLUMN max_downloads INTEGER",
+            "ALTER TABLE wishlist_items ADD COLUMN last_viewed_at INTEGER",
         ] {
             if let Err(error) = query(statement).execute(&self.pool).await {
                 let message = error.to_string();
@@ -2521,14 +2559,33 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO wishlist_items (id, artist, title, kind, added_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO wishlist_items
+                (id, artist, title, kind, filter, enabled, auto_download, max_results,
+                 max_downloads, last_viewed_at, added_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                artist = excluded.artist,
+                title = excluded.title,
+                kind = excluded.kind,
+                filter = excluded.filter,
+                enabled = excluded.enabled,
+                auto_download = excluded.auto_download,
+                max_results = excluded.max_results,
+                max_downloads = excluded.max_downloads,
+                last_viewed_at = excluded.last_viewed_at,
+                added_at = excluded.added_at
             "#,
         )
         .bind(&record.id)
         .bind(&record.artist)
         .bind(&record.title)
         .bind(&record.kind)
+        .bind(&record.filter)
+        .bind(record.enabled)
+        .bind(record.auto_download)
+        .bind(record.max_results)
+        .bind(record.max_downloads)
+        .bind(record.last_viewed_at)
         .bind(record.added_at)
         .execute(&self.pool)
         .await?;
@@ -2544,14 +2601,33 @@ impl DatabaseManager {
         for record in records {
             query(
                 r#"
-                INSERT OR REPLACE INTO wishlist_items (id, artist, title, kind, added_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO wishlist_items
+                    (id, artist, title, kind, filter, enabled, auto_download, max_results,
+                     max_downloads, last_viewed_at, added_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    artist = excluded.artist,
+                    title = excluded.title,
+                    kind = excluded.kind,
+                    filter = excluded.filter,
+                    enabled = excluded.enabled,
+                    auto_download = excluded.auto_download,
+                    max_results = excluded.max_results,
+                    max_downloads = excluded.max_downloads,
+                    last_viewed_at = excluded.last_viewed_at,
+                    added_at = excluded.added_at
                 "#,
             )
             .bind(&record.id)
             .bind(&record.artist)
             .bind(&record.title)
             .bind(&record.kind)
+            .bind(&record.filter)
+            .bind(record.enabled)
+            .bind(record.auto_download)
+            .bind(record.max_results)
+            .bind(record.max_downloads)
+            .bind(record.last_viewed_at)
             .bind(record.added_at)
             .execute(&mut *transaction)
             .await?;
@@ -2582,7 +2658,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<WishlistItemRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, WishlistItemRecord>(
-            "SELECT id, artist, title, kind, added_at FROM wishlist_items ORDER BY added_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, artist, title, kind, filter, enabled, auto_download, max_results, max_downloads, last_viewed_at, added_at FROM wishlist_items ORDER BY added_at DESC LIMIT ? OFFSET ?",
         )
         .bind(limit)
         .bind(offset)

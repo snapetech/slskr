@@ -47,6 +47,7 @@ GET /collections/:var/items
 GET /contacts
 GET /contacts/nearby
 GET /contacts/:var
+GET /conversations/activity/unacknowledged
 GET /conversations/:var
 GET /destinations
 GET /destinations/default
@@ -65,6 +66,7 @@ GET /musicbrainz/albums/completion
 GET /musicbrainz/artist/:var/discography-coverage
 GET /musicbrainz/release-radar/notifications
 GET /musicbrainz/release-radar/subscriptions
+GET /network/stats
 GET /nowplaying
 GET /options
 GET /options/debug
@@ -74,6 +76,7 @@ GET /player/external-visualizer
 GET /profile/me
 GET /profile/:var
 GET /realm-subject-indexes/:var/conflicts
+GET /rooms/activity
 GET /rooms/available
 GET /rooms/joined
 GET /rooms/joined/:var/messages

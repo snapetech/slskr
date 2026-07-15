@@ -12,6 +12,7 @@ client_social_source="crates/slskr-client/src/social.rs"
 client_capability_source="crates/slskr-client/src/capabilities.rs"
 client_peer_cache_source="crates/slskr-client/src/peer_cache.rs"
 client_distributed_tree_source="crates/slskr-client/src/distributed_tree.rs"
+client_filter_source="crates/slskr-client/src/filters.rs"
 status=0
 
 for anchor in \
@@ -54,6 +55,10 @@ for anchor in \
   'share_access_token_issue_rolls_back_when_persistence_fails' \
   'wishlist_ignored_folders_persist_and_suppress_existing_and_future_results' \
   'wishlist_ignored_folder_mutations_roll_back_on_persistence_failure' \
+  'MAX_WISHLIST_FILTER_BYTES' \
+  'MAX_WISHLIST_RESULTS' \
+  'MAX_WISHLIST_DOWNLOADS' \
+  'add_item_with_settings' \
   'completed_transfer_cleanup_rolls_back_on_persistence_failure' \
   'transfer_cancel_rolls_back_on_persistence_failure' \
   '.redirect(reqwest::redirect::Policy::none())' \
@@ -202,6 +207,17 @@ for anchor in \
   'search_results_bound_responses_and_files_per_token'; do
   if ! rg -n --fixed-strings -- "$anchor" crates/slskr-client/src/search.rs crates/slskr-client/tests/search.rs >/dev/null; then
     printf 'runtime boundary hardening check failed: missing client search anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
+  'MAX_EXCLUDED_SEARCH_PHRASES' \
+  'MAX_EXCLUDED_SEARCH_PHRASE_BYTES' \
+  'MAX_FILTERED_SEARCH_QUERY_BYTES' \
+  'excluded_phrase_filter_is_literal_and_bounds_remote_inputs'; do
+  if ! rg -n --fixed-strings -- "$anchor" "$client_filter_source" crates/slskr-client/tests/phase7.rs >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing search-filter anchor %s\n' "$anchor" >&2
     status=1
   fi
 done

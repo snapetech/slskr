@@ -1,6 +1,9 @@
 use slskr_client::{
     events::{trace_distributed_message, trace_peer_message, trace_server_message},
-    filters::ExcludedPhraseFilter,
+    filters::{
+        ExcludedPhraseFilter, MAX_EXCLUDED_SEARCH_PHRASES, MAX_EXCLUDED_SEARCH_PHRASE_BYTES,
+        MAX_FILTERED_SEARCH_QUERY_BYTES,
+    },
     share_payload::{
         compress_zlib_payload, decompress_peer_share_payload, decompress_zlib_payload,
         decompress_zlib_payload_with_limit,
@@ -62,6 +65,24 @@ fn excluded_phrase_filter_tracks_server_updates_and_matches_case_insensitively()
     assert!(!filter.allows_query("album leak"));
     assert!(filter.allows_query("public domain album"));
     assert!(ExcludedPhraseFilter::from_server_message(&ServerMessage::ServerPing).is_none());
+}
+
+#[test]
+fn excluded_phrase_filter_is_literal_and_bounds_remote_inputs() {
+    let regex_syntax = ExcludedPhraseFilter::new(["a.*b".to_owned()]);
+    assert!(regex_syntax.allows_query("axxxb"));
+    assert!(!regex_syntax.allows_query("contains A.*B literally"));
+
+    let filter = ExcludedPhraseFilter::new(
+        (0..=MAX_EXCLUDED_SEARCH_PHRASES)
+            .map(|index| format!("{index}-{}", "é".repeat(MAX_EXCLUDED_SEARCH_PHRASE_BYTES))),
+    );
+    assert_eq!(filter.phrases().len(), MAX_EXCLUDED_SEARCH_PHRASES);
+    assert!(filter
+        .phrases()
+        .iter()
+        .all(|phrase| phrase.len() <= MAX_EXCLUDED_SEARCH_PHRASE_BYTES));
+    assert!(!filter.allows_query(&"q".repeat(MAX_FILTERED_SEARCH_QUERY_BYTES + 1)));
 }
 
 #[test]
