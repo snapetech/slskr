@@ -13119,19 +13119,6 @@ async fn route_http_request_with_headers(
         }
 
         // BROWSE ENDPOINTS
-        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
-            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
-            let browse = state.browse.read().await;
-            let entries = browse
-                .records
-                .iter()
-                .find(|record| record.username == username)
-                .map(|record| record.entries.as_slice())
-                .unwrap_or(&[]);
-            let body = slskd_user_root_json(entries, route.query);
-            drop(browse);
-            Ok(routing::ok_response(body))
-        }
         ("GET", path)
             if path.starts_with("/api/users/")
                 && path.ends_with("/browse/status")
@@ -13168,23 +13155,6 @@ async fn route_http_request_with_headers(
             drop(browse);
             Ok(routing::ok_response(body))
         }
-        ("POST", path) if path.starts_with("/api/users/") && path.ends_with("/directory") => {
-            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
-            let directory = extract_json_string_field(body, "directory")
-                .or_else(|| json_body_string(body))
-                .unwrap_or_default();
-            let browse = state.browse.read().await;
-            let entries = browse
-                .records
-                .iter()
-                .find(|record| record.username == username)
-                .map(|record| record.entries.as_slice())
-                .unwrap_or(&[]);
-            let body = slskd_user_directories_json(&directory, entries, route.query);
-            drop(browse);
-            Ok(routing::ok_response(body))
-        }
-
         // ADDITIONAL MISSING USER ENDPOINTS (Phase 5)
         ("GET", "/api/profile/me") => {
             let session = state.session.read().await;
@@ -13214,8 +13184,11 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
-        ("GET", path) if path.starts_with("/api/profile/") && path.len() > 12 => {
-            let username = decoded_path_segment(&path[12..]);
+        ("GET", path) if path.starts_with("/api/profile/") => {
+            let Some(username) = path_segment_after(path, "/api/profile/") else {
+                return Ok(routing::not_found_response());
+            };
+            let username = decoded_path_segment(username);
             let users = state.users.read().await;
             let user = users
                 .records
@@ -13236,71 +13209,6 @@ async fn route_http_request_with_headers(
                 "directoryCount": user.as_ref().and_then(|user| user.directory_count).unwrap_or(0),
             }).to_string();
             Ok(routing::ok_response(json))
-        }
-
-        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/endpoint") => {
-            Ok(routing::ok_response(serde_json::json!({
-                "addressFamily": "IPv4",
-                "address": "0.0.0.0",
-                "port": 0,
-            }).to_string()))
-        }
-
-        ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
-            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
-            let sharegroups = state.sharegroups.read().await;
-            let json = sharegroups.user_group_json(&username);
-            drop(sharegroups);
-            Ok(routing::ok_response(json))
-        }
-
-        ("GET", path) if path.starts_with("/api/users/") && path.contains("/info") => {
-            let username = decoded_path_segment(path.split('/').nth(3).unwrap_or("unknown"));
-            let users = state.users.read().await;
-            let body = users
-                .records
-                .iter()
-                .find(|record| record.username == username)
-                .map(|record| record.slskd_info_json().to_string())
-                .unwrap_or_else(|| UserRecord {
-                    username: username.clone(),
-                    watched: false,
-                    status: None,
-                    average_speed: None,
-                    upload_count: None,
-                    file_count: None,
-                    directory_count: None,
-                    updated_at: unix_timestamp(),
-                }.slskd_info_json().to_string());
-            drop(users);
-            Ok(routing::ok_response(body))
-        }
-
-        ("GET", path)
-            if path.starts_with("/api/users/")
-                && path.ends_with("/status")
-                && user_route_username(path, "/status").is_some() =>
-        {
-            let username = user_route_username(path, "/status")
-                .expect("guarded user status path");
-            let users = state.users.read().await;
-            let body = users
-                .records
-                .iter()
-                .find(|record| record.username == username)
-                .map(|record| record.slskd_status_json().to_string())
-                .unwrap_or_else(|| UserRecord {
-                    username: username.clone(),
-                    watched: false,
-                    status: Some("Unknown".to_owned()),
-                    average_speed: None,
-                    upload_count: None,
-                    file_count: None,
-                    directory_count: None,
-                    updated_at: unix_timestamp(),
-                }.slskd_status_json().to_string());
-            drop(users);
-            Ok(routing::ok_response(body))
         }
 
         // CONVERSATIONS ENDPOINT
@@ -29363,6 +29271,7 @@ mod tests {
         }
 
         let encoded_path_routes = [
+            ("GET", "/api/profile/peer%201", ""),
             ("GET", "/api/users/peer%201/browse", ""),
             ("GET", "/api/users/peer%201/browse/status", ""),
             (
@@ -29410,6 +29319,7 @@ mod tests {
         }
 
         for (method, path, body) in [
+            ("GET", "/api/profile/peer%201/untrusted", ""),
             ("GET", "/api/users/peer%201/untrusted/info", ""),
             ("GET", "/api/users/peer%201/untrusted/browse", ""),
             ("GET", "/api/users/peer%201/untrusted/group", ""),
