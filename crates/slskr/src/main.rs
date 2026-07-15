@@ -61,7 +61,9 @@ mod webhooks;
 
 use std::{
     collections::{BTreeMap, HashSet},
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     net::{IpAddr, SocketAddr, SocketAddrV4, ToSocketAddrs},
     path::{Component, Path, PathBuf},
     sync::Arc,
@@ -239,12 +241,23 @@ async fn main() {
 
 async fn run() -> Result<(), String> {
     let args = env::args_os().skip(1).collect::<Vec<_>>();
-    if args.first().and_then(|arg| arg.to_str()) == Some("serve") {
-        let once = args.iter().any(|arg| arg == "--once");
+    if let Some(once) = parse_serve_args(&args)? {
         return serve(once).await;
     }
 
     cli::run_from_args(args).await
+}
+
+fn parse_serve_args(args: &[OsString]) -> Result<Option<bool>, String> {
+    if args.first().is_none_or(|arg| arg != "serve") {
+        return Ok(None);
+    }
+
+    match args {
+        [_] => Ok(Some(false)),
+        [_, flag] if flag == "--once" => Ok(Some(true)),
+        _ => Err("usage: slskr serve [--once]".to_owned()),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -25765,6 +25778,7 @@ fn encode_file_entry(writer: &mut Writer, entry: &FileEntry) -> Result<(), Strin
 mod tests {
     use std::{
         collections::BTreeMap,
+        ffi::OsString,
         net::{IpAddr, SocketAddr},
         path::{Path, PathBuf},
         sync::Arc,
@@ -25796,6 +25810,31 @@ mod tests {
         fn var(&self, name: &str) -> Option<String> {
             self.values.get(name).cloned()
         }
+    }
+
+    #[test]
+    fn serve_arguments_reject_unknown_or_duplicate_options() {
+        assert_eq!(
+            super::parse_serve_args(&[OsString::from("serve")]),
+            Ok(Some(false))
+        );
+        assert_eq!(
+            super::parse_serve_args(&[OsString::from("serve"), OsString::from("--once")]),
+            Ok(Some(true))
+        );
+        assert!(
+            super::parse_serve_args(&[OsString::from("serve"), OsString::from("--ocne"),]).is_err()
+        );
+        assert!(super::parse_serve_args(&[
+            OsString::from("serve"),
+            OsString::from("--once"),
+            OsString::from("--once"),
+        ])
+        .is_err());
+        assert_eq!(
+            super::parse_serve_args(&[OsString::from("probe")]),
+            Ok(None)
+        );
     }
 
     fn test_state() -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
