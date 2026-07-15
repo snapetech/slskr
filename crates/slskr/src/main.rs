@@ -25,6 +25,7 @@ mod openapi;
     reason = "persistence exposes operations used by optional compatibility routes"
 )]
 mod persistence;
+mod pod_channels;
 #[allow(
     dead_code,
     reason = "probe metadata builders are shared by optional live probes"
@@ -10464,6 +10465,7 @@ struct AppState {
     rooms: RwLock<RoomStore>,
     pod_join_replays: RwLock<BTreeMap<String, u64>>,
     pod_membership_workflow: RwLock<PodMembershipWorkflowStore>,
+    pod_channels: RwLock<pod_channels::PodChannelStore>,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
@@ -18946,6 +18948,60 @@ async fn route_http_request_with_headers(
               Ok(routing::ok_response(json))
           }
 
+          ("GET", path) if pod_channel_messages_path(path).is_some() => {
+              let (pod_id, channel_id) = pod_channel_messages_path(path).unwrap_or_default();
+              let since = match query_millis_parameter(route.query, "since") {
+                  Ok(value) => value,
+                  Err(error) => return Ok(routing::bad_request_response(&error)),
+              };
+              let channels = state.pod_channels.read().await;
+              let messages = channels.list(&pod_id, &channel_id, since);
+              drop(channels);
+              Ok(routing::ok_response(
+                  serde_json::to_string(&messages)
+                      .map_err(|error| format!("pod message serialization failed: {error}"))?,
+              ))
+          }
+
+          ("POST", path) if pod_channel_messages_path(path).is_some() => {
+              let (pod_id, channel_id) = pod_channel_messages_path(path).unwrap_or_default();
+              let body_text = extract_json_string_field(body, "body")
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              let sender_peer_id = extract_json_string_field(body, "senderPeerId")
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              let signature = extract_json_string_field(body, "signature")
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              let result = state.pod_channels.write().await.append(
+                  pod_id,
+                  channel_id,
+                  sender_peer_id,
+                  body_text,
+                  signature,
+                  unix_timestamp_millis(),
+              );
+              match result {
+                  Ok(message) => Ok(routing::ok_response(
+                      serde_json::json!({
+                          "messageId": message.message_id,
+                          "sent": true,
+                      })
+                      .to_string(),
+                  )),
+                  Err(error)
+                      if error.contains("required") || error.contains("must be at most") =>
+                  {
+                      Ok(routing::bad_request_response(&error))
+                  }
+                  Err(error) => Ok(routing::service_unavailable_response(&error)),
+              }
+          }
+
           ("GET", "/api/pods") => {
               let rooms = state.rooms.read().await;
               let users = state.users.read().await;
@@ -21427,9 +21483,7 @@ async fn route_http_request_with_headers(
                 }
             };
             let available_port_count = end_port - start_port + 1;
-            let returned_port_count = limit
-                .unwrap_or(available_port_count)
-                .min(available_port_count);
+            let returned_port_count = limit.unwrap_or(1_000).min(available_port_count);
             let available_ports = (start_port..=end_port)
                 .take(returned_port_count)
                 .collect::<Vec<_>>();
@@ -23242,6 +23296,26 @@ fn download_request_path(path: &str) -> Option<(&str, Option<&str>)> {
 fn path_segment_between<'a>(path: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
     let segment = path.strip_prefix(prefix)?.strip_suffix(suffix)?;
     (!segment.is_empty() && !segment.contains('/')).then_some(segment)
+}
+
+fn pod_channel_messages_path(path: &str) -> Option<(String, String)> {
+    let rest = path.strip_prefix("/api/pods/")?;
+    let (pod_id, rest) = rest.split_once("/channels/")?;
+    let channel_id = rest.strip_suffix("/messages")?;
+    if pod_id.is_empty()
+        || channel_id.is_empty()
+        || pod_id.contains('/')
+        || channel_id.contains('/')
+    {
+        return None;
+    }
+    let pod_id = decoded_path_segment(pod_id).trim().to_owned();
+    let channel_id = decoded_path_segment(channel_id).trim().to_owned();
+    (!pod_id.is_empty()
+        && !channel_id.is_empty()
+        && !pod_id.contains('/')
+        && !channel_id.contains('/'))
+    .then_some((pod_id, channel_id))
 }
 
 fn decoded_path_segment(segment: &str) -> String {
@@ -25853,6 +25927,7 @@ async fn serve(once: bool) -> Result<(), String> {
 
     let content_discovery_store =
         content_discovery::ContentDiscoveryStore::load(&config.state_dir)?;
+    let pod_channel_store = pod_channels::PodChannelStore::load(&config.state_dir)?;
     let capability_signing_key = new_capability_signing_key()?;
     let state = Arc::new(AppState {
         log_level: RwLock::new(
@@ -25877,6 +25952,7 @@ async fn serve(once: bool) -> Result<(), String> {
         rooms: RwLock::new(room_store),
         pod_join_replays: RwLock::new(BTreeMap::new()),
         pod_membership_workflow: RwLock::new(PodMembershipWorkflowStore::default()),
+        pod_channels: RwLock::new(pod_channel_store),
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
         event_tx,
@@ -36166,6 +36242,9 @@ mod tests {
             rooms: RwLock::new(room_store),
             pod_join_replays: RwLock::new(BTreeMap::new()),
             pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
+            pod_channels: RwLock::new(super::pod_channels::PodChannelStore::empty(
+                &config.state_dir,
+            )),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -37194,6 +37273,21 @@ mod tests {
         assert_eq!(stats["totalForwardingRules"], 0);
         assert_eq!(stats["rules"], serde_json::json!([]));
 
+        let default_page = super::route_http_request(
+            "GET",
+            "/api/port-forwarding/available-ports",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("default available port page");
+        let default_page = serde_json::from_str::<serde_json::Value>(&default_page.body).unwrap();
+        assert_eq!(
+            default_page["availablePorts"].as_array().unwrap().len(),
+            1_000
+        );
+
         for path in [
             "/api/port-forwarding/available-ports?startPort=0",
             "/api/port-forwarding/available-ports?startPort=3000&endPort=2000",
@@ -37229,6 +37323,93 @@ mod tests {
                 .await
                 .expect("idempotent port forwarding stop");
         assert_eq!(stop.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn pod_channel_messages_are_durable_shaped_and_incremental() {
+        let (state, _receiver) = test_state();
+        let path = "/api/v0/pods/pod-1/channels/general/messages";
+
+        let first = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"first","senderPeerId":"peer-1","signature":"sig"}"#,
+            &state,
+        )
+        .await
+        .expect("first pod message");
+        assert_eq!(first.status, "200 OK");
+        let first = serde_json::from_str::<serde_json::Value>(&first.body).unwrap();
+        assert_eq!(first["sent"], true);
+        assert_eq!(first["messageId"].as_str().unwrap().len(), 32);
+
+        let initial = super::route_http_request("GET", path, None, "", &state)
+            .await
+            .expect("initial pod messages");
+        let initial = serde_json::from_str::<serde_json::Value>(&initial.body).unwrap();
+        assert_eq!(initial.as_array().unwrap().len(), 1);
+        assert_eq!(initial[0]["podId"], "pod-1");
+        assert_eq!(initial[0]["channelId"], "general");
+        assert_eq!(initial[0]["senderPeerId"], "peer-1");
+        assert_eq!(initial[0]["body"], "first");
+        assert_eq!(initial[0]["sigVersion"], 1);
+        let cursor = initial[0]["timestampUnixMs"].as_u64().unwrap();
+
+        let second = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"second","senderPeerId":"peer-1"}"#,
+            &state,
+        )
+        .await
+        .expect("second pod message");
+        assert_eq!(second.status, "200 OK");
+        {
+            let mut channels = state.pod_channels.write().await;
+            let latest = channels.list("pod-1", "general", None).pop().unwrap();
+            if latest.timestamp_unix_ms == cursor {
+                channels
+                    .append(
+                        "pod-1".to_owned(),
+                        "general".to_owned(),
+                        "peer-1".to_owned(),
+                        "third".to_owned(),
+                        String::new(),
+                        cursor + 1,
+                    )
+                    .unwrap();
+            }
+        }
+        let incremental =
+            super::route_http_request("GET", &format!("{path}?since={cursor}"), None, "", &state)
+                .await
+                .expect("incremental pod messages");
+        let incremental = serde_json::from_str::<serde_json::Value>(&incremental.body).unwrap();
+        assert!(!incremental.as_array().unwrap().is_empty());
+        assert!(incremental
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|message| message["timestampUnixMs"].as_u64().unwrap() > cursor));
+
+        let invalid =
+            super::route_http_request("GET", &format!("{path}?since=-1"), None, "", &state)
+                .await
+                .expect("invalid pod message cursor");
+        assert_eq!(invalid.status, "400 Bad Request");
+
+        let invalid = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"","senderPeerId":"peer-1"}"#,
+            &state,
+        )
+        .await
+        .expect("invalid pod message");
+        assert_eq!(invalid.status, "400 Bad Request");
     }
 
     fn test_capability_descriptor(
@@ -55100,6 +55281,9 @@ mod tests {
             rooms: RwLock::new(super::RoomStore::new()),
             pod_join_replays: RwLock::new(BTreeMap::new()),
             pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
+            pod_channels: RwLock::new(super::pod_channels::PodChannelStore::empty(
+                &config.state_dir,
+            )),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -55267,6 +55451,9 @@ mod tests {
             rooms: RwLock::new(super::RoomStore::new()),
             pod_join_replays: RwLock::new(BTreeMap::new()),
             pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
+            pod_channels: RwLock::new(super::pod_channels::PodChannelStore::empty(
+                &cookie_enabled_config.state_dir,
+            )),
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
