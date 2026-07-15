@@ -5,7 +5,7 @@ use slskr_client::protocol::{
     init::InitMessage,
     peer::{FileEntry, PeerMessage, TransferRequest, TransferResponse, UserInfo},
     server::{ConnectToPeerResponse, SearchRequest, ServerMessage, WaitPort},
-    Writer, ROTATED_OBFUSCATION_TYPE,
+    ProtocolTextEncoding, Writer, ROTATED_OBFUSCATION_TYPE,
 };
 use slskr_client::{
     connection::ConnectionKind,
@@ -878,6 +878,7 @@ async fn negotiate_download_size(
             direction: 0,
             token,
             filename: filename.to_owned(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
             size: None,
         }))
         .await
@@ -989,6 +990,7 @@ async fn queued_download_peer_probe(
         direction: 0,
         token,
         filename: filename.clone(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
         size: None,
     }))
     .await
@@ -1088,7 +1090,7 @@ async fn wait_for_queued_transfer_request(
         tokio::select! {
             peer_result = peer.receive() => {
                 match peer_result.map_err(|error| format!("queued download peer receive failed: {error}"))? {
-                    PeerMessage::TransferRequest(TransferRequest { direction: 1, token, filename: got_filename, size })
+                    PeerMessage::TransferRequest(TransferRequest { direction: 1, token, filename: got_filename, size, .. })
                         if got_filename == filename =>
                     {
                         let size = size.ok_or_else(|| "queued transfer request did not include size".to_owned())?;
@@ -1124,7 +1126,7 @@ async fn wait_for_queued_transfer_request(
                 let (incoming, _) = accept_result.map_err(|error| format!("queued download listener accept failed: {error}"))?;
                 let mut inbound = incoming_peer_messages(incoming, peer_username, "queued download")?;
                 match inbound.receive().await.map_err(|error| format!("queued download inbound receive failed: {error}"))? {
-                    PeerMessage::TransferRequest(TransferRequest { direction: 1, token, filename: got_filename, size })
+                    PeerMessage::TransferRequest(TransferRequest { direction: 1, token, filename: got_filename, size, .. })
                         if got_filename == filename =>
                     {
                         let size = size.ok_or_else(|| "queued inbound transfer request did not include size".to_owned())?;
@@ -1916,6 +1918,7 @@ async fn transfer_resume_smoke() -> Result<(), String> {
         direction: 0,
         token,
         filename: filename.to_owned(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
         size: None,
     }))
     .await
@@ -2033,6 +2036,7 @@ async fn transfer_reject_smoke() -> Result<(), String> {
         direction: 0,
         token,
         filename: filename.to_owned(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
         size: None,
     }))
     .await
@@ -2226,6 +2230,7 @@ async fn run_fixture_download_smoke(
         direction: 0,
         token,
         filename: virtual_filename.to_owned(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
         size: None,
     }))
     .await
@@ -2293,8 +2298,10 @@ fn build_fixture_shared_file_list_payload(filename: &str, size: usize) -> Result
     let entry = FileEntry {
         code: 1,
         filename: filename.to_owned(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
         size,
         extension,
+        extension_encoding: ProtocolTextEncoding::Utf8,
         attributes: Vec::new(),
     };
     encode_fixture_file_entry(&mut writer, &entry)?;

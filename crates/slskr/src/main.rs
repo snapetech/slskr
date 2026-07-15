@@ -95,7 +95,7 @@ use slskr_client::{
             SearchRequest, ServerMessage, TargetedSearchRequest, UserStats, UserStatus,
             WatchedUser,
         },
-        Reader, Writer, ROTATED_OBFUSCATION_TYPE,
+        ProtocolTextEncoding, Reader, Writer, ROTATED_OBFUSCATION_TYPE,
     },
     search::{WishlistSearchScheduler, WishlistSearchSchedulerOptions},
     server::{LoginCredentials, ServerSession},
@@ -159,6 +159,7 @@ const MAX_BROWSE_FILENAME_BYTES: usize = 4 * 1024;
 const MAX_BROWSE_EXTENSION_BYTES: usize = 256;
 const MAX_BROWSE_REASON_BYTES: usize = 4 * 1024;
 const MAX_BROWSE_FOLDER_BYTES: usize = 4 * 1024;
+const MAX_REMOTE_PATH_ENCODINGS: usize = 50_000;
 const MAX_MESSAGE_RECORDS: usize = 500;
 const MAX_MESSAGE_USERNAME_BYTES: usize = 1024;
 const MAX_MESSAGE_BODY_BYTES: usize = 64 * 1024;
@@ -505,6 +506,8 @@ impl ShareIndexSnapshot {
                     local_paths.insert(record.filename.clone(), PathBuf::from(local_path));
                 }
                 FileEntry {
+                    filename_encoding: Default::default(),
+                    extension_encoding: Default::default(),
                     code: 1,
                     filename: record.filename.clone(),
                     size: record.size.max(0) as u64,
@@ -548,6 +551,8 @@ fn summarize_share_roots_from_persisted(
             .entry(record.root_label.clone())
             .or_default()
             .push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: record.filename.clone(),
                 size: record.size.max(0) as u64,
@@ -3383,6 +3388,7 @@ struct BrowseEntry {
     filename: String,
     size: u64,
     extension: String,
+    path_encoding: ProtocolTextEncoding,
 }
 
 impl BrowseEntry {
@@ -3410,6 +3416,7 @@ impl BrowseEntry {
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
             extension: truncate_utf8_bytes(extension, MAX_BROWSE_EXTENSION_BYTES),
+            path_encoding: ProtocolTextEncoding::Utf8,
         })
     }
 
@@ -3420,6 +3427,50 @@ impl BrowseEntry {
             self.size,
             json_escape(&self.extension)
         )
+    }
+}
+
+#[derive(Debug, Default)]
+struct RemotePathEncodingRegistry {
+    entries: BTreeMap<(String, String), ProtocolTextEncoding>,
+}
+
+impl RemotePathEncodingRegistry {
+    fn remember(&mut self, username: &str, path: &str, encoding: ProtocolTextEncoding) {
+        if username.is_empty() || path.is_empty() {
+            return;
+        }
+        let key = (username.to_owned(), path.to_owned());
+        if self.entries.len() >= MAX_REMOTE_PATH_ENCODINGS && !self.entries.contains_key(&key) {
+            if let Some(oldest_key) = self.entries.keys().next().cloned() {
+                self.entries.remove(&oldest_key);
+            }
+        }
+        self.entries.insert(key, encoding);
+    }
+
+    fn encoding_for(&self, username: &str, path: &str) -> ProtocolTextEncoding {
+        self.entries
+            .get(&(username.to_owned(), path.to_owned()))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn remember_browse_entries(&mut self, username: &str, entries: &[BrowseEntry]) {
+        for entry in entries {
+            self.remember(username, &entry.filename, entry.path_encoding);
+            let mut folder = virtual_folder(&entry.filename);
+            while !folder.is_empty() {
+                self.remember(username, folder, entry.path_encoding);
+                folder = virtual_folder(folder);
+            }
+        }
+    }
+
+    fn remember_search_response(&mut self, response: &FileSearchResponse) {
+        for entry in response.results.iter().chain(&response.private_results) {
+            self.remember(&response.username, &entry.filename, entry.filename_encoding);
+        }
     }
 }
 
@@ -8217,6 +8268,7 @@ struct AppState {
     users: RwLock<UserStore>,
     mesh: RwLock<MeshState>,
     browse: RwLock<BrowseStore>,
+    remote_path_encodings: RwLock<RemotePathEncodingRegistry>,
     messages: RwLock<MessageStore>,
     rooms: RwLock<RoomStore>,
     transfers: RwLock<TransferQueue>,
@@ -16508,15 +16560,14 @@ async fn route_http_request_with_headers(
         // ADDITIONAL MISSING INTEGRATION & PLATFORM ENDPOINTS (Phase 5)
         ("GET", "/api/integrations/spotify/status") => {
             let spotify = &state.config.integrations.spotify;
-            let redirect_uri = spotify_redirect_uri(state);
             let json = format!(
-                "{{\"connected\":false,\"status\":\"{}\",\"configured\":{},\"enabled\":{},\"client_id_configured\":{},\"client_secret_configured\":{},\"redirect_uri\":\"{}\",\"market\":\"{}\",\"scopes\":\"{}\",\"auth_flow\":\"authorization_code_pkce\",\"callback_multiplexed\":true,\"next_action\":\"{}\"}}",
+                "{{\"connected\":false,\"status\":\"{}\",\"configured\":{},\"enabled\":{},\"client_id_configured\":{},\"client_secret_configured\":{},\"redirect_uri\":null,\"redirect_uri_configured\":{},\"market\":\"{}\",\"scopes\":\"{}\",\"auth_flow\":\"authorization_code_pkce\",\"callback_multiplexed\":true,\"next_action\":\"{}\"}}",
                 if spotify.configured() { "ready_to_authorize" } else if spotify.enabled { "missing_client_id" } else { "disabled" },
                 spotify.configured(),
                 spotify.enabled,
                 spotify.client_id.is_some(),
                 spotify.client_secret.is_some(),
-                json_escape(&redirect_uri),
+                spotify.redirect_uri.is_some(),
                 json_escape(&spotify.market),
                 json_escape(&spotify.scopes),
                 if spotify.configured() { "authorize" } else { "configure Spotify client ID and redirect URI" }
@@ -16602,10 +16653,10 @@ async fn route_http_request_with_headers(
             };
 
             Ok(routing::ok_response(format!(
-                "{{\"connected\":false,\"authorized\":false,\"status\":\"callback_received\",\"code_received\":true,\"code_length\":{},\"state_valid\":true,\"state_created_at\":{},\"redirect_uri\":\"{}\",\"next_action\":\"exchange code for token\"}}",
+                "{{\"connected\":false,\"authorized\":false,\"status\":\"callback_received\",\"code_received\":true,\"code_length\":{},\"state_valid\":true,\"state_created_at\":{},\"redirect_uri\":null,\"redirect_uri_configured\":{},\"next_action\":\"exchange code for token\"}}",
                 code.len(),
                 state_record.created_at,
-                json_escape(&state_record.redirect_uri)
+                !state_record.redirect_uri.is_empty()
             )))
         }
 
@@ -21079,6 +21130,7 @@ async fn serve(once: bool) -> Result<(), String> {
         users: RwLock::new(user_store),
         mesh: RwLock::new(MeshState::new()),
         browse: RwLock::new(browse_store),
+        remote_path_encodings: RwLock::new(RemotePathEncodingRegistry::default()),
         messages: RwLock::new(message_store),
         rooms: RwLock::new(room_store),
         transfers: RwLock::new(TransferQueue::new(&config)),
@@ -21990,6 +22042,7 @@ async fn handle_queued_download_request(
     .await
     .map_err(|error| format!("queued transfer response send failed: {error}"))?;
     peer.send(&PeerMessage::TransferRequest(TransferRequest {
+        filename_encoding: request.filename_encoding,
         direction: 1,
         token: request.token,
         filename: request.filename.clone(),
@@ -22630,6 +22683,11 @@ where
             }
         }
         PeerMessage::FileSearchResponse(response) => {
+            state
+                .remote_path_encodings
+                .write()
+                .await
+                .remember_search_response(&response);
             let accepted = {
                 let mut searches = state.searches.write().await;
                 searches.add_peer_response(&response).is_some()
@@ -23468,6 +23526,11 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
 
     match result {
         Ok(entries) => {
+            state
+                .remote_path_encodings
+                .write()
+                .await
+                .remember_browse_entries(&address.username, &entries);
             let mut browse = state.browse.write().await;
             let record = browse.add_entries(address.username.clone(), entries, true);
             drop(browse);
@@ -23570,6 +23633,11 @@ async fn project_indirect_browse_response(state: &AppState, response: &ConnectTo
     };
     match result {
         Ok(entries) => {
+            state
+                .remote_path_encodings
+                .write()
+                .await
+                .remember_browse_entries(&response.username, &entries);
             let mut browse = state.browse.write().await;
             let record = browse.add_entries(response.username.clone(), entries, true);
             drop(browse);
@@ -24263,7 +24331,16 @@ async fn negotiate_peer_transfer(
     address: &PeerAddress,
     transfer: &TransferEntry,
 ) -> Result<PeerTransferNegotiation, String> {
+    let filename_encoding = match transfer.peer_username.as_deref() {
+        Some(username) => state
+            .remote_path_encodings
+            .read()
+            .await
+            .encoding_for(username, &transfer.filename),
+        None => ProtocolTextEncoding::Utf8,
+    };
     let message = PeerMessage::TransferRequest(TransferRequest {
+        filename_encoding,
         direction: transfer.direction,
         token: transfer.token,
         filename: transfer.filename.clone(),
@@ -24340,16 +24417,22 @@ async fn fetch_peer_folder(
     address: &PeerAddress,
     folder: String,
 ) -> Result<Vec<BrowseEntry>, String> {
+    let folder_encoding = state
+        .remote_path_encodings
+        .read()
+        .await
+        .encoding_for(&address.username, &folder);
     let response = send_peer_message_request(
         state,
         address,
         PeerMessage::FolderContentsRequest(FolderContentsRequest {
+            folder_encoding,
             token: 0,
             folder: folder.clone(),
         }),
     )
     .await?;
-    folder_entries_from_peer_message(response, &folder)
+    folder_entries_from_peer_message(response, &folder, folder_encoding)
 }
 
 async fn fetch_indirect_peer_browse(
@@ -24376,10 +24459,16 @@ async fn fetch_indirect_peer_folder(
     response: &ConnectToPeerResponse,
     folder: String,
 ) -> Result<Vec<BrowseEntry>, String> {
+    let folder_encoding = state
+        .remote_path_encodings
+        .read()
+        .await
+        .encoding_for(&response.username, &folder);
     let mut peer = connect_indirect_peer_messages(state, response).await?;
     time::timeout(
         state.config.peer_response_timeout,
         peer.send(&PeerMessage::FolderContentsRequest(FolderContentsRequest {
+            folder_encoding,
             token: 0,
             folder: folder.clone(),
         })),
@@ -24391,7 +24480,7 @@ async fn fetch_indirect_peer_folder(
         .await
         .map_err(|_| "indirect folder browse response timed out".to_owned())?
         .map_err(|error| format!("indirect folder browse response failed: {error}"))?;
-    folder_entries_from_peer_message(message, &folder)
+    folder_entries_from_peer_message(message, &folder, folder_encoding)
 }
 
 async fn browse_plain_peer(
@@ -24694,13 +24783,14 @@ fn browse_entries_from_peer_message(message: PeerMessage) -> Result<Vec<BrowseEn
 fn folder_entries_from_peer_message(
     message: PeerMessage,
     folder: &str,
+    folder_encoding: ProtocolTextEncoding,
 ) -> Result<Vec<BrowseEntry>, String> {
     match message {
         PeerMessage::FolderContentsResponse(payload) => {
             match parse_shared_file_list_payload(&payload) {
                 Ok(entries) if !entries.is_empty() => Ok(entries),
-                Ok(_) => parse_folder_file_list_payload(&payload, folder),
-                Err(_) => parse_folder_file_list_payload(&payload, folder),
+                Ok(_) => parse_folder_file_list_payload(&payload, folder, folder_encoding),
+                Err(_) => parse_folder_file_list_payload(&payload, folder, folder_encoding),
             }
         }
         other => Err(format!(
@@ -27730,6 +27820,8 @@ fn scan_share_root(
             let filename = format!("{}/{}", label, virtual_share_path(relative));
             local_paths.insert(filename.clone(), path.clone());
             entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: filename.clone(),
                 size: metadata.len(),
@@ -27830,6 +27922,8 @@ fn scan_share_root_unix(
             let filename = format!("{}/{}", label, virtual_share_path(&relative));
             local_paths.insert(filename.clone(), root.join(&relative));
             entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: filename.clone(),
                 size: metadata.len(),
@@ -28262,15 +28356,21 @@ fn parse_shared_file_list_section(
         .read_bounded_count("shared folders", 8)
         .map_err(|error| error.to_string())?;
     for _ in 0..folder_count {
-        let folder = reader.read_string().map_err(|error| error.to_string())?;
+        let (folder, folder_encoding) = reader
+            .read_string_with_encoding()
+            .map_err(|error| error.to_string())?;
         let file_count = reader
             .read_bounded_count("shared files", 21)
             .map_err(|error| error.to_string())?;
         for _ in 0..file_count {
             let code = reader.read_u8().map_err(|error| error.to_string())?;
-            let filename = reader.read_string().map_err(|error| error.to_string())?;
+            let (filename, filename_encoding) = reader
+                .read_string_with_encoding()
+                .map_err(|error| error.to_string())?;
             let size = reader.read_u64_le().map_err(|error| error.to_string())?;
-            let extension = reader.read_string().map_err(|error| error.to_string())?;
+            let (extension, _) = reader
+                .read_string_with_encoding()
+                .map_err(|error| error.to_string())?;
             let attribute_count = reader
                 .read_bounded_count("shared file attributes", 8)
                 .map_err(|error| error.to_string())?;
@@ -28288,6 +28388,11 @@ fn parse_shared_file_list_section(
                     filename: join_virtual_path(&folder, &filename),
                     size,
                     extension,
+                    path_encoding: if folder_encoding == ProtocolTextEncoding::Utf8 {
+                        filename_encoding
+                    } else {
+                        folder_encoding
+                    },
                 }));
             }
         }
@@ -28298,6 +28403,7 @@ fn parse_shared_file_list_section(
 fn parse_folder_file_list_payload(
     payload: &[u8],
     folder: &str,
+    folder_encoding: ProtocolTextEncoding,
 ) -> Result<Vec<BrowseEntry>, String> {
     let decompressed = decompress_zlib_payload(payload).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(&decompressed);
@@ -28307,9 +28413,13 @@ fn parse_folder_file_list_payload(
     let mut entries = Vec::new();
     for _ in 0..file_count {
         let code = reader.read_u8().map_err(|error| error.to_string())?;
-        let filename = reader.read_string().map_err(|error| error.to_string())?;
+        let (filename, filename_encoding) = reader
+            .read_string_with_encoding()
+            .map_err(|error| error.to_string())?;
         let size = reader.read_u64_le().map_err(|error| error.to_string())?;
-        let extension = reader.read_string().map_err(|error| error.to_string())?;
+        let (extension, _) = reader
+            .read_string_with_encoding()
+            .map_err(|error| error.to_string())?;
         let attribute_count = reader
             .read_bounded_count("folder file attributes", 8)
             .map_err(|error| error.to_string())?;
@@ -28327,6 +28437,11 @@ fn parse_folder_file_list_payload(
                 filename: join_virtual_path(folder, &filename),
                 size,
                 extension,
+                path_encoding: if folder_encoding == ProtocolTextEncoding::Utf8 {
+                    filename_encoding
+                } else {
+                    folder_encoding
+                },
             }));
         }
     }
@@ -29011,6 +29126,7 @@ mod tests {
             users: RwLock::new(super::UserStore::new()),
             mesh: RwLock::new(super::MeshState::new()),
             browse: RwLock::new(super::BrowseStore::new()),
+            remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(message_store),
             rooms: RwLock::new(room_store),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
@@ -29058,6 +29174,8 @@ mod tests {
             .local_paths
             .insert(filename.to_owned(), path.to_path_buf());
         shares.entries.push(FileEntry {
+            filename_encoding: Default::default(),
+            extension_encoding: Default::default(),
             code: 1,
             filename: filename.to_owned(),
             size,
@@ -30254,6 +30372,8 @@ mod tests {
         {
             let mut shares = state.shares.write().await;
             shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Virtual/Other.mp3".to_owned(),
                 size: 12,
@@ -30297,6 +30417,8 @@ mod tests {
                 }],
             });
             shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Music/Other.mp3".to_owned(),
                 size: 100,
@@ -30304,6 +30426,8 @@ mod tests {
                 attributes: Vec::new(),
             });
             shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Music/Test.flac".to_owned(),
                 size: 42,
@@ -30371,6 +30495,8 @@ mod tests {
                 ("Music/Artist/Loose.mp3", 100, "mp3"),
             ] {
                 shares.entries.push(FileEntry {
+                    filename_encoding: Default::default(),
+                    extension_encoding: Default::default(),
                     code: 1,
                     filename: filename.to_owned(),
                     size,
@@ -35980,6 +36106,8 @@ mod tests {
             username: "peer1".to_owned(),
             token: record.token,
             results: vec![FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Remote/Song.flac".to_owned(),
                 size: 123,
@@ -35991,6 +36119,8 @@ mod tests {
             queue_length: 7,
             unknown: 0,
             private_results: vec![FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Private/Locked.flac".to_owned(),
                 size: 456,
@@ -36034,6 +36164,8 @@ mod tests {
             token: record.token,
             results: (0..(super::MAX_SEARCH_RESULTS_PER_SEARCH + 5))
                 .map(|index| FileEntry {
+                    filename_encoding: Default::default(),
+                    extension_encoding: Default::default(),
                     code: 1,
                     filename: format!("Remote/{index}.flac"),
                     size: index as u64,
@@ -36046,6 +36178,8 @@ mod tests {
             queue_length: 0,
             unknown: 0,
             private_results: vec![FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Private/overflow.flac".to_owned(),
                 size: 1,
@@ -36072,6 +36206,8 @@ mod tests {
             username: "u".repeat(super::MAX_SEARCH_RESULT_USERNAME_BYTES + 1),
             token: first.token,
             results: vec![FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "f".repeat(super::MAX_SEARCH_RESULT_FILENAME_BYTES + 1),
                 size: 1,
@@ -36125,6 +36261,8 @@ mod tests {
             username: "peer".to_owned(),
             token: empty.token,
             results: vec![FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "overflow".to_owned(),
                 size: 1,
@@ -37294,6 +37432,7 @@ mod tests {
             assert_eq!(
                 peer.receive().await.expect("transfer request"),
                 super::PeerMessage::TransferRequest(super::TransferRequest {
+                    filename_encoding: Default::default(),
                     direction: 1,
                     token,
                     filename: "Remote/Song.flac".to_owned(),
@@ -37326,6 +37465,71 @@ mod tests {
         assert_eq!(record.size, Some(4));
         assert_eq!(record.reason, None);
         assert!(transfers.stats_json().contains("\"in_progress\":1"));
+    }
+
+    #[tokio::test]
+    async fn peer_transfer_request_reuses_remembered_legacy_encoding() {
+        let (state, _receiver) = test_state();
+        let filename = "Музыка/песня.flac";
+        let token = {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(
+                0,
+                Some("friend".to_owned()),
+                filename.to_owned(),
+                None,
+                Some(4),
+            );
+            transfers.update_status(entry.id, "peer_lookup", None, None);
+            entry.token
+        };
+        state.remote_path_encodings.write().await.remember(
+            "friend",
+            filename,
+            super::ProtocolTextEncoding::Windows1251,
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let local_addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut init = slskr_client::stream::InitConnection::new(stream);
+            init.receive().await.expect("init");
+            let mut peer = slskr_client::stream::PeerMessageConnection::new(init.into_inner());
+            assert_eq!(
+                peer.receive().await.expect("transfer request"),
+                super::PeerMessage::TransferRequest(super::TransferRequest {
+                    filename_encoding: super::ProtocolTextEncoding::Windows1251,
+                    direction: 0,
+                    token,
+                    filename: filename.to_owned(),
+                    size: None,
+                })
+            );
+            peer.send(&super::PeerMessage::TransferResponse(
+                super::TransferResponse::Allowed {
+                    token,
+                    size: Some(4),
+                },
+            ))
+            .await
+            .expect("response");
+        });
+        let address = slskr_client::protocol::server::PeerAddress {
+            username: "friend".to_owned(),
+            ip: "127.0.0.1".parse().unwrap(),
+            port: u32::from(local_addr.port()),
+            obfuscation_type: 0,
+            obfuscated_port: 0,
+        };
+
+        super::project_peer_transfer_response(&state, &address).await;
+        server.await.expect("server task");
+
+        let transfers = state.transfers.read().await;
+        assert_eq!(transfers.entries.first().unwrap().status, "accepted");
     }
 
     #[tokio::test]
@@ -37371,6 +37575,7 @@ mod tests {
             assert_eq!(
                 peer.receive().await.expect("transfer request"),
                 super::PeerMessage::TransferRequest(super::TransferRequest {
+                    filename_encoding: Default::default(),
                     direction: 1,
                     token,
                     filename: "Remote/Song.flac".to_owned(),
@@ -37464,6 +37669,7 @@ mod tests {
             assert_eq!(
                 peer.receive().await.expect("transfer request"),
                 super::PeerMessage::TransferRequest(super::TransferRequest {
+                    filename_encoding: Default::default(),
                     direction: 0,
                     token: 1,
                     filename: "Remote/Song.flac".to_owned(),
@@ -37562,6 +37768,7 @@ mod tests {
         let mut peer = slskr_client::stream::PeerMessageConnection::new(stream);
         peer.send(&super::PeerMessage::TransferRequest(
             super::TransferRequest {
+                filename_encoding: Default::default(),
                 direction: 0,
                 token: 77,
                 filename: "Remote/QueuedUpload.flac".to_owned(),
@@ -37627,6 +37834,7 @@ mod tests {
             assert_eq!(
                 peer.receive().await.expect("transfer request"),
                 super::PeerMessage::TransferRequest(super::TransferRequest {
+                    filename_encoding: Default::default(),
                     direction: 1,
                     token: 1,
                     filename: "Remote/Obfuscated.flac".to_owned(),
@@ -37728,6 +37936,7 @@ mod tests {
             assert_eq!(
                 peer.receive().await.expect("transfer request"),
                 super::PeerMessage::TransferRequest(super::TransferRequest {
+                    filename_encoding: Default::default(),
                     direction: 1,
                     token: 1,
                     filename: "Remote/Fallback.flac".to_owned(),
@@ -37940,6 +38149,8 @@ mod tests {
         {
             let mut shares = state.shares.write().await;
             shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Virtual/Inbound.flac".to_owned(),
                 size: 4,
@@ -37954,6 +38165,7 @@ mod tests {
         super::handle_peer_message(
             &state,
             super::PeerMessage::TransferRequest(super::TransferRequest {
+                filename_encoding: Default::default(),
                 direction: 0,
                 token: 7,
                 filename: "Virtual/Inbound.flac".to_owned(),
@@ -38018,6 +38230,7 @@ mod tests {
         super::handle_peer_message(
             &state,
             super::PeerMessage::TransferRequest(super::TransferRequest {
+                filename_encoding: Default::default(),
                 direction: 0,
                 token: 99,
                 filename: "Virtual/Test.flac".to_owned(),
@@ -38052,6 +38265,7 @@ mod tests {
         super::handle_peer_message(
             &state,
             super::PeerMessage::TransferRequest(super::TransferRequest {
+                filename_encoding: Default::default(),
                 direction: 0,
                 token: 55,
                 filename: "Virtual/Test.flac".to_owned(),
@@ -41407,6 +41621,8 @@ mod tests {
         {
             let mut shares = state.shares.write().await;
             shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
                 code: 1,
                 filename: "Library/Known/Release.flac".to_owned(),
                 size: 321,
@@ -42104,6 +42320,7 @@ mod tests {
 
         let entries = (0..3)
             .map(|index| super::BrowseEntry {
+                path_encoding: Default::default(),
                 filename: format!("file-{index}.flac"),
                 size: index,
                 extension: "flac".to_owned(),
@@ -42130,6 +42347,7 @@ mod tests {
         browse.request("other".to_owned()).unwrap();
 
         let oversized_entry = super::BrowseEntry {
+            path_encoding: Default::default(),
             filename: "f".repeat(super::MAX_BROWSE_FILENAME_BYTES + 1),
             size: 1,
             extension: "e".repeat(super::MAX_BROWSE_EXTENSION_BYTES + 1),
@@ -42148,6 +42366,7 @@ mod tests {
 
         browse.records[0].entries = (0..super::MAX_TOTAL_BROWSE_ENTRIES)
             .map(|index| super::BrowseEntry {
+                path_encoding: Default::default(),
                 filename: format!("file-{index}"),
                 size: 1,
                 extension: String::new(),
@@ -42157,6 +42376,7 @@ mod tests {
             .add_entries(
                 "other".to_owned(),
                 vec![super::BrowseEntry {
+                    path_encoding: Default::default(),
                     filename: "rejected".to_owned(),
                     size: 1,
                     extension: String::new(),
@@ -42763,6 +42983,67 @@ mod tests {
     }
 
     #[test]
+    fn shared_file_list_payload_retains_legacy_path_encoding() {
+        let mut writer = super::Writer::new();
+        writer.write_u32_le(1);
+        writer
+            .write_string_with_encoding("Музыка", super::ProtocolTextEncoding::Windows1251)
+            .unwrap();
+        writer.write_u32_le(1);
+        writer.write_u8(1);
+        writer
+            .write_string_with_encoding("песня.flac", super::ProtocolTextEncoding::Windows1251)
+            .unwrap();
+        writer.write_u64_le(123);
+        writer.write_string("flac").unwrap();
+        writer.write_u32_le(0);
+        let payload = super::compress_zlib_payload(&writer.into_inner()).unwrap();
+
+        let parsed = super::parse_shared_file_list_payload(&payload).unwrap();
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].filename, "Музыка/песня.flac");
+        assert_eq!(
+            parsed[0].path_encoding,
+            super::ProtocolTextEncoding::Windows1251
+        );
+    }
+
+    #[test]
+    fn remote_path_registry_learns_search_response_encodings() {
+        let response = super::FileSearchResponse {
+            username: "friend".to_owned(),
+            token: 7,
+            results: vec![FileEntry {
+                filename_encoding: super::ProtocolTextEncoding::Windows1251,
+                extension_encoding: super::ProtocolTextEncoding::Utf8,
+                code: 1,
+                filename: "Музыка/песня.flac".to_owned(),
+                size: 123,
+                extension: "flac".to_owned(),
+                attributes: Vec::new(),
+            }],
+            slot_free: true,
+            average_speed: 0,
+            queue_length: 0,
+            unknown: 0,
+            private_results: Vec::new(),
+        };
+        let mut registry = super::RemotePathEncodingRegistry::default();
+
+        registry.remember_search_response(&response);
+
+        assert_eq!(
+            registry.encoding_for("friend", "Музыка/песня.flac"),
+            super::ProtocolTextEncoding::Windows1251
+        );
+        assert_eq!(
+            registry.encoding_for("other", "Музыка/песня.flac"),
+            super::ProtocolTextEncoding::Utf8
+        );
+    }
+
+    #[test]
     fn shared_file_list_payload_rejects_excessive_entries() {
         let entry_count = super::MAX_BROWSE_ENTRIES_PER_USER + 1;
         let mut writer = super::Writer::new();
@@ -43044,6 +43325,7 @@ mod tests {
             assert_eq!(
                 peer.receive().await.expect("folder request"),
                 super::PeerMessage::FolderContentsRequest(super::FolderContentsRequest {
+                    folder_encoding: Default::default(),
                     token: 0,
                     folder: "Remote/Album".to_owned()
                 })
@@ -43074,6 +43356,61 @@ mod tests {
         assert_eq!(record.entries.len(), 1);
         assert_eq!(record.entries[0].filename, "Remote/Album/Song.flac");
         assert_eq!(record.entries[0].size, 321);
+    }
+
+    #[tokio::test]
+    async fn peer_folder_request_reuses_remembered_legacy_encoding() {
+        let (state, _receiver) = test_state();
+        state
+            .browse
+            .write()
+            .await
+            .request_folder("friend".to_owned(), "Музыка".to_owned());
+        state.remote_path_encodings.write().await.remember(
+            "friend",
+            "Музыка",
+            super::ProtocolTextEncoding::Windows1251,
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let local_addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut init = slskr_client::stream::InitConnection::new(stream);
+            init.receive().await.expect("init");
+            let mut peer = slskr_client::stream::PeerMessageConnection::new(init.into_inner());
+            assert_eq!(
+                peer.receive().await.expect("folder request"),
+                super::PeerMessage::FolderContentsRequest(super::FolderContentsRequest {
+                    folder_encoding: super::ProtocolTextEncoding::Windows1251,
+                    token: 0,
+                    folder: "Музыка".to_owned(),
+                })
+            );
+            let mut writer = super::Writer::new();
+            writer.write_u32_le(0);
+            let payload = super::compress_zlib_payload(&writer.into_inner()).unwrap();
+            peer.send(&super::PeerMessage::FolderContentsResponse(payload))
+                .await
+                .expect("response");
+        });
+        let address = slskr_client::protocol::server::PeerAddress {
+            username: "friend".to_owned(),
+            ip: "127.0.0.1".parse().unwrap(),
+            port: u32::from(local_addr.port()),
+            obfuscation_type: 0,
+            obfuscated_port: 0,
+        };
+
+        super::project_peer_browse_response(&state, &address).await;
+        server.await.expect("server task");
+
+        let browse = state.browse.read().await;
+        let record = browse.get("friend").expect("browse record");
+        assert_eq!(record.status, "ready");
+        assert_eq!(record.folder.as_deref(), Some("Музыка"));
     }
 
     #[tokio::test]
@@ -44831,6 +45168,61 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn spotify_diagnostic_projections_redact_redirect_uri() {
+        let private_redirect = "https://spotify.internal/private/callback";
+        let env = MapEnv::default()
+            .with("SLSKR_SPOTIFY_ENABLED", "true")
+            .with("SLSKR_SPOTIFY_CLIENT_ID", "client-id")
+            .with("SLSKR_SPOTIFY_REDIRECT_URI", private_redirect);
+        let (state, _receiver) = test_state_with_env_parts(env, super::SearchStore::new(), None);
+
+        let sanitized = state.config.integrations.spotify.sanitized_json();
+        assert!(sanitized.contains("\"redirect_uri\":null"));
+        assert!(sanitized.contains("\"redirect_uri_configured\":true"));
+        assert!(!sanitized.contains("spotify.internal"));
+        assert!(!sanitized.contains("/private/callback"));
+
+        let status =
+            super::route_http_request("GET", "/api/integrations/spotify/status", None, "", &state)
+                .await
+                .expect("Spotify status");
+        assert!(!status.body.contains(private_redirect));
+        assert!(status.body.contains("\"redirect_uri\":null"));
+
+        let authorize = super::route_http_request(
+            "POST",
+            "/api/integrations/spotify/authorize",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("Spotify authorize");
+        assert!(authorize.body.contains("spotify.internal"));
+        let issued_state = state
+            .oauth_states
+            .read()
+            .await
+            .records
+            .keys()
+            .next()
+            .cloned()
+            .expect("issued state");
+        let callback = super::route_http_request(
+            "GET",
+            &format!("/api/integrations/spotify/callback?code=abc123&state={issued_state}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("Spotify callback");
+        assert_eq!(callback.status, "200 OK");
+        assert!(!callback.body.contains(private_redirect));
+        assert!(callback.body.contains("\"redirect_uri\":null"));
+    }
+
     #[test]
     fn non_loopback_bind_requires_api_token() {
         let env = MapEnv::default().with("SLSKR_HTTP_BIND", "0.0.0.0:5030");
@@ -45046,6 +45438,7 @@ mod tests {
             users: RwLock::new(super::UserStore::new()),
             mesh: RwLock::new(super::MeshState::new()),
             browse: RwLock::new(super::BrowseStore::new()),
+            remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
             rooms: RwLock::new(super::RoomStore::new()),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
@@ -45196,6 +45589,7 @@ mod tests {
             users: RwLock::new(super::UserStore::new()),
             mesh: RwLock::new(super::MeshState::new()),
             browse: RwLock::new(super::BrowseStore::new()),
+            remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
             rooms: RwLock::new(super::RoomStore::new()),
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),

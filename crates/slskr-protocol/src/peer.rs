@@ -1,7 +1,7 @@
 use crate::{
     error::{DecodeError, EncodeError},
     frame::MessageFrame,
-    primitives::{Reader, Writer},
+    primitives::{ProtocolTextEncoding, Reader, Writer},
 };
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use std::io::{Read, Write};
@@ -119,8 +119,10 @@ pub struct FileAttribute {
 pub struct FileEntry {
     pub code: u8,
     pub filename: String,
+    pub filename_encoding: ProtocolTextEncoding,
     pub size: u64,
     pub extension: String,
+    pub extension_encoding: ProtocolTextEncoding,
     pub attributes: Vec<FileAttribute>,
 }
 
@@ -150,6 +152,7 @@ pub struct UserInfo {
 pub struct FolderContentsRequest {
     pub token: u32,
     pub folder: String,
+    pub folder_encoding: ProtocolTextEncoding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +160,7 @@ pub struct TransferRequest {
     pub direction: u32,
     pub token: u32,
     pub filename: String,
+    pub filename_encoding: ProtocolTextEncoding,
     pub size: Option<u64>,
 }
 
@@ -243,14 +247,19 @@ impl PeerMessage {
             }
             PeerCode::UserInfoRequest => Self::UserInfoRequest,
             PeerCode::UserInfoResponse => Self::UserInfoResponse(decode_user_info(&mut reader)?),
-            PeerCode::FolderContentsRequest => Self::FolderContentsRequest(FolderContentsRequest {
-                token: reader.read_u32_le()?,
-                folder: reader.read_string()?,
-            }),
+            PeerCode::FolderContentsRequest => {
+                let token = reader.read_u32_le()?;
+                let (folder, folder_encoding) = reader.read_string_with_encoding()?;
+                Self::FolderContentsRequest(FolderContentsRequest {
+                    token,
+                    folder,
+                    folder_encoding,
+                })
+            }
             PeerCode::TransferRequest => {
                 let direction = reader.read_u32_le()?;
                 let token = reader.read_u32_le()?;
-                let filename = reader.read_string()?;
+                let (filename, filename_encoding) = reader.read_string_with_encoding()?;
                 let size = if !reader.is_empty() {
                     Some(reader.read_u64_le()?)
                 } else {
@@ -260,6 +269,7 @@ impl PeerMessage {
                     direction,
                     token,
                     filename,
+                    filename_encoding,
                     size,
                 })
             }
@@ -373,7 +383,7 @@ impl PeerMessage {
             }
             Self::FolderContentsRequest(value) => {
                 writer.write_u32_le(value.token);
-                writer.write_string(&value.folder)?;
+                writer.write_string_with_encoding(&value.folder, value.folder_encoding)?;
                 PeerCode::FolderContentsRequest
             }
             Self::FolderContentsResponse(payload) => {
@@ -385,7 +395,7 @@ impl PeerMessage {
             Self::TransferRequest(value) => {
                 writer.write_u32_le(value.direction);
                 writer.write_u32_le(value.token);
-                writer.write_string(&value.filename)?;
+                writer.write_string_with_encoding(&value.filename, value.filename_encoding)?;
                 if let Some(size) = value.size {
                     writer.write_u64_le(size);
                 }
@@ -547,9 +557,9 @@ fn decode_file_entries(reader: &mut Reader<'_>) -> Result<Vec<FileEntry>, Decode
     let mut entries = Vec::new();
     for _ in 0..count {
         let code = reader.read_u8()?;
-        let filename = reader.read_string()?;
+        let (filename, filename_encoding) = reader.read_string_with_encoding()?;
         let size = reader.read_u64_le()?;
-        let extension = reader.read_string()?;
+        let (extension, extension_encoding) = reader.read_string_with_encoding()?;
         let attribute_count = reader.read_bounded_count("file attributes", 8)?;
         let mut attributes = Vec::new();
         for _ in 0..attribute_count {
@@ -561,8 +571,10 @@ fn decode_file_entries(reader: &mut Reader<'_>) -> Result<Vec<FileEntry>, Decode
         entries.push(FileEntry {
             code,
             filename,
+            filename_encoding,
             size,
             extension,
+            extension_encoding,
             attributes,
         });
     }
@@ -575,9 +587,9 @@ fn encode_file_entries(writer: &mut Writer, entries: &[FileEntry]) -> Result<(),
     writer.write_u32_le(count);
     for entry in entries {
         writer.write_u8(entry.code);
-        writer.write_string(&entry.filename)?;
+        writer.write_string_with_encoding(&entry.filename, entry.filename_encoding)?;
         writer.write_u64_le(entry.size);
-        writer.write_string(&entry.extension)?;
+        writer.write_string_with_encoding(&entry.extension, entry.extension_encoding)?;
         let attribute_count = u32::try_from(entry.attributes.len())
             .map_err(|_| EncodeError::length_overflow("file attributes", entry.attributes.len()))?;
         writer.write_u32_le(attribute_count);
@@ -651,6 +663,7 @@ mod tests {
                 direction: 0,
                 token: 123,
                 filename: "shares\\file.bin".to_owned(),
+                filename_encoding: ProtocolTextEncoding::Utf8,
                 size: Some(456),
             })
         );

@@ -7,6 +7,7 @@ use slskr_protocol::{
         FileAttribute, FileEntry, FileSearchResponse, FolderContentsRequest, PeerCode, PeerMessage,
         TransferRequest, TransferResponse, UserInfo,
     },
+    ProtocolTextEncoding,
 };
 use std::io::Write;
 
@@ -51,6 +52,7 @@ fn peer_core_messages_round_trip() {
         PeerMessage::FolderContentsRequest(FolderContentsRequest {
             token: 11,
             folder: "Music".to_owned(),
+            folder_encoding: ProtocolTextEncoding::Utf8,
         }),
         PeerMessage::QueueUpload {
             filename: "Music/file.flac".to_owned(),
@@ -104,6 +106,7 @@ fn transfer_messages_round_trip() {
             direction: 1,
             token: 12,
             filename: "Music/file.flac".to_owned(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
             size: Some(1_000),
         }),
         PeerMessage::TransferResponse(TransferResponse::Allowed {
@@ -142,8 +145,10 @@ fn file_search_response_round_trips() {
     let entry = FileEntry {
         code: 1,
         filename: "Music/file.flac".to_owned(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
         size: 1_000,
         extension: String::new(),
+        extension_encoding: ProtocolTextEncoding::Utf8,
         attributes: vec![FileAttribute {
             code: 1,
             value: 320,
@@ -162,6 +167,60 @@ fn file_search_response_round_trips() {
 
     let decoded = PeerMessage::decode(message.encode().unwrap()).unwrap();
     assert_eq!(decoded, message);
+}
+
+#[test]
+fn legacy_peer_paths_preserve_windows_1251_bytes_across_round_trips() {
+    let folder = PeerMessage::FolderContentsRequest(FolderContentsRequest {
+        token: 21,
+        folder: "Музыка".to_owned(),
+        folder_encoding: ProtocolTextEncoding::Windows1251,
+    });
+    let folder_frame = folder.encode().unwrap();
+    assert_eq!(
+        &folder_frame.payload[8..],
+        &[0xCC, 0xF3, 0xE7, 0xFB, 0xEA, 0xE0]
+    );
+    assert_eq!(PeerMessage::decode(folder_frame).unwrap(), folder);
+
+    let transfer = PeerMessage::TransferRequest(TransferRequest {
+        direction: 0,
+        token: 22,
+        filename: "Музыка\\песня.flac".to_owned(),
+        filename_encoding: ProtocolTextEncoding::Windows1251,
+        size: None,
+    });
+    let transfer_frame = transfer.encode().unwrap();
+    assert!(transfer_frame
+        .payload
+        .windows(6)
+        .any(|window| window == [0xCC, 0xF3, 0xE7, 0xFB, 0xEA, 0xE0]));
+    assert_eq!(PeerMessage::decode(transfer_frame).unwrap(), transfer);
+
+    let search = PeerMessage::FileSearchResponse(FileSearchResponse {
+        username: "peer".to_owned(),
+        token: 23,
+        results: vec![FileEntry {
+            code: 1,
+            filename: "Музыка\\песня.flac".to_owned(),
+            filename_encoding: ProtocolTextEncoding::Windows1251,
+            size: 1_000,
+            extension: "флак".to_owned(),
+            extension_encoding: ProtocolTextEncoding::Windows1251,
+            attributes: Vec::new(),
+        }],
+        slot_free: true,
+        average_speed: 100,
+        queue_length: 0,
+        unknown: 0,
+        private_results: Vec::new(),
+    });
+    let search_frame = search.encode().unwrap();
+    let search_payload = zlib_decode(&search_frame.payload);
+    assert!(search_payload
+        .windows(6)
+        .any(|window| window == [0xCC, 0xF3, 0xE7, 0xFB, 0xEA, 0xE0]));
+    assert_eq!(PeerMessage::decode(search_frame).unwrap(), search);
 }
 
 #[test]
@@ -208,8 +267,10 @@ fn file_search_response_ignores_optional_trailing_fields() {
         results: vec![FileEntry {
             code: 1,
             filename: "Music/file.flac".to_owned(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
             size: 1_000,
             extension: String::new(),
+            extension_encoding: ProtocolTextEncoding::Utf8,
             attributes: Vec::new(),
         }],
         slot_free: true,

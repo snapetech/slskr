@@ -1,8 +1,27 @@
 use std::net::Ipv4Addr;
 
-use encoding_rs::WINDOWS_1252;
+use encoding_rs::WINDOWS_1251;
 
 use crate::error::{unexpected_eof, DecodeError, EncodeError};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ProtocolTextEncoding {
+    #[default]
+    Utf8,
+    Windows1251,
+    Latin1,
+}
+
+impl ProtocolTextEncoding {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Windows1251 => "windows-1251",
+            Self::Latin1 => "ISO-8859-1",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Reader<'a> {
@@ -74,6 +93,12 @@ impl<'a> Reader<'a> {
     }
 
     pub fn read_string(&mut self) -> Result<String, DecodeError> {
+        self.read_string_with_encoding().map(|(value, _)| value)
+    }
+
+    pub fn read_string_with_encoding(
+        &mut self,
+    ) -> Result<(String, ProtocolTextEncoding), DecodeError> {
         let length = self.read_u32_le()? as usize;
         if length > self.remaining() {
             return Err(DecodeError::InvalidStringLength {
@@ -84,10 +109,17 @@ impl<'a> Reader<'a> {
 
         let bytes = self.read_exact("string", length)?;
         match std::str::from_utf8(bytes) {
-            Ok(value) => Ok(value.to_owned()),
+            Ok(value) => Ok((value.to_owned(), ProtocolTextEncoding::Utf8)),
             Err(_) => {
-                let (decoded, _, _) = WINDOWS_1252.decode(bytes);
-                Ok(decoded.into_owned())
+                let (windows_1251, _, _) = WINDOWS_1251.decode(bytes);
+                if looks_like_windows_1251(bytes, &windows_1251) {
+                    Ok((windows_1251.into_owned(), ProtocolTextEncoding::Windows1251))
+                } else {
+                    Ok((
+                        bytes.iter().map(|byte| char::from(*byte)).collect(),
+                        ProtocolTextEncoding::Latin1,
+                    ))
+                }
             }
         }
     }
@@ -206,6 +238,38 @@ impl Writer {
         self.write_len_prefixed_bytes("string", value.as_bytes())
     }
 
+    pub fn write_string_with_encoding(
+        &mut self,
+        value: &str,
+        encoding: ProtocolTextEncoding,
+    ) -> Result<(), EncodeError> {
+        match encoding {
+            ProtocolTextEncoding::Utf8 => self.write_string(value),
+            ProtocolTextEncoding::Windows1251 => {
+                let (encoded, _, had_errors) = WINDOWS_1251.encode(value);
+                if had_errors {
+                    return Err(EncodeError::UnrepresentableString {
+                        encoding: encoding.as_str(),
+                    });
+                }
+                self.write_len_prefixed_bytes("string", &encoded)
+            }
+            ProtocolTextEncoding::Latin1 => {
+                let encoded = value
+                    .chars()
+                    .map(|character| {
+                        u8::try_from(u32::from(character)).map_err(|_| {
+                            EncodeError::UnrepresentableString {
+                                encoding: encoding.as_str(),
+                            }
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.write_len_prefixed_bytes("string", &encoded)
+            }
+        }
+    }
+
     pub fn write_bytes(&mut self, value: &[u8]) {
         self.output.extend_from_slice(value);
     }
@@ -221,4 +285,16 @@ impl Writer {
         self.write_bytes(value);
         Ok(())
     }
+}
+
+fn looks_like_windows_1251(bytes: &[u8], decoded: &str) -> bool {
+    let high_byte_count = bytes.iter().filter(|byte| **byte >= 0x80).count();
+    if high_byte_count < 4 {
+        return false;
+    }
+    let cyrillic_count = decoded
+        .chars()
+        .filter(|character| ('\u{0400}'..='\u{04ff}').contains(character))
+        .count();
+    cyrillic_count >= 4 && cyrillic_count.saturating_mul(5) >= high_byte_count.saturating_mul(3)
 }

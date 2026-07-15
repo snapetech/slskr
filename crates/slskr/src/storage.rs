@@ -155,14 +155,14 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
             let code = reader
                 .read_u8()
                 .map_err(|e| format!("cannot read file code: {e}"))?;
-            let filename = reader
-                .read_string()
+            let (filename, filename_encoding) = reader
+                .read_string_with_encoding()
                 .map_err(|e| format!("cannot read filename: {e}"))?;
             let size = reader
                 .read_u64_le()
                 .map_err(|e| format!("cannot read file size: {e}"))?;
-            let extension = reader
-                .read_string()
+            let (extension, extension_encoding) = reader
+                .read_string_with_encoding()
                 .map_err(|e| format!("cannot read extension: {e}"))?;
             let attr_count = reader
                 .read_bounded_count("shared file attributes", 8)
@@ -183,8 +183,10 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
             entries.push(FileEntry {
                 code,
                 filename,
+                filename_encoding,
                 size,
                 extension,
+                extension_encoding,
                 attributes,
             });
         }
@@ -195,11 +197,11 @@ pub fn parse_shared_file_list_payload(payload: &[u8]) -> Result<Vec<FileEntry>, 
 pub fn encode_file_entry(writer: &mut Writer, entry: &FileEntry) -> Result<(), String> {
     writer.write_u8(entry.code);
     writer
-        .write_string(&entry.filename)
+        .write_string_with_encoding(&entry.filename, entry.filename_encoding)
         .map_err(|error| error.to_string())?;
     writer.write_u64_le(entry.size);
     writer
-        .write_string(&entry.extension)
+        .write_string_with_encoding(&entry.extension, entry.extension_encoding)
         .map_err(|error| error.to_string())?;
     writer.write_u32_le(
         u32::try_from(entry.attributes.len()).map_err(|_| "too many attributes".to_owned())?,
@@ -246,14 +248,14 @@ pub fn parse_folder_file_list_payload(
         let code = reader
             .read_u8()
             .map_err(|e| format!("cannot read file code: {e}"))?;
-        let filename = reader
-            .read_string()
+        let (filename, filename_encoding) = reader
+            .read_string_with_encoding()
             .map_err(|e| format!("cannot read filename: {e}"))?;
         let size = reader
             .read_u64_le()
             .map_err(|e| format!("cannot read file size: {e}"))?;
-        let extension = reader
-            .read_string()
+        let (extension, extension_encoding) = reader
+            .read_string_with_encoding()
             .map_err(|e| format!("cannot read extension: {e}"))?;
         let attr_count = reader
             .read_bounded_count("folder file attributes", 8)
@@ -274,8 +276,10 @@ pub fn parse_folder_file_list_payload(
         entries.push(FileEntry {
             code,
             filename,
+            filename_encoding,
             size,
             extension,
+            extension_encoding,
             attributes,
         });
     }

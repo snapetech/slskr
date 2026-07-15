@@ -15,4 +15,4 @@ pub use frame::{InitFrame, MessageFrame, RawFrame};
 pub use init::{InitCode, InitMessage};
 pub use obfuscation::{decode_rotated, encode_rotated, ROTATED_OBFUSCATION_TYPE};
 pub use peer::{PeerCode, PeerMessage};
-pub use primitives::{Reader, Writer};
+pub use primitives::{ProtocolTextEncoding, Reader, Writer};

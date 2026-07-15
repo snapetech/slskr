@@ -4,6 +4,7 @@ use slskr_client::{
     ClientError,
 };
 use slskr_protocol::peer::{PeerMessage, TransferRequest, TransferResponse};
+use slskr_protocol::ProtocolTextEncoding;
 use tokio::io::duplex;
 
 #[test]
@@ -42,6 +43,7 @@ fn transfer_request_updates_state() {
             direction: 1,
             token: 7,
             filename: "Music/file.flac".to_owned(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
             size: Some(100),
         }))
         .unwrap();
@@ -180,6 +182,7 @@ fn upload_transfer_request_marks_requested() {
             direction: 1,
             token: 7,
             filename: "Music/file.flac".to_owned(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
             size: Some(100),
         })
     );

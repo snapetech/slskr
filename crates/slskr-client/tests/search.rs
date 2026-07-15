@@ -13,6 +13,7 @@ use slskr_protocol::{
     distributed::DistributedSearch,
     peer::{FileEntry, FileSearchResponse, PeerMessage},
     server::{Direction, SearchRequest, ServerMessage, TargetedSearchRequest},
+    ProtocolTextEncoding,
 };
 use std::time::{Duration, Instant};
 use tokio::io::duplex;
@@ -425,8 +426,10 @@ fn entry(filename: &str) -> FileEntry {
     FileEntry {
         code: 1,
         filename: filename.to_owned(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
         size: 100,
         extension: String::new(),
+        extension_encoding: ProtocolTextEncoding::Utf8,
         attributes: Vec::new(),
     }
 }

@@ -1,4 +1,5 @@
 use slskr_protocol::peer::{PeerMessage, TransferRequest, TransferResponse};
+use slskr_protocol::ProtocolTextEncoding;
 
 use crate::{file_transfer::FileTransferConnection, ClientError};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -195,6 +196,7 @@ impl UploadTransfer {
             direction: 1,
             token: self.token,
             filename: self.filename.clone(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
             size: Some(self.size),
         })
     }

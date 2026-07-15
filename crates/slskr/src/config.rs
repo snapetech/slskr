@@ -528,11 +528,11 @@ impl SpotifyIntegrationSettings {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"enabled\":{},\"client_id_configured\":{},\"client_secret_configured\":{},\"redirect_uri\":{},\"market\":\"{}\",\"scopes\":\"{}\"}}",
+            "{{\"enabled\":{},\"client_id_configured\":{},\"client_secret_configured\":{},\"redirect_uri\":null,\"redirect_uri_configured\":{},\"market\":\"{}\",\"scopes\":\"{}\"}}",
             self.enabled,
             self.client_id.is_some(),
             self.client_secret.is_some(),
-            json_option(self.redirect_uri.as_deref()),
+            self.redirect_uri.is_some(),
             json_escape(&self.market),
             json_escape(&self.scopes)
         )
@@ -1183,8 +1183,10 @@ pub fn parse_share_entry(value: &str) -> Result<FileEntry, String> {
     Ok(FileEntry {
         code: 1,
         filename: filename.trim().replace('\\', "/"),
+        filename_encoding: slskr_client::protocol::ProtocolTextEncoding::Utf8,
         size,
         extension: extension_for(filename.trim()),
+        extension_encoding: slskr_client::protocol::ProtocolTextEncoding::Utf8,
         attributes: Vec::new(),
     })
 }

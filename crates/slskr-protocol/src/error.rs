@@ -36,6 +36,8 @@ pub enum DecodeError {
 pub enum EncodeError {
     #[error("{field} length {length} exceeds u32::MAX")]
     LengthOverflow { field: &'static str, length: usize },
+    #[error("string contains text that cannot be represented as {encoding}")]
+    UnrepresentableString { encoding: &'static str },
 }
 
 impl EncodeError {

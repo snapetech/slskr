@@ -1,7 +1,7 @@
 use std::net::Ipv4Addr;
 
 use proptest::prelude::*;
-use slskr_protocol::{DecodeError, Reader, Writer};
+use slskr_protocol::{DecodeError, EncodeError, ProtocolTextEncoding, Reader, Writer};
 
 proptest! {
     #[test]
@@ -101,12 +101,52 @@ fn ipv4_uses_soulseek_reversed_wire_order() {
 }
 
 #[test]
-fn strings_fall_back_to_windows_1252() {
+fn strings_fall_back_to_latin1() {
     let input = [1, 0, 0, 0, 0xE9];
     let mut reader = Reader::new(&input);
 
     assert_eq!(reader.read_string().unwrap(), "é");
     assert!(reader.finish().is_ok());
+}
+
+#[test]
+fn windows_1251_strings_preserve_detected_encoding_and_wire_bytes() {
+    let encoded = [0xCC, 0xF3, 0xE7, 0xFB, 0xEA, 0xE0];
+    let mut input = (encoded.len() as u32).to_le_bytes().to_vec();
+    input.extend_from_slice(&encoded);
+    let mut reader = Reader::new(&input);
+
+    let (value, encoding) = reader.read_string_with_encoding().unwrap();
+    assert_eq!(value, "Музыка");
+    assert_eq!(encoding, ProtocolTextEncoding::Windows1251);
+
+    let mut writer = Writer::new();
+    writer.write_string_with_encoding(&value, encoding).unwrap();
+    assert_eq!(writer.as_slice(), input);
+}
+
+#[test]
+fn latin1_strings_preserve_wire_bytes() {
+    let input = [4, 0, 0, 0, b'c', b'a', b'f', 0xE9];
+    let mut reader = Reader::new(&input);
+    let (value, encoding) = reader.read_string_with_encoding().unwrap();
+    assert_eq!(value, "café");
+    assert_eq!(encoding, ProtocolTextEncoding::Latin1);
+
+    let mut writer = Writer::new();
+    writer.write_string_with_encoding(&value, encoding).unwrap();
+    assert_eq!(writer.as_slice(), input);
+}
+
+#[test]
+fn legacy_encoding_rejects_unrepresentable_text() {
+    let mut writer = Writer::new();
+    assert!(matches!(
+        writer.write_string_with_encoding("snowman ☃", ProtocolTextEncoding::Latin1),
+        Err(EncodeError::UnrepresentableString {
+            encoding: "ISO-8859-1"
+        })
+    ));
 }
 
 #[test]

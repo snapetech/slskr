@@ -47,6 +47,7 @@ for anchor in \
   'toml_config_sanitizes_secrets_and_storage_paths' \
   'lidarr_projections_redact_endpoint_and_errors' \
   'bridge_projections_redact_internal_endpoint' \
+  'spotify_diagnostic_projections_redact_redirect_uri' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \
