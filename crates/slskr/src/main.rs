@@ -7290,7 +7290,7 @@ fn share_grant_helper_id<'a>(path: &'a str, helper: &str) -> Option<&'a str> {
 }
 
 // Library Item Models
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct LibraryItemRecord {
     id: String,
     artist: String,
@@ -7299,7 +7299,7 @@ struct LibraryItemRecord {
     created_at: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct LibraryHealthScanRecord {
     id: String,
     library_path: String,
@@ -7336,7 +7336,7 @@ impl LibraryItemRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct LibraryStore {
     records: Vec<LibraryItemRecord>,
     next_id: u64,
@@ -9550,6 +9550,7 @@ async fn route_http_request_with_headers(
               let kind = extract_json_string_field(body, "kind")
                   .or_else(|| extract_json_string_field(body, "mediaKind"));
               let mut library = state.library.write().await;
+              let previous = library.clone();
               let patched = library.patch_health_issue(issue_id, artist, title, kind);
               let patched_item_id = patched
                   .as_ref()
@@ -9570,13 +9571,17 @@ async fn route_http_request_with_headers(
                           "remaining": remaining,
                       }).to_string())
               });
+              let mutated = library.clone();
               drop(library);
               if let Some(item_id) = patched_item_id {
                   let library = state.library.read().await;
                   let item = library.get(&item_id);
                   drop(library);
                   if let Some(item) = item {
-                      persist_library_item(state, &item).await;
+                      if let Err(error) = persist_library_item_checked(state, &item).await {
+                          rollback_library_if_unchanged(state, previous, &mutated).await;
+                          return Ok(routing::service_unavailable_response(&error));
+                      }
                   }
               }
               Ok(response)
@@ -13583,12 +13588,17 @@ async fn route_http_request_with_headers(
             let title = extract_json_string_field(body, "title").unwrap_or_default();
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
             let mut library = state.library.write().await;
+            let previous = library.clone();
             let Some(record) = library.create(artist, title, kind) else {
                 return Ok(routing::service_unavailable_response("library item capacity is full"));
             };
+            let mutated = library.clone();
             let json = record.json();
             drop(library);
-            persist_library_item(state, &record).await;
+            if let Err(error) = persist_library_item_checked(state, &record).await {
+                rollback_library_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/library/items/") => {
@@ -13610,10 +13620,15 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut library = state.library.write().await;
+            let previous = library.clone();
             let deleted = library.delete(id);
+            let mutated = library.clone();
             drop(library);
             if deleted {
-                persist_library_item_delete(state, id).await;
+                if let Err(error) = persist_library_item_delete_checked(state, id).await {
+                    rollback_library_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -14034,6 +14049,7 @@ async fn route_http_request_with_headers(
         }
         ("POST", "/api/library/health/issues/fix") => {
             let mut library = state.library.write().await;
+            let previous = library.clone();
             let fixable = library
                 .health_issues()
                 .into_iter()
@@ -14048,9 +14064,13 @@ async fn route_http_request_with_headers(
             let records = library.records.clone();
             let remaining = library.health_issues().len();
             let updated_at = library.updated_at;
+            let mutated = library.clone();
             drop(library);
-            for record in &records {
-                persist_library_item(state, record).await;
+            if !fixed.is_empty() {
+                if let Err(error) = persist_library_items_checked(state, &records).await {
+                    rollback_library_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
             }
             Ok(routing::ok_response(serde_json::json!({
                 "fixed": fixed.len(),
@@ -16268,13 +16288,18 @@ async fn route_http_request_with_headers(
                 let kind =
                     extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_owned());
                 let mut library = state.library.write().await;
+                let previous = library.clone();
                 let Some(record) = library.create(artist, title, kind) else {
                     return Ok(routing::service_unavailable_response("library item capacity is full"));
                 };
+                let mutated = library.clone();
                 let item = serde_json::from_str::<serde_json::Value>(&record.json())
                     .unwrap_or_else(|_| serde_json::json!({ "id": record.id }));
                 drop(library);
-                persist_library_item(state, &record).await;
+                if let Err(error) = persist_library_item_checked(state, &record).await {
+                    rollback_library_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 let mut runtime = state.runtime.write().await;
                 let body = runtime
                     .record_lidarr_manual_import(1, false, directory, vec![item])
@@ -16529,12 +16554,17 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("target/artist or title is required"));
              }
              let mut library = state.library.write().await;
+             let previous = library.clone();
              let Some(record) = library.create(target.clone(), title, "MusicBrainzTarget".to_owned()) else {
                  return Ok(routing::service_unavailable_response("library item capacity is full"));
              };
              let target_projection = library.target_json(&target);
+             let mutated = library.clone();
              drop(library);
-             persist_library_item(state, &record).await;
+             if let Err(error) = persist_library_item_checked(state, &record).await {
+                 rollback_library_if_unchanged(state, previous, &mutated).await;
+                 return Ok(routing::service_unavailable_response(&error));
+             }
              Ok(routing::created_response(serde_json::json!({
                  "target": target,
                  "created": true,
@@ -24286,23 +24316,67 @@ async fn rollback_collections_if_unchanged(
     }
 }
 
-async fn persist_library_item(state: &AppState, record: &LibraryItemRecord) {
-    let Some(db) = state.db.as_ref() else {
-        return;
-    };
-    let persisted = crate::persistence::LibraryItemRecord {
+fn persisted_library_item(record: &LibraryItemRecord) -> crate::persistence::LibraryItemRecord {
+    crate::persistence::LibraryItemRecord {
         id: record.id.clone(),
         artist: record.artist.clone(),
         title: record.title.clone(),
         kind: record.kind.clone(),
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
-    };
-    let _ = db.upsert_library_item(&persisted).await;
+    }
 }
 
-async fn persist_library_item_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_library_item(id).await;
+async fn persist_library_item_checked(
+    state: &AppState,
+    record: &LibraryItemRecord,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.upsert_library_item(&persisted_library_item(record))
+        .await
+        .map_err(|error| format!("library persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn persist_library_items_checked(
+    state: &AppState,
+    records: &[LibraryItemRecord],
+) -> Result<bool, String> {
+    if records.is_empty() {
+        return Ok(state.db.is_some());
+    }
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    let persisted = records
+        .iter()
+        .map(persisted_library_item)
+        .collect::<Vec<_>>();
+    db.upsert_library_items(&persisted)
+        .await
+        .map_err(|error| format!("library persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn persist_library_item_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_library_item(id)
+        .await
+        .map_err(|error| format!("library deletion persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn rollback_library_if_unchanged(
+    state: &AppState,
+    previous: LibraryStore,
+    mutated: &LibraryStore,
+) {
+    let mut library = state.library.write().await;
+    if *library == *mutated {
+        *library = previous;
     }
 }
 
@@ -32220,6 +32294,93 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "Original");
         assert_eq!(items[0].content_id, "original");
+    }
+
+    #[tokio::test]
+    async fn library_routes_roll_back_when_persistence_fails() {
+        for (path, body) in [
+            (
+                "/api/library/items",
+                r#"{"artist":"Artist","title":"Track"}"#,
+            ),
+            (
+                "/api/integrations/lidarr/manualimport",
+                r#"{"artist":"Artist","album":"Release"}"#,
+            ),
+            (
+                "/api/musicbrainz/targets",
+                r#"{"artist":"Artist","title":"Release"}"#,
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let previous = state.library.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("failed library creation response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("library persistence failed"),
+                "{path}"
+            );
+            assert_eq!(*state.library.read().await, previous, "{path}");
+        }
+
+        for (method, path, body, expected_error) in [
+            (
+                "PATCH",
+                "/api/library/health/issues/lib-1-missing-title",
+                r#"{"title":"Fixed"}"#,
+                "library persistence failed",
+            ),
+            (
+                "POST",
+                "/api/library/health/issues/fix",
+                "",
+                "library persistence failed",
+            ),
+            (
+                "DELETE",
+                "/api/library/items/lib-1",
+                "",
+                "library deletion persistence failed",
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .library
+                .write()
+                .await
+                .create("Artist".to_owned(), String::new(), String::new())
+                .unwrap();
+            let previous = state.library.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .expect("failed library mutation response");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{method} {path}"
+            );
+            assert!(response.body.contains(expected_error), "{method} {path}");
+            assert_eq!(*state.library.read().await, previous, "{method} {path}");
+        }
     }
 
     #[tokio::test]
