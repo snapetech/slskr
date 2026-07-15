@@ -16912,17 +16912,24 @@ fn x_forwarded_for_client_ips(value: &str) -> Option<Vec<IpAddr>> {
 fn forwarded_header_client_ips(value: &str) -> Option<Vec<IpAddr>> {
     let ips = value
         .split(',')
-        .map(|entry| {
-            entry.split(';').find_map(|part| {
-                let (name, value) = part.trim().split_once('=')?;
-                name.trim()
-                    .eq_ignore_ascii_case("for")
-                    .then_some(value)
-                    .and_then(parse_forwarded_ip_token)
-            })
-        })
+        .map(parse_forwarded_element_ip)
         .collect::<Option<Vec<_>>>()?;
     (!ips.is_empty()).then_some(ips)
+}
+
+fn parse_forwarded_element_ip(entry: &str) -> Option<IpAddr> {
+    let mut forwarded_ip = None;
+    for part in entry.split(';') {
+        let (name, value) = part.trim().split_once('=')?;
+        if !name.trim().eq_ignore_ascii_case("for") {
+            continue;
+        }
+        if forwarded_ip.is_some() {
+            return None;
+        }
+        forwarded_ip = Some(parse_forwarded_ip_token(value)?);
+    }
+    forwarded_ip
 }
 
 fn parse_forwarded_ip_token(value: &str) -> Option<IpAddr> {
@@ -26128,6 +26135,28 @@ mod tests {
             super::parse_forwarded_ip_token("198.51.100.24:443"),
             Some("198.51.100.24".parse::<IpAddr>().unwrap())
         );
+    }
+
+    #[test]
+    fn forwarded_elements_require_one_valid_for_parameter() {
+        let expected = "198.51.100.24".parse::<IpAddr>().unwrap();
+        assert_eq!(
+            super::parse_forwarded_element_ip("proto=https; for=198.51.100.24; by=10.0.0.2"),
+            Some(expected)
+        );
+        for malformed in [
+            "proto=https",
+            "for=unknown;for=198.51.100.24",
+            "for=198.51.100.24;for=198.51.100.24",
+            "for=198.51.100.24;for=203.0.113.9",
+            "for=198.51.100.24;broken",
+        ] {
+            assert_eq!(
+                super::parse_forwarded_element_ip(malformed),
+                None,
+                "accepted {malformed:?}"
+            );
+        }
     }
 
     #[test]
