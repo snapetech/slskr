@@ -8288,7 +8288,7 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response(&error));
             }
             let mut results = Vec::new();
-            for operation in operations.into_iter().take(config.max_operations.min(100)) {
+            for operation in operations {
                 let result = match (operation.method.as_str(), operation.path.as_str()) {
                     ("GET", "/api/health") | ("GET", "/api/v0/health") => {
                         batch::create_success_result(

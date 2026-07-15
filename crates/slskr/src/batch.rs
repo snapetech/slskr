@@ -5,6 +5,8 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+pub const MAX_BATCH_OPERATIONS: usize = 100;
+
 /// Represents a single operation in a batch request
 #[derive(Debug, Clone)]
 pub struct BatchOperation {
@@ -37,7 +39,7 @@ pub struct BatchConfig {
 impl Default for BatchConfig {
     fn default() -> Self {
         Self {
-            max_operations: 100,
+            max_operations: MAX_BATCH_OPERATIONS,
             timeout_ms: 30000,
             atomic: false,
             continue_on_error: true,
@@ -55,10 +57,10 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
         .ok_or("Missing 'operations' array")?;
 
     // Check max operations
-    if operations_arr.len() > 100 {
+    if operations_arr.len() > MAX_BATCH_OPERATIONS {
         return Err(format!(
-            "Too many operations: {}, max is 100",
-            operations_arr.len()
+            "Too many operations: {}, max is {MAX_BATCH_OPERATIONS}",
+            operations_arr.len(),
         ));
     }
 
@@ -126,8 +128,8 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
             max_operations: batch_config
                 .get("maxOperations")
                 .and_then(|v| v.as_u64())
-                .map(|v| v as usize)
-                .unwrap_or(100),
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                .unwrap_or(MAX_BATCH_OPERATIONS),
             timeout_ms: batch_config
                 .get("timeoutMs")
                 .and_then(|v| v.as_u64())
@@ -144,6 +146,19 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
     } else {
         BatchConfig::default()
     };
+
+    if !(1..=MAX_BATCH_OPERATIONS).contains(&config.max_operations) {
+        return Err(format!(
+            "maxOperations must be between 1 and {MAX_BATCH_OPERATIONS}"
+        ));
+    }
+    if operations.len() > config.max_operations {
+        return Err(format!(
+            "Too many operations: {}, configured max is {}",
+            operations.len(),
+            config.max_operations
+        ));
+    }
 
     Ok((operations, config))
 }
@@ -303,6 +318,27 @@ mod tests {
         assert!(config.atomic);
         assert_eq!(config.timeout_ms, 60000);
         assert!(!config.continue_on_error);
+    }
+
+    #[test]
+    fn test_batch_rejects_invalid_or_exceeded_configured_limit() {
+        for max_operations in [0, 101] {
+            let body = format!(
+                r#"{{"operations":[{{"id":"op1","method":"GET","path":"/api/health"}}],"config":{{"maxOperations":{max_operations}}}}}"#
+            );
+            let error = parse_batch_request(&body).expect_err("invalid limit must fail");
+            assert!(error.contains("maxOperations"), "{error}");
+        }
+
+        let body = r#"{
+            "operations": [
+                {"id":"op1","method":"GET","path":"/api/health"},
+                {"id":"op2","method":"GET","path":"/api/stats"}
+            ],
+            "config": {"maxOperations": 1}
+        }"#;
+        let error = parse_batch_request(body).expect_err("partial batch must fail");
+        assert!(error.contains("configured max is 1"), "{error}");
     }
 
     #[test]
