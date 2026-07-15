@@ -416,8 +416,9 @@ async fn execute_inner(
             sources.push(prepare_source(source).await?);
         }
         let file_size = request.file_size;
-        let probes = sources.iter().cloned().map(|source| async move {
-            fetch_range(&source, 0, 0, file_size).await.map(|_| source)
+        let probes = sources.iter().map(|source| {
+            let source = source.clone();
+            async move { fetch_range(&source, 0, 0, file_size).await.map(|_| source) }
         });
         let probe_results = futures_util::future::join_all(probes).await;
         let sources = probe_results
