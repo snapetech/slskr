@@ -7668,6 +7668,7 @@ impl OAuthStateStore {
         Some(state)
     }
 
+    #[cfg(test)]
     fn consume(&mut self, provider: &str, state: &str) -> Option<OAuthStateRecord> {
         let now = unix_timestamp();
         self.prune(now);
@@ -14973,14 +14974,13 @@ async fn route_http_request_with_headers(
             if state_value.is_empty() {
                 return Ok(routing::bad_request_response("Spotify callback missing state"));
             }
-            let state_record = {
-                let mut oauth_states = state.oauth_states.write().await;
-                oauth_states.consume("spotify", state_value)
+            let state_record = match consume_oauth_state(state, "spotify", state_value).await {
+                Ok(record) => record,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
             };
             let Some(state_record) = state_record else {
                 return Ok(routing::forbidden_response("invalid or expired Spotify OAuth state"));
             };
-            persist_oauth_state_delete(state, state_value).await;
             if let Some(error) = error {
                 return Ok(routing::bad_request_response(error));
             }
@@ -22870,10 +22870,26 @@ async fn persist_oauth_state(state: &AppState, token: &str, record: &OAuthStateR
     let _ = db.upsert_oauth_state(&persisted).await;
 }
 
-async fn persist_oauth_state_delete(state: &AppState, token: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_oauth_state(token).await;
+async fn consume_oauth_state(
+    state: &AppState,
+    provider: &str,
+    token: &str,
+) -> Result<Option<OAuthStateRecord>, String> {
+    let mut oauth_states = state.oauth_states.write().await;
+    let now = unix_timestamp();
+    oauth_states.prune(now);
+    let Some(record) = oauth_states.records.get(token) else {
+        return Ok(None);
+    };
+    if record.provider != provider || record.expires_at < now {
+        return Ok(None);
     }
+    if let Some(db) = state.db.as_ref() {
+        db.delete_oauth_state(token)
+            .await
+            .map_err(|error| format!("OAuth state persistence delete failed: {error}"))?;
+    }
+    Ok(oauth_states.records.remove(token))
 }
 
 async fn persist_webhook(state: &AppState, webhook: &webhooks::Webhook) {
@@ -26412,6 +26428,53 @@ mod tests {
             .await
             .expect("list after consume")
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn spotify_oauth_state_is_not_consumed_when_persistence_delete_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default()
+                .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_CLIENT_ID", "client-id"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        super::route_http_request(
+            "POST",
+            "/api/integrations/spotify/authorize",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("authorize response");
+        let issued_state = state
+            .oauth_states
+            .read()
+            .await
+            .records
+            .keys()
+            .next()
+            .cloned()
+            .expect("issued state");
+        db.close_for_test().await;
+
+        let callback_path =
+            format!("/api/integrations/spotify/callback?code=abc123&state={issued_state}");
+        let callback = super::route_http_request("GET", &callback_path, None, "", &state)
+            .await
+            .expect("callback response");
+        assert_eq!(callback.status, "503 Service Unavailable");
+        assert!(state
+            .oauth_states
+            .read()
+            .await
+            .records
+            .contains_key(&issued_state));
     }
 
     #[tokio::test]

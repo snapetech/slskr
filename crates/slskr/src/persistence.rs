@@ -748,6 +748,11 @@ impl std::fmt::Debug for DatabaseManager {
 }
 
 impl DatabaseManager {
+    #[cfg(test)]
+    pub async fn close_for_test(&self) {
+        self.pool.close().await;
+    }
+
     /// Create new database manager with SQLite backend
     pub async fn new(db_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let connect_options = SqliteConnectOptions::new()
