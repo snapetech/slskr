@@ -753,6 +753,22 @@ impl DatabaseManager {
         self.pool.close().await;
     }
 
+    #[cfg(test)]
+    pub async fn fail_oauth_delete_for_test(&self) -> Result<(), Box<dyn std::error::Error>> {
+        query(
+            r#"
+            CREATE TRIGGER fail_oauth_delete
+            BEFORE DELETE ON oauth_states
+            BEGIN
+                SELECT RAISE(ABORT, 'forced OAuth delete failure');
+            END
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Create new database manager with SQLite backend
     pub async fn new(db_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let connect_options = SqliteConnectOptions::new()

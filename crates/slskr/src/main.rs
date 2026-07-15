@@ -20288,6 +20288,23 @@ fn slskd_user_transfer_report(username: &str, transfers: &TransferQueue) -> Stri
     .to_string()
 }
 
+async fn load_oauth_state_store(
+    db: Option<&persistence::DatabaseManager>,
+) -> Result<OAuthStateStore, String> {
+    let Some(db) = db else {
+        return Ok(OAuthStateStore::default());
+    };
+    let now = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
+    db.delete_expired_oauth_states(now)
+        .await
+        .map_err(|error| format!("failed to delete expired persisted OAuth states: {error}"))?;
+    let records = db
+        .list_oauth_states(now, EVENT_HISTORY_LIMIT as i32, 0)
+        .await
+        .map_err(|error| format!("failed to load persisted OAuth states: {error}"))?;
+    Ok(OAuthStateStore::from_persisted(records))
+}
+
 async fn serve(once: bool) -> Result<(), String> {
     let config = AppConfig::from_env()?;
     ensure_private_state_dir(&config.state_dir)?;
@@ -20515,17 +20532,7 @@ async fn serve(once: bool) -> Result<(), String> {
     } else {
         None
     };
-    let oauth_state_store = if let Some(db) = db.as_ref() {
-        let now = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
-        let _ = db.delete_expired_oauth_states(now).await;
-        let records = db
-            .list_oauth_states(now, EVENT_HISTORY_LIMIT as i32, 0)
-            .await
-            .map_err(|error| format!("failed to load persisted OAuth states: {error}"))?;
-        OAuthStateStore::from_persisted(records)
-    } else {
-        OAuthStateStore::default()
-    };
+    let oauth_state_store = load_oauth_state_store(db.as_ref()).await?;
     let webhook_manager = if let Some(db) = db.as_ref() {
         let records = db
             .list_webhooks()
@@ -28618,6 +28625,31 @@ mod tests {
             .await
             .expect("replayed error callback");
         assert_eq!(replay.status, "403 Forbidden");
+    }
+
+    #[tokio::test]
+    async fn oauth_state_loader_reports_expired_state_cleanup_failure() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        db.upsert_oauth_state(&crate::persistence::OAuthStateRecord {
+            state: "expired-state".to_owned(),
+            provider: "spotify".to_owned(),
+            redirect_uri: "http://127.0.0.1/callback".to_owned(),
+            created_at: 0,
+            expires_at: 1,
+        })
+        .await
+        .expect("persist expired OAuth state");
+        db.fail_oauth_delete_for_test()
+            .await
+            .expect("install delete failure trigger");
+
+        let error = super::load_oauth_state_store(Some(&db))
+            .await
+            .expect_err("cleanup failure must fail initialization");
+        assert!(error.contains("failed to delete expired persisted OAuth states"));
+        assert!(error.contains("forced OAuth delete failure"));
     }
 
     #[tokio::test]
