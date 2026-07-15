@@ -13465,10 +13465,13 @@ async fn route_http_request_with_headers(
                 "has_more": total > 20,
             }).to_string()))
         }
-        ("GET", path) if path.starts_with("/api/jobs/") && path.len() > 10 => {
-            let job_id = &path[10..];
+        ("GET", path) if path.starts_with("/api/jobs/") => {
+            let Some(job_id) = path_segment_after(path, "/api/jobs/") else {
+                return Ok(routing::not_found_response());
+            };
+            let job_id = decoded_path_segment(job_id);
             let searches = state.searches.read().await;
-            if let Some(record) = searches.get_by_identifier(job_id) {
+            if let Some(record) = searches.get_by_identifier(&job_id) {
                 let progress = if record.status == "completed" { 100 } else { 50 };
                 let body = serde_json::json!({
                     "id": record.id,
@@ -13487,7 +13490,7 @@ async fn route_http_request_with_headers(
             }
             drop(searches);
 
-            let transfer_id = job_id.strip_prefix("transfer-").unwrap_or(job_id);
+            let transfer_id = job_id.strip_prefix("transfer-").unwrap_or(&job_id);
             let transfers = state.transfers.read().await;
             let body = transfer_id
                 .parse::<u64>()
@@ -14934,9 +14937,12 @@ async fn route_http_request_with_headers(
               }).to_string()))
           }
 
-          ("GET", path) if path.starts_with("/api/multisource/jobs/") && path.len() > 22 => {
-              let job_id = &path[22..];
-              let transfer_id = job_id.strip_prefix("transfer-").unwrap_or(job_id);
+          ("GET", path) if path.starts_with("/api/multisource/jobs/") => {
+              let Some(job_id) = path_segment_after(path, "/api/multisource/jobs/") else {
+                  return Ok(routing::not_found_response());
+              };
+              let job_id = decoded_path_segment(job_id);
+              let transfer_id = job_id.strip_prefix("transfer-").unwrap_or(&job_id);
               let transfers = state.transfers.read().await;
               let body = transfer_id
                   .parse::<u64>()
@@ -36956,6 +36962,16 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&discography_detail.body).unwrap();
         assert_eq!(discography_detail_json["kind"], "search");
         assert_eq!(discography_detail_json["query"], "Known discography");
+        let aliased_job = super::route_http_request(
+            "GET",
+            &format!("/api/jobs/{discography_id}/untrusted"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased job detail");
+        assert_eq!(aliased_job.status, "404 Not Found");
 
         let mb_release = super::route_http_request(
             "POST",
@@ -37097,6 +37113,27 @@ mod tests {
         let multisource_json =
             serde_json::from_str::<serde_json::Value>(&multisource.body).unwrap();
         assert_eq!(multisource_json["jobs"][0]["sources"][0], "peer");
+        let multisource_id = multisource_json["jobs"][0]["id"].as_str().unwrap();
+        let multisource_detail = super::route_http_request(
+            "GET",
+            &format!("/api/multisource/jobs/{multisource_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("multisource job detail");
+        assert_eq!(multisource_detail.status, "200 OK");
+        let aliased_multisource = super::route_http_request(
+            "GET",
+            &format!("/api/multisource/jobs/{multisource_id}/untrusted"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased multisource job detail");
+        assert_eq!(aliased_multisource.status, "404 Not Found");
 
         let slskdn = super::route_http_request("GET", "/api/slskdn", None, "", &state)
             .await
