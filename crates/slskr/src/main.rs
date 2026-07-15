@@ -25291,13 +25291,31 @@ fn write_file_atomic_with_temp_path(
         file.sync_all()?;
     }
 
-    match fs::rename(temp_path, path) {
+    match replace_file(temp_path, path) {
         Ok(()) => Ok(()),
         Err(error) => {
             let _ = fs::remove_file(temp_path);
             Err(error)
         }
     }
+}
+
+#[cfg(unix)]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(not(unix))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    // std::fs::rename does not replace an existing destination on Windows.
+    // The state directory is private and both names are fixed beneath it, so
+    // removing the old entry first is the safe-code fallback available here.
+    match fs::remove_file(destination) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::rename(source, destination)
 }
 
 fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), String> {
@@ -37382,6 +37400,32 @@ mod tests {
             "keep"
         );
 
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn atomic_state_writer_replaces_existing_file() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-state-replace-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&state_dir).expect("state dir");
+        let destination = state_dir.join("state.json");
+
+        super::write_file_atomic(&destination, b"first").expect("first state write");
+        super::write_file_atomic(&destination, b"second").expect("replacement state write");
+
+        assert_eq!(std::fs::read(&destination).expect("read state"), b"second");
+        assert_eq!(
+            std::fs::read_dir(&state_dir)
+                .expect("list state dir")
+                .count(),
+            1
+        );
         let _ = std::fs::remove_dir_all(state_dir);
     }
 
