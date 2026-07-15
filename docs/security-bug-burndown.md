@@ -137,6 +137,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | SDK joined-room retention | The Rust SDK bounded room message history but retained unlimited unique joined-room names from unsolicited global messages. | Fixed with a default 1,024-room ceiling, configurable smaller ceilings, existing-room updates and leave-driven slot reuse at capacity, and regression/gate coverage. |
 | High | Browse projection retention | The daemon retained unlimited username-keyed browse records and unlimited file entries per record from API, peer, and persisted inputs. | Fixed with a 1,024-record ceiling, a 10,000-entry per-user ceiling, bounded persisted hydration and response merging, explicit local capacity responses, and regression/gate coverage. |
 | High | Private-message projection retention | The daemon appended inbound and outbound private-message projections indefinitely even though startup hydration was already queried with a finite limit. | Fixed by retaining the newest 500 in-memory records across hydration and runtime appends, preserving monotonic IDs and acknowledgement behavior, and adding regression/gate coverage. |
+| Medium | Transient credential burst retention | OAuth state and preview-stream ticket stores pruned expired records but accepted unlimited still-live records during an issuance burst. | Fixed with explicit 256-state and 1,024-ticket live ceilings, capacity responses that preserve existing valid credentials, bounded OAuth hydration, and regression/gate coverage. |
 
 ## Open Burn-Down
 

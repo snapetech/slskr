@@ -136,6 +136,8 @@ const MAX_USER_RECORDS: usize = 4_096;
 const MAX_BROWSE_RECORDS: usize = 1_024;
 const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
 const MAX_MESSAGE_RECORDS: usize = 500;
+const MAX_OAUTH_STATES: usize = 256;
+const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -6793,12 +6795,26 @@ struct PreviewStreamTicket {
     expires_at: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct PreviewStreamTicketStore {
     records: BTreeMap<String, PreviewStreamTicket>,
+    max_records: usize,
+}
+
+impl Default for PreviewStreamTicketStore {
+    fn default() -> Self {
+        Self::with_max_records(MAX_PREVIEW_STREAM_TICKETS)
+    }
 }
 
 impl PreviewStreamTicketStore {
+    fn with_max_records(max_records: usize) -> Self {
+        Self {
+            records: BTreeMap::new(),
+            max_records: max_records.max(1),
+        }
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "ticket fields are explicit at the single construction boundary"
@@ -6813,9 +6829,12 @@ impl PreviewStreamTicketStore {
         size: u64,
         content_type: String,
         ttl_seconds: u64,
-    ) -> (String, PreviewStreamTicket) {
+    ) -> Option<(String, PreviewStreamTicket)> {
         let now = unix_timestamp();
         self.prune(now);
+        if self.records.len() >= self.max_records {
+            return None;
+        }
         let token = secure_oauth_state();
         let record = PreviewStreamTicket {
             family: family.to_owned(),
@@ -6829,7 +6848,7 @@ impl PreviewStreamTicketStore {
             expires_at: now.saturating_add(ttl_seconds),
         };
         self.records.insert(token.clone(), record.clone());
-        (token, record)
+        Some((token, record))
     }
 
     fn get(&mut self, token: &str) -> Option<PreviewStreamTicket> {
@@ -6891,12 +6910,26 @@ struct OAuthStateRecord {
     expires_at: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct OAuthStateStore {
     records: BTreeMap<String, OAuthStateRecord>,
+    max_records: usize,
+}
+
+impl Default for OAuthStateStore {
+    fn default() -> Self {
+        Self::with_max_records(MAX_OAUTH_STATES)
+    }
 }
 
 impl OAuthStateStore {
+    fn with_max_records(max_records: usize) -> Self {
+        Self {
+            records: BTreeMap::new(),
+            max_records: max_records.max(1),
+        }
+    }
+
     fn from_persisted(records: Vec<crate::persistence::OAuthStateRecord>) -> Self {
         let now = unix_timestamp();
         let records = records
@@ -6914,13 +6947,20 @@ impl OAuthStateStore {
                     },
                 ))
             })
+            .take(MAX_OAUTH_STATES)
             .collect();
-        Self { records }
+        Self {
+            records,
+            max_records: MAX_OAUTH_STATES,
+        }
     }
 
-    fn issue(&mut self, provider: &str, redirect_uri: &str, ttl_seconds: u64) -> String {
+    fn issue(&mut self, provider: &str, redirect_uri: &str, ttl_seconds: u64) -> Option<String> {
         let now = unix_timestamp();
         self.prune(now);
+        if self.records.len() >= self.max_records {
+            return None;
+        }
         let state = secure_oauth_state();
         self.records.insert(
             state.clone(),
@@ -6931,7 +6971,7 @@ impl OAuthStateStore {
                 expires_at: now.saturating_add(ttl_seconds),
             },
         );
-        state
+        Some(state)
     }
 
     fn consume(&mut self, provider: &str, state: &str) -> Option<OAuthStateRecord> {
@@ -14091,7 +14131,11 @@ async fn route_http_request_with_headers(
             let redirect_uri = spotify_redirect_uri(state);
             let (state_token, oauth_record) = {
                 let mut oauth_states = state.oauth_states.write().await;
-                let state_token = oauth_states.issue("spotify", &redirect_uri, 600);
+                let Some(state_token) = oauth_states.issue("spotify", &redirect_uri, 600) else {
+                    return Ok(routing::service_unavailable_response(
+                        "OAuth state capacity is full",
+                    ));
+                };
                 let oauth_record = oauth_states.records.get(&state_token).cloned();
                 (state_token, oauth_record)
             };
@@ -14742,6 +14786,9 @@ async fn route_http_request_with_headers(
             };
             match create_preview_stream_ticket(state, family, body).await {
                 Ok(ticket) => Ok(routing::ok_response(ticket)),
+                Err(error) if error == "preview stream ticket capacity is full" => {
+                    Ok(routing::service_unavailable_response(&error))
+                }
                 Err(error) => Ok(routing::bad_request_response(&error)),
             }
         }
@@ -16194,7 +16241,7 @@ async fn create_preview_stream_ticket(
     drop(shares);
 
     let mut tickets = state.stream_tickets.write().await;
-    let (token, ticket) = tickets.issue(
+    let Some((token, ticket)) = tickets.issue(
         family,
         source,
         resolved_content_id,
@@ -16203,7 +16250,9 @@ async fn create_preview_stream_ticket(
         resolved_size,
         content_type,
         120,
-    );
+    ) else {
+        return Err("preview stream ticket capacity is full".to_owned());
+    };
     drop(tickets);
 
     let body = serde_json::json!({
@@ -24686,6 +24735,47 @@ mod tests {
                 super::CLIENT_MINOR_VERSION
             ))
         );
+    }
+
+    #[test]
+    fn transient_credential_stores_refuse_bursts_at_live_capacity() {
+        let mut oauth = super::OAuthStateStore::with_max_records(1);
+        let state = oauth
+            .issue("spotify", "http://localhost/callback", 600)
+            .unwrap();
+        assert!(oauth
+            .issue("spotify", "http://localhost/callback", 600)
+            .is_none());
+        assert!(oauth.consume("spotify", &state).is_some());
+        assert!(oauth
+            .issue("spotify", "http://localhost/callback", 600)
+            .is_some());
+
+        let mut tickets = super::PreviewStreamTicketStore::with_max_records(1);
+        assert!(tickets
+            .issue(
+                "peer",
+                "test",
+                "content-1".to_owned(),
+                "song.flac".to_owned(),
+                Some("alice".to_owned()),
+                123,
+                "audio/flac".to_owned(),
+                120,
+            )
+            .is_some());
+        assert!(tickets
+            .issue(
+                "peer",
+                "test",
+                "content-2".to_owned(),
+                "other.flac".to_owned(),
+                Some("bob".to_owned()),
+                456,
+                "audio/flac".to_owned(),
+                120,
+            )
+            .is_none());
     }
 
     #[tokio::test]
