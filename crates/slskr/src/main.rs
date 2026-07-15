@@ -21427,7 +21427,9 @@ async fn route_http_request_with_headers(
                 }
             };
             let available_port_count = end_port - start_port + 1;
-            let returned_port_count = limit.unwrap_or(available_port_count).min(available_port_count);
+            let returned_port_count = limit
+                .unwrap_or(available_port_count)
+                .min(available_port_count);
             let available_ports = (start_port..=end_port)
                 .take(returned_port_count)
                 .collect::<Vec<_>>();

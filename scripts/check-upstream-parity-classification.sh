@@ -31,8 +31,8 @@ check_committed_registry() {
 
   check_prefix_set \
     "slskdN" \
-    203 \
-    "0f8bfd046741c69801f73442096c530d074277a4c8685461fec7da584dc96635" \
+    216 \
+    "290a115b1aa2231fe585f10350ffa01ef45a328a82e6709ae85b9c76328a4b5f" \
     "$slskdn_prefixes"
   check_prefix_set \
     "slskNet.Runtime" \
@@ -136,7 +136,7 @@ check_committed_registry
 check_repo \
   "slskdN" \
   "${SLSKR_SLSKDN_REPO:-$repo_root/../slskdn}" \
-  "c5145e3a86b303408ec8da3fd1e32f5fe2525ff6"
+  "2824a7678e25281f81ea6067638fa12aa599f396"
 check_repo \
   "slskNet.Runtime" \
   "${SLSKR_SLSKNET_RUNTIME_REPO:-$repo_root/../slskNet.Runtime}" \
