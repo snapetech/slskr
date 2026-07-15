@@ -75,12 +75,16 @@ use base64::{
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
     Engine,
 };
-use ed25519_dalek::{Signature, VerifyingKey};
+use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use futures_util::StreamExt;
 use rand::{rngs::SysRng, TryRng};
 use serde::{Deserialize, Serialize};
 use slskr_client::{
-    capabilities::PeerCapabilityDescriptor,
+    capabilities::{
+        decode_peer_capability_message, peer_capability_message, PeerCapabilityDescriptor,
+        PeerCapabilityEnvelope, PeerCapabilityMessageType, FEATURE_CAPABILITIES_V1,
+        FEATURE_MESH_V1, MAX_PEER_CAPABILITY_RECORDS,
+    },
     connection::ConnectionKind,
     listener::{IncomingConnection, Listener},
     mesh::{MeshRendezvous, MESH_RENDEZVOUS_INTEREST_TAG},
@@ -4318,6 +4322,31 @@ impl MeshState {
             .collect()
     }
 
+    fn update_capability(&mut self, descriptor: PeerCapabilityDescriptor) -> Result<(), String> {
+        descriptor
+            .verify(std::time::SystemTime::now())
+            .map_err(|error| format!("peer capability descriptor rejected: {error}"))?;
+        let now = unix_timestamp();
+        self.capability_records
+            .retain(|record| record.expires_at_unix > now);
+        if let Some(existing) = self
+            .capability_records
+            .iter_mut()
+            .find(|record| record.username.eq_ignore_ascii_case(&descriptor.username))
+        {
+            *existing = descriptor;
+        } else {
+            if self.capability_records.len() >= MAX_PEER_CAPABILITY_RECORDS {
+                return Err(format!(
+                    "peer capability registry is full (maximum {MAX_PEER_CAPABILITY_RECORDS} records)"
+                ));
+            }
+            self.capability_records.push(descriptor);
+        }
+        self.updated_at = now;
+        Ok(())
+    }
+
     fn candidate_usernames(&self, users: &UserStore) -> Vec<String> {
         self.rendezvous.candidate_usernames(
             users.records.iter().map(|user| user.username.as_str()),
@@ -4415,6 +4444,86 @@ impl MeshState {
         })
         .to_string()
     }
+}
+
+async fn discover_mesh_range_sources(
+    state: &AppState,
+    expected_hash: &str,
+    file_size: u64,
+) -> Vec<multisource::RangeSource> {
+    let peer_ids = {
+        let discovery = state.content_discovery.read().await;
+        let recording_ids = discovery.recording_ids_for_hash(expected_hash, file_size);
+        discovery.peer_ids_for_recordings(&recording_ids)
+    };
+    if peer_ids.is_empty() {
+        return Vec::new();
+    }
+    let peer_ids = peer_ids
+        .into_iter()
+        .map(|peer_id| peer_id.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mesh = state.mesh.read().await;
+    let mut usernames = HashSet::new();
+    mesh.capability_records
+        .iter()
+        .filter(|descriptor| {
+            peer_ids.contains(&descriptor.peer_id.to_ascii_lowercase())
+                && MeshRendezvous::accepts_descriptor(descriptor)
+        })
+        .filter_map(|descriptor| {
+            let endpoint = descriptor.endpoints.iter().find(|endpoint| {
+                endpoint.starts_with("https://") || endpoint.starts_with("http://")
+            })?;
+            usernames
+                .insert(descriptor.username.to_ascii_lowercase())
+                .then_some(multisource::RangeSource {
+                    username: descriptor.username.clone(),
+                    url: endpoint.clone(),
+                    authorization: None,
+                })
+        })
+        .collect()
+}
+
+async fn content_discovery_error_response(state: &AppState, error: String) -> HttpResponse {
+    if error.starts_with("content discovery state ") {
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(error);
+        })
+        .await;
+        routing::service_unavailable_response("content discovery storage is unavailable")
+    } else {
+        routing::bad_request_response(&error)
+    }
+}
+
+fn new_capability_signing_key() -> Result<SigningKey, String> {
+    let mut secret = [0_u8; 32];
+    SysRng
+        .try_fill_bytes(&mut secret)
+        .map_err(|_| "secure randomness unavailable for peer capability identity".to_owned())?;
+    Ok(SigningKey::from_bytes(&secret))
+}
+
+fn local_capability_descriptor(state: &AppState) -> Result<PeerCapabilityDescriptor, String> {
+    PeerCapabilityDescriptor::unsigned(
+        state
+            .config
+            .username
+            .clone()
+            .unwrap_or_else(|| "slskr".to_owned()),
+        vec![
+            FEATURE_CAPABILITIES_V1.to_owned(),
+            FEATURE_MESH_V1.to_owned(),
+        ],
+        Vec::new(),
+        std::time::Duration::from_secs(24 * 60 * 60),
+        &state.capability_signing_key,
+        std::time::SystemTime::now(),
+    )
+    .and_then(|descriptor| descriptor.sign(&state.capability_signing_key))
+    .map_err(|error| format!("local peer capability descriptor failed: {error}"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10014,6 +10123,7 @@ struct AppState {
     searches: RwLock<SearchStore>,
     users: RwLock<UserStore>,
     mesh: RwLock<MeshState>,
+    capability_signing_key: SigningKey,
     content_discovery: RwLock<content_discovery::ContentDiscoveryStore>,
     browse: RwLock<BrowseStore>,
     remote_path_encodings: RwLock<RemotePathEncodingRegistry>,
@@ -10521,25 +10631,59 @@ async fn route_http_request_with_headers(
             ))
         }
         ("GET", "/api/hashdb/stats") => {
+            let discovery = state.content_discovery.read().await;
+            let persisted_entries = discovery.hash_entries().len();
+            let persisted_bytes = discovery
+                .hash_entries()
+                .iter()
+                .map(|entry| entry.size)
+                .sum::<u64>();
+            let latest_seq = discovery.latest_seq();
             let shares = state.shares.read().await;
             let audio_entries = shares
                 .entries
                 .iter()
                 .filter(|entry| is_auto_retry_audio_file(&entry.filename))
                 .collect::<Vec<_>>();
-            let total_entries = audio_entries.len();
-            let total_bytes = audio_entries.iter().map(|entry| entry.size).sum::<u64>();
+            let projected_share_entries = audio_entries.len();
+            let total_entries = persisted_entries + projected_share_entries;
+            let total_bytes = persisted_bytes.saturating_add(
+                audio_entries.iter().map(|entry| entry.size).sum::<u64>(),
+            );
             drop(shares);
+            drop(discovery);
             Ok(routing::ok_response(serde_json::json!({
-                "currentSeqId": unix_timestamp(),
+                "currentSeqId": latest_seq,
                 "totalHashEntries": total_entries,
                 "totalEntries": total_entries,
                 "totalBytes": total_bytes,
+                "persistedEntries": persisted_entries,
+                "projectedShareEntries": projected_share_entries,
             }).to_string()))
         }
         ("GET", "/api/hashdb/entries") => {
+            let params = route.query.map(query_params).unwrap_or_default();
+            let limit = params
+                .iter()
+                .find(|(key, _)| key == "limit")
+                .and_then(|(_, value)| value.parse::<usize>().ok())
+                .unwrap_or(100)
+                .clamp(1, 1_000);
+            let offset = params
+                .iter()
+                .find(|(key, _)| key == "offset")
+                .and_then(|(_, value)| value.parse::<usize>().ok())
+                .unwrap_or(0);
+            let discovery = state.content_discovery.read().await;
+            let mut entries = discovery
+                .hash_entries()
+                .iter()
+                .map(|entry| serde_json::to_value(entry).unwrap_or_else(|_| serde_json::json!({})))
+                .collect::<Vec<_>>();
+            let latest_seq = discovery.latest_seq();
+            drop(discovery);
             let shares = state.shares.read().await;
-            let entries = shares
+            entries.extend(shares
                 .entries
                 .iter()
                 .filter(|entry| is_auto_retry_audio_file(&entry.filename))
@@ -10554,13 +10698,142 @@ async fn route_http_request_with_headers(
                         "source": "share-index",
                     })
                 })
-                .collect::<Vec<_>>();
+                .collect::<Vec<_>>());
             let count = entries.len();
+            let entries = entries
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect::<Vec<_>>();
             drop(shares);
             Ok(routing::ok_response(serde_json::json!({
+                "latestSeq": latest_seq,
                 "entries": entries,
                 "count": count,
+                "offset": offset,
+                "limit": limit,
             }).to_string()))
+        }
+        ("GET", path) if path.starts_with("/api/hashdb/hash/by-size/") => {
+            let Some(raw_size) = path_segment_after(path, "/api/hashdb/hash/by-size/") else {
+                return Ok(routing::not_found_response());
+            };
+            let Ok(size) = raw_size.parse::<u64>() else {
+                return Ok(routing::bad_request_response("size must be a positive integer"));
+            };
+            if size == 0 {
+                return Ok(routing::bad_request_response("size must be a positive integer"));
+            }
+            let discovery = state.content_discovery.read().await;
+            let entries = discovery.hashes_by_size(size);
+            Ok(routing::ok_response(serde_json::json!({
+                "count": entries.len(),
+                "entries": entries,
+            }).to_string()))
+        }
+        ("GET", path) if path.starts_with("/api/hashdb/hash/") => {
+            let Some(raw_key) = path_segment_after(path, "/api/hashdb/hash/") else {
+                return Ok(routing::not_found_response());
+            };
+            let key = decoded_path_segment(raw_key);
+            let discovery = state.content_discovery.read().await;
+            Ok(discovery.lookup_hash(&key).map_or_else(
+                routing::not_found_response,
+                |entry| {
+                    routing::ok_response(
+                        serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_owned()),
+                    )
+                },
+            ))
+        }
+        ("POST", "/api/hashdb/hash") => {
+            let entry = match serde_json::from_str::<content_discovery::HashDbEntry>(body) {
+                Ok(entry) => entry,
+                Err(_) => return Ok(routing::bad_request_response("invalid hash entry")),
+            };
+            let mut discovery = state.content_discovery.write().await;
+            match discovery.merge_hash_entries(vec![entry]) {
+                Ok(_) => Ok(routing::ok_response(serde_json::json!({
+                    "stored": true,
+                    "latestSeq": discovery.latest_seq(),
+                }).to_string())),
+                Err(error) => Ok(content_discovery_error_response(state, error).await),
+            }
+        }
+        ("POST", "/api/hashdb/sync/merge") => {
+            let value = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(value) => value,
+                Err(_) => return Ok(routing::bad_request_response("invalid hash merge request")),
+            };
+            let entries = match value
+                .get("entries")
+                .cloned()
+                .and_then(|entries| serde_json::from_value::<Vec<content_discovery::HashDbEntry>>(entries).ok())
+            {
+                Some(entries) => entries,
+                None => return Ok(routing::bad_request_response("entries are required")),
+            };
+            let received = entries.len();
+            let mut discovery = state.content_discovery.write().await;
+            match discovery.merge_hash_entries(entries) {
+                Ok(merged) => Ok(routing::ok_response(serde_json::json!({
+                    "received": received,
+                    "merged": merged,
+                    "latestSeq": discovery.latest_seq(),
+                }).to_string())),
+                Err(error) => Ok(content_discovery_error_response(state, error).await),
+            }
+        }
+        ("POST", "/api/virtualsoulfind/shadow-index/sync/merge") => {
+            let value = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(value) => value,
+                Err(_) => return Ok(routing::bad_request_response("invalid shadow-index merge request")),
+            };
+            let records = match value
+                .get("records")
+                .or_else(|| value.get("entries"))
+                .cloned()
+                .and_then(|records| serde_json::from_value::<Vec<content_discovery::ShadowIndexRecord>>(records).ok())
+            {
+                Some(records) => records,
+                None => return Ok(routing::bad_request_response("records are required")),
+            };
+            let received = records.len();
+            let mut discovery = state.content_discovery.write().await;
+            match discovery.merge_shadow_records(records) {
+                Ok(merged) => Ok(routing::ok_response(serde_json::json!({
+                    "received": received,
+                    "merged": merged,
+                }).to_string())),
+                Err(error) => Ok(content_discovery_error_response(state, error).await),
+            }
+        }
+        ("GET", path) if path.starts_with("/api/virtualsoulfind/shadow-index/") => {
+            let Some(raw_recording_id) =
+                path_segment_after(path, "/api/virtualsoulfind/shadow-index/")
+            else {
+                return Ok(routing::not_found_response());
+            };
+            let recording_id = decoded_path_segment(raw_recording_id);
+            let discovery = state.content_discovery.read().await;
+            let record = discovery.shadow_records().iter().find(|record| {
+                record.recording_id.eq_ignore_ascii_case(&recording_id)
+            });
+            Ok(routing::ok_response(record.map_or_else(
+                || serde_json::json!({
+                    "recordingId": recording_id,
+                    "peerIds": [],
+                    "totalPeerCount": 0,
+                    "variants": [],
+                }),
+                |record| serde_json::json!({
+                    "recordingId": record.recording_id,
+                    "peerIds": record.peer_ids,
+                    "totalPeerCount": record.peer_ids.len(),
+                    "variants": [],
+                    "updatedAt": record.updated_at,
+                }),
+            ).to_string()))
         }
         ("POST", "/api/hashdb/backfill/from-history") => {
             let searches = state.searches.read().await;
@@ -20050,6 +20323,11 @@ async fn route_http_request_with_headers(
                 Ok(request) => request,
                 Err(_) => return Ok(routing::bad_request_response("invalid swarm request")),
             };
+            if request.sources.is_empty() {
+                let expected_hash = request.expected_hash.clone().unwrap_or_default();
+                request.sources =
+                    discover_mesh_range_sources(state, &expected_hash, request.file_size).await;
+            }
             if let Err(error) = multisource::validate_request(&mut request) {
                 return Ok(routing::bad_request_response(&error));
             }
@@ -24843,6 +25121,7 @@ async fn serve(once: bool) -> Result<(), String> {
 
     let content_discovery_store =
         content_discovery::ContentDiscoveryStore::load(&config.state_dir)?;
+    let capability_signing_key = new_capability_signing_key()?;
     let state = Arc::new(AppState {
         log_level: RwLock::new(
             logging::LogConfig::parse_level(&config.log_level).unwrap_or(logging::LogLevel::Info),
@@ -24854,6 +25133,7 @@ async fn serve(once: bool) -> Result<(), String> {
         searches: RwLock::new(search_store),
         users: RwLock::new(user_store),
         mesh: RwLock::new(MeshState::new()),
+        capability_signing_key,
         content_discovery: RwLock::new(content_discovery_store),
         browse: RwLock::new(browse_store),
         remote_path_encodings: RwLock::new(RemotePathEncodingRegistry::default()),
@@ -27428,6 +27708,42 @@ where
     F: FnOnce(PeerMessage) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
+    if let Some(envelope) = decode_peer_capability_message(&message)
+        .map_err(|error| format!("peer capability message rejected: {error}"))?
+    {
+        let message_type = envelope.message_type;
+        let nonce = envelope.nonce;
+        let username = envelope.descriptor.username.clone();
+        state
+            .mesh
+            .write()
+            .await
+            .update_capability(envelope.descriptor)?;
+        if message_type == PeerCapabilityMessageType::Hello {
+            let acknowledgement = PeerCapabilityEnvelope::new(
+                PeerCapabilityMessageType::Acknowledge,
+                nonce,
+                local_capability_descriptor(state)?,
+            );
+            let response = peer_capability_message(&acknowledgement)
+                .map_err(|error| format!("peer capability acknowledgement failed: {error}"))?;
+            send_response(response).await?;
+        }
+        update_listeners(state, |snapshot| {
+            snapshot.last_event = Some(format!(
+                "peer_capability_{}:{}",
+                if message_type == PeerCapabilityMessageType::Hello {
+                    "hello"
+                } else {
+                    "acknowledge"
+                },
+                redact_username(&username)
+            ));
+            snapshot.last_error = None;
+        })
+        .await;
+        return Ok(());
+    }
     match message {
         PeerMessage::UserInfoRequest => {
             update_listeners(state, |snapshot| {
@@ -34898,6 +35214,8 @@ mod tests {
             searches: RwLock::new(search_store),
             users: RwLock::new(super::UserStore::new()),
             mesh: RwLock::new(super::MeshState::new()),
+            capability_signing_key: super::new_capability_signing_key()
+                .expect("capability signing key"),
             content_discovery: RwLock::new(
                 super::content_discovery::ContentDiscoveryStore::in_memory(),
             ),
@@ -35731,6 +36049,157 @@ mod tests {
         assert_eq!(peers.status, "200 OK");
         assert!(peers.body.contains("\"peers\""));
         assert!(peers.body.contains("\"carol\""));
+    }
+
+    async fn spawn_mesh_range_source(
+        content: Arc<Vec<u8>>,
+    ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mesh range source");
+        let address = listener.local_addr().expect("mesh range source address");
+        let task = tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let content = Arc::clone(&content);
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut buffer = [0_u8; 1_024];
+                    loop {
+                        let count = stream.read(&mut buffer).await.expect("read range request");
+                        if count == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&buffer[..count]);
+                        if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let request = String::from_utf8(request).expect("range request UTF-8");
+                    let range = request
+                        .lines()
+                        .filter_map(|line| line.split_once(':'))
+                        .find(|(name, _)| name.eq_ignore_ascii_case("range"))
+                        .and_then(|(_, value)| value.trim().strip_prefix("bytes="))
+                        .expect("range header");
+                    let (start, end) = range.split_once('-').expect("range bounds");
+                    let start = start.parse::<usize>().expect("range start");
+                    let end = end.parse::<usize>().expect("range end");
+                    let body = &content[start..=end];
+                    stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/{}\r\nConnection: close\r\n\r\n",
+                                body.len(),
+                                content.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .expect("write range headers");
+                    stream.write_all(body).await.expect("write range body");
+                });
+            }
+        });
+        (address, task)
+    }
+
+    #[tokio::test]
+    async fn hashdb_mbid_shadow_index_discovers_and_executes_mesh_swarm_sources() {
+        use sha2::{Digest, Sha256};
+
+        let content = Arc::new(b"verified mesh source discovery".to_vec());
+        let expected_hash = hex::encode(Sha256::digest(content.as_slice()));
+        let (source_a, task_a) = spawn_mesh_range_source(Arc::clone(&content)).await;
+        let (source_b, task_b) = spawn_mesh_range_source(Arc::clone(&content)).await;
+        let (state, _receiver) = test_state();
+
+        let hash_merge = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/sync/merge",
+            None,
+            &format!(
+                r#"{{"entries":[{{"flacKey":"track-key","size":{},"fileSha256":"{}","musicBrainzId":"recording-1"}}]}}"#,
+                content.len(),
+                expected_hash.to_ascii_uppercase()
+            ),
+            &state,
+        )
+        .await
+        .expect("merge hash metadata");
+        assert_eq!(hash_merge.status, "200 OK");
+
+        let shadow_merge = super::route_http_request(
+            "POST",
+            "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+            None,
+            r#"{"records":[{"recordingId":"recording-1","peerIds":["peer-a","peer-b"]}]}"#,
+            &state,
+        )
+        .await
+        .expect("merge shadow index");
+        assert_eq!(shadow_merge.status, "200 OK");
+
+        {
+            let mut mesh = state.mesh.write().await;
+            for (username, peer_id, address) in [
+                ("source-a", "peer-a", source_a),
+                ("source-b", "peer-b", source_b),
+            ] {
+                let mut descriptor = test_capability_descriptor(
+                    username,
+                    vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+                );
+                descriptor.peer_id = peer_id.to_owned();
+                descriptor.endpoints = vec![format!("http://{address}/content")];
+                mesh.capability_records.push(descriptor);
+            }
+        }
+
+        let by_size = super::route_http_request(
+            "GET",
+            &format!("/api/v0/hashdb/hash/by-size/{}", content.len()),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("lookup hashes by size");
+        let by_size_json = serde_json::from_str::<serde_json::Value>(&by_size.body).unwrap();
+        assert_eq!(by_size_json["count"], 1);
+        assert_eq!(by_size_json["entries"][0]["musicBrainzId"], "recording-1");
+
+        let output_path = format!("mesh-discovery/{}.flac", uuid::Uuid::new_v4());
+        let swarm = super::route_http_request(
+            "POST",
+            "/api/v0/multisource/swarm",
+            None,
+            &format!(
+                r#"{{"filename":"Track.flac","fileSize":{},"expectedHash":"{}","outputPath":"{}","sources":[]}}"#,
+                content.len(),
+                expected_hash.to_ascii_uppercase(),
+                output_path
+            ),
+            &state,
+        )
+        .await
+        .expect("execute discovered mesh swarm");
+        let swarm_json = serde_json::from_str::<serde_json::Value>(&swarm.body).unwrap();
+        assert_eq!(swarm.status, "200 OK", "{}", swarm.body);
+        assert_eq!(swarm_json["success"], true, "{}", swarm.body);
+        assert_eq!(
+            std::fs::read(super::download_root(&state.config.state_dir).join(&output_path))
+                .expect("read verified mesh output"),
+            content.as_slice()
+        );
+
+        task_a.abort();
+        task_b.abort();
+        std::fs::remove_dir_all(&state.config.state_dir).expect("remove test state directory");
     }
 
     #[tokio::test]
@@ -44920,6 +45389,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn daemon_ingests_verified_peer_capabilities_and_acknowledges_hello() {
+        use ed25519_dalek::SigningKey;
+
+        let (state, _receiver) = test_state();
+        let signing_key = SigningKey::from_bytes(&[8_u8; 32]);
+        let descriptor = slskr_client::capabilities::PeerCapabilityDescriptor::unsigned(
+            "mesh-source",
+            vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            vec!["https://mesh.example/content".to_owned()],
+            std::time::Duration::from_secs(300),
+            &signing_key,
+            std::time::SystemTime::now(),
+        )
+        .and_then(|descriptor| descriptor.sign(&signing_key))
+        .expect("signed capability descriptor");
+        let nonce = [3_u8; 16];
+        let hello = slskr_client::capabilities::peer_capability_message(
+            &slskr_client::capabilities::PeerCapabilityEnvelope::new(
+                slskr_client::capabilities::PeerCapabilityMessageType::Hello,
+                nonce,
+                descriptor.clone(),
+            ),
+        )
+        .expect("capability hello");
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        super::handle_peer_message(&state, hello, |response| async move {
+            response_tx
+                .send(response)
+                .map_err(|_| "capability response receiver closed".to_owned())
+        })
+        .await
+        .expect("ingest capability hello");
+
+        let response = response_rx.await.expect("capability acknowledgement");
+        let acknowledgement = slskr_client::capabilities::decode_peer_capability_message(&response)
+            .expect("decode acknowledgement")
+            .expect("capability envelope");
+        assert_eq!(
+            acknowledgement.message_type,
+            slskr_client::capabilities::PeerCapabilityMessageType::Acknowledge
+        );
+        assert_eq!(acknowledgement.nonce, nonce);
+        acknowledgement
+            .descriptor
+            .verify(std::time::SystemTime::now())
+            .expect("verify local acknowledgement descriptor");
+        let mesh = state.mesh.read().await;
+        assert_eq!(mesh.capability_records, vec![descriptor.clone()]);
+        drop(mesh);
+
+        let mut tampered = descriptor;
+        tampered.signature = Some([0_u8; 64]);
+        let invalid = slskr_client::capabilities::peer_capability_message(
+            &slskr_client::capabilities::PeerCapabilityEnvelope::new(
+                slskr_client::capabilities::PeerCapabilityMessageType::Acknowledge,
+                [4_u8; 16],
+                tampered,
+            ),
+        )
+        .expect("tampered capability message");
+        let error = super::handle_peer_message(&state, invalid, |_| async { Ok(()) })
+            .await
+            .expect_err("reject invalid descriptor");
+        assert!(error.contains("signature is invalid"));
+        assert_eq!(state.mesh.read().await.capability_records.len(), 1);
+    }
+
+    #[tokio::test]
     async fn inbound_transfer_request_rejects_when_active_limit_is_full() {
         let (state, _receiver) =
             test_state_with_env(MapEnv::default().with("SLSKR_TRANSFER_MAX_ACTIVE", "1"));
@@ -53255,6 +53793,11 @@ mod tests {
             searches: RwLock::new(super::SearchStore::new()),
             users: RwLock::new(super::UserStore::new()),
             mesh: RwLock::new(super::MeshState::new()),
+            capability_signing_key: super::new_capability_signing_key()
+                .expect("capability signing key"),
+            content_discovery: RwLock::new(
+                super::content_discovery::ContentDiscoveryStore::in_memory(),
+            ),
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
@@ -53417,6 +53960,11 @@ mod tests {
             searches: RwLock::new(super::SearchStore::new()),
             users: RwLock::new(super::UserStore::new()),
             mesh: RwLock::new(super::MeshState::new()),
+            capability_signing_key: super::new_capability_signing_key()
+                .expect("capability signing key"),
+            content_discovery: RwLock::new(
+                super::content_discovery::ContentDiscoveryStore::in_memory(),
+            ),
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
