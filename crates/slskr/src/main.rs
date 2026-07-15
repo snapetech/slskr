@@ -2001,7 +2001,7 @@ impl TransferEntry {
             self.token,
             json_option(self.peer_username.as_deref()),
             json_escape(&self.filename),
-            json_option(self.local_path.as_deref()),
+            "null",
             json_option(self.batch_id.as_deref()),
             json_u64_option(self.size),
             self.bytes_transferred,
@@ -29513,6 +29513,26 @@ mod tests {
         assert!(!json.contains("/private"));
         assert!(!json.contains("parse failed"));
         assert!(!json.contains("open failed"));
+    }
+
+    #[test]
+    fn transfer_json_redacts_local_storage_path() {
+        let mut transfers = super::TransferQueue::new_in_memory(8);
+        let entry = transfers.create(
+            0,
+            None,
+            "Remote/Track.flac".to_owned(),
+            Some("/private/downloads/Track.flac".to_owned()),
+            Some(4),
+        );
+
+        assert_eq!(
+            entry.local_path.as_deref(),
+            Some("/private/downloads/Track.flac")
+        );
+        let json = transfers.json(None);
+        assert!(json.contains("\"local_path\":null"));
+        assert!(!json.contains("/private/downloads"));
     }
 
     #[tokio::test]
