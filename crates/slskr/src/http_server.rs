@@ -447,6 +447,7 @@ fn valid_request_target(method: &str, target: &str) -> bool {
     }
 
     let bytes = target.as_bytes();
+    let path_end = target.find('?').unwrap_or(target.len());
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
@@ -458,7 +459,11 @@ fn valid_request_target(method: &str, target: &str) -> bool {
             let Some(low) = bytes.get(index + 2).copied().and_then(http_hex_value) else {
                 return false;
             };
-            decoded.push((high << 4) | low);
+            let decoded_byte = (high << 4) | low;
+            if index < path_end && matches!(decoded_byte, b'/' | b'?' | b'#') {
+                return false;
+            }
+            decoded.push(decoded_byte);
             index += 3;
             continue;
         }
@@ -1017,6 +1022,9 @@ mod tests {
             "/api/health%C3%28",
             "/api/health%00",
             "/api/health%5Cadmin",
+            "/api%2Fhealth",
+            "/api/health%3Fadmin=true",
+            "/api/health%23fragment",
             "/api/\0health",
             "/api/❤",
         ] {
@@ -1033,13 +1041,15 @@ mod tests {
     async fn test_percent_encoded_utf8_request_target_is_accepted() {
         let (mut client, server) = tokio::io::duplex(4096);
         client
-            .write_all(b"GET /api/%E2%9D%A4?q=a+b HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .write_all(
+                b"GET /api/%E2%9D%A4?q=%2Fvalue%3Fpart%23anchor HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            )
             .await
             .unwrap();
         let mut reader = BufReader::new(server);
         let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
         assert_eq!(request.path, "/api/%E2%9D%A4");
-        assert_eq!(request.query.as_deref(), Some("q=a+b"));
+        assert_eq!(request.query.as_deref(), Some("q=%2Fvalue%3Fpart%23anchor"));
     }
 
     #[tokio::test]
