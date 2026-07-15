@@ -5118,6 +5118,20 @@ fn wishlist_search_item_id(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+fn share_contents_id(path: &str) -> Option<String> {
+    let path = path.strip_prefix("/api/shares/")?;
+    let id = path.strip_suffix("/contents")?;
+    if id.is_empty() || id.contains('/') {
+        return None;
+    }
+    Some(decoded_path_segment(id))
+}
+
+fn share_resource_id(path: &str) -> Option<String> {
+    let id = path_segment_after(path, "/api/shares/")?;
+    Some(decoded_path_segment(id))
+}
+
 fn user_route_username(path: &str, suffix: &str) -> Option<String> {
     let path = path.strip_prefix("/api/users/")?;
     let username = path.strip_suffix(suffix)?;
@@ -15396,15 +15410,19 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/shares/") && path.ends_with("/contents") => {
-            let share_id = decoded_path_segment(path.split('/').nth(3).unwrap_or(""));
+            let Some(share_id) = share_contents_id(path) else {
+                return Ok(routing::not_found_response());
+            };
             let shares = state.shares.read().await;
             let json = slskd_share_directories_json(&shares.entries, Some(&share_id));
             drop(shares);
             Ok(routing::ok_response(json))
         }
 
-        ("GET", path) if path.starts_with("/api/shares/") && path.len() > 12 => {
-            let share_id = decoded_path_segment(&path[12..]);
+        ("GET", path) if path.starts_with("/api/shares/") => {
+            let Some(share_id) = share_resource_id(path) else {
+                return Ok(routing::not_found_response());
+            };
             let shares = state.shares.read().await;
             let (directories, files, bytes) = shares
                 .roots
@@ -34372,6 +34390,20 @@ mod tests {
         let shared_json = serde_json::from_str::<serde_json::Value>(&shared.body).unwrap();
         assert_eq!(shared_json[0]["id"], "Virtual");
         assert_eq!(shared_json[0]["files"], 2);
+        let exact_share = super::route_http_request("GET", "/api/shares/Virtual", None, "", &state)
+            .await
+            .expect("exact share resource");
+        assert_eq!(exact_share.status, "200 OK");
+        let aliased_contents = super::route_http_request(
+            "GET",
+            "/api/shares/Virtual/extra/contents",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased share contents");
+        assert_eq!(aliased_contents.status, "404 Not Found");
 
         let contact = super::route_http_request(
             "POST",
