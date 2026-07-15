@@ -103,11 +103,10 @@ impl<'a> Reader<'a> {
         minimum_bytes_per_item: usize,
     ) -> Result<usize, DecodeError> {
         let count = self.read_u32_le()? as usize;
-        let maximum = if minimum_bytes_per_item == 0 {
-            self.remaining()
-        } else {
-            self.remaining() / minimum_bytes_per_item
-        };
+        let maximum = self
+            .remaining()
+            .checked_div(minimum_bytes_per_item)
+            .unwrap_or_else(|| self.remaining());
 
         if count > maximum {
             return Err(DecodeError::InvalidCount {

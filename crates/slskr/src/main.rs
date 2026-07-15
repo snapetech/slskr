@@ -11889,11 +11889,12 @@ async fn route_http_request_with_headers(
                 .collect::<Vec<_>>();
             jobs.extend(transfers.entries.iter().map(|entry| {
                 let size = entry.size.unwrap_or(0);
-                let progress = if size == 0 {
-                    0
-                } else {
-                    ((entry.bytes_transferred.saturating_mul(100)) / size).min(100)
-                };
+                let progress = entry
+                    .bytes_transferred
+                    .saturating_mul(100)
+                    .checked_div(size)
+                    .unwrap_or(0)
+                    .min(100);
                 serde_json::json!({
                     "id": format!("transfer-{}", entry.id),
                     "kind": "transfer",
@@ -11945,11 +11946,12 @@ async fn route_http_request_with_headers(
                 .and_then(|id| transfers.entries.iter().find(|entry| entry.id == id))
                 .map(|entry| {
                     let size = entry.size.unwrap_or(0);
-                    let progress = if size == 0 {
-                        0
-                    } else {
-                        ((entry.bytes_transferred.saturating_mul(100)) / size).min(100)
-                    };
+                    let progress = entry
+                        .bytes_transferred
+                        .saturating_mul(100)
+                        .checked_div(size)
+                        .unwrap_or(0)
+                        .min(100);
                     serde_json::json!({
                         "id": format!("transfer-{}", entry.id),
                         "kind": "transfer",
@@ -24700,7 +24702,7 @@ mod tests {
     }
 
     #[test]
-    fn web_static_csp_rejects_inline_and_scopes_wasm_eval() {
+    fn web_static_csp_rejects_inline_scripts_and_scopes_style_and_wasm_exceptions() {
         let root = std::env::temp_dir().join(format!(
             "slskr-web-static-csp-{}-{}",
             std::process::id(),
@@ -24715,13 +24717,16 @@ mod tests {
 
         let react_csp = super::web_static_content_security_policy(&react_index);
         assert!(react_csp.contains("script-src 'self'"));
-        assert!(!react_csp.contains("'unsafe-inline'"));
+        assert!(!react_csp.contains("script-src 'self' 'unsafe-inline'"));
+        assert!(react_csp.contains("style-src-attr 'unsafe-inline'"));
+        assert!(react_csp.contains("'sha256-AVTm08UMHPqpttgoudpSsvenKKfidtwuSnUVJLIuqcA='"));
         assert!(!react_csp.contains("wasm-unsafe-eval"));
 
         std::fs::write(root.join("slskr_web.wasm"), []).unwrap();
         let wasm_csp = super::web_static_content_security_policy(&react_index);
         assert!(wasm_csp.contains("script-src 'self' 'wasm-unsafe-eval'"));
-        assert!(!wasm_csp.contains("'unsafe-inline'"));
+        assert!(!wasm_csp.contains("script-src 'self' 'unsafe-inline'"));
+        assert!(wasm_csp.contains("style-src-attr 'unsafe-inline'"));
 
         let _ = std::fs::remove_dir_all(root);
     }
