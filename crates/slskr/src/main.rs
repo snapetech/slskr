@@ -9790,7 +9790,7 @@ async fn route_http_request_with_headers(
             let options = StorageDirectoryListOptions::from_query(route.query);
             match slskd_storage_directory_json(&root, None, options) {
                 Ok(json) => Ok(routing::ok_response(json)),
-                Err(error) => Ok(routing::bad_request_response(&error)),
+                Err(error) => Ok(file_storage_error_response(&error)),
             }
         }
         ("GET", path)
@@ -9812,7 +9812,7 @@ async fn route_http_request_with_headers(
             let options = StorageDirectoryListOptions::from_query(route.query);
             match slskd_storage_directory_json(&root, Some(encoded_name), options) {
                 Ok(json) => Ok(routing::ok_response(json)),
-                Err(error) => Ok(routing::bad_request_response(&error)),
+                Err(error) => Ok(file_storage_error_response(&error)),
             }
         }
         ("DELETE", path)
@@ -9837,7 +9837,7 @@ async fn route_http_request_with_headers(
             };
             match delete_result {
                 Ok(deleted) => Ok(routing::ok_response(deleted.to_string())),
-                Err(error) => Ok(routing::bad_request_response(&error)),
+                Err(error) => Ok(file_storage_error_response(&error)),
             }
         }
         ("GET", path) if path.starts_with("/api/files/") || path.starts_with("/api/v0/files/") => {
@@ -18619,6 +18619,15 @@ fn slskd_file_storage_resource_path(path: &str) -> Option<(&str, &str, &str)> {
         return None;
     }
     Some((storage, resource, encoded_name))
+}
+
+fn file_storage_error_response(error: &str) -> HttpResponse {
+    if error.contains("failed:") {
+        eprintln!("file storage operation failed: {error}");
+        routing::service_unavailable_response("file storage unavailable")
+    } else {
+        routing::bad_request_response(error)
+    }
 }
 
 fn slskd_files_from_body(body: &str) -> Vec<serde_json::Value> {
@@ -29883,6 +29892,23 @@ mod tests {
         assert_eq!(album_json["fullName"], "Artist/Album");
         assert_eq!(album_json["files"][0]["name"], "Track.flac");
         assert_eq!(album_json["files"][0]["length"], 5);
+    }
+
+    #[test]
+    fn file_storage_errors_redact_internal_details_and_preserve_client_errors() {
+        let internal = super::file_storage_error_response(
+            "storage directory read failed: permission denied: /srv/private/downloads",
+        );
+        assert_eq!(internal.status, "503 Service Unavailable");
+        assert_eq!(internal.body, "{\"error\":\"file storage unavailable\"}");
+        assert!(!internal.body.contains("permission denied"));
+        assert!(!internal.body.contains("/srv/private"));
+
+        let client = super::file_storage_error_response(
+            "path must be relative and stay within the storage root",
+        );
+        assert_eq!(client.status, "400 Bad Request");
+        assert!(client.body.contains("path must be relative"));
     }
 
     #[test]
