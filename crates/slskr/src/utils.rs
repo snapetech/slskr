@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,6 +8,17 @@ use slskr_client::protocol::server::ServerMessage;
 use tokio::net::TcpStream;
 
 use crate::config::AppConfig;
+
+pub(crate) fn is_non_global_special_use_ipv4(ip: Ipv4Addr) -> bool {
+    let address = u32::from(ip);
+    let in_cidr = |network: Ipv4Addr, prefix: u32| {
+        address >> (32 - prefix) == u32::from(network) >> (32 - prefix)
+    };
+    in_cidr(Ipv4Addr::new(100, 64, 0, 0), 10)
+        || in_cidr(Ipv4Addr::new(192, 0, 0, 0), 24)
+        || in_cidr(Ipv4Addr::new(192, 88, 99, 0), 24)
+        || in_cidr(Ipv4Addr::new(198, 18, 0, 0), 15)
+}
 
 // ============================================================================
 // HTTP Request Parsing

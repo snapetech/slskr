@@ -14,6 +14,8 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
+use crate::utils::is_non_global_special_use_ipv4;
+
 const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
 const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
 pub const MAX_WEBHOOKS: usize = 64;
@@ -612,6 +614,7 @@ fn default_blocks_webhook_ip(ip: IpAddr) -> bool {
                 || ip.is_link_local()
                 || ip.is_broadcast()
                 || ip.is_documentation()
+                || is_non_global_special_use_ipv4(ip)
                 || ip.octets()[0] == 0
                 || ip.octets()[0] >= 224
         }
@@ -798,7 +801,10 @@ mod tests {
     }
 
     #[test]
-    fn test_blocked_webhook_ipv6_embedded_ipv4() {
+    fn test_blocked_webhook_special_use_ip_ranges() {
+        for address in ["100.64.0.1", "192.0.0.8", "192.88.99.1", "198.18.0.1"] {
+            assert!(is_blocked_webhook_ip(address.parse().unwrap()));
+        }
         assert!(is_blocked_webhook_ip("::ffff:127.0.0.1".parse().unwrap()));
         assert!(is_blocked_webhook_ip(
             "::ffff:192.168.1.10".parse().unwrap()

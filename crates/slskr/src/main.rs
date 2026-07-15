@@ -16755,6 +16755,7 @@ fn is_blocked_integration_ip(ip: IpAddr) -> bool {
                 || ip.is_link_local()
                 || ip.is_broadcast()
                 || ip.is_documentation()
+                || is_non_global_special_use_ipv4(ip)
                 || ip.octets()[0] == 0
                 || ip.octets()[0] >= 224
         }
@@ -25749,7 +25750,11 @@ mod tests {
     }
 
     #[test]
-    fn integration_ssrf_filter_blocks_special_use_ipv6_ranges() {
+    fn integration_ssrf_filter_blocks_special_use_ip_ranges() {
+        for address in ["100.64.0.1", "192.0.0.8", "192.88.99.1", "198.18.0.1"] {
+            let ip = address.parse::<std::net::IpAddr>().expect("fixture IP");
+            assert!(super::is_blocked_integration_ip(ip), "accepted {address}");
+        }
         for address in [
             "ff02::1",
             "2001:db8::1",

@@ -26,6 +26,18 @@ for token in 'is_private' 'is_loopback' 'is_link_local' 'is_multicast' '2001:db8
   fi
 done
 
+for token in '100, 64' '192, 0, 0' '192, 88, 99' '198, 18'; do
+  if ! rg -n --fixed-strings -- "$token" crates/slskr/src/utils.rs >/dev/null; then
+    printf 'webhook outbound policy check failed: missing special-use IPv4 policy token: %s\n' "$token" >&2
+    status=1
+  fi
+done
+
+if ! rg -n --fixed-strings -- 'test_blocked_webhook_special_use_ip_ranges' crates/slskr/src/webhooks.rs >/dev/null; then
+  printf 'webhook outbound policy check failed: special-use IP regression is missing\n' >&2
+  status=1
+fi
+
 if ! rg -n 'MAX_WEBHOOK_DELIVERY_TASKS|webhook_deliveries' crates/slskr/src/main.rs >/dev/null; then
   printf 'webhook outbound policy check failed: bounded manual delivery pool is missing\n' >&2
   status=1
