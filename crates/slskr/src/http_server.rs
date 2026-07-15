@@ -610,7 +610,7 @@ async fn write_http_response_inner<W: AsyncWrite + Unpin>(
         "Connection: close\r\n"
     };
 
-    let (body, csp_header) = body_with_content_security_policy(response);
+    let (body, csp_header) = body_with_content_security_policy(response)?;
     let body_bytes = body.as_bytes();
     let e = |err: std::io::Error| err.to_string();
 
@@ -659,9 +659,9 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
     Ok(())
 }
 
-fn body_with_content_security_policy(response: &HttpResponse) -> (String, String) {
+fn body_with_content_security_policy(response: &HttpResponse) -> Result<(String, String), String> {
     if response.content_type.starts_with("text/html") {
-        let nonce = csp_nonce();
+        let nonce = csp_nonce()?;
         let body = response
             .body
             .replace("<script>", &format!(r#"<script nonce="{nonce}">"#))
@@ -669,22 +669,22 @@ fn body_with_content_security_policy(response: &HttpResponse) -> (String, String
         let header = format!(
             "Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'nonce-{nonce}'; img-src 'self' data:; connect-src 'self' ws: wss:\r\n"
         );
-        return (body, header);
+        return Ok((body, header));
     }
 
-    (
+    Ok((
         response.body.clone(),
         "Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'\r\n"
             .to_owned(),
-    )
+    ))
 }
 
-fn csp_nonce() -> String {
+fn csp_nonce() -> Result<String, String> {
     let mut bytes = [0_u8; 16];
     SysRng
         .try_fill_bytes(&mut bytes)
-        .expect("operating system randomness is unavailable");
-    URL_SAFE_NO_PAD.encode(bytes)
+        .map_err(|_| "operating system randomness is unavailable".to_owned())?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
 #[cfg(test)]
