@@ -177,7 +177,13 @@ const MAX_SHARE_GRANTS: usize = 4_096;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
+const MAX_TOTAL_SEARCH_RESULTS: usize = 50_000;
 const MAX_SEARCH_RECORDS: usize = 500;
+const MAX_SEARCH_QUERY_BYTES: usize = 4 * 1024;
+const MAX_SEARCH_TARGET_NAME_BYTES: usize = 1024;
+const MAX_SEARCH_RESULT_USERNAME_BYTES: usize = 1024;
+const MAX_SEARCH_RESULT_FILENAME_BYTES: usize = 4 * 1024;
+const MAX_SEARCH_RESULT_EXTENSION_BYTES: usize = 256;
 
 #[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
@@ -597,13 +603,15 @@ impl SearchResultEntry {
             .map(str::to_owned)
             .unwrap_or_else(|| filename.split('.').next_back().unwrap_or("").to_owned());
         Some(Self {
-            peer_username: peer_username.map(str::to_owned),
-            filename,
+            peer_username: peer_username.map(|username| {
+                truncate_utf8_bytes(username.to_owned(), MAX_SEARCH_RESULT_USERNAME_BYTES)
+            }),
+            filename: truncate_utf8_bytes(filename, MAX_SEARCH_RESULT_FILENAME_BYTES),
             size: file
                 .get("size")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
-            extension,
+            extension: truncate_utf8_bytes(extension, MAX_SEARCH_RESULT_EXTENSION_BYTES),
             locked: file
                 .get("locked")
                 .or_else(|| file.get("isLocked"))
@@ -616,7 +624,7 @@ impl SearchResultEntry {
     }
 
     fn from_file_entry(entry: &FileEntry) -> Self {
-        Self {
+        bounded_search_result_entry(Self {
             peer_username: None,
             filename: entry.filename.clone(),
             size: entry.size,
@@ -625,7 +633,7 @@ impl SearchResultEntry {
             slot_free: Some(true),
             average_speed: Some(0),
             queue_length: Some(0),
-        }
+        })
     }
 
     fn from_peer_response_entry(
@@ -633,7 +641,7 @@ impl SearchResultEntry {
         entry: &FileEntry,
         locked: bool,
     ) -> Self {
-        Self {
+        bounded_search_result_entry(Self {
             peer_username: Some(response.username.clone()),
             filename: entry.filename.clone(),
             size: entry.size,
@@ -642,11 +650,11 @@ impl SearchResultEntry {
             slot_free: Some(response.slot_free),
             average_speed: Some(response.average_speed),
             queue_length: Some(response.queue_length),
-        }
+        })
     }
 
     fn from_persisted(record: &persistence::SearchResultRecord) -> Self {
-        Self {
+        bounded_search_result_entry(Self {
             peer_username: record.peer_username.clone(),
             filename: record.filename.clone(),
             size: record.size.max(0) as u64,
@@ -659,7 +667,7 @@ impl SearchResultEntry {
             queue_length: record
                 .queue_length
                 .and_then(|value| u32::try_from(value).ok()),
-        }
+        })
     }
 
     fn json(&self) -> String {
@@ -692,6 +700,15 @@ impl SearchResultEntry {
     }
 }
 
+fn bounded_search_result_entry(mut entry: SearchResultEntry) -> SearchResultEntry {
+    entry.peer_username = entry
+        .peer_username
+        .map(|username| truncate_utf8_bytes(username, MAX_SEARCH_RESULT_USERNAME_BYTES));
+    entry.filename = truncate_utf8_bytes(entry.filename, MAX_SEARCH_RESULT_FILENAME_BYTES);
+    entry.extension = truncate_utf8_bytes(entry.extension, MAX_SEARCH_RESULT_EXTENSION_BYTES);
+    entry
+}
+
 fn virtual_basename(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
@@ -720,8 +737,14 @@ struct SearchRecord {
 }
 
 impl SearchRecord {
-    fn extend_results_bounded(&mut self, results: impl IntoIterator<Item = SearchResultEntry>) {
-        let remaining = MAX_SEARCH_RESULTS_PER_SEARCH.saturating_sub(self.results.len());
+    fn extend_results_bounded(
+        &mut self,
+        results: impl IntoIterator<Item = SearchResultEntry>,
+        aggregate_remaining: usize,
+    ) {
+        let remaining = MAX_SEARCH_RESULTS_PER_SEARCH
+            .saturating_sub(self.results.len())
+            .min(aggregate_remaining);
         self.results.extend(results.into_iter().take(remaining));
     }
 
@@ -860,9 +883,10 @@ impl SearchRecord {
         Some(Self {
             id: record.id.clone(),
             token,
-            query: record.query.clone(),
+            query: truncate_utf8_bytes(record.query.clone(), MAX_SEARCH_QUERY_BYTES),
             target,
-            target_name,
+            target_name: target_name
+                .map(|name| truncate_utf8_bytes(name, MAX_SEARCH_TARGET_NAME_BYTES)),
             status: persisted_search_status(&record.status),
             results: result_records
                 .iter()
@@ -957,13 +981,18 @@ impl SearchStore {
                 .or_default()
                 .push(result);
         }
+        let mut retained_results = 0_usize;
         let parsed = records
             .iter()
             .filter_map(|record| {
-                SearchRecord::from_persisted_with_results(
+                let remaining = MAX_TOTAL_SEARCH_RESULTS.saturating_sub(retained_results);
+                let mut parsed = SearchRecord::from_persisted_with_results(
                     record,
                     results_by_search.remove(&record.id).unwrap_or_default(),
-                )
+                )?;
+                parsed.results.truncate(remaining);
+                retained_results = retained_results.saturating_add(parsed.results.len());
+                Some(parsed)
             })
             .collect::<Vec<_>>();
         let next_token = next_search_token_hint(&parsed);
@@ -1017,17 +1046,19 @@ impl SearchStore {
             evicted.push(self.records.remove(index));
         }
         let now = unix_timestamp();
+        let aggregate_remaining = MAX_TOTAL_SEARCH_RESULTS.saturating_sub(self.total_results());
         let record = SearchRecord {
             id: id.unwrap_or_else(|| token.to_string()),
             token,
-            query,
+            query: truncate_utf8_bytes(query, MAX_SEARCH_QUERY_BYTES),
             target,
-            target_name,
+            target_name: target_name
+                .map(|name| truncate_utf8_bytes(name, MAX_SEARCH_TARGET_NAME_BYTES)),
             status: "active",
             results: results
                 .iter()
                 .map(SearchResultEntry::from_file_entry)
-                .take(MAX_SEARCH_RESULTS_PER_SEARCH)
+                .take(MAX_SEARCH_RESULTS_PER_SEARCH.min(aggregate_remaining))
                 .collect(),
             expires_at: now.saturating_add(ttl_seconds),
             created_at: now,
@@ -1113,6 +1144,7 @@ impl SearchStore {
             .find(|record| record.id == id || record.token.to_string() == id)?;
         let mut updated = false;
         if let Some(query) = query.map(|value| value.trim().to_owned()) {
+            let query = truncate_utf8_bytes(query, MAX_SEARCH_QUERY_BYTES);
             if !query.is_empty() && query != record.query {
                 record.query = query;
                 updated = true;
@@ -1158,21 +1190,26 @@ impl SearchStore {
     }
 
     fn add_peer_response(&mut self, response: &FileSearchResponse) -> Option<SearchRecord> {
+        let aggregate_remaining = MAX_TOTAL_SEARCH_RESULTS.saturating_sub(self.total_results());
         let record = self
             .records
             .iter_mut()
             .find(|record| record.token == response.token)?;
+        let before = record.results.len();
         record.extend_results_bounded(
             response
                 .results
                 .iter()
                 .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, false)),
+            aggregate_remaining,
         );
+        let aggregate_remaining = aggregate_remaining.saturating_sub(record.results.len() - before);
         record.extend_results_bounded(
             response
                 .private_results
                 .iter()
                 .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, true)),
+            aggregate_remaining,
         );
         record.updated_at = unix_timestamp();
         Some(record.clone())
@@ -1183,6 +1220,10 @@ impl SearchStore {
             .iter()
             .find(|record| record.token == token)
             .cloned()
+    }
+
+    fn total_results(&self) -> usize {
+        self.records.iter().map(|record| record.results.len()).sum()
     }
 
     fn json(&self, query: Option<&str>) -> String {
@@ -9997,7 +10038,7 @@ async fn route_http_request_with_headers(
                     average_speed,
                     queue_length,
                 )
-                .unwrap_or_else(|| SearchResultEntry {
+                .unwrap_or_else(|| bounded_search_result_entry(SearchResultEntry {
                     peer_username: peer_username.map(str::to_owned),
                     filename: String::new(),
                     size: payload
@@ -10009,13 +10050,15 @@ async fn route_http_request_with_headers(
                     average_speed,
                     queue_length,
                     extension: String::new(),
-                });
+                }));
                 entries.push(entry);
             }
 
             let mut searches = state.searches.write().await;
+            let aggregate_remaining =
+                MAX_TOTAL_SEARCH_RESULTS.saturating_sub(searches.total_results());
             if let Some(record) = searches.records.iter_mut().find(|r| r.token == token) {
-                record.extend_results_bounded(entries);
+                record.extend_results_bounded(entries, aggregate_remaining);
                 record.updated_at = unix_timestamp();
                 let response_json = record.json();
                 let record = record.clone();
@@ -31419,6 +31462,89 @@ mod tests {
         let updated = store.add_peer_response(&response).expect("search exists");
         assert_eq!(updated.results.len(), super::MAX_SEARCH_RESULTS_PER_SEARCH);
         assert_eq!(updated.results.last().unwrap().filename, "Remote/9999.flac");
+    }
+
+    #[test]
+    fn search_store_bounds_text_and_aggregate_results() {
+        let mut store = super::SearchStore::new();
+        let oversized_query = "q".repeat(super::MAX_SEARCH_QUERY_BYTES + 1);
+        let first = store
+            .create(None, oversized_query, "global", None, Vec::new(), 300)
+            .unwrap()
+            .record;
+        assert_eq!(first.query.len(), super::MAX_SEARCH_QUERY_BYTES);
+        let response = FileSearchResponse {
+            username: "u".repeat(super::MAX_SEARCH_RESULT_USERNAME_BYTES + 1),
+            token: first.token,
+            results: vec![FileEntry {
+                code: 1,
+                filename: "f".repeat(super::MAX_SEARCH_RESULT_FILENAME_BYTES + 1),
+                size: 1,
+                extension: "e".repeat(super::MAX_SEARCH_RESULT_EXTENSION_BYTES + 1),
+                attributes: Vec::new(),
+            }],
+            slot_free: true,
+            average_speed: 1,
+            queue_length: 0,
+            unknown: 0,
+            private_results: Vec::new(),
+        };
+        let updated = store.add_peer_response(&response).unwrap();
+        assert_eq!(
+            updated.results[0].peer_username.as_ref().unwrap().len(),
+            super::MAX_SEARCH_RESULT_USERNAME_BYTES
+        );
+        assert_eq!(
+            updated.results[0].filename.len(),
+            super::MAX_SEARCH_RESULT_FILENAME_BYTES
+        );
+        assert_eq!(
+            updated.results[0].extension.len(),
+            super::MAX_SEARCH_RESULT_EXTENSION_BYTES
+        );
+
+        let template = super::SearchResultEntry {
+            peer_username: Some("peer".to_owned()),
+            filename: "file".to_owned(),
+            size: 1,
+            extension: String::new(),
+            locked: false,
+            slot_free: Some(true),
+            average_speed: Some(1),
+            queue_length: Some(0),
+        };
+        store.records[0].results.clear();
+        while store.records.len() < 5 {
+            store
+                .create(None, "query".to_owned(), "global", None, Vec::new(), 300)
+                .unwrap();
+        }
+        for record in &mut store.records {
+            record.results = vec![template.clone(); super::MAX_SEARCH_RESULTS_PER_SEARCH];
+        }
+        let empty = store
+            .create(None, "last".to_owned(), "global", None, Vec::new(), 300)
+            .unwrap()
+            .record;
+        let response = FileSearchResponse {
+            username: "peer".to_owned(),
+            token: empty.token,
+            results: vec![FileEntry {
+                code: 1,
+                filename: "overflow".to_owned(),
+                size: 1,
+                extension: String::new(),
+                attributes: Vec::new(),
+            }],
+            slot_free: true,
+            average_speed: 1,
+            queue_length: 0,
+            unknown: 0,
+            private_results: Vec::new(),
+        };
+        let updated = store.add_peer_response(&response).unwrap();
+        assert!(updated.results.is_empty());
+        assert_eq!(store.total_results(), super::MAX_TOTAL_SEARCH_RESULTS);
     }
 
     #[tokio::test]
