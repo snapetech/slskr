@@ -179,8 +179,12 @@ const MAX_LIST_KIND_BYTES: usize = 256;
 const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
 const MAX_SONGID_RUNS: usize = 256;
 const MAX_USER_NOTES: usize = 4_096;
+const MAX_USER_NOTE_BYTES: usize = 16 * 1024;
 const MAX_INTERESTS_PER_KIND: usize = 4_096;
+const MAX_INTEREST_NAME_BYTES: usize = 4 * 1024;
 const MAX_NOW_PLAYING_RECORDS: usize = 4_096;
+const MAX_NOW_PLAYING_ARTIST_BYTES: usize = 4 * 1024;
+const MAX_NOW_PLAYING_TITLE_BYTES: usize = 4 * 1024;
 const MAX_SECURITY_BANS: usize = 4_096;
 const MAX_SHARE_GRANTS: usize = 4_096;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
@@ -5991,8 +5995,8 @@ impl UserNoteStore {
                 updated_at = updated_at.max(record_updated_at);
                 UserNoteRecord {
                     id: record.id,
-                    username: record.username,
-                    note: record.note,
+                    username: bounded_user_username(&record.username),
+                    note: truncate_utf8_bytes(record.note, MAX_USER_NOTE_BYTES),
                     created_at,
                     updated_at: record_updated_at,
                 }
@@ -6013,8 +6017,8 @@ impl UserNoteStore {
         let now = unix_timestamp();
         let record = UserNoteRecord {
             id,
-            username,
-            note,
+            username: bounded_user_username(&username),
+            note: truncate_utf8_bytes(note, MAX_USER_NOTE_BYTES),
             created_at: now,
             updated_at: now,
         };
@@ -6043,7 +6047,7 @@ impl UserNoteStore {
     fn update(&mut self, id: &str, note: String) -> Option<UserNoteRecord> {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == id)?;
-        record.note = note;
+        record.note = truncate_utf8_bytes(note, MAX_USER_NOTE_BYTES);
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -6121,7 +6125,8 @@ impl InterestStore {
         let mut seen_ids = std::collections::HashSet::new();
         let mut seen_liked = std::collections::HashSet::new();
         let mut seen_hated = std::collections::HashSet::new();
-        for record in records {
+        for mut record in records {
+            record.name = truncate_utf8_bytes(record.name, MAX_INTEREST_NAME_BYTES);
             if !seen_ids.insert(record.id.clone()) {
                 continue;
             }
@@ -6157,6 +6162,7 @@ impl InterestStore {
     }
 
     fn add_liked(&mut self, name: String) -> Option<(InterestRecord, bool)> {
+        let name = truncate_utf8_bytes(name, MAX_INTEREST_NAME_BYTES);
         if let Some(record) = self
             .liked
             .iter()
@@ -6181,6 +6187,7 @@ impl InterestStore {
     }
 
     fn add_hated(&mut self, name: String) -> Option<(InterestRecord, bool)> {
+        let name = truncate_utf8_bytes(name, MAX_INTEREST_NAME_BYTES);
         if let Some(record) = self
             .hated
             .iter()
@@ -6386,9 +6393,9 @@ impl NowPlayingStore {
                 let record_updated_at = u64::try_from(record.updated_at).unwrap_or(0);
                 updated_at = updated_at.max(record_updated_at);
                 NowPlayingRecord {
-                    username: record.username,
-                    artist: record.artist,
-                    title: record.title,
+                    username: bounded_user_username(&record.username),
+                    artist: truncate_utf8_bytes(record.artist, MAX_NOW_PLAYING_ARTIST_BYTES),
+                    title: truncate_utf8_bytes(record.title, MAX_NOW_PLAYING_TITLE_BYTES),
                     updated_at: record_updated_at,
                 }
             })
@@ -6409,8 +6416,10 @@ impl NowPlayingStore {
         let username = if username.trim().is_empty() {
             "local".to_owned()
         } else {
-            username
+            bounded_user_username(&username)
         };
+        let artist = truncate_utf8_bytes(artist, MAX_NOW_PLAYING_ARTIST_BYTES);
+        let title = truncate_utf8_bytes(title, MAX_NOW_PLAYING_TITLE_BYTES);
         if let Some(record) = self
             .records
             .iter_mut()
@@ -34140,6 +34149,15 @@ mod tests {
     #[test]
     fn notes_and_interests_bound_growth_and_ids() {
         let mut notes = super::UserNoteStore::new();
+        let bounded_note = notes
+            .create(
+                "é".repeat(super::MAX_USER_USERNAME_BYTES),
+                "n".repeat(super::MAX_USER_NOTE_BYTES + 1),
+            )
+            .unwrap();
+        assert!(bounded_note.username.len() <= super::MAX_USER_USERNAME_BYTES);
+        assert_eq!(bounded_note.note.len(), super::MAX_USER_NOTE_BYTES);
+        notes.records.clear();
         for index in 0..super::MAX_USER_NOTES {
             notes
                 .create(format!("user-{index}"), "note".to_owned())
@@ -34157,6 +34175,13 @@ mod tests {
         );
 
         let mut interests = super::InterestStore::new();
+        let (bounded_interest, created) = interests
+            .add_liked("i".repeat(super::MAX_INTEREST_NAME_BYTES + 1))
+            .unwrap();
+        assert!(created);
+        assert_eq!(bounded_interest.name.len(), super::MAX_INTEREST_NAME_BYTES);
+        interests.liked.clear();
+        interests.next_id = 1;
         let (liked, created) = interests.add_liked("Ambient".to_owned()).unwrap();
         assert!(created);
         let (duplicate_liked, created) = interests.add_liked("ambient".to_owned()).unwrap();
@@ -34183,6 +34208,15 @@ mod tests {
     #[test]
     fn now_playing_and_security_state_bound_remote_keys() {
         let mut now_playing = super::NowPlayingStore::new();
+        let bounded = now_playing.upsert(
+            "é".repeat(super::MAX_USER_USERNAME_BYTES),
+            "a".repeat(super::MAX_NOW_PLAYING_ARTIST_BYTES + 1),
+            "t".repeat(super::MAX_NOW_PLAYING_TITLE_BYTES + 1),
+        );
+        assert!(bounded.username.len() <= super::MAX_USER_USERNAME_BYTES);
+        assert_eq!(bounded.artist.len(), super::MAX_NOW_PLAYING_ARTIST_BYTES);
+        assert_eq!(bounded.title.len(), super::MAX_NOW_PLAYING_TITLE_BYTES);
+        now_playing.records.clear();
         for index in 0..super::MAX_NOW_PLAYING_RECORDS {
             now_playing.upsert(
                 format!("user-{index}"),
