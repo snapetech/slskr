@@ -47,6 +47,8 @@ $HOME/.local/state/slskr
 
 Use `SLSKR_CONFIG=/path/to/config.toml` and `SLSKR_STATE_DIR=/path/to/state` to override those paths. Environment variables override config-file values.
 
+On Unix, `SLSKR_STATE_DIR` must be a real directory rather than a symlink. slskr creates or tightens it to mode `0700` because it contains message, transfer, share-index, and SQLite state.
+
 Start from [slskr.config.example.toml](./slskr.config.example.toml). Configure
 API tokens through your service manager, deployment config, or secret manager.
 For Soulseek credentials, prefer first-run Web UI entry with the OS credential
@@ -97,6 +99,7 @@ api_key = "lidarr-api-key"
 ```
 
 The WebUI exposes the closest safe flow: Check Status, Load Wanted, Sync Wanted, and Manual Import actions over Lidarr's API-key authentication.
+slskr pins the resolved integration address, does not follow HTTP redirects, and caps JSON responses at 2 MiB.
 
 ## First Run
 

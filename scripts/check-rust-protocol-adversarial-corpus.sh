@@ -13,6 +13,13 @@ for anchor in SEEDS KNOWN_CORPUS adversarial_known_corpus_does_not_panic adversa
   fi
 done
 
+for anchor in MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES decompress_zlib_with_limit compressed_search_response_is_bounded_before_decode; do
+  if ! rg -n --fixed-strings -- "$anchor" crates/slskr-protocol/src/peer.rs >/dev/null; then
+    printf 'rust protocol adversarial corpus check failed: missing %s in compressed peer-search handling\n' "$anchor" >&2
+    exit 1
+  fi
+done
+
 cargo test -p slskr-protocol adversarial_
 
 printf 'rust protocol adversarial corpus passed\n'

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 #
-# Bug Council candidate scanner — TEMPLATE.
-#
-# Copy into your-repo/scripts/scan-bug-council-candidates.sh and replace the
-# scan() invocations with the patterns that fit your codebase. Examples for
-# C#, Rust, TypeScript/JavaScript, Go, and Python are included below; comment
-# in the ones that apply and delete the rest.
+# Bug Council candidate scanner for slskR.
 #
 # Output is intentionally noisy: it is the durable discovery queue, not the
 # pass/fail gate. The pass/fail gate is scripts/check-remediation-baseline.sh.
@@ -21,7 +16,14 @@ scan() {
   shift 2
 
   printf '\n## %s\n' "$title"
-  rg -n --with-filename --pcre2 --hidden --glob '!.git/**' "$pattern" "$@" || true
+  rg -n --with-filename --pcre2 --hidden \
+    --glob '!.git/**' \
+    --glob '!.council/**' \
+    --glob '!target/**' \
+    --glob '!**/node_modules/**' \
+    --glob '!**/dist/**' \
+    --glob '!**/build/**' \
+    "$pattern" "$@" || true
 }
 
 printf '# Council candidate scan\n'
@@ -33,50 +35,42 @@ scan "Security-sensitive material candidates" \
   'PRIVATE KEY|gh[pousr]_[A-Za-z0-9_]{36,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|(?i)(api[_-]?key|access[_-]?token|client[_-]?secret)' \
   .
 
-# === C# / .NET examples ====================================================
-#
-# scan "Mutable public byte arrays and array properties" \
-#   'public [^;\n=]*\[\][^{;\n]*(\{|=>|;)|\bbyte\[\]\s+[A-Z][A-Za-z0-9_]*\s*\{' \
-#   src tests
-#
-# scan "Non-idempotent task completion candidates" \
-#   '\.Set(Result|Exception|Canceled)\(' \
-#   src
-#
-# scan "Protocol count and length allocation candidates" \
-#   'ReadInteger\(\)|ReadLong\(\)|ReadBytes\([^)]*\)|new byte\[[^]]+\]' \
-#   src
+# === slskR Rust attack and reliability surfaces ============================
 
-# === Rust examples =========================================================
-#
-# scan "Protocol count/length candidates (Rust)" \
-#   'read_u32_le\(\)\? as usize|Vec::with_capacity\(|read_bytes\(length\)' \
-#   crates
-#
-# scan "Task / cancellation lifecycle candidates (Rust)" \
-#   'tokio::spawn|select!|timeout\(|sleep\(|interval\(|mpsc|broadcast|oneshot' \
-#   crates
+scan "Protocol count/length and allocation candidates" \
+  'read_u(16|32|64)_le\(\)\? as usize|Vec::with_capacity\(|vec!\[[^;]+;[^]]+\]|read_(bytes|chunk)\([^)]*\)' \
+  crates
 
-# === TypeScript / JavaScript examples ======================================
-#
-# scan "DOM/HTML injection candidates (TS/JS)" \
-#   'innerHTML\s*=|dangerouslySetInnerHTML|document\.write\(|eval\(|new Function\(' \
-#   src
-#
-# scan "Auth/storage/CORS leakage candidates (TS/JS)" \
-#   'localStorage|window\.open|target="_blank"|Authorization: Bearer|Access-Control-Allow-Origin: \*' \
-#   src
+scan "Filesystem mutation and path-resolution candidates" \
+  'canonicalize\(|create_dir_all\(|OpenOptions::new\(|remove_(file|dir|dir_all)\(|rename\(|set_permissions\(' \
+  crates
 
-# === Go examples ===========================================================
-#
-# scan "Goroutine and context lifecycle candidates (Go)" \
-#   'go func|context\.Background\(\)|context\.TODO\(\)|<-time\.After|select \{' \
-#   .
+scan "Outbound network and process-launch candidates" \
+  'reqwest::Client|Client::builder\(|Command::new\(|\.resolve\(|to_socket_addrs\(' \
+  crates
 
-# === Python examples =======================================================
-#
-# scan "Constructor mutable input candidates (Python)" \
-#   'def __init__\([^)]*(list|dict|List|Dict)\[' \
-#   .
+scan "Async lifecycle and unbounded-channel candidates" \
+  'tokio::spawn|spawn_blocking|mpsc::unbounded|broadcast::channel|timeout\(|interval\(' \
+  crates
+
+scan "Production panic candidates" \
+  '\.(unwrap|expect)\(' \
+  crates/*/src
+
+# === Browser and SDK attack surfaces =======================================
+
+scan "DOM/HTML/code injection candidates" \
+  'innerHTML\s*=|dangerouslySetInnerHTML|document\.write\(|eval\(|new Function\(' \
+  web dashboard client-ts
+
+scan "Auth, browser storage, and opener candidates" \
+  'localStorage|sessionStorage|window\.open|target=.{0,1}_blank|Authorization|X-API-Key' \
+  web dashboard client-ts
+
+# === Gate bypass candidates =================================================
+
+scan "Suppressed CI and script failures" \
+  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
+  .github .gitlab-ci.yml scripts
 
 printf '\n# End of candidate scan. Every hit must be ledgered as Fixed, Existing guard, False positive, or Out of scope before a council sweep is closed.\n'

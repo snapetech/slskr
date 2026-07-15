@@ -6,6 +6,8 @@ use crate::{
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use std::io::{Read, Write};
 
+const MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum PeerCode {
@@ -507,11 +509,22 @@ fn encode_search_response(
 }
 
 fn decompress_zlib(payload: &[u8]) -> Result<Vec<u8>, DecodeError> {
+    decompress_zlib_with_limit(payload, MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES)
+}
+
+fn decompress_zlib_with_limit(payload: &[u8], max_len: usize) -> Result<Vec<u8>, DecodeError> {
     let mut decoder = ZlibDecoder::new(payload);
+    let limit = u64::try_from(max_len).unwrap_or(u64::MAX).saturating_add(1);
+    let mut limited = decoder.by_ref().take(limit);
     let mut output = Vec::new();
-    decoder
+    limited
         .read_to_end(&mut output)
         .map_err(|_| DecodeError::InvalidCompressedPayload("file search response"))?;
+    if output.len() > max_len {
+        return Err(DecodeError::InvalidCompressedPayload(
+            "file search response exceeds decompression limit",
+        ));
+    }
     Ok(output)
 }
 
@@ -641,5 +654,18 @@ mod tests {
                 size: Some(456),
             })
         );
+    }
+
+    #[test]
+    fn compressed_search_response_is_bounded_before_decode() {
+        let compressed = compress_zlib(&vec![b'x'; 1024]).expect("compress fixture");
+        let error = decompress_zlib_with_limit(&compressed, 128)
+            .expect_err("decompression limit must reject expansion");
+        assert!(matches!(
+            error,
+            DecodeError::InvalidCompressedPayload(
+                "file search response exceeds decompression limit"
+            )
+        ));
     }
 }

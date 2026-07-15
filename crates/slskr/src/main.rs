@@ -71,6 +71,7 @@ use base64::{
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
     Engine,
 };
+use futures_util::StreamExt;
 use rand::{rngs::SysRng, TryRng};
 use serde::{Deserialize, Serialize};
 use slskr_client::{
@@ -110,6 +111,7 @@ use tokio::{
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
+const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 
 use crate::config::{
@@ -126,6 +128,7 @@ const DEFAULT_LIST_LIMIT: usize = 500;
 const DEFAULT_SEARCH_TTL_SECONDS: u64 = 300;
 const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 #[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
@@ -6746,6 +6749,7 @@ struct AppState {
     event_tx: broadcast::Sender<EventRecord>,
     webhooks: RwLock<webhooks::WebhookManager>,
     webhook_deliveries: Arc<Semaphore>,
+    incoming_connections: Arc<Semaphore>,
     collections: RwLock<CollectionStore>,
     wishlist: RwLock<WishlistStore>,
     contacts: RwLock<ContactStore>,
@@ -15532,8 +15536,9 @@ async fn fetch_lidarr_system_status(
         .as_deref()
         .ok_or("Lidarr API key is not configured")?;
     let url = format!("{}/api/v1/system/status", base_url.trim_end_matches('/'));
-    let mut client_builder =
-        reqwest::Client::builder().timeout(std::time::Duration::from_secs(lidarr.timeout_seconds));
+    let mut client_builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+        .redirect(reqwest::redirect::Policy::none());
     for addr in &resolved.addrs {
         client_builder = client_builder.resolve(&resolved.host, *addr);
     }
@@ -15549,10 +15554,7 @@ async fn fetch_lidarr_system_status(
     if !response.status().is_success() {
         return Err(format!("Lidarr returned HTTP {}", response.status()));
     }
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|error| format!("invalid Lidarr status JSON: {error}"))
+    read_bounded_integration_json(response, "Lidarr status").await
 }
 
 async fn fetch_lidarr_wanted_missing(
@@ -15571,8 +15573,9 @@ async fn fetch_lidarr_wanted_missing(
         "{}/api/v1/wanted/missing?pageSize=100",
         base_url.trim_end_matches('/')
     );
-    let mut client_builder =
-        reqwest::Client::builder().timeout(std::time::Duration::from_secs(lidarr.timeout_seconds));
+    let mut client_builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+        .redirect(reqwest::redirect::Policy::none());
     for addr in &resolved.addrs {
         client_builder = client_builder.resolve(&resolved.host, *addr);
     }
@@ -15588,10 +15591,35 @@ async fn fetch_lidarr_wanted_missing(
     if !response.status().is_success() {
         return Err(format!("Lidarr returned HTTP {}", response.status()));
     }
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|error| format!("invalid Lidarr wanted JSON: {error}"))
+    read_bounded_integration_json(response, "Lidarr wanted").await
+}
+
+async fn read_bounded_integration_json(
+    response: reqwest::Response,
+    label: &str,
+) -> Result<serde_json::Value, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_INTEGRATION_RESPONSE_BYTES as u64)
+    {
+        return Err(format!(
+            "{label} response exceeds {MAX_INTEGRATION_RESPONSE_BYTES} bytes"
+        ));
+    }
+
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("{label} response read failed: {error}"))?;
+        if body.len().saturating_add(chunk.len()) > MAX_INTEGRATION_RESPONSE_BYTES {
+            return Err(format!(
+                "{label} response exceeds {MAX_INTEGRATION_RESPONSE_BYTES} bytes"
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    serde_json::from_slice(&body).map_err(|error| format!("invalid {label} JSON: {error}"))
 }
 
 struct ResolvedIntegrationTarget {
@@ -15765,39 +15793,57 @@ fn rate_limit_remote_addr(
         return Some(remote_addr);
     }
 
-    forwarded_client_ip(headers)
+    forwarded_client_ip(config, remote_addr.ip(), headers)
         .map(|ip| SocketAddr::new(ip, 0))
         .or(Some(remote_addr))
 }
 
-fn forwarded_client_ip(headers: &http_server::HttpHeaders) -> Option<IpAddr> {
-    headers
-        .forwarded
-        .as_deref()
-        .and_then(forwarded_header_client_ip)
-        .or_else(|| {
-            headers
-                .x_forwarded_for
-                .as_deref()
-                .and_then(x_forwarded_for_client_ip)
+fn forwarded_client_ip(
+    config: &AppConfig,
+    remote_ip: IpAddr,
+    headers: &http_server::HttpHeaders,
+) -> Option<IpAddr> {
+    let forwarded_ips = if let Some(value) = headers.forwarded.as_deref() {
+        forwarded_header_client_ips(value)?
+    } else {
+        let value = headers.x_forwarded_for.as_deref()?;
+        x_forwarded_for_client_ips(value)?
+    };
+
+    forwarded_ips
+        .into_iter()
+        .chain(std::iter::once(remote_ip))
+        .rev()
+        .find(|ip| {
+            !config
+                .trusted_proxy_cidrs
+                .iter()
+                .any(|cidr| cidr.contains(*ip))
         })
 }
 
-fn x_forwarded_for_client_ip(value: &str) -> Option<IpAddr> {
-    value.split(',').find_map(parse_forwarded_ip_token)
-}
-
-fn forwarded_header_client_ip(value: &str) -> Option<IpAddr> {
-    value
+fn x_forwarded_for_client_ips(value: &str) -> Option<Vec<IpAddr>> {
+    let ips = value
         .split(',')
-        .flat_map(|entry| entry.split(';'))
-        .find_map(|part| {
-            let (name, value) = part.trim().split_once('=')?;
-            name.trim()
-                .eq_ignore_ascii_case("for")
-                .then_some(value)
-                .and_then(parse_forwarded_ip_token)
+        .map(parse_forwarded_ip_token)
+        .collect::<Option<Vec<_>>>()?;
+    (!ips.is_empty()).then_some(ips)
+}
+
+fn forwarded_header_client_ips(value: &str) -> Option<Vec<IpAddr>> {
+    let ips = value
+        .split(',')
+        .map(|entry| {
+            entry.split(';').find_map(|part| {
+                let (name, value) = part.trim().split_once('=')?;
+                name.trim()
+                    .eq_ignore_ascii_case("for")
+                    .then_some(value)
+                    .and_then(parse_forwarded_ip_token)
+            })
         })
+        .collect::<Option<Vec<_>>>()?;
+    (!ips.is_empty()).then_some(ips)
 }
 
 fn parse_forwarded_ip_token(value: &str) -> Option<IpAddr> {
@@ -17431,12 +17477,7 @@ fn slskd_user_transfer_report(username: &str, transfers: &TransferQueue) -> Stri
 
 async fn serve(once: bool) -> Result<(), String> {
     let config = AppConfig::from_env()?;
-    std::fs::create_dir_all(&config.state_dir).map_err(|error| {
-        format!(
-            "failed to create state dir {}: {error}",
-            config.state_dir.display()
-        )
-    })?;
+    ensure_private_state_dir(&config.state_dir)?;
     let address = config.http_bind;
     let scanned_share_index = build_share_index(&config);
     let (session_commands, session_receiver) = mpsc::channel(16);
@@ -17700,6 +17741,7 @@ async fn serve(once: bool) -> Result<(), String> {
         event_tx,
         webhooks: RwLock::new(webhook_manager),
         webhook_deliveries: Arc::new(Semaphore::new(MAX_WEBHOOK_DELIVERY_TASKS)),
+        incoming_connections: Arc::new(Semaphore::new(MAX_INCOMING_CONNECTION_TASKS)),
         collections: RwLock::new(collection_store),
         wishlist: RwLock::new(wishlist_store),
         contacts: RwLock::new(contact_store),
@@ -17829,6 +17871,47 @@ async fn serve(once: bool) -> Result<(), String> {
 
         if once {
             break;
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_private_state_dir(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true).mode(0o700);
+        builder
+            .create(path)
+            .map_err(|error| format!("failed to create state dir {}: {error}", path.display()))?;
+
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|error| format!("failed to inspect state dir {}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(format!(
+                "state dir {} must be a real directory, not a symlink or file",
+                path.display()
+            ));
+        }
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| {
+                format!(
+                    "failed to restrict state dir permissions for {}: {error}",
+                    path.display()
+                )
+            },
+        )?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path)
+            .map_err(|error| format!("failed to create state dir {}: {error}", path.display()))?;
+        if !path.is_dir() {
+            return Err(format!("state dir {} must be a directory", path.display()));
         }
     }
 
@@ -17983,12 +18066,16 @@ async fn run_listener(state: Arc<AppState>, bind: String, obfuscated: bool) {
 
     loop {
         let accepted = if obfuscated {
-            listener.accept_obfuscated().await
+            time::timeout(
+                state.config.peer_response_timeout,
+                listener.accept_obfuscated(),
+            )
+            .await
         } else {
-            listener.accept().await
+            time::timeout(state.config.peer_response_timeout, listener.accept()).await
         };
         match accepted {
-            Ok((incoming, remote_addr)) => {
+            Ok(Ok((incoming, remote_addr))) => {
                 let event = format!(
                     "{} from {}",
                     incoming_connection_name(&incoming),
@@ -18005,9 +18092,24 @@ async fn run_listener(state: Arc<AppState>, bind: String, obfuscated: bool) {
                     snapshot.last_error = None;
                 })
                 .await;
-                tokio::spawn(handle_owned_incoming(Arc::clone(&state), incoming));
+                let Ok(permit) = Arc::clone(&state.incoming_connections).try_acquire_owned() else {
+                    update_listeners(&state, |snapshot| {
+                        snapshot.errors += 1;
+                        snapshot.last_error = Some(
+                            "incoming connection dropped because the handler pool is full"
+                                .to_owned(),
+                        );
+                    })
+                    .await;
+                    continue;
+                };
+                let task_state = Arc::clone(&state);
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    handle_owned_incoming(task_state, incoming).await;
+                });
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 update_listeners(&state, |snapshot| {
                     snapshot.errors += 1;
                     snapshot.last_error = Some(format!(
@@ -18017,6 +18119,7 @@ async fn run_listener(state: Arc<AppState>, bind: String, obfuscated: bool) {
                 })
                 .await;
             }
+            Err(_) => continue,
         }
     }
 }
@@ -21353,17 +21456,14 @@ async fn dispatch_webhook_event(
         &request_body,
     )
     .await;
-    let webhook_deliveries = Arc::clone(&state.webhook_deliveries);
-    tokio::spawn(async move {
-        webhooks::WebhookDispatcher::dispatch(
-            &webhooks_clone,
-            webhook_deliveries,
-            correlation_id,
-            event,
-            data,
-        )
-        .await;
-    });
+    webhooks::WebhookDispatcher::dispatch(
+        &webhooks_clone,
+        Arc::clone(&state.webhook_deliveries),
+        correlation_id,
+        event,
+        data,
+    )
+    .await;
 }
 
 async fn database_stats_value(state: &AppState) -> serde_json::Value {
@@ -23925,6 +24025,127 @@ mod tests {
         assert_eq!(json["warnings"][0], "auth_disabled_non_loopback");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn state_directory_is_private_and_rejects_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-private-state-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let state_dir = root.join("state");
+        super::ensure_private_state_dir(&state_dir).expect("create private state dir");
+        assert_eq!(
+            std::fs::metadata(&state_dir)
+                .expect("state metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+
+        let linked_state = root.join("linked-state");
+        symlink(&state_dir, &linked_state).expect("create state symlink");
+        let error = super::ensure_private_state_dir(&linked_state)
+            .expect_err("state symlink must be rejected");
+        assert!(error.contains("must be a real directory"), "{error}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn integration_json_reader_rejects_declared_oversized_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fixture server");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept fixture request");
+            let mut request = [0_u8; 1024];
+            let request_bytes = stream
+                .read(&mut request)
+                .await
+                .expect("read fixture request");
+            assert!(request_bytes > 0, "fixture request was empty");
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        super::MAX_INTEGRATION_RESPONSE_BYTES + 1
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("write fixture response");
+        });
+
+        let response = reqwest::get(format!("http://{address}/oversized"))
+            .await
+            .expect("receive fixture headers");
+        let error = super::read_bounded_integration_json(response, "fixture")
+            .await
+            .expect_err("oversized response must be rejected");
+        assert!(error.contains("response exceeds"), "{error}");
+        server.await.expect("fixture server task");
+    }
+
+    #[tokio::test]
+    async fn integration_json_reader_rejects_chunked_oversized_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fixture server");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept fixture request");
+            let mut request = [0_u8; 1024];
+            let request_bytes = stream
+                .read(&mut request)
+                .await
+                .expect("read fixture request");
+            assert!(request_bytes > 0, "fixture request was empty");
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .expect("write fixture headers");
+            let chunk = vec![b' '; 64 * 1024];
+            for _ in 0..=(super::MAX_INTEGRATION_RESPONSE_BYTES / chunk.len()) {
+                stream
+                    .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+                    .await
+                    .expect("write chunk length");
+                stream
+                    .write_all(&chunk)
+                    .await
+                    .expect("write oversized chunk");
+                stream.write_all(b"\r\n").await.expect("finish chunk");
+            }
+            stream
+                .write_all(b"0\r\n\r\n")
+                .await
+                .expect("finish response");
+        });
+
+        let response = reqwest::get(format!("http://{address}/oversized"))
+            .await
+            .expect("receive fixture headers");
+        let error = super::read_bounded_integration_json(response, "fixture")
+            .await
+            .expect_err("chunked oversized response must be rejected");
+        assert!(error.contains("response exceeds"), "{error}");
+        server.await.expect("fixture server task");
+    }
+
     #[test]
     fn trusted_proxy_rate_limit_addr_uses_forwarded_headers_only_from_allowlist() {
         let trusted_env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "127.0.0.1/32");
@@ -23966,6 +24187,59 @@ mod tests {
         let addr = super::rate_limit_remote_addr(&config, proxy, &headers)
             .expect("trusted forwarded address");
         assert_eq!(addr.ip(), "2001:db8::42".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn trusted_proxy_rate_limit_addr_rejects_spoofed_leftmost_hop() {
+        let env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "127.0.0.1/32, 10.0.0.0/8");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("proxy config");
+        let proxy = Some("127.0.0.1:5000".parse::<SocketAddr>().unwrap());
+        let headers = super::http_server::HttpHeaders {
+            x_forwarded_for: Some("203.0.113.99, 198.51.100.24, 10.0.0.2".to_owned()),
+            ..Default::default()
+        };
+
+        let addr = super::rate_limit_remote_addr(&config, proxy, &headers)
+            .expect("forwarded client address");
+        assert_eq!(
+            addr.ip(),
+            "198.51.100.24".parse::<IpAddr>().unwrap(),
+            "the first untrusted hop from the proxy boundary is the client"
+        );
+    }
+
+    #[test]
+    fn trusted_proxy_rate_limit_addr_fails_closed_on_malformed_chain() {
+        let env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "127.0.0.1/32");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("proxy config");
+        let proxy = Some("127.0.0.1:5000".parse::<SocketAddr>().unwrap());
+        let headers = super::http_server::HttpHeaders {
+            x_forwarded_for: Some("203.0.113.99, not-an-ip".to_owned()),
+            ..Default::default()
+        };
+
+        let addr =
+            super::rate_limit_remote_addr(&config, proxy, &headers).expect("socket peer fallback");
+        assert_eq!(addr.ip(), "127.0.0.1".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn trusted_proxy_rate_limit_addr_does_not_fallback_from_invalid_forwarded_header() {
+        let env = MapEnv::default().with("SLSKR_TRUSTED_PROXY_CIDRS", "127.0.0.1/32");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("proxy config");
+        let proxy = Some("127.0.0.1:5000".parse::<SocketAddr>().unwrap());
+        let headers = super::http_server::HttpHeaders {
+            forwarded: Some("for=unknown".to_owned()),
+            x_forwarded_for: Some("203.0.113.99".to_owned()),
+            ..Default::default()
+        };
+
+        let addr =
+            super::rate_limit_remote_addr(&config, proxy, &headers).expect("socket peer fallback");
+        assert_eq!(addr.ip(), "127.0.0.1".parse::<IpAddr>().unwrap());
     }
 
     fn test_state_with_env_parts(
@@ -24032,6 +24306,9 @@ mod tests {
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
+            incoming_connections: Arc::new(super::Semaphore::new(
+                super::MAX_INCOMING_CONNECTION_TASKS,
+            )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -33527,6 +33804,9 @@ mod tests {
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
+            incoming_connections: Arc::new(super::Semaphore::new(
+                super::MAX_INCOMING_CONNECTION_TASKS,
+            )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -33663,6 +33943,9 @@ mod tests {
             event_tx: event_tx.clone(),
             webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
+            incoming_connections: Arc::new(super::Semaphore::new(
+                super::MAX_INCOMING_CONNECTION_TASKS,
+            )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),

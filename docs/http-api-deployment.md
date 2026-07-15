@@ -54,7 +54,7 @@ server {
 }
 ```
 
-Set `SLSKR_TRUSTED_PROXY_CIDRS` or `[auth].trusted_proxy_cidrs` to the proxy source CIDRs before relying on `Forwarded` or `X-Forwarded-For` for anonymous rate-limit keys. slskr ignores forwarded client IP headers from untrusted peers so direct clients cannot spoof another address.
+Set `SLSKR_TRUSTED_PROXY_CIDRS` or `[auth].trusted_proxy_cidrs` to every trusted proxy CIDR before relying on `Forwarded` or `X-Forwarded-For` for anonymous rate-limit keys. slskr ignores these headers from untrusted peers, walks forwarded chains from the socket peer toward the client, and fails closed to the socket address when a chain is malformed. Proxies should append or replace forwarding headers consistently.
 
 Do not add wildcard `Access-Control-Allow-Origin: *` for authenticated browser deployments. slskr emits same-origin CORS responses and rejects cross-site mutating API requests when auth is enabled.
 

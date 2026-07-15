@@ -20,7 +20,8 @@ sqlx-core = { version = "0.9", default-features = false, features = ["_rt-tokio"
 sqlx-sqlite = { version = "0.9", default-features = false, features = ["bundled", "chrono", "uuid"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+futures-util = "0.3"
 hmac = "0.13"
 sha2 = "0.11"
 hex = "0.4"
@@ -30,9 +31,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio-tungstenite = "0.29"
 base64 = "0.22"
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "linux-native", "windows-native"] }
-
-[dev-dependencies]
-futures-util = "0.3"
 
 [lints]
 workspace = true

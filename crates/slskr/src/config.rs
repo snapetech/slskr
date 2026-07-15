@@ -159,12 +159,16 @@ impl AppConfig {
             .var("SLSKR_USER_INFO_DESCRIPTION")
             .or(file_config.profile.user_info_description)
             .unwrap_or_else(|| "slskr daemon".to_owned());
-        let peer_response_timeout = Duration::from_secs(env_parse_layer(
+        let peer_response_timeout_seconds = env_parse_layer(
             env,
             "SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS",
             file_config.timeouts.peer_response_seconds,
-            5,
-        )?);
+            5_u64,
+        )?;
+        if peer_response_timeout_seconds == 0 {
+            return Err("SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS must be greater than zero".to_owned());
+        }
+        let peer_response_timeout = Duration::from_secs(peer_response_timeout_seconds);
         let share_settings = ShareSettings::from_layers(file_config.shares, env)?;
         let transfer_history_limit = env_parse_layer(
             env,
@@ -1263,5 +1267,13 @@ mod tests {
         let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
             .expect_err("invalid trusted proxy prefix should fail");
         assert!(error.contains("prefix exceeds"));
+    }
+
+    #[test]
+    fn peer_response_timeout_rejects_zero() {
+        let env = MapEnv::default().with("SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS", "0");
+        let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+            .expect_err("zero peer timeout should fail");
+        assert!(error.contains("must be greater than zero"), "{error}");
     }
 }

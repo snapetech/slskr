@@ -1,6 +1,6 @@
 # Security And Bug Burn-Down
 
-Date: 2026-05-05
+Date: 2026-07-14
 
 Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React web UI, standalone dashboard, TypeScript/Python/Go clients, scripts, CI, release, and Kubernetes manifests.
 
@@ -8,6 +8,13 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 
 | Severity | Area | Finding | Status |
 | --- | --- | --- | --- |
+| High | Peer protocol | Compressed file-search responses used unbounded zlib decompression, allowing a small peer-controlled payload to expand until memory exhaustion. | Fixed with a 64 MiB decompression ceiling and adversarial expansion coverage. |
+| High | Peer listener | A silent TCP peer could hold the listener inside protocol demultiplexing indefinitely, and accepted connections spawned without a handler limit. | Fixed by bounding handshake time with the configured peer timeout and sharing a 128-task handler semaphore across regular and obfuscated listeners. |
+| Medium | Reverse-proxy rate limiting | Forwarded-address parsing trusted the leftmost value, so a client could prepend a spoofed address before a compliant proxy appended the real hop. | Fixed by walking the chain from the trusted socket peer inward, selecting the first untrusted hop, and failing malformed chains closed. |
+| Medium | Persistent state | The daemon created its state directory with ambient umask permissions and accepted a symlink target. | Fixed by requiring a real directory and enforcing mode `0700` on Unix before opening state. |
+| Medium | Backend integrations | Lidarr requests followed redirects and decoded response bodies without a size ceiling, allowing API-key forwarding and memory exhaustion through a hostile integration response. | Fixed by disabling redirects, retaining DNS pinning, and streaming JSON through a 2 MiB cap. |
+| Low | Bug council tooling | Candidate and active-bughunt scripts were unconfigured C#/template scanners that missed the repository's Rust and browser attack surfaces. | Fixed with slskR-specific protocol, filesystem, outbound-network, async, panic, browser, and gate-bypass scans. |
+| Low | Standalone dashboard | Monitoring parsed Prometheus text as JSON, expected counters the backend never emitted, divided zero requests into `NaN%`, and linked to a nonexistent `/metrics` route. | Fixed with a tested Prometheus parser, real slskr counters, explicit loading/error states, and the correct `/api/metrics` link. |
 | High | Backend integrations | Lidarr SSRF validation resolved hosts but did not pin the resolved address for the outbound request, leaving DNS rebinding risk between validation and request. | Fixed by pinning resolved Lidarr addresses into the reqwest client. |
 | High | CI/release | CI only ran Rust checks, so web, dashboard, TypeScript client, wasm, and advisory regressions could merge. | Fixed by expanding CI to the full release-gate surface. |
 | High | Release provenance | Release publishing produced checksums but no GitHub artifact attestations. | Fixed with build provenance attestations and required permissions. |

@@ -21,7 +21,9 @@ if ! rg -n 'trusted_proxy_cidrs.*any|rate_limit_remote_addr' crates/slskr/src/ma
   status=1
 fi
 
-if ! rg -n 'spoof|raw peer|untrusted' crates/slskr/src/main.rs docs/dev/bug-burndown-ledger.md >/dev/null; then
+if ! rg -n 'trusted_proxy_rate_limit_addr_rejects_spoofed_leftmost_hop' crates/slskr/src/main.rs >/dev/null ||
+   ! rg -n 'trusted_proxy_rate_limit_addr_fails_closed_on_malformed_chain' crates/slskr/src/main.rs >/dev/null ||
+   ! rg -n 'trusted_proxy_rate_limit_addr_does_not_fallback_from_invalid_forwarded_header' crates/slskr/src/main.rs >/dev/null; then
   printf 'rate-limit proxy policy check failed: spoofing rejection coverage is missing\n' >&2
   status=1
 fi

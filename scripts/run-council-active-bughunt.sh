@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Bug Council active bughunt runner — TEMPLATE.
+# Bug Council active bughunt runner for slskR.
 #
 # This runner is a discovery queue, not a pass/fail gate. Keep it wired into
 # run-bug-council-all-phases.sh so every council cycle refreshes suspicious
@@ -22,7 +22,17 @@ write_section() {
 
   {
     printf '\n## %s\n' "$title"
-    rg -n -U --with-filename --pcre2 --hidden --glob '!.git/**' --glob '!.council/**' "$pattern" "$@" || true
+    rg -n --with-filename --pcre2 --hidden \
+      --glob '!.git/**' \
+      --glob '!.council/**' \
+      --glob '!target/**' \
+      --glob '!**/node_modules/**' \
+      --glob '!**/dist/**' \
+      --glob '!**/build/**' \
+      --glob '!**/tests/**' \
+      --glob '!**/*.test.*' \
+      --glob '!**/*.spec.*' \
+      "$pattern" "$@" || true
   } >>"$report"
 }
 
@@ -38,38 +48,35 @@ Classification rule: any accepted row must be ledgered, fixed with behavior
 coverage, sibling-swept, and promoted into a durable gate before closure.
 EOF
 
-# Replace paths and patterns for your repo. Add narrow sections whenever a
-# confirmed bug class is fixed, so the next run proves that specific shape is
-# gone while the broader scanner remains free to be noisy.
 write_section \
-  "Async void boundaries" \
-  'async void' \
-  src tests examples
+  "Protocol-controlled allocations and lengths" \
+  'read_u(16|32|64)_le\(\)\? as usize|Vec::with_capacity\(|vec!\[[^;]+;[^]]+\]|read_(bytes|chunk)\([^)]*\)' \
+  crates
 
 write_section \
-  "Silent catch or lossy exception boundaries" \
-  'catch \(Exception\)(?:\s*when[^{]+)?\s*\{\s*(?://\s*(?:noop|ignored?)\s*)?\s*\}' \
-  src tests examples
+  "Proxy, redirect, SSRF, and outbound trust boundaries" \
+  'forwarded|x_forwarded_for|redirect\(|Client::builder\(|reqwest::Client|to_socket_addrs\(|\.resolve\(' \
+  crates
 
 write_section \
-  "Callback/event invocation boundaries" \
-  '\?\.(Invoke|BeginInvoke)\(|\.Invoke\(' \
-  src tests examples
+  "Filesystem and persistent-state boundaries" \
+  'canonicalize\(|create_dir_all\(|OpenOptions::new\(|remove_(file|dir|dir_all)\(|rename\(|set_permissions\(' \
+  crates
 
 write_section \
-  "Remote/user text in diagnostics or HTTP errors" \
-  '(log|logger|Diagnostic|Console\.WriteLine|StatusCode\(|BadRequest\()[^;\n]*(username|query|filename|directory|token|message)' \
-  src tests examples
+  "Async task and channel lifecycle boundaries" \
+  'tokio::spawn|spawn_blocking|mpsc::unbounded|broadcast::channel|timeout\(|interval\(' \
+  crates
 
 write_section \
-  "Red-team abuse lens" \
-  '(token|secret|password|authorization|cookie|api[-_]?key|session|redirect|proxy|forwarded|path|filename|exec|spawn|shell|http://|https://)' \
-  src tests examples scripts docs
+  "Browser injection, token storage, and opener boundaries" \
+  'innerHTML\s*=|dangerouslySetInnerHTML|document\.write\(|eval\(|new Function\(|localStorage|sessionStorage|window\.open|target=.{0,1}_blank' \
+  web dashboard client-ts
 
 write_section \
-  "Public mutable ownership surfaces" \
-  'public [^;\n=]*\[\][^{;\n]*(\{|=>|;)|public .*I(ReadOnly)?(Collection|List|Enumerable)<|params ' \
-  src tests examples
+  "Suppressed CI and script failures" \
+  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
+  .github .gitlab-ci.yml scripts
 
 printf 'Active council bughunt candidates saved to %s.\n' "$report"
 printf 'Verdict boundary: this report is a discovery queue, not proof of no bugs.\n'

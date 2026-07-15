@@ -11,7 +11,12 @@ if [[ -f web/build/index.html ]]; then
   csp_scan_paths+=(web/build/index.html)
 fi
 
-if rg -n "Content-Security-Policy: .*'unsafe-inline'|script-src .*'unsafe-inline'|style-src .*'unsafe-inline'" "${csp_scan_paths[@]}"; then
+unsafe_inline_matches="$(
+  rg --pcre2 -n "(?:script-src|style-src)[[:space:]][^;]*'unsafe-inline'" "${csp_scan_paths[@]}" \
+    | rg -v 'assert!\(!' || true
+)"
+if [[ -n "$unsafe_inline_matches" ]]; then
+  printf '%s\n' "$unsafe_inline_matches"
   printf 'csp policy failed: broad unsafe-inline CSP allowance is present in served source/build files\n' >&2
   status=1
 fi

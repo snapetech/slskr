@@ -12,6 +12,7 @@ GATES=(
   scripts/check-csp-policy.sh
   scripts/check-webhook-outbound-policy.sh
   scripts/check-rate-limit-proxy-policy.sh
+  scripts/check-runtime-boundary-hardening.sh
   scripts/check-storage-listing-pressure.sh
   scripts/check-transfer-event-growth.sh
   scripts/check-workflow-release-policy.sh
