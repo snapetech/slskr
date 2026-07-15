@@ -5,6 +5,10 @@ use std::{
 };
 
 use reqwest::StatusCode;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 struct ChildGuard {
     child: Child,
@@ -145,6 +149,71 @@ async fn daemon_http_api_smoke() {
         }
     }
     assert_eq!(last_status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn serve_once_waits_for_the_accepted_request() {
+    let port = unused_loopback_port();
+    let state_dir = std::env::temp_dir().join(format!(
+        "slskr-once-smoke-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&state_dir).unwrap();
+
+    let binary = option_env!("CARGO_BIN_EXE_slskr")
+        .map(str::to_owned)
+        .unwrap_or_else(|| std::env::var("CARGO_BIN_EXE_slskr").expect("slskr binary path"));
+    let child = Command::new(binary)
+        .args(["serve", "--once"])
+        .env("SLSKR_HTTP_BIND", format!("127.0.0.1:{port}"))
+        .env("SLSKR_STATE_DIR", &state_dir)
+        .env("SLSKR_AUTO_CONNECT", "false")
+        .env("SLSKR_API_TOKEN", "once-token")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn slskr serve --once");
+    let mut guard = ChildGuard { child };
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut stream = loop {
+        match TcpStream::connect(("127.0.0.1", port)).await {
+            Ok(stream) => break stream,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(error) => panic!("serve --once did not accept a connection: {error}"),
+        }
+    };
+
+    stream
+        .write_all(b"GET /api/health HTTP/1.1\r\nHost:")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    stream.write_all(b" localhost\r\n\r\n").await.unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert!(response.ends_with(r#"{"service":"slskr","status":"ok","warnings":[]}"#));
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if guard.child.try_wait().unwrap().is_some() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "serve --once did not exit after its request"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let _ = std::fs::remove_dir_all(state_dir);
 }
 
 async fn wait_for_health(client: &reqwest::Client, base_url: &str) {

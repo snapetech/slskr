@@ -19181,6 +19181,10 @@ async fn serve(once: bool) -> Result<(), String> {
             drop(stream);
             continue;
         };
+        if once {
+            let _permit = permit;
+            return handle_http_connection(stream, Arc::clone(&state)).await;
+        }
         let state = Arc::clone(&state);
         tokio::spawn(async move {
             let _permit = permit;
@@ -19188,13 +19192,7 @@ async fn serve(once: bool) -> Result<(), String> {
                 eprintln!("http request failed: {error}");
             }
         });
-
-        if once {
-            break;
-        }
     }
-
-    Ok(())
 }
 
 fn ensure_private_state_dir(path: &Path) -> Result<(), String> {
