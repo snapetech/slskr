@@ -10668,6 +10668,19 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("no matching alternative found"));
             };
             drop(searches);
+            let Some(replacement_username) = alternative.peer_username.clone() else {
+                return Ok(routing::conflict_response(
+                    "matching alternative has no peer",
+                ));
+            };
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut transfers = state.transfers.write().await;
             let updated_original = transfers.update_status(
                 original.id,
@@ -10691,17 +10704,10 @@ async fn route_http_request_with_headers(
                 persist_transfer_record(state, entry).await?;
             }
             persist_transfer_record(state, &replacement).await?;
-            if let Some(username) = replacement.peer_username.clone() {
-                send_session_command(
-                    state,
-                    SessionCommand::TransferPeer {
-                        id: replacement.id,
-                        username,
-                    },
-                )
-                .await
-                .ok();
-            }
+            session_command_permit.send(SessionCommand::TransferPeer {
+                id: replacement.id,
+                username: replacement_username,
+            });
             Ok(routing::accepted_response(
                 serde_json::json!({
                     "transfer_id": transfer_id,
@@ -10752,6 +10758,18 @@ async fn route_http_request_with_headers(
                 ));
             }
 
+            let mut session_command_permits = Vec::with_capacity(replacements.len());
+            for _ in 0..replacements.len() {
+                match state.session_commands.reserve().await {
+                    Ok(permit) => session_command_permits.push(permit),
+                    Err(_) => {
+                        return Ok(routing::service_unavailable_response(
+                            "session manager is not running",
+                        ));
+                    }
+                }
+            }
+
             let mut queued = Vec::new();
             let mut commands = Vec::new();
             let mut persisted = Vec::new();
@@ -10796,8 +10814,8 @@ async fn route_http_request_with_headers(
             drop(transfers);
             persist_transfer_records(state, &persisted).await?;
 
-            for command in commands {
-                send_session_command(state, command).await.ok();
+            for (permit, command) in session_command_permits.into_iter().zip(commands) {
+                permit.send(command);
             }
 
             Ok(routing::accepted_response(
@@ -33553,6 +33571,78 @@ mod tests {
             original.reason.as_deref(),
             Some("auto-replaced by alternative source")
         );
+    }
+
+    #[tokio::test]
+    async fn transfer_replacements_reject_before_mutation_when_dispatch_is_unavailable() {
+        for (path, body) in [
+            (
+                "/api/transfers/downloads/replace",
+                r#"{"transfer_id":1,"username":"fresh"}"#,
+            ),
+            (
+                "/api/transfers/downloads/auto-replace",
+                r#"{"transfer_id":1}"#,
+            ),
+        ] {
+            let (state, mut receiver) = test_state();
+            super::route_http_request(
+                "POST",
+                "/api/v0/transfers",
+                None,
+                r#"{"filename":"Remote/Album/Song.flac","peer_username":"stale","size":100}"#,
+                &state,
+            )
+            .await
+            .expect("create transfer");
+            state.transfers.write().await.update_status(
+                1,
+                "failed",
+                Some(25),
+                Some("peer offline".to_owned()),
+            );
+            super::route_http_request(
+                "POST",
+                "/api/v0/searches",
+                None,
+                r#"{"query":"song"}"#,
+                &state,
+            )
+            .await
+            .expect("create search");
+            assert!(matches!(
+                receiver.try_recv(),
+                Ok(super::SessionCommand::Search { .. })
+            ));
+            super::route_http_request(
+                "POST",
+                "/api/v0/search-responses",
+                None,
+                r#"{"token":1,"peer_username":"fresh","filename":"Other/Path/Song.flac","size":100}"#,
+                &state,
+            )
+            .await
+            .expect("ingest alternative");
+            drop(receiver);
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("unavailable replacement response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("session manager is not running"),
+                "{path}"
+            );
+            let transfers = state.transfers.read().await;
+            assert_eq!(transfers.entries.len(), 1, "{path}");
+            assert_eq!(transfers.entries[0].status, "failed", "{path}");
+            assert_eq!(transfers.entries[0].bytes_transferred, 25, "{path}");
+            assert_eq!(
+                transfers.entries[0].reason.as_deref(),
+                Some("peer offline"),
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]
