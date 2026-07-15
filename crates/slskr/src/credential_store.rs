@@ -122,9 +122,30 @@ fn read_secret_text(path: &Path, label: &str) -> Result<String, String> {
 }
 
 fn read_bounded_secret_file(path: &Path, label: &str) -> Result<String, String> {
-    let metadata = fs::symlink_metadata(path)
+    use std::io::Read;
+
+    #[cfg(not(unix))]
+    {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| format!("failed to inspect {label} {}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("{label} {} must be a regular file", path.display()));
+        }
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .map_err(|error| format!("failed to open {label} {}: {error}", path.display()))?;
+    let metadata = file
+        .metadata()
         .map_err(|error| format!("failed to inspect {label} {}: {error}", path.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if !metadata.is_file() {
         return Err(format!("{label} {} must be a regular file", path.display()));
     }
     if metadata.len() > MAX_CREDENTIAL_FILE_BYTES {
@@ -133,8 +154,17 @@ fn read_bounded_secret_file(path: &Path, label: &str) -> Result<String, String> 
             path.display()
         ));
     }
-    fs::read_to_string(path)
-        .map_err(|error| format!("failed to read {label} {}: {error}", path.display()))
+    let mut content = String::new();
+    file.take(MAX_CREDENTIAL_FILE_BYTES + 1)
+        .read_to_string(&mut content)
+        .map_err(|error| format!("failed to read {label} {}: {error}", path.display()))?;
+    if content.len() as u64 > MAX_CREDENTIAL_FILE_BYTES {
+        return Err(format!(
+            "{label} {} exceeds {MAX_CREDENTIAL_FILE_BYTES} bytes",
+            path.display()
+        ));
+    }
+    Ok(content)
 }
 
 fn load_os() -> Result<Option<StoredCredentials>, String> {
@@ -372,6 +402,26 @@ mod tests {
         let error = read_bounded_secret_file(&path, "credential fixture")
             .expect_err("reject oversized credential file");
         assert!(error.contains("exceeds"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_file_read_rejects_symlink_without_reading_target() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_dir("read-symlink");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create fixture directory");
+        let target = root.join("target");
+        let linked = root.join("credentials.json");
+        fs::write(&target, "outside-secret").expect("write fixture target");
+        symlink(&target, &linked).expect("create fixture symlink");
+
+        let error = read_bounded_secret_file(&linked, "credential fixture")
+            .expect_err("reject symlinked credential file");
+        assert!(error.contains("failed to open"));
+        assert!(!error.contains("outside-secret"));
         let _ = fs::remove_dir_all(root);
     }
 

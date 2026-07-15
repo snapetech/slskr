@@ -859,8 +859,21 @@ pub fn load_file_config() -> Result<(Option<PathBuf>, FileConfig), String> {
 }
 
 fn read_file_config(path: &std::path::Path) -> Result<FileConfig, String> {
-    let metadata = fs::metadata(path)
+    use std::io::Read;
+
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
         .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("failed to inspect config file {}: {error}", path.display()))?;
     if !metadata.is_file() {
         return Err(format!(
             "config path {} is not a regular file",
@@ -874,8 +887,16 @@ fn read_file_config(path: &std::path::Path) -> Result<FileConfig, String> {
             metadata.len()
         ));
     }
-    let body = fs::read_to_string(path)
+    let mut body = String::new();
+    file.take(MAX_CONFIG_FILE_BYTES + 1)
+        .read_to_string(&mut body)
         .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
+    if body.len() as u64 > MAX_CONFIG_FILE_BYTES {
+        return Err(format!(
+            "config file {} is too large: more than {MAX_CONFIG_FILE_BYTES} bytes",
+            path.display()
+        ));
+    }
     let config = toml::from_str::<FileConfig>(&body)
         .map_err(|error| format!("failed to parse config file {}: {error}", path.display()))?;
     warn_insecure_config_permissions(path, &metadata, &config);
@@ -1191,6 +1212,31 @@ mod tests {
         assert!(error.contains("not a regular file"));
 
         let _ = std::fs::remove_dir(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_file_reader_rejects_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-config-symlink-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.toml");
+        let linked = root.join("config.toml");
+        std::fs::write(&target, "[auth]\napi_token = \"outside-secret\"\n").unwrap();
+        symlink(&target, &linked).unwrap();
+
+        let error = super::read_file_config(&linked).expect_err("symlink should be rejected");
+        assert!(error.contains("failed to read config file"));
+        assert!(!error.contains("outside-secret"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

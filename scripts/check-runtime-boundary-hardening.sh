@@ -7,6 +7,7 @@ cd "$repo_root"
 source_file="crates/slskr/src/main.rs"
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
+config_source="crates/slskr/src/config.rs"
 client_social_source="crates/slskr-client/src/social.rs"
 client_capability_source="crates/slskr-client/src/capabilities.rs"
 client_peer_cache_source="crates/slskr-client/src/peer_cache.rs"
@@ -203,11 +204,22 @@ fi
 for anchor in \
   'MAX_CREDENTIAL_FILE_BYTES' \
   'credential_file_write_rejects_symlink_without_touching_target' \
+  'credential_file_read_rejects_symlink_without_reading_target' \
   'credential_file_read_rejects_oversized_input' \
   'credential_parent_validation_does_not_mutate_existing_permissions' \
   'credential_parent_validation_rejects_shared_writable_directory'; do
   if ! rg -n --fixed-strings -- "$anchor" "$credential_source" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing credential anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
+  'file.take(MAX_CONFIG_FILE_BYTES + 1)' \
+  'config_file_reader_rejects_symlinks' \
+  'config_file_reader_rejects_oversized_files'; do
+  if ! rg -n --fixed-strings -- "$anchor" "$config_source" >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing config reader anchor %s\n' "$anchor" >&2
     status=1
   fi
 done
