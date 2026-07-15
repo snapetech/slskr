@@ -3905,7 +3905,7 @@ fn bounded_browse_entry(mut entry: BrowseEntry) -> BrowseEntry {
     entry
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct MessageRecord {
     id: u64,
     username: String,
@@ -3943,7 +3943,7 @@ impl MessageRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct MessageStore {
     records: Vec<MessageRecord>,
     next_id: u64,
@@ -11470,9 +11470,14 @@ async fn route_http_request_with_headers(
             };
 
              let mut messages = state.messages.write().await;
+             let previous = messages.clone();
              let record = messages.add(username.clone(), "inbound", message_body.clone());
+             let mutated = messages.clone();
              drop(messages);
-             persist_message_record(state, &record).await;
+             if let Err(error) = persist_message_record_checked(state, &record).await {
+                 rollback_messages_if_unchanged(state, previous, &mutated).await;
+                 return Ok(routing::service_unavailable_response(&error));
+             }
              record_event(state, "message.received", "messages", Some(format!("id={}", record.id))).await;
 
             Ok(routing::created_response(record.json()))
@@ -22545,6 +22550,10 @@ async fn project_server_message(
             let record = messages.add(message.username.clone(), "inbound", message.message.clone());
             let message_id = record.id;
             drop(messages);
+            if let Err(error) = persist_message_record_checked(state, &record).await {
+                update_session(state, |snapshot| snapshot.last_error = Some(error)).await;
+                return;
+            }
             record_event(
                 state,
                 "message.received",
@@ -22566,6 +22575,9 @@ async fn project_server_message(
             let mut messages = state.messages.write().await;
             messages.ack(u64::from(*id));
             drop(messages);
+            if let Err(error) = persist_message_ack_checked(state, u64::from(*id)).await {
+                update_session(state, |snapshot| snapshot.last_error = Some(error)).await;
+            }
             record_event(state, "message.acked", "messages", Some(format!("id={id}"))).await;
         }
         ServerMessage::RoomList(room_list) => {
@@ -23975,8 +23987,15 @@ async fn persist_event_record(state: &AppState, record: &EventRecord) {
 }
 
 async fn persist_message_record(state: &AppState, record: &MessageRecord) {
+    let _ = persist_message_record_checked(state, record).await;
+}
+
+async fn persist_message_record_checked(
+    state: &AppState,
+    record: &MessageRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::MessageRecord {
         id: record.id.to_string(),
@@ -23986,12 +24005,34 @@ async fn persist_message_record(state: &AppState, record: &MessageRecord) {
         read: record.acknowledged,
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
     };
-    let _ = db.insert_message(&persisted).await;
+    db.insert_message(&persisted)
+        .await
+        .map_err(|error| format!("message persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_message_ack(state: &AppState, id: u64) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.mark_message_read(&id.to_string()).await;
+    let _ = persist_message_ack_checked(state, id).await;
+}
+
+async fn persist_message_ack_checked(state: &AppState, id: u64) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.mark_message_read(&id.to_string())
+        .await
+        .map_err(|error| format!("message acknowledgement persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn rollback_messages_if_unchanged(
+    state: &AppState,
+    previous: MessageStore,
+    mutated: &MessageStore,
+) {
+    let mut messages = state.messages.write().await;
+    if *messages == *mutated {
+        *messages = previous;
     }
 }
 
@@ -31173,6 +31214,33 @@ mod tests {
         assert_eq!(listed_rooms.status, "200 OK");
         assert!(listed_rooms.body.contains("\"name\":\"music\""));
         assert!(listed_rooms.body.contains("\"joined\":true"));
+    }
+
+    #[tokio::test]
+    async fn inbound_message_route_rolls_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let previous = state.messages.read().await.clone();
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/v0/messages/inbound",
+            None,
+            r#"{"username":"friend","body":"do not lose me"}"#,
+            &state,
+        )
+        .await
+        .expect("failed inbound message persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("message persistence failed"));
+        assert_eq!(*state.messages.read().await, previous);
     }
 
     #[tokio::test]
