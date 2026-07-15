@@ -127,6 +127,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Room message retention | Active room projections retained every message for the process lifetime, allowing memory use and API response size to grow without a bound. | Fixed by retaining the latest 1,000 messages per room, routing both room-message ingestion paths through the bounded store method, and adding regression/gate coverage. |
 | Medium | SDK social history retention | Public Rust SDK room and private-message state retained every server-supplied message for the client lifetime. | Fixed by retaining the latest 1,000 room and private messages, preserving acknowledgement behavior, and adding eviction regression coverage. |
 | Medium | WebSocket frame lengths | The server accepted non-minimal extended payload lengths and 64-bit lengths with RFC 6455's reserved high bit set. | Fixed by rejecting non-canonical 16/64-bit encodings and the reserved high bit before payload allocation, with parser and hardening-gate coverage. |
+| High | Search response retention | Valid search tokens accepted unlimited peer responses and file results in both the daemon projection and public Rust SDK, allowing remote peers to grow memory and API payloads for the active search lifetime. | Fixed with per-token SDK response/file ceilings, a daemon per-search result ceiling across peer/API/persistence ingestion, and regression/gate coverage. |
 
 ## Open Burn-Down
 

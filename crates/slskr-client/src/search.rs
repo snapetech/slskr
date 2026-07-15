@@ -14,6 +14,9 @@ use crate::{
     filters::ExcludedPhraseFilter, manager::TokenGenerator, server::ServerSession, ClientError,
 };
 
+pub const MAX_SEARCH_RESPONSES_PER_TOKEN: usize = 1_000;
+pub const MAX_SEARCH_RESULT_FILES_PER_TOKEN: usize = 10_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
     pub token: u32,
@@ -254,11 +257,20 @@ impl SearchResults {
 
     pub fn accept_peer_message(&mut self, message: PeerMessage) -> Result<bool, ClientError> {
         match message {
-            PeerMessage::FileSearchResponse(response) => {
-                self.by_token
-                    .entry(response.token)
-                    .or_default()
-                    .push(response);
+            PeerMessage::FileSearchResponse(mut response) => {
+                let responses = self.by_token.entry(response.token).or_default();
+                if responses.len() >= MAX_SEARCH_RESPONSES_PER_TOKEN {
+                    return Ok(true);
+                }
+                let stored_files = responses
+                    .iter()
+                    .map(|response| response.results.len() + response.private_results.len())
+                    .sum::<usize>();
+                let mut remaining = MAX_SEARCH_RESULT_FILES_PER_TOKEN.saturating_sub(stored_files);
+                response.results.truncate(remaining);
+                remaining = remaining.saturating_sub(response.results.len());
+                response.private_results.truncate(remaining);
+                responses.push(response);
                 Ok(true)
             }
             message => Err(ClientError::UnexpectedSearchMessage(Box::new(message))),

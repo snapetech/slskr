@@ -2,7 +2,8 @@ use slskr_client::{
     search::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
-        WishlistSearchSchedulerOptions,
+        WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN,
+        MAX_SEARCH_RESULT_FILES_PER_TOKEN,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -133,6 +134,35 @@ fn search_results_reject_non_search_message() {
         .unwrap_err();
 
     assert!(matches!(error, ClientError::UnexpectedSearchMessage(_)));
+}
+
+#[test]
+fn search_results_bound_responses_and_files_per_token() {
+    let mut results = SearchResults::new();
+    let mut oversized = response("alice", 10);
+    oversized.results = (0..(MAX_SEARCH_RESULT_FILES_PER_TOKEN + 5))
+        .map(|index| entry(&format!("file-{index}")))
+        .collect();
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(oversized))
+        .unwrap();
+    assert_eq!(
+        results.responses_for(10)[0].results.len(),
+        MAX_SEARCH_RESULT_FILES_PER_TOKEN
+    );
+
+    for index in 1..(MAX_SEARCH_RESPONSES_PER_TOKEN + 5) {
+        results
+            .accept_peer_message(PeerMessage::FileSearchResponse(response(
+                &format!("peer-{index}"),
+                10,
+            )))
+            .unwrap();
+    }
+    assert_eq!(
+        results.responses_for(10).len(),
+        MAX_SEARCH_RESPONSES_PER_TOKEN
+    );
 }
 
 #[test]

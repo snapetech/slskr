@@ -130,6 +130,7 @@ const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ROOM_MESSAGES_PER_ROOM: usize = 1_000;
+const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
 const APP_CAPABILITIES: &[&str] = &[
@@ -655,6 +656,11 @@ struct SearchRecord {
 }
 
 impl SearchRecord {
+    fn extend_results_bounded(&mut self, results: impl IntoIterator<Item = SearchResultEntry>) {
+        let remaining = MAX_SEARCH_RESULTS_PER_SEARCH.saturating_sub(self.results.len());
+        self.results.extend(results.into_iter().take(remaining));
+    }
+
     fn json(&self) -> String {
         self.json_with_result_page(0, None)
     }
@@ -797,6 +803,7 @@ impl SearchRecord {
             results: result_records
                 .iter()
                 .map(SearchResultEntry::from_persisted)
+                .take(MAX_SEARCH_RESULTS_PER_SEARCH)
                 .collect(),
             expires_at: 0,
             created_at: record.created_at.max(0) as u64,
@@ -895,6 +902,7 @@ impl SearchStore {
             results: results
                 .iter()
                 .map(SearchResultEntry::from_file_entry)
+                .take(MAX_SEARCH_RESULTS_PER_SEARCH)
                 .collect(),
             expires_at: now.saturating_add(ttl_seconds),
             created_at: now,
@@ -1009,13 +1017,13 @@ impl SearchStore {
             .records
             .iter_mut()
             .find(|record| record.token == response.token)?;
-        record.results.extend(
+        record.extend_results_bounded(
             response
                 .results
                 .iter()
                 .map(|entry| SearchResultEntry::from_peer_response_entry(response, entry, false)),
         );
-        record.results.extend(
+        record.extend_results_bounded(
             response
                 .private_results
                 .iter()
@@ -8961,7 +8969,7 @@ async fn route_http_request_with_headers(
 
             let mut searches = state.searches.write().await;
             if let Some(record) = searches.records.iter_mut().find(|r| r.token == token) {
-                record.results.extend(entries);
+                record.extend_results_bounded(entries);
                 record.updated_at = unix_timestamp();
                 let response_json = record.json();
                 let record = record.clone();
@@ -28837,6 +28845,40 @@ mod tests {
             responses[0]["lockedFiles"][0]["filename"],
             "Private/Locked.flac"
         );
+    }
+
+    #[test]
+    fn search_store_caps_results_from_peer_responses() {
+        let mut store = super::SearchStore::new();
+        let record = store.create(None, "remote".to_owned(), "global", None, Vec::new(), 300);
+        let response = FileSearchResponse {
+            username: "peer1".to_owned(),
+            token: record.token,
+            results: (0..(super::MAX_SEARCH_RESULTS_PER_SEARCH + 5))
+                .map(|index| FileEntry {
+                    code: 1,
+                    filename: format!("Remote/{index}.flac"),
+                    size: index as u64,
+                    extension: "flac".to_owned(),
+                    attributes: Vec::new(),
+                })
+                .collect(),
+            slot_free: true,
+            average_speed: 42,
+            queue_length: 0,
+            unknown: 0,
+            private_results: vec![FileEntry {
+                code: 1,
+                filename: "Private/overflow.flac".to_owned(),
+                size: 1,
+                extension: "flac".to_owned(),
+                attributes: Vec::new(),
+            }],
+        };
+
+        let updated = store.add_peer_response(&response).expect("search exists");
+        assert_eq!(updated.results.len(), super::MAX_SEARCH_RESULTS_PER_SEARCH);
+        assert_eq!(updated.results.last().unwrap().filename, "Remote/9999.flac");
     }
 
     #[tokio::test]

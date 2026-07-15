@@ -18,6 +18,8 @@ for anchor in \
   'integration_json_reader_rejects_declared_oversized_response' \
   'integration_json_reader_rejects_chunked_oversized_response' \
   'integration_ssrf_filter_blocks_special_use_ipv6_ranges' \
+  'MAX_SEARCH_RESULTS_PER_SEARCH' \
+  'search_store_caps_results_from_peer_responses' \
   'MAX_ROOM_MESSAGES_PER_ROOM' \
   'room_message_history_evicts_oldest_entries_at_limit' \
   'MAX_INCOMING_CONNECTION_TASKS' \
@@ -36,6 +38,16 @@ for anchor in \
   'retain_newest(&mut self.messages'; do
   if ! rg -n --fixed-strings -- "$anchor" "$client_social_source" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing client social anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
+  'MAX_SEARCH_RESPONSES_PER_TOKEN' \
+  'MAX_SEARCH_RESULT_FILES_PER_TOKEN' \
+  'search_results_bound_responses_and_files_per_token'; do
+  if ! rg -n --fixed-strings -- "$anchor" crates/slskr-client/src/search.rs crates/slskr-client/tests/search.rs >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing client search anchor %s\n' "$anchor" >&2
     status=1
   fi
 done
