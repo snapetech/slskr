@@ -2847,6 +2847,60 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Upsert a library item and runtime compatibility state atomically.
+    pub async fn upsert_library_item_and_runtime_compat_state(
+        &self,
+        library: &LibraryItemRecord,
+        runtime: &RuntimeCompatRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query(
+            r#"
+            INSERT OR REPLACE INTO library_items (id, artist, title, kind, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&library.id)
+        .bind(&library.artist)
+        .bind(&library.title)
+        .bind(&library.kind)
+        .bind(library.created_at)
+        .execute(&mut *transaction)
+        .await?;
+        query(
+            r#"
+            INSERT OR REPLACE INTO runtime_compat_state
+            (id, application_restart_requested, gc_runs, autoreplace_enabled, relay_enabled,
+             relay_agent_enabled, bridge_running, bridge_config_updates, profile_invites_created,
+             options_updates, options_yaml_uploads, options_yaml_validations, cache_warm_runs,
+             backfill_runs, songid_runs, lidarr_sync_runs, lidarr_manual_imports, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&runtime.id)
+        .bind(runtime.application_restart_requested)
+        .bind(runtime.gc_runs)
+        .bind(runtime.autoreplace_enabled)
+        .bind(runtime.relay_enabled)
+        .bind(runtime.relay_agent_enabled)
+        .bind(runtime.bridge_running)
+        .bind(runtime.bridge_config_updates)
+        .bind(runtime.profile_invites_created)
+        .bind(runtime.options_updates)
+        .bind(runtime.options_yaml_uploads)
+        .bind(runtime.options_yaml_validations)
+        .bind(runtime.cache_warm_runs)
+        .bind(runtime.backfill_runs)
+        .bind(runtime.songid_runs)
+        .bind(runtime.lidarr_sync_runs)
+        .bind(runtime.lidarr_manual_imports)
+        .bind(runtime.updated_at)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// Insert or update library items atomically.
     pub async fn upsert_library_items(
         &self,

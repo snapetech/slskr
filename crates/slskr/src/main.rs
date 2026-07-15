@@ -9542,10 +9542,12 @@ async fn route_http_request_with_headers(
           ("PATCH", "/api/options") => {
               match slskd_options_mutation_response(body, 0, state.db.is_some()) {
                   Ok(_) => {
-                      let mut runtime = state.runtime.write().await;
-                      let acknowledgements = runtime.record_options_update();
-                      drop(runtime);
-                      persist_runtime_compat_state(state).await;
+                      let acknowledgements = match mutate_runtime_compat_state(state, |runtime, _| {
+                          runtime.record_options_update()
+                      }).await {
+                          Ok(acknowledgements) => acknowledgements,
+                          Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                      };
                       record_event(
                           state,
                           "options.updated",
@@ -12584,10 +12586,12 @@ async fn route_http_request_with_headers(
         ("PUT", "/api/options") => {
             match slskd_options_mutation_response(body, 0, state.db.is_some()) {
                 Ok(_) => {
-                    let mut runtime = state.runtime.write().await;
-                    let acknowledgements = runtime.record_options_update();
-                    drop(runtime);
-                    persist_runtime_compat_state(state).await;
+                    let acknowledgements = match mutate_runtime_compat_state(state, |runtime, _| {
+                        runtime.record_options_update()
+                    }).await {
+                        Ok(acknowledgements) => acknowledgements,
+                        Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                    };
                     record_event(
                         state,
                         "options.updated",
@@ -14434,30 +14438,34 @@ async fn route_http_request_with_headers(
 
          ("POST", "/api/bridge/start") => {
              let bridge = &state.config.integrations.bridge;
-             let mut runtime = state.runtime.write().await;
-             let mut value = runtime.set_bridge_running(true, bridge.enabled);
-             if let Some(object) = value.as_object_mut() {
-                 object.insert(
-                     "next_action".to_owned(),
-                     serde_json::json!(if bridge.enabled {
-                         "accept bridge traffic"
-                     } else {
-                         "enable bridge integration"
-                     }),
-                 );
-             }
-             let body = value.to_string();
-             drop(runtime);
-             persist_runtime_compat_state(state).await;
+             let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                 let mut value = runtime.set_bridge_running(true, bridge.enabled);
+                 if let Some(object) = value.as_object_mut() {
+                     object.insert(
+                         "next_action".to_owned(),
+                         serde_json::json!(if bridge.enabled {
+                             "accept bridge traffic"
+                         } else {
+                             "enable bridge integration"
+                         }),
+                     );
+                 }
+                 value.to_string()
+             }).await {
+                 Ok(body) => body,
+                 Err(error) => return Ok(routing::service_unavailable_response(&error)),
+             };
              Ok(routing::accepted_response(body))
          }
 
          ("POST", "/api/bridge/stop") => {
              let bridge = &state.config.integrations.bridge;
-             let mut runtime = state.runtime.write().await;
-             let body = runtime.set_bridge_running(false, bridge.enabled).to_string();
-             drop(runtime);
-             persist_runtime_compat_state(state).await;
+             let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                 runtime.set_bridge_running(false, bridge.enabled).to_string()
+             }).await {
+                 Ok(body) => body,
+                 Err(error) => return Ok(routing::service_unavailable_response(&error)),
+             };
              Ok(routing::ok_response(body))
          }
 
@@ -14471,12 +14479,14 @@ async fn route_http_request_with_headers(
                          .map(|object| object.keys().cloned().collect::<Vec<_>>())
                  })
                  .unwrap_or_default();
-             let mut runtime = state.runtime.write().await;
-             let body = runtime
-                 .record_bridge_config_update(bridge.enabled, accepted_keys)
-                 .to_string();
-             drop(runtime);
-             persist_runtime_compat_state(state).await;
+             let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                 runtime
+                     .record_bridge_config_update(bridge.enabled, accepted_keys)
+                     .to_string()
+             }).await {
+                 Ok(body) => body,
+                 Err(error) => return Ok(routing::service_unavailable_response(&error)),
+             };
              Ok(routing::ok_response(body))
          }
 
@@ -14588,10 +14598,12 @@ async fn route_http_request_with_headers(
         ("PUT", "/api/options/yaml") => {
             match slskd_options_config_upload_response(body, 0, state.db.is_some()) {
                 Ok(_) => {
-                    let mut runtime = state.runtime.write().await;
-                    let acknowledgements = runtime.record_options_yaml_upload();
-                    drop(runtime);
-                    persist_runtime_compat_state(state).await;
+                    let acknowledgements = match mutate_runtime_compat_state(state, |runtime, _| {
+                        runtime.record_options_yaml_upload()
+                    }).await {
+                        Ok(acknowledgements) => acknowledgements,
+                        Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                    };
                     record_event(
                         state,
                         "options.yaml.uploaded",
@@ -15162,13 +15174,15 @@ async fn route_http_request_with_headers(
              let shared_files = shares.entries.len();
              drop(shares);
              drop(library);
-             let mut runtime = state.runtime.write().await;
-             let run = runtime.record_songid_run(matches, library_items, shared_files);
-             drop(runtime);
-             let Some(run) = run else {
-                 return Ok(routing::service_unavailable_response("song id run space exhausted"));
+             let run = match mutate_runtime_compat_state(state, |runtime, _| {
+                 runtime.record_songid_run(matches, library_items, shared_files)
+             }).await {
+                 Ok(Some(run)) => run,
+                 Ok(None) => {
+                     return Ok(routing::service_unavailable_response("song id run space exhausted"));
+                 }
+                 Err(error) => return Ok(routing::service_unavailable_response(&error)),
              };
-             persist_runtime_compat_state(state).await;
              Ok(routing::accepted_response(run.to_string()))
          }
 
@@ -15716,10 +15730,12 @@ async fn route_http_request_with_headers(
           ("POST", "/api/options/yaml/validate") => {
               match slskd_options_config_validate_response(body) {
                   Ok(_) => {
-                      let mut runtime = state.runtime.write().await;
-                      let acknowledgements = runtime.record_options_yaml_validation();
-                      drop(runtime);
-                      persist_runtime_compat_state(state).await;
+                      let acknowledgements = match mutate_runtime_compat_state(state, |runtime, _| {
+                          runtime.record_options_yaml_validation()
+                      }).await {
+                          Ok(acknowledgements) => acknowledgements,
+                          Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                      };
                       record_event(
                           state,
                           "options.yaml.validated",
@@ -16395,37 +16411,41 @@ async fn route_http_request_with_headers(
                 let missing_albums = lidarr_missing_albums_value(&library);
                 let missing_count = missing_albums.len();
                 drop(library);
-                let mut runtime = state.runtime.write().await;
-                let mut value = runtime.record_lidarr_sync(missing_count, false);
-                if let Some(object) = value.as_object_mut() {
-                    object.insert("missing_albums".to_owned(), serde_json::json!(missing_albums));
-                    object.insert("source".to_owned(), serde_json::json!("library-health"));
-                    object.insert(
-                        "next_action".to_owned(),
-                        serde_json::json!(if missing_count == 0 {
-                            "library metadata is complete"
-                        } else {
-                            "fix library health issues or configure Lidarr URL and API key"
-                        }),
-                    );
-                }
-                let body = value.to_string();
-                drop(runtime);
-                persist_runtime_compat_state(state).await;
+                let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                    let mut value = runtime.record_lidarr_sync(missing_count, false);
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("missing_albums".to_owned(), serde_json::json!(missing_albums));
+                        object.insert("source".to_owned(), serde_json::json!("library-health"));
+                        object.insert(
+                            "next_action".to_owned(),
+                            serde_json::json!(if missing_count == 0 {
+                                "library metadata is complete"
+                            } else {
+                                "fix library health issues or configure Lidarr URL and API key"
+                            }),
+                        );
+                    }
+                    value.to_string()
+                }).await {
+                    Ok(body) => body,
+                    Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                };
                 return Ok(routing::accepted_response(body));
             }
-            let mut runtime = state.runtime.write().await;
-            let mut value = runtime.record_lidarr_sync(0, true);
-            if let Some(object) = value.as_object_mut() {
-                object.insert("missing_albums".to_owned(), serde_json::json!([]));
-                object.insert(
-                    "next_action".to_owned(),
-                    serde_json::json!("poll wanted/missing"),
-                );
-            }
-            let body = value.to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                let mut value = runtime.record_lidarr_sync(0, true);
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("missing_albums".to_owned(), serde_json::json!([]));
+                    object.insert(
+                        "next_action".to_owned(),
+                        serde_json::json!("poll wanted/missing"),
+                    );
+                }
+                value.to_string()
+            }).await {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::accepted_response(body))
         }
 
@@ -16446,37 +16466,55 @@ async fn route_http_request_with_headers(
                 let kind =
                     extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_owned());
                 let mut library = state.library.write().await;
-                let previous = library.clone();
+                let mut runtime = state.runtime.write().await;
+                let relay = state.relay.read().await;
+                let previous_library = library.clone();
+                let previous_runtime = runtime.clone();
                 let Some(record) = library.create(artist, title, kind) else {
                     return Ok(routing::service_unavailable_response("library item capacity is full"));
                 };
-                let mutated = library.clone();
                 let item = serde_json::from_str::<serde_json::Value>(&record.json())
                     .unwrap_or_else(|_| serde_json::json!({ "id": record.id }));
-                drop(library);
-                if let Err(error) = persist_library_item_checked(state, &record).await {
-                    rollback_library_if_unchanged(state, previous, &mutated).await;
-                    return Ok(routing::service_unavailable_response(&error));
-                }
-                let mut runtime = state.runtime.write().await;
                 let body = runtime
                     .record_lidarr_manual_import(1, false, directory, vec![item])
                     .to_string();
+                if let Some(db) = state.db.as_ref() {
+                    let runtime_record = runtime.persistence_record(&relay);
+                    if let Err(error) = db
+                        .upsert_library_item_and_runtime_compat_state(
+                            &persisted_library_item(&record),
+                            &runtime_record,
+                        )
+                        .await
+                    {
+                        *library = previous_library;
+                        *runtime = previous_runtime;
+                        return Ok(routing::service_unavailable_response(&format!(
+                            "library persistence failed: Lidarr manual import transaction failed: {error}"
+                        )));
+                    }
+                }
+                drop(relay);
                 drop(runtime);
-                persist_runtime_compat_state(state).await;
+                drop(library);
                 return Ok(routing::accepted_response(body));
             }
-            let mut runtime = state.runtime.write().await;
-            let mut value = runtime.record_lidarr_manual_import(0, true, directory, Vec::new());
-            if let Some(object) = value.as_object_mut() {
-                object.insert(
-                    "next_action".to_owned(),
-                    serde_json::json!("trigger Lidarr manual import from configured UI"),
-                );
-            }
-            let body = value.to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                let mut value =
+                    runtime.record_lidarr_manual_import(0, true, directory, Vec::new());
+                if let Some(object) = value.as_object_mut() {
+                    object.insert(
+                        "next_action".to_owned(),
+                        serde_json::json!("trigger Lidarr manual import from configured UI"),
+                    );
+                }
+                value.to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::accepted_response(body))
         }
 
@@ -16646,8 +16684,14 @@ async fn route_http_request_with_headers(
          }
 
         ("POST", "/api/profile/invite") => {
-            let mut runtime = state.runtime.write().await;
-            let invite_state = runtime.record_profile_invite();
+            let invite_state = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.record_profile_invite()
+            })
+            .await
+            {
+                Ok(invite_state) => invite_state,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             let count = invite_state
                 .get("count")
                 .and_then(serde_json::Value::as_u64)
@@ -16656,8 +16700,6 @@ async fn route_http_request_with_headers(
                 .get("updated_at")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or_else(unix_timestamp);
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
             Ok(routing::created_response(serde_json::json!({
                 "invite": format!("local-{count}"),
                 "created_at": updated_at,
@@ -16940,10 +16982,14 @@ async fn route_http_request_with_headers(
             drop(library);
             drop(searches);
             drop(shares);
-            let mut runtime = state.runtime.write().await;
-            let body = runtime.record_cache_warm(warmed).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.record_cache_warm(warmed).to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::accepted_response(body))
         }
 
@@ -17199,10 +17245,14 @@ async fn route_http_request_with_headers(
             let queued = searches.records.len() + shares.entries.len();
             drop(shares);
             drop(searches);
-            let mut runtime = state.runtime.write().await;
-            let body = runtime.record_backfill(queued).to_string();
-            drop(runtime);
-            persist_runtime_compat_state(state).await;
+            let body = match mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.record_backfill(queued).to_string()
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             Ok(routing::accepted_response(body))
         }
         (method, path) if native_compat_route(method, path) => {
@@ -24716,18 +24766,6 @@ async fn mutate_runtime_compat_state<T>(
         }
     }
     Ok(result)
-}
-
-async fn persist_runtime_compat_state(state: &AppState) {
-    let Some(db) = state.db.as_ref() else {
-        return;
-    };
-    let runtime = state.runtime.read().await;
-    let relay = state.relay.read().await;
-    let record = runtime.persistence_record(&relay);
-    drop(relay);
-    drop(runtime);
-    let _ = db.upsert_runtime_compat_state(&record).await;
 }
 
 async fn persist_oauth_state_checked(
@@ -33054,6 +33092,36 @@ mod tests {
             ("DELETE", "/api/relay", "", "", true),
             ("PUT", "/api/relay/agent", r#"{"enabled":true}"#, "", false),
             ("DELETE", "/api/relay/agent", "", "relay_agent", false),
+            ("PATCH", "/api/options", r#"{"logging":{}}"#, "", false),
+            ("PUT", "/api/options", r#"{"logging":{}}"#, "", false),
+            ("PUT", "/api/options/yaml", r#""app: {}""#, "", false),
+            (
+                "POST",
+                "/api/options/yaml/validate",
+                r#""app: {}""#,
+                "",
+                false,
+            ),
+            ("POST", "/api/bridge/start", "", "", false),
+            ("POST", "/api/bridge/stop", "", "bridge", false),
+            (
+                "PUT",
+                "/api/bridge/admin/config",
+                r#"{"enabled":true}"#,
+                "",
+                false,
+            ),
+            ("POST", "/api/songid/runs", "", "", false),
+            (
+                "POST",
+                "/api/integrations/lidarr/wanted/sync",
+                "",
+                "",
+                false,
+            ),
+            ("POST", "/api/profile/invite", "", "", false),
+            ("POST", "/api/slskdn/warm-cache", "", "", false),
+            ("POST", "/api/backfill", "", "", false),
         ] {
             let db = super::persistence::DatabaseManager::in_memory()
                 .await
@@ -33072,6 +33140,9 @@ mod tests {
                 }
                 "relay_agent" => {
                     state.runtime.write().await.set_relay_agent(true);
+                }
+                "bridge" => {
+                    state.runtime.write().await.set_bridge_running(true, false);
                 }
                 _ => {}
             }
@@ -33102,6 +33173,37 @@ mod tests {
             );
             assert_eq!(*state.relay.read().await, previous_relay, "{method} {path}");
         }
+    }
+
+    #[tokio::test]
+    async fn lidarr_manual_import_rolls_back_both_stores_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let previous_library = state.library.read().await.clone();
+        let previous_runtime = state.runtime.read().await.clone();
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/integrations/lidarr/manualimport",
+            None,
+            r#"{"artist":"Artist","title":"Album","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("failed Lidarr manual import persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response
+            .body
+            .contains("library persistence failed: Lidarr manual import transaction failed"));
+        assert_eq!(*state.library.read().await, previous_library);
+        assert_eq!(*state.runtime.read().await, previous_runtime);
     }
 
     #[tokio::test]
@@ -33213,6 +33315,17 @@ mod tests {
         assert_eq!(options_validate.status, "200 OK");
         assert_eq!(options_validate.content_type, "text/plain; charset=utf-8");
         assert!(options_validate.body.is_empty());
+        let manual_import = super::route_http_request(
+            "POST",
+            "/api/integrations/lidarr/manualimport",
+            None,
+            r#"{"artist":"Artist","title":"Album","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("Lidarr manual import");
+        assert_eq!(manual_import.status, "202 Accepted");
+        assert_eq!(db.list_library_items(10, 0).await.unwrap().len(), 1);
 
         let persisted = db
             .get_runtime_compat_state()
@@ -33232,6 +33345,7 @@ mod tests {
         assert_eq!(persisted.cache_warm_runs, 1);
         assert_eq!(persisted.songid_runs, 1);
         assert_eq!(persisted.backfill_runs, 1);
+        assert_eq!(persisted.lidarr_manual_imports, 1);
 
         let rehydrated_relay = super::RelayState::from_persisted(&persisted);
         let rehydrated_runtime = super::RuntimeCompatState::from_persisted(&persisted);
@@ -33248,6 +33362,7 @@ mod tests {
         assert_eq!(runtime_json["cacheWarmRuns"], 1);
         assert_eq!(runtime_json["songidRuns"], 1);
         assert_eq!(runtime_json["backfillRuns"], 1);
+        assert_eq!(runtime_json["lidarrManualImports"], 1);
 
         let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
             .await
