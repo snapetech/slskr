@@ -17625,15 +17625,15 @@ fn read_bounded_web_static_string(file: &Path) -> Result<String, String> {
 }
 
 fn web_static_error_response(error: &str) -> HttpResponse {
-    let status = if error.contains("too large") {
-        "413 Payload Too Large"
+    let (status, message) = if error.contains("too large") {
+        ("413 Payload Too Large", "static asset is too large")
     } else {
-        "500 Internal Server Error"
+        ("500 Internal Server Error", "static asset is unavailable")
     };
     routing::HttpResponse {
         status,
         content_type: "application/json",
-        body: format!("{{\"error\":\"{}\"}}", json_escape(error)),
+        body: format!("{{\"error\":\"{message}\"}}"),
     }
 }
 
@@ -25708,6 +25708,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    eprintln!("web static response failed: {error}");
                     let response = web_static_error_response(&error);
                     let _ =
                         http_server::write_http_response(&mut writer, &response, false, "").await;
@@ -29436,9 +29437,24 @@ mod tests {
 
     #[test]
     fn web_static_oversize_errors_return_413() {
-        let response = super::web_static_error_response("static asset is too large: 1 bytes");
+        let response = super::web_static_error_response(
+            "static asset is too large: 1 bytes at /srv/private/web/index.html",
+        );
         assert_eq!(response.status, "413 Payload Too Large");
         assert!(response.body.contains("static asset is too large"));
+        assert!(!response.body.contains("1 bytes"));
+        assert!(!response.body.contains("/srv/private"));
+    }
+
+    #[test]
+    fn web_static_internal_errors_do_not_expose_filesystem_details() {
+        let response = super::web_static_error_response(
+            "static file confined open failed: permission denied: /srv/private/web/index.html",
+        );
+        assert_eq!(response.status, "500 Internal Server Error");
+        assert_eq!(response.body, "{\"error\":\"static asset is unavailable\"}");
+        assert!(!response.body.contains("permission denied"));
+        assert!(!response.body.contains("/srv/private"));
     }
 
     #[test]
