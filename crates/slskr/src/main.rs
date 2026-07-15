@@ -15772,10 +15772,17 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
-        ("GET", path) if path.starts_with("/api/musicbrainz/artist/") && path.contains("/discography-coverage") => {
-            let artist = path.split('/').nth(4).unwrap_or("unknown");
+        ("GET", path) if path.starts_with("/api/musicbrainz/artist/") => {
+            let Some(artist) = path_segment_between(
+                path,
+                "/api/musicbrainz/artist/",
+                "/discography-coverage",
+            ) else {
+                return Ok(routing::not_found_response());
+            };
+            let artist = decoded_path_segment(artist);
             let library = state.library.read().await;
-            let json = library.discography_coverage_json(artist);
+            let json = library.discography_coverage_json(&artist);
             drop(library);
             Ok(routing::ok_response(json))
         }
@@ -36580,6 +36587,16 @@ mod tests {
         .expect("coverage");
         let coverage_json = serde_json::from_str::<serde_json::Value>(&coverage.body).unwrap();
         assert_eq!(coverage_json["releases"], 1);
+        let aliased_coverage = super::route_http_request(
+            "GET",
+            "/api/musicbrainz/artist/Known/extra/discography-coverage",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased artist coverage");
+        assert_eq!(aliased_coverage.status, "404 Not Found");
 
         let target = super::route_http_request(
             "POST",
