@@ -5,6 +5,7 @@
 mod batch;
 mod cli;
 mod config;
+mod content_discovery;
 mod credential_store;
 mod events_ws;
 mod http_server;
@@ -10013,6 +10014,7 @@ struct AppState {
     searches: RwLock<SearchStore>,
     users: RwLock<UserStore>,
     mesh: RwLock<MeshState>,
+    content_discovery: RwLock<content_discovery::ContentDiscoveryStore>,
     browse: RwLock<BrowseStore>,
     remote_path_encodings: RwLock<RemotePathEncodingRegistry>,
     messages: RwLock<MessageStore>,
@@ -24839,6 +24841,8 @@ async fn serve(once: bool) -> Result<(), String> {
         enabled: true,
     });
 
+    let content_discovery_store =
+        content_discovery::ContentDiscoveryStore::load(&config.state_dir)?;
     let state = Arc::new(AppState {
         log_level: RwLock::new(
             logging::LogConfig::parse_level(&config.log_level).unwrap_or(logging::LogLevel::Info),
@@ -24850,6 +24854,7 @@ async fn serve(once: bool) -> Result<(), String> {
         searches: RwLock::new(search_store),
         users: RwLock::new(user_store),
         mesh: RwLock::new(MeshState::new()),
+        content_discovery: RwLock::new(content_discovery_store),
         browse: RwLock::new(browse_store),
         remote_path_encodings: RwLock::new(RemotePathEncodingRegistry::default()),
         messages: RwLock::new(message_store),
@@ -29358,8 +29363,6 @@ async fn download_file_with_progress(
     remaining: usize,
     file: &mut fs::File,
 ) -> Result<u64, String> {
-    use std::io::Write;
-
     let token = time::timeout(
         state.config.peer_response_timeout,
         connection.receive_token(),
@@ -29394,13 +29397,35 @@ async fn download_file_with_progress(
         .await
         .map_err(|_| "file download chunk receive timed out".to_owned())?
         .map_err(|error| format!("file download chunk receive failed: {error}"))?;
-        file.write_all(&chunk)
-            .map_err(|error| format!("download file write failed: {error}"))?;
         bytes_received += chunk.len();
         let transferred = offset.saturating_add(u64::try_from(bytes_received).unwrap_or(u64::MAX));
-        update_transfer_progress(state, transfer.id, transferred).await;
+        write_download_chunk_if_active(state, transfer.id, file, &chunk, transferred).await?;
     }
     Ok(u64::try_from(bytes_received).unwrap_or(u64::MAX))
+}
+
+async fn write_download_chunk_if_active(
+    state: &AppState,
+    transfer_id: u64,
+    file: &mut fs::File,
+    chunk: &[u8],
+    bytes_transferred: u64,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    let mut transfers = state.transfers.write().await;
+    if transfers
+        .entries
+        .iter()
+        .find(|entry| entry.id == transfer_id)
+        .is_none_or(|entry| entry.status != "in_progress")
+    {
+        return Err("transfer cancelled".to_owned());
+    }
+    file.write_all(chunk)
+        .map_err(|error| format!("download file write failed: {error}"))?;
+    transfers.update_progress(transfer_id, bytes_transferred);
+    Ok(())
 }
 
 async fn update_transfer_progress(state: &AppState, transfer_id: u64, bytes_transferred: u64) {
@@ -34873,6 +34898,9 @@ mod tests {
             searches: RwLock::new(search_store),
             users: RwLock::new(super::UserStore::new()),
             mesh: RwLock::new(super::MeshState::new()),
+            content_discovery: RwLock::new(
+                super::content_discovery::ContentDiscoveryStore::in_memory(),
+            ),
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(message_store),
@@ -54349,6 +54377,32 @@ mod tests {
             .expect("transfer remains projected");
         assert_eq!(current.status, "cancelled");
         assert_eq!(current.bytes_transferred, 400);
+        drop(transfers);
+
+        let path = std::env::temp_dir().join(format!(
+            "slskr-cancelled-chunk-{}-{}",
+            std::process::id(),
+            transfer.id
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .expect("create cancelled transfer test file");
+        let error = super::write_download_chunk_if_active(
+            &state,
+            transfer.id,
+            &mut file,
+            b"must-not-be-written",
+            900,
+        )
+        .await
+        .expect_err("cancelled download must reject a received chunk");
+        assert_eq!(error, "transfer cancelled");
+        assert_eq!(file.metadata().expect("test file metadata").len(), 0);
+        drop(file);
+        std::fs::remove_file(path).expect("remove cancelled transfer test file");
     }
 
     #[test]
