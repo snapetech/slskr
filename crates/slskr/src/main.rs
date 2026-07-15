@@ -16840,20 +16840,22 @@ fn extract_json_i32_field(body: &str, field: &str) -> Option<i32> {
         .and_then(|value| i32::try_from(value).ok())
 }
 
-fn rate_limit_user_key(authorization: Option<&str>, cookie: Option<&str>) -> String {
+fn rate_limit_user_key(authenticated_token: &str) -> String {
     use sha2::{Digest, Sha256};
 
-    let decoded_cookie_token = cookie_session_token(cookie);
-    let token = authorization
-        .and_then(|value| {
-            value
-                .strip_prefix("Bearer ")
-                .or_else(|| value.strip_prefix("ApiKey "))
-        })
-        .or(decoded_cookie_token.as_deref())
-        .unwrap_or("authenticated");
-    let digest = Sha256::digest(token.as_bytes());
+    let digest = Sha256::digest(authenticated_token.as_bytes());
     format!("auth:{}", hex::encode(&digest[..16]))
+}
+
+fn authenticated_rate_limit_user_key(
+    config: &AppConfig,
+    authorization: Option<&str>,
+    cookie: Option<&str>,
+) -> Option<String> {
+    is_authorized(config, authorization, cookie)
+        .then_some(config.api_token.as_deref())
+        .flatten()
+        .map(rate_limit_user_key)
 }
 
 fn rate_limit_remote_addr(
@@ -23385,10 +23387,16 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
 
         // Rate limiting: unauthenticated traffic is IP-keyed. Authenticated
         // traffic is keyed by a token digest so clients do not share one bucket.
-        let authenticated_for_rate_limit = route_requires_auth(&state.config, path)
-            && is_authorized(&state.config, authorization, sec_headers.cookie.as_deref());
-        let rate_limit_user = authenticated_for_rate_limit
-            .then(|| rate_limit_user_key(authorization, sec_headers.cookie.as_deref()));
+        let rate_limit_user = route_requires_auth(&state.config, path)
+            .then(|| {
+                authenticated_rate_limit_user_key(
+                    &state.config,
+                    authorization,
+                    sec_headers.cookie.as_deref(),
+                )
+            })
+            .flatten();
+        let authenticated_for_rate_limit = rate_limit_user.is_some();
         let username = rate_limit_user.as_deref();
         let rate_limit_remote_addr =
             rate_limit_remote_addr(&state.config, remote_addr, &req.headers);
@@ -25919,17 +25927,34 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_cookie_rate_limit_key_uses_decoded_token() {
-        let plain = super::rate_limit_user_key(None, Some("slskr.session=route-token"));
-        let encoded = super::rate_limit_user_key(None, Some("slskr.session=%72oute%2Dtoken"));
-        let fully_encoded = super::rate_limit_user_key(
+    fn authenticated_rate_limit_key_uses_configured_identity() {
+        let config = super::AppConfig::from_layers(
             None,
-            Some("other=value; slskr.session=%72%6F%75%74%65%2D%74%6F%6B%65%6E"),
-        );
+            FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_API_TOKEN", "route-token")
+                .with("SLSKR_API_COOKIE_AUTH_ENABLED", "true"),
+        )
+        .expect("cookie auth config");
+        let cookie = Some("slskr.session=route-token");
+        let first = super::authenticated_rate_limit_user_key(
+            &config,
+            Some("Bearer attacker-controlled-1"),
+            cookie,
+        )
+        .expect("cookie-authenticated key");
+        let second = super::authenticated_rate_limit_user_key(
+            &config,
+            Some("Bearer attacker-controlled-2"),
+            cookie,
+        )
+        .expect("cookie-authenticated key");
 
-        assert_eq!(plain, encoded);
-        assert_eq!(plain, fully_encoded);
-        assert!(!plain.contains("route-token"));
+        assert_eq!(first, second);
+        assert_eq!(first, super::rate_limit_user_key("route-token"));
+        assert_ne!(first, super::rate_limit_user_key("attacker-controlled-1"));
+        let key = first;
+        assert!(!key.contains("route-token"));
     }
 
     #[test]
