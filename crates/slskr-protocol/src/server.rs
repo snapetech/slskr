@@ -790,15 +790,26 @@ impl ServerMessage {
                 })
             }
             (ServerCode::ConnectToPeer, Direction::ServerToClient) => {
+                let username = reader.read_string()?;
+                let connection_type = reader.read_string()?;
+                let ip = reader.read_ipv4()?;
+                let port = reader.read_u32_le()?;
+                let token = reader.read_u32_le()?;
+                let privileged = reader.read_bool()?;
+                let (obfuscation_type, obfuscated_port) = if reader.is_empty() {
+                    (0, 0)
+                } else {
+                    normalize_optional_obfuscated_port(reader.read_u32_le()?, reader.read_u32_le()?)
+                };
                 Self::ConnectToPeerResponse(ConnectToPeerResponse {
-                    username: reader.read_string()?,
-                    connection_type: reader.read_string()?,
-                    ip: reader.read_ipv4()?,
-                    port: reader.read_u32_le()?,
-                    token: reader.read_u32_le()?,
-                    privileged: reader.read_bool()?,
-                    obfuscation_type: reader.read_u32_le()?,
-                    obfuscated_port: reader.read_u32_le()?,
+                    username,
+                    connection_type,
+                    ip,
+                    port,
+                    token,
+                    privileged,
+                    obfuscation_type,
+                    obfuscated_port,
                 })
             }
             (ServerCode::MessageUser, Direction::ClientToServer) => Self::MessageUserRequest {
@@ -1276,13 +1287,30 @@ fn decode_wait_port(reader: &mut Reader<'_>) -> Result<WaitPort, DecodeError> {
 }
 
 fn decode_peer_address(reader: &mut Reader<'_>) -> Result<PeerAddress, DecodeError> {
+    let username = reader.read_string()?;
+    let ip = reader.read_ipv4()?;
+    let port = reader.read_u32_le()?;
+    let (obfuscation_type, obfuscated_port) = if reader.is_empty() {
+        (0, 0)
+    } else {
+        normalize_optional_obfuscated_port(reader.read_u32_le()?, u32::from(reader.read_u16_le()?))
+    };
     Ok(PeerAddress {
-        username: reader.read_string()?,
-        ip: reader.read_ipv4()?,
-        port: reader.read_u32_le()?,
-        obfuscation_type: reader.read_u32_le()?,
-        obfuscated_port: reader.read_u16_le()?,
+        username,
+        ip,
+        port,
+        obfuscation_type,
+        obfuscated_port: u16::try_from(obfuscated_port)
+            .expect("peer-address obfuscated port originated as u16"),
     })
+}
+
+fn normalize_optional_obfuscated_port(obfuscation_type: u32, port: u32) -> (u32, u32) {
+    if obfuscation_type == 1 && !(1..=u32::from(u16::MAX)).contains(&port) {
+        (0, 0)
+    } else {
+        (obfuscation_type, port)
+    }
 }
 
 fn decode_watched_user(reader: &mut Reader<'_>) -> Result<WatchedUser, DecodeError> {

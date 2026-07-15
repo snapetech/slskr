@@ -624,7 +624,7 @@ impl CatalogFilter {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchResultEntry {
     peer_username: Option<String>,
     filename: String,
@@ -771,7 +771,7 @@ fn stable_content_hash(path: &str, size: u64) -> u64 {
     hash
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchRecord {
     id: String,
     token: u32,
@@ -957,7 +957,7 @@ impl SearchRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchStore {
     records: Vec<SearchRecord>,
     next_token: u32,
@@ -13544,16 +13544,28 @@ async fn route_http_request_with_headers(
             let mutated = wishlist.clone();
             drop(wishlist);
             if created {
-                if let Err(error) = persist_wishlist_ignored_result_checked(state, &rule).await {
+                let (previous_searches, mutated_searches, changed_searches) = {
+                    let mut searches = state.searches.write().await;
+                    let previous = searches.clone();
+                    let changed = searches.suppress_ignored_result(&rule);
+                    let mutated = searches.clone();
+                    (previous, mutated, changed)
+                };
+                if let Err(error) = persist_wishlist_ignored_result_and_searches_checked(
+                    state,
+                    &rule,
+                    &changed_searches,
+                )
+                .await
+                {
                     rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                    let mut searches = state.searches.write().await;
+                    if *searches == mutated_searches {
+                        *searches = previous_searches;
+                    }
+                    drop(searches);
                     return Ok(routing::service_unavailable_response(&error));
                 }
-                let changed_searches = state
-                    .searches
-                    .write()
-                    .await
-                    .suppress_ignored_result(&rule);
-                persist_search_records(state, &changed_searches).await?;
             }
             let json = rule.json().to_string();
             if created {
@@ -25603,16 +25615,29 @@ fn persisted_wishlist_ignored_result(
     }
 }
 
-async fn persist_wishlist_ignored_result_checked(
+async fn persist_wishlist_ignored_result_and_searches_checked(
     state: &AppState,
     rule: &WishlistIgnoredResult,
+    searches: &[SearchRecord],
 ) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
         return Ok(false);
     };
-    db.upsert_wishlist_ignored_result(&persisted_wishlist_ignored_result(rule))
-        .await
-        .map_err(|error| format!("wishlist ignored-result persistence failed: {error}"))?;
+    let searches = searches
+        .iter()
+        .map(|search| {
+            (
+                persisted_search_record(search),
+                persisted_search_result_records(search),
+            )
+        })
+        .collect::<Vec<_>>();
+    db.upsert_wishlist_ignored_result_and_searches(
+        &persisted_wishlist_ignored_result(rule),
+        &searches,
+    )
+    .await
+    .map_err(|error| format!("wishlist ignored-result transaction failed: {error}"))?;
     Ok(true)
 }
 
@@ -36343,6 +36368,21 @@ mod tests {
             .await
             .add_item("Artist".to_owned(), "Album".to_owned(), "Audio".to_owned())
             .unwrap();
+        let search =
+            super::route_http_request("POST", "/api/wishlist/wish-1/search", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(search.status, "202 Accepted");
+        super::route_http_request(
+            "POST",
+            "/api/v0/search-responses",
+            None,
+            r#"{"token":1,"username":"friend","filename":"Remote/Album/One.flac","size":1}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let searches_before_failure = state.searches.read().await.clone();
         db.close_for_test().await;
 
         let create = super::route_http_request(
@@ -36356,6 +36396,7 @@ mod tests {
         .unwrap();
         assert_eq!(create.status, "503 Service Unavailable");
         assert!(state.wishlist.read().await.ignored_results.is_empty());
+        assert_eq!(*state.searches.read().await, searches_before_failure);
 
         let rule = state
             .wishlist

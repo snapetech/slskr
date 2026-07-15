@@ -50,6 +50,7 @@ for anchor in \
   'spotify_diagnostic_projections_redact_redirect_uri' \
   'share_tokens_use_headers_and_content_bound_stream_tickets' \
   'wishlist_ignored_folders_persist_and_suppress_existing_and_future_results' \
+  'wishlist_ignored_folder_mutations_roll_back_on_persistence_failure' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \

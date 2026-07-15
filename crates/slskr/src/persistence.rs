@@ -2541,11 +2541,13 @@ impl DatabaseManager {
         Ok(records)
     }
 
-    /// Insert a durable ignored wishlist result rule.
-    pub async fn upsert_wishlist_ignored_result(
+    /// Persist an ignored wishlist rule and its suppressed search snapshots atomically.
+    pub async fn upsert_wishlist_ignored_result_and_searches(
         &self,
-        record: &WishlistIgnoredResultRecord,
+        rule: &WishlistIgnoredResultRecord,
+        searches: &[(SearchRecord, Vec<SearchResultRecord>)],
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
         query(
             r#"
             INSERT OR REPLACE INTO wishlist_ignored_results
@@ -2553,13 +2555,58 @@ impl DatabaseManager {
             VALUES (?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&record.id)
-        .bind(&record.wishlist_item_id)
-        .bind(&record.username)
-        .bind(&record.directory)
-        .bind(record.created_at)
-        .execute(&self.pool)
+        .bind(&rule.id)
+        .bind(&rule.wishlist_item_id)
+        .bind(&rule.username)
+        .bind(&rule.directory)
+        .bind(rule.created_at)
+        .execute(&mut *transaction)
         .await?;
+        for (search, results) in searches {
+            query(
+                r#"
+                INSERT OR REPLACE INTO searches
+                    (id, query, status, result_count, created_at, completed_at, room, target)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&search.id)
+            .bind(&search.query)
+            .bind(&search.status)
+            .bind(search.result_count)
+            .bind(search.created_at)
+            .bind(search.completed_at)
+            .bind(&search.room)
+            .bind(&search.target)
+            .execute(&mut *transaction)
+            .await?;
+            query("DELETE FROM search_results WHERE search_id = ?")
+                .bind(&search.id)
+                .execute(&mut *transaction)
+                .await?;
+            for result in results {
+                query(
+                    r#"
+                    INSERT INTO search_results
+                        (search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    "#,
+                )
+                .bind(&search.id)
+                .bind(&result.peer_username)
+                .bind(&result.filename)
+                .bind(result.size)
+                .bind(&result.extension)
+                .bind(result.locked)
+                .bind(result.slot_free)
+                .bind(result.average_speed)
+                .bind(result.queue_length)
+                .bind(result.created_at)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+        transaction.commit().await?;
         Ok(())
     }
 

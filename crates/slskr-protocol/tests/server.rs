@@ -6,6 +6,7 @@ use slskr_protocol::{
         Direction, LoginRequest, LoginResponse, ObfuscatedPort, PeerAddress, RoomList,
         RoomListEntry, ServerCode, ServerMessage, TargetedSearchRequest, UserStats, WaitPort,
     },
+    Writer,
 };
 
 #[test]
@@ -106,6 +107,103 @@ fn peer_address_response_round_trips() {
     let decoded =
         ServerMessage::decode(message.encode().unwrap(), Direction::ServerToClient).unwrap();
     assert_eq!(decoded, message);
+}
+
+#[test]
+fn peer_address_response_ignores_zero_optional_obfuscated_port() {
+    let message = ServerMessage::GetPeerAddressResponse(PeerAddress {
+        username: "peer".to_owned(),
+        ip: Ipv4Addr::new(10, 0, 0, 7),
+        port: 2234,
+        obfuscation_type: 1,
+        obfuscated_port: 0,
+    });
+
+    let decoded =
+        ServerMessage::decode(message.encode().unwrap(), Direction::ServerToClient).unwrap();
+
+    assert_eq!(
+        decoded,
+        ServerMessage::GetPeerAddressResponse(PeerAddress {
+            username: "peer".to_owned(),
+            ip: Ipv4Addr::new(10, 0, 0, 7),
+            port: 2234,
+            obfuscation_type: 0,
+            obfuscated_port: 0,
+        })
+    );
+}
+
+#[test]
+fn connect_to_peer_response_ignores_out_of_range_optional_obfuscated_ports() {
+    for obfuscated_port in [0, 65_536, u32::MAX] {
+        let message =
+            ServerMessage::ConnectToPeerResponse(slskr_protocol::server::ConnectToPeerResponse {
+                username: "peer".to_owned(),
+                connection_type: "P".to_owned(),
+                ip: Ipv4Addr::new(192, 0, 2, 10),
+                port: 2234,
+                token: 42,
+                privileged: false,
+                obfuscation_type: 1,
+                obfuscated_port,
+            });
+
+        let decoded =
+            ServerMessage::decode(message.encode().unwrap(), Direction::ServerToClient).unwrap();
+
+        let ServerMessage::ConnectToPeerResponse(response) = decoded else {
+            panic!("expected connect-to-peer response");
+        };
+        assert_eq!(response.port, 2234);
+        assert_eq!(response.obfuscation_type, 0);
+        assert_eq!(response.obfuscated_port, 0);
+    }
+}
+
+#[test]
+fn peer_endpoint_responses_accept_omitted_optional_obfuscation_fields() {
+    let mut peer_address = Writer::new();
+    peer_address.write_string("peer").unwrap();
+    peer_address.write_ipv4(Ipv4Addr::new(10, 0, 0, 7));
+    peer_address.write_u32_le(2234);
+    let decoded = ServerMessage::decode(
+        MessageFrame::new(
+            ServerCode::GetPeerAddress.as_u32(),
+            peer_address.into_inner(),
+        ),
+        Direction::ServerToClient,
+    )
+    .unwrap();
+    assert_eq!(
+        decoded,
+        ServerMessage::GetPeerAddressResponse(PeerAddress {
+            username: "peer".to_owned(),
+            ip: Ipv4Addr::new(10, 0, 0, 7),
+            port: 2234,
+            obfuscation_type: 0,
+            obfuscated_port: 0,
+        })
+    );
+
+    let mut connect = Writer::new();
+    connect.write_string("peer").unwrap();
+    connect.write_string("P").unwrap();
+    connect.write_ipv4(Ipv4Addr::new(192, 0, 2, 10));
+    connect.write_u32_le(2234);
+    connect.write_u32_le(42);
+    connect.write_bool(false);
+    let decoded = ServerMessage::decode(
+        MessageFrame::new(ServerCode::ConnectToPeer.as_u32(), connect.into_inner()),
+        Direction::ServerToClient,
+    )
+    .unwrap();
+    let ServerMessage::ConnectToPeerResponse(response) = decoded else {
+        panic!("expected connect-to-peer response");
+    };
+    assert_eq!(response.port, 2234);
+    assert_eq!(response.obfuscation_type, 0);
+    assert_eq!(response.obfuscated_port, 0);
 }
 
 #[test]
