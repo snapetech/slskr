@@ -27,6 +27,10 @@ for anchor in \
   'shared_file_confined_open_rejects_symlinked_parent' \
   'scan_share_root_unix' \
   'share_scan_does_not_follow_symlinked_directory' \
+  'MAX_SHARE_SCAN_ENTRIES' \
+  'share_scan_bounds_aggregate_directory_entries' \
+  'MAX_SHARE_SCAN_PENDING_DIRECTORIES' \
+  'share_scan_bounds_pending_directory_descriptors' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \

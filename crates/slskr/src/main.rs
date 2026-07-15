@@ -365,6 +365,22 @@ struct ShareScanOptions {
     max_files: usize,
 }
 
+const MAX_SHARE_SCAN_ENTRIES: usize = 65_536;
+#[cfg(unix)]
+const MAX_SHARE_SCAN_PENDING_DIRECTORIES: usize = 256;
+const SHARE_SCAN_ENTRY_LIMIT_ERROR: &str = "share scan stopped at aggregate directory entry limit";
+#[cfg(unix)]
+const SHARE_SCAN_PENDING_DIRECTORY_LIMIT_ERROR: &str =
+    "share scan stopped at pending directory limit";
+
+fn reserve_share_scan_entry(scanned_entries: &mut usize) -> bool {
+    if *scanned_entries >= MAX_SHARE_SCAN_ENTRIES {
+        return false;
+    }
+    *scanned_entries += 1;
+    true
+}
+
 #[derive(Clone, Debug)]
 struct ShareIndexSnapshot {
     entries: Vec<FileEntry>,
@@ -27124,6 +27140,7 @@ fn scan_share_dirs(
     let mut local_paths = BTreeMap::new();
     let mut root_summaries = Vec::new();
     let mut errors = Vec::new();
+    let mut scanned_entries = 0;
 
     for (index, root) in roots.iter().enumerate() {
         let label = share_root_label(root, index);
@@ -27135,6 +27152,7 @@ fn scan_share_dirs(
             &mut entries,
             &mut local_paths,
             &mut errors,
+            &mut scanned_entries,
         );
         let root_entries = &entries[before..];
         root_summaries.push(ShareRoot {
@@ -27143,7 +27161,7 @@ fn scan_share_dirs(
             bytes: root_entries.iter().map(|entry| entry.size).sum(),
             extensions: summarize_extensions(root_entries),
         });
-        if entries.len() >= max_files {
+        if entries.len() >= max_files || scanned_entries >= MAX_SHARE_SCAN_ENTRIES {
             break;
         }
     }
@@ -27185,6 +27203,7 @@ fn scan_share_root(
     entries: &mut Vec<FileEntry>,
     local_paths: &mut BTreeMap<String, PathBuf>,
     errors: &mut Vec<String>,
+    scanned_entries: &mut usize,
 ) {
     if entries.len() >= options.max_files {
         return;
@@ -27192,7 +27211,15 @@ fn scan_share_root(
 
     #[cfg(unix)]
     if !options.follow_symlinks {
-        scan_share_root_unix(root, label, options, entries, local_paths, errors);
+        scan_share_root_unix(
+            root,
+            label,
+            options,
+            entries,
+            local_paths,
+            errors,
+            scanned_entries,
+        );
         return;
     }
 
@@ -27248,6 +27275,11 @@ fn scan_share_root(
         for child in read_dir {
             if entries.len() >= options.max_files {
                 errors.push("share scan stopped at SLSKR_SHARE_SCAN_MAX_FILES".to_owned());
+                return;
+            }
+
+            if !reserve_share_scan_entry(scanned_entries) {
+                errors.push(SHARE_SCAN_ENTRY_LIMIT_ERROR.to_owned());
                 return;
             }
 
@@ -27322,6 +27354,7 @@ fn scan_share_root_unix(
     entries: &mut Vec<FileEntry>,
     local_paths: &mut BTreeMap<String, PathBuf>,
     errors: &mut Vec<String>,
+    scanned_entries: &mut usize,
 ) {
     use rustix::fs::{open, openat, Dir, Mode, OFlags};
     use std::os::unix::ffi::OsStrExt;
@@ -27359,6 +27392,10 @@ fn scan_share_root_unix(
                 errors.push("share scan stopped at SLSKR_SHARE_SCAN_MAX_FILES".to_owned());
                 return;
             }
+            if !reserve_share_scan_entry(scanned_entries) {
+                errors.push(SHARE_SCAN_ENTRY_LIMIT_ERROR.to_owned());
+                return;
+            }
             let Ok(child) = child else {
                 errors.push(format!(
                     "{}: entry unreadable",
@@ -27376,6 +27413,10 @@ fn scan_share_root_unix(
             }
             let relative = relative_directory.join(name_os);
             if let Ok(child_directory) = openat(&directory, name, directory_flags, Mode::empty()) {
+                if stack.len() >= MAX_SHARE_SCAN_PENDING_DIRECTORIES {
+                    errors.push(SHARE_SCAN_PENDING_DIRECTORY_LIMIT_ERROR.to_owned());
+                    return;
+                }
                 stack.push((relative, child_directory));
                 continue;
             }
@@ -44459,6 +44500,40 @@ mod tests {
         assert_eq!(scan.roots[0].extensions[0].bytes, 5);
         assert!(scan.roots[0].json().contains("\"bytes\":5"));
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn share_scan_bounds_aggregate_directory_entries() {
+        let mut scanned_entries = super::MAX_SHARE_SCAN_ENTRIES - 1;
+        assert!(super::reserve_share_scan_entry(&mut scanned_entries));
+        assert_eq!(scanned_entries, super::MAX_SHARE_SCAN_ENTRIES);
+        assert!(!super::reserve_share_scan_entry(&mut scanned_entries));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn share_scan_bounds_pending_directory_descriptors() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-share-scan-width-test-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        for index in 0..=super::MAX_SHARE_SCAN_PENDING_DIRECTORIES {
+            std::fs::create_dir(root.join(format!("directory-{index:04}"))).unwrap();
+        }
+
+        let scan = super::scan_share_dirs(std::slice::from_ref(&root), false, false, 100);
+
+        assert!(scan.entries.is_empty());
+        assert!(scan
+            .errors
+            .iter()
+            .any(|error| error == super::SHARE_SCAN_PENDING_DIRECTORY_LIMIT_ERROR));
         std::fs::remove_dir_all(root).unwrap();
     }
 
