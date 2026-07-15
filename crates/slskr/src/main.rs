@@ -2262,6 +2262,8 @@ struct TransferEntry {
     #[serde(default)]
     start_offset: u64,
     updated_at: u64,
+    #[serde(default)]
+    updated_at_ms: u64,
 }
 
 impl TransferEntry {
@@ -2803,6 +2805,7 @@ impl TransferQueue {
         reason: String,
     ) -> TransferEntry {
         let now = unix_timestamp();
+        let now_ms = unix_timestamp_millis();
         let id = self.allocate_id();
         let entry = TransferEntry {
             id,
@@ -2832,6 +2835,7 @@ impl TransferQueue {
             started_at: None,
             start_offset: 0,
             updated_at: now,
+            updated_at_ms: now_ms,
         };
         self.push_entry(entry)
     }
@@ -2845,6 +2849,7 @@ impl TransferQueue {
         size: u64,
     ) -> TransferEntry {
         let now = unix_timestamp();
+        let now_ms = unix_timestamp_millis();
         let id = self.allocate_id();
         let entry = TransferEntry {
             id,
@@ -2874,6 +2879,7 @@ impl TransferQueue {
             started_at: None,
             start_offset: 0,
             updated_at: now,
+            updated_at_ms: now_ms,
         };
         self.push_entry(entry)
     }
@@ -2930,6 +2936,7 @@ impl TransferQueue {
         details: TransferRequestDetails,
     ) -> TransferEntry {
         let now = unix_timestamp();
+        let now_ms = unix_timestamp_millis();
         let id = self.allocate_id();
         let token = self.allocate_token();
         let entry = TransferEntry {
@@ -2960,6 +2967,7 @@ impl TransferQueue {
             started_at: None,
             start_offset: 0,
             updated_at: now,
+            updated_at_ms: now_ms,
         };
         self.push_entry(entry)
     }
@@ -3007,6 +3015,7 @@ impl TransferQueue {
         }
         entry.reason = bounded_transfer_reason(reason);
         entry.updated_at = now;
+        entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -3037,6 +3046,7 @@ impl TransferQueue {
         }
         entry.reason = bounded_transfer_reason(reason);
         entry.updated_at = now;
+        entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -3057,6 +3067,7 @@ impl TransferQueue {
         entry.bytes_transferred = bytes_transferred;
         entry.reason = None;
         entry.updated_at = now;
+        entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -3077,6 +3088,7 @@ impl TransferQueue {
         entry.bit_depth = metadata.bit_depth.or(entry.bit_depth);
         entry.length_seconds = metadata.length_seconds.or(entry.length_seconds);
         entry.updated_at = unix_timestamp();
+        entry.updated_at_ms = unix_timestamp_millis();
         let entry = entry.clone();
         self.persist_state();
         self.updated_at = unix_timestamp();
@@ -3145,6 +3157,7 @@ impl TransferQueue {
         entry.status = "accepted".to_owned();
         entry.reason = None;
         entry.updated_at = unix_timestamp();
+        entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -3182,6 +3195,7 @@ impl TransferQueue {
         entry.status = "accepted".to_owned();
         entry.reason = None;
         entry.updated_at = unix_timestamp();
+        entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
         }
@@ -3803,6 +3817,9 @@ fn bounded_transfer_reason(reason: Option<String>) -> Option<String> {
 }
 
 fn bounded_transfer_entry(mut entry: TransferEntry) -> TransferEntry {
+    if entry.updated_at_ms == 0 {
+        entry.updated_at_ms = entry.updated_at.saturating_mul(1_000);
+    }
     entry.peer_username = entry
         .peer_username
         .map(|username| truncate_utf8_bytes(username, MAX_TRANSFER_USERNAME_BYTES));
@@ -4484,6 +4501,245 @@ async fn discover_mesh_range_sources(
                 })
         })
         .collect()
+}
+
+fn swarm_analytics_dashboard(
+    store: &multisource::SwarmStore,
+    time_window_hours: u64,
+    ranking_limit: usize,
+) -> serde_json::Value {
+    let cutoff = unix_timestamp().saturating_sub(time_window_hours.saturating_mul(3_600));
+    let jobs = store
+        .list()
+        .into_iter()
+        .filter(|job| job.created_at >= cutoff)
+        .collect::<Vec<_>>();
+    let total_downloads = jobs.len() as u64;
+    let successful_downloads = jobs.iter().filter(|job| job.status == "completed").count() as u64;
+    let failed_downloads = jobs.iter().filter(|job| job.status == "failed").count() as u64;
+    let completed = jobs
+        .iter()
+        .filter_map(|job| job.result.as_ref().filter(|result| result.success))
+        .collect::<Vec<_>>();
+    let total_bytes = completed
+        .iter()
+        .map(|result| result.bytes_downloaded)
+        .sum::<u64>();
+    let total_chunks = completed
+        .iter()
+        .map(|result| result.chunks.len() as u64)
+        .sum::<u64>();
+    let attempted_chunks = jobs.iter().map(|job| job.total_chunks).sum::<u64>();
+    let average_duration =
+        average_u64(completed.iter().map(|result| result.total_time_ms)) / 1_000.0;
+    let average_sources = average_u64(completed.iter().map(|result| result.sources_used as u64));
+    let average_speed = if completed.is_empty() {
+        0.0
+    } else {
+        completed
+            .iter()
+            .map(|result| {
+                result.bytes_downloaded as f64 / (result.total_time_ms.max(1) as f64 / 1_000.0)
+            })
+            .sum::<f64>()
+            / completed.len() as f64
+    };
+    let success_rate = ratio(successful_downloads, total_downloads);
+    let chunk_success_rate = ratio(total_chunks, attempted_chunks);
+
+    let mut peers = BTreeMap::<String, (String, u64, u64, u64)>::new();
+    let mut available_peers = HashSet::new();
+    for job in &jobs {
+        available_peers.extend(job.sources.iter().map(|source| source.to_ascii_lowercase()));
+        if let Some(result) = job.result.as_ref() {
+            for chunk in &result.chunks {
+                let entry = peers
+                    .entry(chunk.username.to_ascii_lowercase())
+                    .or_insert_with(|| (chunk.username.clone(), 0, 0, 0));
+                entry.1 = entry.1.saturating_add(1);
+                entry.2 = entry.2.saturating_add(chunk.bytes_downloaded);
+                entry.3 = entry.3.saturating_add(chunk.time_ms);
+            }
+        }
+    }
+    let mut peer_rows = peers
+        .into_values()
+        .map(|(peer_id, chunks, bytes, time_ms)| {
+            let average_rtt = if chunks == 0 {
+                0.0
+            } else {
+                time_ms as f64 / chunks as f64
+            };
+            let throughput = bytes as f64 / (time_ms.max(1) as f64 / 1_000.0);
+            (peer_id, chunks, bytes, average_rtt, throughput)
+        })
+        .collect::<Vec<_>>();
+    peer_rows.sort_by(|left, right| {
+        right.2.cmp(&left.2).then_with(|| {
+            left.0
+                .to_ascii_lowercase()
+                .cmp(&right.0.to_ascii_lowercase())
+        })
+    });
+    let active_peer_count = peer_rows.len() as u64;
+    let peer_rankings = peer_rows
+        .into_iter()
+        .take(ranking_limit)
+        .enumerate()
+        .map(
+            |(index, (peer_id, chunks, bytes, average_rtt, throughput))| {
+                serde_json::json!({
+                    "peerId": peer_id,
+                    "source": "overlay",
+                    "reputationScore": 1.0,
+                    "averageRttMs": average_rtt,
+                    "averageThroughputBytesPerSecond": throughput,
+                    "chunksCompleted": chunks,
+                    "chunksFailed": 0,
+                    "chunkSuccessRate": 1.0,
+                    "totalBytesTransferred": bytes,
+                    "rank": index + 1,
+                })
+            },
+        )
+        .collect::<Vec<_>>();
+    let peer_utilization = ratio(active_peer_count, available_peers.len() as u64);
+    let rescue_count = jobs
+        .iter()
+        .filter(|job| job.output_path.starts_with("rescue/"))
+        .count() as u64;
+    let first_byte_samples = completed
+        .iter()
+        .filter_map(|result| result.chunks.iter().map(|chunk| chunk.time_ms).min())
+        .collect::<Vec<_>>();
+    let efficiency = serde_json::json!({
+        "chunkUtilization": ratio(total_chunks, attempted_chunks),
+        "peerUtilization": peer_utilization,
+        "redundancyFactor": if total_chunks == 0 { 0.0 } else { 1.0 },
+        "averageTimeToFirstByteMs": average_u64(first_byte_samples.into_iter()),
+        "averageReassignmentRate": 0.0,
+        "averageRescueRate": ratio(rescue_count, total_downloads),
+    });
+    let performance = serde_json::json!({
+        "totalDownloads": total_downloads,
+        "successfulDownloads": successful_downloads,
+        "failedDownloads": failed_downloads,
+        "successRate": success_rate,
+        "averageDurationSeconds": average_duration,
+        "averageSpeedBytesPerSecond": average_speed,
+        "averageSourcesUsed": average_sources,
+        "totalBytesDownloaded": total_bytes,
+        "totalChunksCompleted": total_chunks,
+        "chunkSuccessRate": chunk_success_rate,
+        "timeWindow": format_dotnet_hours(time_window_hours),
+    });
+    let mut recommendations = Vec::new();
+    if success_rate < 0.8 {
+        recommendations.push(swarm_recommendation(
+            "PeerSelection",
+            "High",
+            "Low Success Rate",
+            "Review peer reputation thresholds and source availability.",
+            0.3,
+        ));
+    }
+    if chunk_success_rate < 0.9 {
+        recommendations.push(swarm_recommendation(
+            "ChunkSize",
+            "Medium",
+            "High Chunk Failure Rate",
+            "Reduce chunk size or increase bounded source timeouts.",
+            0.2,
+        ));
+    }
+    if peer_utilization < 0.5 {
+        recommendations.push(swarm_recommendation(
+            "SourceCount",
+            "Low",
+            "Low Peer Utilization",
+            "Increase the number of verified sources per download.",
+            0.15,
+        ));
+    }
+    if average_speed / (1024.0 * 1024.0) < 0.5 {
+        recommendations.push(swarm_recommendation(
+            "NetworkConfig",
+            "High",
+            "Low Download Speed",
+            "Check connectivity and add verified sources.",
+            0.4,
+        ));
+    }
+    recommendations.sort_by(|left, right| {
+        recommendation_priority(right)
+            .cmp(&recommendation_priority(left))
+            .then_with(|| {
+                right["estimatedImpact"]
+                    .as_f64()
+                    .partial_cmp(&left["estimatedImpact"].as_f64())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+    serde_json::json!({
+        "performanceMetrics": performance,
+        "peerRankings": peer_rankings,
+        "efficiencyMetrics": efficiency,
+        "recommendations": recommendations,
+    })
+}
+
+fn ratio(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+fn average_u64(values: impl Iterator<Item = u64>) -> f64 {
+    let (total, count) = values.fold((0_u128, 0_u64), |(total, count), value| {
+        (total.saturating_add(u128::from(value)), count + 1)
+    });
+    if count == 0 {
+        0.0
+    } else {
+        total as f64 / count as f64
+    }
+}
+
+fn format_dotnet_hours(hours: u64) -> String {
+    if hours < 24 {
+        format!("{hours:02}:00:00")
+    } else {
+        format!("{}.{:02}:00:00", hours / 24, hours % 24)
+    }
+}
+
+fn swarm_recommendation(
+    kind: &str,
+    priority: &str,
+    title: &str,
+    action: &str,
+    estimated_impact: f64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": kind,
+        "priority": priority,
+        "title": title,
+        "description": title,
+        "action": action,
+        "estimatedImpact": estimated_impact,
+    })
+}
+
+fn recommendation_priority(value: &serde_json::Value) -> u8 {
+    match value["priority"].as_str() {
+        Some("Critical") => 4,
+        Some("High") => 3,
+        Some("Medium") => 2,
+        Some("Low") => 1,
+        _ => 0,
+    }
 }
 
 async fn content_discovery_error_response(state: &AppState, error: String) -> HttpResponse {
@@ -5186,6 +5442,7 @@ struct MessageRecord {
     body: String,
     acknowledged: bool,
     created_at: u64,
+    created_at_ms: u64,
     updated_at: u64,
 }
 
@@ -5254,6 +5511,9 @@ impl MessageStore {
                     body: truncate_utf8_bytes(record.content, MAX_MESSAGE_BODY_BYTES),
                     acknowledged: record.read,
                     created_at: u64::try_from(record.created_at).unwrap_or_default(),
+                    created_at_ms: u64::try_from(record.created_at)
+                        .unwrap_or_default()
+                        .saturating_mul(1_000),
                     updated_at: u64::try_from(record.created_at).unwrap_or_default(),
                 })
             })
@@ -5282,6 +5542,7 @@ impl MessageStore {
 
     fn add(&mut self, username: String, direction: &'static str, body: String) -> MessageRecord {
         let now = unix_timestamp();
+        let now_ms = unix_timestamp_millis();
         let id = self.allocate_id();
         let record = MessageRecord {
             id,
@@ -5290,6 +5551,7 @@ impl MessageStore {
             body: truncate_utf8_bytes(body, MAX_MESSAGE_BODY_BYTES),
             acknowledged: false,
             created_at: now,
+            created_at_ms: now_ms,
             updated_at: now,
         };
         self.records.push(record.clone());
@@ -5423,13 +5685,29 @@ impl MessageStore {
         serde_json::Value::Array(conversations).to_string()
     }
 
-    fn slskd_conversation_json(&self, username: &str, include_messages: bool) -> String {
+    fn slskd_conversation_json(
+        &self,
+        username: &str,
+        include_messages: bool,
+        since: Option<u64>,
+    ) -> String {
         let messages = self
             .records
             .iter()
             .filter(|record| record.username == username)
             .collect::<Vec<_>>();
-        slskd_conversation_json(username.to_owned(), messages, include_messages).to_string()
+        let mut conversation =
+            slskd_conversation_json(username.to_owned(), messages.clone(), false);
+        if include_messages {
+            conversation["messages"] = serde_json::Value::Array(
+                messages
+                    .into_iter()
+                    .filter(|record| since.is_none_or(|since| record.created_at_ms > since))
+                    .map(MessageRecord::slskd_json)
+                    .collect(),
+            );
+        }
+        conversation.to_string()
     }
 
     fn slskd_messages_json(&self, username: &str, unacknowledged_only: bool) -> String {
@@ -5621,23 +5899,28 @@ fn slskd_conversation_json(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomMessageRecord {
+    id: u64,
     username: String,
     body: String,
     created_at: u64,
+    created_at_ms: u64,
 }
 
 impl RoomMessageRecord {
     fn json(&self) -> String {
         format!(
-            "{{\"username\":\"{}\",\"body\":\"{}\",\"created_at\":{}}}",
+            "{{\"id\":{},\"username\":\"{}\",\"body\":\"{}\",\"created_at\":{},\"created_at_ms\":{}}}",
+            self.id,
             json_escape(&self.username),
             json_escape(&self.body),
-            self.created_at
+            self.created_at,
+            self.created_at_ms
         )
     }
 
     fn slskd_json(&self, room_name: &str) -> serde_json::Value {
         serde_json::json!({
+            "id": self.id.to_string(),
             "timestamp": self.created_at.to_string(),
             "username": self.username,
             "message": self.body,
@@ -5712,6 +5995,7 @@ impl RoomRecord {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomStore {
     records: Vec<RoomRecord>,
+    next_message_id: u64,
     updated_at: u64,
     max_records: usize,
     max_members_per_room: usize,
@@ -5725,6 +6009,7 @@ impl RoomStore {
     fn with_limits(max_records: usize, max_members_per_room: usize) -> Self {
         Self {
             records: Vec::new(),
+            next_message_id: 1,
             updated_at: unix_timestamp(),
             max_records: max_records.max(1),
             max_members_per_room: max_members_per_room.max(1),
@@ -5914,11 +6199,15 @@ impl RoomStore {
             self.evict_oldest_message()?;
         }
         let now = unix_timestamp();
+        let now_ms = unix_timestamp_millis();
+        let id = self.allocate_message_id();
         let record = &mut self.records[record_index];
         record.messages.push(RoomMessageRecord {
+            id,
             username: truncate_utf8_bytes(username, MAX_ROOM_USERNAME_BYTES),
             body: truncate_utf8_bytes(body, MAX_ROOM_MESSAGE_BODY_BYTES),
             created_at: now,
+            created_at_ms: now_ms,
         });
         if record.messages.len() > MAX_ROOM_MESSAGES_PER_ROOM {
             let excess = record.messages.len() - MAX_ROOM_MESSAGES_PER_ROOM;
@@ -5927,6 +6216,23 @@ impl RoomStore {
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
+    }
+
+    fn allocate_message_id(&mut self) -> u64 {
+        let mut candidate = self.next_message_id.max(1);
+        for _ in 0..=self.total_messages() {
+            if !self
+                .records
+                .iter()
+                .flat_map(|room| room.messages.iter())
+                .any(|message| message.id == candidate)
+            {
+                self.next_message_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded room message history must leave an available u64 id")
     }
 
     fn activity_json(&self, local_username: &str) -> String {
@@ -12872,6 +13178,7 @@ async fn route_http_request_with_headers(
             }) {
                 entry.request_name = Some(name.clone());
                 entry.updated_at = unix_timestamp();
+                entry.updated_at_ms = unix_timestamp_millis();
                 updated.push(entry.clone());
             }
             if updated.is_empty() {
@@ -12936,6 +13243,109 @@ async fn route_http_request_with_headers(
                 return Ok(routing::service_unavailable_response(&error));
             }
             Ok(routing::no_content_response())
+        }
+
+        ("GET", "/api/transfers/changes") => {
+            let since = match query_millis_parameter(route.query, "since") {
+                Ok(value) => value,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            let include_completed = query_parameter(route.query, "includeCompleted")
+                .as_deref()
+                .and_then(parse_bool_value)
+                .unwrap_or(true);
+            let snapshot_at = unix_timestamp_millis();
+            let transfers = state.transfers.read().await;
+            let rows = transfers
+                .entries
+                .iter()
+                .filter(|entry| entry.updated_at_ms <= snapshot_at)
+                .filter(|entry| {
+                    since.is_some()
+                        || include_completed
+                        || !matches!(entry.status.as_str(), "succeeded" | "completed")
+                })
+                .filter(|entry| since.is_none_or(|since| entry.updated_at_ms > since))
+                .map(TransferEntry::slskd_file_json)
+                .collect::<Vec<_>>();
+            let download = transfers
+                .entries
+                .iter()
+                .filter(|entry| entry.direction == 0)
+                .count();
+            let upload = transfers.entries.len().saturating_sub(download);
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "cursor": snapshot_at,
+                    "counts": { "download": download, "upload": upload },
+                    "transfers": rows,
+                })
+                .to_string(),
+            ))
+        }
+
+        ("GET", "/api/transfers/history") => {
+            let direction = query_parameter(route.query, "direction").unwrap_or_default();
+            let direction = match direction.trim().to_ascii_lowercase().as_str() {
+                "download" => 0,
+                "upload" => 1,
+                _ => {
+                    return Ok(routing::bad_request_response(
+                        "direction must be 'download' or 'upload'",
+                    ))
+                }
+            };
+            let as_of = match query_millis_parameter(route.query, "asOf") {
+                Ok(value) => value.unwrap_or_else(unix_timestamp_millis),
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            let offset = match query_bounded_usize(route.query, "offset", 0, usize::MAX) {
+                Ok(value) => value.unwrap_or(0),
+                Err(_) => {
+                    return Ok(routing::bad_request_response(
+                        "offset must be greater than or equal to zero",
+                    ))
+                }
+            };
+            let limit = match query_bounded_usize(route.query, "limit", 1, 500) {
+                Ok(value) => value.unwrap_or(250),
+                Err(_) => {
+                    return Ok(routing::bad_request_response(
+                        "limit must be between 1 and 500",
+                    ))
+                }
+            };
+            let transfers = state.transfers.read().await;
+            let mut rows = transfers
+                .entries
+                .iter()
+                .filter(|entry| entry.direction == direction)
+                .filter(|entry| matches!(entry.status.as_str(), "succeeded" | "completed"))
+                .filter(|entry| entry.updated_at_ms <= as_of)
+                .collect::<Vec<_>>();
+            rows.sort_by_key(|entry| {
+                std::cmp::Reverse((entry.updated_at_ms, entry.requested_at, entry.id))
+            });
+            let page = rows
+                .into_iter()
+                .skip(offset)
+                .take(limit.saturating_add(1))
+                .collect::<Vec<_>>();
+            let has_more = page.len() > limit;
+            let rows = page
+                .into_iter()
+                .take(limit)
+                .map(TransferEntry::slskd_file_json)
+                .collect::<Vec<_>>();
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "asOf": as_of,
+                    "hasMore": has_more,
+                    "nextOffset": offset.saturating_add(rows.len()),
+                    "transfers": rows,
+                })
+                .to_string(),
+            ))
         }
 
         ("POST", "/api/transfers") => {
@@ -13645,6 +14055,7 @@ async fn route_http_request_with_headers(
                  if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
                      entry.status = "cancelled".to_owned();
                      entry.updated_at = unix_timestamp();
+                     entry.updated_at_ms = unix_timestamp_millis();
                      let json_response = entry.json();
                      let mutated = entry.clone();
                      drop(transfers);
@@ -13760,6 +14171,7 @@ async fn route_http_request_with_headers(
                             entry.status = "peer_lookup".to_owned();
                             entry.reason = None;
                             entry.updated_at = unix_timestamp();
+                            entry.updated_at_ms = unix_timestamp_millis();
                             let json_response = entry.json();
                             let username_clone = username.clone();
                             let entry = entry.clone();
@@ -13786,6 +14198,7 @@ async fn route_http_request_with_headers(
                             entry.reason = None;
 
                             entry.updated_at = unix_timestamp();
+                            entry.updated_at_ms = unix_timestamp_millis();
                             let json_response = entry.json();
                             let entry = entry.clone();
                             drop(transfers);
@@ -13802,6 +14215,7 @@ async fn route_http_request_with_headers(
                         entry.status = "in_progress".to_owned();
                         entry.bytes_transferred = bytes_transferred;
                         entry.updated_at = unix_timestamp();
+                        entry.updated_at_ms = unix_timestamp_millis();
                         let json_response = entry.json();
                         let entry = entry.clone();
                         drop(transfers);
@@ -13818,6 +14232,7 @@ async fn route_http_request_with_headers(
                          entry.bytes_transferred = bytes_transferred;
                          entry.status = status_str.clone();
                          entry.updated_at = unix_timestamp();
+                         entry.updated_at_ms = unix_timestamp_millis();
                          let json_response = entry.json();
                          let entry_for_persistence = entry.clone();
 
@@ -14426,11 +14841,16 @@ async fn route_http_request_with_headers(
         {
             let room_name = joined_room_subresource(path, "/messages")
                 .expect("guarded joined-room messages path");
+            let since = match query_millis_parameter(route.query, "since") {
+                Ok(value) => value,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
             let rooms = state.rooms.read().await;
             if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
                 let messages = room
                     .messages
                     .iter()
+                    .filter(|message| since.is_none_or(|since| message.created_at_ms > since))
                     .map(|message| message.slskd_json(&room.name))
                     .collect::<Vec<_>>();
                 let json = serde_json::Value::Array(messages).to_string();
@@ -16883,8 +17303,12 @@ async fn route_http_request_with_headers(
                 .find(|(key, _)| key == "includeMessages")
                 .and_then(|(_, value)| parse_bool_value(&value))
                 .unwrap_or(true);
+            let since = match query_millis_parameter(route.query, "since") {
+                Ok(value) => value,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
             let messages = state.messages.read().await;
-            let body = messages.slskd_conversation_json(&username, include_messages);
+            let body = messages.slskd_conversation_json(&username, include_messages, since);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -18283,11 +18707,124 @@ async fn route_http_request_with_headers(
              Ok(routing::ok_response(json))
          }
 
+         ("GET", "/api/swarm/analytics/dashboard") => {
+             let time_window_hours = match query_bounded_usize(
+                 route.query,
+                 "timeWindowHours",
+                 1,
+                 168,
+             ) {
+                 Ok(value) => value.unwrap_or(24) as u64,
+                 Err(()) => {
+                     return Ok(routing::bad_request_response(
+                         "Time window must be between 1 and 168 hours (7 days)",
+                     ));
+                 }
+             };
+             let ranking_limit = match query_bounded_usize(route.query, "rankingLimit", 1, 100) {
+                 Ok(value) => value.unwrap_or(20),
+                 Err(()) => {
+                     return Ok(routing::bad_request_response(
+                         "Ranking limit must be between 1 and 100",
+                     ));
+                 }
+             };
+             let swarms = state.multisource.read().await;
+             let dashboard = swarm_analytics_dashboard(&swarms, time_window_hours, ranking_limit);
+             drop(swarms);
+             Ok(routing::ok_response(dashboard.to_string()))
+         }
+
+         ("GET", "/api/swarm/analytics/performance") => {
+             let time_window_hours = match query_bounded_usize(
+                 route.query,
+                 "timeWindowHours",
+                 1,
+                 168,
+             ) {
+                 Ok(value) => value.unwrap_or(24) as u64,
+                 Err(()) => {
+                     return Ok(routing::bad_request_response(
+                         "Time window must be between 1 and 168 hours (7 days)",
+                     ));
+                 }
+             };
+             let swarms = state.multisource.read().await;
+             let dashboard = swarm_analytics_dashboard(&swarms, time_window_hours, 20);
+             drop(swarms);
+             Ok(routing::ok_response(
+                 dashboard["performanceMetrics"].to_string(),
+             ))
+         }
+
+         ("GET", "/api/swarm/analytics/peers/rankings") => {
+             let limit = match query_bounded_usize(route.query, "limit", 1, 100) {
+                 Ok(value) => value.unwrap_or(20),
+                 Err(()) => {
+                     return Ok(routing::bad_request_response(
+                         "Limit must be between 1 and 100",
+                     ));
+                 }
+             };
+             let swarms = state.multisource.read().await;
+             let dashboard = swarm_analytics_dashboard(&swarms, 24, limit);
+             drop(swarms);
+             Ok(routing::ok_response(dashboard["peerRankings"].to_string()))
+         }
+
+         ("GET", "/api/swarm/analytics/efficiency") => {
+             let time_window_hours = match query_bounded_usize(
+                 route.query,
+                 "timeWindowHours",
+                 1,
+                 168,
+             ) {
+                 Ok(value) => value.unwrap_or(24) as u64,
+                 Err(()) => {
+                     return Ok(routing::bad_request_response(
+                         "Time window must be between 1 and 168 hours (7 days)",
+                     ));
+                 }
+             };
+             let swarms = state.multisource.read().await;
+             let dashboard = swarm_analytics_dashboard(&swarms, time_window_hours, 100);
+             drop(swarms);
+             Ok(routing::ok_response(
+                 dashboard["efficiencyMetrics"].to_string(),
+             ))
+         }
+
+         ("GET", "/api/swarm/analytics/trends") => {
+             if query_bounded_usize(route.query, "timeWindowHours", 1, 168).is_err() {
+                 return Ok(routing::bad_request_response(
+                     "Time window must be between 1 and 168 hours (7 days)",
+                 ));
+             }
+             if query_bounded_usize(route.query, "dataPoints", 2, 168).is_err() {
+                 return Ok(routing::bad_request_response(
+                     "Data points must be between 2 and 168",
+                 ));
+             }
+             Ok(routing::ok_response(
+                 serde_json::json!({
+                     "timePoints": [],
+                     "successRates": [],
+                     "averageSpeeds": [],
+                     "averageDurations": [],
+                     "averageSourcesUsed": [],
+                     "downloadCounts": [],
+                 })
+                 .to_string(),
+             ))
+         }
+
          ("GET", "/api/swarm/analytics/recommendations") => {
-             let interests = state.interests.read().await;
-             let json = interests.recommendations_json("recommendations");
-             drop(interests);
-             Ok(routing::ok_response(json))
+             let swarms = state.multisource.read().await;
+             let dashboard = swarm_analytics_dashboard(&swarms, 24, 10);
+             drop(swarms);
+             Ok(routing::ok_response(
+                 dashboard["recommendations"].to_string(),
+             ))
          }
 
         ("GET", "/api/telemetry/metrics") => {
@@ -22061,6 +22598,44 @@ fn extract_json_u32_field(body: &str, field: &str) -> Option<u32> {
         .get(field)?
         .as_u64()
         .and_then(|value| u32::try_from(value).ok())
+}
+
+const MAX_SUPPORTED_UNIX_MILLIS: u64 = 253_402_300_799_999;
+
+fn query_millis_parameter(query: Option<&str>, name: &str) -> Result<Option<u64>, String> {
+    let Some(raw) = query_parameter(query, name) else {
+        return Ok(None);
+    };
+    let parsed = raw
+        .parse::<i128>()
+        .map_err(|_| format!("{name} is outside the supported Unix timestamp range"))?;
+    if parsed < 0 {
+        return Err(format!(
+            "{name} must be a non-negative Unix timestamp in milliseconds"
+        ));
+    }
+    let parsed = u64::try_from(parsed)
+        .ok()
+        .filter(|value| *value <= MAX_SUPPORTED_UNIX_MILLIS)
+        .ok_or_else(|| format!("{name} is outside the supported Unix timestamp range"))?;
+    Ok(Some(parsed))
+}
+
+fn query_bounded_usize(
+    query: Option<&str>,
+    name: &str,
+    minimum: usize,
+    maximum: usize,
+) -> Result<Option<usize>, ()> {
+    let Some(raw) = query_parameter(query, name) else {
+        return Ok(None);
+    };
+    let value = raw.parse::<i128>().map_err(|_| ())?;
+    let value = usize::try_from(value).map_err(|_| ())?;
+    if !(minimum..=maximum).contains(&value) {
+        return Err(());
+    }
+    Ok(Some(value))
 }
 
 fn extract_json_bool_field(body: &str, field: &str) -> Option<bool> {
@@ -27063,6 +27638,7 @@ async fn open_remote_peer_preview_stream(
         started_at: None,
         start_offset: 0,
         updated_at: now,
+        updated_at_ms: unix_timestamp_millis(),
     };
     let length = match negotiate_peer_transfer(state, &address, &transfer).await? {
         PeerTransferNegotiation::Allowed { token, size } if token == transfer_token => size
@@ -36161,6 +36737,266 @@ mod tests {
         assert!(!response.body.contains("secret"));
     }
 
+    #[tokio::test]
+    async fn incremental_transfer_and_message_routes_validate_cursors_and_bound_history() {
+        let (state, _receiver) = test_state();
+        {
+            let mut transfers = state.transfers.write().await;
+            for (filename, direction, status, updated_at_ms) in [
+                ("old.flac", 0, "succeeded", 1_000),
+                ("new.flac", 0, "succeeded", 3_000),
+                ("active.flac", 0, "in_progress", 4_000),
+                ("upload.flac", 1, "failed", 5_000),
+            ] {
+                let entry = transfers.create(
+                    direction,
+                    Some("peer".to_owned()),
+                    filename.to_owned(),
+                    None,
+                    Some(10),
+                );
+                let entry = transfers
+                    .entries
+                    .iter_mut()
+                    .find(|candidate| candidate.id == entry.id)
+                    .unwrap();
+                entry.status = status.to_owned();
+                entry.updated_at = updated_at_ms / 1_000;
+                entry.updated_at_ms = updated_at_ms;
+            }
+        }
+
+        let initial = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/changes?includeCompleted=false",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("initial transfer changes");
+        let initial = serde_json::from_str::<serde_json::Value>(&initial.body).unwrap();
+        assert_eq!(initial["counts"]["download"], 3);
+        assert_eq!(initial["counts"]["upload"], 1);
+        assert_eq!(initial["transfers"].as_array().unwrap().len(), 2);
+
+        let changes =
+            super::route_http_request("GET", "/api/transfers/changes?since=3500", None, "", &state)
+                .await
+                .expect("incremental transfer changes");
+        let changes = serde_json::from_str::<serde_json::Value>(&changes.body).unwrap();
+        let changed = changes["transfers"].as_array().unwrap();
+        assert_eq!(changed.len(), 2);
+        assert!(changed
+            .iter()
+            .any(|entry| entry["filename"] == "active.flac"));
+        assert!(changed
+            .iter()
+            .any(|entry| entry["filename"] == "upload.flac"));
+
+        let history = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/history?direction=download&asOf=3500&offset=0&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("transfer history page");
+        let history = serde_json::from_str::<serde_json::Value>(&history.body).unwrap();
+        assert_eq!(history["asOf"], 3_500);
+        assert_eq!(history["hasMore"], true);
+        assert_eq!(history["nextOffset"], 1);
+        assert_eq!(history["transfers"][0]["filename"], "new.flac");
+        let invalid_history = super::route_http_request(
+            "GET",
+            "/api/transfers/history?direction=download&limit=501",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("invalid transfer history");
+        assert_eq!(invalid_history.status, "400 Bad Request");
+
+        {
+            let mut messages = state.messages.write().await;
+            messages.add("friend".to_owned(), "inbound", "old".to_owned());
+            messages.add("friend".to_owned(), "inbound", "new".to_owned());
+            messages.records[0].created_at_ms = 1_000;
+            messages.records[1].created_at_ms = 2_000;
+        }
+        let conversation = super::route_http_request(
+            "GET",
+            "/api/v0/conversations/friend?since=1500",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("incremental conversation");
+        let conversation = serde_json::from_str::<serde_json::Value>(&conversation.body).unwrap();
+        assert_eq!(conversation["unAcknowledgedMessageCount"], 2);
+        assert_eq!(conversation["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(conversation["messages"][0]["message"], "new");
+
+        {
+            let mut rooms = state.rooms.write().await;
+            rooms.join("music".to_owned()).unwrap();
+            rooms
+                .add_message("music", "friend".to_owned(), "old".to_owned())
+                .unwrap();
+            rooms
+                .add_message("music", "friend".to_owned(), "new".to_owned())
+                .unwrap();
+            let room = rooms
+                .records
+                .iter_mut()
+                .find(|room| room.name == "music")
+                .unwrap();
+            room.messages[0].created_at_ms = 1_000;
+            room.messages[1].created_at_ms = 2_000;
+        }
+        let room = super::route_http_request(
+            "GET",
+            "/api/v0/rooms/joined/music/messages?since=1500",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("incremental room messages");
+        let room = serde_json::from_str::<serde_json::Value>(&room.body).unwrap();
+        assert_eq!(room.as_array().unwrap().len(), 1);
+        assert_eq!(room[0]["message"], "new");
+        assert!(room[0]["id"].as_str().is_some());
+
+        for path in [
+            "/api/transfers/changes?since=-1",
+            "/api/conversations/friend?since=-1",
+            "/api/rooms/joined/music/messages?since=-1",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("negative cursor response");
+            assert_eq!(response.status, "400 Bad Request", "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn swarm_analytics_routes_share_a_bounded_snapshot() {
+        let (state, _receiver) = test_state();
+        let now = super::unix_timestamp();
+        state
+            .multisource
+            .write()
+            .await
+            .insert(super::multisource::SwarmJob {
+                id: "swarm-analytics-fixture".to_owned(),
+                status: "completed".to_owned(),
+                filename: "album.flac".to_owned(),
+                output_path: "album.flac".to_owned(),
+                file_size: 1_024,
+                chunk_size: 512,
+                sources: vec!["alice".to_owned(), "bob".to_owned()],
+                completed_chunks: 2,
+                total_chunks: 2,
+                bytes_downloaded: 1_024,
+                created_at: now,
+                updated_at: now,
+                result: Some(super::multisource::SwarmResult {
+                    id: "swarm-analytics-fixture".to_owned(),
+                    success: true,
+                    filename: "album.flac".to_owned(),
+                    output_path: "album.flac".to_owned(),
+                    bytes_downloaded: 1_024,
+                    total_time_ms: 100,
+                    sources_used: 2,
+                    final_hash: "00".repeat(32),
+                    chunks: vec![
+                        super::multisource::ChunkResult {
+                            index: 0,
+                            username: "alice".to_owned(),
+                            start_offset: 0,
+                            end_offset: 511,
+                            bytes_downloaded: 512,
+                            time_ms: 40,
+                        },
+                        super::multisource::ChunkResult {
+                            index: 1,
+                            username: "bob".to_owned(),
+                            start_offset: 512,
+                            end_offset: 1_023,
+                            bytes_downloaded: 512,
+                            time_ms: 60,
+                        },
+                    ],
+                    error: None,
+                }),
+            });
+
+        let dashboard = super::route_http_request(
+            "GET",
+            "/api/v0/swarm/analytics/dashboard?timeWindowHours=24&rankingLimit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("swarm analytics dashboard");
+        assert_eq!(dashboard.status, "200 OK");
+        let dashboard = serde_json::from_str::<serde_json::Value>(&dashboard.body).unwrap();
+        assert_eq!(dashboard["performanceMetrics"]["totalDownloads"], 1);
+        assert_eq!(dashboard["performanceMetrics"]["successRate"], 1.0);
+        assert_eq!(dashboard["performanceMetrics"]["timeWindow"], "1.00:00:00");
+        assert_eq!(dashboard["peerRankings"].as_array().unwrap().len(), 1);
+        assert_eq!(dashboard["peerRankings"][0]["rank"], 1);
+        assert!(dashboard["efficiencyMetrics"].is_object());
+        assert!(dashboard["recommendations"].is_array());
+
+        for (path, expected_kind) in [
+            ("/api/swarm/analytics/performance", "object"),
+            ("/api/swarm/analytics/peers/rankings?limit=2", "array"),
+            ("/api/swarm/analytics/efficiency", "object"),
+            ("/api/swarm/analytics/recommendations", "array"),
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("swarm analytics projection");
+            assert_eq!(response.status, "200 OK", "{path}");
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+            assert_eq!(
+                if value.is_array() { "array" } else { "object" },
+                expected_kind,
+                "{path}"
+            );
+        }
+
+        let trends = super::route_http_request(
+            "GET",
+            "/api/swarm/analytics/trends?timeWindowHours=48&dataPoints=12",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("swarm analytics trends");
+        let trends = serde_json::from_str::<serde_json::Value>(&trends.body).unwrap();
+        assert_eq!(trends["timePoints"], serde_json::json!([]));
+
+        for path in [
+            "/api/swarm/analytics/dashboard?timeWindowHours=0",
+            "/api/swarm/analytics/dashboard?rankingLimit=101",
+            "/api/swarm/analytics/peers/rankings?limit=0",
+            "/api/swarm/analytics/trends?dataPoints=1",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("invalid swarm analytics query");
+            assert_eq!(response.status, "400 Bad Request", "{path}");
+        }
+    }
+
     fn test_capability_descriptor(
         username: &str,
         features: Vec<String>,
@@ -43537,6 +44373,7 @@ mod tests {
             started_at: Some(1),
             start_offset: 0,
             updated_at: 2,
+            updated_at_ms: 2_000,
         };
 
         super::persist_transfer_projection(&state, &entry).await;
@@ -52528,9 +53365,11 @@ mod tests {
 
         rooms.records[0].messages = (0..super::MAX_TOTAL_ROOM_MESSAGES)
             .map(|created_at| super::RoomMessageRecord {
+                id: created_at as u64 + 1,
                 username: "peer".to_owned(),
                 body: "message".to_owned(),
                 created_at: created_at as u64,
+                created_at_ms: created_at as u64 * 1_000,
             })
             .collect();
         let _ = rooms.add_message("other", "peer".to_owned(), "new".to_owned());
@@ -55001,6 +55840,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transfer_changes_applies_completed_filter_only_to_initial_snapshot() {
+        let (state, _receiver) = test_state();
+        {
+            let mut transfers = state.transfers.write().await;
+            let active = transfers.create(
+                0,
+                Some("active-peer".to_owned()),
+                "Remote/Active.flac".to_owned(),
+                None,
+                Some(10),
+            );
+            let completed = transfers.create(
+                0,
+                Some("completed-peer".to_owned()),
+                "Remote/Completed.flac".to_owned(),
+                None,
+                Some(10),
+            );
+            transfers
+                .update_local_execution(completed.id, "succeeded", 10, Some(10), None)
+                .expect("complete transfer");
+            transfers
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == active.id)
+                .expect("active transfer")
+                .updated_at_ms = 100;
+            transfers
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == completed.id)
+                .expect("completed transfer")
+                .updated_at_ms = 200;
+        }
+
+        let response = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/changes?since=0&includeCompleted=false",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("transfer changes");
+        let body = serde_json::from_str::<serde_json::Value>(&response.body).expect("changes JSON");
+        let rows = body["transfers"].as_array().expect("transfer rows");
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| row["username"] == "active-peer"));
+        assert!(rows.iter().any(|row| row["username"] == "completed-peer"));
+
+        let future_since = 9_999_999_999_999_u64;
+        let response = super::route_http_request(
+            "GET",
+            &format!("/api/v0/transfers/changes?since={future_since}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("future transfer cursor");
+        let body = serde_json::from_str::<serde_json::Value>(&response.body).expect("changes JSON");
+        assert!(body["cursor"].as_u64().unwrap() < future_since);
+        assert_eq!(body["transfers"].as_array().unwrap().len(), 0);
+
+        let response = super::route_http_request(
+            "GET",
+            &format!("/api/v0/transfers/history?direction=download&asOf={future_since}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("future history snapshot");
+        let body = serde_json::from_str::<serde_json::Value>(&response.body).expect("history JSON");
+        assert_eq!(body["asOf"], future_since);
+        assert_eq!(body["transfers"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn rescue_cycle_atomically_swaps_an_underperforming_audio_source() {
         let mut searches = super::SearchStore::new();
         let search = searches
@@ -55655,6 +56574,7 @@ mod tests {
             started_at: None,
             start_offset: 0,
             updated_at: 1,
+            updated_at_ms: 1_000,
         };
         let error =
             super::append_transfer_event(&events_path, &entry).expect_err("reject event symlink");
@@ -55765,6 +56685,7 @@ mod tests {
             started_at: Some(11),
             start_offset: 0,
             updated_at: 12,
+            updated_at_ms: 12_000,
         };
         super::append_transfer_event(&events_path, &entry).expect("append rotated event");
 
