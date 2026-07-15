@@ -49,6 +49,8 @@ describe('MediaCore', () => {
     expect(screen.getByText('Publishes metadata')).toBeInTheDocument();
     expect(screen.getAllByText('Handles key material').length).toBeGreaterThan(0);
     expect(screen.getByText('Read-only verification')).toBeInTheDocument();
+    expect(screen.getByText(/In Enforce mode, signatures use/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/unique-request-nonce/)).toBeInTheDocument();
     expect(screen.getByText('Publishes pod metadata')).toBeInTheDocument();
     expect(screen.getByText('Mutates local message storage')).toBeInTheDocument();
     expect(screen.getAllByText('Publishes opinion data').length).toBeGreaterThan(0);

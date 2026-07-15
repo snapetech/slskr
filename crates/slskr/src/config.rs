@@ -52,6 +52,7 @@ pub struct AppConfig {
     pub transfer_auto_retry: TransferAutoRetrySettings,
     pub download_completed_path_template: String,
     pub private_message_auto_response: PrivateMessageAutoResponseSettings,
+    pub pod_join_signature_mode: PodSignatureMode,
     pub auth_required: bool,
     pub api_token: Option<String>,
     pub api_cookie_auth_enabled: bool,
@@ -289,6 +290,12 @@ impl AppConfig {
             "SLSKR_PERSISTENCE_ENABLED",
             file_config.persistence.enabled.unwrap_or(false),
         )?;
+        let pod_join_signature_mode = PodSignatureMode::parse(
+            env.var("SLSKR_POD_JOIN_SIGNATURE_MODE")
+                .or(file_config.podcore.join.signature_mode)
+                .unwrap_or_else(|| "off".to_owned())
+                .as_str(),
+        )?;
         let integrations = IntegrationSettings::from_layers(file_config.integrations, env)?;
 
         Ok(Self {
@@ -325,6 +332,7 @@ impl AppConfig {
             transfer_auto_retry,
             download_completed_path_template,
             private_message_auto_response,
+            pod_join_signature_mode,
             auth_required,
             api_token,
             api_cookie_auth_enabled,
@@ -345,7 +353,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -391,6 +399,7 @@ impl AppConfig {
             self.transfer_auto_retry.sanitized_json(),
             !self.download_completed_path_template.is_empty(),
             self.private_message_auto_response.sanitized_json(),
+            self.pod_join_signature_mode.as_str(),
             self.auth_required,
             self.api_token.is_some(),
             self.api_cookie_auth_enabled,
@@ -411,6 +420,32 @@ impl AppConfig {
 pub enum SoulseekObfuscationMode {
     Compatibility,
     Prefer,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PodSignatureMode {
+    Off,
+    Warn,
+    Enforce,
+}
+
+impl PodSignatureMode {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" => Ok(Self::Off),
+            "warn" => Ok(Self::Warn),
+            "enforce" => Ok(Self::Enforce),
+            _ => Err("SLSKR_POD_JOIN_SIGNATURE_MODE must be off, warn, or enforce".to_owned()),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Warn => "warn",
+            Self::Enforce => "enforce",
+        }
+    }
 }
 
 impl SoulseekObfuscationMode {
@@ -1054,7 +1089,20 @@ pub struct FileConfig {
     transfers: TransferFileConfig,
     auth: AuthFileConfig,
     persistence: PersistenceFileConfig,
+    podcore: PodCoreFileConfig,
     integrations: IntegrationsFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PodCoreFileConfig {
+    join: PodJoinFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PodJoinFileConfig {
+    signature_mode: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1973,5 +2021,37 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn pod_join_signature_modes_are_validated() {
+        let default =
+            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
+                .expect("default pod signature config");
+        assert_eq!(
+            default.pod_join_signature_mode,
+            super::PodSignatureMode::Off
+        );
+
+        for (value, expected) in [
+            ("warn", super::PodSignatureMode::Warn),
+            ("enforce", super::PodSignatureMode::Enforce),
+        ] {
+            let config = super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default().with("SLSKR_POD_JOIN_SIGNATURE_MODE", value),
+            )
+            .expect("supported pod signature mode");
+            assert_eq!(config.pod_join_signature_mode, expected);
+        }
+
+        let error = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_POD_JOIN_SIGNATURE_MODE", "accept-anything"),
+        )
+        .expect_err("invalid pod signature mode must fail");
+        assert!(error.contains("off, warn, or enforce"), "{error}");
     }
 }

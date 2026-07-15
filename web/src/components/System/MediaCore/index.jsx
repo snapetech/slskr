@@ -5936,7 +5936,7 @@ const MediaCore = () => {
                     <Form.TextArea
                       label="Pod Message JSON"
                       onChange={(e) => setMessageToVerify(e.target.value)}
-                      placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Hello everyone!", "timestampUnixMs": 1703123456789, "signature": "base64-signature"}'
+                      placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Hello everyone!", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature"}'
                       rows={4}
                       value={messageToVerify}
                     />
@@ -6508,13 +6508,18 @@ const MediaCore = () => {
                 Pod Join/Leave Operations
               </Card.Header>
               <Card.Description>
-                Manage signed pod membership operations with cryptographic
+                Manage signed pod membership operations with Ed25519
                 verification and role-based approvals
               </Card.Description>
               <PodWorkflowNotice title="Publishes join and leave events">
                 Join and leave requests can expose peer IDs, requested roles,
                 public keys, signatures, and operator-provided messages.
               </PodWorkflowNotice>
+              <Message info>
+                In Enforce mode, signatures use the
+                <code> ed25519:&lt;base64 signature&gt;</code> format over the
+                canonical join payload and require a fresh one-use nonce.
+              </Message>
             </Card.Content>
 
             {/* Join Request */}
@@ -6524,7 +6529,7 @@ const MediaCore = () => {
                 <Form.TextArea
                   label="Join Request JSON (signed by requester)"
                   onChange={(e) => setJoinRequestData(e.target.value)}
-                  placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "requestedRole": "member", "publicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "base64-signature", "message": "Please let me join!"}'
+                  placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "requestedRole": "member", "publicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature", "nonce": "unique-request-nonce", "message": "Please let me join!"}'
                   rows={4}
                   value={joinRequestData}
                 />
@@ -6574,7 +6579,7 @@ const MediaCore = () => {
                     <Form.TextArea
                       label="Acceptance JSON (signed by owner/mod)"
                       onChange={(e) => setAcceptanceData(e.target.value)}
-                      placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "acceptedRole": "member", "acceptorPeerId": "bob", "acceptorPublicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "base64-signature", "message": "Welcome!"}'
+                      placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "acceptedRole": "member", "acceptorPeerId": "bob", "acceptorPublicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature", "message": "Welcome!"}'
                       rows={4}
                       value={acceptanceData}
                     />
@@ -6616,7 +6621,7 @@ const MediaCore = () => {
                     <Form.TextArea
                       label="Leave Request JSON (signed by member)"
                       onChange={(e) => setLeaveRequestData(e.target.value)}
-                      placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "publicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "base64-signature", "message": "Goodbye!"}'
+                      placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "publicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature", "message": "Goodbye!"}'
                       rows={4}
                       value={leaveRequestData}
                     />
@@ -6663,7 +6668,7 @@ const MediaCore = () => {
                     <Form.TextArea
                       label="Leave Acceptance JSON (signed by owner/mod)"
                       onChange={(e) => setAcceptanceData(e.target.value)}
-                      placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "acceptorPeerId": "bob", "acceptorPublicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "base64-signature", "message": "Farewell!"}'
+                      placeholder='{"podId": "pod:artist:mb:daft-punk-hash", "peerId": "alice", "acceptorPeerId": "bob", "acceptorPublicKey": "base64-ed25519-public-key", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature", "message": "Farewell!"}'
                       rows={4}
                       value={acceptanceData}
                     />
@@ -6777,7 +6782,7 @@ const MediaCore = () => {
                 <Form.TextArea
                   label="Pod Message JSON"
                   onChange={(e) => setRouteMessageData(e.target.value)}
-                  placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Hello pod!", "timestampUnixMs": 1703123456789, "signature": "base64-signature"}'
+                  placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Hello pod!", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature"}'
                   rows={4}
                   value={routeMessageData}
                 />
@@ -6837,7 +6842,7 @@ const MediaCore = () => {
                     <Form.TextArea
                       label="Pod Message JSON"
                       onChange={(e) => setRouteToPeersMessage(e.target.value)}
-                      placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Direct message", "timestampUnixMs": 1703123456789, "signature": "base64-signature"}'
+                      placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Direct message", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature"}'
                       rows={3}
                       value={routeToPeersMessage}
                     />
@@ -8139,7 +8144,7 @@ const MediaCore = () => {
                     <Form.TextArea
                       label="Pod Message JSON (with signature)"
                       onChange={(e) => setMessageToVerify(e.target.value)}
-                      placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Hello pod!", "timestampUnixMs": 1703123456789, "signature": "base64-signature"}'
+                      placeholder='{"messageId": "msg123", "channelId": "pod:artist:mb:daft-punk-hash:general", "senderPeerId": "alice", "body": "Hello pod!", "timestampUnixMs": 1703123456789, "signature": "ed25519:base64-signature"}'
                       rows={4}
                       value={messageToVerify}
                     />
