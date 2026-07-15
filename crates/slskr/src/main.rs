@@ -2738,17 +2738,25 @@ impl TransferQueue {
                     .and_then(|name| name.to_str())
                     .unwrap_or("transfer-events.tsv")
             ),
-            json_option(self.events_error.as_deref()),
+            json_option(public_transfer_events_error(self.events_error.as_deref())),
             json_escape(
                 self.state_path
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("transfer-state.json")
             ),
-            json_option(self.state_error.as_deref()),
+            json_option(public_transfer_state_error(self.state_error.as_deref())),
             self.updated_at
         )
     }
+}
+
+fn public_transfer_events_error(error: Option<&str>) -> Option<&'static str> {
+    error.map(|_| "transfer events unavailable")
+}
+
+fn public_transfer_state_error(error: Option<&str>) -> Option<&'static str> {
+    error.map(|_| "transfer state unavailable")
 }
 
 fn bounded_transfer_username(username: &str) -> String {
@@ -9032,8 +9040,12 @@ async fn route_http_request_with_headers(
 
             let transfers = state.transfers.read().await;
             let transfers_json = transfers.summary_json();
-            let transfer_state_error = transfers.state_error.clone();
-            let transfer_events_error = transfers.events_error.clone();
+            let transfer_state_healthy = transfers.state_error.is_none();
+            let transfer_events_healthy = transfers.events_error.is_none();
+            let transfer_state_error =
+                public_transfer_state_error(transfers.state_error.as_deref());
+            let transfer_events_error =
+                public_transfer_events_error(transfers.events_error.as_deref());
             drop(transfers);
 
             let events = state.events.read().await;
@@ -9057,8 +9069,8 @@ async fn route_http_request_with_headers(
                     "connected": is_connected,
                     "database": database.get("healthy").and_then(serde_json::Value::as_bool).unwrap_or(false)
                         || !database.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(false),
-                    "transferState": transfer_state_error.is_none(),
-                    "transferEvents": transfer_events_error.is_none(),
+                    "transferState": transfer_state_healthy,
+                    "transferEvents": transfer_events_healthy,
                     "eventsBuffered": event_count,
                 },
                 "service": {
@@ -29405,6 +29417,13 @@ mod tests {
         let (state, _receiver) = test_state();
         state.shares.write().await.cache_error =
             Some("share cache write failed: /private/share-index.tsv denied".to_owned());
+        {
+            let mut transfers = state.transfers.write().await;
+            transfers.state_error =
+                Some("transfer state parse failed at /private/transfer-state.json".to_owned());
+            transfers.events_error =
+                Some("transfer event open failed at /private/transfer-events.tsv".to_owned());
+        }
 
         let response = super::route_http_request("GET", "/api/v0/telemetry", None, "", &state)
             .await
@@ -29434,6 +29453,16 @@ mod tests {
         );
         assert!(!response.body.contains("/private"));
         assert!(!response.body.contains("denied"));
+        assert_eq!(
+            json["storage"]["transfer_state_error"],
+            "transfer state unavailable"
+        );
+        assert_eq!(
+            json["storage"]["transfer_events_error"],
+            "transfer events unavailable"
+        );
+        assert_eq!(json["health"]["transferState"], false);
+        assert_eq!(json["health"]["transferEvents"], false);
         assert_eq!(json["shares"]["cache_enabled"], true);
         assert_eq!(json["database"]["enabled"], false);
         assert_eq!(json["health"]["database"], true);
@@ -29443,6 +29472,22 @@ mod tests {
         assert_eq!(json["transfers"]["total"], 0);
         assert_eq!(json["runtime"]["backfillRuns"], 0);
         assert!(!response.body.contains("secret"));
+    }
+
+    #[test]
+    fn transfer_storage_errors_redact_internal_details() {
+        let mut transfers = super::TransferQueue::new_in_memory(8);
+        transfers.state_error =
+            Some("transfer state parse failed at /private/transfer-state.json".to_owned());
+        transfers.events_error =
+            Some("transfer event open failed at /private/transfer-events.tsv".to_owned());
+
+        let json = transfers.json(None);
+        assert!(json.contains("\"state_error\":\"transfer state unavailable\""));
+        assert!(json.contains("\"events_error\":\"transfer events unavailable\""));
+        assert!(!json.contains("/private"));
+        assert!(!json.contains("parse failed"));
+        assert!(!json.contains("open failed"));
     }
 
     #[tokio::test]
