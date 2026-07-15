@@ -9705,13 +9705,19 @@ async fn route_http_request_with_headers(
             if (path.starts_with("/api/files/downloads/directories/")
                 || path.starts_with("/api/files/incomplete/directories/")) =>
         {
-            let root = if path.starts_with("/api/files/downloads/") {
+            let Some((storage, resource, encoded_name)) = slskd_file_storage_resource_path(path)
+            else {
+                return Ok(routing::not_found_response());
+            };
+            if resource != "directories" {
+                return Ok(routing::not_found_response());
+            }
+            let root = if storage == "downloads" {
                 file_storage_root(&state.config.state_dir, "downloads")
             } else {
                 file_storage_root(&state.config.state_dir, "incomplete")
             };
             let options = StorageDirectoryListOptions::from_query(route.query);
-            let encoded_name = path.rsplit('/').next().unwrap_or("");
             match slskd_storage_directory_json(&root, Some(encoded_name), options) {
                 Ok(json) => Ok(routing::ok_response(json)),
                 Err(error) => Ok(routing::bad_request_response(&error)),
@@ -9723,15 +9729,16 @@ async fn route_http_request_with_headers(
                 || path.starts_with("/api/files/incomplete/directories/")
                 || path.starts_with("/api/files/incomplete/files/") =>
         {
-            let Some(encoded_name) = path.rsplit('/').next().filter(|value| !value.is_empty()) else {
-                return Ok(routing::bad_request_response("path is required"));
+            let Some((storage, resource, encoded_name)) = slskd_file_storage_resource_path(path)
+            else {
+                return Ok(routing::not_found_response());
             };
-            let root = if path.starts_with("/api/files/downloads/") {
+            let root = if storage == "downloads" {
                 file_storage_root(&state.config.state_dir, "downloads")
             } else {
                 file_storage_root(&state.config.state_dir, "incomplete")
             };
-            let delete_result = if path.contains("/directories/") {
+            let delete_result = if resource == "directories" {
                 delete_scoped_file_storage_path(&root, encoded_name, true)
             } else {
                 delete_scoped_file_storage_path(&root, encoded_name, false)
@@ -17748,6 +17755,21 @@ fn slskd_transfer_position_path(path: &str) -> Option<(&str, u64)> {
 fn transfer_resource_segment(path: &str) -> Option<&str> {
     path_segment_after(path, "/api/transfers/")
         .or_else(|| path_segment_after(path, "/api/v0/transfers/"))
+}
+
+fn slskd_file_storage_resource_path(path: &str) -> Option<(&str, &str, &str)> {
+    let mut segments = path.strip_prefix("/api/files/")?.split('/');
+    let storage = segments.next()?;
+    let resource = segments.next()?;
+    let encoded_name = segments.next()?;
+    if segments.next().is_some()
+        || !matches!(storage, "downloads" | "incomplete")
+        || !matches!(resource, "directories" | "files")
+        || encoded_name.is_empty()
+    {
+        return None;
+    }
+    Some((storage, resource, encoded_name))
 }
 
 fn slskd_files_from_body(body: &str) -> Vec<serde_json::Value> {
@@ -28150,6 +28172,18 @@ mod tests {
         std::fs::create_dir_all(download_file.parent().unwrap()).unwrap();
         std::fs::write(&download_file, b"song").unwrap();
 
+        let aliased_delete = super::route_http_request(
+            "DELETE",
+            "/api/v0/files/downloads/files/unrelated/UmVtb3RlL1NvbmcubXAz",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased file delete");
+        assert_eq!(aliased_delete.status, "404 Not Found");
+        assert!(download_file.exists());
+
         let deleted = super::route_http_request(
             "DELETE",
             "/api/v0/files/downloads/files/UmVtb3RlL1NvbmcubXAz",
@@ -28241,6 +28275,16 @@ mod tests {
         )
         .await
         .expect("list album dir");
+        let aliased_album_dir = super::route_http_request(
+            "GET",
+            "/api/v0/files/downloads/directories/unrelated/QXJ0aXN0L0FsYnVt",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased directory lookup");
+        assert_eq!(aliased_album_dir.status, "404 Not Found");
         let album_json = serde_json::from_str::<serde_json::Value>(&album_dir.body).unwrap();
         assert_eq!(album_json["fullName"], "Artist/Album");
         assert_eq!(album_json["files"][0]["name"], "Track.flac");
