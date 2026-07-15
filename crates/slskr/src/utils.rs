@@ -212,7 +212,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     diff == 0
 }
 
-fn cookie_session_token(cookie: Option<&str>) -> Option<String> {
+pub(crate) fn cookie_session_token(cookie: Option<&str>) -> Option<String> {
     cookie?
         .split(';')
         .filter_map(|part| part.trim().split_once('='))

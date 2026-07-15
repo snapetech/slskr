@@ -16827,18 +16827,14 @@ fn extract_json_i32_field(body: &str, field: &str) -> Option<i32> {
 fn rate_limit_user_key(authorization: Option<&str>, cookie: Option<&str>) -> String {
     use sha2::{Digest, Sha256};
 
+    let decoded_cookie_token = cookie_session_token(cookie);
     let token = authorization
         .and_then(|value| {
             value
                 .strip_prefix("Bearer ")
                 .or_else(|| value.strip_prefix("ApiKey "))
         })
-        .or_else(|| {
-            cookie?.split(';').find_map(|part| {
-                let (name, value) = part.trim().split_once('=')?;
-                (name == "slskr.session").then_some(value)
-            })
-        })
+        .or(decoded_cookie_token.as_deref())
         .unwrap_or("authenticated");
     let digest = Sha256::digest(token.as_bytes());
     format!("auth:{}", hex::encode(&digest[..16]))
@@ -25869,6 +25865,20 @@ mod tests {
         let untrusted_addr = super::rate_limit_remote_addr(&untrusted_config, proxy, &headers)
             .expect("raw peer address");
         assert_eq!(untrusted_addr.ip(), "127.0.0.1".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn authenticated_cookie_rate_limit_key_uses_decoded_token() {
+        let plain = super::rate_limit_user_key(None, Some("slskr.session=route-token"));
+        let encoded = super::rate_limit_user_key(None, Some("slskr.session=%72oute%2Dtoken"));
+        let fully_encoded = super::rate_limit_user_key(
+            None,
+            Some("other=value; slskr.session=%72%6F%75%74%65%2D%74%6F%6B%65%6E"),
+        );
+
+        assert_eq!(plain, encoded);
+        assert_eq!(plain, fully_encoded);
+        assert!(!plain.contains("route-token"));
     }
 
     #[test]

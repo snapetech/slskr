@@ -33,6 +33,12 @@ if ! rg -n 'BUG-008 .*Verified' docs/dev/bug-burndown-ledger.md >/dev/null; then
   status=1
 fi
 
+if ! rg -n --fixed-strings -- 'authenticated_cookie_rate_limit_key_uses_decoded_token' crates/slskr/src/main.rs >/dev/null ||
+   ! rg -n --fixed-strings -- 'cookie_session_token(cookie)' crates/slskr/src/main.rs >/dev/null; then
+  printf 'rate-limit proxy policy check failed: canonical cookie-auth rate-limit identity is missing\n' >&2
+  status=1
+fi
+
 if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi
