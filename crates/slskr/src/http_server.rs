@@ -495,10 +495,26 @@ fn valid_request_target(method: &str, target: &str) -> bool {
         decoded.push(byte);
         index += 1;
     }
-    std::str::from_utf8(&decoded).is_ok()
-        && !decoded
+    if std::str::from_utf8(&decoded).is_err()
+        || decoded
             .iter()
             .any(|byte| byte.is_ascii_control() || *byte == b'\\')
+    {
+        return false;
+    }
+    let decoded_path_end = decoded
+        .iter()
+        .position(|byte| *byte == b'?')
+        .unwrap_or(decoded.len());
+    let decoded_path = &decoded[..decoded_path_end];
+    let mut segments = decoded_path.split(|byte| *byte == b'/').peekable();
+    let _leading_empty = segments.next();
+    while let Some(segment) = segments.next() {
+        if matches!(segment, b"." | b"..") || (segment.is_empty() && segments.peek().is_some()) {
+            return false;
+        }
+    }
+    true
 }
 
 fn http_hex_value(value: u8) -> Option<u8> {
@@ -1025,6 +1041,11 @@ mod tests {
             "/api%2Fhealth",
             "/api/health%3Fadmin=true",
             "/api/health%23fragment",
+            "/api//health",
+            "/api/./health",
+            "/api/../health",
+            "/api/%2e/health",
+            "/api/%2E%2E/health",
             "/api/\0health",
             "/api/❤",
         ] {
@@ -1050,6 +1071,18 @@ mod tests {
         let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
         assert_eq!(request.path, "/api/%E2%9D%A4");
         assert_eq!(request.query.as_deref(), Some("q=%2Fvalue%3Fpart%23anchor"));
+    }
+
+    #[tokio::test]
+    async fn test_canonical_trailing_slash_is_accepted() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET /api/transfers/downloads/ HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
+        assert_eq!(request.path, "/api/transfers/downloads/");
     }
 
     #[tokio::test]
