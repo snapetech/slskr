@@ -145,6 +145,7 @@ const MAX_COLLECTIONS: usize = 256;
 const MAX_COLLECTION_ITEMS: usize = 10_000;
 const MAX_WISHLIST_ITEMS: usize = 10_000;
 const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
+const MAX_SONGID_RUNS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -5869,6 +5870,7 @@ struct RuntimeCompatState {
     cache_warm_runs: u64,
     backfill_runs: u64,
     songid_runs: u64,
+    songid_run_records: Vec<serde_json::Value>,
     lidarr_sync_runs: u64,
     lidarr_manual_imports: u64,
     updated_at: u64,
@@ -5890,6 +5892,7 @@ impl RuntimeCompatState {
             cache_warm_runs: 0,
             backfill_runs: 0,
             songid_runs: 0,
+            songid_run_records: Vec::new(),
             lidarr_sync_runs: 0,
             lidarr_manual_imports: 0,
             updated_at: unix_timestamp(),
@@ -5913,6 +5916,7 @@ impl RuntimeCompatState {
             cache_warm_runs: u64::try_from(record.cache_warm_runs).unwrap_or_default(),
             backfill_runs: u64::try_from(record.backfill_runs).unwrap_or_default(),
             songid_runs: u64::try_from(record.songid_runs).unwrap_or_default(),
+            songid_run_records: Vec::new(),
             lidarr_sync_runs: u64::try_from(record.lidarr_sync_runs).unwrap_or_default(),
             lidarr_manual_imports: u64::try_from(record.lidarr_manual_imports).unwrap_or_default(),
             updated_at: u64::try_from(record.updated_at).unwrap_or_else(|_| unix_timestamp()),
@@ -6073,19 +6077,38 @@ impl RuntimeCompatState {
         })
     }
 
-    fn record_songid_run(&mut self, matches: Vec<serde_json::Value>) -> serde_json::Value {
-        self.songid_runs = self.songid_runs.saturating_add(1);
+    fn record_songid_run(
+        &mut self,
+        matches: Vec<serde_json::Value>,
+        library_items: usize,
+        shared_files: usize,
+    ) -> Option<serde_json::Value> {
+        self.songid_runs = self.songid_runs.checked_add(1)?;
         self.updated_at = unix_timestamp();
         let match_count = matches.len();
-        serde_json::json!({
+        let record = serde_json::json!({
             "id": format!("songid-{}", self.songid_runs),
             "status": if matches.is_empty() { "completed" } else { "matched" },
+            "libraryItems": library_items,
+            "sharedFiles": shared_files,
             "matches": matches,
             "matchCount": match_count,
             "runs": self.songid_runs,
             "persisted": true,
             "updated_at": self.updated_at,
-        })
+        });
+        if self.songid_run_records.len() == MAX_SONGID_RUNS {
+            self.songid_run_records.remove(0);
+        }
+        self.songid_run_records.push(record.clone());
+        Some(record)
+    }
+
+    fn songid_run(&self, id: &str) -> Option<serde_json::Value> {
+        self.songid_run_records
+            .iter()
+            .find(|run| run.get("id").and_then(serde_json::Value::as_str) == Some(id))
+            .cloned()
     }
 
     fn record_lidarr_sync(&mut self, missing_count: usize, configured: bool) -> serde_json::Value {
@@ -13409,12 +13432,10 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", "/api/songid/runs") => {
-             let library = state.library.read().await;
-             let shares = state.shares.read().await;
-             let runs = songid_runs_value(&library, &shares);
+             let runtime = state.runtime.read().await;
+             let runs = runtime.songid_run_records.clone();
              let count = runs.len();
-             drop(shares);
-             drop(library);
+             drop(runtime);
              Ok(routing::ok_response(serde_json::json!({
                  "runs": runs,
                  "count": count,
@@ -13429,35 +13450,42 @@ async fn route_http_request_with_headers(
                  .iter()
                  .flat_map(|run| run.get("matches").and_then(serde_json::Value::as_array).cloned().unwrap_or_default())
                  .collect::<Vec<_>>();
+             let library_items = library.records.len();
+             let shared_files = shares.entries.len();
              drop(shares);
              drop(library);
              let mut runtime = state.runtime.write().await;
-             let body = runtime.record_songid_run(matches).to_string();
+             let run = runtime.record_songid_run(matches, library_items, shared_files);
              drop(runtime);
+             let Some(run) = run else {
+                 return Ok(routing::service_unavailable_response("song id run space exhausted"));
+             };
              persist_runtime_compat_state(state).await;
-             Ok(routing::accepted_response(body))
+             Ok(routing::accepted_response(run.to_string()))
          }
 
          ("GET", path) if path.starts_with("/api/songid/runs/") && path.len() > 17 && !path.contains("/forensic-matrix") => {
              let run_id = &path[17..];
-             let library = state.library.read().await;
-             let shares = state.shares.read().await;
-             let matches = songid_matches_value(&library, &shares);
-             let count = matches.len();
-             drop(shares);
-             drop(library);
-             Ok(routing::ok_response(serde_json::json!({
-                 "id": run_id,
-                 "results": matches,
-                 "count": count,
-             }).to_string()))
+             let runtime = state.runtime.read().await;
+             let run = runtime.songid_run(run_id);
+             drop(runtime);
+             Ok(run
+                 .map(|run| routing::ok_response(run.to_string()))
+                 .unwrap_or_else(routing::not_found_response))
          }
 
          ("GET", path) if path.starts_with("/api/songid/runs/") && path.contains("/forensic-matrix") => {
              let run_id = path.split('/').nth(4).unwrap_or("unknown");
-             let library = state.library.read().await;
-             let shares = state.shares.read().await;
-             let matrix = songid_matches_value(&library, &shares)
+             let runtime = state.runtime.read().await;
+             let Some(run) = runtime.songid_run(run_id) else {
+                 return Ok(routing::not_found_response());
+             };
+             drop(runtime);
+             let matrix = run
+                 .get("matches")
+                 .and_then(serde_json::Value::as_array)
+                 .cloned()
+                 .unwrap_or_default()
                  .into_iter()
                  .map(|match_value| {
                      serde_json::json!({
@@ -13469,8 +13497,6 @@ async fn route_http_request_with_headers(
                  })
                  .collect::<Vec<_>>();
              let count = matrix.len();
-             drop(shares);
-             drop(library);
              Ok(routing::ok_response(serde_json::json!({
                  "run_id": run_id,
                  "matrix": matrix,
@@ -31595,6 +31621,24 @@ mod tests {
         assert!(library.health_scan("scan-does-not-exist").is_none());
     }
 
+    #[test]
+    fn songid_runs_are_bounded_snapshots_with_real_lookup() {
+        let mut runtime = super::RuntimeCompatState::new();
+        let first = runtime
+            .record_songid_run(vec![serde_json::json!({ "score": 1.0 })], 1, 1)
+            .unwrap();
+        let first_id = first["id"].as_str().unwrap().to_owned();
+        for _ in 1..super::MAX_SONGID_RUNS {
+            runtime.record_songid_run(Vec::new(), 0, 0).unwrap();
+        }
+        assert_eq!(runtime.songid_run_records.len(), super::MAX_SONGID_RUNS);
+        assert!(runtime.songid_run(&first_id).is_some());
+        runtime.record_songid_run(Vec::new(), 0, 0).unwrap();
+        assert_eq!(runtime.songid_run_records.len(), super::MAX_SONGID_RUNS);
+        assert!(runtime.songid_run(&first_id).is_none());
+        assert!(runtime.songid_run("songid-does-not-exist").is_none());
+    }
+
     #[tokio::test]
     async fn compatibility_projections_use_local_state_for_recommendations_and_activity() {
         let (state, _receiver) = test_state();
@@ -32225,8 +32269,7 @@ mod tests {
             .await
             .expect("song id runs");
         let song_runs_json = serde_json::from_str::<serde_json::Value>(&song_runs.body).unwrap();
-        assert!(song_runs_json["count"].as_u64().unwrap() >= 1);
-        assert!(song_runs_json["runs"][0]["matchCount"].as_u64().unwrap() >= 1);
+        assert_eq!(song_runs_json["count"], 0);
         let song_run = super::route_http_request("POST", "/api/songid/runs", None, "{}", &state)
             .await
             .expect("song id run");
@@ -32234,16 +32277,33 @@ mod tests {
         assert!(song_run_json["matchCount"].as_u64().unwrap() >= 1);
         assert_eq!(song_run_json["runs"], 1);
         assert_eq!(song_run_json["persisted"], true);
-        let song_detail =
-            super::route_http_request("GET", "/api/songid/runs/songid-local", None, "", &state)
-                .await
-                .expect("song id detail");
+        let song_id = song_run_json["id"].as_str().unwrap();
+        let song_detail = super::route_http_request(
+            "GET",
+            &format!("/api/songid/runs/{song_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("song id detail");
         let song_detail_json =
             serde_json::from_str::<serde_json::Value>(&song_detail.body).unwrap();
-        assert!(song_detail_json["count"].as_u64().unwrap() >= 1);
+        assert_eq!(song_detail_json["id"], song_id);
+        assert!(song_detail_json["matchCount"].as_u64().unwrap() >= 1);
+        let missing_song_run = super::route_http_request(
+            "GET",
+            "/api/songid/runs/songid-does-not-exist",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing song id run");
+        assert_eq!(missing_song_run.status, "404 Not Found");
         let song_matrix = super::route_http_request(
             "GET",
-            "/api/songid/runs/songid-local/forensic-matrix",
+            &format!("/api/songid/runs/{song_id}/forensic-matrix"),
             None,
             "",
             &state,
