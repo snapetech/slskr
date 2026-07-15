@@ -11635,6 +11635,28 @@ async fn route_http_request_with_headers(
                 None => return Ok(routing::bad_request_response("username is required")),
             };
 
+            {
+                let users = state.users.read().await;
+                let bounded_username = bounded_user_username(&username);
+                if users.records.len() >= users.max_records
+                    && !users
+                        .records
+                        .iter()
+                        .any(|record| record.username == bounded_username)
+                {
+                    return Ok(routing::service_unavailable_response(
+                        "user watch capacity is full",
+                    ));
+                }
+            }
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut users = state.users.write().await;
             let Some(record) = users.watch(username.clone()) else {
                 return Ok(routing::service_unavailable_response(
@@ -11643,8 +11665,8 @@ async fn route_http_request_with_headers(
             };
             drop(users);
 
-            send_session_command(state, SessionCommand::WatchUser(username)).await.ok();
             persist_user_projection(state, &record).await;
+            session_command_permit.send(SessionCommand::WatchUser(username));
 
             Ok(routing::created_response(record.json()))
         }
@@ -11653,13 +11675,32 @@ async fn route_http_request_with_headers(
             let Some(username) = user_watch_path(normalized_path.as_str()) else {
                 return Ok(routing::not_found_response());
             };
+            if !state
+                .users
+                .read()
+                .await
+                .records
+                .iter()
+                .any(|record| record.username == bounded_user_username(username))
+            {
+                return Ok(routing::not_found_response());
+            }
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut users = state.users.write().await;
 
             if let Some(record) = users.unwatch(username) {
                 drop(users);
 
-                send_session_command(state, SessionCommand::UnwatchUser(username.to_string())).await.ok();
                 persist_user_projection(state, &record).await;
+                session_command_permit
+                    .send(SessionCommand::UnwatchUser(username.to_string()));
 
                 Ok(routing::ok_response(record.json()))
             } else {
@@ -34854,6 +34895,42 @@ mod tests {
             receiver.try_recv().expect("unwatch command"),
             super::SessionCommand::UnwatchUser("friend".to_owned())
         );
+    }
+
+    #[tokio::test]
+    async fn user_watch_routes_reject_before_mutation_when_dispatch_is_unavailable() {
+        let (state, receiver) = test_state();
+        drop(receiver);
+        let watched = super::route_http_request(
+            "POST",
+            "/api/v0/users/watch",
+            None,
+            r#"{"username":"friend"}"#,
+            &state,
+        )
+        .await
+        .expect("unavailable watch response");
+        assert_eq!(watched.status, "503 Service Unavailable");
+        assert!(watched.body.contains("session manager is not running"));
+        assert!(state.users.read().await.records.is_empty());
+
+        let (state, receiver) = test_state();
+        state
+            .users
+            .write()
+            .await
+            .watch("friend".to_owned())
+            .unwrap();
+        drop(receiver);
+        let unwatched =
+            super::route_http_request("DELETE", "/api/v2/users/friend/watch", None, "", &state)
+                .await
+                .expect("unavailable unwatch response");
+        assert_eq!(unwatched.status, "503 Service Unavailable");
+        assert!(unwatched.body.contains("session manager is not running"));
+        let users = state.users.read().await;
+        assert_eq!(users.records.len(), 1);
+        assert!(users.records[0].watched);
     }
 
     #[tokio::test]
