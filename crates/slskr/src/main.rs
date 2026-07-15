@@ -137,8 +137,15 @@ const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ROOM_MESSAGES_PER_ROOM: usize = 1_000;
+const MAX_TOTAL_ROOM_MESSAGES: usize = 10_000;
 const MAX_ROOM_RECORDS: usize = 1_024;
 const MAX_ROOM_MEMBERS_PER_ROOM: usize = 10_000;
+const MAX_TOTAL_ROOM_MEMBERS: usize = 50_000;
+const MAX_ROOM_NAME_BYTES: usize = 1024;
+const MAX_ROOM_USERNAME_BYTES: usize = 1024;
+const MAX_ROOM_MESSAGE_BODY_BYTES: usize = 4 * 1024;
+const MAX_ROOM_TICKER_BYTES: usize = 16 * 1024;
+const MAX_ROOM_ERROR_BYTES: usize = 4 * 1024;
 const MAX_USER_RECORDS: usize = 4_096;
 const MAX_BROWSE_RECORDS: usize = 1_024;
 const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
@@ -4158,7 +4165,7 @@ impl RoomStore {
             .into_iter()
             .take(store.max_records)
             .map(|record| RoomRecord {
-                name: record.name,
+                name: bounded_room_name(&record.name),
                 joined: record.subscribed,
                 kind: if record.owner.is_some() {
                     "private"
@@ -4184,6 +4191,7 @@ impl RoomStore {
     }
 
     fn join(&mut self, name: String) -> Option<RoomRecord> {
+        let name = bounded_room_name(&name);
         let now = unix_timestamp();
         if let Some(record) = self.records.iter_mut().find(|record| record.name == name) {
             record.joined = true;
@@ -4213,6 +4221,7 @@ impl RoomStore {
     }
 
     fn leave(&mut self, name: &str) -> Option<RoomRecord> {
+        let name = bounded_room_name(name);
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|record| record.name == name)?;
         record.joined = false;
@@ -4222,6 +4231,8 @@ impl RoomStore {
     }
 
     fn fail_join(&mut self, name: &str, reason: String) -> Option<RoomRecord> {
+        let name = bounded_room_name(name);
+        let reason = truncate_utf8_bytes(reason, MAX_ROOM_ERROR_BYTES);
         let now = unix_timestamp();
         if let Some(record) = self.records.iter_mut().find(|record| record.name == name) {
             record.joined = false;
@@ -4234,7 +4245,7 @@ impl RoomStore {
             return None;
         }
         let record = RoomRecord {
-            name: name.to_owned(),
+            name,
             joined: false,
             kind: "local",
             user_count: None,
@@ -4265,12 +4276,13 @@ impl RoomStore {
             self.upsert_room_list_entry(entry, "private", operated);
         }
         for room in &room_list.operated_private_rooms {
+            let room = bounded_room_name(room);
             if self.records.len() < self.max_records
-                && !self.records.iter().any(|record| record.name == *room)
+                && !self.records.iter().any(|record| record.name == room)
             {
                 let now = unix_timestamp();
                 self.records.push(RoomRecord {
-                    name: room.clone(),
+                    name: room,
                     joined: false,
                     kind: "operated_private",
                     user_count: None,
@@ -4292,12 +4304,9 @@ impl RoomStore {
         kind: &'static str,
         operated: bool,
     ) -> Option<RoomRecord> {
+        let name = bounded_room_name(&entry.name);
         let now = unix_timestamp();
-        if let Some(record) = self
-            .records
-            .iter_mut()
-            .find(|record| record.name == entry.name)
-        {
+        if let Some(record) = self.records.iter_mut().find(|record| record.name == name) {
             record.kind = kind;
             record.user_count = Some(entry.user_count);
             record.operated = operated;
@@ -4310,7 +4319,7 @@ impl RoomStore {
             return None;
         }
         let record = RoomRecord {
-            name: entry.name.clone(),
+            name,
             joined: false,
             kind,
             user_count: Some(entry.user_count),
@@ -4327,11 +4336,16 @@ impl RoomStore {
     }
 
     fn add_message(&mut self, room: &str, username: String, body: String) -> Option<RoomRecord> {
+        let room = bounded_room_name(room);
+        let record_index = self.records.iter().position(|record| record.name == room)?;
+        while self.total_messages() >= MAX_TOTAL_ROOM_MESSAGES {
+            self.evict_oldest_message()?;
+        }
         let now = unix_timestamp();
-        let record = self.records.iter_mut().find(|record| record.name == room)?;
+        let record = &mut self.records[record_index];
         record.messages.push(RoomMessageRecord {
-            username,
-            body,
+            username: truncate_utf8_bytes(username, MAX_ROOM_USERNAME_BYTES),
+            body: truncate_utf8_bytes(body, MAX_ROOM_MESSAGE_BODY_BYTES),
             created_at: now,
         });
         if record.messages.len() > MAX_ROOM_MESSAGES_PER_ROOM {
@@ -4344,20 +4358,23 @@ impl RoomStore {
     }
 
     fn set_ticker(&mut self, room: &str, ticker: String) -> Option<RoomRecord> {
+        let room = bounded_room_name(room);
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|record| record.name == room)?;
-        record.ticker = Some(ticker);
+        record.ticker = Some(truncate_utf8_bytes(ticker, MAX_ROOM_TICKER_BYTES));
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
     }
 
     fn add_member(&mut self, room: &str, username: String) -> Result<Option<RoomRecord>, ()> {
+        let room = bounded_room_name(room);
         let now = unix_timestamp();
-        let username = username.trim();
+        let username = truncate_utf8_bytes(username.trim().to_owned(), MAX_ROOM_USERNAME_BYTES);
         if username.is_empty() {
             return Ok(None);
         }
+        let total_members = self.total_members();
         let record = match self.records.iter_mut().find(|record| record.name == room) {
             Some(record) => record,
             None => return Ok(None),
@@ -4365,17 +4382,47 @@ impl RoomStore {
         if !record
             .members
             .iter()
-            .any(|member| member.eq_ignore_ascii_case(username))
+            .any(|member| member.eq_ignore_ascii_case(&username))
         {
-            if record.members.len() >= self.max_members_per_room {
+            if record.members.len() >= self.max_members_per_room
+                || total_members >= MAX_TOTAL_ROOM_MEMBERS
+            {
                 return Err(());
             }
-            record.members.push(username.to_owned());
+            record.members.push(username);
         }
         record.user_count = Some(u32::try_from(record.members.len()).unwrap_or(u32::MAX));
         record.updated_at = now;
         self.updated_at = now;
         Ok(Some(record.clone()))
+    }
+
+    fn total_messages(&self) -> usize {
+        self.records
+            .iter()
+            .map(|record| record.messages.len())
+            .sum()
+    }
+
+    fn total_members(&self) -> usize {
+        self.records.iter().map(|record| record.members.len()).sum()
+    }
+
+    fn evict_oldest_message(&mut self) -> Option<()> {
+        let room_index = self
+            .records
+            .iter()
+            .enumerate()
+            .filter_map(|(index, record)| {
+                record
+                    .messages
+                    .first()
+                    .map(|message| (index, message.created_at))
+            })
+            .min_by_key(|(index, created_at)| (*created_at, *index))?
+            .0;
+        self.records[room_index].messages.remove(0);
+        Some(())
     }
 
     fn json(&self, query: Option<&str>) -> String {
@@ -4458,6 +4505,10 @@ impl RoomStore {
             self.updated_at
         )
     }
+}
+
+fn bounded_room_name(name: &str) -> String {
+    truncate_utf8_bytes(name.to_owned(), MAX_ROOM_NAME_BYTES)
 }
 
 // Collection Models
@@ -36477,6 +36528,50 @@ mod tests {
             room.messages.last().unwrap().body,
             format!("message-{}", super::MAX_ROOM_MESSAGES_PER_ROOM + 4)
         );
+    }
+
+    #[test]
+    fn room_store_bounds_text_and_aggregate_retention() {
+        let oversized_room = "é".repeat(super::MAX_ROOM_NAME_BYTES);
+        let oversized_username = "u".repeat(super::MAX_ROOM_USERNAME_BYTES + 1);
+        let oversized_body = "b".repeat(super::MAX_ROOM_MESSAGE_BODY_BYTES + 1);
+        let oversized_ticker = "t".repeat(super::MAX_ROOM_TICKER_BYTES + 1);
+        let mut rooms = super::RoomStore::with_limits(3, super::MAX_TOTAL_ROOM_MEMBERS + 1);
+        let joined = rooms.join(oversized_room.clone()).unwrap();
+        assert!(joined.name.len() <= super::MAX_ROOM_NAME_BYTES);
+        rooms.join("other".to_owned()).unwrap();
+
+        let message = rooms
+            .add_message(&oversized_room, oversized_username.clone(), oversized_body)
+            .unwrap();
+        assert_eq!(
+            message.messages[0].username.len(),
+            super::MAX_ROOM_USERNAME_BYTES
+        );
+        assert_eq!(
+            message.messages[0].body.len(),
+            super::MAX_ROOM_MESSAGE_BODY_BYTES
+        );
+        let ticker = rooms.set_ticker(&oversized_room, oversized_ticker).unwrap();
+        assert_eq!(ticker.ticker.unwrap().len(), super::MAX_ROOM_TICKER_BYTES);
+
+        rooms.records[0].messages = (0..super::MAX_TOTAL_ROOM_MESSAGES)
+            .map(|created_at| super::RoomMessageRecord {
+                username: "peer".to_owned(),
+                body: "message".to_owned(),
+                created_at: created_at as u64,
+            })
+            .collect();
+        let _ = rooms.add_message("other", "peer".to_owned(), "new".to_owned());
+        assert_eq!(rooms.total_messages(), super::MAX_TOTAL_ROOM_MESSAGES);
+        assert_eq!(rooms.records[0].messages.first().unwrap().created_at, 1);
+
+        rooms.records[0].members = (0..super::MAX_TOTAL_ROOM_MEMBERS)
+            .map(|index| format!("peer-{index}"))
+            .collect();
+        assert!(rooms.add_member("other", "new-peer".to_owned()).is_err());
+        let existing = rooms.records[0].members[0].clone();
+        assert!(rooms.add_member(&oversized_room, existing).is_ok());
     }
 
     #[test]
