@@ -143,6 +143,7 @@ const MAX_SHARE_GROUPS: usize = 256;
 const MAX_SHARE_GROUP_MEMBERS: usize = 4_096;
 const MAX_COLLECTIONS: usize = 256;
 const MAX_COLLECTION_ITEMS: usize = 10_000;
+const MAX_WISHLIST_ITEMS: usize = 10_000;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -4663,29 +4664,48 @@ struct WishlistRecord {
 #[derive(Debug)]
 struct WishlistStore {
     records: Vec<WishlistRecord>,
+    next_item_id: u64,
     updated_at: u64,
+    max_items: usize,
 }
 
 impl WishlistStore {
     fn new() -> Self {
+        Self::with_max_items(MAX_WISHLIST_ITEMS)
+    }
+
+    fn with_max_items(max_items: usize) -> Self {
         Self {
             records: Vec::new(),
+            next_item_id: 1,
             updated_at: unix_timestamp(),
+            max_items: max_items.max(1),
         }
     }
 
     fn from_persisted(records: Vec<crate::persistence::WishlistItemRecord>) -> Self {
         let mut store = Self::new();
-        let mut items = records
-            .into_iter()
-            .map(|record| WishlistItem {
+        let mut items = Vec::new();
+        let mut seen_ids = HashSet::new();
+        for record in records {
+            if let Some(number) = record
+                .id
+                .strip_prefix("wish-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                store.next_item_id = store.next_item_id.max(number.saturating_add(1));
+            }
+            if items.len() >= store.max_items || !seen_ids.insert(record.id.clone()) {
+                continue;
+            }
+            items.push(WishlistItem {
                 id: record.id,
                 artist: record.artist,
                 title: record.title,
                 kind: record.kind,
                 added_at: u64::try_from(record.added_at).unwrap_or(0),
-            })
-            .collect::<Vec<_>>();
+            });
+        }
         items.sort_by_key(|item| item.added_at);
         let updated_at = items
             .iter()
@@ -4717,13 +4737,52 @@ impl WishlistStore {
         }
     }
 
-    fn add_item(&mut self, item: WishlistItem) -> Option<WishlistRecord> {
+    fn add_item(
+        &mut self,
+        artist: String,
+        title: String,
+        kind: String,
+    ) -> Result<WishlistItem, ()> {
         let now = unix_timestamp();
-        let record = self.records.iter_mut().find(|r| r.id == "default")?;
-        record.items.push(item);
+        self.get_or_create();
+        let record = self
+            .records
+            .iter_mut()
+            .find(|record| record.id == "default")
+            .ok_or(())?;
+        if record.items.len() >= self.max_items {
+            return Err(());
+        }
+        let next_item_id = self.next_item_id.checked_add(1).ok_or(())?;
+        let item = WishlistItem {
+            id: format!("wish-{}", self.next_item_id),
+            artist,
+            title,
+            kind,
+            added_at: now,
+        };
+        self.next_item_id = next_item_id;
+        record.items.push(item.clone());
         record.updated_at = now;
         self.updated_at = now;
-        Some(record.clone())
+        Ok(item)
+    }
+
+    fn remaining_capacity(&mut self) -> usize {
+        self.get_or_create();
+        self.records
+            .iter()
+            .find(|record| record.id == "default")
+            .map(|record| self.max_items.saturating_sub(record.items.len()))
+            .unwrap_or(0)
+    }
+
+    fn can_add_items(&mut self, count: usize) -> bool {
+        count <= self.remaining_capacity()
+            && u64::try_from(count)
+                .ok()
+                .and_then(|count| self.next_item_id.checked_add(count))
+                .is_some()
     }
 
     fn remove_item(&mut self, item_id: &str) -> Option<WishlistRecord> {
@@ -11356,23 +11415,17 @@ async fn route_http_request_with_headers(
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
 
             let mut wishlist = state.wishlist.write().await;
-            wishlist.get_or_create();
-            let item_id = format!("wish-{}", unix_timestamp());
-            let item = WishlistItem {
-                id: item_id,
-                artist,
-                title,
-                kind,
-                added_at: unix_timestamp(),
-            };
-            if let Some(_record) = wishlist.add_item(item.clone()) {
+            match wishlist.add_item(artist, title, kind) {
+              Ok(item) => {
                 let json = item.json();
                 drop(wishlist);
                 persist_wishlist_item(state, &item).await;
                 Ok(routing::created_response(json))
-            } else {
+              }
+              Err(()) => {
                 drop(wishlist);
-                Ok(routing::conflict_response("failed to add wishlist item"))
+                Ok(routing::service_unavailable_response("wishlist item capacity is full"))
+              }
             }
         }
         ("DELETE", path) if path.starts_with("/api/wishlist/") && path.len() > 14 => {
@@ -13272,29 +13325,26 @@ async fn route_http_request_with_headers(
                  .lines()
                  .map(str::trim)
                  .filter(|line| !line.is_empty())
-                 .enumerate()
-                 .map(|(index, line)| {
+                 .map(|line| {
                      let (artist, title) = line
                          .split_once(" - ")
                          .map(|(artist, title)| (artist.trim().to_owned(), title.trim().to_owned()))
                          .unwrap_or_else(|| (String::new(), line.to_owned()));
-                     WishlistItem {
-                         id: format!("source-feed-{}-{}", unix_timestamp(), index + 1),
-                         artist,
-                         title,
-                         kind: "SourceFeed".to_owned(),
-                         added_at: unix_timestamp(),
-                     }
+                     (artist, title, "SourceFeed".to_owned())
                  })
                  .collect::<Vec<_>>();
              let mut wishlist = state.wishlist.write().await;
-             wishlist.get_or_create();
+             if !wishlist.can_add_items(parsed_items.len()) {
+                 return Ok(routing::service_unavailable_response("wishlist item capacity is full"));
+             }
              let mut items = Vec::new();
              let mut persisted_items = Vec::new();
-             for item in parsed_items {
+             for (artist, title, kind) in parsed_items {
+                 let item = wishlist
+                     .add_item(artist, title, kind)
+                     .map_err(|_| "wishlist capacity changed unexpectedly".to_owned())?;
                  let value = serde_json::from_str::<serde_json::Value>(&item.json())
                      .unwrap_or_else(|_| serde_json::json!({ "id": item.id }));
-                 wishlist.add_item(item.clone());
                  persisted_items.push(item);
                  items.push(value);
              }
@@ -14680,15 +14730,18 @@ async fn route_http_request_with_headers(
              let artist = extract_json_string_field(body, "artist").unwrap_or_default();
              let title = extract_json_string_field(body, "title").unwrap_or_default();
              let mut wishlist = state.wishlist.write().await;
-             wishlist.get_or_create();
-             let item = WishlistItem {
-                 id: format!("radar-{}", unix_timestamp()),
+             let item = match wishlist.add_item(
                  artist,
                  title,
-                 kind: "MusicBrainzReleaseRadar".to_owned(),
-                 added_at: unix_timestamp(),
+                 "MusicBrainzReleaseRadar".to_owned(),
+             ) {
+                 Ok(item) => item,
+                 Err(()) => {
+                     return Ok(routing::service_unavailable_response(
+                         "wishlist item capacity is full",
+                     ));
+                 }
              };
-             wishlist.add_item(item.clone());
              let json = item.json();
              let count = wishlist
                  .records
@@ -14786,23 +14839,21 @@ async fn route_http_request_with_headers(
                      } else {
                          (String::new(), line.to_owned())
                      };
-                     Some(WishlistItem {
-                         id: format!("csv-{}-{}", unix_timestamp(), index + 1),
-                         artist,
-                         title,
-                         kind: "Audio".to_owned(),
-                         added_at: unix_timestamp(),
-                     })
+                     Some((artist, title, "Audio".to_owned()))
                  })
                  .collect::<Vec<_>>();
              let mut wishlist = state.wishlist.write().await;
-             wishlist.get_or_create();
+             if !wishlist.can_add_items(parsed_items.len()) {
+                 return Ok(routing::service_unavailable_response("wishlist item capacity is full"));
+             }
              let mut imported = Vec::new();
              let mut persisted_items = Vec::new();
-             for item in parsed_items {
+             for (artist, title, kind) in parsed_items {
+                 let item = wishlist
+                     .add_item(artist, title, kind)
+                     .map_err(|_| "wishlist capacity changed unexpectedly".to_owned())?;
                  let value = serde_json::from_str::<serde_json::Value>(&item.json())
                      .unwrap_or_else(|_| serde_json::json!({ "id": item.id }));
-                 wishlist.add_item(item.clone());
                  persisted_items.push(item);
                  imported.push(value);
              }
@@ -31461,6 +31512,24 @@ mod tests {
             .is_none());
     }
 
+    #[test]
+    fn wishlist_bounds_items_and_allocates_unique_ids() {
+        let mut wishlist = super::WishlistStore::with_max_items(2);
+        let first = wishlist
+            .add_item("Artist".to_owned(), "First".to_owned(), "Audio".to_owned())
+            .unwrap();
+        let second = wishlist
+            .add_item("Artist".to_owned(), "Second".to_owned(), "Audio".to_owned())
+            .unwrap();
+        assert_ne!(first.id, second.id);
+        assert_eq!(wishlist.remaining_capacity(), 0);
+        assert!(wishlist
+            .add_item(String::new(), "Overflow".to_owned(), "Audio".to_owned())
+            .is_err());
+        wishlist.next_item_id = u64::MAX;
+        assert!(!wishlist.can_add_items(1));
+    }
+
     #[tokio::test]
     async fn compatibility_projections_use_local_state_for_recommendations_and_activity() {
         let (state, _receiver) = test_state();
@@ -33567,21 +33636,12 @@ mod tests {
     #[test]
     fn wishlist_store_terms_feed_scheduled_search_records() {
         let mut wishlist = super::WishlistStore::new();
-        wishlist.get_or_create();
-        wishlist.add_item(super::WishlistItem {
-            id: "artist-title".to_owned(),
-            artist: "Artist".to_owned(),
-            title: "Title".to_owned(),
-            kind: "Audio".to_owned(),
-            added_at: 1,
-        });
-        wishlist.add_item(super::WishlistItem {
-            id: "title-only".to_owned(),
-            artist: String::new(),
-            title: "Rare Track".to_owned(),
-            kind: "Audio".to_owned(),
-            added_at: 2,
-        });
+        wishlist
+            .add_item("Artist".to_owned(), "Title".to_owned(), "Audio".to_owned())
+            .unwrap();
+        wishlist
+            .add_item(String::new(), "Rare Track".to_owned(), "Audio".to_owned())
+            .unwrap();
 
         assert_eq!(
             wishlist.search_terms(),
