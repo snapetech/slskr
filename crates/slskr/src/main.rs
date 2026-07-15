@@ -14970,9 +14970,6 @@ async fn route_http_request_with_headers(
                 .map(|(_, value)| value.as_str())
                 .unwrap_or("");
 
-            if let Some(error) = error {
-                return Ok(routing::bad_request_response(error));
-            }
             if state_value.is_empty() {
                 return Ok(routing::bad_request_response("Spotify callback missing state"));
             }
@@ -14984,6 +14981,9 @@ async fn route_http_request_with_headers(
                 return Ok(routing::forbidden_response("invalid or expired Spotify OAuth state"));
             };
             persist_oauth_state_delete(state, state_value).await;
+            if let Some(error) = error {
+                return Ok(routing::bad_request_response(error));
+            }
             let Some(code) = code else {
                 return Ok(routing::bad_request_response("Spotify callback missing code"));
             };
@@ -26296,6 +26296,69 @@ mod tests {
         let replay = super::route_http_request("GET", &valid_path, None, "", &state)
             .await
             .expect("replay callback response");
+        assert_eq!(replay.status, "403 Forbidden");
+    }
+
+    #[tokio::test]
+    async fn spotify_oauth_error_callback_validates_and_consumes_state() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_SPOTIFY_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_CLIENT_ID", "client-id"),
+        );
+        super::route_http_request(
+            "POST",
+            "/api/integrations/spotify/authorize",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("authorize response");
+        let issued_state = state
+            .oauth_states
+            .read()
+            .await
+            .records
+            .keys()
+            .next()
+            .cloned()
+            .expect("issued state");
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/integrations/spotify/callback?error=access_denied",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing state response");
+        assert_eq!(missing.status, "400 Bad Request");
+        assert!(missing.body.contains("missing state"));
+
+        let invalid = super::route_http_request(
+            "GET",
+            "/api/integrations/spotify/callback?error=access_denied&state=bogus",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("invalid state response");
+        assert_eq!(invalid.status, "403 Forbidden");
+
+        let error_path =
+            format!("/api/integrations/spotify/callback?error=access_denied&state={issued_state}");
+        let denied = super::route_http_request("GET", &error_path, None, "", &state)
+            .await
+            .expect("valid error callback");
+        assert_eq!(denied.status, "400 Bad Request");
+        assert!(denied.body.contains("access_denied"));
+
+        let replay = super::route_http_request("GET", &error_path, None, "", &state)
+            .await
+            .expect("replayed error callback");
         assert_eq!(replay.status, "403 Forbidden");
     }
 
