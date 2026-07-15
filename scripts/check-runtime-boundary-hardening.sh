@@ -22,6 +22,8 @@ for anchor in \
   'MAX_SEARCH_RESULTS_PER_SEARCH' \
   'search_store_caps_results_from_peer_responses' \
   'libc::O_NOFOLLOW' \
+  '.take(MAX_TRANSFER_STATE_BYTES + 1)' \
+  'transfer event path must be a regular file' \
   'write_file_atomic_with_temp_path' \
   'state_file_io_rejects_symlinks_without_touching_targets' \
   'MAX_ROOM_MESSAGES_PER_ROOM' \

@@ -23568,9 +23568,14 @@ fn write_transfer_events_header(path: &Path) -> Result<(), String> {
 }
 
 fn rotate_transfer_events_if_needed(path: &Path) -> Result<(), String> {
-    let Ok(metadata) = fs::metadata(path) else {
-        return Ok(());
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("transfer event metadata read failed: {error}")),
     };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("transfer event path must be a regular file".to_owned());
+    }
     if metadata.len() <= MAX_TRANSFER_EVENTS_BYTES {
         return Ok(());
     }
@@ -23609,7 +23614,7 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW);
     }
-    let mut file = options
+    let file = options
         .open(path)
         .map_err(|error| format!("transfer state open failed: {error}"))?;
     let size = file
@@ -23622,8 +23627,14 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
         ));
     }
     let mut body = String::new();
-    file.read_to_string(&mut body)
+    file.take(MAX_TRANSFER_STATE_BYTES + 1)
+        .read_to_string(&mut body)
         .map_err(|error| format!("transfer state read failed: {error}"))?;
+    if body.len() as u64 > MAX_TRANSFER_STATE_BYTES {
+        return Err(format!(
+            "transfer state file is too large: more than {MAX_TRANSFER_STATE_BYTES} bytes"
+        ));
+    }
     let mut state = serde_json::from_str::<TransferStateFile>(&body)
         .map_err(|error| format!("transfer state parse failed: {error}"))?;
     if state.version != 1 {
@@ -23705,9 +23716,14 @@ fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), Strin
 
     rotate_transfer_events_if_needed(path)?;
 
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
+    let mut options = fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
         .open(path)
         .map_err(|error| format!("transfer event open failed: {error}"))?;
     writeln!(
@@ -34401,6 +34417,31 @@ mod tests {
             "keep"
         );
         assert!(!destination.exists());
+
+        let events_path = super::transfer_events_path(&state_dir);
+        symlink(&target, &events_path).expect("event symlink");
+        let entry = super::TransferEntry {
+            id: 1,
+            direction: 0,
+            token: 1,
+            peer_username: None,
+            filename: "Remote/Song.flac".to_owned(),
+            local_path: None,
+            batch_id: None,
+            size: Some(1),
+            bytes_transferred: 0,
+            status: "queued".to_owned(),
+            reason: None,
+            requested_at: 1,
+            updated_at: 1,
+        };
+        let error =
+            super::append_transfer_event(&events_path, &entry).expect_err("reject event symlink");
+        assert!(error.contains("must be a regular file"));
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("target still unchanged"),
+            "keep"
+        );
 
         let _ = std::fs::remove_dir_all(state_dir);
     }
