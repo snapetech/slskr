@@ -6978,6 +6978,14 @@ fn normalize_security_ban_value(kind: &str, value: &str) -> Option<String> {
     }
 }
 
+fn security_ban_route_tail(path: &str) -> Option<Vec<&str>> {
+    let segments = path.strip_prefix("/api/")?.split('/').collect::<Vec<_>>();
+    match segments.as_slice() {
+        ["bans", tail @ ..] | [_, "bans", tail @ ..] => Some(tail.to_vec()),
+        _ => None,
+    }
+}
+
 // Share Grant Models
 #[derive(Clone, Debug)]
 struct ShareGrantRecord {
@@ -15056,17 +15064,17 @@ async fn route_http_request_with_headers(
         }
 
           // BANS & BLOCKING ENDPOINTS
-        ("GET", path) if path.contains("/bans") => {
+        ("GET", path) if security_ban_route_tail(path).is_some_and(|tail| tail.is_empty()) => {
             let security = state.security.read().await;
             let json = security.json_value().to_string();
             drop(security);
             Ok(routing::ok_response(json))
         }
 
-        ("POST", path) if path.contains("/bans/username") => {
-            let username = extract_json_string_field(body, "username")
-                .or_else(|| path.split_once("/bans/username/").map(|(_, value)| decoded_path_segment(value)))
-                .unwrap_or_default();
+        ("POST", path)
+            if security_ban_route_tail(path).as_deref() == Some(["username"].as_slice()) =>
+        {
+            let username = extract_json_string_field(body, "username").unwrap_or_default();
             let Some(username) = normalize_security_ban_value("username", &username) else {
                 return Ok(routing::bad_request_response("username is required"));
             };
@@ -15087,7 +15095,10 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
 
-        ("DELETE", path) if path.contains("/bans/username/") => {
+        ("DELETE", path)
+            if security_ban_route_tail(path)
+                .is_some_and(|tail| tail.len() == 2 && tail[0] == "username") =>
+        {
             let username = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
             let Some(username) = normalize_security_ban_value("username", &username) else {
                 return Ok(routing::bad_request_response("username is required"));
@@ -15108,7 +15119,9 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
 
-        ("POST", path) if path.contains("/bans/ip") => {
+        ("POST", path)
+            if security_ban_route_tail(path).as_deref() == Some(["ip"].as_slice()) =>
+        {
             let ip = extract_json_string_field(body, "ip").unwrap_or_default();
             let Some(ip) = normalize_security_ban_value("ip", &ip) else {
                 return Ok(routing::bad_request_response("valid ip is required"));
@@ -15130,7 +15143,10 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
 
-        ("DELETE", path) if path.contains("/bans/ip/") => {
+        ("DELETE", path)
+            if security_ban_route_tail(path)
+                .is_some_and(|tail| tail.len() == 2 && tail[0] == "ip") =>
+        {
             let ip = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
             let Some(ip) = normalize_security_ban_value("ip", &ip) else {
                 return Ok(routing::bad_request_response("valid ip is required"));
@@ -34491,6 +34507,53 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&username.body).unwrap()["username"],
             "Peer One"
         );
+    }
+
+    #[tokio::test]
+    async fn security_ban_routes_require_exact_documented_segments() {
+        let (state, _receiver) = test_state();
+        let security_body = state.security.read().await.json_value().to_string();
+        for path in [
+            "/not-api/bans",
+            "/api/x/y/bans",
+            "/api/security/bans/username",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap();
+            assert_ne!(response.body, security_body, "unexpected GET match: {path}");
+        }
+        for path in [
+            "/api/security/bans/ip/extra",
+            "/api/x/y/bans/ip",
+            "/not-api/bans/ip",
+        ] {
+            super::route_http_request("POST", path, None, r#"{"ip":"192.0.2.1"}"#, &state)
+                .await
+                .unwrap();
+        }
+        assert!(state.security.read().await.bans.is_empty());
+
+        let root = super::route_http_request("GET", "/api/bans", None, "", &state)
+            .await
+            .unwrap();
+        assert_eq!(root.body, security_body);
+        let namespaced = super::route_http_request("GET", "/api/security/bans", None, "", &state)
+            .await
+            .unwrap();
+        assert_eq!(namespaced.body, security_body);
+        let versioned = super::route_http_request("GET", "/api/v0/security/bans", None, "", &state)
+            .await
+            .unwrap();
+        assert_eq!(versioned.body, security_body);
+
+        assert_eq!(super::security_ban_route_tail("/api/bans"), Some(vec![]));
+        assert_eq!(
+            super::security_ban_route_tail("/api/security/bans/ip/192.0.2.1"),
+            Some(vec!["ip", "192.0.2.1"])
+        );
+        assert_eq!(super::security_ban_route_tail("/not-api/bans"), None);
+        assert_eq!(super::security_ban_route_tail("/api/x/y/bans"), None);
     }
 
     #[tokio::test]
