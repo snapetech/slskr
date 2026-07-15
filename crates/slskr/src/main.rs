@@ -9737,12 +9737,11 @@ async fn route_http_request_with_headers(
             })
         }
         ("PUT", "/api/shares") => {
-            let rebuilt = build_share_index(&state.config);
+            let rebuilt = match rebuild_share_index(state).await {
+                Ok(snapshot) => snapshot,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             let json = rebuilt.json();
-            let mut shares = state.shares.write().await;
-            *shares = rebuilt.clone();
-            drop(shares);
-            persist_share_index(state, &rebuilt).await;
             record_event(state, "share.scan.completed", "shares", None).await;
             Ok(routing::ok_response((!json.is_empty()).to_string()))
         }
@@ -9998,7 +9997,10 @@ async fn route_http_request_with_headers(
             })
         }
         ("POST", "/api/shares/rescan") => {
-            let snapshot = rebuild_share_index(state).await;
+            let snapshot = match rebuild_share_index(state).await {
+                Ok(snapshot) => snapshot,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             record_event(
                 state,
                 "share.scan.completed",
@@ -26436,21 +26438,30 @@ pub fn fallback_dashboard_html() -> String {
         )
 }
 
-async fn rebuild_share_index(state: &AppState) -> ShareIndexSnapshot {
+async fn rebuild_share_index(state: &AppState) -> Result<ShareIndexSnapshot, String> {
     let snapshot = build_share_index(&state.config);
-    {
-        let mut shares = state.shares.write().await;
-        *shares = snapshot.clone();
+    let mut shares = state.shares.write().await;
+    let previous = std::mem::replace(&mut *shares, snapshot.clone());
+    if let Err(error) = persist_share_index_checked(state, &snapshot).await {
+        *shares = previous;
+        return Err(error);
     }
-    persist_share_index(state, &snapshot).await;
-    snapshot
+    drop(shares);
+    Ok(snapshot)
 }
 
-async fn persist_share_index(state: &AppState, snapshot: &ShareIndexSnapshot) {
-    if let Some(db) = state.db.as_ref() {
-        let records = persisted_share_file_records(snapshot);
-        let _ = db.replace_share_files(&records).await;
-    }
+async fn persist_share_index_checked(
+    state: &AppState,
+    snapshot: &ShareIndexSnapshot,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    let records = persisted_share_file_records(snapshot);
+    db.replace_share_files(&records)
+        .await
+        .map_err(|error| format!("share index persistence failed: {error}"))?;
+    Ok(true)
 }
 
 fn persisted_share_file_records(
@@ -30576,6 +30587,46 @@ mod tests {
         assert_eq!(response.status, "202 Accepted");
         assert!(response.body.contains("\"files\":1"));
         assert_eq!(state.shares.read().await.entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn share_rebuild_routes_roll_back_when_persistence_fails() {
+        for (method, path) in [("PUT", "/api/shares"), ("POST", "/api/v0/shares/rescan")] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            {
+                let mut shares = state.shares.write().await;
+                shares.entries.clear();
+                shares.local_paths.clear();
+                shares.roots.clear();
+                shares.scan_errors.push("previous snapshot".to_owned());
+            }
+            let previous = state.shares.read().await.json();
+            db.close_for_test().await;
+
+            let response = super::route_http_request(method, path, None, "", &state)
+                .await
+                .expect("failed share index persistence response");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{method} {path}"
+            );
+            assert!(
+                response.body.contains("share index persistence failed"),
+                "{method} {path}"
+            );
+            assert_eq!(
+                state.shares.read().await.json(),
+                previous,
+                "{method} {path}"
+            );
+        }
     }
 
     #[tokio::test]
