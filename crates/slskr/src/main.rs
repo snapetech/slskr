@@ -148,6 +148,8 @@ const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
 const MAX_SONGID_RUNS: usize = 256;
 const MAX_USER_NOTES: usize = 4_096;
 const MAX_INTERESTS_PER_KIND: usize = 4_096;
+const MAX_NOW_PLAYING_RECORDS: usize = 4_096;
+const MAX_SECURITY_BANS: usize = 4_096;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -5793,7 +5795,7 @@ impl NowPlayingStore {
 
     fn from_persisted(records: Vec<crate::persistence::NowPlayingRecord>) -> Self {
         let mut updated_at = unix_timestamp();
-        let records = records
+        let mut records = records
             .into_iter()
             .map(|record| {
                 let record_updated_at = u64::try_from(record.updated_at).unwrap_or(0);
@@ -5805,7 +5807,12 @@ impl NowPlayingStore {
                     updated_at: record_updated_at,
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        records.sort_by_key(|record| std::cmp::Reverse(record.updated_at));
+        let mut seen_users = std::collections::HashSet::new();
+        records.retain(|record| seen_users.insert(record.username.to_ascii_lowercase()));
+        records.truncate(MAX_NOW_PLAYING_RECORDS);
+        records.sort_by_key(|record| record.updated_at);
         Self {
             records,
             updated_at,
@@ -5822,7 +5829,7 @@ impl NowPlayingStore {
         if let Some(record) = self
             .records
             .iter_mut()
-            .find(|record| record.username == username)
+            .find(|record| record.username.eq_ignore_ascii_case(&username))
         {
             record.artist = artist;
             record.title = title;
@@ -5836,6 +5843,16 @@ impl NowPlayingStore {
             title,
             updated_at: now,
         };
+        if self.records.len() == MAX_NOW_PLAYING_RECORDS {
+            let oldest = self
+                .records
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, record)| record.updated_at)
+                .map(|(index, _)| index)
+                .unwrap_or(0);
+            self.records.remove(oldest);
+        }
         self.records.push(record.clone());
         self.updated_at = now;
         record
@@ -6236,8 +6253,18 @@ impl SecurityState {
 
     fn from_persisted(records: Vec<crate::persistence::SecurityBanRecord>) -> Self {
         let mut updated_at = unix_timestamp();
+        let mut seen = std::collections::HashSet::new();
         let bans = records
             .into_iter()
+            .filter(|record| {
+                let value = if record.kind == "username" {
+                    record.value.to_ascii_lowercase()
+                } else {
+                    record.value.clone()
+                };
+                seen.insert((record.kind.clone(), value))
+            })
+            .take(MAX_SECURITY_BANS)
             .map(|record| {
                 let created_at = u64::try_from(record.created_at).unwrap_or(0);
                 updated_at = updated_at.max(created_at);
@@ -6251,16 +6278,22 @@ impl SecurityState {
         Self { bans, updated_at }
     }
 
-    fn ban(&mut self, kind: &str, value: String) -> SecurityBanRecord {
+    fn ban(&mut self, kind: &str, value: String) -> Option<SecurityBanRecord> {
         let now = unix_timestamp();
-        if let Some(record) = self
-            .bans
-            .iter_mut()
-            .find(|record| record.kind == kind && record.value == value)
-        {
+        if let Some(record) = self.bans.iter_mut().find(|record| {
+            record.kind == kind
+                && if kind == "username" {
+                    record.value.eq_ignore_ascii_case(&value)
+                } else {
+                    record.value == value
+                }
+        }) {
             record.created_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.bans.len() >= MAX_SECURITY_BANS {
+            return None;
         }
         let record = SecurityBanRecord {
             kind: kind.to_owned(),
@@ -6269,13 +6302,19 @@ impl SecurityState {
         };
         self.bans.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn unban(&mut self, kind: &str, value: &str) -> bool {
         let before = self.bans.len();
-        self.bans
-            .retain(|record| !(record.kind == kind && record.value == value));
+        self.bans.retain(|record| {
+            let value_matches = if kind == "username" {
+                record.value.eq_ignore_ascii_case(value)
+            } else {
+                record.value == value
+            };
+            !(record.kind == kind && value_matches)
+        });
         let removed = before != self.bans.len();
         if removed {
             self.updated_at = unix_timestamp();
@@ -14241,10 +14280,15 @@ async fn route_http_request_with_headers(
 
         ("POST", path) if path.contains("/bans/username") => {
             let username = extract_json_string_field(body, "username")
-                .or_else(|| path.rsplit('/').next().map(str::to_owned))
+                .or_else(|| path.split_once("/bans/username/").map(|(_, value)| decoded_path_segment(value)))
                 .unwrap_or_default();
+            if username.trim().is_empty() {
+                return Ok(routing::bad_request_response("username is required"));
+            }
             let mut security = state.security.write().await;
-            let record = security.ban("username", username.clone());
+            let Some(record) = security.ban("username", username.clone()) else {
+                return Ok(routing::service_unavailable_response("security ban capacity is full"));
+            };
             let active_bans = security.active_bans();
             drop(security);
             persist_security_ban(state, &record).await;
@@ -14278,8 +14322,13 @@ async fn route_http_request_with_headers(
 
         ("POST", path) if path.contains("/bans/ip") => {
             let ip = extract_json_string_field(body, "ip").unwrap_or_default();
+            if ip.trim().is_empty() {
+                return Ok(routing::bad_request_response("ip is required"));
+            }
             let mut security = state.security.write().await;
-            let record = security.ban("ip", ip.clone());
+            let Some(record) = security.ban("ip", ip.clone()) else {
+                return Ok(routing::service_unavailable_response("security ban capacity is full"));
+            };
             let active_bans = security.active_bans();
             drop(security);
             persist_security_ban(state, &record).await;
@@ -27694,6 +27743,11 @@ mod tests {
         .await
         .expect("create username ban");
         assert_eq!(ban.status, "200 OK");
+        let blank_ban =
+            super::route_http_request("POST", "/api/security/bans/username", None, "{}", &state)
+                .await
+                .expect("reject blank username ban");
+        assert_eq!(blank_ban.status, "400 Bad Request");
 
         let persisted_notes = db.list_user_notes(10, 0).await.expect("list notes");
         assert_eq!(persisted_notes.len(), 1);
@@ -31741,6 +31795,47 @@ mod tests {
         interests.next_id = u64::MAX;
         assert!(interests.add_liked("Jazz".to_owned()).is_none());
         assert!(interests.add_hated("Pop".to_owned()).is_none());
+    }
+
+    #[test]
+    fn now_playing_and_security_state_bound_remote_keys() {
+        let mut now_playing = super::NowPlayingStore::new();
+        for index in 0..super::MAX_NOW_PLAYING_RECORDS {
+            now_playing.upsert(
+                format!("user-{index}"),
+                "Artist".to_owned(),
+                "Track".to_owned(),
+            );
+        }
+        now_playing.upsert(
+            "overflow".to_owned(),
+            "Artist".to_owned(),
+            "Track".to_owned(),
+        );
+        assert_eq!(now_playing.records.len(), super::MAX_NOW_PLAYING_RECORDS);
+        assert!(now_playing
+            .records
+            .iter()
+            .any(|record| record.username == "overflow"));
+        let count = now_playing.records.len();
+        now_playing.upsert(
+            "OVERFLOW".to_owned(),
+            "Updated".to_owned(),
+            "Track".to_owned(),
+        );
+        assert_eq!(now_playing.records.len(), count);
+
+        let mut security = super::SecurityState::new();
+        let first = security.ban("username", "Spammer".to_owned()).unwrap();
+        let duplicate = security.ban("username", "spammer".to_owned()).unwrap();
+        assert_eq!(first.value, duplicate.value);
+        assert_eq!(security.bans.len(), 1);
+        assert!(security.unban("username", "SPAMMER"));
+        for index in 0..super::MAX_SECURITY_BANS {
+            security.ban("ip", format!("192.0.2.{index}")).unwrap();
+        }
+        assert!(security.ban("ip", "198.51.100.1".to_owned()).is_none());
+        assert_eq!(security.bans.len(), super::MAX_SECURITY_BANS);
     }
 
     #[tokio::test]

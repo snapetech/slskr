@@ -61,6 +61,9 @@ for anchor in \
   'MAX_USER_NOTES' \
   'MAX_INTERESTS_PER_KIND' \
   'notes_and_interests_bound_growth_and_ids' \
+  'MAX_NOW_PLAYING_RECORDS' \
+  'MAX_SECURITY_BANS' \
+  'now_playing_and_security_state_bound_remote_keys' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
