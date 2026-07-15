@@ -19,12 +19,20 @@ pub fn decompress_zlib_payload_with_limit(
     let limit = u64::try_from(max_decompressed_len)
         .unwrap_or(u64::MAX)
         .saturating_add(1);
-    let mut limited = decoder.by_ref().take(limit);
     let mut decompressed = Vec::new();
-    limited.read_to_end(&mut decompressed)?;
+    {
+        let mut limited = decoder.by_ref().take(limit);
+        limited.read_to_end(&mut decompressed)?;
+    }
     if decompressed.len() > max_decompressed_len {
         return Err(ClientError::PayloadTooLarge {
             max: max_decompressed_len,
+        });
+    }
+    let consumed = usize::try_from(decoder.total_in()).unwrap_or(usize::MAX);
+    if consumed != payload.len() {
+        return Err(ClientError::TrailingCompressedData {
+            remaining: payload.len().saturating_sub(consumed),
         });
     }
     Ok(decompressed)
@@ -43,5 +51,39 @@ pub fn decompress_peer_share_payload(
         PeerMessage::SharedFileListResponse(payload)
         | PeerMessage::FolderContentsResponse(payload) => Some(decompress_zlib_payload(payload)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compress_zlib_payload, decompress_zlib_payload_with_limit, ClientError};
+
+    #[test]
+    fn decompression_rejects_trailing_bytes_and_concatenated_streams() {
+        let compressed = compress_zlib_payload(b"share payload").expect("compress payload");
+        let mut with_junk = compressed.clone();
+        with_junk.extend_from_slice(b"hidden");
+        assert!(matches!(
+            decompress_zlib_payload_with_limit(&with_junk, 1024),
+            Err(ClientError::TrailingCompressedData { remaining: 6 })
+        ));
+
+        let mut concatenated = compressed;
+        concatenated.extend_from_slice(
+            &compress_zlib_payload(b"second stream").expect("compress second stream"),
+        );
+        assert!(matches!(
+            decompress_zlib_payload_with_limit(&concatenated, 1024),
+            Err(ClientError::TrailingCompressedData { remaining }) if remaining > 0
+        ));
+    }
+
+    #[test]
+    fn decompression_accepts_one_complete_stream_at_the_limit() {
+        let compressed = compress_zlib_payload(b"12345678").expect("compress payload");
+        assert_eq!(
+            decompress_zlib_payload_with_limit(&compressed, 8).expect("decompress payload"),
+            b"12345678"
+        );
     }
 }
