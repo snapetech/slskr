@@ -44256,6 +44256,7 @@ mod tests {
         assert!(sanitized.contains("\"api_cookie_auth_enabled\":true"));
         assert!(sanitized.contains("\"share_cache_tsv_enabled\":false"));
         assert!(sanitized.contains("\"launch_enabled\":true"));
+        assert!(sanitized.contains("\"command\":null"));
         assert!(sanitized.contains("a***e"));
         assert!(sanitized.contains("\"config_file\":\"config://file\""));
         assert!(sanitized.contains("\"state_dir\":\"state://configured\""));
@@ -44263,6 +44264,7 @@ mod tests {
         assert!(!sanitized.contains("/tmp/slskr"));
         assert!(!sanitized.contains("secret-password"));
         assert!(!sanitized.contains("test-token"));
+        assert!(!sanitized.contains("projectm"));
         assert!(!sanitized.contains("\"alice\""));
     }
 

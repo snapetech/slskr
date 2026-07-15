@@ -674,10 +674,9 @@ impl ExternalVisualizerSettings {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"configured\":{},\"launch_enabled\":{},\"command\":{}}}",
+            "{{\"configured\":{},\"launch_enabled\":{},\"command\":null}}",
             self.configured(),
-            self.launch_enabled,
-            json_option(self.command.as_deref())
+            self.launch_enabled
         )
     }
 }
