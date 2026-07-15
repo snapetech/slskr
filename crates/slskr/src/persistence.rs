@@ -2483,14 +2483,16 @@ impl DatabaseManager {
 
     /// Delete a share group and its members.
     pub async fn delete_share_group(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
         query("DELETE FROM share_group_members WHERE group_id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
         query("DELETE FROM share_groups WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
