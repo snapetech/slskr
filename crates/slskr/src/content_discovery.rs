@@ -6,6 +6,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 const STATE_VERSION: u32 = 1;
 const MAX_STATE_BYTES: u64 = 16 * 1024 * 1024;
@@ -147,6 +148,22 @@ impl ContentDiscoveryStore {
             .iter()
             .filter(|entry| entry.size == size)
             .collect()
+    }
+
+    pub fn verified_file_hash(&self, filename: &str, size: u64) -> Option<String> {
+        let entry = self.lookup_hash(&generate_flac_key(filename, size))?;
+        if entry.size != size {
+            return None;
+        }
+        let hashes = [&entry.file_sha256, &entry.full_file_hash]
+            .into_iter()
+            .filter(|hash| !hash.is_empty())
+            .collect::<Vec<_>>();
+        let hash = hashes.first()?;
+        hashes
+            .iter()
+            .all(|candidate| candidate.eq_ignore_ascii_case(hash))
+            .then(|| (*hash).clone())
     }
 
     pub fn recording_ids_for_hash(&self, expected_hash: &str, size: u64) -> Vec<String> {
@@ -293,6 +310,16 @@ impl ContentDiscoveryStore {
         crate::write_file_atomic(path, body)
             .map_err(|error| format!("content discovery state write failed: {error}"))
     }
+}
+
+pub fn generate_flac_key(filename: &str, size: u64) -> String {
+    let normalized = filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(filename)
+        .to_lowercase();
+    let input = format!("{normalized}:{size}");
+    hex::encode(&Sha256::digest(input.as_bytes())[..8])
 }
 
 fn normalize_hash_entry(mut entry: HashDbEntry, now: u64) -> Result<HashDbEntry, String> {
@@ -531,6 +558,33 @@ mod tests {
             vec!["Peer-A", "Peer-B"]
         );
         assert!(store.recording_ids_for_hash(HASH, 124).is_empty());
+    }
+
+    #[test]
+    fn rescue_lookup_matches_sibling_flac_key_and_requires_consistent_full_hash() {
+        assert_eq!(
+            generate_flac_key("Remote/Album/Track.FLAC", 123),
+            "072a888a552d6ba1"
+        );
+        let mut store = ContentDiscoveryStore::in_memory();
+        let mut entry = hash_entry(HASH, "recording-1");
+        entry.flac_key = generate_flac_key("Track.FLAC", 123);
+        entry.full_file_hash = HASH.to_owned();
+        store.merge_hash_entries(vec![entry]).expect("merge hash");
+        assert_eq!(
+            store.verified_file_hash("folder\\TRACK.flac", 123),
+            Some(HASH.to_owned())
+        );
+        assert_eq!(store.verified_file_hash("track.flac", 124), None);
+
+        let mut conflicting = hash_entry(HASH, "recording-1");
+        conflicting.flac_key = generate_flac_key("Track.FLAC", 123);
+        conflicting.full_file_hash =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned();
+        store
+            .merge_hash_entries(vec![conflicting])
+            .expect("merge conflicting full hashes");
+        assert_eq!(store.verified_file_hash("track.flac", 123), None);
     }
 
     #[test]

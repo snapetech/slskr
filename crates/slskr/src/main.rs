@@ -25596,6 +25596,25 @@ async fn run_transfer_rescue_cycle(
     };
     let mut activated = 0usize;
     for candidate in plan {
+        if let Some(replacement) = run_rescue_mesh_swarm(state, &candidate).await? {
+            tracker.retry_after.insert(
+                candidate.source.id,
+                now.saturating_add(state.config.transfer_rescue.retry_cooldown.as_secs()),
+            );
+            activated += 1;
+            record_event(
+                state,
+                "transfer.rescue.activated",
+                candidate.source.id.to_string(),
+                Some(format!(
+                    "replacement={};reason={};source=mesh-swarm",
+                    replacement.id,
+                    candidate.reason.as_str()
+                )),
+            )
+            .await;
+            continue;
+        }
         let permit = state
             .session_commands
             .reserve()
@@ -25707,6 +25726,189 @@ async fn run_transfer_rescue_cycle(
         .await;
     }
     Ok(activated)
+}
+
+async fn run_rescue_mesh_swarm(
+    state: &AppState,
+    candidate: &RescueCandidate,
+) -> Result<Option<TransferEntry>, String> {
+    let Some(file_size) = candidate.source.size.filter(|size| *size > 0) else {
+        return Ok(None);
+    };
+    let expected_hash = {
+        state
+            .content_discovery
+            .read()
+            .await
+            .verified_file_hash(&candidate.source.filename, file_size)
+    };
+    let Some(expected_hash) = expected_hash else {
+        return Ok(None);
+    };
+    let sources = discover_mesh_range_sources(state, &expected_hash, file_size).await;
+    if sources.len() < 2 {
+        return Ok(None);
+    }
+
+    let job_id = uuid::Uuid::new_v4().to_string();
+    let relative_path = format!(
+        "rescue/{}-{}-{}",
+        candidate.source.id,
+        job_id,
+        virtual_basename(&candidate.source.filename)
+    );
+    let output_path =
+        safe_download_path(&state.config.state_dir, &relative_path).and_then(|path| {
+            ensure_scoped_download_path(&state.config.state_dir, path.to_string_lossy().as_ref())
+        })?;
+    let public_output_path = output_path
+        .strip_prefix(download_root(&state.config.state_dir))
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .map_err(|_| "rescue swarm output path escaped the download root".to_owned())?;
+    let mut request = multisource::SwarmRequest {
+        filename: candidate.source.filename.clone(),
+        file_size,
+        expected_hash: Some(expected_hash),
+        output_path: Some(public_output_path.clone()),
+        chunk_size: multisource::DEFAULT_CHUNK_SIZE,
+        sources,
+    };
+    if multisource::validate_request(&mut request).is_err() {
+        return Ok(None);
+    }
+    let job = multisource::new_job(
+        job_id.clone(),
+        &request,
+        public_output_path.clone(),
+        unix_timestamp(),
+    );
+    state.multisource.write().await.insert(job);
+    let result = multisource::execute(
+        job_id.clone(),
+        request,
+        output_path.clone(),
+        public_output_path,
+        Arc::clone(&state.multisource),
+    )
+    .await;
+    if !result.success {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Info,
+            "transfers",
+            format!(
+                "verified mesh rescue for transfer {} did not complete; retaining the Soulseek attempt",
+                candidate.source.id
+            ),
+        )
+        .await;
+        return Ok(None);
+    }
+
+    let replacement = {
+        let mut transfers = state.transfers.write().await;
+        let Some(current) = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == candidate.source.id)
+            .cloned()
+        else {
+            drop(transfers);
+            discard_rescue_swarm_output(
+                state,
+                &job_id,
+                &output_path,
+                "verified rescue output was not promoted because the original transfer changed",
+            )
+            .await;
+            return Ok(None);
+        };
+        if !matches!(current.status.as_str(), "queued" | "in_progress") {
+            drop(transfers);
+            discard_rescue_swarm_output(
+                state,
+                &job_id,
+                &output_path,
+                "verified rescue output was not promoted because the original transfer changed",
+            )
+            .await;
+            return Ok(None);
+        }
+        let previous_entries = transfers.entries.clone();
+        let previous_next_id = transfers.next_id;
+        let previous_next_token = transfers.next_token;
+        let original = transfers
+            .update_status(
+                current.id,
+                "cancelled",
+                Some(current.bytes_transferred),
+                Some(format!(
+                    "rescued by verified mesh swarm: {}",
+                    candidate.reason.as_str()
+                )),
+            )
+            .expect("current mesh rescue transfer exists");
+        let replacement = transfers.create_with_details(
+            0,
+            Some("mesh-swarm".to_owned()),
+            current.filename.clone(),
+            Some(output_path.display().to_string()),
+            Some(file_size),
+            current.batch_id.clone(),
+            retry_request_details(&current),
+        );
+        let replacement = transfers
+            .update_local_execution(
+                replacement.id,
+                "succeeded",
+                file_size,
+                Some(file_size),
+                None,
+            )
+            .unwrap_or(replacement);
+        if let Err(error) = persist_transfer_records(state, &[original, replacement.clone()]).await
+        {
+            transfers.entries = previous_entries;
+            transfers.next_id = previous_next_id;
+            transfers.next_token = previous_next_token;
+            transfers.persist_state();
+            drop(transfers);
+            discard_rescue_swarm_output(
+                state,
+                &job_id,
+                &output_path,
+                "verified rescue output was not promoted because transfer metadata could not be committed",
+            )
+            .await;
+            return Err(error);
+        }
+        replacement
+    };
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "transfers",
+        format!(
+            "promoted underperforming transfer {} to verified mesh swarm job {} as attempt {}",
+            candidate.source.id, job_id, replacement.id
+        ),
+    )
+    .await;
+    Ok(Some(replacement))
+}
+
+async fn discard_rescue_swarm_output(
+    state: &AppState,
+    job_id: &str,
+    output_path: &Path,
+    reason: &str,
+) {
+    let _ = fs::remove_file(output_path);
+    state
+        .multisource
+        .write()
+        .await
+        .invalidate_completed(job_id, reason, unix_timestamp());
 }
 
 fn retry_request_details(source: &TransferEntry) -> TransferRequestDetails {
@@ -54900,6 +55102,135 @@ mod tests {
         assert_eq!(replacement.local_path, source.local_path);
         drop(transfers);
         assert!(super::transfer_is_cancelled(&state, source.id).await);
+    }
+
+    #[tokio::test]
+    async fn rescue_cycle_promotes_verified_mesh_swarm_without_overwriting_partial_file() {
+        use sha2::{Digest, Sha256};
+
+        let content = Arc::new(b"verified automatic rescue swarm".to_vec());
+        let expected_hash = hex::encode(Sha256::digest(content.as_slice()));
+        let (source_a, task_a) = spawn_mesh_range_source(Arc::clone(&content)).await;
+        let (source_b, task_b) = spawn_mesh_range_source(Arc::clone(&content)).await;
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_TRANSFER_RESCUE_MAX_QUEUE_TIME_SECONDS", "60"),
+            super::SearchStore::new(),
+            None,
+        );
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
+                    flac_key: super::content_discovery::generate_flac_key(
+                        "Remote/Album/Song.flac",
+                        content.len() as u64,
+                    ),
+                    size: content.len() as u64,
+                    full_file_hash: expected_hash.clone(),
+                    music_brainz_id: "recording-rescue".to_owned(),
+                    ..Default::default()
+                }])
+                .expect("merge rescue hash");
+            discovery
+                .merge_shadow_records(vec![super::content_discovery::ShadowIndexRecord {
+                    recording_id: "recording-rescue".to_owned(),
+                    peer_ids: vec!["rescue-peer-a".to_owned(), "rescue-peer-b".to_owned()],
+                    updated_at: 0,
+                }])
+                .expect("merge rescue shadow peers");
+        }
+        {
+            let mut mesh = state.mesh.write().await;
+            for (username, peer_id, address) in [
+                ("mesh-a", "rescue-peer-a", source_a),
+                ("mesh-b", "rescue-peer-b", source_b),
+            ] {
+                let mut descriptor = test_capability_descriptor(
+                    username,
+                    vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+                );
+                descriptor.peer_id = peer_id.to_owned();
+                descriptor.endpoints = vec![format!("http://{address}/content")];
+                mesh.capability_records.push(descriptor);
+            }
+        }
+
+        let partial_path = super::download_root(&state.config.state_dir).join("Song.partial");
+        std::fs::create_dir_all(partial_path.parent().unwrap()).expect("create download root");
+        std::fs::write(&partial_path, b"keep partial until verified").expect("write partial");
+        let now = super::unix_timestamp();
+        let source = {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create_with_details(
+                0,
+                Some("slow-peer".to_owned()),
+                "Remote/Album/Song.flac".to_owned(),
+                Some(partial_path.display().to_string()),
+                Some(content.len() as u64),
+                Some("batch-mesh-rescue".to_owned()),
+                super::TransferRequestDetails {
+                    request_id: Some("request-mesh-rescue".to_owned()),
+                    artist: Some("Artist".to_owned()),
+                    ..Default::default()
+                },
+            );
+            let source = transfers
+                .entries
+                .iter_mut()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap();
+            source.requested_at = now - 61;
+            source.clone()
+        };
+        let mut tracker = super::RescueTracker::default();
+
+        assert_eq!(
+            super::run_transfer_rescue_cycle(&state, &mut tracker)
+                .await
+                .expect("mesh rescue cycle"),
+            1
+        );
+        assert!(receiver.try_recv().is_err());
+        let transfers = state.transfers.read().await;
+        let original = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == source.id)
+            .expect("original transfer");
+        let replacement = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id != source.id)
+            .expect("mesh replacement");
+        assert_eq!(original.status, "cancelled");
+        assert_eq!(replacement.status, "succeeded");
+        assert_eq!(replacement.peer_username.as_deref(), Some("mesh-swarm"));
+        assert_eq!(
+            replacement.request_id.as_deref(),
+            Some("request-mesh-rescue")
+        );
+        assert_eq!(replacement.batch_id.as_deref(), Some("batch-mesh-rescue"));
+        assert_eq!(replacement.artist.as_deref(), Some("Artist"));
+        assert_eq!(replacement.bytes_transferred, content.len() as u64);
+        let replacement_path = replacement.local_path.clone().expect("rescue output path");
+        assert_ne!(replacement_path, partial_path.display().to_string());
+        drop(transfers);
+        assert_eq!(
+            std::fs::read(replacement_path).expect("read verified rescue output"),
+            content.as_slice()
+        );
+        assert_eq!(
+            std::fs::read(&partial_path).expect("read untouched partial"),
+            b"keep partial until verified"
+        );
+        let jobs = state.multisource.read().await;
+        assert_eq!(jobs.list().len(), 1);
+        assert_eq!(jobs.list()[0].status, "completed");
+        drop(jobs);
+
+        task_a.abort();
+        task_b.abort();
+        std::fs::remove_dir_all(&state.config.state_dir).expect("remove test state directory");
     }
 
     #[tokio::test]

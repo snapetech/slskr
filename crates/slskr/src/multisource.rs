@@ -18,7 +18,7 @@ use tokio::{
     sync::{RwLock, Semaphore},
 };
 
-const DEFAULT_CHUNK_SIZE: u64 = 512 * 1024;
+pub const DEFAULT_CHUNK_SIZE: u64 = 512 * 1024;
 const MIN_CHUNK_SIZE: u64 = 64 * 1024;
 const MAX_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
 const MAX_SOURCES: usize = 16;
@@ -144,6 +144,17 @@ impl SwarmStore {
         let mut records = self.records.values().collect::<Vec<_>>();
         records.sort_by_key(|record| std::cmp::Reverse((record.created_at, record.id.as_str())));
         records
+    }
+
+    pub fn invalidate_completed(&mut self, id: &str, error: &str, now: u64) {
+        if let Some(job) = self.records.get_mut(id) {
+            job.status = "failed".to_owned();
+            job.updated_at = now;
+            if let Some(result) = job.result.as_mut() {
+                result.success = false;
+                result.error = Some(error.to_owned());
+            }
+        }
     }
 
     fn update_progress(&mut self, id: &str, completed: u64, bytes: u64, now: u64) {
