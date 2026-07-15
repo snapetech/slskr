@@ -113,6 +113,7 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
 const MAX_WEBSOCKET_CONNECTIONS: usize = 32;
+const MAX_EXTERNAL_VISUALIZER_PROCESSES: usize = 4;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 
 use crate::config::{
@@ -7574,6 +7575,7 @@ struct AppState {
     webhook_deliveries: Arc<Semaphore>,
     incoming_connections: Arc<Semaphore>,
     websocket_connections: Arc<Semaphore>,
+    external_visualizer_processes: Arc<Semaphore>,
     collections: RwLock<CollectionStore>,
     wishlist: RwLock<WishlistStore>,
     contacts: RwLock<ContactStore>,
@@ -14619,8 +14621,21 @@ async fn route_http_request_with_headers(
                 return Ok(routing::forbidden_response("external visualizer launch is disabled"));
             }
             if let Some(command) = visualizer.command.as_deref().filter(|value| !value.trim().is_empty()) {
+                let Ok(process_permit) = Arc::clone(&state.external_visualizer_processes)
+                    .try_acquire_owned()
+                else {
+                    return Ok(routing::HttpResponse {
+                        status: "503 Service Unavailable",
+                        content_type: "application/json",
+                        body: "{\"error\":\"external visualizer process limit reached\"}".to_owned(),
+                    });
+                };
                 match std::process::Command::new(command).spawn() {
-                    Ok(_) => {
+                    Ok(mut child) => {
+                        tokio::task::spawn_blocking(move || {
+                            let _process_permit = process_permit;
+                            let _ = child.wait();
+                        });
                         record_event(
                             state,
                             "external_visualizer.launch",
@@ -14634,6 +14649,7 @@ async fn route_http_request_with_headers(
                         )))
                     }
                     Err(error) => {
+                        drop(process_permit);
                         record_event(
                             state,
                             "external_visualizer.launch.failed",
@@ -18940,6 +18956,7 @@ async fn serve(once: bool) -> Result<(), String> {
         webhook_deliveries: Arc::new(Semaphore::new(MAX_WEBHOOK_DELIVERY_TASKS)),
         incoming_connections: Arc::new(Semaphore::new(MAX_INCOMING_CONNECTION_TASKS)),
         websocket_connections: Arc::new(Semaphore::new(MAX_WEBSOCKET_CONNECTIONS)),
+        external_visualizer_processes: Arc::new(Semaphore::new(MAX_EXTERNAL_VISUALIZER_PROCESSES)),
         collections: RwLock::new(collection_store),
         wishlist: RwLock::new(wishlist_store),
         contacts: RwLock::new(contact_store),
@@ -26020,6 +26037,9 @@ mod tests {
             websocket_connections: Arc::new(super::Semaphore::new(
                 super::MAX_WEBSOCKET_CONNECTIONS,
             )),
+            external_visualizer_processes: Arc::new(super::Semaphore::new(
+                super::MAX_EXTERNAL_VISUALIZER_PROCESSES,
+            )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -30131,6 +30151,31 @@ mod tests {
             .records
             .iter()
             .any(|event| event.kind == "external_visualizer.launch"));
+    }
+
+    #[tokio::test]
+    async fn external_visualizer_launch_rejects_when_process_pool_is_full() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", "true")
+                .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
+        );
+        let _permits = Arc::clone(&state.external_visualizer_processes)
+            .acquire_many_owned(super::MAX_EXTERNAL_VISUALIZER_PROCESSES as u32)
+            .await
+            .expect("configured visualizer permits");
+
+        let launch = super::route_http_request(
+            "POST",
+            "/api/player/external-visualizer/launch",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("external visualizer launch");
+        assert_eq!(launch.status, "503 Service Unavailable");
+        assert!(launch.body.contains("process limit reached"));
     }
 
     #[tokio::test]
@@ -36768,6 +36813,9 @@ mod tests {
             websocket_connections: Arc::new(super::Semaphore::new(
                 super::MAX_WEBSOCKET_CONNECTIONS,
             )),
+            external_visualizer_processes: Arc::new(super::Semaphore::new(
+                super::MAX_EXTERNAL_VISUALIZER_PROCESSES,
+            )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -36909,6 +36957,9 @@ mod tests {
             )),
             websocket_connections: Arc::new(super::Semaphore::new(
                 super::MAX_WEBSOCKET_CONNECTIONS,
+            )),
+            external_visualizer_processes: Arc::new(super::Semaphore::new(
+                super::MAX_EXTERNAL_VISUALIZER_PROCESSES,
             )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
