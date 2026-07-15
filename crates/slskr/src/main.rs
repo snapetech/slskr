@@ -115,6 +115,8 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
 const MAX_SHARE_SCAN_TASKS: usize = 1;
+const SHARE_SCAN_BUSY_ERROR: &str = "share scan already in progress";
+const SHARE_SCAN_WORKER_ERROR: &str = "share scan worker failed";
 const MAX_WEBSOCKET_CONNECTIONS: usize = 32;
 const MAX_EXTERNAL_VISUALIZER_PROCESSES: usize = 4;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
@@ -9792,7 +9794,7 @@ async fn route_http_request_with_headers(
         ("PUT", "/api/shares") => {
             let rebuilt = match rebuild_share_index(state).await {
                 Ok(snapshot) => snapshot,
-                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                Err(error) => return Ok(share_rebuild_error_response(&error)),
             };
             let json = rebuilt.json();
             record_event(state, "share.scan.completed", "shares", None).await;
@@ -10052,7 +10054,7 @@ async fn route_http_request_with_headers(
         ("POST", "/api/shares/rescan") => {
             let snapshot = match rebuild_share_index(state).await {
                 Ok(snapshot) => snapshot,
-                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                Err(error) => return Ok(share_rebuild_error_response(&error)),
             };
             record_event(
                 state,
@@ -27044,11 +27046,11 @@ pub fn fallback_dashboard_html() -> String {
 async fn rebuild_share_index(state: &AppState) -> Result<ShareIndexSnapshot, String> {
     let _scan_permit = Arc::clone(&state.share_scans)
         .try_acquire_owned()
-        .map_err(|_| "share scan already in progress".to_owned())?;
+        .map_err(|_| SHARE_SCAN_BUSY_ERROR.to_owned())?;
     let config = state.config.clone();
     let snapshot = tokio::task::spawn_blocking(move || build_share_index(&config))
         .await
-        .map_err(|_| "share scan worker failed".to_owned())?;
+        .map_err(|_| SHARE_SCAN_WORKER_ERROR.to_owned())?;
     let mut shares = state.shares.write().await;
     let previous = std::mem::replace(&mut *shares, snapshot.clone());
     if let Err(error) = persist_share_index_checked(state, &snapshot).await {
@@ -27057,6 +27059,14 @@ async fn rebuild_share_index(state: &AppState) -> Result<ShareIndexSnapshot, Str
     }
     drop(shares);
     Ok(snapshot)
+}
+
+fn share_rebuild_error_response(error: &str) -> HttpResponse {
+    if error == SHARE_SCAN_BUSY_ERROR {
+        routing::service_unavailable_response(SHARE_SCAN_BUSY_ERROR)
+    } else {
+        routing::service_unavailable_response("share index unavailable")
+    }
 }
 
 async fn persist_share_index_checked(
@@ -31450,6 +31460,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn share_rebuild_errors_redact_internal_details() {
+        for error in [
+            super::SHARE_SCAN_WORKER_ERROR,
+            "share index persistence failed: database path /private/slskr.db",
+        ] {
+            let response = super::share_rebuild_error_response(error);
+            assert_eq!(response.status, "503 Service Unavailable");
+            assert_eq!(response.body, "{\"error\":\"share index unavailable\"}");
+        }
+    }
+
     #[tokio::test]
     async fn share_rebuild_routes_roll_back_when_persistence_fails() {
         for (method, path) in [("PUT", "/api/shares"), ("POST", "/api/v0/shares/rescan")] {
@@ -31478,8 +31500,8 @@ mod tests {
                 response.status, "503 Service Unavailable",
                 "{method} {path}"
             );
-            assert!(
-                response.body.contains("share index persistence failed"),
+            assert_eq!(
+                response.body, "{\"error\":\"share index unavailable\"}",
                 "{method} {path}"
             );
             assert_eq!(

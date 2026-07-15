@@ -34,6 +34,7 @@ for anchor in \
   'MAX_SHARE_SCAN_TASKS' \
   'share_rebuild_routes_reject_concurrent_scans' \
   'spawn_blocking(move || build_share_index(&config))' \
+  'share_rebuild_errors_redact_internal_details' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \
