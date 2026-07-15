@@ -58,7 +58,7 @@ jobs:
       - run: cargo audit
       - run: scripts/run-security-scans.sh
       - run: scripts/check-client-sdk-gates.sh
-      - run: npm --prefix web ci
+      - run: npm --prefix web ci --allow-git=root --legacy-peer-deps
       - run: npm --prefix web audit --audit-level=moderate
       - run: npm --prefix web run lint
       - run: npm --prefix web test

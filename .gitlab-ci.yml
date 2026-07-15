@@ -40,7 +40,7 @@ node:web:
     paths:
       - web/.npm/
   before_script:
-    - npm --prefix web ci --cache web/.npm --prefer-offline
+    - npm --prefix web ci --allow-git=root --legacy-peer-deps --cache web/.npm --prefer-offline
   script:
     - npm --prefix web run lint
     - npm --prefix web test

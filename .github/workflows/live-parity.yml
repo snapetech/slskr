@@ -41,7 +41,7 @@ jobs:
           sudo apt-get install -y ripgrep
           "$(rustup which cargo)" install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Install web dependencies
-        run: npm --prefix web ci
+        run: npm --prefix web ci --allow-git=root --legacy-peer-deps
       - name: Install Playwright browsers
         run: npm --prefix web exec playwright install --with-deps chromium
       - name: Rust web UI headless parity audit

@@ -53,5 +53,5 @@ jobs:
 
       - name: Web build
         run: |
-          npm --prefix web ci
+          npm --prefix web ci --allow-git=root --legacy-peer-deps
           npm --prefix web run build
