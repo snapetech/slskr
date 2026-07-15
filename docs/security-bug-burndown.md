@@ -135,6 +135,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | High | Daemon room projection retention | Remote room lists and global messages could create unlimited daemon room records, and room member lists grew without a ceiling. | Fixed with a 1,024-room ceiling, a 10,000-member per-room ceiling, explicit capacity responses for local mutations, bounded persisted-state hydration, and regression/gate coverage. |
 | High | User projection retention | The daemon accepted unlimited persisted and remote user records, while the Rust SDK retained unlimited unsolicited watch/status usernames across two maps. | Fixed with a 4,096-record daemon ceiling, a 1,024-username SDK ceiling, bounded persisted-state hydration, replacement-at-capacity behavior, explicit local capacity responses, and regression/gate coverage. |
 | Medium | SDK joined-room retention | The Rust SDK bounded room message history but retained unlimited unique joined-room names from unsolicited global messages. | Fixed with a default 1,024-room ceiling, configurable smaller ceilings, existing-room updates and leave-driven slot reuse at capacity, and regression/gate coverage. |
+| High | Browse projection retention | The daemon retained unlimited username-keyed browse records and unlimited file entries per record from API, peer, and persisted inputs. | Fixed with a 1,024-record ceiling, a 10,000-entry per-user ceiling, bounded persisted hydration and response merging, explicit local capacity responses, and regression/gate coverage. |
 
 ## Open Burn-Down
 

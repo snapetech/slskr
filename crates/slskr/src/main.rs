@@ -133,6 +133,8 @@ const MAX_ROOM_MESSAGES_PER_ROOM: usize = 1_000;
 const MAX_ROOM_RECORDS: usize = 1_024;
 const MAX_ROOM_MEMBERS_PER_ROOM: usize = 10_000;
 const MAX_USER_RECORDS: usize = 4_096;
+const MAX_BROWSE_RECORDS: usize = 1_024;
+const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -3123,14 +3125,22 @@ struct BrowseStore {
     records: Vec<BrowseRecord>,
     next_indirect_token: u32,
     updated_at: u64,
+    max_records: usize,
+    max_entries_per_user: usize,
 }
 
 impl BrowseStore {
     fn new() -> Self {
+        Self::with_limits(MAX_BROWSE_RECORDS, MAX_BROWSE_ENTRIES_PER_USER)
+    }
+
+    fn with_limits(max_records: usize, max_entries_per_user: usize) -> Self {
         Self {
             records: Vec::new(),
             next_indirect_token: 1,
             updated_at: unix_timestamp(),
+            max_records: max_records.max(1),
+            max_entries_per_user: max_entries_per_user.max(1),
         }
     }
 
@@ -3139,6 +3149,7 @@ impl BrowseStore {
         let mut updated_at = unix_timestamp();
         let records = records
             .into_iter()
+            .take(MAX_BROWSE_RECORDS)
             .map(|record| {
                 let entries = serde_json::from_str::<serde_json::Value>(&record.entries_json)
                     .ok()
@@ -3146,6 +3157,7 @@ impl BrowseStore {
                     .unwrap_or_default()
                     .iter()
                     .filter_map(|entry| BrowseEntry::from_json_file(entry, None))
+                    .take(MAX_BROWSE_ENTRIES_PER_USER)
                     .collect::<Vec<_>>();
                 let indirect_token = record
                     .indirect_token
@@ -3175,6 +3187,8 @@ impl BrowseStore {
             records,
             next_indirect_token,
             updated_at,
+            max_records: MAX_BROWSE_RECORDS,
+            max_entries_per_user: MAX_BROWSE_ENTRIES_PER_USER,
         }
     }
 
@@ -3184,7 +3198,7 @@ impl BrowseStore {
         token
     }
 
-    fn request(&mut self, username: String) -> BrowseRecord {
+    fn request(&mut self, username: String) -> Option<BrowseRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3198,7 +3212,10 @@ impl BrowseStore {
             record.requested_at = Some(now);
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = BrowseRecord {
             username,
@@ -3212,10 +3229,10 @@ impl BrowseStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
-    fn request_folder(&mut self, username: String, folder: String) -> BrowseRecord {
+    fn request_folder(&mut self, username: String, folder: String) -> Option<BrowseRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3229,7 +3246,10 @@ impl BrowseStore {
             record.requested_at = Some(now);
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = BrowseRecord {
             username,
@@ -3243,7 +3263,7 @@ impl BrowseStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn requested_folder(&self, username: &str) -> Option<Option<String>> {
@@ -3296,7 +3316,7 @@ impl BrowseStore {
         username: String,
         entries: Vec<BrowseEntry>,
         complete: bool,
-    ) -> BrowseRecord {
+    ) -> Option<BrowseRecord> {
         let now = unix_timestamp();
         let status = if complete { "ready" } else { "partial" };
         if let Some(record) = self
@@ -3305,13 +3325,23 @@ impl BrowseStore {
             .find(|record| record.username == username)
         {
             record.status = status;
-            record.entries.extend(entries);
+            let remaining = self
+                .max_entries_per_user
+                .saturating_sub(record.entries.len());
+            record.entries.extend(entries.into_iter().take(remaining));
             record.reason = None;
             record.indirect_token = None;
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
         }
+        if self.records.len() >= self.max_records {
+            return None;
+        }
+        let entries = entries
+            .into_iter()
+            .take(self.max_entries_per_user)
+            .collect();
         let record = BrowseRecord {
             username,
             status,
@@ -3324,10 +3354,10 @@ impl BrowseStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
-    fn fail(&mut self, username: String, reason: String) -> BrowseRecord {
+    fn fail(&mut self, username: String, reason: String) -> Option<BrowseRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3339,7 +3369,10 @@ impl BrowseStore {
             record.indirect_token = None;
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = BrowseRecord {
             username,
@@ -3353,10 +3386,10 @@ impl BrowseStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
-    fn cancel(&mut self, username: String, reason: String) -> BrowseRecord {
+    fn cancel(&mut self, username: String, reason: String) -> Option<BrowseRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3372,7 +3405,10 @@ impl BrowseStore {
             record.indirect_token = None;
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = BrowseRecord {
             username,
@@ -3390,7 +3426,7 @@ impl BrowseStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn get(&self, username: &str) -> Option<BrowseRecord> {
@@ -10277,7 +10313,11 @@ async fn route_http_request_with_headers(
             };
 
             let mut browse = state.browse.write().await;
-            let record = browse.request(username.to_string());
+            let Some(record) = browse.request(username.to_string()) else {
+                return Ok(routing::service_unavailable_response(
+                    "browse record capacity is full",
+                ));
+            };
             drop(browse);
 
             send_session_command(state, SessionCommand::BrowseUser(username.to_string())).await.ok();
@@ -10293,7 +10333,11 @@ async fn route_http_request_with_headers(
             let folder = extract_json_string_field(body, "folder").unwrap_or_default();
 
             let mut browse = state.browse.write().await;
-            let record = browse.request_folder(username.to_string(), folder.clone());
+            let Some(record) = browse.request_folder(username.to_string(), folder.clone()) else {
+                return Ok(routing::service_unavailable_response(
+                    "browse record capacity is full",
+                ));
+            };
             drop(browse);
 
             send_session_command(state, SessionCommand::BrowseFolder { username: username.to_string(), folder }).await.ok();
@@ -10309,7 +10353,11 @@ async fn route_http_request_with_headers(
             let reason = extract_json_string_field(body, "reason").unwrap_or_default();
 
             let mut browse = state.browse.write().await;
-            let record = browse.fail(username.to_owned(), reason.clone());
+            let Some(record) = browse.fail(username.to_owned(), reason.clone()) else {
+                return Ok(routing::service_unavailable_response(
+                    "browse record capacity is full",
+                ));
+            };
             drop(browse);
             persist_browse_record(state, &record).await;
 
@@ -10325,7 +10373,11 @@ async fn route_http_request_with_headers(
                 .unwrap_or_else(|| "cancelled by client".to_owned());
 
             let mut browse = state.browse.write().await;
-            let record = browse.cancel(username, reason);
+            let Some(record) = browse.cancel(username, reason) else {
+                return Ok(routing::service_unavailable_response(
+                    "browse record capacity is full",
+                ));
+            };
             let body = record.json();
             drop(browse);
             persist_browse_record(state, &record).await;
@@ -10385,7 +10437,11 @@ async fn route_http_request_with_headers(
             }
 
             let mut browse = state.browse.write().await;
-            let record = browse.add_entries(username, entries, complete);
+            let Some(record) = browse.add_entries(username, entries, complete) else {
+                return Ok(routing::service_unavailable_response(
+                    "browse record capacity is full",
+                ));
+            };
             drop(browse);
             persist_browse_record(state, &record).await;
 
@@ -19831,7 +19887,9 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
             let mut browse = state.browse.write().await;
             let record = browse.add_entries(address.username.clone(), entries, true);
             drop(browse);
-            persist_browse_record(state, &record).await;
+            if let Some(record) = record {
+                persist_browse_record(state, &record).await;
+            }
         }
         Err(error) => {
             let mut browse = state.browse.write().await;
@@ -19861,7 +19919,9 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
                 let mut browse = state.browse.write().await;
                 let record = browse.fail(address.username.clone(), error.clone());
                 drop(browse);
-                persist_browse_record(state, &record).await;
+                if let Some(record) = record {
+                    persist_browse_record(state, &record).await;
+                }
                 record_event(
                     state,
                     "browse.failed",
@@ -19906,13 +19966,17 @@ async fn project_indirect_browse_response(state: &AppState, response: &ConnectTo
             let mut browse = state.browse.write().await;
             let record = browse.add_entries(response.username.clone(), entries, true);
             drop(browse);
-            persist_browse_record(state, &record).await;
+            if let Some(record) = record {
+                persist_browse_record(state, &record).await;
+            }
         }
         Err(error) => {
             let mut browse = state.browse.write().await;
             let record = browse.fail(response.username.clone(), error.clone());
             drop(browse);
-            persist_browse_record(state, &record).await;
+            if let Some(record) = record {
+                persist_browse_record(state, &record).await;
+            }
             record_event(
                 state,
                 "browse.failed",
@@ -32161,6 +32225,31 @@ mod tests {
         assert_eq!(backfill_json["backfilled"], 1);
         assert_eq!(backfill_json["persisted"], true);
         assert_eq!(backfill_json["status"], "local");
+    }
+
+    #[test]
+    fn browse_store_bounds_records_and_entries_but_updates_existing_users() {
+        let mut browse = super::BrowseStore::with_limits(1, 2);
+        browse.request("alice".to_owned()).unwrap();
+        assert!(browse.request("bob".to_owned()).is_none());
+
+        let entries = (0..3)
+            .map(|index| super::BrowseEntry {
+                filename: format!("file-{index}.flac"),
+                size: index,
+                extension: "flac".to_owned(),
+            })
+            .collect();
+        let record = browse
+            .add_entries("alice".to_owned(), entries, false)
+            .unwrap();
+        assert_eq!(record.entries.len(), 2);
+        assert_eq!(record.entries[0].filename, "file-0.flac");
+        assert_eq!(record.entries[1].filename, "file-1.flac");
+        assert!(browse
+            .add_entries("bob".to_owned(), Vec::new(), true)
+            .is_none());
+        assert_eq!(browse.records.len(), 1);
     }
 
     #[tokio::test]

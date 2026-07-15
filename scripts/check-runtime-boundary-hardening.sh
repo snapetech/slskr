@@ -36,6 +36,9 @@ for anchor in \
   'room_store_rejects_new_members_at_limit_but_accepts_duplicates' \
   'MAX_USER_RECORDS' \
   'user_store_rejects_new_records_at_limit_but_updates_existing_users' \
+  'MAX_BROWSE_RECORDS' \
+  'MAX_BROWSE_ENTRIES_PER_USER' \
+  'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
