@@ -16729,6 +16729,9 @@ fn validate_integration_base_url(base_url: &str) -> Result<ResolvedIntegrationTa
     let host = parsed
         .host_str()
         .ok_or_else(|| "integration URL must include a host".to_owned())?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("integration URL must not contain embedded credentials".to_owned());
+    }
     let allow_private = matches!(
         env::var("SLSKR_ALLOW_PRIVATE_INTEGRATION_URLS")
             .unwrap_or_default()
@@ -26033,6 +26036,17 @@ mod tests {
 
     #[test]
     fn integration_ssrf_filter_blocks_special_use_ip_ranges() {
+        let error =
+            super::validate_integration_base_url("https://operator:secret@example.com/lidarr")
+                .err()
+                .expect("credential-bearing integration URL should be rejected");
+        assert_eq!(
+            error,
+            "integration URL must not contain embedded credentials"
+        );
+        assert!(!error.contains("operator"));
+        assert!(!error.contains("secret"));
+
         for address in ["100.64.0.1", "192.0.0.8", "192.88.99.1", "198.18.0.1"] {
             let ip = address.parse::<std::net::IpAddr>().expect("fixture IP");
             assert!(super::is_blocked_integration_ip(ip), "accepted {address}");

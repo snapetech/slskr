@@ -549,13 +549,21 @@ pub struct LidarrIntegrationSettings {
 
 impl LidarrIntegrationSettings {
     fn from_layers<E: ConfigEnv>(file_config: LidarrFileConfig, env: &E) -> Result<Self, String> {
+        let url = env.var("SLSKR_LIDARR_URL").or(file_config.url);
+        if let Some(url) = url.as_deref() {
+            let parsed = reqwest::Url::parse(url)
+                .map_err(|error| format!("Lidarr URL is invalid: {error}"))?;
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                return Err("Lidarr URL must not contain embedded credentials".to_owned());
+            }
+        }
         Ok(Self {
             enabled: env_bool_layer(
                 env,
                 "SLSKR_LIDARR_ENABLED",
                 file_config.enabled.unwrap_or(false),
             )?,
-            url: env.var("SLSKR_LIDARR_URL").or(file_config.url),
+            url,
             api_key: env.var("SLSKR_LIDARR_API_KEY").or(file_config.api_key),
             timeout_seconds: env_parse_layer(
                 env,
@@ -1318,6 +1326,18 @@ mod tests {
         assert!(super::config_contains_sensitive_values(
             &with_integration_secret
         ));
+    }
+
+    #[test]
+    fn lidarr_url_rejects_embedded_credentials_before_projection() {
+        let env = MapEnv::default()
+            .with("SLSKR_LIDARR_URL", "https://operator:secret@example.com")
+            .with("SLSKR_LIDARR_API_KEY", "api-key");
+        let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+            .expect_err("credential-bearing Lidarr URL should be rejected");
+        assert_eq!(error, "Lidarr URL must not contain embedded credentials");
+        assert!(!error.contains("operator"));
+        assert!(!error.contains("secret"));
     }
 
     #[test]

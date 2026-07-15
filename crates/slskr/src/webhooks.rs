@@ -496,6 +496,9 @@ pub(crate) fn validate_webhook_url_for_registration(
     let Some(host) = parsed.host_str() else {
         return Err("webhook URL must include a host".into());
     };
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("webhook URL must not contain embedded credentials".into());
+    }
     if host.eq_ignore_ascii_case("localhost") {
         return Err("webhook URL host is not allowed".into());
     }
@@ -902,6 +905,10 @@ mod tests {
     #[test]
     fn test_webhook_registration_url_validation() {
         assert!(validate_webhook_url_for_registration("https://example.com/hook").is_ok());
+        assert!(
+            validate_webhook_url_for_registration("https://operator:secret@example.com/hook")
+                .is_err()
+        );
         assert!(validate_webhook_url_for_registration("ftp://example.com/hook").is_err());
         assert!(validate_webhook_url_for_registration("http://localhost/hook").is_err());
         assert!(validate_webhook_url_for_registration("http://127.0.0.1/hook").is_err());
