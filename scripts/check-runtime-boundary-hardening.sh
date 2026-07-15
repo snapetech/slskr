@@ -44,6 +44,7 @@ for anchor in \
   'browse_failure_events_redact_internal_details' \
   'external_visualizer_launch_errors_redact_command_details' \
   'options_config_endpoints_redact_file_path' \
+  'toml_config_sanitizes_secrets_and_storage_paths' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \

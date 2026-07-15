@@ -292,11 +292,11 @@ impl AppConfig {
             json_option(
                 self.config_file
                     .as_ref()
-                    .map(|path| path.display().to_string())
+                    .map(|_| "config://file".to_owned())
                     .as_deref()
             ),
             json_escape(&self.http_bind.to_string()),
-            json_escape(&self.state_dir.display().to_string()),
+            "state://configured",
             json_escape(&self.server_address),
             self.listen_port,
             self.advertised_port,
@@ -308,7 +308,7 @@ impl AppConfig {
             json_option(self.username.as_deref().map(redact_username).as_deref()),
             self.username.is_some() && self.password.is_some(),
             self.credential_store.as_str(),
-            json_escape(&self.credential_file.display().to_string()),
+            "credential://configured",
             self.auto_connect,
             self.reconnect,
             self.reconnect_delay.as_secs(),

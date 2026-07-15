@@ -44155,7 +44155,7 @@ mod tests {
     }
 
     #[test]
-    fn toml_config_populates_app_config_without_leaking_password() {
+    fn toml_config_sanitizes_secrets_and_storage_paths() {
         let file_config = toml::from_str::<FileConfig>(
             r#"
                 [app]
@@ -44257,6 +44257,10 @@ mod tests {
         assert!(sanitized.contains("\"share_cache_tsv_enabled\":false"));
         assert!(sanitized.contains("\"launch_enabled\":true"));
         assert!(sanitized.contains("a***e"));
+        assert!(sanitized.contains("\"config_file\":\"config://file\""));
+        assert!(sanitized.contains("\"state_dir\":\"state://configured\""));
+        assert!(sanitized.contains("\"credential_file\":\"credential://configured\""));
+        assert!(!sanitized.contains("/tmp/slskr"));
         assert!(!sanitized.contains("secret-password"));
         assert!(!sanitized.contains("test-token"));
         assert!(!sanitized.contains("\"alice\""));
