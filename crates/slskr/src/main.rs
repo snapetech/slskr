@@ -8023,7 +8023,7 @@ impl PreviewStreamTicketStore {
         if self.records.len() >= self.max_records {
             return None;
         }
-        let token = secure_oauth_state();
+        let token = secure_oauth_state()?;
         let record = PreviewStreamTicket {
             family: family.to_owned(),
             source: source.to_owned(),
@@ -8151,7 +8151,7 @@ impl OAuthStateStore {
         if self.records.len() >= self.max_records {
             return None;
         }
-        let state = secure_oauth_state();
+        let state = secure_oauth_state()?;
         self.records.insert(
             state.clone(),
             OAuthStateRecord {
@@ -17124,12 +17124,13 @@ fn url_encode(value: &str) -> String {
     encoded
 }
 
-fn secure_oauth_state() -> String {
+fn secure_oauth_state() -> Option<String> {
+    secure_oauth_state_with(|bytes| SysRng.try_fill_bytes(bytes).is_ok())
+}
+
+fn secure_oauth_state_with(fill: impl FnOnce(&mut [u8; 32]) -> bool) -> Option<String> {
     let mut bytes = [0_u8; 32];
-    SysRng
-        .try_fill_bytes(&mut bytes)
-        .expect("operating system randomness is unavailable");
-    format!("slskr-{}", hex::encode(bytes))
+    fill(&mut bytes).then(|| format!("slskr-{}", hex::encode(bytes)))
 }
 
 fn webhook_from_persisted(record: crate::persistence::WebhookRecord) -> Option<webhooks::Webhook> {
@@ -26461,6 +26462,18 @@ mod tests {
     use crate::utils::{
         normalize_api_path, parse_route, percent_decode, query_params, split_request_target,
     };
+
+    #[test]
+    fn secure_oauth_state_fails_closed_when_randomness_is_unavailable() {
+        assert!(super::secure_oauth_state_with(|_| false).is_none());
+
+        let token = super::secure_oauth_state_with(|bytes| {
+            bytes.fill(0xab);
+            true
+        })
+        .expect("deterministic randomness fixture");
+        assert_eq!(token, format!("slskr-{}", "ab".repeat(32)));
+    }
 
     #[derive(Default)]
     struct MapEnv {
