@@ -24442,6 +24442,12 @@ async fn record_event(
     resource: impl Into<String>,
     detail: Option<String>,
 ) {
+    let kind = kind.into();
+    let detail = if kind == "browse.failed" && detail.is_some() {
+        Some("browse failed".to_owned())
+    } else {
+        detail
+    };
     let mut events = state.events.write().await;
     let record = events.record(kind, resource, detail);
     drop(events);
@@ -29609,6 +29615,27 @@ mod tests {
             assert!(!body.contains("denied"));
         }
         assert!(record.reason.as_deref().unwrap().contains("10.0.0.9"));
+    }
+
+    #[tokio::test]
+    async fn browse_failure_events_redact_internal_details() {
+        let (state, _receiver) = test_state();
+        super::record_event(
+            &state,
+            "browse.failed",
+            "friend",
+            Some("connect to 10.0.0.9:2242 via /private/socket denied".to_owned()),
+        )
+        .await;
+
+        let events = state.events.read().await;
+        let event = events.records.last().expect("browse failure event");
+        assert_eq!(event.detail.as_deref(), Some("browse failed"));
+        for body in [event.json(), event.slskd_json().to_string()] {
+            assert!(!body.contains("10.0.0.9"));
+            assert!(!body.contains("/private"));
+            assert!(!body.contains("denied"));
+        }
     }
 
     #[tokio::test]

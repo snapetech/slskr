@@ -41,6 +41,7 @@ for anchor in \
   'listener_errors_redact_internal_details' \
   'session_errors_redact_internal_details' \
   'browse_errors_redact_internal_details' \
+  'browse_failure_events_redact_internal_details' \
   'external_visualizer_launch_errors_redact_command_details' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
