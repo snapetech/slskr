@@ -10148,6 +10148,15 @@ async fn route_http_request_with_headers(
             let matching_results = search_shares(&shares.entries, &query);
             drop(shares);
 
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
+
              let mut searches = state.searches.write().await;
              let target_name = if target_str == "user" { username_opt.clone() } else if target_str == "room" { room_opt.clone() } else { None };
              let result_count = matching_results.len();
@@ -10160,25 +10169,22 @@ async fn route_http_request_with_headers(
               let record = outcome.record;
               let evicted = outcome.evicted;
               let token = record.token;
-              drop(searches);
+
+             let dispatch_target = match target_str.as_str() {
+                 "user" => SearchDispatchTarget::User(username_opt.clone().unwrap_or_default()),
+                 "room" => SearchDispatchTarget::Room(room_opt.clone().unwrap_or_default()),
+                "wishlist" => SearchDispatchTarget::Wishlist,
+                _ => SearchDispatchTarget::Global,
+             };
+             drop(searches);
 
              delete_persisted_searches(state, &evicted).await?;
-
-             let persisted_search = persistence::SearchRecord {
-                 id: format!("{}", token),
+             persist_search_record(state, &record).await?;
+             session_command_permit.send(SessionCommand::Search {
+                 token,
                  query: query.clone(),
-                 status: record.status.to_string(),
-                 result_count: record.results.len() as i64,
-                 created_at: record.created_at as i64,
-                 completed_at: None,
-                 room: room_opt.clone(),
-                 target: Some(target_str.clone()),
-             };
-             if let Some(db) = state.db.as_ref() {
-                 db.insert_search(&persisted_search)
-                     .await
-                     .map_err(|error| format!("failed to persist search: {error}"))?;
-             }
+                 target: dispatch_target,
+             });
 
              record_event(state, "search.started", format!("{}", token), None).await;
 
@@ -10197,15 +10203,6 @@ async fn route_http_request_with_headers(
                  webhooks::WebhookEvent::SearchCreated,
                  webhook_data,
              ).await;
-
-             let dispatch_target = match target_str.as_str() {
-                 "user" => SearchDispatchTarget::User(username_opt.unwrap_or_default()),
-                 "room" => SearchDispatchTarget::Room(room_opt.unwrap_or_default()),
-                "wishlist" => SearchDispatchTarget::Wishlist,
-                _ => SearchDispatchTarget::Global,
-             };
-
-             send_session_command(state, SessionCommand::Search { token, query, target: dispatch_target }).await.ok();
 
              Ok(routing::created_response(record.json()))
         }
@@ -29812,6 +29809,35 @@ mod tests {
                 .expect("complete search");
         assert_eq!(completed.status, "200 OK");
         assert!(completed.body.contains("\"status\":\"completed\""));
+    }
+
+    #[tokio::test]
+    async fn search_create_rejects_before_mutation_when_dispatch_is_unavailable() {
+        let (state, receiver) = test_state();
+        drop(receiver);
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/searches",
+            None,
+            r#"{"query":"never dispatched"}"#,
+            &state,
+        )
+        .await
+        .expect("failed dispatch response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("session manager is not running"));
+        let searches = state.searches.read().await;
+        assert!(searches.records.is_empty());
+        assert_eq!(searches.next_token, 1);
+        drop(searches);
+        assert!(state
+            .events
+            .read()
+            .await
+            .records
+            .iter()
+            .all(|event| event.kind != "search.started"));
     }
 
     #[tokio::test]
