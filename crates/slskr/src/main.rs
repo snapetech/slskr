@@ -2099,8 +2099,9 @@ impl TransferQueue {
         reason: String,
     ) -> TransferEntry {
         let now = unix_timestamp();
+        let id = self.allocate_id();
         let entry = TransferEntry {
-            id: self.next_id,
+            id,
             direction,
             token,
             peer_username: None,
@@ -2114,7 +2115,6 @@ impl TransferQueue {
             requested_at: now,
             updated_at: now,
         };
-        self.next_id += 1;
         self.push_entry(entry)
     }
 
@@ -2127,8 +2127,9 @@ impl TransferQueue {
         size: u64,
     ) -> TransferEntry {
         let now = unix_timestamp();
+        let id = self.allocate_id();
         let entry = TransferEntry {
-            id: self.next_id,
+            id,
             direction,
             token,
             peer_username: None,
@@ -2142,7 +2143,6 @@ impl TransferQueue {
             requested_at: now,
             updated_at: now,
         };
-        self.next_id += 1;
         self.push_entry(entry)
     }
 
@@ -2167,10 +2167,10 @@ impl TransferQueue {
         batch_id: Option<String>,
     ) -> TransferEntry {
         let now = unix_timestamp();
-        let token = self.next_token;
-        self.next_token = self.next_token.wrapping_add(1).max(1);
+        let id = self.allocate_id();
+        let token = self.allocate_token();
         let entry = TransferEntry {
-            id: self.next_id,
+            id,
             direction,
             token,
             peer_username,
@@ -2184,8 +2184,31 @@ impl TransferQueue {
             requested_at: now,
             updated_at: now,
         };
-        self.next_id += 1;
         self.push_entry(entry)
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.entries.len() {
+            if !self.entries.iter().any(|entry| entry.id == candidate) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("finite transfer history must leave an available u64 id")
+    }
+
+    fn allocate_token(&mut self) -> u32 {
+        let mut candidate = self.next_token.max(1);
+        for _ in 0..=self.entries.len() {
+            if !self.entries.iter().any(|entry| entry.token == candidate) {
+                self.next_token = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded transfer history must leave an available u32 token")
     }
 
     fn update_status(
@@ -24456,6 +24479,10 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
             entry.updated_at = now;
         }
     }
+    let mut seen_ids = std::collections::HashSet::new();
+    state.entries.reverse();
+    state.entries.retain(|entry| seen_ids.insert(entry.id));
+    state.entries.reverse();
     if state.entries.len() > history_limit {
         let extra = state.entries.len() - history_limit;
         state.entries.drain(0..extra);
@@ -32297,6 +32324,40 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn transfer_ids_and_tokens_wrap_without_collisions() {
+        let mut queue = super::TransferQueue::new_in_memory(8);
+        let first = queue.create(0, Some("peer".to_owned()), "first".to_owned(), None, None);
+        assert_eq!((first.id, first.token), (1, 1));
+        queue.next_id = u64::MAX;
+        queue.next_token = u32::MAX;
+        let maximum = queue.create(0, Some("peer".to_owned()), "max".to_owned(), None, None);
+        assert_eq!((maximum.id, maximum.token), (u64::MAX, u32::MAX));
+        let wrapped = queue.create(0, Some("peer".to_owned()), "wrapped".to_owned(), None, None);
+        assert_eq!((wrapped.id, wrapped.token), (2, 2));
+        let rejected =
+            queue.record_rejected_request(0, 99, "rejected".to_owned(), None, "test".to_owned());
+        assert_eq!(rejected.id, 3);
+        assert_eq!(
+            queue
+                .entries
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            queue.entries.len()
+        );
+
+        let mut duplicate = wrapped.clone();
+        duplicate.filename = "newest".to_owned();
+        super::write_transfer_state(&queue.state_path, &[wrapped, duplicate]).unwrap();
+        let loaded = super::load_transfer_state(&queue.state_path, 8).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].filename, "newest");
+        let _ = std::fs::remove_file(&queue.state_path);
+        let _ = std::fs::remove_file(&queue.events_path);
     }
 
     #[tokio::test]

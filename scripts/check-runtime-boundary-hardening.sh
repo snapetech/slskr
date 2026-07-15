@@ -72,6 +72,8 @@ for anchor in \
   'destinations_bound_deduplicate_and_select_one_default' \
   'MAX_SEARCH_RECORDS' \
   'searches_bound_active_records_and_avoid_identity_collisions' \
+  'transfer_ids_and_tokens_wrap_without_collisions' \
+  'finite transfer history must leave an available u64 id' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
