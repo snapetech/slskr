@@ -11315,11 +11315,24 @@ async fn route_http_request_with_headers(
                  None => return Ok(routing::bad_request_response("body is required")),
              };
 
+             let session_command_permit = match state.session_commands.reserve().await {
+                 Ok(permit) => permit,
+                 Err(_) => {
+                     return Ok(routing::service_unavailable_response(
+                         "session manager is not running",
+                     ));
+                 }
+             };
+
               let mut messages = state.messages.write().await;
               let record = messages.add(username.clone(), "outbound", message_body.clone());
               let message_id = record.id;
               drop(messages);
               persist_message_record(state, &record).await;
+              session_command_permit.send(SessionCommand::MessageUser {
+                  username: username.clone(),
+                  body: message_body.clone(),
+              });
               record_event(
                   state,
                   "message.sent",
@@ -11342,21 +11355,6 @@ async fn route_http_request_with_headers(
                   webhooks::WebhookEvent::MessageSent,
                   webhook_data,
               ).await;
-
-              if let Err(error) = send_session_command(
-                  state,
-                  SessionCommand::MessageUser {
-                      username,
-                      body: message_body,
-                  },
-              )
-              .await
-              {
-                  eprintln!("session command dispatch failed for message user: {error}");
-                  return Ok(routing::service_unavailable_response(
-                      "session manager is not running",
-                  ));
-              }
 
               Ok(routing::created_response(record.json()))
          }
@@ -13348,6 +13346,15 @@ async fn route_http_request_with_headers(
                 Err(error) => return Ok(routing::bad_request_response(&error.to_string())),
             };
 
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
+
             let mut messages = state.messages.write().await;
             let records: Vec<_> = command
                 .iter()
@@ -13355,15 +13362,13 @@ async fn route_http_request_with_headers(
                 .collect();
             drop(messages);
 
-            send_session_command(
-                state,
-                SessionCommand::MessageUsers {
-                    usernames: command.clone(),
-                    body: message_body,
-                },
-            )
-            .await
-            .ok();
+            for record in &records {
+                persist_message_record(state, record).await;
+            }
+            session_command_permit.send(SessionCommand::MessageUsers {
+                usernames: command.clone(),
+                body: message_body,
+            });
 
             Ok(routing::created_response(
                 serde_json::json!({
@@ -13383,18 +13388,22 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "message"))
                 .or_else(|| extract_json_string_field(body, "body"))
                 .unwrap_or_default();
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut messages = state.messages.write().await;
             let record = messages.add(username.clone(), "outbound", message_body.clone());
             drop(messages);
-            if let Err(error) = send_session_command(state, SessionCommand::MessageUser {
+            persist_message_record(state, &record).await;
+            session_command_permit.send(SessionCommand::MessageUser {
                 username,
                 body: message_body,
-            }).await {
-                eprintln!("session command dispatch failed for conversation message: {error}");
-                return Ok(routing::service_unavailable_response(
-                    "session manager is not running",
-                ));
-            }
+            });
             Ok(routing::ok_response((record.id > 0).to_string()))
         }
 
@@ -39360,6 +39369,88 @@ mod tests {
                 .await
                 .expect("peer messages");
         assert!(peer_messages.body.contains("\"body\":\"hello all\""));
+    }
+
+    #[tokio::test]
+    async fn outbound_message_routes_reject_before_mutation_when_dispatch_is_unavailable() {
+        for (path, body) in [
+            (
+                "/api/messages",
+                r#"{"username":"friend","body":"direct message"}"#,
+            ),
+            (
+                "/api/conversations/friend",
+                r#"{"body":"conversation message"}"#,
+            ),
+            (
+                "/api/conversations/batch",
+                r#"{"usernames":["friend","peer"],"body":"batch message"}"#,
+            ),
+        ] {
+            let (state, receiver) = test_state();
+            drop(receiver);
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("unavailable dispatch response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("session manager is not running"),
+                "{path}"
+            );
+
+            let messages = state.messages.read().await;
+            assert!(messages.records.is_empty(), "{path}");
+            assert_eq!(messages.next_id, 1, "{path}");
+            drop(messages);
+            assert!(
+                state
+                    .events
+                    .read()
+                    .await
+                    .records
+                    .iter()
+                    .all(|event| event.kind != "message.sent"),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn conversations_batch_persists_each_outbound_message() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/conversations/batch",
+            None,
+            r#"{"usernames":["friend","peer"],"body":"persisted batch"}"#,
+            &state,
+        )
+        .await
+        .expect("batch message");
+        assert_eq!(response.status, "201 Created");
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(super::SessionCommand::MessageUsers { .. })
+        ));
+
+        let mut persisted = db.list_messages(10, 0).await.expect("list messages");
+        persisted.sort_by(|left, right| left.username.cmp(&right.username));
+        assert_eq!(persisted.len(), 2);
+        assert_eq!(persisted[0].username, "friend");
+        assert_eq!(persisted[0].content, "persisted batch");
+        assert_eq!(persisted[0].direction, "outbound");
+        assert_eq!(persisted[1].username, "peer");
+        assert_eq!(persisted[1].content, "persisted batch");
+        assert_eq!(persisted[1].direction, "outbound");
     }
 
     #[tokio::test]
