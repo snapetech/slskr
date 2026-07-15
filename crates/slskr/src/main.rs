@@ -16926,23 +16926,39 @@ fn forwarded_header_client_ips(value: &str) -> Option<Vec<IpAddr>> {
 }
 
 fn parse_forwarded_ip_token(value: &str) -> Option<IpAddr> {
-    let value = value.trim().trim_matches('"');
+    let value = value.trim();
+    let value = match (value.strip_prefix('"'), value.strip_suffix('"')) {
+        (Some(without_prefix), Some(_)) => without_prefix.strip_suffix('"')?,
+        (None, None) => value,
+        _ => return None,
+    };
+    if value.is_empty() || value.contains(['"', '\\']) {
+        return None;
+    }
     if value.eq_ignore_ascii_case("unknown") || value.starts_with('_') {
         return None;
     }
-    let without_brackets = value
-        .strip_prefix('[')
-        .and_then(|value| value.split_once(']').map(|(ip, _)| ip))
-        .unwrap_or(value);
-    if let Ok(ip) = without_brackets.parse::<IpAddr>() {
+    if let Some(bracketed) = value.strip_prefix('[') {
+        let (host, suffix) = bracketed.split_once(']')?;
+        if !suffix.is_empty()
+            && suffix
+                .strip_prefix(':')
+                .and_then(|port| port.parse::<u16>().ok())
+                .is_none()
+        {
+            return None;
+        }
+        return host.parse::<std::net::Ipv6Addr>().ok().map(IpAddr::V6);
+    }
+    if value.contains(['[', ']']) {
+        return None;
+    }
+    if let Ok(ip) = value.parse::<IpAddr>() {
         return Some(ip);
     }
-    let host_part = without_brackets
-        .rsplit_once(':')
-        .filter(|(host, port)| !host.contains(':') && port.parse::<u16>().is_ok())
-        .map(|(host, _)| host)
-        .unwrap_or(without_brackets);
-    host_part.parse::<IpAddr>().ok()
+    let (host, port) = value.rsplit_once(':')?;
+    port.parse::<u16>().ok()?;
+    host.parse::<std::net::Ipv4Addr>().ok().map(IpAddr::V4)
 }
 
 fn websocket_auth_protocol(protocol_header: Option<&str>) -> Option<&str> {
@@ -26032,6 +26048,35 @@ mod tests {
         let addr = super::rate_limit_remote_addr(&config, proxy, &headers)
             .expect("trusted forwarded address");
         assert_eq!(addr.ip(), "2001:db8::42".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn forwarded_ip_parser_rejects_malformed_authorities() {
+        for malformed in [
+            "\"\"198.51.100.24\"\"",
+            "\"198.51.100.24",
+            "198.51.100.24\"",
+            "[2001:db8::42]garbage",
+            "[2001:db8::42]:garbage",
+            "[2001:db8::42]:65536",
+            "[198.51.100.24]:80",
+            "198.51.100.24:65536",
+            "198.51.100.24:80:90",
+        ] {
+            assert_eq!(
+                super::parse_forwarded_ip_token(malformed),
+                None,
+                "accepted {malformed}"
+            );
+        }
+        assert_eq!(
+            super::parse_forwarded_ip_token("\"[2001:db8::42]:443\""),
+            Some("2001:db8::42".parse::<IpAddr>().unwrap())
+        );
+        assert_eq!(
+            super::parse_forwarded_ip_token("198.51.100.24:443"),
+            Some("198.51.100.24".parse::<IpAddr>().unwrap())
+        );
     }
 
     #[test]
