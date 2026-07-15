@@ -1808,7 +1808,8 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
 
         let error = super::read_file_config(&path).expect_err("directory should be rejected");
-        assert!(error.contains("not a regular file"));
+        assert!(error.contains("config"));
+        assert!(error.contains(&path.display().to_string()));
 
         let _ = std::fs::remove_dir(path);
     }

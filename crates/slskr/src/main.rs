@@ -43530,7 +43530,12 @@ mod tests {
             .local_path
             .clone()
             .unwrap();
-        assert!(local_path.ends_with("downloads/friend/Album/Archive Cut/Song.flac"));
+        let expected_suffix = std::path::Path::new("downloads")
+            .join("friend")
+            .join("Album")
+            .join("Archive Cut")
+            .join("Song.flac");
+        assert!(std::path::Path::new(&local_path).ends_with(expected_suffix));
 
         let listed = super::route_http_request(
             "GET",
