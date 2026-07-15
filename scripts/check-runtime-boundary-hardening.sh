@@ -21,6 +21,9 @@ for anchor in \
   'integration_ssrf_filter_blocks_special_use_ipv6_ranges' \
   'MAX_SEARCH_RESULTS_PER_SEARCH' \
   'search_store_caps_results_from_peer_responses' \
+  'libc::O_NOFOLLOW' \
+  'write_file_atomic_with_temp_path' \
+  'state_file_io_rejects_symlinks_without_touching_targets' \
   'MAX_ROOM_MESSAGES_PER_ROOM' \
   'room_message_history_evicts_oldest_entries_at_limit' \
   'MAX_INCOMING_CONNECTION_TASKS' \

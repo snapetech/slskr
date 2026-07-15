@@ -23592,10 +23592,28 @@ struct TransferStateFile {
 }
 
 fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<TransferEntry>, String> {
-    if !path.exists() {
-        return Ok(Vec::new());
+    use std::io::Read;
+
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("transfer state metadata read failed: {error}")),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("transfer state path must be a regular file".to_owned());
     }
-    let size = fs::metadata(path)
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("transfer state open failed: {error}"))?;
+    let size = file
+        .metadata()
         .map_err(|error| format!("transfer state metadata read failed: {error}"))?
         .len();
     if size > MAX_TRANSFER_STATE_BYTES {
@@ -23603,8 +23621,9 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
             "transfer state file is too large: {size} bytes, max is {MAX_TRANSFER_STATE_BYTES}"
         ));
     }
-    let body =
-        fs::read_to_string(path).map_err(|error| format!("transfer state read failed: {error}"))?;
+    let mut body = String::new();
+    file.read_to_string(&mut body)
+        .map_err(|error| format!("transfer state read failed: {error}"))?;
     let mut state = serde_json::from_str::<TransferStateFile>(&body)
         .map_err(|error| format!("transfer state parse failed: {error}"))?;
     if state.version != 1 {
@@ -23639,8 +23658,6 @@ fn write_transfer_state(path: &Path, entries: &[TransferEntry]) -> Result<(), St
 }
 
 fn write_file_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
-    use std::io::Write;
-
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
@@ -23655,16 +23672,29 @@ fn write_file_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result
             .unwrap_or(0)
     ));
 
+    write_file_atomic_with_temp_path(path, &temp_path, contents.as_ref())
+}
+
+fn write_file_atomic_with_temp_path(
+    path: &Path,
+    temp_path: &Path,
+    contents: &[u8],
+) -> std::io::Result<()> {
+    use std::io::Write;
+
     {
-        let mut file = fs::File::create(&temp_path)?;
-        file.write_all(contents.as_ref())?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(temp_path)?;
+        file.write_all(contents)?;
         file.sync_all()?;
     }
 
-    match fs::rename(&temp_path, path) {
+    match fs::rename(temp_path, path) {
         Ok(()) => Ok(()),
         Err(error) => {
-            let _ = fs::remove_file(&temp_path);
+            let _ = fs::remove_file(temp_path);
             Err(error)
         }
     }
@@ -34333,6 +34363,44 @@ mod tests {
 
         let error = super::load_transfer_state(&state_path, 100).expect_err("oversized state");
         assert!(error.contains("transfer state file is too large"));
+
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_file_io_rejects_symlinks_without_touching_targets() {
+        use std::os::unix::fs::symlink;
+
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-state-symlink-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&state_dir).expect("state dir");
+        let target = state_dir.join("target.json");
+        std::fs::write(&target, "keep").expect("target");
+
+        let state_path = super::transfer_state_path(&state_dir);
+        symlink(&target, &state_path).expect("state symlink");
+        let error = super::load_transfer_state(&state_path, 100).expect_err("reject state symlink");
+        assert!(error.contains("must be a regular file"));
+
+        let destination = state_dir.join("destination.json");
+        let temporary = state_dir.join("temporary.json");
+        symlink(&target, &temporary).expect("temporary symlink");
+        let error =
+            super::write_file_atomic_with_temp_path(&destination, &temporary, br#"{"version":1}"#)
+                .expect_err("reject occupied temporary path");
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("target unchanged"),
+            "keep"
+        );
+        assert!(!destination.exists());
 
         let _ = std::fs::remove_dir_all(state_dir);
     }
