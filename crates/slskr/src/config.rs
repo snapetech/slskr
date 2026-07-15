@@ -111,18 +111,19 @@ impl AppConfig {
             "SLSKR_RECONNECT",
             file_config.app.reconnect.unwrap_or(auto_connect),
         )?;
-        let reconnect_delay = Duration::from_secs(env_parse_layer(
-            env,
+        let reconnect_delay = validated_runtime_interval(
             "SLSKR_RECONNECT_SECONDS",
-            file_config.app.reconnect_seconds,
-            30,
-        )?);
-        let ping_interval = Duration::from_secs(env_parse_layer(
-            env,
+            env_parse_layer(
+                env,
+                "SLSKR_RECONNECT_SECONDS",
+                file_config.app.reconnect_seconds,
+                30,
+            )?,
+        )?;
+        let ping_interval = validated_runtime_interval(
             "SLSKR_PING_SECONDS",
-            file_config.app.ping_seconds,
-            300,
-        )?);
+            env_parse_layer(env, "SLSKR_PING_SECONDS", file_config.app.ping_seconds, 300)?,
+        )?;
         let log_level = env
             .var("SLSKR_LOG_LEVEL")
             .or(file_config.app.log_level)
@@ -165,10 +166,10 @@ impl AppConfig {
             file_config.timeouts.peer_response_seconds,
             5_u64,
         )?;
-        if peer_response_timeout_seconds == 0 {
-            return Err("SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS must be greater than zero".to_owned());
-        }
-        let peer_response_timeout = Duration::from_secs(peer_response_timeout_seconds);
+        let peer_response_timeout = validated_runtime_interval(
+            "SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS",
+            peer_response_timeout_seconds,
+        )?;
         let share_settings = ShareSettings::from_layers(file_config.shares, env)?;
         let transfer_history_limit = env_parse_layer(
             env,
@@ -350,6 +351,17 @@ fn validate_api_token(token: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn validated_runtime_interval(name: &str, seconds: u64) -> Result<Duration, String> {
+    if seconds == 0 {
+        return Err(format!("{name} must be greater than zero"));
+    }
+    let duration = Duration::from_secs(seconds);
+    if std::time::Instant::now().checked_add(duration).is_none() {
+        return Err(format!("{name} exceeds the runtime timer range"));
+    }
+    Ok(duration)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1432,5 +1444,24 @@ mod tests {
         let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
             .expect_err("zero peer timeout should fail");
         assert!(error.contains("must be greater than zero"), "{error}");
+    }
+
+    #[test]
+    fn runtime_intervals_reject_zero_and_unrepresentable_values() {
+        for name in [
+            "SLSKR_RECONNECT_SECONDS",
+            "SLSKR_PING_SECONDS",
+            "SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS",
+        ] {
+            for value in ["0", &u64::MAX.to_string()] {
+                let env = MapEnv::default().with(name, value);
+                let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+                    .expect_err("invalid runtime interval must fail at startup");
+                assert!(
+                    error.contains("greater than zero") || error.contains("timer range"),
+                    "{name}={value}: {error}"
+                );
+            }
+        }
     }
 }
