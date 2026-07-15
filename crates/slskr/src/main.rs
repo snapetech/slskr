@@ -162,8 +162,10 @@ const MAX_MESSAGE_BODY_BYTES: usize = 64 * 1024;
 const MAX_OAUTH_STATES: usize = 256;
 const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
 const MAX_CONTACT_RECORDS: usize = 4_096;
+const MAX_CONTACT_STATUS_BYTES: usize = 64;
 const MAX_SHARE_GROUPS: usize = 256;
 const MAX_SHARE_GROUP_MEMBERS: usize = 4_096;
+const MAX_TOTAL_SHARE_GROUP_MEMBERS: usize = 50_000;
 const MAX_COLLECTIONS: usize = 256;
 const MAX_COLLECTION_ITEMS: usize = 10_000;
 const MAX_TOTAL_COLLECTION_ITEMS: usize = 50_000;
@@ -5412,7 +5414,8 @@ impl ContactStore {
         let mut updated_at = unix_timestamp();
         let mut projected = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
-        for record in records {
+        for mut record in records {
+            record.username = bounded_user_username(&record.username);
             if let Some(number) = record
                 .id
                 .strip_prefix("contact-")
@@ -5435,7 +5438,7 @@ impl ContactStore {
                 id: record.id,
                 username: record.username,
                 online: record.online,
-                status: record.status,
+                status: truncate_utf8_bytes(record.status, MAX_CONTACT_STATUS_BYTES),
                 free_upload_slots: record
                     .free_upload_slots
                     .and_then(|value| u32::try_from(value).ok()),
@@ -5455,6 +5458,7 @@ impl ContactStore {
     }
 
     fn create(&mut self, username: String) -> Result<(ContactRecord, bool), ()> {
+        let username = bounded_user_username(&username);
         if let Some(record) = self
             .records
             .iter()
@@ -5508,7 +5512,7 @@ impl ContactStore {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == id)?;
         if let Some(u) = username {
-            record.username = u;
+            record.username = bounded_user_username(&u);
         }
         if let Some(o) = online {
             record.online = o;
@@ -5651,6 +5655,7 @@ impl ShareGroupStore {
     ) -> Self {
         let mut store = Self::new();
         let mut max_id = 0_u64;
+        let mut retained_members = 0_usize;
         let mut seen_ids = std::collections::HashSet::new();
         for record in groups {
             if let Some(value) = record
@@ -5663,21 +5668,26 @@ impl ShareGroupStore {
             if store.records.len() < store.max_records && seen_ids.insert(record.id.clone()) {
                 store.records.push(ShareGroupRecord {
                     id: record.id,
-                    name: record.name,
-                    description: record.description,
+                    name: truncate_utf8_bytes(record.name, MAX_LIST_NAME_BYTES),
+                    description: truncate_utf8_bytes(
+                        record.description,
+                        MAX_LIST_DESCRIPTION_BYTES,
+                    ),
                     members: Vec::new(),
                     created_at: u64::try_from(record.created_at).unwrap_or_default(),
                     updated_at: u64::try_from(record.updated_at).unwrap_or_default(),
                 });
             }
         }
-        for member in members {
+        for mut member in members {
+            member.username = bounded_user_username(&member.username);
             if let Some(group) = store
                 .records
                 .iter_mut()
                 .find(|record| record.id == member.group_id)
             {
-                if group.members.len() < store.max_members_per_group
+                if retained_members < MAX_TOTAL_SHARE_GROUP_MEMBERS
+                    && group.members.len() < store.max_members_per_group
                     && !group
                         .members
                         .iter()
@@ -5687,6 +5697,7 @@ impl ShareGroupStore {
                         username: member.username,
                         added_at: u64::try_from(member.added_at).unwrap_or_default(),
                     });
+                    retained_members = retained_members.saturating_add(1);
                 }
             }
         }
@@ -5715,8 +5726,8 @@ impl ShareGroupStore {
         let id = format!("sg-{}", self.allocate_id());
         let record = ShareGroupRecord {
             id,
-            name,
-            description,
+            name: truncate_utf8_bytes(name, MAX_LIST_NAME_BYTES),
+            description: truncate_utf8_bytes(description, MAX_LIST_DESCRIPTION_BYTES),
             members: Vec::new(),
             created_at: now,
             updated_at: now,
@@ -5746,8 +5757,8 @@ impl ShareGroupStore {
     fn update(&mut self, id: &str, name: String, description: String) -> Option<ShareGroupRecord> {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == id)?;
-        record.name = name;
-        record.description = description;
+        record.name = truncate_utf8_bytes(name, MAX_LIST_NAME_BYTES);
+        record.description = truncate_utf8_bytes(description, MAX_LIST_DESCRIPTION_BYTES);
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -5768,6 +5779,8 @@ impl ShareGroupStore {
         group_id: &str,
         username: String,
     ) -> Result<Option<(ShareGroupRecord, bool)>, ()> {
+        let username = bounded_user_username(&username);
+        let total_members = self.total_members();
         let now = unix_timestamp();
         let Some(record) = self.records.iter_mut().find(|r| r.id == group_id) else {
             return Ok(None);
@@ -5779,7 +5792,9 @@ impl ShareGroupStore {
         {
             false
         } else {
-            if record.members.len() >= self.max_members_per_group {
+            if record.members.len() >= self.max_members_per_group
+                || total_members >= MAX_TOTAL_SHARE_GROUP_MEMBERS
+            {
                 return Err(());
             }
             record.members.push(ShareGroupMember {
@@ -5794,12 +5809,13 @@ impl ShareGroupStore {
     }
 
     fn remove_member(&mut self, group_id: &str, username: &str) -> Option<ShareGroupRecord> {
+        let username = bounded_user_username(username);
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|r| r.id == group_id)?;
         if let Some(pos) = record
             .members
             .iter()
-            .position(|member| member.username.eq_ignore_ascii_case(username))
+            .position(|member| member.username.eq_ignore_ascii_case(&username))
         {
             record.members.remove(pos);
             record.updated_at = now;
@@ -5811,6 +5827,7 @@ impl ShareGroupStore {
     }
 
     fn user_group_json(&self, username: &str) -> String {
+        let username = bounded_user_username(username);
         let groups = self
             .records
             .iter()
@@ -5841,6 +5858,10 @@ impl ShareGroupStore {
             "groupCount": groups.len(),
         })
         .to_string()
+    }
+
+    fn total_members(&self) -> usize {
+        self.records.iter().map(|record| record.members.len()).sum()
     }
 
     #[allow(dead_code)]
@@ -33752,6 +33773,54 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(groups.remove_member(&group.id, "ALICE").is_some());
+    }
+
+    #[test]
+    fn contacts_and_share_groups_bound_text_and_aggregate_members() {
+        let oversized_username = "é".repeat(super::MAX_USER_USERNAME_BYTES);
+        let mut contacts = super::ContactStore::with_max_records(2);
+        let (contact, created) = contacts.create(oversized_username.clone()).unwrap();
+        assert!(created);
+        assert!(contact.username.len() <= super::MAX_USER_USERNAME_BYTES);
+        let (_, duplicate) = contacts.create(oversized_username.clone()).unwrap();
+        assert!(!duplicate);
+
+        let mut groups =
+            super::ShareGroupStore::with_limits(14, super::MAX_SHARE_GROUP_MEMBERS + 1);
+        let first = groups
+            .create(
+                "n".repeat(super::MAX_LIST_NAME_BYTES + 1),
+                "d".repeat(super::MAX_LIST_DESCRIPTION_BYTES + 1),
+            )
+            .unwrap();
+        assert_eq!(first.name.len(), super::MAX_LIST_NAME_BYTES);
+        assert_eq!(first.description.len(), super::MAX_LIST_DESCRIPTION_BYTES);
+        let (_, added) = groups
+            .add_member(&first.id, oversized_username.clone())
+            .unwrap()
+            .unwrap();
+        assert!(added);
+        assert!(groups.records[0].members[0].username.len() <= super::MAX_USER_USERNAME_BYTES);
+
+        groups.records[0].members.clear();
+        while groups.records.len() < 13 {
+            groups.create("group".to_owned(), String::new()).unwrap();
+        }
+        let template = super::ShareGroupMember {
+            username: "peer".to_owned(),
+            added_at: 0,
+        };
+        for record in groups.records.iter_mut().take(12) {
+            record.members = vec![template.clone(); super::MAX_SHARE_GROUP_MEMBERS];
+        }
+        groups.records[12].members = vec![
+            template;
+            super::MAX_TOTAL_SHARE_GROUP_MEMBERS
+                - (12 * super::MAX_SHARE_GROUP_MEMBERS)
+        ];
+        let last = groups.create("last".to_owned(), String::new()).unwrap();
+        assert!(groups.add_member(&last.id, "overflow".to_owned()).is_err());
+        assert_eq!(groups.total_members(), super::MAX_TOTAL_SHARE_GROUP_MEMBERS);
     }
 
     #[test]
