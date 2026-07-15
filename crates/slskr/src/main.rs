@@ -8604,19 +8604,22 @@ async fn route_http_request_with_headers(
             drop(users);
             Ok(routing::ok_response(body))
         }
-        ("POST", path) if path.starts_with("/api/mesh/sync/") && path.len() > 15 => {
-            let username = &path[15..];
+        ("POST", path) if path.starts_with("/api/mesh/sync/") => {
+            let Some(username) = path_segment_after(path, "/api/mesh/sync/") else {
+                return Ok(routing::not_found_response());
+            };
+            let username = decoded_path_segment(username);
             let users = state.users.read().await;
             let mesh = state.mesh.read().await;
             let candidate = mesh.candidate_usernames(&users).into_iter().any(|candidate| {
-                candidate.eq_ignore_ascii_case(username)
+                candidate.eq_ignore_ascii_case(&username)
             });
             let watched = users.records.iter().any(|user| {
-                user.username.eq_ignore_ascii_case(username)
+                user.username.eq_ignore_ascii_case(&username)
                     && (user.watched || user.status.as_deref() == Some("online"))
             });
             let capability = mesh.capability_records.iter().any(|record| {
-                record.username.eq_ignore_ascii_case(username)
+                record.username.eq_ignore_ascii_case(&username)
             });
             drop(mesh);
             drop(users);
@@ -14986,10 +14989,17 @@ async fn route_http_request_with_headers(
           }
 
           ("GET", path) if path.starts_with("/api/realm-subject-indexes/") && path.ends_with("/conflicts") => {
-              let realm = path.split('/').nth(3).unwrap_or("unknown");
+              let Some(realm) = path_segment_between(
+                  path,
+                  "/api/realm-subject-indexes/",
+                  "/conflicts",
+              ) else {
+                  return Ok(routing::not_found_response());
+              };
+              let realm = decoded_path_segment(realm);
               Ok(routing::ok_response(format!(
                   "{{\"realm\":\"{}\",\"conflicts\":[],\"count\":0}}",
-                  json_escape(realm)
+                  json_escape(&realm)
               )))
           }
 
@@ -27671,6 +27681,58 @@ mod tests {
         assert_eq!(peers.status, "200 OK");
         assert!(peers.body.contains("\"peers\""));
         assert!(peers.body.contains("\"carol\""));
+    }
+
+    #[tokio::test]
+    async fn mesh_sync_and_realm_conflict_routes_require_single_encoded_segments() {
+        let (state, _receiver) = test_state();
+        {
+            let mut users = state.users.write().await;
+            users.watch("mesh peer".to_owned());
+        }
+
+        let mesh_sync =
+            super::route_http_request("POST", "/api/mesh/sync/mesh%20peer", None, "{}", &state)
+                .await
+                .expect("encoded mesh sync");
+        assert_eq!(mesh_sync.status, "202 Accepted");
+        let mesh_sync_json = serde_json::from_str::<serde_json::Value>(&mesh_sync.body).unwrap();
+        assert_eq!(mesh_sync_json["username"], "mesh peer");
+        assert_eq!(mesh_sync_json["queued"], true);
+
+        let aliased_mesh_sync = super::route_http_request(
+            "POST",
+            "/api/mesh/sync/mesh%20peer/untrusted",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("reject aliased mesh sync");
+        assert_eq!(aliased_mesh_sync.status, "404 Not Found");
+
+        let realm_conflicts = super::route_http_request(
+            "GET",
+            "/api/realm-subject-indexes/local%20realm/conflicts",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("encoded realm conflicts");
+        assert_eq!(realm_conflicts.status, "200 OK");
+        assert!(realm_conflicts.body.contains("local realm"));
+
+        let aliased_realm_conflicts = super::route_http_request(
+            "GET",
+            "/api/realm-subject-indexes/local/extra/conflicts",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased realm conflicts");
+        assert_eq!(aliased_realm_conflicts.status, "404 Not Found");
     }
 
     #[tokio::test]
