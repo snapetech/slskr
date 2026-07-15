@@ -128,6 +128,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | SDK social history retention | Public Rust SDK room and private-message state retained every server-supplied message for the client lifetime. | Fixed by retaining the latest 1,000 room and private messages, preserving acknowledgement behavior, and adding eviction regression coverage. |
 | Medium | WebSocket frame lengths | The server accepted non-minimal extended payload lengths and 64-bit lengths with RFC 6455's reserved high bit set. | Fixed by rejecting non-canonical 16/64-bit encodings and the reserved high bit before payload allocation, with parser and hardening-gate coverage. |
 | High | Search response retention | Valid search tokens accepted unlimited peer responses and file results in both the daemon projection and public Rust SDK, allowing remote peers to grow memory and API payloads for the active search lifetime. | Fixed with per-token SDK response/file ceilings, a daemon per-search result ceiling across peer/API/persistence ingestion, and regression/gate coverage. |
+| Medium | Capability registry retention | The Rust SDK retained unlimited signed peer capability descriptors under unique usernames, while expiry pruning depended on callers invoking it separately. | Fixed by pruning expired records during every update, limiting the registry to 1,024 live peers, allowing replacement at capacity, and adding regression/gate coverage. |
 
 ## Open Burn-Down
 

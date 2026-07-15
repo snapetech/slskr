@@ -10,6 +10,7 @@ use slskr_protocol::{peer::PeerMessage, DecodeError, Reader, Writer};
 pub const PEER_CAPABILITY_MESSAGE_CODE: u32 = 0x534C_534B;
 pub const PEER_CAPABILITY_ENVELOPE_VERSION: u16 = 1;
 pub const MAX_CAPABILITY_ENVELOPE_BYTES: usize = 64 * 1024;
+pub const MAX_PEER_CAPABILITY_RECORDS: usize = 1_024;
 pub const FEATURE_CAPABILITIES_V1: &str = "slskdn-capabilities-v1";
 pub const FEATURE_MESH_V1: &str = "slskdn-mesh-v1";
 pub const FEATURE_SHARED_UDP_V1: &str = "slskdn-shared-udp-v1";
@@ -263,6 +264,12 @@ impl PeerCapabilityRegistry {
     ) -> Result<Option<PeerCapabilityDescriptor>, CapabilityError> {
         descriptor.verify(now)?;
         let key = descriptor.username.to_ascii_lowercase();
+        self.prune_expired(now)?;
+        if self.records.len() >= MAX_PEER_CAPABILITY_RECORDS && !self.records.contains_key(&key) {
+            return Err(CapabilityError::RegistryFull {
+                max: MAX_PEER_CAPABILITY_RECORDS,
+            });
+        }
         Ok(self.records.insert(key, descriptor))
     }
 
@@ -318,6 +325,8 @@ pub enum CapabilityError {
     EnvelopeTooLarge { length: usize, max: usize },
     #[error("capability envelope decode error: {0}")]
     Decode(String),
+    #[error("peer capability registry is full (maximum {max} records)")]
+    RegistryFull { max: usize },
     #[error("{field} length {length} exceeds maximum {max}")]
     FieldTooLong {
         field: &'static str,
@@ -640,6 +649,53 @@ mod tests {
             1
         );
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn registry_prunes_expired_records_and_rejects_new_peers_at_limit() {
+        let mut registry = PeerCapabilityRegistry::new();
+        let alice = descriptor();
+        registry.records.insert("alice".to_owned(), alice.clone());
+        for index in 1..MAX_PEER_CAPABILITY_RECORDS {
+            registry
+                .records
+                .insert(format!("peer-{index}"), alice.clone());
+        }
+
+        assert!(registry.update(descriptor(), now()).is_ok());
+        let bob = PeerCapabilityDescriptor::unsigned(
+            "Bob",
+            vec![FEATURE_CAPABILITIES_V1.to_owned()],
+            Vec::new(),
+            Duration::from_secs(60),
+            &signing_key(),
+            now(),
+        )
+        .unwrap()
+        .sign(&signing_key())
+        .unwrap();
+        assert_eq!(
+            registry.update(bob.clone(), now()).unwrap_err(),
+            CapabilityError::RegistryFull {
+                max: MAX_PEER_CAPABILITY_RECORDS
+            }
+        );
+
+        let later = now() + Duration::from_secs(61);
+        let refreshed_bob = PeerCapabilityDescriptor::unsigned(
+            "Bob",
+            vec![FEATURE_CAPABILITIES_V1.to_owned()],
+            Vec::new(),
+            Duration::from_secs(60),
+            &signing_key(),
+            later,
+        )
+        .unwrap()
+        .sign(&signing_key())
+        .unwrap();
+        assert!(registry.update(refreshed_bob, later).is_ok());
+        assert_eq!(registry.len(), 1);
+        assert!(registry.get("bob").is_some());
     }
 
     #[test]

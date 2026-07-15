@@ -8,6 +8,7 @@ source_file="crates/slskr/src/main.rs"
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
 client_social_source="crates/slskr-client/src/social.rs"
+client_capability_source="crates/slskr-client/src/capabilities.rs"
 status=0
 
 for anchor in \
@@ -28,6 +29,16 @@ for anchor in \
   'state.incoming_connections'; do
   if ! rg -n --fixed-strings -- "$anchor" "$source_file" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
+  'MAX_PEER_CAPABILITY_RECORDS' \
+  'CapabilityError::RegistryFull' \
+  'registry_prunes_expired_records_and_rejects_new_peers_at_limit'; do
+  if ! rg -n --fixed-strings -- "$anchor" "$client_capability_source" >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing client capability anchor %s\n' "$anchor" >&2
     status=1
   fi
 done
