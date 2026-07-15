@@ -48,6 +48,21 @@ pub struct TransferRecord {
     pub status: String,
     pub started_at: i64,
     pub completed_at: Option<i64>,
+    pub request_id: Option<String>,
+    pub request_name: Option<String>,
+    pub destination_directory: Option<String>,
+    pub local_path: Option<String>,
+    pub batch_id: Option<String>,
+    pub reason: Option<String>,
+    pub bit_rate: Option<i64>,
+    pub sample_rate: Option<i64>,
+    pub bit_depth: Option<i64>,
+    pub length_seconds: Option<i64>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub title: Option<String>,
+    pub track_number: Option<i64>,
+    pub year: Option<i64>,
 }
 
 /// Transfer transition/progress event record for persistence
@@ -422,6 +437,21 @@ impl<'r> FromRow<'r, SqliteRow> for TransferRecord {
             status: row.try_get("status")?,
             started_at: row.try_get("started_at")?,
             completed_at: row.try_get("completed_at")?,
+            request_id: row.try_get("request_id")?,
+            request_name: row.try_get("request_name")?,
+            destination_directory: row.try_get("destination_directory")?,
+            local_path: row.try_get("local_path")?,
+            batch_id: row.try_get("batch_id")?,
+            reason: row.try_get("reason")?,
+            bit_rate: row.try_get("bit_rate")?,
+            sample_rate: row.try_get("sample_rate")?,
+            bit_depth: row.try_get("bit_depth")?,
+            length_seconds: row.try_get("length_seconds")?,
+            artist: row.try_get("artist")?,
+            album: row.try_get("album")?,
+            title: row.try_get("title")?,
+            track_number: row.try_get("track_number")?,
+            year: row.try_get("year")?,
         })
     }
 }
@@ -919,6 +949,21 @@ impl DatabaseManager {
                 status TEXT NOT NULL,
                 started_at INTEGER NOT NULL,
                 completed_at INTEGER
+                , request_id TEXT
+                , request_name TEXT
+                , destination_directory TEXT
+                , local_path TEXT
+                , batch_id TEXT
+                , reason TEXT
+                , bit_rate INTEGER
+                , sample_rate INTEGER
+                , bit_depth INTEGER
+                , length_seconds INTEGER
+                , artist TEXT
+                , album TEXT
+                , title TEXT
+                , track_number INTEGER
+                , year INTEGER
             )
             "#,
         )
@@ -1337,6 +1382,7 @@ impl DatabaseManager {
         .await?;
         self.ensure_runtime_compat_columns().await?;
         self.ensure_wishlist_item_columns().await?;
+        self.ensure_transfer_columns().await?;
 
         // Create pending OAuth states table
         query(
@@ -1567,6 +1613,36 @@ impl DatabaseManager {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn ensure_transfer_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE transfers ADD COLUMN request_id TEXT",
+            "ALTER TABLE transfers ADD COLUMN request_name TEXT",
+            "ALTER TABLE transfers ADD COLUMN destination_directory TEXT",
+            "ALTER TABLE transfers ADD COLUMN local_path TEXT",
+            "ALTER TABLE transfers ADD COLUMN batch_id TEXT",
+            "ALTER TABLE transfers ADD COLUMN reason TEXT",
+            "ALTER TABLE transfers ADD COLUMN bit_rate INTEGER",
+            "ALTER TABLE transfers ADD COLUMN sample_rate INTEGER",
+            "ALTER TABLE transfers ADD COLUMN bit_depth INTEGER",
+            "ALTER TABLE transfers ADD COLUMN length_seconds INTEGER",
+            "ALTER TABLE transfers ADD COLUMN artist TEXT",
+            "ALTER TABLE transfers ADD COLUMN album TEXT",
+            "ALTER TABLE transfers ADD COLUMN title TEXT",
+            "ALTER TABLE transfers ADD COLUMN track_number INTEGER",
+            "ALTER TABLE transfers ADD COLUMN year INTEGER",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                if !error.to_string().contains("duplicate column name") {
+                    return Err(Box::new(error));
+                }
+            }
+        }
+        query("CREATE INDEX IF NOT EXISTS idx_transfers_request ON transfers(request_id, started_at DESC)")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -1837,8 +1913,8 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.id)
@@ -1850,6 +1926,21 @@ impl DatabaseManager {
         .bind(&record.status)
         .bind(record.started_at)
         .bind(record.completed_at)
+        .bind(&record.request_id)
+        .bind(&record.request_name)
+        .bind(&record.destination_directory)
+        .bind(&record.local_path)
+        .bind(&record.batch_id)
+        .bind(&record.reason)
+        .bind(record.bit_rate)
+        .bind(record.sample_rate)
+        .bind(record.bit_depth)
+        .bind(record.length_seconds)
+        .bind(&record.artist)
+        .bind(&record.album)
+        .bind(&record.title)
+        .bind(record.track_number)
+        .bind(record.year)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -1861,7 +1952,7 @@ impl DatabaseManager {
         id: &str,
     ) -> Result<Option<TransferRecord>, Box<dyn std::error::Error>> {
         let record = query_as::<_, TransferRecord>(
-            "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at FROM transfers WHERE id = ?"
+            "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -1878,7 +1969,7 @@ impl DatabaseManager {
     ) -> Result<Vec<TransferRecord>, Box<dyn std::error::Error>> {
         let records = if let Some(status) = status {
             query_as::<_, TransferRecord>(
-                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at FROM transfers WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"
             )
             .bind(status)
             .bind(limit)
@@ -1887,7 +1978,7 @@ impl DatabaseManager {
             .await?
         } else {
             query_as::<_, TransferRecord>(
-                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at FROM transfers ORDER BY started_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers ORDER BY started_at DESC LIMIT ? OFFSET ?"
             )
             .bind(limit)
             .bind(offset)
@@ -4203,12 +4294,29 @@ mod tests {
             status: "active".to_string(),
             started_at: now,
             completed_at: None,
+            request_id: Some("request_1".to_owned()),
+            request_name: Some("Test".to_owned()),
+            destination_directory: Some("Artist/Album".to_owned()),
+            local_path: Some("downloads/Artist/Album/test.mp3".to_owned()),
+            batch_id: None,
+            reason: None,
+            bit_rate: Some(320),
+            sample_rate: Some(44_100),
+            bit_depth: Some(16),
+            length_seconds: Some(180),
+            artist: Some("Artist".to_owned()),
+            album: Some("Album".to_owned()),
+            title: Some("Test".to_owned()),
+            track_number: Some(1),
+            year: Some(2026),
         };
 
         db.insert_transfer(&record).await.unwrap();
         let retrieved = db.get_transfer("transfer_1").await.unwrap().unwrap();
         assert_eq!(retrieved.filename, "test.mp3");
         assert_eq!(retrieved.progress, 500000);
+        assert_eq!(retrieved.bit_rate, Some(320));
+        assert_eq!(retrieved.request_id.as_deref(), Some("request_1"));
 
         db.update_transfer_progress("transfer_1", 750000)
             .await

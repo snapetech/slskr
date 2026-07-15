@@ -102,6 +102,7 @@ pub fn request_body(request: &str) -> &str {
 }
 
 pub fn route_requires_auth(config: &AppConfig, path: &str) -> bool {
+    let path = normalize_api_path(path);
     config.auth_required
         && path.starts_with("/api/")
         && path != "/api/health"

@@ -270,6 +270,9 @@ const MAX_TRANSFER_USERNAME_BYTES: usize = 1024;
 const MAX_TRANSFER_FILENAME_BYTES: usize = 16 * 1024;
 const MAX_TRANSFER_LOCAL_PATH_BYTES: usize = 16 * 1024;
 const MAX_TRANSFER_BATCH_ID_BYTES: usize = 4 * 1024;
+const MAX_TRANSFER_REQUEST_ID_BYTES: usize = 128;
+const MAX_TRANSFER_REQUEST_NAME_BYTES: usize = 512;
+const MAX_TRANSFER_METADATA_TEXT_BYTES: usize = 1024;
 const MAX_TRANSFER_STATUS_BYTES: usize = 64;
 const MAX_TRANSFER_REASON_BYTES: usize = 4 * 1024;
 
@@ -2161,6 +2164,30 @@ struct TransferEntry {
     local_path: Option<String>,
     #[serde(default)]
     batch_id: Option<String>,
+    #[serde(default)]
+    request_id: Option<String>,
+    #[serde(default)]
+    request_name: Option<String>,
+    #[serde(default)]
+    destination_directory: Option<String>,
+    #[serde(default)]
+    bit_rate: Option<u32>,
+    #[serde(default)]
+    sample_rate: Option<u32>,
+    #[serde(default)]
+    bit_depth: Option<u32>,
+    #[serde(default)]
+    length_seconds: Option<u32>,
+    #[serde(default)]
+    artist: Option<String>,
+    #[serde(default)]
+    album: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    track_number: Option<u32>,
+    #[serde(default)]
+    year: Option<u32>,
     size: Option<u64>,
     bytes_transferred: u64,
     status: String,
@@ -2173,7 +2200,7 @@ impl TransferEntry {
     #[allow(dead_code)]
     fn json(&self) -> String {
         format!(
-            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"batch_id\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"requested_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"batch_id\":{},\"request_id\":{},\"request_name\":{},\"destination_directory\":{},\"bit_rate\":{},\"sample_rate\":{},\"bit_depth\":{},\"length_seconds\":{},\"artist\":{},\"album\":{},\"title\":{},\"track_number\":{},\"year\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"failure_code\":{},\"recovery_action\":{},\"recovery_label\":{},\"requested_at\":{},\"updated_at\":{}}}",
             self.id,
             self.direction,
             self.token,
@@ -2181,10 +2208,25 @@ impl TransferEntry {
             json_escape(&self.filename),
             "null",
             json_option(self.batch_id.as_deref()),
+            json_option(self.request_id.as_deref()),
+            json_option(self.request_name.as_deref()),
+            json_option(self.destination_directory.as_deref()),
+            json_u32_option(self.bit_rate),
+            json_u32_option(self.sample_rate),
+            json_u32_option(self.bit_depth),
+            json_u32_option(self.length_seconds),
+            json_option(self.artist.as_deref()),
+            json_option(self.album.as_deref()),
+            json_option(self.title.as_deref()),
+            json_u32_option(self.track_number),
+            json_u32_option(self.year),
             json_u64_option(self.size),
             self.bytes_transferred,
             json_escape(&self.status),
             json_option(public_transfer_reason(&self.status, self.reason.as_deref())),
+            json_option(transfer_failure_code(&self.status, self.reason.as_deref())),
+            json_option(transfer_recovery_action(&self.status, self.reason.as_deref())),
+            json_option(transfer_recovery_label(&self.status, self.reason.as_deref())),
             self.requested_at,
             self.updated_at
         )
@@ -2217,6 +2259,18 @@ impl TransferEntry {
             "direction": if self.direction == 0 { "Download" } else { "Upload" },
             "filename": self.filename,
             "batchId": self.batch_id,
+            "requestId": self.request_id,
+            "requestName": self.request_name,
+            "destinationDirectory": self.destination_directory,
+            "bitRate": self.bit_rate,
+            "sampleRate": self.sample_rate,
+            "bitDepth": self.bit_depth,
+            "length": self.length_seconds,
+            "artist": self.artist,
+            "album": self.album,
+            "title": self.title,
+            "trackNumber": self.track_number,
+            "year": self.year,
             "size": size,
             "startOffset": 0,
             "state": slskd_transfer_state(&self.status),
@@ -2230,6 +2284,9 @@ impl TransferEntry {
             "elapsedTime": "",
             "percentComplete": percent_complete,
             "remainingTime": "",
+            "failureCode": transfer_failure_code(&self.status, self.reason.as_deref()),
+            "recoveryAction": transfer_recovery_action(&self.status, self.reason.as_deref()),
+            "recoveryLabel": transfer_recovery_label(&self.status, self.reason.as_deref()),
         })
     }
 }
@@ -2241,6 +2298,128 @@ fn public_transfer_reason(status: &str, reason: Option<&str>) -> Option<&'static
         "cancelled" => "transfer cancelled",
         _ => "transfer operation unavailable",
     })
+}
+
+fn transfer_failure_code(status: &str, reason: Option<&str>) -> Option<&'static str> {
+    if !matches!(status, "failed" | "rejected") {
+        return None;
+    }
+    let reason = reason?.to_ascii_lowercase();
+    Some(if reason.contains("too many megabytes") || reason.contains("overwhelmed") {
+        "peer_capacity"
+    } else if reason.contains("not shared") || reason.contains("file not found") {
+        "remote_file_unavailable"
+    } else if reason.contains("size mismatch") || reason.contains("does not match expected size") {
+        "size_mismatch"
+    } else if reason.contains("offline") || reason.contains("unavailable") {
+        "peer_offline"
+    } else if reason.contains("connection closed")
+        || reason.contains("connection lost")
+        || reason.contains("reset by peer")
+    {
+        "connection_lost"
+    } else if reason.contains("internal error") {
+        "remote_internal"
+    } else {
+        "transfer_failed"
+    })
+}
+
+fn transfer_recovery_action(status: &str, reason: Option<&str>) -> Option<&'static str> {
+    match transfer_failure_code(status, reason)? {
+        "peer_offline" => Some("wait"),
+        _ => Some("retry"),
+    }
+}
+
+fn transfer_recovery_label(status: &str, reason: Option<&str>) -> Option<&'static str> {
+    match transfer_failure_code(status, reason)? {
+        "peer_capacity" => Some("Retry later"),
+        "remote_file_unavailable" | "size_mismatch" | "remote_internal" => {
+            Some("Find other sources")
+        }
+        "peer_offline" => Some("Wait for online"),
+        "connection_lost" => Some("Retry connection"),
+        _ => Some("Retry"),
+    }
+}
+
+fn download_request_state(entries: &[&TransferEntry]) -> &'static str {
+    if entries
+        .iter()
+        .any(|entry| matches!(entry.status.as_str(), "succeeded" | "completed"))
+    {
+        "Completed"
+    } else if entries.iter().any(|entry| {
+        matches!(
+            entry.status.as_str(),
+            "queued"
+                | "accepted"
+                | "peer_lookup"
+                | "peer_negotiating"
+                | "indirect_pending"
+                | "in_progress"
+        )
+    }) {
+        "Active"
+    } else if entries.iter().all(|entry| entry.status == "cancelled") {
+        "Cancelled"
+    } else {
+        "Failed"
+    }
+}
+
+fn download_request_projection(
+    entries: &[&TransferEntry],
+    include_attempts: bool,
+) -> serde_json::Value {
+    let first = entries
+        .iter()
+        .min_by_key(|entry| entry.requested_at)
+        .copied()
+        .expect("download request projection requires an attempt");
+    let current = entries
+        .iter()
+        .filter(|entry| entry.status != "cancelled")
+        .max_by_key(|entry| entry.requested_at)
+        .or_else(|| entries.iter().max_by_key(|entry| entry.requested_at))
+        .copied();
+    let state = download_request_state(entries);
+    let completed_at = matches!(state, "Completed" | "Failed" | "Cancelled")
+        .then(|| entries.iter().map(|entry| entry.updated_at).max())
+        .flatten();
+    let request = serde_json::json!({
+        "id": first.request_id,
+        "name": first.request_name.as_deref().unwrap_or_else(|| virtual_basename(&first.filename)),
+        "originalFilename": first.filename,
+        "size": first.size,
+        "batchId": first.batch_id,
+        "destinationDirectory": first.destination_directory,
+        "state": state,
+        "stateDescription": state,
+        "createdAt": first.requested_at,
+        "completedAt": completed_at,
+        "bitRate": first.bit_rate,
+        "sampleRate": first.sample_rate,
+        "bitDepth": first.bit_depth,
+        "length": first.length_seconds,
+        "artist": first.artist,
+        "album": first.album,
+        "title": first.title,
+        "trackNumber": first.track_number,
+        "year": first.year,
+    });
+    let current =
+        current.and_then(|entry| serde_json::from_str::<serde_json::Value>(&entry.json()).ok());
+    if include_attempts {
+        let attempts = entries
+            .iter()
+            .filter_map(|entry| serde_json::from_str::<serde_json::Value>(&entry.json()).ok())
+            .collect::<Vec<_>>();
+        serde_json::json!({"request": request, "attempts": attempts, "current": current})
+    } else {
+        serde_json::json!({"request": request, "attemptCount": entries.len(), "current": current})
+    }
 }
 
 fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferRecord {
@@ -2266,6 +2445,21 @@ fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferReco
         status: entry.status.clone(),
         started_at: entry.requested_at as i64,
         completed_at,
+        request_id: entry.request_id.clone(),
+        request_name: entry.request_name.clone(),
+        destination_directory: entry.destination_directory.clone(),
+        local_path: entry.local_path.clone(),
+        batch_id: entry.batch_id.clone(),
+        reason: entry.reason.clone(),
+        bit_rate: entry.bit_rate.map(i64::from),
+        sample_rate: entry.sample_rate.map(i64::from),
+        bit_depth: entry.bit_depth.map(i64::from),
+        length_seconds: entry.length_seconds.map(i64::from),
+        artist: entry.artist.clone(),
+        album: entry.album.clone(),
+        title: entry.title.clone(),
+        track_number: entry.track_number.map(i64::from),
+        year: entry.year.map(i64::from),
     }
 }
 
@@ -2386,6 +2580,22 @@ struct TransferQueue {
     updated_at: u64,
 }
 
+#[derive(Clone, Debug, Default)]
+struct TransferRequestDetails {
+    request_id: Option<String>,
+    request_name: Option<String>,
+    destination_directory: Option<String>,
+    bit_rate: Option<u32>,
+    sample_rate: Option<u32>,
+    bit_depth: Option<u32>,
+    length_seconds: Option<u32>,
+    artist: Option<String>,
+    album: Option<String>,
+    title: Option<String>,
+    track_number: Option<u32>,
+    year: Option<u32>,
+}
+
 impl TransferQueue {
     fn new(config: &AppConfig) -> Self {
         let events_path = transfer_events_path(&config.state_dir);
@@ -2469,6 +2679,18 @@ impl TransferQueue {
             filename,
             local_path: None,
             batch_id: None,
+            request_id: None,
+            request_name: None,
+            destination_directory: None,
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
+            artist: None,
+            album: None,
+            title: None,
+            track_number: None,
+            year: None,
             size,
             bytes_transferred: 0,
             status: "rejected".to_owned(),
@@ -2497,6 +2719,18 @@ impl TransferQueue {
             filename,
             local_path: Some(local_path),
             batch_id: None,
+            request_id: None,
+            request_name: None,
+            destination_directory: None,
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
+            artist: None,
+            album: None,
+            title: None,
+            track_number: None,
+            year: None,
             size: Some(size),
             bytes_transferred: 0,
             status: "accepted".to_owned(),
@@ -2527,6 +2761,37 @@ impl TransferQueue {
         size: Option<u64>,
         batch_id: Option<String>,
     ) -> TransferEntry {
+        let details = if direction == 0 {
+            TransferRequestDetails {
+                request_id: Some(uuid::Uuid::new_v4().to_string()),
+                request_name: Some(virtual_basename(&filename).to_owned()),
+                ..TransferRequestDetails::default()
+            }
+        } else {
+            TransferRequestDetails::default()
+        };
+        self.create_with_details(
+            direction,
+            peer_username,
+            filename,
+            local_path,
+            size,
+            batch_id,
+            details,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_with_details(
+        &mut self,
+        direction: u32,
+        peer_username: Option<String>,
+        filename: String,
+        local_path: Option<String>,
+        size: Option<u64>,
+        batch_id: Option<String>,
+        details: TransferRequestDetails,
+    ) -> TransferEntry {
         let now = unix_timestamp();
         let id = self.allocate_id();
         let token = self.allocate_token();
@@ -2538,6 +2803,18 @@ impl TransferQueue {
             filename,
             local_path,
             batch_id,
+            request_id: details.request_id,
+            request_name: details.request_name,
+            destination_directory: details.destination_directory,
+            bit_rate: details.bit_rate,
+            sample_rate: details.sample_rate,
+            bit_depth: details.bit_depth,
+            length_seconds: details.length_seconds,
+            artist: details.artist,
+            album: details.album,
+            title: details.title,
+            track_number: details.track_number,
+            year: details.year,
             size,
             bytes_transferred: 0,
             status: "queued".to_owned(),
@@ -2993,6 +3270,28 @@ fn bounded_transfer_entry(mut entry: TransferEntry) -> TransferEntry {
     entry.batch_id = entry
         .batch_id
         .map(|batch_id| truncate_utf8_bytes(batch_id, MAX_TRANSFER_BATCH_ID_BYTES));
+    entry.request_id = entry
+        .request_id
+        .map(|request_id| truncate_utf8_bytes(request_id, MAX_TRANSFER_REQUEST_ID_BYTES));
+    if entry.direction == 0 && entry.request_id.is_none() {
+        entry.request_id = Some(uuid::Uuid::new_v4().to_string());
+    }
+    entry.request_name = entry
+        .request_name
+        .or_else(|| (entry.direction == 0).then(|| virtual_basename(&entry.filename).to_owned()))
+        .map(|name| truncate_utf8_bytes(name, MAX_TRANSFER_REQUEST_NAME_BYTES));
+    entry.destination_directory = entry
+        .destination_directory
+        .filter(|path| path.len() <= MAX_TRANSFER_LOCAL_PATH_BYTES);
+    entry.artist = entry
+        .artist
+        .map(|value| truncate_utf8_bytes(value, MAX_TRANSFER_METADATA_TEXT_BYTES));
+    entry.album = entry
+        .album
+        .map(|value| truncate_utf8_bytes(value, MAX_TRANSFER_METADATA_TEXT_BYTES));
+    entry.title = entry
+        .title
+        .map(|value| truncate_utf8_bytes(value, MAX_TRANSFER_METADATA_TEXT_BYTES));
     entry.status = truncate_utf8_bytes(entry.status, MAX_TRANSFER_STATUS_BYTES);
     entry.reason = bounded_transfer_reason(entry.reason);
     entry
@@ -11642,6 +11941,138 @@ async fn route_http_request_with_headers(
         }
 
         // TRANSFER ENDPOINTS
+        ("GET", "/api/v0/downloads/requests")
+        | ("GET", "/api/downloads/requests") => {
+            let requested_state = query_parameter(route.query, "state");
+            let transfers = state.transfers.read().await;
+            let mut grouped = std::collections::BTreeMap::<&str, Vec<&TransferEntry>>::new();
+            for entry in transfers.entries.iter().filter(|entry| entry.direction == 0) {
+                if let Some(request_id) = entry.request_id.as_deref() {
+                    grouped.entry(request_id).or_default().push(entry);
+                }
+            }
+            let mut requests = grouped
+                .into_values()
+                .filter(|entries| {
+                    requested_state.as_deref().is_none_or(|requested| {
+                        download_request_state(entries).eq_ignore_ascii_case(requested)
+                    })
+                })
+                .map(|entries| download_request_projection(&entries, false))
+                .collect::<Vec<_>>();
+            requests.sort_by_key(|entry| {
+                std::cmp::Reverse(entry["request"]["createdAt"].as_u64().unwrap_or(0))
+            });
+            Ok(routing::ok_response(serde_json::Value::Array(requests).to_string()))
+        }
+
+        ("GET", path) if download_request_path(path).is_some() => {
+            let Some((request_id, None)) = download_request_path(path) else {
+                return Ok(routing::not_found_response());
+            };
+            let transfers = state.transfers.read().await;
+            let attempts = transfers
+                .entries
+                .iter()
+                .filter(|entry| entry.direction == 0 && entry.request_id.as_deref() == Some(request_id))
+                .collect::<Vec<_>>();
+            if attempts.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            Ok(routing::ok_response(
+                download_request_projection(&attempts, true).to_string(),
+            ))
+        }
+
+        ("PATCH", path) if download_request_path(path).is_some() => {
+            let Some((request_id, Some("name"))) = download_request_path(path) else {
+                return Ok(routing::not_found_response());
+            };
+            let Some(name) = extract_json_string_field(body, "name")
+                .map(|name| name.trim().to_owned())
+                .filter(|name| !name.is_empty())
+            else {
+                return Ok(routing::bad_request_response("name is required"));
+            };
+            if name.len() > MAX_TRANSFER_REQUEST_NAME_BYTES {
+                return Ok(routing::bad_request_response(
+                    "name must be 512 bytes or fewer",
+                ));
+            }
+            let mut transfers = state.transfers.write().await;
+            let previous = transfers.entries.clone();
+            let mut updated = Vec::new();
+            for entry in transfers.entries.iter_mut().filter(|entry| {
+                entry.direction == 0 && entry.request_id.as_deref() == Some(request_id)
+            }) {
+                entry.request_name = Some(name.clone());
+                entry.updated_at = unix_timestamp();
+                updated.push(entry.clone());
+            }
+            if updated.is_empty() {
+                return Ok(routing::not_found_response());
+            }
+            transfers.persist_state();
+            drop(transfers);
+            if let Err(error) = persist_transfer_records(state, &updated).await {
+                let mut transfers = state.transfers.write().await;
+                transfers.entries = previous.clone();
+                transfers.persist_state();
+                drop(transfers);
+                let _ = persist_transfer_records(state, &previous).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
+            let attempts = updated.iter().collect::<Vec<_>>();
+            Ok(routing::ok_response(
+                download_request_projection(&attempts, true).to_string(),
+            ))
+        }
+
+        ("POST", path) if download_request_path(path).is_some() => {
+            let Some((request_id, Some("cancel"))) = download_request_path(path) else {
+                return Ok(routing::not_found_response());
+            };
+            let mut transfers = state.transfers.write().await;
+            let previous = transfers.entries.clone();
+            let ids = transfers
+                .entries
+                .iter()
+                .filter(|entry| {
+                    entry.direction == 0
+                        && entry.request_id.as_deref() == Some(request_id)
+                        && !matches!(entry.status.as_str(), "succeeded" | "completed" | "cancelled")
+                })
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>();
+            let exists = transfers.entries.iter().any(|entry| {
+                entry.direction == 0 && entry.request_id.as_deref() == Some(request_id)
+            });
+            if !exists {
+                return Ok(routing::not_found_response());
+            }
+            let updated = ids
+                .into_iter()
+                .filter_map(|id| {
+                    transfers.update_status(
+                        id,
+                        "cancelled",
+                        None,
+                        Some("cancelled by request".to_owned()),
+                    )
+                })
+                .collect::<Vec<_>>();
+            drop(transfers);
+            if let Err(error) = persist_transfer_records(state, &updated).await {
+                let mut transfers = state.transfers.write().await;
+                transfers.entries = previous.clone();
+                transfers.persist_state();
+                drop(transfers);
+                let _ = persist_transfer_records(state, &previous).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
+            Ok(routing::no_content_response())
+        }
+
         ("POST", "/api/transfers") => {
             if let Some((username, files)) = slskd_enqueue_request(body) {
                 let batch_id = slskd_transfer_batch_id(body)
@@ -11659,13 +12090,30 @@ async fn route_http_request_with_headers(
                         continue;
                     }
                     let size = file.get("size").and_then(serde_json::Value::as_u64);
-                    let entry = transfers.create_with_batch(
+                    let details = transfer_request_details_from_json(&file, &filename);
+                    let relative = match render_completed_download_path(
+                        &state.config.download_completed_path_template,
+                        &username,
+                        &filename,
+                        batch_id.as_deref(),
+                        details.request_name.as_deref(),
+                        unix_timestamp(),
+                    ) {
+                        Ok(relative) => relative,
+                        Err(error) => return Ok(routing::bad_request_response(&error)),
+                    };
+                    let local_path = match safe_download_path(&state.config.state_dir, &relative) {
+                        Ok(path) => Some(path.display().to_string()),
+                        Err(error) => return Ok(routing::bad_request_response(&error)),
+                    };
+                    let entry = transfers.create_with_details(
                         0,
                         Some(username.clone()),
                         filename,
-                        None,
+                        local_path,
                         size,
                         batch_id.clone(),
+                        details,
                     );
                     created.push(entry.slskd_file_json());
                     created_entries.push(entry);
@@ -11692,19 +12140,35 @@ async fn route_http_request_with_headers(
             let supplied_local_path = extract_json_string_field(body, "local_path");
             let batch_id = slskd_transfer_batch_id(body);
             let size = extract_json_u64_field(body, "size");
-            let local_path = match prepare_transfer_local_path(state, direction, &filename, supplied_local_path).await {
+            let payload = serde_json::from_str::<serde_json::Value>(body)
+                .unwrap_or(serde_json::Value::Null);
+            let details = if direction == 0 {
+                transfer_request_details_from_json(&payload, &filename)
+            } else {
+                TransferRequestDetails::default()
+            };
+            let local_path = match prepare_transfer_local_path(
+                state,
+                direction,
+                peer_username.as_deref(),
+                &filename,
+                batch_id.as_deref(),
+                &details,
+                supplied_local_path,
+            ).await {
                 Ok(path) => path,
                 Err(error) => return Ok(routing::bad_request_response(&error)),
             };
 
              let mut transfers = state.transfers.write().await;
-             let entry = transfers.create_with_batch(
+             let entry = transfers.create_with_details(
                  direction,
                  peer_username.clone(),
                  filename.clone(),
                  local_path.clone(),
                  size,
                  batch_id,
+                 details,
              );
              drop(transfers);
              persist_transfer_record(state, &entry).await?;
@@ -11937,12 +12401,27 @@ async fn route_http_request_with_headers(
                 Some(original.bytes_transferred),
                 Some("replaced by alternative source".to_owned()),
             );
-            let replacement = transfers.create(
+            let replacement = transfers.create_with_details(
                 0,
                 alternative.peer_username.clone(),
                 alternative.filename.clone(),
-                None,
+                original.local_path.clone(),
                 Some(alternative.size),
+                original.batch_id.clone(),
+                TransferRequestDetails {
+                    request_id: original.request_id.clone(),
+                    request_name: original.request_name.clone(),
+                    destination_directory: original.destination_directory.clone(),
+                    bit_rate: original.bit_rate,
+                    sample_rate: original.sample_rate,
+                    bit_depth: original.bit_depth,
+                    length_seconds: original.length_seconds,
+                    artist: original.artist.clone(),
+                    album: original.album.clone(),
+                    title: original.title.clone(),
+                    track_number: original.track_number,
+                    year: original.year,
+                },
             );
             let replacement = transfers
                 .update_status(replacement.id, "peer_lookup", None, None)
@@ -12032,12 +12511,27 @@ async fn route_http_request_with_headers(
                 ) {
                     persisted.push(entry);
                 }
-                let replacement = transfers.create(
+                let replacement = transfers.create_with_details(
                     0,
                     alternative.peer_username.clone(),
                     alternative.filename.clone(),
-                    None,
+                    original.local_path.clone(),
                     Some(alternative.size),
+                    original.batch_id.clone(),
+                    TransferRequestDetails {
+                        request_id: original.request_id.clone(),
+                        request_name: original.request_name.clone(),
+                        destination_directory: original.destination_directory.clone(),
+                        bit_rate: original.bit_rate,
+                        sample_rate: original.sample_rate,
+                        bit_depth: original.bit_depth,
+                        length_seconds: original.length_seconds,
+                        artist: original.artist.clone(),
+                        album: original.album.clone(),
+                        title: original.title.clone(),
+                        track_number: original.track_number,
+                        year: original.year,
+                    },
                 );
                 let replacement = transfers
                     .update_status(replacement.id, "peer_lookup", None, None)
@@ -12099,13 +12593,46 @@ async fn route_http_request_with_headers(
                      continue;
                  }
                  let size = file.get("size").and_then(serde_json::Value::as_u64);
-                 let entry = transfers.create_with_batch(
+                 let mut details = transfer_request_details_from_json(&file, &filename);
+                 if details.destination_directory.is_none() {
+                     details.destination_directory = query_parameter(route.query, "destination")
+                         .map(|value| truncate_utf8_bytes(value, MAX_TRANSFER_LOCAL_PATH_BYTES));
+                 }
+                 let relative = if let Some(destination) = details
+                     .destination_directory
+                     .as_deref()
+                     .filter(|value| !value.trim().is_empty())
+                 {
+                     format!(
+                         "{}/{}",
+                         destination.trim_matches(['/', '\\']),
+                         virtual_basename(&filename)
+                     )
+                 } else {
+                     match render_completed_download_path(
+                         &state.config.download_completed_path_template,
+                         &username,
+                         &filename,
+                         batch_id.as_deref(),
+                         details.request_name.as_deref(),
+                         unix_timestamp(),
+                     ) {
+                         Ok(relative) => relative,
+                         Err(error) => return Ok(routing::bad_request_response(&error)),
+                     }
+                 };
+                 let local_path = match safe_download_path(&state.config.state_dir, &relative) {
+                     Ok(path) => Some(path.display().to_string()),
+                     Err(error) => return Ok(routing::bad_request_response(&error)),
+                 };
+                 let entry = transfers.create_with_details(
                      0,
                      Some(username.clone()),
                      filename,
-                     None,
+                     local_path,
                      size,
                      batch_id.clone(),
+                     details,
                  );
                  created.push(entry.slskd_file_json());
                  created_entries.push(entry);
@@ -20584,6 +21111,54 @@ fn slskd_transfer_batch_id(body: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+fn transfer_request_details_from_json(
+    value: &serde_json::Value,
+    filename: &str,
+) -> TransferRequestDetails {
+    let text = |names: &[&str], max_bytes: usize| {
+        names
+            .iter()
+            .find_map(|name| value.get(name).and_then(serde_json::Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| truncate_utf8_bytes(value.to_owned(), max_bytes))
+    };
+    let number = |names: &[&str]| {
+        names
+            .iter()
+            .find_map(|name| value.get(name).and_then(serde_json::Value::as_u64))
+            .and_then(|value| u32::try_from(value).ok())
+    };
+    let request_id = text(&["requestId", "request_id"], MAX_TRANSFER_REQUEST_ID_BYTES)
+        .filter(|value| uuid::Uuid::parse_str(value).is_ok())
+        .or_else(|| Some(uuid::Uuid::new_v4().to_string()));
+    TransferRequestDetails {
+        request_id,
+        request_name: text(
+            &["requestName", "request_name", "name"],
+            MAX_TRANSFER_REQUEST_NAME_BYTES,
+        )
+        .or_else(|| Some(virtual_basename(filename).to_owned())),
+        destination_directory: text(
+            &[
+                "destinationDirectory",
+                "destination_directory",
+                "destination",
+            ],
+            MAX_TRANSFER_LOCAL_PATH_BYTES,
+        ),
+        bit_rate: number(&["bitRate", "bit_rate", "bitrate"]),
+        sample_rate: number(&["sampleRate", "sample_rate", "samplerate"]),
+        bit_depth: number(&["bitDepth", "bit_depth", "bitdepth"]),
+        length_seconds: number(&["length", "lengthSeconds", "length_seconds"]),
+        artist: text(&["artist"], MAX_TRANSFER_METADATA_TEXT_BYTES),
+        album: text(&["album"], MAX_TRANSFER_METADATA_TEXT_BYTES),
+        title: text(&["title"], MAX_TRANSFER_METADATA_TEXT_BYTES),
+        track_number: number(&["trackNumber", "track_number"]),
+        year: number(&["year"]),
+    }
+}
+
 fn slskd_enqueue_request(body: &str) -> Option<(String, Vec<serde_json::Value>)> {
     let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let username = payload.get("username")?.as_str()?.to_owned();
@@ -20604,6 +21179,20 @@ fn json_body_string(body: &str) -> Option<String> {
 fn path_segment_after<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
     path.strip_prefix(prefix)
         .filter(|segment| !segment.is_empty() && !segment.contains('/'))
+}
+
+fn download_request_path(path: &str) -> Option<(&str, Option<&str>)> {
+    let rest = path
+        .strip_prefix("/api/v0/downloads/requests/")
+        .or_else(|| path.strip_prefix("/api/downloads/requests/"))?;
+    let (id, action) = rest
+        .split_once('/')
+        .map_or((rest, None), |(id, action)| (id, Some(action)));
+    (!id.is_empty()
+        && !id.contains('/')
+        && uuid::Uuid::parse_str(id).is_ok()
+        && action.is_none_or(|action| !action.is_empty() && !action.contains('/')))
+    .then_some((id, action))
 }
 
 fn path_segment_between<'a>(path: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
@@ -23847,7 +24436,10 @@ fn search_target_static(target: &str) -> &'static str {
 async fn prepare_transfer_local_path(
     state: &AppState,
     direction: u32,
+    peer_username: Option<&str>,
     filename: &str,
+    batch_id: Option<&str>,
+    details: &TransferRequestDetails,
     supplied_local_path: Option<String>,
 ) -> Result<Option<String>, String> {
     if direction == 1 {
@@ -23860,8 +24452,117 @@ async fn prepare_transfer_local_path(
             .ok_or_else(|| "upload filename is not available from local shares".to_owned());
     }
 
-    let path = safe_download_path(&state.config.state_dir, filename)?;
+    let relative = if let Some(destination) = details
+        .destination_directory
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        format!(
+            "{}/{}",
+            destination.trim_matches(['/', '\\']),
+            virtual_basename(filename)
+        )
+    } else {
+        render_completed_download_path(
+            &state.config.download_completed_path_template,
+            peer_username.unwrap_or_default(),
+            filename,
+            batch_id,
+            details.request_name.as_deref(),
+            unix_timestamp(),
+        )?
+    };
+    let path = safe_download_path(&state.config.state_dir, &relative)?;
     Ok(Some(path.display().to_string()))
+}
+
+fn render_completed_download_path(
+    template: &str,
+    uploader: &str,
+    remote_filename: &str,
+    batch_id: Option<&str>,
+    request_name: Option<&str>,
+    requested_at: u64,
+) -> Result<String, String> {
+    if template.trim().is_empty() {
+        return Ok(remote_filename.to_owned());
+    }
+    let normalized = remote_filename.replace('\\', "/");
+    let mut remote_parts = normalized
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let basename = remote_parts
+        .pop()
+        .ok_or_else(|| "download filename is empty".to_owned())?;
+    let stem = Path::new(basename)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(basename);
+    let remote_folder = if remote_parts.is_empty() {
+        "_singles".to_owned()
+    } else {
+        remote_parts.join("/")
+    };
+    let remote_parent = remote_parts.last().copied().unwrap_or("_singles");
+    let requested_at = i64::try_from(requested_at)
+        .ok()
+        .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+    let mut rendered = String::with_capacity(template.len().saturating_add(64));
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        rendered.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('}') else {
+            return Err("download completed path template has an unclosed token".to_owned());
+        };
+        let token = &after_open[..close];
+        let (name, format) = token.split_once(':').unwrap_or((token, ""));
+        let value = match name.to_ascii_lowercase().as_str() {
+            "uploader" => uploader.to_owned(),
+            "remote_folder" => remote_folder.clone(),
+            "remote_parent" => remote_parent.to_owned(),
+            "remote_filename" => stem.to_owned(),
+            "batch_id" => batch_id.unwrap_or("_no-batch").to_owned(),
+            "request_name" => request_name.unwrap_or("_").to_owned(),
+            "search_text" => String::new(),
+            "date" => requested_at
+                .format(if format.is_empty() {
+                    "%Y-%m-%d"
+                } else {
+                    format
+                })
+                .to_string(),
+            _ => String::new(),
+        };
+        rendered.push_str(&value);
+        rest = &after_open[close + 1..];
+    }
+    rendered.push_str(rest);
+
+    let mut output = Vec::new();
+    for segment in rendered.split(['/', '\\']) {
+        let segment = segment.trim();
+        if segment.is_empty() || matches!(segment, "." | "..") {
+            continue;
+        }
+        let sanitized = segment
+            .chars()
+            .map(|ch| {
+                if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*') {
+                    '_'
+                } else {
+                    ch
+                }
+            })
+            .collect::<String>();
+        if !sanitized.is_empty() {
+            output.push(sanitized);
+        }
+    }
+    output.push(basename.to_owned());
+    Ok(output.join("/"))
 }
 
 fn download_root(state_dir: &Path) -> PathBuf {
@@ -31350,6 +32051,23 @@ mod tests {
             "/api/session/connect"
         );
         assert_eq!(normalize_api_path("/api/custom"), "/api/custom");
+    }
+
+    #[test]
+    fn versioned_public_routes_share_auth_policy_with_canonical_routes() {
+        let env = MapEnv::default()
+            .with(
+                "SLSKR_STATE_DIR",
+                &std::env::temp_dir().display().to_string(),
+            )
+            .with("SLSKR_API_TOKEN", "route-token");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("auth config");
+
+        for path in ["/api/v0/health", "/api/v0/version", "/api/v0/capabilities"] {
+            assert!(!super::route_requires_auth(&config, path), "{path}");
+        }
+        assert!(super::route_requires_auth(&config, "/api/v0/config"));
     }
 
     #[tokio::test]
@@ -39124,6 +39842,18 @@ mod tests {
             filename: "Remote/Projected.flac".to_owned(),
             local_path: None,
             batch_id: None,
+            request_id: None,
+            request_name: None,
+            destination_directory: None,
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
+            artist: None,
+            album: None,
+            title: None,
+            track_number: None,
+            year: None,
             size: Some(100),
             bytes_transferred: 40,
             status: "in_progress".to_owned(),
@@ -39299,6 +40029,83 @@ mod tests {
                 username: "friend".to_owned(),
             }
         );
+    }
+
+    #[tokio::test]
+    async fn download_requests_preserve_metadata_path_and_runtime_lifecycle() {
+        let (state, _receiver) = test_state_with_env(MapEnv::default().with(
+            "SLSKR_DOWNLOAD_COMPLETED_PATH_TEMPLATE",
+            "{uploader}/{remote_parent}/{request_name}",
+        ));
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"filename":"Remote/Album/Song.flac","peer_username":"friend","size":10,"requestName":"Archive Cut","bitRate":1411,"sampleRate":96000,"bitDepth":24,"length":245,"artist":"Archive Artist","album":"Open Sessions","title":"Song"}"#,
+            &state,
+        )
+        .await
+        .expect("create request transfer");
+        assert_eq!(created.status, "201 Created");
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let request_id = created_json["request_id"].as_str().unwrap();
+        assert!(uuid::Uuid::parse_str(request_id).is_ok());
+        assert_eq!(created_json["bit_rate"], 1411);
+        let local_path = state.transfers.read().await.entries[0]
+            .local_path
+            .clone()
+            .unwrap();
+        assert!(local_path.ends_with("downloads/friend/Album/Archive Cut/Song.flac"));
+
+        let listed = super::route_http_request(
+            "GET",
+            "/api/v0/downloads/requests?state=active",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list requests");
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        assert_eq!(listed_json[0]["request"]["id"], request_id);
+        assert_eq!(listed_json[0]["request"]["sampleRate"], 96_000);
+
+        let renamed = super::route_http_request(
+            "PATCH",
+            &format!("/api/v0/downloads/requests/{request_id}/name"),
+            None,
+            r#"{"name":"Renamed request"}"#,
+            &state,
+        )
+        .await
+        .expect("rename request");
+        assert_eq!(renamed.status, "200 OK");
+        assert_eq!(state.transfers.read().await.entries[0].request_name.as_deref(), Some("Renamed request"));
+
+        let cancelled = super::route_http_request(
+            "POST",
+            &format!("/api/v0/downloads/requests/{request_id}/cancel"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("cancel request");
+        assert_eq!(cancelled.status, "204 No Content");
+        assert_eq!(state.transfers.read().await.entries[0].status, "cancelled");
+
+        let detail = super::route_http_request(
+            "GET",
+            &format!("/api/v0/downloads/requests/{request_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("request detail");
+        let detail_json = serde_json::from_str::<serde_json::Value>(&detail.body).unwrap();
+        assert_eq!(detail_json["request"]["state"], "Cancelled");
+        assert_eq!(detail_json["attempts"].as_array().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -49293,6 +50100,18 @@ mod tests {
             filename: "Remote/Song.flac".to_owned(),
             local_path: None,
             batch_id: None,
+            request_id: None,
+            request_name: None,
+            destination_directory: None,
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
+            artist: None,
+            album: None,
+            title: None,
+            track_number: None,
+            year: None,
             size: Some(1),
             bytes_transferred: 0,
             status: "queued".to_owned(),
@@ -49389,6 +50208,18 @@ mod tests {
             filename: "Remote/Song.flac".to_owned(),
             local_path: None,
             batch_id: None,
+            request_id: None,
+            request_name: None,
+            destination_directory: None,
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
+            artist: None,
+            album: None,
+            title: None,
+            track_number: None,
+            year: None,
             size: Some(100),
             bytes_transferred: 25,
             status: "in_progress".to_owned(),

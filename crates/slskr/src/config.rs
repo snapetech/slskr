@@ -15,6 +15,7 @@ use slskr_client::{
 
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_BYTES: usize = 4 * 1024;
+const MAX_COMPLETED_PATH_TEMPLATE_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -45,6 +46,7 @@ pub struct AppConfig {
     pub transfer_max_active: usize,
     pub transfer_allow_inbound: bool,
     pub transfer_allow_outbound: bool,
+    pub download_completed_path_template: String,
     pub private_message_auto_response: PrivateMessageAutoResponseSettings,
     pub auth_required: bool,
     pub api_token: Option<String>,
@@ -195,6 +197,23 @@ impl AppConfig {
             "SLSKR_TRANSFER_ALLOW_OUTBOUND",
             file_config.transfers.allow_outbound.unwrap_or(true),
         )?;
+        let download_completed_path_template = optional_env_any(
+            env,
+            &[
+                "SLSKR_DOWNLOAD_COMPLETED_PATH_TEMPLATE",
+                "DOWNLOAD_COMPLETED_PATH_TEMPLATE",
+            ],
+        )
+        .or(file_config.transfers.completed_path_template)
+        .unwrap_or_default();
+        if download_completed_path_template.len() > MAX_COMPLETED_PATH_TEMPLATE_BYTES {
+            return Err(format!(
+                "download completed path template exceeds {MAX_COMPLETED_PATH_TEMPLATE_BYTES} bytes"
+            ));
+        }
+        if download_completed_path_template.contains('\0') {
+            return Err("download completed path template contains a NUL byte".to_owned());
+        }
         let private_message_auto_response = PrivateMessageAutoResponseSettings::from_layers(
             file_config.network.private_message_auto_response,
             env,
@@ -274,6 +293,7 @@ impl AppConfig {
             transfer_max_active,
             transfer_allow_inbound,
             transfer_allow_outbound,
+            download_completed_path_template,
             private_message_auto_response,
             auth_required,
             api_token,
@@ -295,7 +315,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -331,6 +351,7 @@ impl AppConfig {
             self.transfer_max_active,
             self.transfer_allow_inbound,
             self.transfer_allow_outbound,
+            !self.download_completed_path_template.is_empty(),
             self.private_message_auto_response.sanitized_json(),
             self.auth_required,
             self.api_token.is_some(),
@@ -888,6 +909,7 @@ pub struct TransferFileConfig {
     max_active: Option<usize>,
     allow_inbound: Option<bool>,
     allow_outbound: Option<bool>,
+    completed_path_template: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
