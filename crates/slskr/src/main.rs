@@ -6151,7 +6151,7 @@ impl UserNoteStore {
 }
 
 // Interest Models
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct InterestRecord {
     id: String,
     name: String,
@@ -6171,7 +6171,7 @@ impl InterestRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct InterestStore {
     liked: Vec<InterestRecord>,
     hated: Vec<InterestRecord>,
@@ -13262,13 +13262,22 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("name is required"));
             }
             let mut interests = state.interests.write().await;
+            let previous = interests.clone();
             let Some((record, created)) = interests.add_liked(name) else {
                 return Ok(routing::service_unavailable_response("liked interest capacity is full"));
             };
+            let mutated = interests.clone();
             let json = record.json();
             drop(interests);
             if created {
-                persist_interest(state, &record).await;
+                if let Err(error) = persist_interest_checked(state, &record).await {
+                    let mut interests = state.interests.write().await;
+                    if *interests == mutated {
+                        *interests = previous;
+                    }
+                    drop(interests);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::created_response(json))
             } else {
                 Ok(routing::ok_response(json))
@@ -13279,10 +13288,19 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut interests = state.interests.write().await;
+            let previous = interests.clone();
             let deleted = interests.remove_liked(id);
+            let mutated = interests.clone();
             drop(interests);
             if deleted {
-                persist_interest_delete(state, id).await;
+                if let Err(error) = persist_interest_delete_checked(state, id).await {
+                    let mut interests = state.interests.write().await;
+                    if *interests == mutated {
+                        *interests = previous;
+                    }
+                    drop(interests);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -13302,13 +13320,22 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("name is required"));
             }
             let mut interests = state.interests.write().await;
+            let previous = interests.clone();
             let Some((record, created)) = interests.add_hated(name) else {
                 return Ok(routing::service_unavailable_response("hated interest capacity is full"));
             };
+            let mutated = interests.clone();
             let json = record.json();
             drop(interests);
             if created {
-                persist_interest(state, &record).await;
+                if let Err(error) = persist_interest_checked(state, &record).await {
+                    let mut interests = state.interests.write().await;
+                    if *interests == mutated {
+                        *interests = previous;
+                    }
+                    drop(interests);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::created_response(json))
             } else {
                 Ok(routing::ok_response(json))
@@ -13319,10 +13346,19 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut interests = state.interests.write().await;
+            let previous = interests.clone();
             let deleted = interests.remove_hated(id);
+            let mutated = interests.clone();
             drop(interests);
             if deleted {
-                persist_interest_delete(state, id).await;
+                if let Err(error) = persist_interest_delete_checked(state, id).await {
+                    let mut interests = state.interests.write().await;
+                    if *interests == mutated {
+                        *interests = previous;
+                    }
+                    drop(interests);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 Ok(routing::not_found_response())
@@ -23811,9 +23847,12 @@ async fn persist_user_note_delete_checked(state: &AppState, id: &str) -> Result<
     Ok(true)
 }
 
-async fn persist_interest(state: &AppState, record: &InterestRecord) {
+async fn persist_interest_checked(
+    state: &AppState,
+    record: &InterestRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::InterestRecord {
         id: record.id.clone(),
@@ -23821,13 +23860,20 @@ async fn persist_interest(state: &AppState, record: &InterestRecord) {
         kind: record.kind.clone(),
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_interest(&persisted).await;
+    db.upsert_interest(&persisted)
+        .await
+        .map_err(|error| format!("interest persistence failed: {error}"))?;
+    Ok(true)
 }
 
-async fn persist_interest_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_interest(id).await;
-    }
+async fn persist_interest_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_interest(id)
+        .await
+        .map_err(|error| format!("interest deletion persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_security_ban(
@@ -31128,6 +31174,80 @@ mod tests {
             assert_eq!(notes.records.len(), 1, "{method}");
             assert_eq!(notes.records[0].note, "original", "{method}");
             assert_eq!(notes.next_id, 2, "{method}");
+        }
+    }
+
+    #[tokio::test]
+    async fn interest_routes_roll_back_when_persistence_fails() {
+        for path in ["/api/soulseek/interests", "/api/soulseek/hated-interests"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            db.close_for_test().await;
+
+            let response =
+                super::route_http_request("POST", path, None, r#"{"name":"jazz"}"#, &state)
+                    .await
+                    .expect("failed interest creation response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("interest persistence failed"),
+                "{path}"
+            );
+            let interests = state.interests.read().await;
+            assert!(interests.liked.is_empty(), "{path}");
+            assert!(interests.hated.is_empty(), "{path}");
+            assert_eq!(interests.next_id, 1, "{path}");
+        }
+
+        for (path, hated) in [
+            ("/api/soulseek/interests/liked-1", false),
+            ("/api/soulseek/hated-interests/hated-1", true),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            if hated {
+                state
+                    .interests
+                    .write()
+                    .await
+                    .add_hated("noise".to_owned())
+                    .unwrap();
+            } else {
+                state
+                    .interests
+                    .write()
+                    .await
+                    .add_liked("jazz".to_owned())
+                    .unwrap();
+            }
+            db.close_for_test().await;
+
+            let response = super::route_http_request("DELETE", path, None, "", &state)
+                .await
+                .expect("failed interest deletion response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response
+                    .body
+                    .contains("interest deletion persistence failed"),
+                "{path}"
+            );
+            let interests = state.interests.read().await;
+            assert_eq!(interests.liked.len(), usize::from(!hated), "{path}");
+            assert_eq!(interests.hated.len(), usize::from(hated), "{path}");
+            assert_eq!(interests.next_id, 2, "{path}");
         }
     }
 
