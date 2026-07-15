@@ -680,7 +680,7 @@ impl WebhookRetryScheduler {
     #[allow(dead_code)]
     fn calculate_backoff(attempt: u32) -> std::time::Duration {
         // 30s, 60s, 120s, 240s, 480s (max)
-        let seconds = 30 * 2_u64.saturating_pow(attempt);
+        let seconds = 30_u64.saturating_mul(2_u64.saturating_pow(attempt));
         std::time::Duration::from_secs(seconds.min(480))
     }
 }
@@ -907,6 +907,16 @@ mod tests {
         assert!(validate_webhook_url_for_registration("http://127.0.0.1/hook").is_err());
         assert!(validate_webhook_url_for_registration("http://10.0.0.5/hook").is_err());
         assert!(validate_webhook_url_for_registration("http://169.254.169.254/hook").is_err());
+    }
+
+    #[test]
+    fn test_webhook_retry_backoff_saturates_before_overflow() {
+        for (attempt, seconds) in [(0, 30), (1, 60), (4, 480), (5, 480), (u32::MAX, 480)] {
+            assert_eq!(
+                WebhookRetryScheduler::calculate_backoff(attempt),
+                std::time::Duration::from_secs(seconds)
+            );
+        }
     }
 
     #[test]
