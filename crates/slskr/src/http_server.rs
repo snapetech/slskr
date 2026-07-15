@@ -329,6 +329,13 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
     if http_version == "HTTP/1.1" && headers.host.is_none() {
         return Err("HTTP/1.1 requires a Host header".to_owned());
     }
+    if headers
+        .host
+        .as_deref()
+        .is_some_and(|host| crate::utils::parse_authority(host).is_none())
+    {
+        return Err("invalid Host header authority".to_owned());
+    }
 
     // Reject oversized bodies before reading
     if content_length > BODY_SIZE_LIMIT {
@@ -825,6 +832,39 @@ mod tests {
             let error = read_http_request(&mut reader).await.unwrap_err();
             assert!(error.contains("Host") || error.contains("host"), "{error}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_malformed_host_authorities_are_rejected() {
+        for host in [
+            "user@localhost",
+            "localhost,example.test",
+            "local host",
+            "localhost:bad",
+            "localhost:65536",
+            "[::1",
+            "[::1]garbage",
+            "[::1]:bad",
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!("GET / HTTP/1.1\r\nHost: {host}\r\n\r\n");
+            client.write_all(request.as_bytes()).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("Host"), "{host:?}: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_host_authority_is_accepted() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: [::1]:5030\r\n\r\n")
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
+        assert_eq!(request.headers.host.as_deref(), Some("[::1]:5030"));
     }
 
     #[tokio::test]

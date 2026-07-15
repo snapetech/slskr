@@ -177,7 +177,7 @@ fn origin_matches_host(origin: &str, expected_host: &str) -> bool {
             == expected_authority.1.unwrap_or(default_port)
 }
 
-fn parse_authority(value: &str) -> Option<(String, Option<u16>)> {
+pub(crate) fn parse_authority(value: &str) -> Option<(String, Option<u16>)> {
     if value.is_empty() || value.trim() != value || value.contains('@') {
         return None;
     }
