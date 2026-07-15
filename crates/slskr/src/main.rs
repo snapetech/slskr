@@ -15890,7 +15890,7 @@ fn web_static_content_type(path: &Path) -> &'static str {
     }
 }
 
-fn web_static_file_for_request(path: &str) -> Option<(PathBuf, &'static str)> {
+fn web_static_file_for_request(path: &str) -> Option<(PathBuf, PathBuf, &'static str)> {
     if path.starts_with("/api/")
         || path.starts_with("/hub/")
         || path == "/api"
@@ -15900,8 +15900,9 @@ fn web_static_file_for_request(path: &str) -> Option<(PathBuf, &'static str)> {
         return None;
     }
 
-    let root = web_build_root()?;
-    web_static_file_for_request_under_root(&root, path)
+    let root = web_build_root()?.canonicalize().ok()?;
+    let (file, content_type) = web_static_file_for_request_under_root(&root, path)?;
+    Some((root, file, content_type))
 }
 
 fn is_spa_navigation_path(path: &str) -> bool {
@@ -15995,8 +15996,9 @@ fn resolve_web_static_relative_path(root: &Path, relative_path: &Path) -> Option
 }
 
 fn read_web_index_html() -> Option<String> {
-    let (path, _) = web_static_file_for_request("/")?;
-    read_bounded_web_static_string(&path).ok()
+    let (root, path, _) = web_static_file_for_request("/")?;
+    let bytes = read_bounded_web_static_file_under_root(&root, &path).ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 fn security_headers(file: &Path) -> String {
@@ -16024,17 +16026,90 @@ fn is_rust_wasm_shell(file: &Path) -> bool {
             .is_some_and(|parent| parent.join("slskr_web.wasm").is_file())
 }
 
+#[cfg(any(test, not(unix)))]
 fn read_bounded_web_static_file(file: &Path) -> Result<Vec<u8>, String> {
-    let metadata = fs::metadata(file).map_err(|error| error.to_string())?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options.open(file).map_err(|error| error.to_string())?;
+    read_bounded_web_static_handle(file)
+}
+
+#[cfg(unix)]
+fn read_bounded_web_static_file_under_root(root: &Path, file: &Path) -> Result<Vec<u8>, String> {
+    use rustix::fs::{open, openat, Mode, OFlags};
+
+    let relative = file
+        .strip_prefix(root)
+        .map_err(|_| "static asset is outside the web root".to_owned())?;
+    let components = relative
+        .components()
+        .map(|component| match component {
+            Component::Normal(value) => Ok(value),
+            _ => Err("static asset contains a non-relative component".to_owned()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (filename, parents) = components
+        .split_last()
+        .ok_or_else(|| "static asset path is empty".to_owned())?;
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, directory_flags, Mode::empty())
+        .map_err(|error| format!("static root confined open failed: {error}"))?;
+    for component in parents {
+        directory = openat(&directory, *component, directory_flags, Mode::empty())
+            .map_err(|error| format!("static directory confined open failed: {error}"))?;
+    }
+    let file = openat(
+        &directory,
+        *filename,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("static file confined open failed: {error}"))?;
+    read_bounded_web_static_handle(fs::File::from(file))
+}
+
+#[cfg(not(unix))]
+fn read_bounded_web_static_file_under_root(root: &Path, file: &Path) -> Result<Vec<u8>, String> {
+    let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
+    let canonical_file = file.canonicalize().map_err(|error| error.to_string())?;
+    if !canonical_file.starts_with(canonical_root) {
+        return Err("static asset is outside the web root".to_owned());
+    }
+    read_bounded_web_static_file(&canonical_file)
+}
+
+fn read_bounded_web_static_handle(mut file: fs::File) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("static asset is not a regular file".to_owned());
+    }
     if metadata.len() > MAX_WEB_STATIC_BYTES {
         return Err(format!(
             "static asset is too large: {} bytes, max is {MAX_WEB_STATIC_BYTES}",
             metadata.len()
         ));
     }
-    fs::read(file).map_err(|error| error.to_string())
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(MAX_WEB_STATIC_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_WEB_STATIC_BYTES {
+        return Err(format!(
+            "static asset is too large: more than {MAX_WEB_STATIC_BYTES} bytes"
+        ));
+    }
+    Ok(bytes)
 }
 
+#[cfg(test)]
 fn read_bounded_web_static_string(file: &Path) -> Result<String, String> {
     let bytes = read_bounded_web_static_file(file)?;
     String::from_utf8(bytes).map_err(|error| format!("static asset is not UTF-8: {error}"))
@@ -16060,10 +16135,10 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     keep_alive: bool,
     extra_headers: &str,
 ) -> Result<Option<usize>, String> {
-    let Some((file, content_type)) = web_static_file_for_request(path) else {
+    let Some((root, file, content_type)) = web_static_file_for_request(path) else {
         return Ok(None);
     };
-    let bytes = read_bounded_web_static_file(&file)?;
+    let bytes = read_bounded_web_static_file_under_root(&root, &file)?;
     let connection_header = if keep_alive { "keep-alive" } else { "close" };
     let headers = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: {connection_header}\r\n{}{}\r\n",
@@ -26221,8 +26296,20 @@ mod tests {
         symlink(&outside, root.join("leak.txt")).unwrap();
 
         assert!(super::web_static_file_for_request_under_root(&root, "/leak.txt").is_none());
+        assert!(super::read_bounded_web_static_file(&root.join("leak.txt")).is_err());
+
+        let outside_dir = outside.with_extension("dir");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        std::fs::write(outside_dir.join("secret.txt"), "secret").unwrap();
+        symlink(&outside_dir, root.join("linked")).unwrap();
+        assert!(super::read_bounded_web_static_file_under_root(
+            &root,
+            &root.join("linked/secret.txt")
+        )
+        .is_err());
 
         let _ = std::fs::remove_file(outside);
+        let _ = std::fs::remove_dir_all(outside_dir);
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -91,6 +91,9 @@ for anchor in \
   'scoped_storage_confined_delete_rejects_symlinked_parent' \
   'storage parent confined open failed' \
   'remove_directory_contents_unix' \
+  'read_bounded_web_static_file_under_root(&root, &file)' \
+  'static directory confined open failed' \
+  '.take(MAX_WEB_STATIC_BYTES + 1)' \
   'browse_indirect_tokens_wrap_without_aliasing_pending_records' \
   'bounded browse store must leave an available u32 token' \
   'MAX_INCOMING_CONNECTION_TASKS' \
