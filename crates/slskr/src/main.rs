@@ -11088,10 +11088,9 @@ async fn route_http_request_with_headers(
 
         // USER PROFILE ENDPOINTS
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/info") => {
-            let username = path
-                .strip_prefix("/api/users/")
-                .and_then(|p| p.strip_suffix("/info"))
-                .unwrap_or("unknown");
+            let Some(username) = user_route_username(path, "/info") else {
+                return Ok(routing::not_found_response());
+            };
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
                 let json = record.slskd_info_json().to_string();
@@ -11100,7 +11099,7 @@ async fn route_http_request_with_headers(
             } else {
                 drop(users);
                 let record = UserRecord {
-                    username: username.to_owned(),
+                    username,
                     watched: false,
                     status: None,
                     average_speed: None,
@@ -11114,10 +11113,9 @@ async fn route_http_request_with_headers(
         }
 
         ("POST", path) if path.starts_with("/api/users/") && path.ends_with("/directory") => {
-            let username = path.strip_prefix("/api/users/")
-                .and_then(|p| p.strip_suffix("/directory"))
-                .map(decoded_path_segment)
-                .unwrap_or_else(|| "unknown".to_string());
+            let Some(username) = user_route_username(path, "/directory") else {
+                return Ok(routing::not_found_response());
+            };
             let directory = extract_json_string_field(body, "directory").unwrap_or_default();
             let browse = state.browse.read().await;
             let entries = browse
@@ -11161,10 +11159,9 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
-            let username = path.strip_prefix("/api/users/")
-                .and_then(|p| p.strip_suffix("/group"))
-                .map(decoded_path_segment)
-                .unwrap_or_else(|| "unknown".to_owned());
+            let Some(username) = user_route_username(path, "/group") else {
+                return Ok(routing::not_found_response());
+            };
             let sharegroups = state.sharegroups.read().await;
             let json = sharegroups.user_group_json(&username);
             drop(sharegroups);
@@ -11172,10 +11169,9 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/endpoint") => {
-            let username = path.strip_prefix("/api/users/")
-                .and_then(|p| p.strip_suffix("/endpoint"))
-                .map(decoded_path_segment)
-                .unwrap_or_else(|| "unknown".to_owned());
+            let Some(username) = user_route_username(path, "/endpoint") else {
+                return Ok(routing::not_found_response());
+            };
             let json = if let Some(address) = test_user_endpoint_peer_address(state, &username) {
                 format!(
                     "{{\"username\":\"{}\",\"addressFamily\":\"IPv4\",\"address\":\"{}\",\"port\":{}}}",
@@ -11202,11 +11198,16 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/soulseek/users/") && path.ends_with("/interests") => {
-            let username = path.strip_prefix("/api/soulseek/users/")
-                .and_then(|p| p.strip_suffix("/interests"))
-                .unwrap_or("unknown");
+            let Some(username) = path_segment_between(
+                path,
+                "/api/soulseek/users/",
+                "/interests",
+            ) else {
+                return Ok(routing::not_found_response());
+            };
+            let username = decoded_path_segment(username);
             let interests = state.interests.read().await;
-            let json = interests.user_interests_json(username);
+            let json = interests.user_interests_json(&username);
             drop(interests);
             Ok(routing::ok_response(json))
         }
@@ -11753,12 +11754,7 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
-            let username = path
-                .strip_prefix("/api/users/")
-                .and_then(|p| p.strip_suffix("/browse"));
-
-            if let Some(username) = username {
-                let username = decoded_path_segment(username);
+            if let Some(username) = user_route_username(path, "/browse") {
                 let browse = state.browse.read().await;
                 if route.normalized_path.starts_with("/api/v0/") {
                     if let Some(record) = browse.get(&username) {
@@ -29411,6 +29407,28 @@ mod tests {
                 response.status
             );
             while receiver.try_recv().is_ok() {}
+        }
+
+        for (method, path, body) in [
+            ("GET", "/api/users/peer%201/untrusted/info", ""),
+            ("GET", "/api/users/peer%201/untrusted/browse", ""),
+            ("GET", "/api/users/peer%201/untrusted/group", ""),
+            ("GET", "/api/users/peer%201/untrusted/endpoint", ""),
+            (
+                "POST",
+                "/api/users/peer%201/untrusted/directory",
+                r#"{"directory":"Music"}"#,
+            ),
+            (
+                "GET",
+                "/api/soulseek/users/peer%201/untrusted/interests",
+                "",
+            ),
+        ] {
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
         }
 
         let native_compat_routes = [
