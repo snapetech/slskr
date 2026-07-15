@@ -24265,7 +24265,7 @@ async fn record_http_log(
         "message": logging::transaction_summary(transaction),
         "request_id": request_id,
         "method": transaction.request.method,
-        "path": transaction.request.path,
+        "path": logging::redacted_path(&transaction.request.path),
         "status": transaction.response.status_code,
         "duration_ms": transaction.response.duration_ms,
         "remote_addr": transaction.request.remote_addr,
@@ -28913,6 +28913,36 @@ mod tests {
             .body
             .contains("slskr_runtime_operations_total{operation=\"backfill\"} 0"));
         assert!(!response.body.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn persisted_http_logs_redact_stream_ticket_paths() {
+        let (state, _receiver) = test_state();
+        super::record_http_log(
+            &state,
+            "request-1",
+            &super::logging::HttpTransactionLog {
+                request: super::logging::HttpRequestLog {
+                    method: "GET".to_owned(),
+                    path: "/api/v0/peer-streams/bearer-ticket-secret".to_owned(),
+                    query: None,
+                    remote_addr: None,
+                    timestamp: "fixture".to_owned(),
+                },
+                response: super::logging::HttpResponseLog {
+                    status_code: 200,
+                    content_length: 0,
+                    duration_ms: 1,
+                    error: None,
+                },
+            },
+        )
+        .await;
+
+        let events = state.events.read().await;
+        let detail = events.records[0].detail.as_deref().expect("log detail");
+        assert!(detail.contains("/api/v0/peer-streams/<redacted>"));
+        assert!(!detail.contains("bearer-ticket-secret"));
     }
 
     #[tokio::test]

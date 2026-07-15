@@ -129,11 +129,12 @@ pub fn log_request(config: &LogConfig, log: &HttpRequestLog) {
     }
 
     let query_str = redacted_query_suffix(log.query.as_deref());
+    let path = redacted_path(&log.path);
     eprintln!(
         "[{}] {} {} {} (from {})",
         log.timestamp,
         log.method,
-        log.path,
+        path,
         query_str,
         log.remote_addr.as_deref().unwrap_or("unknown")
     );
@@ -205,6 +206,7 @@ pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
     };
 
     let query_str = redacted_query_suffix(log.request.query.as_deref());
+    let path = redacted_path(&log.request.path);
 
     let error_str = log
         .response
@@ -218,7 +220,7 @@ pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
         log.request.timestamp,
         method_color,
         log.request.method,
-        log.request.path,
+        path,
         query_str,
         status_color,
         log.response.status_code,
@@ -238,6 +240,7 @@ pub fn response_level(status_code: u16) -> LogLevel {
 
 pub fn transaction_summary(log: &HttpTransactionLog) -> String {
     let query_str = redacted_query_suffix(log.request.query.as_deref());
+    let path = redacted_path(&log.request.path);
     let error_str = log
         .response
         .error
@@ -247,13 +250,26 @@ pub fn transaction_summary(log: &HttpTransactionLog) -> String {
     format!(
         "{} {}{} {} {} bytes in {}ms{}",
         log.request.method,
-        log.request.path,
+        path,
         query_str,
         log.response.status_code,
         log.response.content_length,
         log.response.duration_ms,
         error_str
     )
+}
+
+pub fn redacted_path(path: &str) -> String {
+    let mut segments = path.split('/').collect::<Vec<_>>();
+    for index in 0..segments.len().saturating_sub(1) {
+        if matches!(segments[index], "peer-streams" | "mesh-streams")
+            && !segments[index + 1].is_empty()
+            && segments[index + 1] != "tickets"
+        {
+            segments[index + 1] = "<redacted>";
+        }
+    }
+    segments.join("/")
 }
 
 fn redacted_query_suffix(query: Option<&str>) -> &'static str {
@@ -320,6 +336,37 @@ mod tests {
         );
         assert!(!summary.contains("oauth-secret"));
         assert!(!summary.contains("state-secret"));
+    }
+
+    #[test]
+    fn transaction_summary_redacts_stream_ticket_paths() {
+        for path in [
+            "/api/v0/peer-streams/peer-ticket-secret",
+            "/api/mesh-streams/mesh-ticket-secret",
+        ] {
+            let summary = transaction_summary(&HttpTransactionLog {
+                request: HttpRequestLog {
+                    method: "GET".to_owned(),
+                    path: path.to_owned(),
+                    query: None,
+                    remote_addr: None,
+                    timestamp: "fixture".to_owned(),
+                },
+                response: HttpResponseLog {
+                    status_code: 200,
+                    content_length: 2,
+                    duration_ms: 1,
+                    error: None,
+                },
+            });
+            assert!(summary.contains("-streams/<redacted>"), "{summary}");
+            assert!(!summary.contains("ticket-secret"), "{summary}");
+        }
+
+        assert_eq!(
+            redacted_path("/api/v0/peer-streams/tickets"),
+            "/api/v0/peer-streams/tickets"
+        );
     }
 
     #[test]
