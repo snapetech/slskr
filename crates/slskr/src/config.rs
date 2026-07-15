@@ -46,6 +46,7 @@ pub struct AppConfig {
     pub transfer_max_active: usize,
     pub transfer_allow_inbound: bool,
     pub transfer_allow_outbound: bool,
+    pub transfer_auto_retry: TransferAutoRetrySettings,
     pub download_completed_path_template: String,
     pub private_message_auto_response: PrivateMessageAutoResponseSettings,
     pub auth_required: bool,
@@ -197,6 +198,8 @@ impl AppConfig {
             "SLSKR_TRANSFER_ALLOW_OUTBOUND",
             file_config.transfers.allow_outbound.unwrap_or(true),
         )?;
+        let transfer_auto_retry =
+            TransferAutoRetrySettings::from_layers(file_config.transfers.auto_retry, env)?;
         let download_completed_path_template = optional_env_any(
             env,
             &[
@@ -293,6 +296,7 @@ impl AppConfig {
             transfer_max_active,
             transfer_allow_inbound,
             transfer_allow_outbound,
+            transfer_auto_retry,
             download_completed_path_template,
             private_message_auto_response,
             auth_required,
@@ -315,7 +319,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -351,6 +355,7 @@ impl AppConfig {
             self.transfer_max_active,
             self.transfer_allow_inbound,
             self.transfer_allow_outbound,
+            self.transfer_auto_retry.sanitized_json(),
             !self.download_completed_path_template.is_empty(),
             self.private_message_auto_response.sanitized_json(),
             self.auth_required,
@@ -391,6 +396,157 @@ fn validated_runtime_interval(name: &str, seconds: u64) -> Result<Duration, Stri
         return Err(format!("{name} exceeds the runtime timer range"));
     }
     Ok(duration)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferAutoRetrySettings {
+    pub enabled: bool,
+    pub retry_delay: Duration,
+    pub check_interval: Duration,
+    pub max_attempts: usize,
+    pub max_files_per_cycle: usize,
+    pub max_files_per_peer_per_cycle: usize,
+    pub peer_cooldown: Duration,
+    pub alternate_sources_enabled: bool,
+    pub max_alternate_source_searches_per_cycle: usize,
+    pub alternate_source_size_tolerance_percent: u32,
+}
+
+impl TransferAutoRetrySettings {
+    fn from_layers<E: ConfigEnv>(
+        file: TransferAutoRetryFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        let retry_delay_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_AUTO_RETRY_DELAY_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_AUTO_RETRY_DELAY_SECONDS",
+                file.retry_delay_seconds,
+                1800_u64,
+            )?,
+            10,
+            86_400,
+        )?;
+        let check_interval_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_AUTO_RETRY_CHECK_INTERVAL_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_AUTO_RETRY_CHECK_INTERVAL_SECONDS",
+                file.check_interval_seconds,
+                300_u64,
+            )?,
+            10,
+            3_600,
+        )?;
+        let peer_cooldown_seconds = bounded_config_value(
+            "SLSKR_TRANSFER_AUTO_RETRY_PEER_COOLDOWN_SECONDS",
+            env_parse_layer(
+                env,
+                "SLSKR_TRANSFER_AUTO_RETRY_PEER_COOLDOWN_SECONDS",
+                file.peer_cooldown_seconds,
+                900_u64,
+            )?,
+            60,
+            86_400,
+        )?;
+        Ok(Self {
+            enabled: env_bool_layer(
+                env,
+                "SLSKR_TRANSFER_AUTO_RETRY_ENABLED",
+                file.enabled.unwrap_or(true),
+            )?,
+            retry_delay: Duration::from_secs(retry_delay_seconds),
+            check_interval: Duration::from_secs(check_interval_seconds),
+            max_attempts: bounded_config_value(
+                "SLSKR_TRANSFER_AUTO_RETRY_MAX_ATTEMPTS",
+                env_parse_layer(
+                    env,
+                    "SLSKR_TRANSFER_AUTO_RETRY_MAX_ATTEMPTS",
+                    file.max_attempts,
+                    5_usize,
+                )?,
+                0,
+                100,
+            )?,
+            max_files_per_cycle: bounded_config_value(
+                "SLSKR_TRANSFER_AUTO_RETRY_MAX_FILES_PER_CYCLE",
+                env_parse_layer(
+                    env,
+                    "SLSKR_TRANSFER_AUTO_RETRY_MAX_FILES_PER_CYCLE",
+                    file.max_files_per_cycle,
+                    10_usize,
+                )?,
+                1,
+                100,
+            )?,
+            max_files_per_peer_per_cycle: bounded_config_value(
+                "SLSKR_TRANSFER_AUTO_RETRY_MAX_FILES_PER_PEER_PER_CYCLE",
+                env_parse_layer(
+                    env,
+                    "SLSKR_TRANSFER_AUTO_RETRY_MAX_FILES_PER_PEER_PER_CYCLE",
+                    file.max_files_per_peer_per_cycle,
+                    1_usize,
+                )?,
+                1,
+                20,
+            )?,
+            peer_cooldown: Duration::from_secs(peer_cooldown_seconds),
+            alternate_sources_enabled: env_bool_layer(
+                env,
+                "SLSKR_TRANSFER_AUTO_RETRY_ALTERNATE_SOURCES_ENABLED",
+                file.alternate_sources_enabled.unwrap_or(true),
+            )?,
+            max_alternate_source_searches_per_cycle: bounded_config_value(
+                "SLSKR_TRANSFER_AUTO_RETRY_MAX_ALTERNATE_SOURCE_SEARCHES_PER_CYCLE",
+                env_parse_layer(
+                    env,
+                    "SLSKR_TRANSFER_AUTO_RETRY_MAX_ALTERNATE_SOURCE_SEARCHES_PER_CYCLE",
+                    file.max_alternate_source_searches_per_cycle,
+                    1_usize,
+                )?,
+                0,
+                10,
+            )?,
+            alternate_source_size_tolerance_percent: bounded_config_value(
+                "SLSKR_TRANSFER_AUTO_RETRY_ALTERNATE_SOURCE_SIZE_TOLERANCE_PERCENT",
+                env_parse_layer(
+                    env,
+                    "SLSKR_TRANSFER_AUTO_RETRY_ALTERNATE_SOURCE_SIZE_TOLERANCE_PERCENT",
+                    file.alternate_source_size_tolerance_percent,
+                    5_u32,
+                )?,
+                0,
+                100,
+            )?,
+        })
+    }
+
+    fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"retry_delay_seconds\":{},\"check_interval_seconds\":{},\"max_attempts\":{},\"max_files_per_cycle\":{},\"max_files_per_peer_per_cycle\":{},\"peer_cooldown_seconds\":{},\"alternate_sources_enabled\":{},\"max_alternate_source_searches_per_cycle\":{},\"alternate_source_size_tolerance_percent\":{}}}",
+            self.enabled,
+            self.retry_delay.as_secs(),
+            self.check_interval.as_secs(),
+            self.max_attempts,
+            self.max_files_per_cycle,
+            self.max_files_per_peer_per_cycle,
+            self.peer_cooldown.as_secs(),
+            self.alternate_sources_enabled,
+            self.max_alternate_source_searches_per_cycle,
+            self.alternate_source_size_tolerance_percent,
+        )
+    }
+}
+
+fn bounded_config_value<T>(name: &str, value: T, min: T, max: T) -> Result<T, String>
+where
+    T: Copy + PartialOrd + std::fmt::Display,
+{
+    if value < min || value > max {
+        return Err(format!("{name} must be between {min} and {max}"));
+    }
+    Ok(value)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -909,7 +1065,23 @@ pub struct TransferFileConfig {
     max_active: Option<usize>,
     allow_inbound: Option<bool>,
     allow_outbound: Option<bool>,
+    auto_retry: TransferAutoRetryFileConfig,
     completed_path_template: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TransferAutoRetryFileConfig {
+    enabled: Option<bool>,
+    retry_delay_seconds: Option<u64>,
+    check_interval_seconds: Option<u64>,
+    max_attempts: Option<usize>,
+    max_files_per_cycle: Option<usize>,
+    max_files_per_peer_per_cycle: Option<usize>,
+    peer_cooldown_seconds: Option<u64>,
+    alternate_sources_enabled: Option<bool>,
+    max_alternate_source_searches_per_cycle: Option<usize>,
+    alternate_source_size_tolerance_percent: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1643,6 +1815,56 @@ mod tests {
                     "{name}={value}: {error}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn transfer_auto_retry_defaults_match_the_frozen_client_policy() {
+        let config =
+            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
+                .expect("default auto-retry config");
+        let retry = &config.transfer_auto_retry;
+        assert!(retry.enabled);
+        assert_eq!(retry.retry_delay.as_secs(), 1800);
+        assert_eq!(retry.check_interval.as_secs(), 300);
+        assert_eq!(retry.max_attempts, 5);
+        assert_eq!(retry.max_files_per_cycle, 10);
+        assert_eq!(retry.max_files_per_peer_per_cycle, 1);
+        assert_eq!(retry.peer_cooldown.as_secs(), 900);
+        assert!(retry.alternate_sources_enabled);
+        assert_eq!(retry.max_alternate_source_searches_per_cycle, 1);
+        assert_eq!(retry.alternate_source_size_tolerance_percent, 5);
+        assert!(config.sanitized_json().contains("\"transfer_auto_retry\""));
+    }
+
+    #[test]
+    fn transfer_auto_retry_bounds_are_enforced_at_startup() {
+        for (name, value) in [
+            ("SLSKR_TRANSFER_AUTO_RETRY_DELAY_SECONDS", "9"),
+            ("SLSKR_TRANSFER_AUTO_RETRY_CHECK_INTERVAL_SECONDS", "3601"),
+            ("SLSKR_TRANSFER_AUTO_RETRY_MAX_ATTEMPTS", "101"),
+            ("SLSKR_TRANSFER_AUTO_RETRY_MAX_FILES_PER_CYCLE", "0"),
+            (
+                "SLSKR_TRANSFER_AUTO_RETRY_MAX_FILES_PER_PEER_PER_CYCLE",
+                "21",
+            ),
+            ("SLSKR_TRANSFER_AUTO_RETRY_PEER_COOLDOWN_SECONDS", "59"),
+            (
+                "SLSKR_TRANSFER_AUTO_RETRY_MAX_ALTERNATE_SOURCE_SEARCHES_PER_CYCLE",
+                "11",
+            ),
+            (
+                "SLSKR_TRANSFER_AUTO_RETRY_ALTERNATE_SOURCE_SIZE_TOLERANCE_PERCENT",
+                "101",
+            ),
+        ] {
+            let error = super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default().with(name, value),
+            )
+            .expect_err("out-of-range auto-retry config must fail");
+            assert!(error.contains("must be between"), "{name}={value}: {error}");
         }
     }
 }

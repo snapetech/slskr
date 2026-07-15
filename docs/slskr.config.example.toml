@@ -55,6 +55,18 @@ allow_inbound = true
 allow_outbound = true
 # completed_path_template = "{uploader}/{remote_parent}/{request_name}"
 
+[transfers.auto_retry]
+enabled = true
+retry_delay_seconds = 1800
+check_interval_seconds = 300
+max_attempts = 5 # 0 means unlimited for the process lifetime
+max_files_per_cycle = 10
+max_files_per_peer_per_cycle = 1
+peer_cooldown_seconds = 900
+alternate_sources_enabled = true
+max_alternate_source_searches_per_cycle = 1
+alternate_source_size_tolerance_percent = 5
+
 [auth]
 # Loopback-only binds default to no API auth unless api_token is configured.
 # Non-loopback binds require an API token unless auth is explicitly disabled.

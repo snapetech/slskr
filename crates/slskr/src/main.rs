@@ -1645,6 +1645,55 @@ impl SearchStore {
             })
             .cloned()
     }
+
+    fn best_transfer_alternative<F>(
+        &self,
+        transfer: &TransferEntry,
+        size_tolerance_percent: u32,
+        peer_is_cooling_down: F,
+    ) -> Option<SearchResultEntry>
+    where
+        F: Fn(&str) -> bool,
+    {
+        let original_basename = virtual_basename(&transfer.filename);
+        self.records
+            .iter()
+            .flat_map(|record| record.results.iter())
+            .filter(|result| {
+                let Some(username) = result.peer_username.as_deref() else {
+                    return false;
+                };
+                !result.locked
+                    && transfer
+                        .peer_username
+                        .as_deref()
+                        .is_none_or(|original| !username.eq_ignore_ascii_case(original))
+                    && !peer_is_cooling_down(username)
+                    && virtual_basename(&result.filename).eq_ignore_ascii_case(original_basename)
+                    && alternate_size_is_eligible(
+                        transfer.size,
+                        result.size,
+                        size_tolerance_percent,
+                    )
+            })
+            .max_by(|left, right| {
+                left.slot_free
+                    .unwrap_or(false)
+                    .cmp(&right.slot_free.unwrap_or(false))
+                    .then_with(|| {
+                        left.average_speed
+                            .unwrap_or(0)
+                            .cmp(&right.average_speed.unwrap_or(0))
+                    })
+                    .then_with(|| {
+                        right
+                            .queue_length
+                            .unwrap_or(u32::MAX)
+                            .cmp(&left.queue_length.unwrap_or(u32::MAX))
+                    })
+            })
+            .cloned()
+    }
 }
 
 fn persisted_search_status(status: &str) -> &'static str {
@@ -3283,6 +3332,195 @@ impl TransferQueue {
             self.updated_at
         )
     }
+}
+
+#[derive(Clone, Debug)]
+struct AutoRetryCandidate {
+    source: TransferEntry,
+    username: String,
+    filename: String,
+    size: Option<u64>,
+    source_kind: &'static str,
+}
+
+#[derive(Debug, Default)]
+struct AutoRetryTracker {
+    retried_ids: HashSet<u64>,
+    retry_counts: BTreeMap<String, usize>,
+    peer_retry_after: BTreeMap<String, u64>,
+    alternate_search_requested_at: BTreeMap<u64, u64>,
+}
+
+fn auto_retry_key(username: &str, filename: &str) -> String {
+    format!("{}\u{1f}{}", username.to_ascii_lowercase(), filename)
+}
+
+fn is_auto_retry_audio_file(filename: &str) -> bool {
+    let extension = virtual_basename(filename)
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase());
+    matches!(
+        extension.as_deref(),
+        Some("flac" | "mp3" | "m4a" | "aac" | "ogg" | "opus" | "wav" | "alac")
+    )
+}
+
+fn alternate_size_is_eligible(original: Option<u64>, candidate: u64, tolerance: u32) -> bool {
+    let Some(original) = original.filter(|size| *size > 0) else {
+        return true;
+    };
+    let difference = original.abs_diff(candidate) as u128;
+    difference.saturating_mul(100) <= (original as u128).saturating_mul(u128::from(tolerance))
+}
+
+fn latest_download_attempts(entries: &[TransferEntry]) -> BTreeMap<String, u64> {
+    let mut latest = BTreeMap::<String, u64>::new();
+    for entry in entries.iter().filter(|entry| entry.direction == 0) {
+        let identity = entry.request_id.clone().unwrap_or_else(|| {
+            auto_retry_key(
+                entry.peer_username.as_deref().unwrap_or_default(),
+                &entry.filename,
+            )
+        });
+        latest
+            .entry(identity)
+            .and_modify(|id| *id = (*id).max(entry.id))
+            .or_insert(entry.id);
+    }
+    latest
+}
+
+fn create_auto_retry_plan(
+    entries: &[TransferEntry],
+    searches: &SearchStore,
+    tracker: &AutoRetryTracker,
+    settings: &crate::config::TransferAutoRetrySettings,
+    now: u64,
+    available_slots: usize,
+) -> Vec<AutoRetryCandidate> {
+    if available_slots == 0 {
+        return Vec::new();
+    }
+    let cutoff = now.saturating_sub(settings.retry_delay.as_secs());
+    let latest = latest_download_attempts(entries);
+    let mut failed = entries
+        .iter()
+        .filter(|entry| {
+            if entry.direction != 0
+                || entry.status != "failed"
+                || entry.updated_at > cutoff
+                || tracker.retried_ids.contains(&entry.id)
+                || !is_auto_retry_audio_file(&entry.filename)
+                || entry.peer_username.is_none()
+            {
+                return false;
+            }
+            let identity = entry.request_id.clone().unwrap_or_else(|| {
+                auto_retry_key(
+                    entry.peer_username.as_deref().unwrap_or_default(),
+                    &entry.filename,
+                )
+            });
+            latest.get(&identity) == Some(&entry.id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    failed.sort_by_key(|entry| (entry.updated_at, entry.id));
+
+    let global_limit = settings.max_files_per_cycle.min(available_slots);
+    let mut per_peer = BTreeMap::<String, usize>::new();
+    let mut alternate_searches = 0usize;
+    let mut plan = Vec::new();
+    for source in failed {
+        let alternative = settings
+            .alternate_sources_enabled
+            .then(|| {
+                searches.best_transfer_alternative(
+                    &source,
+                    settings.alternate_source_size_tolerance_percent,
+                    |username| {
+                        tracker
+                            .peer_retry_after
+                            .get(&username.to_ascii_lowercase())
+                            .is_some_and(|retry_after| *retry_after > now)
+                    },
+                )
+            })
+            .flatten();
+        let (username, filename, size, source_kind) = if let Some(alternative) = alternative {
+            let Some(username) = alternative.peer_username else {
+                continue;
+            };
+            (
+                username,
+                alternative.filename,
+                Some(alternative.size),
+                "cached-search",
+            )
+        } else if settings.alternate_sources_enabled
+            && !tracker
+                .alternate_search_requested_at
+                .contains_key(&source.id)
+            && alternate_searches < settings.max_alternate_source_searches_per_cycle
+        {
+            alternate_searches += 1;
+            (
+                source
+                    .peer_username
+                    .clone()
+                    .expect("filtered peer username"),
+                source.filename.clone(),
+                source.size,
+                "network-search",
+            )
+        } else if tracker
+            .alternate_search_requested_at
+            .get(&source.id)
+            .is_some_and(|requested_at| {
+                requested_at.saturating_add(settings.check_interval.as_secs()) > now
+            })
+        {
+            continue;
+        } else {
+            (
+                source
+                    .peer_username
+                    .clone()
+                    .expect("filtered peer username"),
+                source.filename.clone(),
+                source.size,
+                "original",
+            )
+        };
+        let peer_key = username.to_ascii_lowercase();
+        if tracker
+            .peer_retry_after
+            .get(&peer_key)
+            .is_some_and(|retry_after| *retry_after > now)
+        {
+            continue;
+        }
+        if per_peer.get(&peer_key).copied().unwrap_or(0) >= settings.max_files_per_peer_per_cycle {
+            continue;
+        }
+        let retry_key = auto_retry_key(&username, &filename);
+        let attempts = tracker.retry_counts.get(&retry_key).copied().unwrap_or(0);
+        if settings.max_attempts != 0 && attempts >= settings.max_attempts {
+            continue;
+        }
+        *per_peer.entry(peer_key).or_default() += 1;
+        plan.push(AutoRetryCandidate {
+            source,
+            username,
+            filename,
+            size,
+            source_kind,
+        });
+        if plan.len() >= global_limit {
+            break;
+        }
+    }
+    plan
 }
 
 fn public_transfer_events_error(error: Option<&str>) -> Option<&'static str> {
@@ -23524,6 +23762,7 @@ async fn serve(once: bool) -> Result<(), String> {
         }
     }
     spawn_session_manager(Arc::clone(&state), session_receiver);
+    spawn_download_auto_retry(Arc::clone(&state));
     spawn_configured_listeners(Arc::clone(&state));
     spawn_rate_limit_cleanup(Arc::clone(&state));
     record_daemon_log(
@@ -23790,6 +24029,275 @@ fn spawn_rate_limit_cleanup(state: Arc<AppState>) {
             state.rate_limiter.cleanup().await;
         }
     });
+}
+
+fn spawn_download_auto_retry(state: Arc<AppState>) {
+    if !state.config.transfer_auto_retry.enabled {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut tracker = AutoRetryTracker::default();
+        let mut interval = time::interval(state.config.transfer_auto_retry.check_interval);
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if state.session.read().await.state != "connected" {
+                continue;
+            }
+            if let Err(error) = run_download_auto_retry_cycle(&state, &mut tracker).await {
+                record_daemon_log(
+                    &state,
+                    logging::LogLevel::Warn,
+                    "transfers",
+                    format!("download auto-retry cycle failed: {error}"),
+                )
+                .await;
+            }
+        }
+    });
+}
+
+fn retry_request_details(source: &TransferEntry) -> TransferRequestDetails {
+    TransferRequestDetails {
+        request_id: source.request_id.clone(),
+        request_name: source.request_name.clone(),
+        destination_directory: source.destination_directory.clone(),
+        bit_rate: source.bit_rate,
+        sample_rate: source.sample_rate,
+        bit_depth: source.bit_depth,
+        length_seconds: source.length_seconds,
+        artist: source.artist.clone(),
+        album: source.album.clone(),
+        title: source.title.clone(),
+        track_number: source.track_number,
+        year: source.year,
+    }
+}
+
+fn rollback_auto_retry_replacement(
+    transfers: &mut TransferQueue,
+    replacement_id: u64,
+    previous_next_id: u64,
+    previous_next_token: u32,
+    replacement_next_id: u64,
+    replacement_next_token: u32,
+) {
+    transfers.entries.retain(|entry| entry.id != replacement_id);
+    if transfers.next_id == replacement_next_id {
+        transfers.next_id = previous_next_id;
+    }
+    if transfers.next_token == replacement_next_token {
+        transfers.next_token = previous_next_token;
+    }
+    transfers.persist_state();
+}
+
+fn rollback_auto_retry_search(
+    searches: &mut SearchStore,
+    created: &SearchRecord,
+    evicted: Vec<SearchRecord>,
+    previous_next_token: u32,
+    created_next_token: u32,
+) {
+    if searches
+        .records
+        .iter()
+        .any(|record| record.token == created.token && record == created)
+    {
+        searches
+            .records
+            .retain(|record| record.token != created.token);
+    }
+    for record in evicted {
+        if searches.records.len() >= MAX_SEARCH_RECORDS
+            || searches
+                .records
+                .iter()
+                .any(|current| current.id == record.id || current.token == record.token)
+        {
+            continue;
+        }
+        searches.records.push(record);
+    }
+    if searches.next_token == created_next_token {
+        searches.next_token = previous_next_token;
+    }
+}
+
+async fn run_download_auto_retry_cycle(
+    state: &AppState,
+    tracker: &mut AutoRetryTracker,
+) -> Result<usize, String> {
+    if !state.config.transfer_allow_outbound {
+        return Ok(0);
+    }
+    let now = unix_timestamp();
+    let (entries, available_slots) = {
+        let transfers = state.transfers.read().await;
+        (
+            transfers.entries.clone(),
+            state
+                .config
+                .transfer_max_active
+                .saturating_sub(transfers.active_count_excluding(None)),
+        )
+    };
+    let plan = {
+        let searches = state.searches.read().await;
+        create_auto_retry_plan(
+            &entries,
+            &searches,
+            tracker,
+            &state.config.transfer_auto_retry,
+            now,
+            available_slots,
+        )
+    };
+    let mut queued = 0usize;
+    for candidate in plan {
+        let permit = state
+            .session_commands
+            .reserve()
+            .await
+            .map_err(|_| "session manager is not running".to_owned())?;
+        if candidate.source_kind == "network-search" {
+            let query = virtual_basename(&candidate.source.filename).to_owned();
+            let (record, evicted, previous_next_token, created_next_token) = {
+                let mut searches = state.searches.write().await;
+                let previous_next_token = searches.next_token;
+                let outcome = searches
+                    .create(
+                        None,
+                        query.clone(),
+                        "global",
+                        None,
+                        Vec::new(),
+                        DEFAULT_SEARCH_TTL_SECONDS,
+                    )
+                    .map_err(|error| format!("auto-retry alternative search failed: {error:?}"))?;
+                let record = outcome.record;
+                let evicted = outcome.evicted;
+                (record, evicted, previous_next_token, searches.next_token)
+            };
+            if let Err(error) = persist_search_record(state, &record).await {
+                rollback_auto_retry_search(
+                    &mut *state.searches.write().await,
+                    &record,
+                    evicted,
+                    previous_next_token,
+                    created_next_token,
+                );
+                return Err(error);
+            }
+            if let Err(error) = delete_persisted_searches(state, &evicted).await {
+                let _ = delete_persisted_searches(state, std::slice::from_ref(&record)).await;
+                rollback_auto_retry_search(
+                    &mut *state.searches.write().await,
+                    &record,
+                    evicted,
+                    previous_next_token,
+                    created_next_token,
+                );
+                return Err(error);
+            }
+            permit.send(SessionCommand::Search {
+                token: record.token,
+                query,
+                target: SearchDispatchTarget::Global,
+            });
+            tracker
+                .alternate_search_requested_at
+                .insert(candidate.source.id, now);
+            record_daemon_log(
+                state,
+                logging::LogLevel::Info,
+                "transfers",
+                format!(
+                    "searching for alternate sources before auto-retrying transfer {}",
+                    candidate.source.id
+                ),
+            )
+            .await;
+            continue;
+        }
+        let (
+            replacement,
+            previous_next_id,
+            previous_next_token,
+            replacement_next_id,
+            replacement_next_token,
+        ) = {
+            let mut transfers = state.transfers.write().await;
+            if transfers.active_count_excluding(None) >= state.config.transfer_max_active
+                || !transfers
+                    .entries
+                    .iter()
+                    .any(|entry| entry.id == candidate.source.id && entry.status == "failed")
+            {
+                continue;
+            }
+            let previous_next_id = transfers.next_id;
+            let previous_next_token = transfers.next_token;
+            let replacement = transfers.create_with_details(
+                0,
+                Some(candidate.username.clone()),
+                candidate.filename.clone(),
+                candidate.source.local_path.clone(),
+                candidate.size,
+                candidate.source.batch_id.clone(),
+                retry_request_details(&candidate.source),
+            );
+            let replacement = transfers
+                .update_status(replacement.id, "peer_lookup", None, None)
+                .unwrap_or(replacement);
+            let replacement_next_id = transfers.next_id;
+            let replacement_next_token = transfers.next_token;
+            (
+                replacement,
+                previous_next_id,
+                previous_next_token,
+                replacement_next_id,
+                replacement_next_token,
+            )
+        };
+        if let Err(error) = persist_transfer_record(state, &replacement).await {
+            let mut transfers = state.transfers.write().await;
+            rollback_auto_retry_replacement(
+                &mut transfers,
+                replacement.id,
+                previous_next_id,
+                previous_next_token,
+                replacement_next_id,
+                replacement_next_token,
+            );
+            return Err(error);
+        }
+        permit.send(SessionCommand::TransferPeer {
+            id: replacement.id,
+            username: candidate.username.clone(),
+        });
+        tracker.retried_ids.insert(candidate.source.id);
+        *tracker
+            .retry_counts
+            .entry(auto_retry_key(&candidate.username, &candidate.filename))
+            .or_default() += 1;
+        tracker.peer_retry_after.insert(
+            candidate.username.to_ascii_lowercase(),
+            now.saturating_add(state.config.transfer_auto_retry.peer_cooldown.as_secs()),
+        );
+        queued += 1;
+        record_daemon_log(
+            state,
+            logging::LogLevel::Info,
+            "transfers",
+            format!(
+                "auto-retried transfer {} as {} from {} via {}",
+                candidate.source.id, replacement.id, candidate.username, candidate.source_kind
+            ),
+        )
+        .await;
+    }
+    Ok(queued)
 }
 
 fn spawn_configured_listeners(state: Arc<AppState>) {
@@ -24773,9 +25281,13 @@ async fn open_remote_mesh_preview_file(
             return Err(error);
         }
     };
-    let metadata = file
-        .metadata()
-        .map_err(|error| format!("mesh preview metadata failed: {error}"))?;
+    let metadata = match file.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            let _ = fs::remove_file(&path);
+            return Err(format!("mesh preview metadata failed: {error}"));
+        }
+    };
     Ok(Some(LocalStreamFile {
         file,
         length: metadata.len(),
@@ -24792,15 +25304,6 @@ async fn write_peer_preview_response<W: tokio::io::AsyncWrite + Unpin>(
     extra_headers: &str,
     io_timeout: Duration,
 ) -> Result<http_server::FileResponseResult, String> {
-    let connection = if keep_alive { "keep-alive" } else { "close" };
-    let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccept-Ranges: none\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n",
-        preview.content_type, preview.length
-    );
-    time::timeout(io_timeout, writer.write_all(headers.as_bytes()))
-        .await
-        .map_err(|_| "peer preview response header timed out".to_owned())?
-        .map_err(|error| format!("peer preview response header failed: {error}"))?;
     if include_body {
         let received_token = time::timeout(io_timeout, preview.connection.receive_token())
             .await
@@ -24813,6 +25316,17 @@ async fn write_peer_preview_response<W: tokio::io::AsyncWrite + Unpin>(
             .await
             .map_err(|_| "peer preview offset send timed out".to_owned())?
             .map_err(|error| format!("peer preview offset send failed: {error}"))?;
+    }
+    let connection = if keep_alive { "keep-alive" } else { "close" };
+    let headers = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccept-Ranges: none\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n",
+        preview.content_type, preview.length
+    );
+    time::timeout(io_timeout, writer.write_all(headers.as_bytes()))
+        .await
+        .map_err(|_| "peer preview response header timed out".to_owned())?
+        .map_err(|error| format!("peer preview response header failed: {error}"))?;
+    if include_body {
         let mut remaining = preview.length;
         while remaining > 0 {
             let wanted = usize::try_from(remaining.min(TRANSFER_PROGRESS_CHUNK_BYTES as u64))
@@ -51357,6 +51871,314 @@ mod tests {
         assert_eq!(queue.entries[0].status, "rejected");
 
         let _ = std::fs::remove_file(queue.events_path);
+    }
+
+    #[test]
+    fn auto_retry_plan_is_bounded_latest_only_and_network_friendly() {
+        assert!(super::alternate_size_is_eligible(Some(1_000), 1_050, 5));
+        assert!(!super::alternate_size_is_eligible(Some(1_000), 1_051, 5));
+        let config = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_TRANSFER_AUTO_RETRY_DELAY_SECONDS", "10")
+                .with("SLSKR_TRANSFER_AUTO_RETRY_MAX_ATTEMPTS", "1")
+                .with(
+                    "SLSKR_TRANSFER_AUTO_RETRY_MAX_FILES_PER_PEER_PER_CYCLE",
+                    "1",
+                ),
+        )
+        .expect("auto retry config");
+        let now = super::unix_timestamp();
+        let mut queue = super::TransferQueue::new_in_memory(16);
+        for (peer, filename) in [
+            ("peer-a", "Remote/First.flac"),
+            ("peer-a", "Remote/Second.mp3"),
+            ("peer-b", "Remote/Notes.txt"),
+        ] {
+            let entry = queue.create(
+                0,
+                Some(peer.to_owned()),
+                filename.to_owned(),
+                None,
+                Some(100),
+            );
+            queue.update_status(entry.id, "failed", None, Some("connection lost".to_owned()));
+            queue
+                .entries
+                .iter_mut()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap()
+                .updated_at = now - 11;
+        }
+        let searches = super::SearchStore::new();
+        let mut tracker = super::AutoRetryTracker::default();
+        let plan = super::create_auto_retry_plan(
+            &queue.entries,
+            &searches,
+            &tracker,
+            &config.transfer_auto_retry,
+            now,
+            10,
+        );
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].source.filename, "Remote/First.flac");
+
+        tracker
+            .retry_counts
+            .insert(super::auto_retry_key("peer-a", "Remote/First.flac"), 1);
+        let next = super::create_auto_retry_plan(
+            &queue.entries,
+            &searches,
+            &tracker,
+            &config.transfer_auto_retry,
+            now,
+            10,
+        );
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].source.filename, "Remote/Second.mp3");
+        tracker
+            .retry_counts
+            .insert(super::auto_retry_key("peer-a", "Remote/Second.mp3"), 1);
+        assert!(super::create_auto_retry_plan(
+            &queue.entries,
+            &searches,
+            &tracker,
+            &config.transfer_auto_retry,
+            now,
+            10,
+        )
+        .is_empty());
+
+        tracker.retry_counts.clear();
+        tracker
+            .peer_retry_after
+            .insert("peer-a".to_owned(), now + 60);
+        assert!(super::create_auto_retry_plan(
+            &queue.entries,
+            &searches,
+            &tracker,
+            &config.transfer_auto_retry,
+            now,
+            10,
+        )
+        .is_empty());
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
+    }
+
+    #[tokio::test]
+    async fn auto_retry_cycle_creates_a_metadata_preserving_attempt_once() {
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default()
+                .with("SLSKR_TRANSFER_AUTO_RETRY_DELAY_SECONDS", "10")
+                .with(
+                    "SLSKR_TRANSFER_AUTO_RETRY_ALTERNATE_SOURCES_ENABLED",
+                    "false",
+                ),
+            super::SearchStore::new(),
+            None,
+        );
+        let now = super::unix_timestamp();
+        let source = {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create_with_details(
+                0,
+                Some("peer-a".to_owned()),
+                "Remote/Album/Song.flac".to_owned(),
+                Some("/tmp/Song.flac".to_owned()),
+                Some(1_000),
+                Some("batch-1".to_owned()),
+                super::TransferRequestDetails {
+                    request_id: Some("request-1".to_owned()),
+                    request_name: Some("Song".to_owned()),
+                    artist: Some("Artist".to_owned()),
+                    ..Default::default()
+                },
+            );
+            transfers.update_status(
+                entry.id,
+                "failed",
+                Some(123),
+                Some("connection lost".to_owned()),
+            );
+            let source = transfers
+                .entries
+                .iter_mut()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap();
+            source.updated_at = now - 11;
+            source.clone()
+        };
+        let mut tracker = super::AutoRetryTracker::default();
+
+        assert_eq!(
+            super::run_download_auto_retry_cycle(&state, &mut tracker)
+                .await
+                .expect("auto retry cycle"),
+            1
+        );
+        let command = receiver.recv().await.expect("transfer dispatch");
+        let super::SessionCommand::TransferPeer { id, username } = command else {
+            panic!("unexpected command: {command:?}");
+        };
+        assert_eq!(username, "peer-a");
+        let transfers = state.transfers.read().await;
+        let original = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == source.id)
+            .unwrap();
+        let replacement = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+        assert_eq!(original.status, "failed");
+        assert_eq!(replacement.status, "peer_lookup");
+        assert_eq!(replacement.request_id.as_deref(), Some("request-1"));
+        assert_eq!(replacement.batch_id.as_deref(), Some("batch-1"));
+        assert_eq!(replacement.artist.as_deref(), Some("Artist"));
+        assert_eq!(replacement.bytes_transferred, 0);
+        drop(transfers);
+
+        assert_eq!(
+            super::run_download_auto_retry_cycle(&state, &mut tracker)
+                .await
+                .expect("deduplicated cycle"),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_retry_searches_then_uses_a_verified_cached_alternate() {
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_TRANSFER_AUTO_RETRY_DELAY_SECONDS", "10"),
+            super::SearchStore::new(),
+            None,
+        );
+        let now = super::unix_timestamp();
+        let source_id = {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(
+                0,
+                Some("peer-a".to_owned()),
+                "Remote/Album/Song.flac".to_owned(),
+                None,
+                Some(1_000),
+            );
+            transfers.update_status(entry.id, "failed", None, Some("timed out".to_owned()));
+            transfers
+                .entries
+                .iter_mut()
+                .find(|candidate| candidate.id == entry.id)
+                .unwrap()
+                .updated_at = now - 11;
+            entry.id
+        };
+        let mut tracker = super::AutoRetryTracker::default();
+
+        assert_eq!(
+            super::run_download_auto_retry_cycle(&state, &mut tracker)
+                .await
+                .expect("discovery cycle"),
+            0
+        );
+        let super::SessionCommand::Search { token, query, .. } =
+            receiver.recv().await.expect("search dispatch")
+        else {
+            panic!("expected alternate-source search");
+        };
+        assert_eq!(query, "Song.flac");
+        state
+            .searches
+            .write()
+            .await
+            .add_peer_response(&FileSearchResponse {
+                username: "peer-b".to_owned(),
+                token,
+                results: vec![FileEntry {
+                    filename_encoding: Default::default(),
+                    extension_encoding: Default::default(),
+                    code: 1,
+                    filename: "Other/Album/Song.flac".to_owned(),
+                    size: 1_040,
+                    extension: "flac".to_owned(),
+                    attributes: Vec::new(),
+                }],
+                slot_free: true,
+                average_speed: 10_000,
+                queue_length: 0,
+                unknown: 0,
+                private_results: Vec::new(),
+            })
+            .expect("search response");
+
+        assert_eq!(
+            super::run_download_auto_retry_cycle(&state, &mut tracker)
+                .await
+                .expect("alternate retry cycle"),
+            1
+        );
+        let super::SessionCommand::TransferPeer { id, username } =
+            receiver.recv().await.expect("alternate dispatch")
+        else {
+            panic!("expected transfer dispatch");
+        };
+        assert_eq!(username, "peer-b");
+        let transfers = state.transfers.read().await;
+        assert_eq!(
+            transfers
+                .entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .unwrap()
+                .filename,
+            "Other/Album/Song.flac"
+        );
+        assert!(tracker.retried_ids.contains(&source_id));
+    }
+
+    #[test]
+    fn auto_retry_rollback_preserves_concurrent_transfer_allocations() {
+        let mut queue = super::TransferQueue::new_in_memory(16);
+        let previous_next_id = queue.next_id;
+        let previous_next_token = queue.next_token;
+        let replacement = queue.create(
+            0,
+            Some("retry-peer".to_owned()),
+            "Remote/Retry.flac".to_owned(),
+            None,
+            Some(100),
+        );
+        let replacement_next_id = queue.next_id;
+        let replacement_next_token = queue.next_token;
+        let concurrent = queue.create(
+            0,
+            Some("other-peer".to_owned()),
+            "Remote/Other.flac".to_owned(),
+            None,
+            Some(200),
+        );
+        let concurrent_next_id = queue.next_id;
+        let concurrent_next_token = queue.next_token;
+
+        super::rollback_auto_retry_replacement(
+            &mut queue,
+            replacement.id,
+            previous_next_id,
+            previous_next_token,
+            replacement_next_id,
+            replacement_next_token,
+        );
+
+        assert!(queue.entries.iter().all(|entry| entry.id != replacement.id));
+        assert!(queue.entries.iter().any(|entry| entry.id == concurrent.id));
+        assert_eq!(queue.next_id, concurrent_next_id);
+        assert_eq!(queue.next_token, concurrent_next_token);
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
     }
 
     #[test]

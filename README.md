@@ -274,6 +274,7 @@ Common settings:
 | `SLSKR_TRANSFER_MAX_ACTIVE` | Maximum active transfers. |
 | `SLSKR_TRANSFER_ALLOW_INBOUND` | Enable inbound shared-file serving. |
 | `SLSKR_TRANSFER_ALLOW_OUTBOUND` | Enable outbound downloads. |
+| `SLSKR_TRANSFER_AUTO_RETRY_ENABLED` | Automatically retry aged failed audio downloads; defaults to `true`. |
 | `SLSKR_DOWNLOAD_COMPLETED_PATH_TEMPLATE` | Optional confined download layout using `{uploader}`, `{remote_folder}`, `{remote_parent}`, `{remote_filename}`, `{batch_id}`, `{request_name}`, and `{date}` tokens. |
 | `SLSKR_PERSISTENCE_ENABLED` | Enable SQLite-backed persistence paths. |
 | `SLSKR_LOG_LEVEL` | Runtime log threshold: `trace`, `debug`, `info`, `warn`, or `error`. |
