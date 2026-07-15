@@ -16946,19 +16946,80 @@ fn parse_forwarded_ip_token(value: &str) -> Option<IpAddr> {
 }
 
 fn websocket_auth_protocol(protocol_header: Option<&str>) -> Option<&str> {
-    protocol_header?.split(',').map(str::trim).find(|protocol| {
-        let Some(encoded) = protocol.strip_prefix(WEBSOCKET_AUTH_PROTOCOL_PREFIX) else {
-            return false;
-        };
-        let token = percent_decode(encoded);
-        !token.is_empty() && !token.contains('\r') && !token.contains('\n')
-    })
+    protocol_header?
+        .split(',')
+        .map(str::trim)
+        .find(|protocol| decode_websocket_auth_protocol(protocol).is_some())
 }
 
 fn websocket_protocol_authorization(protocol_header: Option<&str>) -> Option<String> {
     let protocol = websocket_auth_protocol(protocol_header)?;
-    let token = percent_decode(protocol.strip_prefix(WEBSOCKET_AUTH_PROTOCOL_PREFIX)?);
+    let token = decode_websocket_auth_protocol(protocol)?;
     Some(format!("Bearer {token}"))
+}
+
+fn decode_websocket_auth_protocol(protocol: &str) -> Option<String> {
+    if !is_websocket_protocol_token(protocol) {
+        return None;
+    }
+    let encoded = protocol.strip_prefix(WEBSOCKET_AUTH_PROTOCOL_PREFIX)?;
+    let token = strict_percent_decode(encoded)?;
+    (!token.is_empty()
+        && !token
+            .chars()
+            .any(|character| character.is_control() || character == '\u{7f}'))
+    .then_some(token)
+}
+
+fn strict_percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = strict_hex_value(*bytes.get(index + 1)?)?;
+            let low = strict_hex_value(*bytes.get(index + 2)?)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn strict_hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn is_websocket_protocol_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
 }
 
 fn slskd_transfer_user_path<'a>(path: &'a str, direction: &str) -> Option<&'a str> {
@@ -36443,6 +36504,22 @@ mod tests {
             super::websocket_protocol_authorization(Some("slskr.api-token.")),
             None
         );
+        for malformed in [
+            "slskr.api-token.route/token",
+            "slskr.api-token.route token",
+            "slskr.api-token.route\"token",
+            "slskr.api-token.route%",
+            "slskr.api-token.route%GG",
+            "slskr.api-token.%FF",
+            "slskr.api-token.%00",
+            "slskr.api-token.tokén",
+        ] {
+            assert_eq!(super::websocket_auth_protocol(Some(malformed)), None);
+            assert_eq!(
+                super::websocket_protocol_authorization(Some(malformed)),
+                None
+            );
+        }
     }
 
     #[test]
