@@ -2071,6 +2071,69 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Atomically persist transfer projections and their corresponding events.
+    pub async fn insert_transfer_records_with_events(
+        &self,
+        records: &[(TransferRecord, TransferEventRecord)],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for (transfer, event) in records {
+            query(
+                r#"
+                INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&transfer.id)
+            .bind(&transfer.direction)
+            .bind(&transfer.filename)
+            .bind(&transfer.peer_username)
+            .bind(transfer.filesize)
+            .bind(transfer.progress)
+            .bind(&transfer.status)
+            .bind(transfer.started_at)
+            .bind(transfer.completed_at)
+            .bind(&transfer.request_id)
+            .bind(&transfer.request_name)
+            .bind(&transfer.destination_directory)
+            .bind(&transfer.local_path)
+            .bind(&transfer.batch_id)
+            .bind(&transfer.reason)
+            .bind(transfer.bit_rate)
+            .bind(transfer.sample_rate)
+            .bind(transfer.bit_depth)
+            .bind(transfer.length_seconds)
+            .bind(&transfer.artist)
+            .bind(&transfer.album)
+            .bind(&transfer.title)
+            .bind(transfer.track_number)
+            .bind(transfer.year)
+            .execute(&mut *transaction)
+            .await?;
+            query(
+                r#"
+                INSERT INTO transfer_events
+                    (transfer_id, direction, token, filename, peer_username, filesize, progress, status, reason, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&event.transfer_id)
+            .bind(&event.direction)
+            .bind(event.token)
+            .bind(&event.filename)
+            .bind(&event.peer_username)
+            .bind(event.filesize)
+            .bind(event.progress)
+            .bind(&event.status)
+            .bind(&event.reason)
+            .bind(event.created_at)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// List recent transfer transition/progress events.
     pub async fn list_transfer_events(
         &self,
@@ -4348,6 +4411,83 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn transfer_record_and_event_batches_roll_back_atomically() {
+        let db = DatabaseManager::in_memory().await.unwrap();
+        query(
+            r#"
+            CREATE TRIGGER reject_bad_transfer_event
+            BEFORE INSERT ON transfer_events
+            WHEN NEW.transfer_id = 'transfer_bad'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced transfer event failure');
+            END
+            "#,
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let transfer = |id: &str| TransferRecord {
+            id: id.to_owned(),
+            direction: "download".to_owned(),
+            filename: format!("{id}.flac"),
+            peer_username: "peer".to_owned(),
+            filesize: 10,
+            progress: 0,
+            status: "queued".to_owned(),
+            started_at: 1,
+            completed_at: None,
+            request_id: None,
+            request_name: None,
+            destination_directory: None,
+            local_path: None,
+            batch_id: None,
+            reason: None,
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
+            artist: None,
+            album: None,
+            title: None,
+            track_number: None,
+            year: None,
+        };
+        let event = |id: &str| TransferEventRecord {
+            id: 0,
+            transfer_id: id.to_owned(),
+            direction: "download".to_owned(),
+            token: 1,
+            filename: format!("{id}.flac"),
+            peer_username: Some("peer".to_owned()),
+            filesize: 10,
+            progress: 0,
+            status: "queued".to_owned(),
+            reason: None,
+            created_at: 1,
+        };
+        let records = [
+            (transfer("transfer_good"), event("transfer_good")),
+            (transfer("transfer_bad"), event("transfer_bad")),
+        ];
+
+        assert!(db
+            .insert_transfer_records_with_events(&records)
+            .await
+            .is_err());
+        for id in ["transfer_good", "transfer_bad"] {
+            assert!(db.get_transfer(id).await.unwrap().is_none(), "{id}");
+            assert!(
+                db.list_transfer_events(Some(id), 10, 0)
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "{id}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -2305,24 +2305,28 @@ fn transfer_failure_code(status: &str, reason: Option<&str>) -> Option<&'static 
         return None;
     }
     let reason = reason?.to_ascii_lowercase();
-    Some(if reason.contains("too many megabytes") || reason.contains("overwhelmed") {
-        "peer_capacity"
-    } else if reason.contains("not shared") || reason.contains("file not found") {
-        "remote_file_unavailable"
-    } else if reason.contains("size mismatch") || reason.contains("does not match expected size") {
-        "size_mismatch"
-    } else if reason.contains("offline") || reason.contains("unavailable") {
-        "peer_offline"
-    } else if reason.contains("connection closed")
-        || reason.contains("connection lost")
-        || reason.contains("reset by peer")
-    {
-        "connection_lost"
-    } else if reason.contains("internal error") {
-        "remote_internal"
-    } else {
-        "transfer_failed"
-    })
+    Some(
+        if reason.contains("too many megabytes") || reason.contains("overwhelmed") {
+            "peer_capacity"
+        } else if reason.contains("not shared") || reason.contains("file not found") {
+            "remote_file_unavailable"
+        } else if reason.contains("size mismatch")
+            || reason.contains("does not match expected size")
+        {
+            "size_mismatch"
+        } else if reason.contains("offline") || reason.contains("unavailable") {
+            "peer_offline"
+        } else if reason.contains("connection closed")
+            || reason.contains("connection lost")
+            || reason.contains("reset by peer")
+        {
+            "connection_lost"
+        } else if reason.contains("internal error") {
+            "remote_internal"
+        } else {
+            "transfer_failed"
+        },
+    )
 }
 
 fn transfer_recovery_action(status: &str, reason: Option<&str>) -> Option<&'static str> {
@@ -2485,12 +2489,13 @@ fn persisted_transfer_event_record(entry: &TransferEntry) -> persistence::Transf
 
 async fn persist_transfer_record(state: &AppState, entry: &TransferEntry) -> Result<(), String> {
     if let Some(db) = state.db.as_ref() {
-        db.insert_transfer(&persisted_transfer_record(entry))
+        let records = [(
+            persisted_transfer_record(entry),
+            persisted_transfer_event_record(entry),
+        )];
+        db.insert_transfer_records_with_events(&records)
             .await
-            .map_err(|error| format!("failed to persist transfer: {error}"))?;
-        db.insert_transfer_event(&persisted_transfer_event_record(entry))
-            .await
-            .map_err(|error| format!("failed to persist transfer event: {error}"))?;
+            .map_err(|error| format!("failed to persist transfer and event: {error}"))?;
     }
     Ok(())
 }
@@ -2509,8 +2514,19 @@ async fn persist_transfer_records(
     state: &AppState,
     entries: &[TransferEntry],
 ) -> Result<(), String> {
-    for entry in entries {
-        persist_transfer_record(state, entry).await?;
+    if let Some(db) = state.db.as_ref() {
+        let records = entries
+            .iter()
+            .map(|entry| {
+                (
+                    persisted_transfer_record(entry),
+                    persisted_transfer_event_record(entry),
+                )
+            })
+            .collect::<Vec<_>>();
+        db.insert_transfer_records_with_events(&records)
+            .await
+            .map_err(|error| format!("failed to persist transfers and events: {error}"))?;
     }
     Ok(())
 }
@@ -40080,7 +40096,12 @@ mod tests {
         .await
         .expect("rename request");
         assert_eq!(renamed.status, "200 OK");
-        assert_eq!(state.transfers.read().await.entries[0].request_name.as_deref(), Some("Renamed request"));
+        assert_eq!(
+            state.transfers.read().await.entries[0]
+                .request_name
+                .as_deref(),
+            Some("Renamed request")
+        );
 
         let cancelled = super::route_http_request(
             "POST",
@@ -40106,6 +40127,31 @@ mod tests {
         let detail_json = serde_json::from_str::<serde_json::Value>(&detail.body).unwrap();
         assert_eq!(detail_json["request"]["state"], "Cancelled");
         assert_eq!(detail_json["attempts"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn transfer_failure_projection_exposes_bounded_recovery_not_internal_reason() {
+        let mut transfers = super::TransferQueue::new_in_memory(10);
+        let entry = transfers.create(
+            0,
+            Some("friend".to_owned()),
+            "Remote/Song.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        let failed = transfers
+            .update_status(
+                entry.id,
+                "rejected",
+                None,
+                Some("Transfer rejected: File not shared; internal=/secret".to_owned()),
+            )
+            .unwrap();
+        let json = failed.json();
+        assert!(json.contains(r#""failure_code":"remote_file_unavailable""#));
+        assert!(json.contains(r#""recovery_label":"Find other sources""#));
+        assert!(!json.contains("/secret"));
+        assert!(!json.contains("File not shared"));
     }
 
     #[tokio::test]
