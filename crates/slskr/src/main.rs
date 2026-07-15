@@ -22884,13 +22884,36 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
                 persist_browse_projection(state, &record).await;
             }
             if let Some(token) = token {
-                try_send_session_command(
+                if let Err(error) = try_send_session_command(
                     state,
                     SessionCommand::IndirectBrowse {
                         username: address.username.clone(),
                         token,
                     },
-                );
+                ) {
+                    let failed = {
+                        let mut browse = state.browse.write().await;
+                        browse.fail(address.username.clone(), error.clone())
+                    };
+                    if let Some(record) = failed {
+                        persist_browse_projection(state, &record).await;
+                    }
+                    record_event(
+                        state,
+                        "browse.failed",
+                        address.username.clone(),
+                        Some(error.clone()),
+                    )
+                    .await;
+                    update_session(state, |snapshot| {
+                        snapshot.last_error = Some(format!(
+                            "indirect browse {} dispatch failed: {error}",
+                            redact_username(&address.username)
+                        ));
+                    })
+                    .await;
+                    return;
+                }
                 record_event(
                     state,
                     "browse.indirect.requested",
@@ -23183,14 +23206,34 @@ async fn execute_accepted_file_transfer(
                 if let Some(indirect_pending) = indirect_pending {
                     persist_transfer_projection(state, &indirect_pending).await;
                 }
-                try_send_session_command(
+                if let Err(error) = try_send_session_command(
                     state,
                     SessionCommand::IndirectTransfer {
                         id: transfer.id,
                         username,
                         token: transfer.token,
                     },
-                );
+                ) {
+                    let failed = {
+                        let mut transfers = state.transfers.write().await;
+                        transfers.update_status(
+                            transfer.id,
+                            "failed",
+                            None,
+                            Some(format!("indirect transfer dispatch failed: {error}")),
+                        )
+                    };
+                    if let Some(failed) = failed {
+                        persist_transfer_projection(state, &failed).await;
+                    }
+                    update_session(state, |snapshot| {
+                        snapshot.last_error = Some(format!(
+                            "indirect transfer {} dispatch failed: {error}",
+                            transfer.id
+                        ));
+                    })
+                    .await;
+                }
                 return;
             }
             (
@@ -24074,8 +24117,11 @@ async fn send_session_command(state: &AppState, command: SessionCommand) -> Resu
         .map_err(|_| "session manager is not running".to_owned())
 }
 
-fn try_send_session_command(state: &AppState, command: SessionCommand) {
-    let _ = state.session_commands.try_send(command);
+fn try_send_session_command(state: &AppState, command: SessionCommand) -> Result<(), String> {
+    state
+        .session_commands
+        .try_send(command)
+        .map_err(|error| format!("session command queue rejected request: {error}"))
 }
 
 async fn update_session<F>(state: &AppState, update: F)
@@ -36595,7 +36641,8 @@ mod tests {
                 username: "friend".to_owned(),
                 token: 42,
             },
-        );
+        )
+        .expect("queue indirect transfer command");
 
         assert_eq!(
             receiver.try_recv().expect("indirect command"),
@@ -41599,6 +41646,44 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("direct browse failed"));
+    }
+
+    #[tokio::test]
+    async fn indirect_browse_dispatch_failure_does_not_stay_pending() {
+        let (state, _receiver) = test_state();
+        for _ in 0..8 {
+            super::try_send_session_command(&state, super::SessionCommand::Ping)
+                .expect("fill command queue");
+        }
+        state.browse.write().await.request("friend".to_owned());
+        let address = slskr_client::protocol::server::PeerAddress {
+            username: "friend".to_owned(),
+            ip: "127.0.0.1".parse().unwrap(),
+            port: 0,
+            obfuscation_type: 0,
+            obfuscated_port: 0,
+        };
+
+        super::project_peer_browse_response(&state, &address).await;
+
+        let browse = state.browse.read().await;
+        let record = browse.get("friend").expect("browse record");
+        assert_eq!(record.status, "failed");
+        assert_eq!(record.indirect_token, None);
+        assert!(record
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("session command queue rejected request"));
+        drop(browse);
+        assert!(state
+            .session
+            .read()
+            .await
+            .last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("indirect browse f***d dispatch failed"));
     }
 
     #[tokio::test]
