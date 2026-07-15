@@ -5156,7 +5156,7 @@ fn library_health_issue_id(path: &str) -> Option<&str> {
 }
 
 // Wishlist Models
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct WishlistItem {
     id: String,
     artist: String,
@@ -5189,14 +5189,14 @@ impl WishlistItem {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct WishlistRecord {
     id: String,
     items: Vec<WishlistItem>,
     updated_at: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct WishlistStore {
     records: Vec<WishlistRecord>,
     next_item_id: u64,
@@ -12811,11 +12811,16 @@ async fn route_http_request_with_headers(
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
 
             let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
             match wishlist.add_item(artist, title, kind) {
               Ok(item) => {
+                let mutated = wishlist.clone();
                 let json = item.json();
                 drop(wishlist);
-                persist_wishlist_item(state, &item).await;
+                if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                    rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::created_response(json))
               }
               Err(()) => {
@@ -12829,7 +12834,9 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
             if let Some(record) = wishlist.remove_item(item_id) {
+                let mutated = wishlist.clone();
                 let json = serde_json::json!({
                     "deleted": true,
                     "item_id": item_id,
@@ -12838,7 +12845,10 @@ async fn route_http_request_with_headers(
                 })
                 .to_string();
                 drop(wishlist);
-                persist_wishlist_item_delete(state, item_id).await;
+                if let Err(error) = persist_wishlist_item_delete_checked(state, item_id).await {
+                    rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response(json))
             } else {
                 drop(wishlist);
@@ -14546,10 +14556,15 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "searchText"));
             let kind = extract_json_string_field(body, "kind");
             let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
             if let Some(item) = wishlist.update_item(item_id, artist, title, kind) {
+                let mutated = wishlist.clone();
                 let json = item.json();
                 drop(wishlist);
-                persist_wishlist_item(state, &item).await;
+                if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                    rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response(json))
             } else {
                 drop(wishlist);
@@ -14891,9 +14906,10 @@ async fn route_http_request_with_headers(
                          .map(|(artist, title)| (artist.trim().to_owned(), title.trim().to_owned()))
                          .unwrap_or_else(|| (String::new(), line.to_owned()));
                      (artist, title, "SourceFeed".to_owned())
-                 })
-                 .collect::<Vec<_>>();
+             })
+             .collect::<Vec<_>>();
              let mut wishlist = state.wishlist.write().await;
+             let previous = wishlist.clone();
              if !wishlist.can_add_items(parsed_items.len()) {
                  return Ok(routing::service_unavailable_response("wishlist item capacity is full"));
              }
@@ -14909,9 +14925,11 @@ async fn route_http_request_with_headers(
                  items.push(value);
              }
              let count = items.len();
+             let mutated = wishlist.clone();
              drop(wishlist);
-             for item in &persisted_items {
-                 persist_wishlist_item(state, item).await;
+             if let Err(error) = persist_wishlist_items_checked(state, &persisted_items).await {
+                 rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                 return Ok(routing::service_unavailable_response(&error));
              }
              Ok(routing::created_response(serde_json::json!({
                  "id": format!("source-feed-{}", unix_timestamp()),
@@ -16425,6 +16443,7 @@ async fn route_http_request_with_headers(
              let artist = extract_json_string_field(body, "artist").unwrap_or_default();
              let title = extract_json_string_field(body, "title").unwrap_or_default();
              let mut wishlist = state.wishlist.write().await;
+             let previous = wishlist.clone();
              let item = match wishlist.add_item(
                  artist,
                  title,
@@ -16443,8 +16462,12 @@ async fn route_http_request_with_headers(
                  .iter()
                  .flat_map(|record| record.items.iter())
                  .count();
+             let mutated = wishlist.clone();
              drop(wishlist);
-             persist_wishlist_item(state, &item).await;
+             if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                 rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                 return Ok(routing::service_unavailable_response(&error));
+             }
              Ok(routing::created_response(serde_json::json!({
                  "subscriptions": [serde_json::from_str::<serde_json::Value>(&json).unwrap_or_else(|_| serde_json::json!({}))],
                  "created": true,
@@ -16551,6 +16574,7 @@ async fn route_http_request_with_headers(
                  })
                  .collect::<Vec<_>>();
              let mut wishlist = state.wishlist.write().await;
+             let previous = wishlist.clone();
              if !wishlist.can_add_items(parsed_items.len()) {
                  return Ok(routing::service_unavailable_response("wishlist item capacity is full"));
              }
@@ -16565,9 +16589,11 @@ async fn route_http_request_with_headers(
                  persisted_items.push(item);
                  imported.push(value);
              }
+             let mutated = wishlist.clone();
              drop(wishlist);
-             for item in &persisted_items {
-                 persist_wishlist_item(state, item).await;
+             if let Err(error) = persist_wishlist_items_checked(state, &persisted_items).await {
+                 rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                 return Ok(routing::service_unavailable_response(&error));
              }
              Ok(routing::created_response(serde_json::json!({
                  "imported": imported.len(),
@@ -23971,23 +23997,67 @@ async fn persist_security_unban(state: &AppState, kind: &str, value: &str) -> Re
     Ok(true)
 }
 
-async fn persist_wishlist_item(state: &AppState, item: &WishlistItem) {
-    let Some(db) = state.db.as_ref() else {
-        return;
-    };
-    let persisted = crate::persistence::WishlistItemRecord {
+fn persisted_wishlist_item(item: &WishlistItem) -> crate::persistence::WishlistItemRecord {
+    crate::persistence::WishlistItemRecord {
         id: item.id.clone(),
         artist: item.artist.clone(),
         title: item.title.clone(),
         kind: item.kind.clone(),
         added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
-    };
-    let _ = db.upsert_wishlist_item(&persisted).await;
+    }
 }
 
-async fn persist_wishlist_item_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_wishlist_item(id).await;
+async fn persist_wishlist_item_checked(
+    state: &AppState,
+    item: &WishlistItem,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.upsert_wishlist_item(&persisted_wishlist_item(item))
+        .await
+        .map_err(|error| format!("wishlist persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn persist_wishlist_items_checked(
+    state: &AppState,
+    items: &[WishlistItem],
+) -> Result<bool, String> {
+    if items.is_empty() {
+        return Ok(state.db.is_some());
+    }
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    let persisted = items
+        .iter()
+        .map(persisted_wishlist_item)
+        .collect::<Vec<_>>();
+    db.upsert_wishlist_items(&persisted)
+        .await
+        .map_err(|error| format!("wishlist persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn persist_wishlist_item_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_wishlist_item(id)
+        .await
+        .map_err(|error| format!("wishlist deletion persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn rollback_wishlist_if_unchanged(
+    state: &AppState,
+    previous: WishlistStore,
+    mutated: &WishlistStore,
+) {
+    let mut wishlist = state.wishlist.write().await;
+    if *wishlist == *mutated {
+        *wishlist = previous;
     }
 }
 
@@ -31837,6 +31907,80 @@ mod tests {
             assert_eq!(contacts.records[0].username, "friend", "{method}");
             assert!(!contacts.records[0].online, "{method}");
             assert_eq!(contacts.next_id, 2, "{method}");
+        }
+    }
+
+    #[tokio::test]
+    async fn wishlist_routes_roll_back_when_persistence_fails() {
+        for (path, body) in [
+            ("/api/wishlist", r#"{"artist":"Artist","title":"Track"}"#),
+            (
+                "/api/source-feeds",
+                r#"{"name":"feed","text":"Artist - One\nArtist - Two"}"#,
+            ),
+            (
+                "/api/musicbrainz/release-radar/subscriptions",
+                r#"{"artist":"Artist","title":"Release"}"#,
+            ),
+            (
+                "/api/wishlist/import/csv",
+                r#"{"csv":"artist,title\nArtist,One\nArtist,Two"}"#,
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let previous = state.wishlist.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("failed wishlist creation response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("wishlist persistence failed"),
+                "{path}"
+            );
+            assert_eq!(*state.wishlist.read().await, previous, "{path}");
+        }
+
+        for (method, body, expected_error) in [
+            (
+                "PUT",
+                r#"{"artist":"Changed","title":"Changed"}"#,
+                "wishlist persistence failed",
+            ),
+            ("DELETE", "", "wishlist deletion persistence failed"),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .wishlist
+                .write()
+                .await
+                .add_item("Artist".to_owned(), "Track".to_owned(), "Audio".to_owned())
+                .unwrap();
+            let previous = state.wishlist.read().await.clone();
+            db.close_for_test().await;
+
+            let response =
+                super::route_http_request(method, "/api/wishlist/wish-1", None, body, &state)
+                    .await
+                    .expect("failed wishlist mutation response");
+            assert_eq!(response.status, "503 Service Unavailable", "{method}");
+            assert!(response.body.contains(expected_error), "{method}");
+            assert_eq!(*state.wishlist.read().await, previous, "{method}");
         }
     }
 

@@ -2340,6 +2340,31 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Insert or update wishlist items atomically.
+    pub async fn upsert_wishlist_items(
+        &self,
+        records: &[WishlistItemRecord],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for record in records {
+            query(
+                r#"
+                INSERT OR REPLACE INTO wishlist_items (id, artist, title, kind, added_at)
+                VALUES (?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&record.id)
+            .bind(&record.artist)
+            .bind(&record.title)
+            .bind(&record.kind)
+            .bind(record.added_at)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// Delete a wishlist item.
     pub async fn delete_wishlist_item(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
         query("DELETE FROM wishlist_items WHERE id = ?")
