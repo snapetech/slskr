@@ -14337,6 +14337,9 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/relay/controller/downloads/") => {
+            let Some(_token) = path_segment_after(path, "/api/relay/controller/downloads/") else {
+                return Ok(routing::not_found_response());
+            };
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/octet-stream",
@@ -14345,7 +14348,10 @@ async fn route_http_request_with_headers(
         }
 
         ("POST", path) if path.starts_with("/api/relay/controller/files/") => {
-            let token = decoded_path_segment(path.rsplit('/').next().unwrap_or_default());
+            let Some(token) = path_segment_after(path, "/api/relay/controller/files/") else {
+                return Ok(routing::not_found_response());
+            };
+            let token = decoded_path_segment(token);
             let relay = state.relay.read().await;
             let runtime = state.runtime.read().await;
             let body = serde_json::json!({
@@ -14362,7 +14368,10 @@ async fn route_http_request_with_headers(
         }
 
         ("POST", path) if path.starts_with("/api/relay/controller/shares/") => {
-            let token = decoded_path_segment(path.rsplit('/').next().unwrap_or_default());
+            let Some(token) = path_segment_after(path, "/api/relay/controller/shares/") else {
+                return Ok(routing::not_found_response());
+            };
+            let token = decoded_path_segment(token);
             let shares = state.shares.read().await;
             let relay = state.relay.read().await;
             let runtime = state.runtime.read().await;
@@ -37117,6 +37126,16 @@ mod tests {
         assert_eq!(relay_shares_json["accepted"], true);
         assert_eq!(relay_shares_json["token"], "token-2");
         assert!(relay_shares_json["shareCount"].as_u64().unwrap() >= 1);
+        for (method, path) in [
+            ("GET", "/api/relay/controller/downloads/nested/token-1"),
+            ("POST", "/api/relay/controller/files/nested/token-1"),
+            ("POST", "/api/relay/controller/shares/nested/token-2"),
+        ] {
+            let response = super::route_http_request(method, path, None, "{}", &state)
+                .await
+                .expect("reject nested relay token route");
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
         let application = super::route_http_request("GET", "/api/application", None, "", &state)
             .await
             .expect("application with relay");
