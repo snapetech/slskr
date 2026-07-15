@@ -5395,6 +5395,12 @@ struct ContactStore {
     max_records: usize,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ContactUpdateError {
+    NotFound,
+    DuplicateUsername,
+}
+
 impl ContactStore {
     fn new() -> Self {
         Self::with_max_records(MAX_CONTACT_RECORDS)
@@ -5508,11 +5514,26 @@ impl ContactStore {
         id: &str,
         username: Option<String>,
         online: Option<bool>,
-    ) -> Option<ContactRecord> {
+    ) -> Result<ContactRecord, ContactUpdateError> {
+        if !self.records.iter().any(|record| record.id == id) {
+            return Err(ContactUpdateError::NotFound);
+        }
+        let username = username.map(|username| bounded_user_username(&username));
+        if username.as_deref().is_some_and(|username| {
+            self.records
+                .iter()
+                .any(|record| record.id != id && record.username.eq_ignore_ascii_case(username))
+        }) {
+            return Err(ContactUpdateError::DuplicateUsername);
+        }
         let now = unix_timestamp();
-        let record = self.records.iter_mut().find(|r| r.id == id)?;
+        let record = self
+            .records
+            .iter_mut()
+            .find(|r| r.id == id)
+            .expect("contact existence checked before mutation");
         if let Some(u) = username {
-            record.username = bounded_user_username(&u);
+            record.username = u;
         }
         if let Some(o) = online {
             record.online = o;
@@ -5524,7 +5545,7 @@ impl ContactStore {
         }
         record.updated_at = now;
         self.updated_at = now;
-        Some(record.clone())
+        Ok(record.clone())
     }
 
     fn delete(&mut self, id: &str) -> bool {
@@ -12372,14 +12393,21 @@ async fn route_http_request_with_headers(
             let username = extract_json_string_field(body, "username");
             let online = extract_json_bool_field(body, "online");
             let mut contacts = state.contacts.write().await;
-            if let Some(record) = contacts.update(id, username, online) {
-                let json = record.json();
-                drop(contacts);
-                persist_contact(state, &record).await;
-                Ok(routing::ok_response(json))
-            } else {
-                drop(contacts);
-                Ok(routing::not_found_response())
+            match contacts.update(id, username, online) {
+                Ok(record) => {
+                    let json = record.json();
+                    drop(contacts);
+                    persist_contact(state, &record).await;
+                    Ok(routing::ok_response(json))
+                }
+                Err(ContactUpdateError::DuplicateUsername) => {
+                    drop(contacts);
+                    Ok(routing::conflict_response("contact username already exists"))
+                }
+                Err(ContactUpdateError::NotFound) => {
+                    drop(contacts);
+                    Ok(routing::not_found_response())
+                }
             }
         }
         ("DELETE", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
@@ -33821,6 +33849,55 @@ mod tests {
         let last = groups.create("last".to_owned(), String::new()).unwrap();
         assert!(groups.add_member(&last.id, "overflow".to_owned()).is_err());
         assert_eq!(groups.total_members(), super::MAX_TOTAL_SHARE_GROUP_MEMBERS);
+    }
+
+    #[tokio::test]
+    async fn contact_update_rejects_duplicate_username() {
+        let (state, _receiver) = test_state();
+        let first = super::route_http_request(
+            "POST",
+            "/api/contacts",
+            None,
+            r#"{"username":"Alice"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let first_id = serde_json::from_str::<serde_json::Value>(&first.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let second = super::route_http_request(
+            "POST",
+            "/api/contacts",
+            None,
+            r#"{"username":"Bob"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let second_id = serde_json::from_str::<serde_json::Value>(&second.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let duplicate = super::route_http_request(
+            "PUT",
+            &format!("/api/contacts/{first_id}"),
+            None,
+            r#"{"username":"bOB"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(duplicate.status, "409 Conflict");
+        assert_eq!(
+            duplicate.body,
+            "{\"error\":\"contact username already exists\"}"
+        );
+        let contacts = state.contacts.read().await;
+        assert_eq!(contacts.get(&first_id).unwrap().username, "Alice");
+        assert_eq!(contacts.get(&second_id).unwrap().username, "Bob");
     }
 
     #[test]
