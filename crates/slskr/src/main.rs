@@ -5701,7 +5701,7 @@ impl ShareGroupRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ShareGroupStore {
     records: Vec<ShareGroupRecord>,
     next_id: u64,
@@ -12809,9 +12809,15 @@ async fn route_http_request_with_headers(
             let (id, username) =
                 share_group_member_path(path).expect("guarded share-group member path");
             let mut sharegroups = state.sharegroups.write().await;
+            let previous = sharegroups.clone();
             if let Some(record) = sharegroups.remove_member(id, &username) {
+                if let Err(error) =
+                    persist_share_group_member_delete(state, id, &username).await
+                {
+                    *sharegroups = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 drop(sharegroups);
-                persist_share_group_member_delete(state, id, &username).await;
                 persist_share_group(state, &record).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
@@ -23575,10 +23581,18 @@ async fn persist_share_group_member(state: &AppState, group_id: &str, member: &S
     let _ = db.upsert_share_group_member(&persisted).await;
 }
 
-async fn persist_share_group_member_delete(state: &AppState, group_id: &str, username: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_share_group_member(group_id, username).await;
-    }
+async fn persist_share_group_member_delete(
+    state: &AppState,
+    group_id: &str,
+    username: &str,
+) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_share_group_member(group_id, username)
+        .await
+        .map_err(|error| format!("share group member revocation persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_collection(state: &AppState, record: &CollectionRecord) {
@@ -34680,6 +34694,55 @@ mod tests {
             .unwrap()
             .members
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn share_group_member_revocation_rolls_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let group_id = state
+            .sharegroups
+            .write()
+            .await
+            .create("Trusted".to_owned(), String::new())
+            .expect("share group")
+            .id;
+        state
+            .sharegroups
+            .write()
+            .await
+            .add_member(&group_id, "friend".to_owned())
+            .expect("member capacity")
+            .expect("share group");
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "DELETE",
+            &format!("/api/sharegroups/{group_id}/members/friend"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("failed persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response
+            .body
+            .contains("share group member revocation persistence failed"));
+        let group = state
+            .sharegroups
+            .read()
+            .await
+            .get(&group_id)
+            .expect("rolled-back group");
+        assert_eq!(group.members.len(), 1);
+        assert_eq!(group.members[0].username, "friend");
     }
 
     #[tokio::test]
