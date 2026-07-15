@@ -25224,11 +25224,14 @@ async fn database_stats_value(state: &AppState) -> serde_json::Value {
                 "webhooks": stats.webhook_count,
                 "webhookLogs": stats.webhook_log_count,
             }),
-            Err(error) => serde_json::json!({
-                "enabled": true,
-                "healthy": false,
-                "error": error.to_string(),
-            }),
+            Err(error) => {
+                eprintln!("database statistics failed: {error}");
+                serde_json::json!({
+                    "enabled": true,
+                    "healthy": false,
+                    "error": "database statistics unavailable",
+                })
+            }
         }
     } else {
         serde_json::json!({
@@ -25394,23 +25397,36 @@ async fn database_cleanup_value(state: &AppState, body: &str) -> serde_json::Val
         match db.cleanup_old_records(days).await {
             Ok(count) => serde_json::json!({
                 "enabled": true,
+                "healthy": true,
                 "cleaned": count,
             }),
-            Err(error) => serde_json::json!({
-                "enabled": true,
-                "cleaned": 0,
-                "error": error.to_string(),
-            }),
+            Err(error) => {
+                eprintln!("database cleanup failed: {error}");
+                serde_json::json!({
+                    "enabled": true,
+                    "healthy": false,
+                    "cleaned": 0,
+                    "error": "database cleanup unavailable",
+                })
+            }
         }
     } else {
         serde_json::json!({
             "enabled": false,
+            "healthy": false,
             "cleaned": 0,
         })
     };
+    let status = if persisted_cleaned["healthy"].as_bool().unwrap_or(true) {
+        "ok"
+    } else if persisted_cleaned["enabled"].as_bool().unwrap_or(false) {
+        "error"
+    } else {
+        "skipped"
+    };
 
     serde_json::json!({
-        "status": "ok",
+        "status": status,
         "days": days,
         "cleaned": persisted_cleaned["cleaned"],
         "persisted": persisted_cleaned,
@@ -25429,12 +25445,15 @@ async fn database_vacuum_value(state: &AppState) -> serde_json::Value {
                 "enabled": true,
                 "status": "ok",
             }),
-            Err(error) => serde_json::json!({
-                "vacuumed": false,
-                "enabled": true,
-                "status": "error",
-                "error": error.to_string(),
-            }),
+            Err(error) => {
+                eprintln!("database vacuum failed: {error}");
+                serde_json::json!({
+                    "vacuumed": false,
+                    "enabled": true,
+                    "status": "error",
+                    "error": "database vacuum unavailable",
+                })
+            }
         }
     } else {
         serde_json::json!({
@@ -33414,6 +33433,48 @@ mod tests {
         let vacuum_json = serde_json::from_str::<serde_json::Value>(&vacuum.body).unwrap();
         assert_eq!(vacuum_json["enabled"], true);
         assert_eq!(vacuum_json["vacuumed"], true);
+    }
+
+    #[tokio::test]
+    async fn database_admin_errors_are_redacted_and_do_not_report_success() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        db.close_for_test().await;
+        let raw_error = db
+            .get_stats()
+            .await
+            .expect_err("closed database should reject statistics")
+            .to_string();
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db),
+        );
+
+        let stats = super::database_stats_value(&state).await;
+        assert_eq!(stats["healthy"], false);
+        assert_eq!(
+            stats["persisted"]["error"],
+            "database statistics unavailable"
+        );
+
+        let cleanup = super::database_cleanup_value(&state, "{\"days\":0}").await;
+        assert_eq!(cleanup["status"], "error");
+        assert_eq!(
+            cleanup["persisted"]["error"],
+            "database cleanup unavailable"
+        );
+
+        let vacuum = super::database_vacuum_value(&state).await;
+        assert_eq!(vacuum["status"], "error");
+        assert_eq!(vacuum["error"], "database vacuum unavailable");
+
+        for value in [stats, cleanup, vacuum] {
+            let json = value.to_string();
+            assert!(!json.contains(&raw_error), "leaked database error: {json}");
+            assert!(!json.to_ascii_lowercase().contains("pool closed"), "{json}");
+        }
     }
 
     #[tokio::test]
