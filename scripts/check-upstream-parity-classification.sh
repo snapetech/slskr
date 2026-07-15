@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ledger="$repo_root/docs/parity/slskdn-slsknet-runtime-parity.md"
-since="2026-05-13"
+since="2026-05-13T00:00:00-06:00"
 status=0
 
 check_committed_registry() {
@@ -31,8 +31,8 @@ check_committed_registry() {
 
   check_prefix_set \
     "slskdN" \
-    164 \
-    "6aaafb3ecd577eed22c195cdb508d77fec0de5d70cf8add46a588213bd1c00ed" \
+    203 \
+    "0f8bfd046741c69801f73442096c530d074277a4c8685461fec7da584dc96635" \
     "$slskdn_prefixes"
   check_prefix_set \
     "slskNet.Runtime" \

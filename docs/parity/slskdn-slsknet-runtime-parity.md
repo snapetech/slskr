@@ -49,8 +49,9 @@ and regression coverage match the parity target.
 ## 2026-07-15 Upstream Delta Audit
 
 The previous ledger date is not a current upstream baseline. At the frozen
-heads above, the sibling repositories contain 451 non-merge `slskdN` commits
-and 42 non-merge `slskNet.Runtime` commits since 2026-05-13. Of those, 164 and
+heads above, the sibling repositories contain 513 non-merge `slskdN` commits
+and 42 non-merge `slskNet.Runtime` commits since the explicit start-of-day
+cutoff `2026-05-13T00:00:00-06:00`. Of those, 203 and
 6 respectively touch `src`. The behavior/security classification against
 those snapshots is:
 
@@ -84,6 +85,10 @@ non-runtime or gate-backed rather than copied into this ledger individually.
 - `not-applicable` dependency/release/test-only default (23): `5a87a1aa9` `a5b05fba9` `a238c1d5a` `d5fed7d6e` `ca7639348` `e6099f133` `da9c2299b` `baef05557` `51b169ad2` `f57f4d862` `5b6895a50` `178ecfb75` `f904fe10a` `d97e08f6a` `02e21e78c` `22e86d0d1` `40ccd22be` `c828cf873` `2f4b16ffa` `5b4fe84f2` `b35fac890` `d57af6229` `ce61428e7`.
 - `not-applicable` .NET/logging/lifecycle default (17): `2be213804` `ee802eb03` `59f1a7fe5` `f837b5111` `e124b2f46` `2540c8332` `01631fc74` `983466e9c` `8490eda02` `8e36ad2e1` `60039cee8` `72bba6c23` `47b0840d3` `f31965fac` `a51e25e3b` `546ac8a5e` `7a2c8cb37`.
 - `needs-proof` manual-review default (22): `e2487ccb5` `1eb0a4951` `8928aef73` `4f3d6657a` `1d2f21348` `c6b31866a` `454797904` `cf692c036` `ffce1d305` `ee04c5818` `230549f93` `1bcef0404` `ea4362e2e` `25feed2ee` `c39a604ac` `dd87b7fe1` `82368a51a` `c6105a56e` `bcfcc7319` `5cebdb63c` `f5a49bc50` `765a4db82`.
+- `needs-proof` start-of-day behavior additions (2): `ca0dbda66` `624e67a7c`.
+- `needs-proof` start-of-day security addition (1): `f9663cba0`.
+- `not-applicable` start-of-day test-only additions (2): `6a1b1581c` `8a222ed28`.
+- `not-applicable` start-of-day .NET/UI/lifecycle additions (34): `af651569b` `20fd4a5f0` `fd1ad086e` `cfd981f6f` `7f8f6e6e8` `1e1bd949b` `e90d82871` `8ddd93f91` `0ec711cb0` `0d119d69f` `7aa547e58` `f7e0c4a48` `023fd2014` `21630fc36` `05d8335f0` `013adf136` `56718f62c` `2495586e8` `7909d5717` `c07c23791` `deff6900b` `631a5808f` `da0632767` `b149843ff` `9364a9d85` `626f39d54` `730f6e942` `f63c1b2e1` `ec356e40a` `cfd3a563f` `69d318234` `c24c20602` `fc279fc51` `05c63be87`.
 - `slskNet.Runtime` source registry: `192c5e4a` is implemented/needs-live-proof; `af73ff3f` is not-applicable logging severity; `1fce75fa`, `681c48c9`, `0fa803d5`, and `09b16f96` are not-applicable .NET dependency changes covered by dependency gates.
 
 The inventory is now exhaustive at the frozen heads, but parity is not closed:
