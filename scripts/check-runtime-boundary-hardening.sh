@@ -64,6 +64,8 @@ for anchor in \
   'MAX_NOW_PLAYING_RECORDS' \
   'MAX_SECURITY_BANS' \
   'now_playing_and_security_state_bound_remote_keys' \
+  'MAX_SHARE_GRANTS' \
+  'share_grants_bound_and_deduplicate_collection_users' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \

@@ -150,6 +150,7 @@ const MAX_USER_NOTES: usize = 4_096;
 const MAX_INTERESTS_PER_KIND: usize = 4_096;
 const MAX_NOW_PLAYING_RECORDS: usize = 4_096;
 const MAX_SECURITY_BANS: usize = 4_096;
+const MAX_SHARE_GRANTS: usize = 4_096;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -6389,16 +6390,28 @@ impl ShareGrantStore {
     fn from_persisted(records: Vec<crate::persistence::ShareGrantRecord>) -> Self {
         let mut next_id = 1;
         let mut updated_at = unix_timestamp();
+        for record in &records {
+            if let Some(number) = record
+                .id
+                .strip_prefix("grant-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                next_id = next_id.max(number.saturating_add(1));
+            }
+        }
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_grants = std::collections::HashSet::new();
         let records = records
             .into_iter()
+            .filter(|record| {
+                seen_ids.insert(record.id.clone())
+                    && seen_grants.insert((
+                        record.collection_id.clone(),
+                        record.username.to_ascii_lowercase(),
+                    ))
+            })
+            .take(MAX_SHARE_GRANTS)
             .map(|record| {
-                if let Some(number) = record
-                    .id
-                    .strip_prefix("grant-")
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    next_id = next_id.max(number.saturating_add(1));
-                }
                 let shared_at = u64::try_from(record.shared_at).unwrap_or(0);
                 updated_at = updated_at.max(shared_at);
                 ShareGrantRecord {
@@ -6417,10 +6430,23 @@ impl ShareGrantStore {
         }
     }
 
-    fn create(&mut self, collection_id: String, username: String) -> ShareGrantRecord {
+    fn create(
+        &mut self,
+        collection_id: String,
+        username: String,
+    ) -> Option<(ShareGrantRecord, bool)> {
+        if let Some(record) = self.records.iter().find(|record| {
+            record.collection_id == collection_id && record.username.eq_ignore_ascii_case(&username)
+        }) {
+            return Some((record.clone(), false));
+        }
+        if self.records.len() >= MAX_SHARE_GRANTS {
+            return None;
+        }
+        let next_id = self.next_id.checked_add(1)?;
         let now = unix_timestamp();
         let id = format!("grant-{}", self.next_id);
-        self.next_id += 1;
+        self.next_id = next_id;
         let record = ShareGrantRecord {
             id,
             collection_id,
@@ -6430,7 +6456,7 @@ impl ShareGrantStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some((record, true))
     }
 
     fn get(&self, id: &str) -> Option<ShareGrantRecord> {
@@ -12041,11 +12067,17 @@ async fn route_http_request_with_headers(
                 return Ok(routing::conflict_response("collection_id and username are required"));
             }
             let mut grants = state.share_grants.write().await;
-            let record = grants.create(collection_id, username);
+            let Some((record, created)) = grants.create(collection_id, username) else {
+                return Ok(routing::service_unavailable_response("share grant capacity is full"));
+            };
             let json = record.json();
             drop(grants);
-            persist_share_grant(state, &record).await;
-            Ok(routing::created_response(json))
+            if created {
+                persist_share_grant(state, &record).await;
+                Ok(routing::created_response(json))
+            } else {
+                Ok(routing::ok_response(json))
+            }
         }
         ("GET", path) if path.starts_with("/api/share-grants/") && !path.starts_with("/api/share-grants/by-collection/") && !path.ends_with("/token") && !path.ends_with("/backfill") && path.len() > 18 => {
             let id = &path[18..];
@@ -27876,6 +27908,17 @@ mod tests {
         .await
         .expect("create share grant");
         assert_eq!(grant.status, "201 Created");
+        let duplicate_grant = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            r#"{"collection_id":"collection-1","username":"FRIEND"}"#,
+            &state,
+        )
+        .await
+        .expect("reuse share grant");
+        assert_eq!(duplicate_grant.status, "200 OK");
+        assert_eq!(duplicate_grant.body, grant.body);
         let grant_json = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap();
         let grant_id = grant_json["id"].as_str().unwrap().to_owned();
 
@@ -31836,6 +31879,34 @@ mod tests {
         }
         assert!(security.ban("ip", "198.51.100.1".to_owned()).is_none());
         assert_eq!(security.bans.len(), super::MAX_SECURITY_BANS);
+    }
+
+    #[test]
+    fn share_grants_bound_and_deduplicate_collection_users() {
+        let mut grants = super::ShareGrantStore::new();
+        let (first, created) = grants
+            .create("collection".to_owned(), "Alice".to_owned())
+            .unwrap();
+        assert!(created);
+        let (duplicate, created) = grants
+            .create("collection".to_owned(), "alice".to_owned())
+            .unwrap();
+        assert!(!created);
+        assert_eq!(duplicate.id, first.id);
+        for index in 1..super::MAX_SHARE_GRANTS {
+            grants
+                .create(format!("collection-{index}"), format!("user-{index}"))
+                .unwrap();
+        }
+        assert!(grants
+            .create("overflow".to_owned(), "user".to_owned())
+            .is_none());
+        assert_eq!(grants.records.len(), super::MAX_SHARE_GRANTS);
+        let mut exhausted = super::ShareGrantStore::new();
+        exhausted.next_id = u64::MAX;
+        assert!(exhausted
+            .create("collection".to_owned(), "user".to_owned())
+            .is_none());
     }
 
     #[tokio::test]
