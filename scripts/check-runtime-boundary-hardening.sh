@@ -88,6 +88,9 @@ for anchor in \
   'open_download_file(&download_root(&state.config.state_dir), &path)' \
   'download_confined_open_rejects_symlinked_parent' \
   'download directory confined open failed' \
+  'scoped_storage_confined_delete_rejects_symlinked_parent' \
+  'storage parent confined open failed' \
+  'remove_directory_contents_unix' \
   'browse_indirect_tokens_wrap_without_aliasing_pending_records' \
   'bounded browse store must leave an available u32 token' \
   'MAX_INCOMING_CONNECTION_TASKS' \

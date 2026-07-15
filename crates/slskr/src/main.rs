@@ -19836,24 +19836,107 @@ fn delete_scoped_file_storage_path(
     if !canonical_parent.starts_with(&canonical_root) {
         return Err("path escapes the storage root".to_owned());
     }
-    let metadata = path
-        .symlink_metadata()
-        .map_err(|error| format!("storage path metadata failed: {error}"))?;
-    if metadata.file_type().is_symlink() {
-        return Err("storage path must not be a symlink".to_owned());
+    #[cfg(unix)]
+    {
+        delete_scoped_storage_path_unix(root, &path, directory)
+    }
+    #[cfg(not(unix))]
+    {
+        let metadata = path
+            .symlink_metadata()
+            .map_err(|error| format!("storage path metadata failed: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err("storage path must not be a symlink".to_owned());
+        }
+        if directory {
+            if !metadata.is_dir() {
+                return Ok(false);
+            }
+            fs::remove_dir_all(&path)
+                .map_err(|error| format!("directory delete failed: {error}"))?;
+        } else {
+            if !metadata.is_file() {
+                return Ok(false);
+            }
+            fs::remove_file(&path).map_err(|error| format!("file delete failed: {error}"))?;
+        }
+        Ok(true)
+    }
+}
+
+#[cfg(unix)]
+fn delete_scoped_storage_path_unix(
+    root: &Path,
+    path: &Path,
+    directory: bool,
+) -> Result<bool, String> {
+    use rustix::fs::{open, openat, unlinkat, AtFlags, Mode, OFlags};
+
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| "storage path is outside the storage root".to_owned())?;
+    let components = relative
+        .components()
+        .map(|component| match component {
+            Component::Normal(value) => Ok(value),
+            _ => Err("storage path contains a non-relative component".to_owned()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (target, parents) = components
+        .split_last()
+        .ok_or_else(|| "storage path is empty".to_owned())?;
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut parent = open(root, directory_flags, Mode::empty())
+        .map_err(|error| format!("storage root confined open failed: {error}"))?;
+    for component in parents {
+        parent = openat(&parent, *component, directory_flags, Mode::empty())
+            .map_err(|error| format!("storage parent confined open failed: {error}"))?;
     }
     if directory {
-        if !metadata.is_dir() {
-            return Ok(false);
-        }
-        fs::remove_dir_all(&path).map_err(|error| format!("directory delete failed: {error}"))?;
+        let target_directory = match openat(&parent, *target, directory_flags, Mode::empty()) {
+            Ok(target_directory) => target_directory,
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
+            Err(error) => return Err(format!("storage directory confined open failed: {error}")),
+        };
+        remove_directory_contents_unix(&target_directory)?;
+        unlinkat(&parent, *target, AtFlags::REMOVEDIR)
+            .map_err(|error| format!("directory confined delete failed: {error}"))?;
     } else {
-        if !metadata.is_file() {
-            return Ok(false);
+        match unlinkat(&parent, *target, AtFlags::empty()) {
+            Ok(()) => {}
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
+            Err(error) => return Err(format!("file confined delete failed: {error}")),
         }
-        fs::remove_file(&path).map_err(|error| format!("file delete failed: {error}"))?;
     }
     Ok(true)
+}
+
+#[cfg(unix)]
+fn remove_directory_contents_unix(directory: &impl std::os::fd::AsFd) -> Result<(), String> {
+    use rustix::fs::{openat, unlinkat, AtFlags, Dir, Mode, OFlags};
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut entries = Dir::read_from(directory)
+        .map_err(|error| format!("storage directory read failed: {error}"))?;
+    let mut names = Vec::new();
+    while let Some(entry) = entries.read() {
+        let entry = entry.map_err(|error| format!("storage directory entry failed: {error}"))?;
+        if !matches!(entry.file_name().to_bytes(), b"." | b"..") {
+            names.push(entry.file_name().to_owned());
+        }
+    }
+    for name in names {
+        match openat(directory, &name, directory_flags, Mode::empty()) {
+            Ok(child) => {
+                remove_directory_contents_unix(&child)?;
+                unlinkat(directory, &name, AtFlags::REMOVEDIR)
+                    .map_err(|error| format!("storage child directory delete failed: {error}"))?;
+            }
+            Err(_) => unlinkat(directory, &name, AtFlags::empty())
+                .map_err(|error| format!("storage child file delete failed: {error}"))?,
+        }
+    }
+    Ok(())
 }
 
 fn safe_download_path(state_dir: &Path, filename: &str) -> Result<PathBuf, String> {
@@ -35992,7 +36075,52 @@ mod tests {
             .expect_err("traversal must fail");
         assert!(error.contains("relative"));
 
+        let album = root.join("album/disc");
+        std::fs::create_dir_all(&album).expect("create recursive directory");
+        std::fs::write(album.join("song.flac"), b"fixture").expect("write recursive file");
+        let encoded_album = super::STANDARD.encode("album");
+        assert_eq!(
+            super::delete_scoped_file_storage_path(&root, &encoded_album, true),
+            Ok(true)
+        );
+        assert!(!root.join("album").exists());
+
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_storage_confined_delete_rejects_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-confined-delete-test-{}-{unique}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "slskr-confined-delete-outside-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        let victim = outside.join("victim.flac");
+        std::fs::write(&victim, b"keep").expect("write victim");
+        symlink(&outside, root.join("linked")).expect("symlinked parent");
+
+        assert!(super::delete_scoped_storage_path_unix(
+            &root,
+            &root.join("linked/victim.flac"),
+            false
+        )
+        .is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
     }
 
     #[tokio::test]
