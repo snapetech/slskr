@@ -135,6 +135,7 @@ const MAX_ROOM_MEMBERS_PER_ROOM: usize = 10_000;
 const MAX_USER_RECORDS: usize = 4_096;
 const MAX_BROWSE_RECORDS: usize = 1_024;
 const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
+const MAX_MESSAGE_RECORDS: usize = 500;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -3568,14 +3569,20 @@ struct MessageStore {
     records: Vec<MessageRecord>,
     next_id: u64,
     updated_at: u64,
+    max_records: usize,
 }
 
 impl MessageStore {
     fn new() -> Self {
+        Self::with_max_records(MAX_MESSAGE_RECORDS)
+    }
+
+    fn with_max_records(max_records: usize) -> Self {
         Self {
             records: Vec::new(),
             next_id: 1,
             updated_at: unix_timestamp(),
+            max_records: max_records.max(1),
         }
     }
 
@@ -3600,6 +3607,10 @@ impl MessageStore {
             })
             .collect();
         store.records.sort_by_key(|record| record.id);
+        if store.records.len() > store.max_records {
+            let excess = store.records.len() - store.max_records;
+            store.records.drain(0..excess);
+        }
         store.next_id = store
             .records
             .iter()
@@ -3629,6 +3640,10 @@ impl MessageStore {
         };
         self.next_id += 1;
         self.records.push(record.clone());
+        if self.records.len() > self.max_records {
+            let excess = self.records.len() - self.max_records;
+            self.records.drain(0..excess);
+        }
         self.updated_at = now;
         record
     }
@@ -33073,6 +33088,20 @@ mod tests {
         let stats = super::database_stats_value(&state).await;
         assert_eq!(stats["users"], 1);
         assert_eq!(stats["persisted"]["users"], 1);
+    }
+
+    #[test]
+    fn message_store_evicts_oldest_records_at_limit() {
+        let mut messages = super::MessageStore::with_max_records(2);
+        messages.add("alice".to_owned(), "inbound", "first".to_owned());
+        let second = messages.add("bob".to_owned(), "outbound", "second".to_owned());
+        let third = messages.add("carol".to_owned(), "inbound", "third".to_owned());
+
+        assert_eq!(messages.records.len(), 2);
+        assert_eq!(messages.records[0].id, second.id);
+        assert_eq!(messages.records[1].id, third.id);
+        assert!(messages.ack(second.id).is_some());
+        assert!(messages.ack(1).is_none());
     }
 
     #[tokio::test]

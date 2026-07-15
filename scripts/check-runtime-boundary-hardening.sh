@@ -39,6 +39,8 @@ for anchor in \
   'MAX_BROWSE_RECORDS' \
   'MAX_BROWSE_ENTRIES_PER_USER' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
+  'MAX_MESSAGE_RECORDS' \
+  'message_store_evicts_oldest_records_at_limit' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \

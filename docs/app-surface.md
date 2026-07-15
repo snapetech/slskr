@@ -120,7 +120,7 @@ The first app shell exposes:
 - `POST /api/v0/browse-responses`: merge flattened browse results from JSON body with `username` plus either one `filename`/`size`/optional `extension` or an `entries` array of those fields. Optional `complete:false` records the browse as `partial`; omitted or true promotes it to `ready`. Browse result projections write through to SQLite when persistence is enabled.
 - `POST /api/v0/messages`: record an outbound private-message projection from JSON body with `username` and `body`, optionally persist it to SQLite, then enqueue the server private-message command when connected
 - `POST /api/v0/messages/inbound`: record an inbound private-message projection and optionally persist it to SQLite
-- `GET /api/v0/messages`: list message projections. Supports `q`, `username`, `direction`, `limit`, and `offset` query parameters.
+- `GET /api/v0/messages`: list the newest 500 in-memory message projections; persisted storage remains durable beyond the projection window. Supports `q`, `username`, `direction`, `limit`, and `offset` query parameters.
 - `GET /api/v0/messages/:username`: list message projections for one user. Supports `q`, `direction`, `limit`, and `offset` query parameters.
 - `POST /api/v0/messages/:id/ack`: mark a message projection acknowledged, optionally persist the acknowledgement to SQLite, and enqueue the server acknowledgement when connected
 - `GET /api/v0/rooms`: list up to 1,024 room projections, including joined state, room kind, user count, operated flag, message count, up to 10,000 projected members, and the latest 1,000 projected messages per room. Supports `q`, `joined`, `limit`, and `offset` query parameters.
