@@ -11459,7 +11459,14 @@ async fn route_http_request_with_headers(
 
         // ROOM ENDPOINTS
         ("POST", "/api/rooms/refresh") => {
-            send_session_command(state, SessionCommand::RefreshRooms).await.ok();
+            if send_session_command(state, SessionCommand::RefreshRooms)
+                .await
+                .is_err()
+            {
+                return Ok(routing::service_unavailable_response(
+                    "session manager is not running",
+                ));
+            }
             Ok(routing::accepted_response("{}".to_string()))
         }
 
@@ -11514,10 +11521,32 @@ async fn route_http_request_with_headers(
                 .or_else(|| json_body_string(body))
                 .unwrap_or_default();
 
+            if !state
+                .rooms
+                .read()
+                .await
+                .records
+                .iter()
+                .any(|room| room.name == room_name)
+            {
+                return Ok(routing::not_found_response());
+            }
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut rooms = state.rooms.write().await;
             if let Some(record) = rooms.add_message(room_name, username.clone(), message_body.clone()) {
                 let json_response = record.json();
                 drop(rooms);
+                session_command_permit.send(SessionCommand::SayRoom {
+                    room: room_name.to_string(),
+                    body: message_body,
+                });
                 record_event(
                     state,
                     "room.message",
@@ -11525,8 +11554,6 @@ async fn route_http_request_with_headers(
                     Some(format!("username={username}")),
                 )
                 .await;
-
-                send_session_command(state, SessionCommand::SayRoom { room: room_name.to_string(), body: message_body }).await.ok();
 
                 Ok(routing::ok_response(json_response))
             } else {
@@ -12053,12 +12080,34 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "message"))
                 .or_else(|| extract_json_string_field(body, "body"))
                 .unwrap_or_default();
+            if !state
+                .rooms
+                .read()
+                .await
+                .records
+                .iter()
+                .any(|room| room.name == room_name)
+            {
+                return Ok(routing::not_found_response());
+            }
+            let session_command_permit = match state.session_commands.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    return Ok(routing::service_unavailable_response(
+                        "session manager is not running",
+                    ));
+                }
+            };
             let mut rooms = state.rooms.write().await;
             if rooms
                 .add_message(&room_name, "local".to_owned(), message_body.clone())
                 .is_some()
             {
                 drop(rooms);
+                session_command_permit.send(SessionCommand::SayRoom {
+                    room: room_name.to_owned(),
+                    body: message_body,
+                });
                 record_event(
                     state,
                     "room.message",
@@ -12066,10 +12115,6 @@ async fn route_http_request_with_headers(
                     Some("username=local".to_owned()),
                 )
                 .await;
-                send_session_command(state, SessionCommand::SayRoom {
-                    room: room_name.to_owned(),
-                    body: message_body,
-                }).await.ok();
                 Ok(routing::ok_response("true".to_owned()))
             } else {
                 drop(rooms);
@@ -39650,6 +39695,51 @@ mod tests {
                 .await
                 .expect("joined room filter");
         assert!(joined_filter.body.contains("\"filtered_count\":0"));
+    }
+
+    #[tokio::test]
+    async fn one_shot_room_routes_reject_before_mutation_when_dispatch_is_unavailable() {
+        let (state, receiver) = test_state();
+        drop(receiver);
+        let refresh = super::route_http_request("POST", "/api/v0/rooms/refresh", None, "", &state)
+            .await
+            .expect("unavailable refresh response");
+        assert_eq!(refresh.status, "503 Service Unavailable");
+        assert!(refresh.body.contains("session manager is not running"));
+
+        for (path, body) in [
+            (
+                "/api/v0/rooms/music/messages",
+                r#"{"username":"friend","body":"not sent"}"#,
+            ),
+            ("/api/v0/rooms/joined/music/messages", r#""also not sent""#),
+        ] {
+            let (state, receiver) = test_state();
+            state.rooms.write().await.join("music".to_owned()).unwrap();
+            drop(receiver);
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("unavailable room message response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("session manager is not running"),
+                "{path}"
+            );
+            let rooms = state.rooms.read().await;
+            assert!(rooms.records[0].messages.is_empty(), "{path}");
+            drop(rooms);
+            assert!(
+                state
+                    .events
+                    .read()
+                    .await
+                    .records
+                    .iter()
+                    .all(|event| event.kind != "room.message"),
+                "{path}"
+            );
+        }
     }
 
     #[test]
