@@ -66,6 +66,12 @@
     white-space: nowrap;
 }
 
+.slskr-footer-support {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
 .slskr-footer-github,
 .slskr-footer-sponsor,
 .slskr-footer-build,
@@ -120,20 +126,36 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
+    min-height: 24px;
+    padding: 3px 8px;
+    border: 1px solid rgba(0, 255, 204, 0.2);
+    border-radius: 999px;
+    background: rgba(16, 13, 18, 0.34);
+    font-size: 10px;
+    font-weight: 700;
     line-height: 1;
     color: rgba(238, 233, 227, 0.78);
     text-decoration: none;
 }
 
 .slskr-footer-sponsor:hover {
-    color: #ff79a8;
+    border-color: currentColor;
     text-decoration: none;
-    text-shadow: 0 0 8px rgba(255, 121, 168, 0.42);
+    box-shadow: 0 0 12px color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.slskr-footer-sponsor.paypal,
+.slskr-footer-sponsor.paypal .icon {
+    color: #68aee8;
+}
+
+.slskr-footer-sponsor.kofi,
+.slskr-footer-sponsor.kofi .icon {
+    color: #ff79a8;
 }
 
 .slskr-footer-sponsor .icon {
     align-items: center;
-    color: #ff79a8;
     display: inline-flex;
     height: 1em;
     justify-content: center;

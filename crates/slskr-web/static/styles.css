@@ -83,6 +83,43 @@ body {
   font-size: 13px;
 }
 
+.slskr-appbar .slskr-appbar-support {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.slskr-appbar-support b {
+  color: #82908a;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slskr-appbar-support a {
+  background: #111a1b;
+  border: 1px solid #36504d;
+  border-radius: 999px;
+  color: #9fd8ff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  text-decoration: none;
+}
+
+.slskr-appbar-support a:last-child {
+  color: #ff9ab8;
+}
+
+.slskr-appbar-support a:hover,
+.slskr-appbar-support a:focus-visible {
+  border-color: currentColor;
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
 .slskr-appbar ul {
   display: grid;
   gap: 6px;
