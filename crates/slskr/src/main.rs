@@ -149,6 +149,12 @@ const MAX_ROOM_ERROR_BYTES: usize = 4 * 1024;
 const MAX_USER_RECORDS: usize = 4_096;
 const MAX_BROWSE_RECORDS: usize = 1_024;
 const MAX_BROWSE_ENTRIES_PER_USER: usize = 10_000;
+const MAX_TOTAL_BROWSE_ENTRIES: usize = 50_000;
+const MAX_BROWSE_USERNAME_BYTES: usize = 1024;
+const MAX_BROWSE_FILENAME_BYTES: usize = 4 * 1024;
+const MAX_BROWSE_EXTENSION_BYTES: usize = 256;
+const MAX_BROWSE_REASON_BYTES: usize = 4 * 1024;
+const MAX_BROWSE_FOLDER_BYTES: usize = 4 * 1024;
 const MAX_MESSAGE_RECORDS: usize = 500;
 const MAX_MESSAGE_USERNAME_BYTES: usize = 1024;
 const MAX_MESSAGE_BODY_BYTES: usize = 64 * 1024;
@@ -3215,12 +3221,12 @@ impl BrowseEntry {
             .map(str::to_owned)
             .unwrap_or_else(|| filename.split('.').next_back().unwrap_or("").to_owned());
         Some(Self {
-            filename,
+            filename: truncate_utf8_bytes(filename, MAX_BROWSE_FILENAME_BYTES),
             size: file
                 .get("size")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
-            extension,
+            extension: truncate_utf8_bytes(extension, MAX_BROWSE_EXTENSION_BYTES),
         })
     }
 
@@ -3346,19 +3352,26 @@ impl BrowseStore {
         let mut next_indirect_token = 1_u32;
         let mut updated_at = unix_timestamp();
         let mut seen_usernames = std::collections::HashSet::new();
+        let mut total_entries = 0_usize;
         let records = records
             .into_iter()
+            .map(|mut record| {
+                record.username = bounded_browse_username(&record.username);
+                record
+            })
             .filter(|record| seen_usernames.insert(record.username.clone()))
             .take(MAX_BROWSE_RECORDS)
             .map(|record| {
+                let remaining = MAX_TOTAL_BROWSE_ENTRIES.saturating_sub(total_entries);
                 let entries = serde_json::from_str::<serde_json::Value>(&record.entries_json)
                     .ok()
                     .and_then(|value| value.as_array().cloned())
                     .unwrap_or_default()
                     .iter()
                     .filter_map(|entry| BrowseEntry::from_json_file(entry, None))
-                    .take(MAX_BROWSE_ENTRIES_PER_USER)
+                    .take(MAX_BROWSE_ENTRIES_PER_USER.min(remaining))
                     .collect::<Vec<_>>();
+                total_entries = total_entries.saturating_add(entries.len());
                 let indirect_token = record
                     .indirect_token
                     .and_then(|token| u32::try_from(token).ok());
@@ -3375,8 +3388,12 @@ impl BrowseStore {
                     username: record.username,
                     status: persisted_browse_status(&record.status),
                     entries,
-                    reason: record.reason,
-                    folder: record.folder,
+                    reason: record
+                        .reason
+                        .map(|reason| truncate_utf8_bytes(reason, MAX_BROWSE_REASON_BYTES)),
+                    folder: record
+                        .folder
+                        .map(|folder| truncate_utf8_bytes(folder, MAX_BROWSE_FOLDER_BYTES)),
                     indirect_token,
                     requested_at,
                     updated_at: record_updated_at,
@@ -3409,6 +3426,7 @@ impl BrowseStore {
     }
 
     fn request(&mut self, username: String) -> Option<BrowseRecord> {
+        let username = bounded_browse_username(&username);
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3443,6 +3461,8 @@ impl BrowseStore {
     }
 
     fn request_folder(&mut self, username: String, folder: String) -> Option<BrowseRecord> {
+        let username = bounded_browse_username(&username);
+        let folder = truncate_utf8_bytes(folder, MAX_BROWSE_FOLDER_BYTES);
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3477,6 +3497,7 @@ impl BrowseStore {
     }
 
     fn requested_folder(&self, username: &str) -> Option<Option<String>> {
+        let username = bounded_browse_username(username);
         self.records
             .iter()
             .find(|record| record.username == username && record.status == "requested")
@@ -3484,6 +3505,8 @@ impl BrowseStore {
     }
 
     fn mark_indirect_pending(&mut self, username: &str, reason: String) -> Option<u32> {
+        let username = bounded_browse_username(username);
+        let reason = truncate_utf8_bytes(reason, MAX_BROWSE_REASON_BYTES);
         let index = self
             .records
             .iter()
@@ -3500,6 +3523,7 @@ impl BrowseStore {
     }
 
     fn pending_indirect(&self, username: &str, token: u32) -> Option<Option<String>> {
+        let username = bounded_browse_username(username);
         self.records
             .iter()
             .find(|record| {
@@ -3511,6 +3535,7 @@ impl BrowseStore {
     }
 
     fn fail_indirect(&mut self, token: u32, reason: String) -> Option<BrowseRecord> {
+        let reason = truncate_utf8_bytes(reason, MAX_BROWSE_REASON_BYTES);
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|record| {
             record.status == "indirect_pending" && record.indirect_token == Some(token)
@@ -3528,6 +3553,8 @@ impl BrowseStore {
         entries: Vec<BrowseEntry>,
         complete: bool,
     ) -> Option<BrowseRecord> {
+        let username = bounded_browse_username(&username);
+        let total_entries = self.total_entries();
         let now = unix_timestamp();
         let status = if complete { "ready" } else { "partial" };
         if let Some(record) = self
@@ -3536,10 +3563,16 @@ impl BrowseStore {
             .find(|record| record.username == username)
         {
             record.status = status;
-            let remaining = self
+            let per_user_remaining = self
                 .max_entries_per_user
                 .saturating_sub(record.entries.len());
-            record.entries.extend(entries.into_iter().take(remaining));
+            let aggregate_remaining = MAX_TOTAL_BROWSE_ENTRIES.saturating_sub(total_entries);
+            record.entries.extend(
+                entries
+                    .into_iter()
+                    .take(per_user_remaining.min(aggregate_remaining))
+                    .map(bounded_browse_entry),
+            );
             record.reason = None;
             record.indirect_token = None;
             record.updated_at = now;
@@ -3551,7 +3584,11 @@ impl BrowseStore {
         }
         let entries = entries
             .into_iter()
-            .take(self.max_entries_per_user)
+            .take(
+                self.max_entries_per_user
+                    .min(MAX_TOTAL_BROWSE_ENTRIES.saturating_sub(total_entries)),
+            )
+            .map(bounded_browse_entry)
             .collect();
         let record = BrowseRecord {
             username,
@@ -3569,6 +3606,8 @@ impl BrowseStore {
     }
 
     fn fail(&mut self, username: String, reason: String) -> Option<BrowseRecord> {
+        let username = bounded_browse_username(&username);
+        let reason = truncate_utf8_bytes(reason, MAX_BROWSE_REASON_BYTES);
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3601,6 +3640,8 @@ impl BrowseStore {
     }
 
     fn cancel(&mut self, username: String, reason: String) -> Option<BrowseRecord> {
+        let username = bounded_browse_username(&username);
+        let reason = truncate_utf8_bytes(reason, MAX_BROWSE_REASON_BYTES);
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3641,10 +3682,15 @@ impl BrowseStore {
     }
 
     fn get(&self, username: &str) -> Option<BrowseRecord> {
+        let username = bounded_browse_username(username);
         self.records
             .iter()
             .find(|record| record.username == username)
             .cloned()
+    }
+
+    fn total_entries(&self) -> usize {
+        self.records.iter().map(|record| record.entries.len()).sum()
     }
 
     fn json(&self, query: Option<&str>) -> String {
@@ -3734,6 +3780,16 @@ impl BrowseStore {
             self.updated_at
         )
     }
+}
+
+fn bounded_browse_username(username: &str) -> String {
+    truncate_utf8_bytes(username.to_owned(), MAX_BROWSE_USERNAME_BYTES)
+}
+
+fn bounded_browse_entry(mut entry: BrowseEntry) -> BrowseEntry {
+    entry.filename = truncate_utf8_bytes(entry.filename, MAX_BROWSE_FILENAME_BYTES);
+    entry.extension = truncate_utf8_bytes(entry.extension, MAX_BROWSE_EXTENSION_BYTES);
+    entry
 }
 
 #[derive(Clone, Debug)]
@@ -25732,11 +25788,16 @@ fn parse_shared_file_list_section(
                 let _value = reader.read_u32_le().map_err(|error| error.to_string())?;
             }
             if code == 1 {
-                entries.push(BrowseEntry {
+                if entries.len() >= MAX_BROWSE_ENTRIES_PER_USER {
+                    return Err(format!(
+                        "shared file list exceeds {MAX_BROWSE_ENTRIES_PER_USER} entries"
+                    ));
+                }
+                entries.push(bounded_browse_entry(BrowseEntry {
                     filename: join_virtual_path(&folder, &filename),
                     size,
                     extension,
-                });
+                }));
             }
         }
     }
@@ -25766,11 +25827,16 @@ fn parse_folder_file_list_payload(
             let _value = reader.read_u32_le().map_err(|error| error.to_string())?;
         }
         if code == 1 {
-            entries.push(BrowseEntry {
+            if entries.len() >= MAX_BROWSE_ENTRIES_PER_USER {
+                return Err(format!(
+                    "folder file list exceeds {MAX_BROWSE_ENTRIES_PER_USER} entries"
+                ));
+            }
+            entries.push(bounded_browse_entry(BrowseEntry {
                 filename: join_virtual_path(folder, &filename),
                 size,
                 extension,
-            });
+            }));
         }
     }
     reader.finish().map_err(|error| error.to_string())?;
@@ -35350,6 +35416,54 @@ mod tests {
         assert_eq!(browse.records.len(), 1);
     }
 
+    #[test]
+    fn browse_store_bounds_text_and_aggregate_entries() {
+        let oversized_username = "é".repeat(super::MAX_BROWSE_USERNAME_BYTES);
+        let mut browse = super::BrowseStore::with_limits(2, super::MAX_TOTAL_BROWSE_ENTRIES + 1);
+        let requested = browse.request(oversized_username.clone()).unwrap();
+        assert!(requested.username.len() <= super::MAX_BROWSE_USERNAME_BYTES);
+        browse.request("other".to_owned()).unwrap();
+
+        let oversized_entry = super::BrowseEntry {
+            filename: "f".repeat(super::MAX_BROWSE_FILENAME_BYTES + 1),
+            size: 1,
+            extension: "e".repeat(super::MAX_BROWSE_EXTENSION_BYTES + 1),
+        };
+        let record = browse
+            .add_entries(oversized_username.clone(), vec![oversized_entry], false)
+            .unwrap();
+        assert_eq!(
+            record.entries[0].filename.len(),
+            super::MAX_BROWSE_FILENAME_BYTES
+        );
+        assert_eq!(
+            record.entries[0].extension.len(),
+            super::MAX_BROWSE_EXTENSION_BYTES
+        );
+
+        browse.records[0].entries = (0..super::MAX_TOTAL_BROWSE_ENTRIES)
+            .map(|index| super::BrowseEntry {
+                filename: format!("file-{index}"),
+                size: 1,
+                extension: String::new(),
+            })
+            .collect();
+        let record = browse
+            .add_entries(
+                "other".to_owned(),
+                vec![super::BrowseEntry {
+                    filename: "rejected".to_owned(),
+                    size: 1,
+                    extension: String::new(),
+                }],
+                true,
+            )
+            .unwrap();
+        assert!(record.entries.is_empty());
+        assert_eq!(browse.total_entries(), super::MAX_TOTAL_BROWSE_ENTRIES);
+        assert!(browse.get(&oversized_username).is_some());
+    }
+
     #[tokio::test]
     async fn user_browse_api_requests_and_ingests_entries() {
         let (state, mut receiver) = test_state();
@@ -35845,6 +35959,26 @@ mod tests {
         assert_eq!(parsed[0].size, 123);
         assert_eq!(parsed[0].extension, "flac");
         assert_eq!(parsed[1].filename, "Loose.mp3");
+    }
+
+    #[test]
+    fn shared_file_list_payload_rejects_excessive_entries() {
+        let entry_count = super::MAX_BROWSE_ENTRIES_PER_USER + 1;
+        let mut writer = super::Writer::new();
+        writer.write_u32_le(1);
+        writer.write_string("folder").unwrap();
+        writer.write_u32_le(u32::try_from(entry_count).unwrap());
+        for index in 0..entry_count {
+            writer.write_u8(1);
+            writer.write_string(&format!("file-{index}")).unwrap();
+            writer.write_u64_le(1);
+            writer.write_string("").unwrap();
+            writer.write_u32_le(0);
+        }
+        let payload = super::compress_zlib_payload(&writer.into_inner()).unwrap();
+
+        let error = super::parse_shared_file_list_payload(&payload).unwrap_err();
+        assert!(error.contains("exceeds"), "{error}");
     }
 
     #[test]
