@@ -649,14 +649,7 @@ fn default_blocks_webhook_ip(ip: IpAddr) -> bool {
 
 fn sanitized_webhook_url_for_log(url: &str) -> String {
     match reqwest::Url::parse(url) {
-        Ok(parsed) => {
-            let host = parsed.host_str().unwrap_or("<unknown>");
-            let port = parsed
-                .port()
-                .map(|port| format!(":{port}"))
-                .unwrap_or_default();
-            format!("{}://{}{}{}", parsed.scheme(), host, port, parsed.path())
-        }
+        Ok(parsed) => parsed.origin().ascii_serialization(),
         Err(_) => "<invalid webhook url>".to_string(),
     }
 }
@@ -927,10 +920,12 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitized_webhook_url_omits_query() {
+    fn test_sanitized_webhook_url_omits_secret_path_and_query() {
         assert_eq!(
-            sanitized_webhook_url_for_log("https://example.com/hook/path?token=secret"),
-            "https://example.com/hook/path"
+            sanitized_webhook_url_for_log(
+                "https://example.com/services/secret-path?token=secret-query"
+            ),
+            "https://example.com"
         );
     }
 

@@ -128,11 +128,7 @@ pub fn log_request(config: &LogConfig, log: &HttpRequestLog) {
         return;
     }
 
-    let query_str = log
-        .query
-        .as_ref()
-        .map(|_| "?<redacted>")
-        .unwrap_or_default();
+    let query_str = redacted_query_suffix(log.query.as_deref());
     eprintln!(
         "[{}] {} {} {} (from {})",
         log.timestamp,
@@ -208,12 +204,7 @@ pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
         _ => "37",         // white
     };
 
-    let query_str = log
-        .request
-        .query
-        .as_ref()
-        .map(|q| format!("?{}", q))
-        .unwrap_or_default();
+    let query_str = redacted_query_suffix(log.request.query.as_deref());
 
     let error_str = log
         .response
@@ -246,12 +237,7 @@ pub fn response_level(status_code: u16) -> LogLevel {
 }
 
 pub fn transaction_summary(log: &HttpTransactionLog) -> String {
-    let query_str = log
-        .request
-        .query
-        .as_ref()
-        .map(|_| "?<redacted>")
-        .unwrap_or_default();
+    let query_str = redacted_query_suffix(log.request.query.as_deref());
     let error_str = log
         .response
         .error
@@ -268,6 +254,14 @@ pub fn transaction_summary(log: &HttpTransactionLog) -> String {
         log.response.duration_ms,
         error_str
     )
+}
+
+fn redacted_query_suffix(query: Option<&str>) -> &'static str {
+    if query.is_some() {
+        "?<redacted>"
+    } else {
+        ""
+    }
 }
 
 /// Start timing measurement
@@ -301,6 +295,31 @@ mod tests {
         };
         assert!(config.log_requests);
         assert!(config.log_responses);
+    }
+
+    #[test]
+    fn transaction_summary_redacts_query_credentials() {
+        let summary = transaction_summary(&HttpTransactionLog {
+            request: HttpRequestLog {
+                method: "GET".to_owned(),
+                path: "/api/integrations/spotify/callback".to_owned(),
+                query: Some("code=oauth-secret&state=state-secret".to_owned()),
+                remote_addr: None,
+                timestamp: "fixture".to_owned(),
+            },
+            response: HttpResponseLog {
+                status_code: 200,
+                content_length: 2,
+                duration_ms: 1,
+                error: None,
+            },
+        });
+        assert_eq!(
+            summary,
+            "GET /api/integrations/spotify/callback?<redacted> 200 2 bytes in 1ms"
+        );
+        assert!(!summary.contains("oauth-secret"));
+        assert!(!summary.contains("state-secret"));
     }
 
     #[test]
