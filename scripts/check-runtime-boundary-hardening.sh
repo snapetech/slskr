@@ -85,6 +85,7 @@ for anchor in \
   'bounded SongID run history must leave an available u64 id' \
   'open_shared_local_file(state, &shared_file.local_path)' \
   'options.custom_flags(libc::O_NOFOLLOW)' \
+  'open_download_file(&path)' \
   'browse_indirect_tokens_wrap_without_aliasing_pending_records' \
   'bounded browse store must leave an available u32 token' \
   'MAX_INCOMING_CONNECTION_TASKS' \

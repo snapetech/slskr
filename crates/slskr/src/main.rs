@@ -19919,6 +19919,19 @@ fn ensure_scoped_download_path(state_dir: &Path, local_path: &str) -> Result<Pat
     Ok(path)
 }
 
+fn open_download_file(path: &Path) -> Result<fs::File, String> {
+    let mut options = fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    options
+        .open(path)
+        .map_err(|error| format!("download file open failed: {error}"))
+}
+
 async fn transfer_capacity_available(state: &AppState, excluding_id: Option<u64>) -> bool {
     if state.config.transfer_max_active == 0 {
         return false;
@@ -21306,9 +21319,14 @@ async fn download_file_transfer_with_connection(
         .size
         .ok_or_else(|| "download size is required before file transfer".to_owned())?;
     let path = ensure_scoped_download_path(&state.config.state_dir, local_path)?;
-    let offset = fs::metadata(&path)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
+    let mut file = open_download_file(&path)?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("download file metadata failed: {error}"))?;
+    if !metadata.is_file() {
+        return Err("download path is not a regular file".to_owned());
+    }
+    let offset = metadata.len();
     if offset > size {
         return Err(format!(
             "local resume offset {offset} exceeds transfer size {size}"
@@ -21316,11 +21334,6 @@ async fn download_file_transfer_with_connection(
     }
     let remaining = usize::try_from(size - offset)
         .map_err(|_| "download remaining size is too large".to_owned())?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|error| format!("download file open failed: {error}"))?;
     let bytes_received =
         download_file_with_progress(state, transfer, connection, offset, remaining, &mut file)
             .await?;
@@ -30808,6 +30821,7 @@ mod tests {
         let error = super::ensure_scoped_download_path(&state_dir, &path.display().to_string())
             .expect_err("symlink rejected");
         assert!(error.contains("must not be a symlink"));
+        assert!(super::open_download_file(&path).is_err());
 
         let _ = std::fs::remove_dir_all(state_dir);
     }
