@@ -2898,7 +2898,7 @@ impl ListenerSnapshot {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct UserRecord {
     username: String,
     watched: bool,
@@ -11753,6 +11753,13 @@ async fn route_http_request_with_headers(
                 }
             };
             let mut users = state.users.write().await;
+            let previous_updated_at = users.updated_at;
+            let bounded_username = bounded_user_username(&username);
+            let previous_record = users
+                .records
+                .iter()
+                .find(|record| record.username == bounded_username)
+                .cloned();
             let Some(record) = users.watch(username.clone()) else {
                 return Ok(routing::service_unavailable_response(
                     "user watch capacity is full",
@@ -11760,7 +11767,33 @@ async fn route_http_request_with_headers(
             };
             drop(users);
 
-            persist_user_projection(state, &record).await;
+            if let Err(error) = persist_user_projection(state, &record).await {
+                let mut users = state.users.write().await;
+                match previous_record {
+                    Some(previous) => {
+                        if let Some(current) = users
+                            .records
+                            .iter_mut()
+                            .find(|current| {
+                                current.username == bounded_username && **current == record
+                            })
+                        {
+                            *current = previous;
+                        }
+                    }
+                    None => users.records.retain(|current| {
+                        current.username != bounded_username || *current != record
+                    }),
+                }
+                users.updated_at = users
+                    .records
+                    .iter()
+                    .map(|current| current.updated_at)
+                    .max()
+                    .unwrap_or(previous_updated_at);
+                drop(users);
+                return Ok(routing::service_unavailable_response(&error));
+            }
             session_command_permit.send(SessionCommand::WatchUser(username));
 
             Ok(routing::created_response(record.json()))
@@ -11789,11 +11822,38 @@ async fn route_http_request_with_headers(
                 }
             };
             let mut users = state.users.write().await;
+            let previous_updated_at = users.updated_at;
+            let previous_record = users
+                .records
+                .iter()
+                .find(|record| record.username == bounded_user_username(username))
+                .cloned();
 
             if let Some(record) = users.unwatch(username) {
                 drop(users);
 
-                persist_user_projection(state, &record).await;
+                if let Err(error) = persist_user_projection(state, &record).await {
+                    let mut users = state.users.write().await;
+                    if let Some(previous) = previous_record {
+                        if let Some(current) = users
+                            .records
+                            .iter_mut()
+                            .find(|current| {
+                                current.username == previous.username && **current == record
+                            })
+                        {
+                            *current = previous;
+                        }
+                    }
+                    users.updated_at = users
+                        .records
+                        .iter()
+                        .map(|current| current.updated_at)
+                        .max()
+                        .unwrap_or(previous_updated_at);
+                    drop(users);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 session_command_permit
                     .send(SessionCommand::UnwatchUser(username.to_string()));
 
@@ -22153,7 +22213,9 @@ async fn project_server_message(
                 users.apply_watched_user(user)
             };
             if let Some(record) = record {
-                persist_user_projection(state, &record).await;
+                if let Err(error) = persist_user_projection(state, &record).await {
+                    update_session(state, |snapshot| snapshot.last_error = Some(error)).await;
+                }
             }
         }
         ServerMessage::GetUserStatusResponse(status) => {
@@ -22162,7 +22224,9 @@ async fn project_server_message(
                 users.apply_status(status)
             };
             if let Some(record) = record {
-                persist_user_projection(state, &record).await;
+                if let Err(error) = persist_user_projection(state, &record).await {
+                    update_session(state, |snapshot| snapshot.last_error = Some(error)).await;
+                }
             }
         }
         ServerMessage::GetUserStats { username, stats } => {
@@ -22171,7 +22235,9 @@ async fn project_server_message(
                 users.apply_stats(username.clone(), stats)
             };
             if let Some(record) = record {
-                persist_user_projection(state, &record).await;
+                if let Err(error) = persist_user_projection(state, &record).await {
+                    update_session(state, |snapshot| snapshot.last_error = Some(error)).await;
+                }
             }
         }
         ServerMessage::CheckPrivilegesResponse { seconds } => {
@@ -23768,9 +23834,9 @@ async fn persist_wishlist_item_delete(state: &AppState, id: &str) {
     }
 }
 
-async fn persist_user_projection(state: &AppState, record: &UserRecord) {
+async fn persist_user_projection(state: &AppState, record: &UserRecord) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::UserProjectionRecord {
         username: record.username.clone(),
@@ -23782,7 +23848,10 @@ async fn persist_user_projection(state: &AppState, record: &UserRecord) {
         directory_count: record.directory_count.map(i64::from),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_user_projection(&persisted).await;
+    db.upsert_user_projection(&persisted)
+        .await
+        .map_err(|error| format!("user projection persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_contact(state: &AppState, record: &ContactRecord) {
@@ -35081,6 +35150,58 @@ mod tests {
         let users = state.users.read().await;
         assert_eq!(users.records.len(), 1);
         assert!(users.records[0].watched);
+    }
+
+    #[tokio::test]
+    async fn user_watch_routes_roll_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        db.close_for_test().await;
+        let watched = super::route_http_request(
+            "POST",
+            "/api/v0/users/watch",
+            None,
+            r#"{"username":"friend"}"#,
+            &state,
+        )
+        .await
+        .expect("failed watch persistence response");
+        assert_eq!(watched.status, "503 Service Unavailable");
+        assert!(watched.body.contains("user projection persistence failed"));
+        assert!(state.users.read().await.records.is_empty());
+        assert!(receiver.try_recv().is_err());
+
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, mut receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        state
+            .users
+            .write()
+            .await
+            .watch("friend".to_owned())
+            .unwrap();
+        db.close_for_test().await;
+        let unwatched =
+            super::route_http_request("DELETE", "/api/v2/users/friend/watch", None, "", &state)
+                .await
+                .expect("failed unwatch persistence response");
+        assert_eq!(unwatched.status, "503 Service Unavailable");
+        assert!(unwatched
+            .body
+            .contains("user projection persistence failed"));
+        assert!(state.users.read().await.records[0].watched);
+        assert!(receiver.try_recv().is_err());
     }
 
     #[tokio::test]
