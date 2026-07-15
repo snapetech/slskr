@@ -2933,10 +2933,14 @@ impl ListenerSnapshot {
             self.unsupported_peer_messages,
             self.errors,
             json_option(self.last_event.as_deref()),
-            json_option(self.last_error.as_deref()),
+            json_option(public_listener_error(self.last_error.as_deref())),
             self.updated_at
         )
     }
+}
+
+fn public_listener_error(error: Option<&str>) -> Option<&'static str> {
+    error.map(|_| "listener unavailable")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19084,7 +19088,7 @@ async fn native_compat_response(method: &str, path: &str, state: &AppState) -> H
             "regularAccepts": listeners.regular_accepts,
             "obfuscatedAccepts": listeners.obfuscated_accepts,
             "errors": listeners.errors,
-            "lastError": listeners.last_error,
+            "lastError": public_listener_error(listeners.last_error.as_deref()),
             "updated_at": listeners.updated_at,
         })],
         "solid" => collections
@@ -29488,6 +29492,23 @@ mod tests {
         assert!(!json.contains("/private"));
         assert!(!json.contains("parse failed"));
         assert!(!json.contains("open failed"));
+    }
+
+    #[tokio::test]
+    async fn listener_errors_redact_internal_details() {
+        let (state, _receiver) = test_state();
+        state.listeners.write().await.last_error =
+            Some("regular listener bind failed at 10.0.0.8:2234: permission denied".to_owned());
+
+        let response = super::route_http_request("GET", "/api/v0/listeners", None, "", &state)
+            .await
+            .expect("listener response");
+        assert_eq!(response.status, "200 OK");
+        assert!(response
+            .body
+            .contains("\"last_error\":\"listener unavailable\""));
+        assert!(!response.body.contains("10.0.0.8"));
+        assert!(!response.body.contains("permission denied"));
     }
 
     #[tokio::test]
