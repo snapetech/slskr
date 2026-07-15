@@ -54,6 +54,8 @@ for anchor in \
   'collections_bound_nested_state_and_allocate_unique_item_ids' \
   'MAX_WISHLIST_ITEMS' \
   'wishlist_bounds_items_and_allocates_unique_ids' \
+  'MAX_LIBRARY_HEALTH_SCANS' \
+  'library_health_scans_are_bounded_snapshots_with_unique_ids' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \

@@ -144,6 +144,7 @@ const MAX_SHARE_GROUP_MEMBERS: usize = 4_096;
 const MAX_COLLECTIONS: usize = 256;
 const MAX_COLLECTION_ITEMS: usize = 10_000;
 const MAX_WISHLIST_ITEMS: usize = 10_000;
+const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -6384,6 +6385,30 @@ struct LibraryItemRecord {
     created_at: u64,
 }
 
+#[derive(Clone, Debug)]
+struct LibraryHealthScanRecord {
+    id: String,
+    library_path: String,
+    items: usize,
+    issues: Vec<serde_json::Value>,
+    updated_at: u64,
+}
+
+impl LibraryHealthScanRecord {
+    fn json(&self) -> String {
+        serde_json::json!({
+            "id": self.id,
+            "status": "completed",
+            "libraryPath": self.library_path,
+            "items": self.items,
+            "issues_found": self.issues.len(),
+            "issues": self.issues,
+            "updated_at": self.updated_at,
+        })
+        .to_string()
+    }
+}
+
 impl LibraryItemRecord {
     fn json(&self) -> String {
         format!(
@@ -6401,6 +6426,8 @@ impl LibraryItemRecord {
 struct LibraryStore {
     records: Vec<LibraryItemRecord>,
     next_id: u64,
+    health_scans: Vec<LibraryHealthScanRecord>,
+    next_health_scan_id: u64,
     updated_at: u64,
 }
 
@@ -6409,6 +6436,8 @@ impl LibraryStore {
         Self {
             records: Vec::new(),
             next_id: 1,
+            health_scans: Vec::new(),
+            next_health_scan_id: 1,
             updated_at: unix_timestamp(),
         }
     }
@@ -6440,8 +6469,31 @@ impl LibraryStore {
         Self {
             records,
             next_id,
+            health_scans: Vec::new(),
+            next_health_scan_id: 1,
             updated_at,
         }
+    }
+
+    fn create_health_scan(&mut self, library_path: String) -> Option<LibraryHealthScanRecord> {
+        let next_id = self.next_health_scan_id.checked_add(1)?;
+        let record = LibraryHealthScanRecord {
+            id: format!("scan-{}", self.next_health_scan_id),
+            library_path,
+            items: self.records.len(),
+            issues: self.health_issues(),
+            updated_at: self.updated_at,
+        };
+        self.next_health_scan_id = next_id;
+        if self.health_scans.len() == MAX_LIBRARY_HEALTH_SCANS {
+            self.health_scans.remove(0);
+        }
+        self.health_scans.push(record.clone());
+        Some(record)
+    }
+
+    fn health_scan(&self, id: &str) -> Option<LibraryHealthScanRecord> {
+        self.health_scans.iter().find(|scan| scan.id == id).cloned()
     }
 
     fn create(&mut self, artist: String, title: String, kind: String) -> LibraryItemRecord {
@@ -12423,40 +12475,32 @@ async fn route_http_request_with_headers(
             drop(library);
             Ok(routing::ok_response(json))
         }
-        ("GET", path) if path.starts_with("/api/library/health/scans/") && path.len() > 27 => {
-            let scan_id = &path[27..];
+        ("GET", path)
+            if path.starts_with("/api/library/health/scans/")
+                && path.len() > "/api/library/health/scans/".len() =>
+        {
+            let scan_id = path
+                .strip_prefix("/api/library/health/scans/")
+                .expect("route guard requires the scan prefix");
             let library = state.library.read().await;
-            let issues = library.health_issues();
-            let body = serde_json::json!({
-                "id": scan_id,
-                "status": "completed",
-                "issues_found": issues.len(),
-                "issues": issues,
-                "updated_at": library.updated_at,
-            })
-            .to_string();
+            let scan = library.health_scan(scan_id);
             drop(library);
-            Ok(routing::ok_response(body))
+            Ok(scan
+                .map(|record| routing::ok_response(record.json()))
+                .unwrap_or_else(routing::not_found_response))
         }
         ("POST", "/api/library/health/scans") => {
             let library_path = extract_json_string_field(body, "libraryPath")
                 .or_else(|| extract_json_string_field(body, "path"))
                 .unwrap_or_default();
-            let library = state.library.read().await;
-            let issues = library.health_issues();
-            let scan_id = format!("scan-{}", unix_timestamp());
-            let response = serde_json::json!({
-                "id": scan_id,
-                "status": "completed",
-                "libraryPath": library_path,
-                "items": library.records.len(),
-                "issues_found": issues.len(),
-                "issues": issues,
-                "updated_at": library.updated_at,
-            })
-            .to_string();
+            let mut library = state.library.write().await;
+            let scan = library.create_health_scan(library_path);
             drop(library);
-            Ok(routing::accepted_response(response))
+            Ok(scan
+                .map(|record| routing::accepted_response(record.json()))
+                .unwrap_or_else(|| {
+                    routing::service_unavailable_response("library health scan id space exhausted")
+                }))
         }
         ("POST", "/api/library/health/issues/fix") => {
             let mut library = state.library.write().await;
@@ -31530,6 +31574,27 @@ mod tests {
         assert!(!wishlist.can_add_items(1));
     }
 
+    #[test]
+    fn library_health_scans_are_bounded_snapshots_with_unique_ids() {
+        let mut library = super::LibraryStore::new();
+        library.create("Artist".to_owned(), "Title".to_owned(), String::new());
+        let first = library.create_health_scan("/music".to_owned()).unwrap();
+        let second = library.create_health_scan("/music".to_owned()).unwrap();
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.issues.len(), 1);
+
+        library.fix_health_issues();
+        assert_eq!(library.health_scan(&first.id).unwrap().issues.len(), 1);
+        for _ in 2..super::MAX_LIBRARY_HEALTH_SCANS {
+            library.create_health_scan("/music".to_owned()).unwrap();
+        }
+        assert_eq!(library.health_scans.len(), super::MAX_LIBRARY_HEALTH_SCANS);
+        library.create_health_scan("/music".to_owned()).unwrap();
+        assert_eq!(library.health_scans.len(), super::MAX_LIBRARY_HEALTH_SCANS);
+        assert!(library.health_scan(&first.id).is_none());
+        assert!(library.health_scan("scan-does-not-exist").is_none());
+    }
+
     #[tokio::test]
     async fn compatibility_projections_use_local_state_for_recommendations_and_activity() {
         let (state, _receiver) = test_state();
@@ -31829,6 +31894,28 @@ mod tests {
         let scan_json = serde_json::from_str::<serde_json::Value>(&scan.body).unwrap();
         assert_eq!(scan_json["libraryPath"], "/music");
         assert_eq!(scan_json["issues_found"], 1);
+        let second_scan = super::route_http_request(
+            "POST",
+            "/api/library/health/scans",
+            None,
+            r#"{"libraryPath":"/music"}"#,
+            &state,
+        )
+        .await
+        .expect("second library scan");
+        let second_scan_json =
+            serde_json::from_str::<serde_json::Value>(&second_scan.body).unwrap();
+        assert_ne!(scan_json["id"], second_scan_json["id"]);
+        let missing_scan = super::route_http_request(
+            "GET",
+            "/api/library/health/scans/scan-does-not-exist",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing library scan");
+        assert_eq!(missing_scan.status, "404 Not Found");
         let scan_detail = super::route_http_request(
             "GET",
             &format!(
@@ -31852,6 +31939,21 @@ mod tests {
         assert_eq!(fixed_json["fixed"], 1);
         assert_eq!(fixed_json["issues"][0]["type"], "missing_kind");
         assert_eq!(fixed_json["remaining"], 0);
+        let stored_scan = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/library/health/scans/{}",
+                scan_json["id"].as_str().unwrap()
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("stored library scan snapshot");
+        let stored_scan_json =
+            serde_json::from_str::<serde_json::Value>(&stored_scan.body).unwrap();
+        assert_eq!(stored_scan_json["issues_found"], 1);
 
         let lidarr_import = super::route_http_request(
             "POST",
