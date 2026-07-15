@@ -44,6 +44,7 @@ The current app surface preserves the following compatibility concepts:
 - mesh and service-fabric status projections for DHT, mesh peers, hashes/catalog sequence state, sync/backfill activity, transfer rates, and NAT/overlay health, plus an executable verified multi-source range swarm with pollable jobs
 - one pod-friendly daemon process that owns the Soulseek session, HTTP API, WebUI, event stream, static assets, share scanner, transfer engine, runtime telemetry, and integration callbacks
 - versioned `/api/v0/*` APIs plus selected compatibility aliases for existing client and automation habits
+- short-lived local, direct Soulseek peer, and SHA-256-pinned mesh-range audio preview byte streams
 - WebUI surfaces for search, transfers, uploads, rooms, private messages, users, contacts, browse, collections, share groups, shared-with-me views, playlist intake, integrations, system state, and player/media tools
 - live interoperability scripts and fixtures that compare slskr behavior against slskd, Soulseek.NET-family clients, and other compatible runtimes
 

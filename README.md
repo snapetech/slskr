@@ -105,6 +105,12 @@ then verifies and atomically publishes the confined output. Ordinary Soulseek
 peers use sequential transfer/failover because Soulseek does not support
 harmless bounded range cancellation.
 
+Short-lived peer and mesh preview tickets stream audio to the browser without
+creating a normal download. Peer previews negotiate Soulseek directly and do
+not write a local file. Mesh previews can redeem a hash-pinned HTTP range
+source; bytes are exposed only after exact-size and SHA-256 verification, and
+the confined staging file is removed immediately afterward.
+
 ### Shares And Browse
 
 Share roots are indexed at startup or by rescan. The catalog uses virtual share

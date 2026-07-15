@@ -121,6 +121,7 @@ const SHARE_SCAN_WORKER_ERROR: &str = "share scan worker failed";
 const MAX_WEBSOCKET_CONNECTIONS: usize = 32;
 const MAX_EXTERNAL_VISUALIZER_PROCESSES: usize = 4;
 const MAX_PREVIEW_STREAMS: usize = 4;
+const MAX_PREVIEW_STREAM_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_PEER_ENDPOINT_RECORDS: usize = 1_024;
 const PEER_ENDPOINT_TTL_SECONDS: u64 = 300;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
@@ -21403,6 +21404,9 @@ async fn create_preview_stream_ticket(
         .or_else(|| extract_json_string_field(body, "peer_username"))
         .or_else(|| extract_json_string_field(body, "peerId"));
     let requested_size = extract_json_u64_field(body, "size").unwrap_or(0);
+    if requested_size > MAX_PREVIEW_STREAM_BYTES {
+        return Err("preview stream size exceeds the 2 GiB limit".to_owned());
+    }
     let source_url = extract_json_string_field(body, "sourceUrl")
         .or_else(|| extract_json_string_field(body, "source_url"));
     let source_authorization = extract_json_string_field(body, "sourceAuthorization")
@@ -21472,11 +21476,10 @@ async fn create_preview_stream_ticket(
     });
     let search_result = searches.records.iter().find_map(|record| {
         record.results.iter().find(|result| {
-            result.filename == filename
-                || content_id.as_deref() == Some(result.filename.as_str())
-                || peer_username
+            (result.filename == filename || content_id.as_deref() == Some(result.filename.as_str()))
+                && peer_username
                     .as_deref()
-                    .is_some_and(|peer| result.peer_username.as_deref() == Some(peer))
+                    .is_none_or(|peer| result.peer_username.as_deref() == Some(peer))
         })
     });
 
@@ -24707,6 +24710,9 @@ async fn open_remote_peer_preview_stream(
             return Err("peer preview negotiation token did not match".to_owned());
         }
     };
+    if length > MAX_PREVIEW_STREAM_BYTES {
+        return Err("peer preview size exceeds the 2 GiB limit".to_owned());
+    }
     let connection = connect_file_transfer_preferred(state, &address).await?;
     Ok(Some(PeerPreviewStream {
         connection,
@@ -35810,6 +35816,40 @@ mod tests {
     #[tokio::test]
     async fn peer_and_mesh_preview_stream_tickets_are_short_lived() {
         let (state, _receiver) = test_state();
+
+        {
+            let mut searches = state.searches.write().await;
+            searches
+                .create(None, "preview".to_owned(), "global", None, Vec::new(), 300)
+                .expect("create preview search");
+            searches
+                .records
+                .last_mut()
+                .unwrap()
+                .results
+                .push(super::SearchResultEntry {
+                    peer_username: Some("peer".to_owned()),
+                    filename: "Remote/Other.flac".to_owned(),
+                    size: 42,
+                    extension: "flac".to_owned(),
+                    locked: false,
+                    slot_free: Some(true),
+                    average_speed: Some(1),
+                    queue_length: Some(0),
+                });
+        }
+
+        let unmatched = super::route_http_request(
+            "POST",
+            "/api/v0/peer-streams/tickets",
+            None,
+            r#"{"filename":"Remote/Requested.flac","username":"peer"}"#,
+            &state,
+        )
+        .await
+        .expect("unmatched peer ticket");
+        let unmatched_json = serde_json::from_str::<serde_json::Value>(&unmatched.body).unwrap();
+        assert_eq!(unmatched_json["filename"], "Remote/Requested.flac");
 
         let peer_ticket = super::route_http_request(
             "POST",

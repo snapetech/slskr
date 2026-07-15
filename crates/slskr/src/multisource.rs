@@ -939,10 +939,8 @@ mod tests {
     async fn single_mesh_source_hash_failure_removes_staging_file() {
         let content = Arc::new(b"untrusted-mesh-bytes".to_vec());
         let (address, server) = spawn_range_source(content).await;
-        let root = std::env::temp_dir().join(format!(
-            "slskr-mesh-preview-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("slskr-mesh-preview-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).expect("create mesh preview test root");
         let output = root.join("preview.part");
         let result = fetch_single_verified_source(
