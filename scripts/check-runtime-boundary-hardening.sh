@@ -225,6 +225,8 @@ done
 
 for anchor in \
   'file.take(MAX_CONFIG_FILE_BYTES + 1)' \
+  'HTTP API token must not be empty or whitespace-only' \
+  'api_token_rejects_blank_env_and_file_values' \
   'config_file_reader_rejects_symlinks' \
   'config_file_reader_rejects_oversized_files'; do
   if ! rg -n --fixed-strings -- "$anchor" "$config_source" >/dev/null; then

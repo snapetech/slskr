@@ -193,6 +193,12 @@ impl AppConfig {
             file_config.transfers.allow_outbound.unwrap_or(true),
         )?;
         let api_token = env.var("SLSKR_API_TOKEN").or(file_config.auth.api_token);
+        if api_token
+            .as_deref()
+            .is_some_and(|token| token.trim().is_empty())
+        {
+            return Err("HTTP API token must not be empty or whitespace-only".to_owned());
+        }
         let auth_disabled = env_bool_layer(
             env,
             "SLSKR_AUTH_DISABLED",
@@ -1305,6 +1311,30 @@ mod tests {
         let config = super::AppConfig::from_layers(None, file_config, &MapEnv::default())
             .expect("trusted proxy file config");
         assert!(config.trusted_proxy_cidrs[0].contains("10.1.2.3".parse().unwrap()));
+    }
+
+    #[test]
+    fn api_token_rejects_blank_env_and_file_values() {
+        for token in ["", " \t\r\n"] {
+            let env = MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", token);
+            let error = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+                .expect_err("blank environment API token must fail");
+            assert!(error.contains("must not be empty"));
+
+            let file_config = super::FileConfig {
+                auth: super::AuthFileConfig {
+                    disabled: Some(false),
+                    api_token: Some(token.to_owned()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let error = super::AppConfig::from_layers(None, file_config, &MapEnv::default())
+                .expect_err("blank file API token must fail");
+            assert!(error.contains("must not be empty"));
+        }
     }
 
     #[test]
