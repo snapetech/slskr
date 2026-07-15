@@ -19919,7 +19919,42 @@ fn ensure_scoped_download_path(state_dir: &Path, local_path: &str) -> Result<Pat
     Ok(path)
 }
 
-fn open_download_file(path: &Path) -> Result<fs::File, String> {
+#[cfg(unix)]
+fn open_download_file(root: &Path, path: &Path) -> Result<fs::File, String> {
+    use rustix::fs::{open, openat, Mode, OFlags};
+
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| "download path is outside the download root".to_owned())?;
+    let components = relative
+        .components()
+        .map(|component| match component {
+            Component::Normal(value) => Ok(value),
+            _ => Err("download path contains a non-relative component".to_owned()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (filename, parents) = components
+        .split_last()
+        .ok_or_else(|| "download filename is empty".to_owned())?;
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, directory_flags, Mode::empty())
+        .map_err(|error| format!("download root open failed: {error}"))?;
+    for component in parents {
+        directory = openat(&directory, *component, directory_flags, Mode::empty())
+            .map_err(|error| format!("download directory confined open failed: {error}"))?;
+    }
+    let fd = openat(
+        &directory,
+        *filename,
+        OFlags::WRONLY | OFlags::CREATE | OFlags::APPEND | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::from_raw_mode(0o600),
+    )
+    .map_err(|error| format!("download file confined open failed: {error}"))?;
+    Ok(fs::File::from(fd))
+}
+
+#[cfg(not(unix))]
+fn open_download_file(_root: &Path, path: &Path) -> Result<fs::File, String> {
     let mut options = fs::OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
@@ -21319,7 +21354,7 @@ async fn download_file_transfer_with_connection(
         .size
         .ok_or_else(|| "download size is required before file transfer".to_owned())?;
     let path = ensure_scoped_download_path(&state.config.state_dir, local_path)?;
-    let mut file = open_download_file(&path)?;
+    let mut file = open_download_file(&download_root(&state.config.state_dir), &path)?;
     let metadata = file
         .metadata()
         .map_err(|error| format!("download file metadata failed: {error}"))?;
@@ -30821,7 +30856,33 @@ mod tests {
         let error = super::ensure_scoped_download_path(&state_dir, &path.display().to_string())
             .expect_err("symlink rejected");
         assert!(error.contains("must not be a symlink"));
-        assert!(super::open_download_file(&path).is_err());
+        assert!(super::open_download_file(&super::download_root(&state_dir), &path).is_err());
+
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_confined_open_rejects_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-download-parent-symlink-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let root = super::download_root(&state_dir);
+        let outside = state_dir.join("outside");
+        std::fs::create_dir_all(&root).expect("download root");
+        std::fs::create_dir_all(&outside).expect("outside directory");
+        symlink(&outside, root.join("Remote")).expect("symlinked parent");
+        let path = root.join("Remote/Song.flac");
+
+        assert!(super::open_download_file(&root, &path).is_err());
+        assert!(!outside.join("Song.flac").exists());
 
         let _ = std::fs::remove_dir_all(state_dir);
     }
