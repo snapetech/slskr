@@ -5112,6 +5112,12 @@ fn collection_items_id(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+fn wishlist_search_item_id(path: &str) -> Option<&str> {
+    let path = path.strip_prefix("/api/wishlist/")?;
+    let id = path.strip_suffix("/search")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
 // Wishlist Models
 #[derive(Clone, Debug)]
 struct WishlistItem {
@@ -15863,8 +15869,13 @@ async fn route_http_request_with_headers(
              }).to_string()))
          }
 
-         ("POST", path) if path.starts_with("/api/wishlist/") && path.contains("/search") => {
-             let item_id = path.split('/').nth(3).unwrap_or("unknown");
+         ("POST", path)
+             if path.starts_with("/api/wishlist/")
+                 && path.ends_with("/search")
+                 && wishlist_search_item_id(path).is_some() =>
+         {
+             let item_id = wishlist_search_item_id(path)
+                 .expect("guarded wishlist search path");
              let wishlist = state.wishlist.read().await;
              let Some(item) = wishlist.get_item(item_id) else {
                  drop(wishlist);
@@ -34255,6 +34266,57 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn wishlist_item_search_requires_exact_action_path() {
+        let (state, _receiver) = test_state();
+        let wish = super::route_http_request(
+            "POST",
+            "/api/wishlist",
+            None,
+            r#"{"artist":"Artist","title":"Track"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let item_id = serde_json::from_str::<serde_json::Value>(&wish.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{item_id}/extra/search"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert!(state.searches.read().await.records.is_empty());
+        assert_eq!(
+            super::wishlist_search_item_id(&format!("/api/wishlist/{item_id}/extra/search")),
+            None
+        );
+
+        let exact = super::route_http_request(
+            "POST",
+            &format!("/api/wishlist/{item_id}/search"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(exact.status, "202 Accepted");
+        assert_eq!(
+            super::wishlist_search_item_id(&format!("/api/wishlist/{item_id}/search")),
+            Some(item_id.as_str())
+        );
+        let searches = state.searches.read().await;
+        assert_eq!(searches.records.len(), 1);
+        assert_eq!(searches.records[0].query, "Artist Track");
     }
 
     #[tokio::test]
