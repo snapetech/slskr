@@ -4681,7 +4681,7 @@ fn bounded_room_name(name: &str) -> String {
 }
 
 // Collection Models
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CollectionItem {
     id: String,
     content_id: String,
@@ -4709,7 +4709,7 @@ impl CollectionItem {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CollectionRecord {
     id: String,
     name: String,
@@ -4744,7 +4744,7 @@ impl CollectionRecord {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CollectionStore {
     records: Vec<CollectionRecord>,
     next_id: u64,
@@ -12627,14 +12627,19 @@ async fn route_http_request_with_headers(
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
             let description = extract_json_string_field(body, "description").unwrap_or_default();
             let mut collections = state.collections.write().await;
+            let previous = collections.clone();
             let Some(record) = collections.create(name, description) else {
                 return Ok(routing::service_unavailable_response(
                     "collection capacity is full",
                 ));
             };
+            let mutated = collections.clone();
             let json = record.json();
             drop(collections);
-            persist_collection(state, &record).await;
+            if let Err(error) = persist_collection_checked(state, &record).await {
+                rollback_collections_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::created_response(json))
         }
         ("GET", path) if path.starts_with("/api/collections/") && !path.ends_with("/items") && path.matches('/').count() == 3 => {
@@ -12660,10 +12665,15 @@ async fn route_http_request_with_headers(
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
             let description = extract_json_string_field(body, "description").unwrap_or_default();
             let mut collections = state.collections.write().await;
+            let previous = collections.clone();
             if let Some(record) = collections.update(id, name, description) {
+                let mutated = collections.clone();
                 let json = record.json();
                 drop(collections);
-                persist_collection(state, &record).await;
+                if let Err(error) = persist_collection_checked(state, &record).await {
+                    rollback_collections_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response(json))
             } else {
                 drop(collections);
@@ -12728,6 +12738,7 @@ async fn route_http_request_with_headers(
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
 
             let mut collections = state.collections.write().await;
+            let previous = collections.clone();
             match collections.add_item(
                 id,
                 content_id,
@@ -12736,9 +12747,16 @@ async fn route_http_request_with_headers(
                 kind,
             ) {
               Ok(Some(item)) => {
+                let record = collections
+                    .get(id)
+                    .expect("item was added to an existing collection");
+                let mutated = collections.clone();
                 let json = item.json();
                 drop(collections);
-                persist_collection_item(state, id, &item).await;
+                if let Err(error) = persist_collection_checked(state, &record).await {
+                    rollback_collections_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::created_response(json))
               }
               Ok(None) => {
@@ -12757,7 +12775,14 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             }
             let mut collections = state.collections.write().await;
+            let previous = collections.clone();
+            let collection_id = collections.collection_id_for_item(item_id);
             if let Some(item) = collections.remove_item(item_id) {
+                let record = collection_id
+                    .as_deref()
+                    .and_then(|id| collections.get(id))
+                    .expect("removed item belonged to an existing collection");
+                let mutated = collections.clone();
                 let json = serde_json::json!({
                     "deleted": true,
                     "item": serde_json::from_str::<serde_json::Value>(&item.json())
@@ -12765,7 +12790,10 @@ async fn route_http_request_with_headers(
                 })
                 .to_string();
                 drop(collections);
-                persist_collection_item_delete(state, item_id).await;
+                if let Err(error) = persist_collection_checked(state, &record).await {
+                    rollback_collections_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response(json))
             } else {
                 drop(collections);
@@ -12783,12 +12811,19 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "mediaKind"));
 
             let mut collections = state.collections.write().await;
+            let previous = collections.clone();
             let collection_id = collections.collection_id_for_item(item_id);
             if let Some(item) = collections.update_item(item_id, artist, title, kind) {
+                let record = collection_id
+                    .as_deref()
+                    .and_then(|id| collections.get(id))
+                    .expect("updated item belonged to an existing collection");
+                let mutated = collections.clone();
                 let json = item.json();
                 drop(collections);
-                if let Some(collection_id) = collection_id {
-                    persist_collection_item(state, &collection_id, &item).await;
+                if let Err(error) = persist_collection_checked(state, &record).await {
+                    rollback_collections_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
                 }
                 Ok(routing::ok_response(json))
             } else {
@@ -14321,7 +14356,9 @@ async fn route_http_request_with_headers(
                 .and_then(|rest| rest.strip_suffix("/items/reorder"))
                 .unwrap_or_default();
             let mut collections = state.collections.write().await;
+            let previous = collections.clone();
             if let Some(record) = collections.reorder_items(collection_id, body) {
+                let mutated = collections.clone();
                 let items = record
                     .items
                     .iter()
@@ -14332,7 +14369,10 @@ async fn route_http_request_with_headers(
                 .collect::<Vec<_>>();
                 let item_count = items.len();
                 drop(collections);
-                persist_collection(state, &record).await;
+                if let Err(error) = persist_collection_checked(state, &record).await {
+                    rollback_collections_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 Ok(routing::ok_response(serde_json::json!({
                     "reordered": true,
                     "collection_id": collection_id,
@@ -24188,9 +24228,12 @@ async fn persist_share_group_member_delete(
     Ok(true)
 }
 
-async fn persist_collection(state: &AppState, record: &CollectionRecord) {
+async fn persist_collection_checked(
+    state: &AppState,
+    record: &CollectionRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::CollectionRecord {
         id: record.id.clone(),
@@ -24199,10 +24242,27 @@ async fn persist_collection(state: &AppState, record: &CollectionRecord) {
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_collection(&persisted).await;
-    for (position, item) in record.items.iter().enumerate() {
-        persist_collection_item_with_position(state, &record.id, item, position).await;
-    }
+    let items = record
+        .items
+        .iter()
+        .enumerate()
+        .map(
+            |(position, item)| crate::persistence::CollectionItemRecord {
+                id: item.id.clone(),
+                collection_id: record.id.clone(),
+                content_id: item.content_id.clone(),
+                artist: item.artist.clone(),
+                title: item.title.clone(),
+                kind: item.kind.clone(),
+                added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
+                position: i64::try_from(position).unwrap_or(i64::MAX),
+            },
+        )
+        .collect::<Vec<_>>();
+    db.replace_collection(&persisted, &items)
+        .await
+        .map_err(|error| format!("collection persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_collection_delete(state: &AppState, id: &str) -> Result<bool, String> {
@@ -24215,35 +24275,14 @@ async fn persist_collection_delete(state: &AppState, id: &str) -> Result<bool, S
     Ok(true)
 }
 
-async fn persist_collection_item(state: &AppState, collection_id: &str, item: &CollectionItem) {
-    persist_collection_item_with_position(state, collection_id, item, 0).await;
-}
-
-async fn persist_collection_item_with_position(
+async fn rollback_collections_if_unchanged(
     state: &AppState,
-    collection_id: &str,
-    item: &CollectionItem,
-    position: usize,
+    previous: CollectionStore,
+    mutated: &CollectionStore,
 ) {
-    let Some(db) = state.db.as_ref() else {
-        return;
-    };
-    let persisted = crate::persistence::CollectionItemRecord {
-        id: item.id.clone(),
-        collection_id: collection_id.to_owned(),
-        content_id: item.content_id.clone(),
-        artist: item.artist.clone(),
-        title: item.title.clone(),
-        kind: item.kind.clone(),
-        added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
-        position: i64::try_from(position).unwrap_or(i64::MAX),
-    };
-    let _ = db.upsert_collection_item(&persisted).await;
-}
-
-async fn persist_collection_item_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_collection_item(id).await;
+    let mut collections = state.collections.write().await;
+    if *collections == *mutated {
+        *collections = previous;
     }
 }
 
@@ -31982,6 +32021,205 @@ mod tests {
             assert!(response.body.contains(expected_error), "{method}");
             assert_eq!(*state.wishlist.read().await, previous, "{method}");
         }
+    }
+
+    #[tokio::test]
+    async fn collection_routes_roll_back_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let previous = state.collections.read().await.clone();
+        db.close_for_test().await;
+        let response = super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Collection"}"#,
+            &state,
+        )
+        .await
+        .expect("failed collection create response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response.body.contains("collection persistence failed"));
+        assert_eq!(*state.collections.read().await, previous);
+
+        for (method, path, body) in [
+            ("PUT", "/api/collections/col-1", r#"{"name":"Changed"}"#),
+            (
+                "POST",
+                "/api/collections/col-1/items",
+                r#"{"title":"Added"}"#,
+            ),
+            (
+                "PUT",
+                "/api/collections/items/item-1",
+                r#"{"title":"Changed"}"#,
+            ),
+            ("DELETE", "/api/collections/items/item-1", ""),
+            (
+                "PUT",
+                "/api/collections/col-1/items/reorder",
+                r#"{"item_ids":["item-2","item-1"]}"#,
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let mut collections = state.collections.write().await;
+            collections
+                .create("Collection".to_owned(), String::new())
+                .unwrap();
+            collections
+                .add_item(
+                    "col-1",
+                    "one".to_owned(),
+                    String::new(),
+                    "One".to_owned(),
+                    "Audio".to_owned(),
+                )
+                .unwrap();
+            collections
+                .add_item(
+                    "col-1",
+                    "two".to_owned(),
+                    String::new(),
+                    "Two".to_owned(),
+                    "Audio".to_owned(),
+                )
+                .unwrap();
+            let previous = collections.clone();
+            drop(collections);
+            db.close_for_test().await;
+
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .expect("failed collection mutation response");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{method} {path}"
+            );
+            assert!(
+                response.body.contains("collection persistence failed"),
+                "{method} {path}"
+            );
+            assert_eq!(*state.collections.read().await, previous, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn collection_item_order_is_persisted_as_one_snapshot() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        super::route_http_request(
+            "POST",
+            "/api/collections",
+            None,
+            r#"{"name":"Collection"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        for title in ["One", "Two"] {
+            super::route_http_request(
+                "POST",
+                "/api/collections/col-1/items",
+                None,
+                &format!(r#"{{"title":"{title}"}}"#),
+                &state,
+            )
+            .await
+            .unwrap();
+        }
+        let response = super::route_http_request(
+            "PUT",
+            "/api/collections/col-1/items/reorder",
+            None,
+            r#"{"item_ids":["item-2","item-1"]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, "200 OK");
+
+        let items = db.list_collection_items(10, 0).await.unwrap();
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| (item.id.as_str(), item.position))
+                .collect::<Vec<_>>(),
+            vec![("item-2", 0), ("item-1", 1)]
+        );
+    }
+
+    #[tokio::test]
+    async fn collection_snapshot_database_write_is_atomic() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let original = super::persistence::CollectionRecord {
+            id: "col-1".to_owned(),
+            name: "Original".to_owned(),
+            description: String::new(),
+            created_at: 1,
+            updated_at: 1,
+        };
+        let original_item = super::persistence::CollectionItemRecord {
+            id: "item-1".to_owned(),
+            collection_id: "col-1".to_owned(),
+            content_id: "original".to_owned(),
+            artist: String::new(),
+            title: "Original".to_owned(),
+            kind: "Audio".to_owned(),
+            added_at: 1,
+            position: 0,
+        };
+        db.upsert_collection(&original).await.unwrap();
+        db.upsert_collection_item(&original_item).await.unwrap();
+
+        let changed = super::persistence::CollectionRecord {
+            name: "Changed".to_owned(),
+            updated_at: 2,
+            ..original.clone()
+        };
+        let duplicate_items = vec![
+            super::persistence::CollectionItemRecord {
+                title: "Changed".to_owned(),
+                ..original_item.clone()
+            },
+            super::persistence::CollectionItemRecord {
+                content_id: "duplicate".to_owned(),
+                position: 1,
+                ..original_item.clone()
+            },
+        ];
+        assert!(db
+            .replace_collection(&changed, &duplicate_items)
+            .await
+            .is_err());
+
+        let collections = db.list_collections(10, 0).await.unwrap();
+        assert_eq!(collections.len(), 1);
+        assert_eq!(collections[0].name, "Original");
+        let items = db.list_collection_items(10, 0).await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Original");
+        assert_eq!(items[0].content_id, "original");
     }
 
     #[tokio::test]
