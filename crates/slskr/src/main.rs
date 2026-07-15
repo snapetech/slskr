@@ -16975,6 +16975,16 @@ fn websocket_auth_protocol(protocol_header: Option<&str>) -> Option<&str> {
         .find(|protocol| decode_websocket_auth_protocol(protocol).is_some())
 }
 
+fn websocket_auth_protocol_count(protocol_header: Option<&str>) -> usize {
+    protocol_header
+        .into_iter()
+        .flat_map(|header| header.split(','))
+        .map(str::trim)
+        .filter(|protocol| decode_websocket_auth_protocol(protocol).is_some())
+        .take(2)
+        .count()
+}
+
 fn websocket_protocol_authorization(protocol_header: Option<&str>) -> Option<String> {
     let protocol = websocket_auth_protocol(protocol_header)?;
     let token = decode_websocket_auth_protocol(protocol)?;
@@ -16985,8 +16995,9 @@ fn mixed_websocket_auth_credentials(
     headers: &http_server::HttpHeaders,
     websocket_authorization: Option<&str>,
 ) -> bool {
-    websocket_authorization.is_some()
-        && (headers.authorization.is_some() || headers.x_api_key.is_some())
+    websocket_auth_protocol_count(headers.sec_websocket_protocol.as_deref()) > 1
+        || (websocket_authorization.is_some()
+            && (headers.authorization.is_some() || headers.x_api_key.is_some()))
 }
 
 fn decode_websocket_auth_protocol(protocol: &str) -> Option<String> {
@@ -36675,6 +36686,29 @@ mod tests {
         assert!(!super::mixed_websocket_auth_credentials(
             &super::http_server::HttpHeaders::default(),
             websocket_auth
+        ));
+    }
+
+    #[test]
+    fn websocket_auth_subprotocol_rejects_multiple_token_credentials() {
+        let headers = super::http_server::HttpHeaders {
+            sec_websocket_protocol: Some(
+                "chat, slskr.api-token.first, slskr.api-token.second".to_owned(),
+            ),
+            ..Default::default()
+        };
+        assert!(super::mixed_websocket_auth_credentials(
+            &headers,
+            Some("Bearer first")
+        ));
+
+        let headers = super::http_server::HttpHeaders {
+            sec_websocket_protocol: Some("chat, slskr.api-token.only, telemetry".to_owned()),
+            ..Default::default()
+        };
+        assert!(!super::mixed_websocket_auth_credentials(
+            &headers,
+            Some("Bearer only")
         ));
     }
 
