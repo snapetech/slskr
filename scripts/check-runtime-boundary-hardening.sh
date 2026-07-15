@@ -30,6 +30,10 @@ for anchor in \
   'state_file_io_rejects_symlinks_without_touching_targets' \
   'MAX_ROOM_MESSAGES_PER_ROOM' \
   'room_message_history_evicts_oldest_entries_at_limit' \
+  'MAX_ROOM_RECORDS' \
+  'MAX_ROOM_MEMBERS_PER_ROOM' \
+  'room_store_rejects_new_records_at_limit_but_updates_existing_rooms' \
+  'room_store_rejects_new_members_at_limit_but_accepts_duplicates' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \

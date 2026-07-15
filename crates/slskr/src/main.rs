@@ -130,6 +130,8 @@ const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ROOM_MESSAGES_PER_ROOM: usize = 1_000;
+const MAX_ROOM_RECORDS: usize = 1_024;
+const MAX_ROOM_MEMBERS_PER_ROOM: usize = 10_000;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -3844,13 +3846,21 @@ impl RoomRecord {
 struct RoomStore {
     records: Vec<RoomRecord>,
     updated_at: u64,
+    max_records: usize,
+    max_members_per_room: usize,
 }
 
 impl RoomStore {
     fn new() -> Self {
+        Self::with_limits(MAX_ROOM_RECORDS, MAX_ROOM_MEMBERS_PER_ROOM)
+    }
+
+    fn with_limits(max_records: usize, max_members_per_room: usize) -> Self {
         Self {
             records: Vec::new(),
             updated_at: unix_timestamp(),
+            max_records: max_records.max(1),
+            max_members_per_room: max_members_per_room.max(1),
         }
     }
 
@@ -3858,6 +3868,7 @@ impl RoomStore {
         let mut store = Self::new();
         store.records = records
             .into_iter()
+            .take(store.max_records)
             .map(|record| RoomRecord {
                 name: record.name,
                 joined: record.subscribed,
@@ -3884,14 +3895,17 @@ impl RoomStore {
         store
     }
 
-    fn join(&mut self, name: String) -> RoomRecord {
+    fn join(&mut self, name: String) -> Option<RoomRecord> {
         let now = unix_timestamp();
         if let Some(record) = self.records.iter_mut().find(|record| record.name == name) {
             record.joined = true;
             record.last_error = None;
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = RoomRecord {
             name,
@@ -3907,7 +3921,7 @@ impl RoomStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn leave(&mut self, name: &str) -> Option<RoomRecord> {
@@ -3919,14 +3933,17 @@ impl RoomStore {
         Some(record.clone())
     }
 
-    fn fail_join(&mut self, name: &str, reason: String) -> RoomRecord {
+    fn fail_join(&mut self, name: &str, reason: String) -> Option<RoomRecord> {
         let now = unix_timestamp();
         if let Some(record) = self.records.iter_mut().find(|record| record.name == name) {
             record.joined = false;
             record.last_error = Some(reason);
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = RoomRecord {
             name: name.to_owned(),
@@ -3942,7 +3959,7 @@ impl RoomStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn apply_room_list(&mut self, room_list: &RoomList) {
@@ -3960,7 +3977,9 @@ impl RoomStore {
             self.upsert_room_list_entry(entry, "private", operated);
         }
         for room in &room_list.operated_private_rooms {
-            if !self.records.iter().any(|record| record.name == *room) {
+            if self.records.len() < self.max_records
+                && !self.records.iter().any(|record| record.name == *room)
+            {
                 let now = unix_timestamp();
                 self.records.push(RoomRecord {
                     name: room.clone(),
@@ -3984,7 +4003,7 @@ impl RoomStore {
         entry: &RoomListEntry,
         kind: &'static str,
         operated: bool,
-    ) -> RoomRecord {
+    ) -> Option<RoomRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -3997,7 +4016,10 @@ impl RoomStore {
             record.last_error = None;
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = RoomRecord {
             name: entry.name.clone(),
@@ -4013,7 +4035,7 @@ impl RoomStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn add_message(&mut self, room: &str, username: String, body: String) -> Option<RoomRecord> {
@@ -4042,24 +4064,30 @@ impl RoomStore {
         Some(record.clone())
     }
 
-    fn add_member(&mut self, room: &str, username: String) -> Option<RoomRecord> {
+    fn add_member(&mut self, room: &str, username: String) -> Result<Option<RoomRecord>, ()> {
         let now = unix_timestamp();
         let username = username.trim();
         if username.is_empty() {
-            return None;
+            return Ok(None);
         }
-        let record = self.records.iter_mut().find(|record| record.name == room)?;
+        let record = match self.records.iter_mut().find(|record| record.name == room) {
+            Some(record) => record,
+            None => return Ok(None),
+        };
         if !record
             .members
             .iter()
             .any(|member| member.eq_ignore_ascii_case(username))
         {
+            if record.members.len() >= self.max_members_per_room {
+                return Err(());
+            }
             record.members.push(username.to_owned());
         }
-        record.user_count = Some(record.members.len() as u32);
+        record.user_count = Some(u32::try_from(record.members.len()).unwrap_or(u32::MAX));
         record.updated_at = now;
         self.updated_at = now;
-        Some(record.clone())
+        Ok(Some(record.clone()))
     }
 
     fn json(&self, query: Option<&str>) -> String {
@@ -10061,7 +10089,11 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut rooms = state.rooms.write().await;
-            let record = rooms.join(room_name.to_string());
+            let Some(record) = rooms.join(room_name.to_string()) else {
+                return Ok(routing::service_unavailable_response(
+                    "room capacity is full",
+                ));
+            };
             drop(rooms);
             persist_room_join(state, room_name).await;
             record_event(state, "room.joined", room_name.to_string(), None).await;
@@ -10539,7 +10571,11 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("room is required"));
             };
             let mut rooms = state.rooms.write().await;
-            let record = rooms.join(room_name.to_string());
+            let Some(record) = rooms.join(room_name.to_string()) else {
+                return Ok(routing::service_unavailable_response(
+                    "room capacity is full",
+                ));
+            };
             let body = record.slskd_room_json().to_string();
             drop(rooms);
             persist_room_join(state, &room_name).await;
@@ -10633,16 +10669,17 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("username is required"));
             }
             let mut rooms = state.rooms.write().await;
-            let response = rooms
-                .add_member(&room_name, username)
-                .map(|room| {
+            let response = match rooms.add_member(&room_name, username) {
+                Ok(Some(room)) => {
                     routing::ok_response(serde_json::json!({
                         "updated": true,
                         "room": room.slskd_room_json(),
                         "userCount": room.user_count.unwrap_or(0),
                     }).to_string())
-                })
-                .unwrap_or_else(routing::not_found_response);
+                }
+                Ok(None) => routing::not_found_response(),
+                Err(()) => routing::service_unavailable_response("room member capacity is full"),
+            };
             drop(rooms);
             if response.status == "200 OK" {
                 record_event(state, "room.users.updated", room_name.to_string(), None).await;
@@ -14635,7 +14672,11 @@ async fn route_http_request_with_headers(
             let title = extract_json_string_field(body, "title").unwrap_or_else(|| "party content".to_owned());
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
             let mut rooms = state.rooms.write().await;
-            let room_record = rooms.join(room.clone());
+            let Some(room_record) = rooms.join(room.clone()) else {
+                return Ok(routing::service_unavailable_response(
+                    "room capacity is full",
+                ));
+            };
             let room_record = rooms
                 .add_message(
                     &room,
@@ -14731,7 +14772,11 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "room"))
                 .unwrap_or_else(|| "pod".to_owned());
             let mut rooms = state.rooms.write().await;
-            let record = rooms.join(pod_id.clone());
+            let Some(record) = rooms.join(pod_id.clone()) else {
+                return Ok(routing::service_unavailable_response(
+                    "room capacity is full",
+                ));
+            };
             let body = serde_json::json!({
                 "podId": pod_id,
                 "joined": true,
@@ -33184,7 +33229,7 @@ mod tests {
     #[test]
     fn room_message_history_evicts_oldest_entries_at_limit() {
         let mut rooms = super::RoomStore::new();
-        rooms.join("music".to_owned());
+        rooms.join("music".to_owned()).unwrap();
 
         for index in 0..(super::MAX_ROOM_MESSAGES_PER_ROOM + 5) {
             rooms
@@ -33203,6 +33248,51 @@ mod tests {
             room.messages.last().unwrap().body,
             format!("message-{}", super::MAX_ROOM_MESSAGES_PER_ROOM + 4)
         );
+    }
+
+    #[test]
+    fn room_store_rejects_new_records_at_limit_but_updates_existing_rooms() {
+        let mut rooms = super::RoomStore::with_limits(2, 2);
+        rooms.join("one".to_owned()).unwrap();
+        rooms.join("two".to_owned()).unwrap();
+
+        assert!(rooms.join("three".to_owned()).is_none());
+        assert!(rooms.join("one".to_owned()).unwrap().joined);
+        rooms.apply_room_list(&super::RoomList {
+            public_rooms: vec![
+                super::RoomListEntry {
+                    name: "one".to_owned(),
+                    user_count: 12,
+                },
+                super::RoomListEntry {
+                    name: "remote-unique".to_owned(),
+                    user_count: 1,
+                },
+            ],
+            owned_private_rooms: Vec::new(),
+            private_rooms: Vec::new(),
+            operated_private_rooms: vec!["remote-operated".to_owned()],
+        });
+
+        assert_eq!(rooms.records.len(), 2);
+        assert_eq!(rooms.records[0].user_count, Some(12));
+        assert!(!rooms
+            .records
+            .iter()
+            .any(|room| room.name == "remote-unique"));
+    }
+
+    #[test]
+    fn room_store_rejects_new_members_at_limit_but_accepts_duplicates() {
+        let mut rooms = super::RoomStore::with_limits(1, 2);
+        rooms.join("music".to_owned()).unwrap();
+        rooms.add_member("music", "alice".to_owned()).unwrap();
+        rooms.add_member("music", "bob".to_owned()).unwrap();
+
+        assert!(rooms.add_member("music", "carol".to_owned()).is_err());
+        assert!(rooms.add_member("music", "ALICE".to_owned()).is_ok());
+        assert_eq!(rooms.records[0].members, ["alice", "bob"]);
+        assert_eq!(rooms.records[0].user_count, Some(2));
     }
 
     #[tokio::test]
@@ -33273,7 +33363,9 @@ mod tests {
         let mut rooms = super::RoomStore::new();
         rooms.join("denied".to_owned());
 
-        let failed = rooms.fail_join("denied", "server reported cant-create-room".to_owned());
+        let failed = rooms
+            .fail_join("denied", "server reported cant-create-room".to_owned())
+            .unwrap();
 
         assert!(!failed.joined);
         assert_eq!(
@@ -33285,7 +33377,7 @@ mod tests {
             .json()
             .contains("\"last_error\":\"server reported cant-create-room\""));
 
-        let joined = rooms.join("denied".to_owned());
+        let joined = rooms.join("denied".to_owned()).unwrap();
         assert!(joined.joined);
         assert_eq!(joined.last_error, None);
     }

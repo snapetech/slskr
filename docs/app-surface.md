@@ -123,7 +123,7 @@ The first app shell exposes:
 - `GET /api/v0/messages`: list message projections. Supports `q`, `username`, `direction`, `limit`, and `offset` query parameters.
 - `GET /api/v0/messages/:username`: list message projections for one user. Supports `q`, `direction`, `limit`, and `offset` query parameters.
 - `POST /api/v0/messages/:id/ack`: mark a message projection acknowledged, optionally persist the acknowledgement to SQLite, and enqueue the server acknowledgement when connected
-- `GET /api/v0/rooms`: list room projections, including joined state, room kind, user count, operated flag, message count, and the latest 1,000 projected messages per room. Supports `q`, `joined`, `limit`, and `offset` query parameters.
+- `GET /api/v0/rooms`: list up to 1,024 room projections, including joined state, room kind, user count, operated flag, message count, up to 10,000 projected members, and the latest 1,000 projected messages per room. Supports `q`, `joined`, `limit`, and `offset` query parameters.
 - `POST /api/v0/rooms/refresh`: enqueue a server room-list request when connected
 - `POST /api/v0/rooms/:room/join`: mark a room joined, optionally persist the subscription to SQLite, and enqueue the server room-join command when connected
 - `DELETE /api/v0/rooms/:room/join`: mark a room left, optionally persist the unsubscribed state to SQLite, and enqueue the server room-leave command when connected
