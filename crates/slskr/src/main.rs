@@ -12990,15 +12990,20 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             }
             let mut grants = state.share_grants.write().await;
+            let previous = grants.clone();
             let Some((record, created)) = grants.create(collection_id, username) else {
                 return Ok(routing::service_unavailable_response("share grant capacity is full"));
             };
             let json = record.json();
-            drop(grants);
             if created {
-                persist_share_grant(state, &record).await;
+                if let Err(error) = persist_share_grant(state, &record).await {
+                    *grants = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
+                drop(grants);
                 Ok(routing::created_response(json))
             } else {
+                drop(grants);
                 Ok(routing::ok_response(json))
             }
         }
@@ -13038,10 +13043,14 @@ async fn route_http_request_with_headers(
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
             let permissions = extract_json_string_field(body, "permissions").unwrap_or_else(|| "read".to_string());
             let mut grants = state.share_grants.write().await;
+            let previous = grants.clone();
             if let Some(record) = grants.update(id, permissions) {
                 let json = record.json();
+                if let Err(error) = persist_share_grant(state, &record).await {
+                    *grants = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 drop(grants);
-                persist_share_grant(state, &record).await;
                 Ok(routing::ok_response(json))
             } else {
                 drop(grants);
@@ -23500,9 +23509,9 @@ async fn persist_contact_delete(state: &AppState, id: &str) {
     }
 }
 
-async fn persist_share_grant(state: &AppState, record: &ShareGrantRecord) {
+async fn persist_share_grant(state: &AppState, record: &ShareGrantRecord) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let persisted = crate::persistence::ShareGrantRecord {
         id: record.id.clone(),
@@ -23511,7 +23520,10 @@ async fn persist_share_grant(state: &AppState, record: &ShareGrantRecord) {
         shared_at: i64::try_from(record.shared_at).unwrap_or(i64::MAX),
         permissions: record.permissions.clone(),
     };
-    let _ = db.upsert_share_grant(&persisted).await;
+    db.upsert_share_grant(&persisted)
+        .await
+        .map_err(|error| format!("share grant persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_share_grant_delete(state: &AppState, id: &str) {
@@ -35956,6 +35968,76 @@ mod tests {
             .body
             .contains("share grant revocation persistence failed"));
         assert!(state.share_grants.read().await.get("grant-1").is_some());
+    }
+
+    #[tokio::test]
+    async fn share_grant_create_and_update_roll_back_when_persistence_fails() {
+        let create_db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (create_state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(create_db.clone()),
+        );
+        create_state
+            .collections
+            .write()
+            .await
+            .create("Private".to_owned(), String::new())
+            .expect("collection");
+        create_db.close_for_test().await;
+
+        let create = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            None,
+            r#"{"collection_id":"col-1","username":"friend"}"#,
+            &create_state,
+        )
+        .await
+        .expect("failed persistence response");
+        assert_eq!(create.status, "503 Service Unavailable");
+        assert!(create.body.contains("share grant persistence failed"));
+        assert!(create_state.share_grants.read().await.records.is_empty());
+
+        let update_db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (update_state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(update_db.clone()),
+        );
+        update_state
+            .share_grants
+            .write()
+            .await
+            .create("private-collection".to_owned(), "friend".to_owned())
+            .expect("grant");
+        update_db.close_for_test().await;
+
+        let update = super::route_http_request(
+            "PUT",
+            "/api/share-grants/grant-1",
+            None,
+            r#"{"permissions":"restricted"}"#,
+            &update_state,
+        )
+        .await
+        .expect("failed persistence response");
+        assert_eq!(update.status, "503 Service Unavailable");
+        assert!(update.body.contains("share grant persistence failed"));
+        assert_eq!(
+            update_state
+                .share_grants
+                .read()
+                .await
+                .get("grant-1")
+                .expect("rolled-back grant")
+                .permissions,
+            "read"
+        );
     }
 
     #[tokio::test]
