@@ -2091,6 +2091,16 @@ async fn persist_transfer_record(state: &AppState, entry: &TransferEntry) -> Res
     Ok(())
 }
 
+async fn persist_transfer_projection(state: &AppState, entry: &TransferEntry) {
+    if let Err(error) = persist_transfer_record(state, entry).await {
+        update_session(state, |snapshot| {
+            snapshot.last_error =
+                Some(format!("transfer {} persistence failed: {error}", entry.id));
+        })
+        .await;
+    }
+}
+
 async fn persist_transfer_records(
     state: &AppState,
     entries: &[TransferEntry],
@@ -21280,9 +21290,12 @@ async fn handle_inbound_file_transfer(
         )
     })?;
 
-    {
+    let in_progress = {
         let mut transfers = state.transfers.write().await;
-        transfers.update_status(transfer.id, "in_progress", None, None);
+        transfers.update_status(transfer.id, "in_progress", None, None)
+    };
+    if let Some(in_progress) = in_progress {
+        persist_transfer_projection(state, &in_progress).await;
     }
 
     let result = if transfer.direction == 0 {
@@ -22963,9 +22976,12 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
         return;
     };
 
-    {
+    let negotiating = {
         let mut transfers = state.transfers.write().await;
-        transfers.update_status(transfer.id, "peer_negotiating", None, None);
+        transfers.update_status(transfer.id, "peer_negotiating", None, None)
+    };
+    if let Some(negotiating) = negotiating {
+        persist_transfer_projection(state, &negotiating).await;
     }
 
     let result = negotiate_peer_transfer(state, address, &transfer).await;
@@ -22978,6 +22994,7 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
                 transfers.update_local_execution(transfer.id, "accepted", transferred, size, None)
             };
             if let Some(accepted) = accepted {
+                persist_transfer_projection(state, &accepted).await;
                 execute_accepted_file_transfer(state, address, &accepted).await;
             }
             return;
@@ -22988,7 +23005,7 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
                 transfers.update_local_execution(transfer.id, "accepted", 0, size, None)
             };
             if let Some(accepted) = accepted {
-                persist_transfer_record(state, &accepted).await.ok();
+                persist_transfer_projection(state, &accepted).await;
             }
             return;
         }
@@ -23019,8 +23036,13 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
         Err(error) => ("failed", None, Some(error)),
     };
 
-    let mut transfers = state.transfers.write().await;
-    transfers.update_status(transfer.id, status, bytes_transferred, reason);
+    let updated = {
+        let mut transfers = state.transfers.write().await;
+        transfers.update_status(transfer.id, status, bytes_transferred, reason)
+    };
+    if let Some(updated) = updated {
+        persist_transfer_projection(state, &updated).await;
+    }
 }
 
 fn is_remote_queue_response(reason: &str) -> bool {
@@ -23138,14 +23160,18 @@ async fn execute_accepted_file_transfer(
         Ok((bytes_transferred, size)) => ("succeeded", bytes_transferred, Some(size), None),
         Err(error) => {
             if let Some(username) = transfer.peer_username.clone() {
-                let mut transfers = state.transfers.write().await;
-                transfers.update_status(
-                    transfer.id,
-                    "indirect_pending",
-                    None,
-                    Some(format!("direct file-transfer failed: {error}")),
-                );
-                drop(transfers);
+                let indirect_pending = {
+                    let mut transfers = state.transfers.write().await;
+                    transfers.update_status(
+                        transfer.id,
+                        "indirect_pending",
+                        None,
+                        Some(format!("direct file-transfer failed: {error}")),
+                    )
+                };
+                if let Some(indirect_pending) = indirect_pending {
+                    persist_transfer_projection(state, &indirect_pending).await;
+                }
                 try_send_session_command(
                     state,
                     SessionCommand::IndirectTransfer {
@@ -23165,8 +23191,13 @@ async fn execute_accepted_file_transfer(
         }
     };
 
-    let mut transfers = state.transfers.write().await;
-    transfers.update_local_execution(transfer.id, status, bytes_transferred, size, reason);
+    let updated = {
+        let mut transfers = state.transfers.write().await;
+        transfers.update_local_execution(transfer.id, status, bytes_transferred, size, reason)
+    };
+    if let Some(updated) = updated {
+        persist_transfer_projection(state, &updated).await;
+    }
 }
 
 async fn project_indirect_transfer_response(state: &AppState, response: &ConnectToPeerResponse) {
@@ -23183,9 +23214,12 @@ async fn project_indirect_transfer_response(state: &AppState, response: &Connect
     let Some(transfer) = transfer else {
         return;
     };
-    {
+    let in_progress = {
         let mut transfers = state.transfers.write().await;
-        transfers.update_status(transfer.id, "in_progress", None, None);
+        transfers.update_status(transfer.id, "in_progress", None, None)
+    };
+    if let Some(in_progress) = in_progress {
+        persist_transfer_projection(state, &in_progress).await;
     }
 
     let result = execute_indirect_file_transfer(state, response, &transfer).await;
@@ -23198,8 +23232,13 @@ async fn project_indirect_transfer_response(state: &AppState, response: &Connect
             Some(error),
         ),
     };
-    let mut transfers = state.transfers.write().await;
-    transfers.update_local_execution(transfer.id, status, bytes_transferred, size, reason);
+    let updated = {
+        let mut transfers = state.transfers.write().await;
+        transfers.update_local_execution(transfer.id, status, bytes_transferred, size, reason)
+    };
+    if let Some(updated) = updated {
+        persist_transfer_projection(state, &updated).await;
+    }
 }
 
 async fn fail_indirect_transfer(state: &AppState, token: u32, reason: String) {
@@ -23212,8 +23251,13 @@ async fn fail_indirect_transfer(state: &AppState, token: u32, reason: String) {
             .cloned()
     };
     if let Some(transfer) = transfer {
-        let mut transfers = state.transfers.write().await;
-        transfers.update_status(transfer.id, "failed", None, Some(reason));
+        let failed = {
+            let mut transfers = state.transfers.write().await;
+            transfers.update_status(transfer.id, "failed", None, Some(reason))
+        };
+        if let Some(failed) = failed {
+            persist_transfer_projection(state, &failed).await;
+        }
     }
 }
 
@@ -34990,6 +35034,45 @@ mod tests {
         assert_eq!(pruned.status, "200 OK");
         assert!(db.get_transfer("1").await.expect("get pruned 1").is_none());
         assert!(db.get_transfer("2").await.expect("get pruned 2").is_none());
+    }
+
+    #[tokio::test]
+    async fn transfer_projection_persists_status_and_surfaces_failures() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let entry = super::TransferEntry {
+            id: 99,
+            direction: 0,
+            token: 7,
+            peer_username: Some("friend".to_owned()),
+            filename: "Remote/Projected.flac".to_owned(),
+            local_path: None,
+            batch_id: None,
+            size: Some(100),
+            bytes_transferred: 40,
+            status: "in_progress".to_owned(),
+            reason: None,
+            requested_at: 1,
+            updated_at: 2,
+        };
+
+        super::persist_transfer_projection(&state, &entry).await;
+        let persisted = db.get_transfer("99").await.unwrap().unwrap();
+        assert_eq!(persisted.status, "in_progress");
+        assert_eq!(persisted.progress, 40);
+
+        db.close_for_test().await;
+        super::persist_transfer_projection(&state, &entry).await;
+        let session = state.session.read().await;
+        let error = session.last_error.as_deref().unwrap_or_default();
+        assert!(error.contains("transfer 99 persistence failed"));
+        assert!(error.contains("failed to persist transfer"));
     }
 
     #[tokio::test]
