@@ -44,6 +44,16 @@ if ! rg -n 'sec_websocket_protocol|websocket_protocol_authorization|Sec-WebSocke
   status=1
 fi
 
+for anchor in \
+  'MAX_WEBSOCKET_CONNECTIONS' \
+  'state.websocket_connections' \
+  'websocket_connection_pool_reserves_http_capacity'; do
+  if ! rg -n --fixed-strings -- "$anchor" crates/slskr/src/main.rs >/dev/null; then
+    printf 'websocket auth coverage check failed: missing WebSocket admission anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
 if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi

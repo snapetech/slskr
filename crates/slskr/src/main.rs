@@ -112,6 +112,7 @@ use tokio::{
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
+const MAX_WEBSOCKET_CONNECTIONS: usize = 32;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 
 use crate::config::{
@@ -7572,6 +7573,7 @@ struct AppState {
     webhooks: RwLock<webhooks::WebhookManager>,
     webhook_deliveries: Arc<Semaphore>,
     incoming_connections: Arc<Semaphore>,
+    websocket_connections: Arc<Semaphore>,
     collections: RwLock<CollectionStore>,
     wishlist: RwLock<WishlistStore>,
     contacts: RwLock<ContactStore>,
@@ -18941,6 +18943,7 @@ async fn serve(once: bool) -> Result<(), String> {
         webhooks: RwLock::new(webhook_manager),
         webhook_deliveries: Arc::new(Semaphore::new(MAX_WEBHOOK_DELIVERY_TASKS)),
         incoming_connections: Arc::new(Semaphore::new(MAX_INCOMING_CONNECTION_TASKS)),
+        websocket_connections: Arc::new(Semaphore::new(MAX_WEBSOCKET_CONNECTIONS)),
         collections: RwLock::new(collection_store),
         wishlist: RwLock::new(wishlist_store),
         contacts: RwLock::new(contact_store),
@@ -23408,6 +23411,18 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
             if let Some(websocket_key) =
                 websocket_key.filter(|key| is_upgrade && events_ws::valid_sec_websocket_key(key))
             {
+                let Ok(_websocket_permit) =
+                    Arc::clone(&state.websocket_connections).try_acquire_owned()
+                else {
+                    let response = routing::HttpResponse {
+                        status: "503 Service Unavailable",
+                        content_type: "application/json",
+                        body: r#"{"error":"too many websocket connections"}"#.to_owned(),
+                    };
+                    let _ =
+                        http_server::write_http_response(&mut writer, &response, false, "").await;
+                    break;
+                };
                 let accepted_protocol =
                     websocket_auth_protocol(req.headers.sec_websocket_protocol.as_deref());
                 events_ws::write_upgrade_response(&mut writer, websocket_key, accepted_protocol)
@@ -25991,6 +26006,9 @@ mod tests {
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
             incoming_connections: Arc::new(super::Semaphore::new(
                 super::MAX_INCOMING_CONNECTION_TASKS,
+            )),
+            websocket_connections: Arc::new(super::Semaphore::new(
+                super::MAX_WEBSOCKET_CONNECTIONS,
             )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
@@ -36130,6 +36148,24 @@ mod tests {
     }
 
     #[test]
+    fn websocket_connection_pool_reserves_http_capacity() {
+        let semaphore = Arc::new(super::Semaphore::new(super::MAX_WEBSOCKET_CONNECTIONS));
+        let permits = (0..super::MAX_WEBSOCKET_CONNECTIONS)
+            .map(|_| {
+                Arc::clone(&semaphore)
+                    .try_acquire_owned()
+                    .expect("configured websocket permit")
+            })
+            .collect::<Vec<_>>();
+        assert!(Arc::clone(&semaphore).try_acquire_owned().is_err());
+        drop(permits);
+        assert_eq!(
+            semaphore.available_permits(),
+            super::MAX_WEBSOCKET_CONNECTIONS
+        );
+    }
+
+    #[test]
     fn websocket_auth_subprotocol_builds_bearer_authorization() {
         let header = "chat, slskr.api-token.route%2Dtoken%2Fwith%20space";
         assert_eq!(
@@ -36681,6 +36717,9 @@ mod tests {
             incoming_connections: Arc::new(super::Semaphore::new(
                 super::MAX_INCOMING_CONNECTION_TASKS,
             )),
+            websocket_connections: Arc::new(super::Semaphore::new(
+                super::MAX_WEBSOCKET_CONNECTIONS,
+            )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -36819,6 +36858,9 @@ mod tests {
             webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
             incoming_connections: Arc::new(super::Semaphore::new(
                 super::MAX_INCOMING_CONNECTION_TASKS,
+            )),
+            websocket_connections: Arc::new(super::Semaphore::new(
+                super::MAX_WEBSOCKET_CONNECTIONS,
             )),
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
