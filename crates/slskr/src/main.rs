@@ -16484,10 +16484,10 @@ async fn route_http_request_with_headers(
                 if connected { "connected" } else if lidarr.configured() { "connection_failed" } else if lidarr.enabled { "missing_url_or_api_key" } else { "disabled" },
                 lidarr.configured(),
                 lidarr.enabled,
-                json_option(lidarr.url.as_deref()),
+                "null",
                 lidarr.api_key.is_some(),
                 json_option(version.as_deref()),
-                json_option(error_message.as_deref()),
+                json_option(public_lidarr_error(error_message.as_deref())),
                 if lidarr.configured() { "test connection or sync wanted" } else { "configure Lidarr URL and API key" }
             );
             Ok(routing::ok_response(json))
@@ -16513,10 +16513,9 @@ async fn route_http_request_with_headers(
             }
             match fetch_lidarr_wanted_missing(lidarr).await {
                 Ok(value) => Ok(routing::ok_response(value.to_string())),
-                Err(error) => Ok(routing::ok_response(format!(
-                    "{{\"missing_albums\":[],\"count\":0,\"status\":\"connection_failed\",\"error\":\"{}\"}}",
-                    json_escape(&error)
-                ))),
+                Err(_) => Ok(routing::ok_response(
+                    "{\"missing_albums\":[],\"count\":0,\"status\":\"connection_failed\",\"error\":\"Lidarr connection failed\"}".to_owned(),
+                )),
             }
         }
 
@@ -17389,6 +17388,10 @@ async fn route_http_request_with_headers(
             .unwrap_or(500);
         tracing::complete_request_span(status_code);
     })
+}
+
+fn public_lidarr_error(error: Option<&str>) -> Option<&'static str> {
+    error.map(|_| "Lidarr connection failed")
 }
 
 fn index_html_response() -> HttpResponse {
@@ -44266,6 +44269,29 @@ mod tests {
         assert!(!sanitized.contains("test-token"));
         assert!(!sanitized.contains("projectm"));
         assert!(!sanitized.contains("\"alice\""));
+    }
+
+    #[test]
+    fn lidarr_projections_redact_endpoint_and_errors() {
+        let env = MapEnv::default()
+            .with("SLSKR_LIDARR_ENABLED", "true")
+            .with("SLSKR_LIDARR_URL", "http://lidarr.internal:8686/private")
+            .with("SLSKR_LIDARR_API_KEY", "lidarr-secret");
+        let config = super::AppConfig::from_layers(None, FileConfig::default(), &env)
+            .expect("Lidarr config");
+        let json = config.integrations.lidarr.sanitized_json();
+
+        assert!(json.contains("\"url\":null"));
+        assert!(json.contains("\"url_configured\":true"));
+        assert!(!json.contains("lidarr.internal"));
+        assert!(!json.contains("/private"));
+        assert!(!json.contains("lidarr-secret"));
+        assert_eq!(
+            super::public_lidarr_error(Some(
+                "request to http://lidarr.internal:8686/private failed"
+            )),
+            Some("Lidarr connection failed")
+        );
     }
 
     #[test]

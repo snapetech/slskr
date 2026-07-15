@@ -597,9 +597,9 @@ impl LidarrIntegrationSettings {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"enabled\":{},\"url\":{},\"api_key_configured\":{},\"timeout_seconds\":{}}}",
+            "{{\"enabled\":{},\"url\":null,\"url_configured\":{},\"api_key_configured\":{},\"timeout_seconds\":{}}}",
             self.enabled,
-            json_option(self.url.as_deref()),
+            self.url.is_some(),
             self.api_key.is_some(),
             self.timeout_seconds
         )
