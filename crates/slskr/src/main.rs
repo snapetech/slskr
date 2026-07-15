@@ -11198,8 +11198,10 @@ async fn route_http_request_with_headers(
             }
         }
 
-        ("GET", path) if path.starts_with("/api/searches/") && path.len() > "/api/searches/".len() => {
-            let id = path.trim_start_matches("/api/searches/");
+        ("GET", path) if path.starts_with("/api/searches/") => {
+            let Some(id) = path_segment_after(path, "/api/searches/") else {
+                return Ok(routing::not_found_response());
+            };
             let searches = state.searches.read().await;
             if let Some(record) = searches.get_by_identifier(id) {
                 let json = record.json_with_query(route.query);
@@ -11212,14 +11214,14 @@ async fn route_http_request_with_headers(
         }
 
         ("DELETE", path)
-            if (path.starts_with("/api/searches/")
-                || route.normalized_path.starts_with("/api/v0/searches/"))
-                && path.len() > "/api/searches/".len() =>
+            if path.starts_with("/api/searches/")
+                || route.normalized_path.starts_with("/api/v0/searches/") =>
         {
-            let token_str = path
-                .strip_prefix("/api/searches/")
-                .or_else(|| route.normalized_path.strip_prefix("/api/v0/searches/"))
-                .unwrap_or_default();
+            let Some(token_str) = path_segment_after(path, "/api/searches/").or_else(|| {
+                path_segment_after(route.normalized_path, "/api/v0/searches/")
+            }) else {
+                return Ok(routing::not_found_response());
+            };
             let mut searches = state.searches.write().await;
             let removed = searches.remove_by_identifier(token_str);
             drop(searches);
@@ -12457,8 +12459,10 @@ async fn route_http_request_with_headers(
               }
             }
         }
-        ("DELETE", path) if path.starts_with("/api/wishlist/") && path.len() > 14 => {
-            let item_id = &path[14..];
+        ("DELETE", path) if path.starts_with("/api/wishlist/") => {
+            let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
+                return Ok(routing::not_found_response());
+            };
             let mut wishlist = state.wishlist.write().await;
             if let Some(record) = wishlist.remove_item(item_id) {
                 let json = serde_json::json!({
@@ -12561,8 +12565,10 @@ async fn route_http_request_with_headers(
              );
              Ok(if added { routing::created_response(json) } else { routing::ok_response(json) })
          }
-         ("GET", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
-            let id = &path[14..];
+         ("GET", path) if path.starts_with("/api/contacts/") => {
+            let Some(id) = path_segment_after(path, "/api/contacts/") else {
+                return Ok(routing::not_found_response());
+            };
             let contacts = state.contacts.read().await;
             if let Some(record) = contacts.get(id) {
                 let json = record.json();
@@ -12573,8 +12579,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("PUT", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
-            let id = &path[14..];
+        ("PUT", path) if path.starts_with("/api/contacts/") => {
+            let Some(id) = path_segment_after(path, "/api/contacts/") else {
+                return Ok(routing::not_found_response());
+            };
             let username = extract_json_string_field(body, "username");
             let online = extract_json_bool_field(body, "online");
             let mut contacts = state.contacts.write().await;
@@ -12595,8 +12603,10 @@ async fn route_http_request_with_headers(
                 }
             }
         }
-        ("DELETE", path) if path.starts_with("/api/contacts/") && path.len() > 14 && !path.contains("/members") => {
-            let id = &path[14..];
+        ("DELETE", path) if path.starts_with("/api/contacts/") => {
+            let Some(id) = path_segment_after(path, "/api/contacts/") else {
+                return Ok(routing::not_found_response());
+            };
             let mut contacts = state.contacts.write().await;
             let deleted = contacts.delete(id);
             drop(contacts);
@@ -14030,11 +14040,10 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
-        ("PUT", path) if path.starts_with("/api/searches/") && path.len() > 13 => {
-            let id = path.trim_start_matches("/api/searches/");
-            if id.is_empty() || id.contains('/') {
+        ("PUT", path) if path.starts_with("/api/searches/") => {
+            let Some(id) = path_segment_after(path, "/api/searches/") else {
                 return Ok(routing::not_found_response());
-            }
+            };
             let query = extract_json_string_field(body, "query")
                 .or_else(|| extract_json_string_field(body, "searchText"));
             let status = extract_json_string_field(body, "status")
@@ -14080,8 +14089,10 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(payload.to_string()))
         }
 
-        ("PUT", path) if path.starts_with("/api/wishlist/") && path.len() > 14 => {
-            let item_id = path.rsplit('/').next().unwrap_or("unknown");
+        ("PUT", path) if path.starts_with("/api/wishlist/") => {
+            let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
+                return Ok(routing::not_found_response());
+            };
             let artist = extract_json_string_field(body, "artist");
             let title = extract_json_string_field(body, "title")
                 .or_else(|| extract_json_string_field(body, "searchText"));
@@ -30342,6 +30353,22 @@ mod tests {
         assert_eq!(wishlist.status, "201 Created");
         let wishlist_json = serde_json::from_str::<serde_json::Value>(&wishlist.body).unwrap();
         let wish_id = wishlist_json["id"].as_str().unwrap().to_owned();
+
+        let aliased_wishlist_update = super::route_http_request(
+            "PUT",
+            &format!("/api/wishlist/unrelated/{wish_id}"),
+            None,
+            r#"{"title":"Aliased Track"}"#,
+            &state,
+        )
+        .await
+        .expect("reject aliased wishlist update");
+        assert_eq!(aliased_wishlist_update.status, "404 Not Found");
+        assert_eq!(
+            state.wishlist.read().await.records[0].items[0].title,
+            "Blue Track",
+            "nested route must not update the last path segment"
+        );
 
         let updated_wishlist = super::route_http_request(
             "PUT",
