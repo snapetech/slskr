@@ -104,7 +104,6 @@ where
                     Some(Ok(ClientFrame::Close)) | None => return Ok(()),
                     Some(Ok(ClientFrame::Ping(payload))) => write_frame(writer, 0x8a, &payload).await?,
                     Some(Ok(ClientFrame::Pong)) => awaiting_pong = false,
-                    Some(Ok(ClientFrame::Other)) => {}
                     Some(Err(error)) => return Err(error),
                 },
             received = receiver.recv() => match received {
@@ -151,7 +150,6 @@ enum ClientFrame {
     Close,
     Ping(Vec<u8>),
     Pong,
-    Other,
 }
 
 async fn read_client_frame<R>(reader: &mut R) -> Result<ClientFrame, String>
@@ -211,6 +209,9 @@ where
     if is_control && len > 125 {
         return Err("client websocket control frame is too large".to_owned());
     }
+    if !is_control {
+        return Err("event websocket does not accept client data frames".to_owned());
+    }
     let mut mask = [0_u8; 4];
     reader
         .read_exact(&mut mask)
@@ -230,7 +231,7 @@ where
         0x8 => Ok(ClientFrame::Close),
         0x9 => Ok(ClientFrame::Ping(payload)),
         0xa => Ok(ClientFrame::Pong),
-        _ => Ok(ClientFrame::Other),
+        _ => unreachable!("validated websocket control opcode"),
     }
 }
 
@@ -418,6 +419,17 @@ mod tests {
         let mut reader = &frame[..];
         let error = read_client_frame(&mut reader).await.unwrap_err();
         assert_eq!(error, "client websocket frame used reserved opcode");
+    }
+
+    #[tokio::test]
+    async fn event_websocket_rejects_client_data_before_payload_read() {
+        for opcode in [0x80, 0x81, 0x82] {
+            let frame = masked_client_frame(opcode, b"hello");
+            let mut reader = &frame[..];
+            let error = read_client_frame(&mut reader).await.unwrap_err();
+            assert_eq!(error, "event websocket does not accept client data frames");
+            assert_eq!(reader.len(), 9, "mask and payload should remain unread");
+        }
     }
 
     #[tokio::test]
