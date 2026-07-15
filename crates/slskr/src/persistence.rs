@@ -1438,12 +1438,12 @@ impl DatabaseManager {
     pub async fn delete_expired_oauth_states(
         &self,
         now: i64,
-    ) -> Result<u32, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<dyn std::error::Error>> {
         let result = query("DELETE FROM oauth_states WHERE expires_at < ?")
             .bind(now)
             .execute(&self.pool)
             .await?;
-        Ok(result.rows_affected() as u32)
+        Ok(result.rows_affected())
     }
 
     /// List non-expired pending OAuth states.
@@ -1914,7 +1914,7 @@ impl DatabaseManager {
     pub async fn prune_events(
         &self,
         history_limit: i32,
-    ) -> Result<u32, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<dyn std::error::Error>> {
         let result = query(
             r#"
             DELETE FROM events
@@ -1926,7 +1926,7 @@ impl DatabaseManager {
         .bind(history_limit)
         .execute(&self.pool)
         .await?;
-        Ok(result.rows_affected() as u32)
+        Ok(result.rows_affected())
     }
 
     // ========================================================================
@@ -3002,39 +3002,39 @@ impl DatabaseManager {
             .await?;
 
         Ok(DatabaseStats {
-            search_count: search_count.0 as u32,
-            search_result_count: search_result_count.0 as u32,
-            transfer_count: transfer_count.0 as u32,
-            transfer_event_count: transfer_event_count.0 as u32,
-            share_file_count: share_file_count.0 as u32,
-            event_count: event_count.0 as u32,
-            message_count: message_count.0 as u32,
-            user_count: user_count.0 as u32,
-            user_projection_count: user_projection_count.0 as u32,
-            room_count: room_count.0 as u32,
-            user_note_count: user_note_count.0 as u32,
-            interest_count: interest_count.0 as u32,
-            security_ban_count: security_ban_count.0 as u32,
-            wishlist_count: wishlist_count.0 as u32,
-            contact_count: contact_count.0 as u32,
-            share_grant_count: share_grant_count.0 as u32,
-            share_group_count: share_group_count.0 as u32,
-            share_group_member_count: share_group_member_count.0 as u32,
-            collection_count: collection_count.0 as u32,
-            collection_item_count: collection_item_count.0 as u32,
-            library_item_count: library_item_count.0 as u32,
-            destination_count: destination_count.0 as u32,
-            now_playing_count: now_playing_count.0 as u32,
-            browse_count: browse_count.0 as u32,
-            runtime_state_count: runtime_state_count.0 as u32,
-            oauth_state_count: oauth_state_count.0 as u32,
-            webhook_count: webhook_count.0 as u32,
-            webhook_log_count: webhook_log_count.0 as u32,
+            search_count: nonnegative_database_count(search_count.0)?,
+            search_result_count: nonnegative_database_count(search_result_count.0)?,
+            transfer_count: nonnegative_database_count(transfer_count.0)?,
+            transfer_event_count: nonnegative_database_count(transfer_event_count.0)?,
+            share_file_count: nonnegative_database_count(share_file_count.0)?,
+            event_count: nonnegative_database_count(event_count.0)?,
+            message_count: nonnegative_database_count(message_count.0)?,
+            user_count: nonnegative_database_count(user_count.0)?,
+            user_projection_count: nonnegative_database_count(user_projection_count.0)?,
+            room_count: nonnegative_database_count(room_count.0)?,
+            user_note_count: nonnegative_database_count(user_note_count.0)?,
+            interest_count: nonnegative_database_count(interest_count.0)?,
+            security_ban_count: nonnegative_database_count(security_ban_count.0)?,
+            wishlist_count: nonnegative_database_count(wishlist_count.0)?,
+            contact_count: nonnegative_database_count(contact_count.0)?,
+            share_grant_count: nonnegative_database_count(share_grant_count.0)?,
+            share_group_count: nonnegative_database_count(share_group_count.0)?,
+            share_group_member_count: nonnegative_database_count(share_group_member_count.0)?,
+            collection_count: nonnegative_database_count(collection_count.0)?,
+            collection_item_count: nonnegative_database_count(collection_item_count.0)?,
+            library_item_count: nonnegative_database_count(library_item_count.0)?,
+            destination_count: nonnegative_database_count(destination_count.0)?,
+            now_playing_count: nonnegative_database_count(now_playing_count.0)?,
+            browse_count: nonnegative_database_count(browse_count.0)?,
+            runtime_state_count: nonnegative_database_count(runtime_state_count.0)?,
+            oauth_state_count: nonnegative_database_count(oauth_state_count.0)?,
+            webhook_count: nonnegative_database_count(webhook_count.0)?,
+            webhook_log_count: nonnegative_database_count(webhook_log_count.0)?,
         })
     }
 
     /// Cleanup old records (older than specified days)
-    pub async fn cleanup_old_records(&self, days: i32) -> Result<u32, Box<dyn std::error::Error>> {
+    pub async fn cleanup_old_records(&self, days: i32) -> Result<u64, Box<dyn std::error::Error>> {
         let cutoff =
             SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64 - (days as i64 * 86400);
 
@@ -3043,7 +3043,7 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() as u32)
+        Ok(result.rows_affected())
     }
 
     /// Vacuum database (optimize storage)
@@ -3224,7 +3224,7 @@ impl DatabaseManager {
     pub async fn delete_old_webhook_logs(
         &self,
         days: i32,
-    ) -> Result<u32, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<dyn std::error::Error>> {
         let cutoff =
             SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64 - (days as i64 * 86400);
 
@@ -3233,46 +3233,57 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() as u32)
+        Ok(result.rows_affected())
     }
+}
+
+fn nonnegative_database_count(value: i64) -> Result<u64, std::num::TryFromIntError> {
+    u64::try_from(value)
 }
 
 /// Database statistics
 #[derive(Clone, Debug, Serialize)]
 pub struct DatabaseStats {
-    pub search_count: u32,
-    pub search_result_count: u32,
-    pub transfer_count: u32,
-    pub transfer_event_count: u32,
-    pub share_file_count: u32,
-    pub event_count: u32,
-    pub message_count: u32,
-    pub user_count: u32,
-    pub user_projection_count: u32,
-    pub room_count: u32,
-    pub user_note_count: u32,
-    pub interest_count: u32,
-    pub security_ban_count: u32,
-    pub wishlist_count: u32,
-    pub contact_count: u32,
-    pub share_grant_count: u32,
-    pub share_group_count: u32,
-    pub share_group_member_count: u32,
-    pub collection_count: u32,
-    pub collection_item_count: u32,
-    pub library_item_count: u32,
-    pub destination_count: u32,
-    pub now_playing_count: u32,
-    pub browse_count: u32,
-    pub runtime_state_count: u32,
-    pub oauth_state_count: u32,
-    pub webhook_count: u32,
-    pub webhook_log_count: u32,
+    pub search_count: u64,
+    pub search_result_count: u64,
+    pub transfer_count: u64,
+    pub transfer_event_count: u64,
+    pub share_file_count: u64,
+    pub event_count: u64,
+    pub message_count: u64,
+    pub user_count: u64,
+    pub user_projection_count: u64,
+    pub room_count: u64,
+    pub user_note_count: u64,
+    pub interest_count: u64,
+    pub security_ban_count: u64,
+    pub wishlist_count: u64,
+    pub contact_count: u64,
+    pub share_grant_count: u64,
+    pub share_group_count: u64,
+    pub share_group_member_count: u64,
+    pub collection_count: u64,
+    pub collection_item_count: u64,
+    pub library_item_count: u64,
+    pub destination_count: u64,
+    pub now_playing_count: u64,
+    pub browse_count: u64,
+    pub runtime_state_count: u64,
+    pub oauth_state_count: u64,
+    pub webhook_count: u64,
+    pub webhook_log_count: u64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_counts_reject_negative_values_without_wrapping() {
+        assert_eq!(nonnegative_database_count(0), Ok(0));
+        assert_eq!(nonnegative_database_count(i64::MAX), Ok(i64::MAX as u64));
+        assert!(nonnegative_database_count(-1).is_err());
+    }
 
     #[tokio::test]
     async fn test_database_creation() {
