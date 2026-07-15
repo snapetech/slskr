@@ -11,6 +11,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{server::ServerSession, stream::DistributedConnection, ClientError};
 
+pub const DEFAULT_MAX_DISTRIBUTED_CHILDREN: usize = 128;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParentInfo {
     pub username: String,
@@ -63,11 +65,17 @@ pub struct DistributedTree<S> {
     accepting_children: bool,
     parent: Option<ParentConnection<S>>,
     children: HashMap<String, ChildConnection<S>>,
+    max_children: usize,
 }
 
 impl<S> DistributedTree<S> {
     #[must_use]
     pub fn new(local_username: impl Into<String>) -> Self {
+        Self::with_max_children(local_username, DEFAULT_MAX_DISTRIBUTED_CHILDREN)
+    }
+
+    #[must_use]
+    pub fn with_max_children(local_username: impl Into<String>, max_children: usize) -> Self {
         let local_username = local_username.into();
         Self {
             branch_level: 0,
@@ -76,6 +84,7 @@ impl<S> DistributedTree<S> {
             accepting_children: false,
             parent: None,
             children: HashMap::new(),
+            max_children: max_children.max(1),
         }
     }
 
@@ -199,8 +208,13 @@ impl<S> DistributedTree<S> {
         &mut self,
         username: impl Into<String>,
         connection: DistributedConnection<S>,
-    ) -> bool {
+    ) -> Result<bool, ClientError> {
         let username = username.into();
+        if self.children.len() >= self.max_children && !self.children.contains_key(&username) {
+            return Err(ClientError::DistributedChildCapacityFull {
+                max: self.max_children,
+            });
+        }
         let replaced = self.children.insert(
             username.clone(),
             ChildConnection {
@@ -208,7 +222,7 @@ impl<S> DistributedTree<S> {
                 connection,
             },
         );
-        replaced.is_some()
+        Ok(replaced.is_some())
     }
 
     pub fn remove_child(&mut self, username: &str) -> Option<ChildInfo> {

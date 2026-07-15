@@ -61,6 +61,8 @@ pub enum ClientError {
     TimedOut { operation: &'static str },
     #[error("peer connection cache is full (maximum {max} connections)")]
     PeerConnectionCacheFull { max: usize },
+    #[error("distributed child capacity is full (maximum {max} connections)")]
+    DistributedChildCapacityFull { max: usize },
 }
 
 impl ClientError {

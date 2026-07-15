@@ -117,8 +117,10 @@ fn child_depth_updates_local_child_depth() {
     let (child_a, _peer_a) = duplex(512);
     let (child_b, _peer_b) = duplex(512);
     let mut tree = DistributedTree::new("local");
-    tree.add_child("alice", DistributedConnection::new(child_a));
-    tree.add_child("bob", DistributedConnection::new(child_b));
+    tree.add_child("alice", DistributedConnection::new(child_a))
+        .unwrap();
+    tree.add_child("bob", DistributedConnection::new(child_b))
+        .unwrap();
 
     assert_eq!(tree.child_depth(), 1);
     assert_eq!(
@@ -144,7 +146,8 @@ async fn branch_info_is_sent_to_parent_as_distributed_messages() {
         parent_info("parent", [10, 0, 0, 2], 2234),
         DistributedConnection::new(tree_side),
     );
-    tree.add_child("child", DistributedConnection::new(child_side));
+    tree.add_child("child", DistributedConnection::new(child_side))
+        .unwrap();
     tree.handle_child_message("child", DistributedMessage::ChildDepth { depth: 2 });
 
     assert!(tree.send_branch_info_to_parent().await.unwrap());
@@ -173,8 +176,10 @@ async fn distributed_searches_forward_to_children_except_source() {
     let mut peer_b = DistributedConnection::new(peer_b);
     let search = distributed_search(5, "origin", 44, "album");
 
-    tree.add_child("alice", DistributedConnection::new(tree_a));
-    tree.add_child("bob", DistributedConnection::new(tree_b));
+    tree.add_child("alice", DistributedConnection::new(tree_a))
+        .unwrap();
+    tree.add_child("bob", DistributedConnection::new(tree_b))
+        .unwrap();
 
     assert_eq!(
         tree.forward_search_to_children(&search, Some("alice"))
@@ -189,6 +194,31 @@ async fn distributed_searches_forward_to_children_except_source() {
 
     let timed_out = tokio::time::timeout(Duration::from_millis(25), peer_a.receive()).await;
     assert!(timed_out.is_err());
+}
+
+#[test]
+fn distributed_tree_rejects_new_children_at_limit_but_allows_replacement() {
+    let mut tree = DistributedTree::with_max_children("local", 1);
+    let (first, _) = duplex(64);
+    assert!(!tree
+        .add_child("first", DistributedConnection::new(first))
+        .unwrap());
+
+    let (replacement, _) = duplex(64);
+    assert!(tree
+        .add_child("first", DistributedConnection::new(replacement))
+        .unwrap());
+
+    let (second, _) = duplex(64);
+    let error = tree
+        .add_child("second", DistributedConnection::new(second))
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::DistributedChildCapacityFull { max: 1 }
+    ));
+    assert_eq!(tree.children_len(), 1);
+    assert!(tree.child_info("first").is_some());
 }
 
 #[tokio::test]
