@@ -15420,6 +15420,7 @@ async fn route_http_request_with_headers(
             let mut runtime = state.runtime.write().await;
             let json = runtime.set_relay_agent(false).to_string();
             drop(runtime);
+            persist_runtime_compat_state(state).await;
             Ok(routing::ok_response(json))
         }
 
@@ -31001,6 +31002,18 @@ mod tests {
         .await
         .expect("relay agent");
         assert_eq!(relay_agent.status, "200 OK");
+        assert!(
+            db.get_runtime_compat_state()
+                .await
+                .unwrap()
+                .unwrap()
+                .relay_agent_enabled
+        );
+        let relay_agent_disabled =
+            super::route_http_request("DELETE", "/api/relay/agent", None, "", &state)
+                .await
+                .expect("disable relay agent");
+        assert_eq!(relay_agent_disabled.status, "200 OK");
         let bridge_config = super::route_http_request(
             "PUT",
             "/api/bridge/admin/config",
@@ -31069,7 +31082,7 @@ mod tests {
         assert_eq!(persisted.gc_runs, 1);
         assert!(persisted.autoreplace_enabled);
         assert!(persisted.relay_enabled);
-        assert!(persisted.relay_agent_enabled);
+        assert!(!persisted.relay_agent_enabled);
         assert_eq!(persisted.bridge_config_updates, 1);
         assert_eq!(persisted.options_updates, 1);
         assert_eq!(persisted.options_yaml_uploads, 1);
@@ -31085,7 +31098,7 @@ mod tests {
         let runtime_json = rehydrated_runtime.json_value();
         assert_eq!(runtime_json["pendingRestart"], true);
         assert_eq!(runtime_json["autoreplaceEnabled"], true);
-        assert_eq!(runtime_json["relayAgentEnabled"], true);
+        assert_eq!(runtime_json["relayAgentEnabled"], false);
         assert_eq!(runtime_json["bridgeConfigUpdates"], 1);
         assert_eq!(runtime_json["optionsUpdates"], 1);
         assert_eq!(runtime_json["optionsYamlUploads"], 1);
