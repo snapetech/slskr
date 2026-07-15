@@ -151,6 +151,8 @@ const MAX_INTERESTS_PER_KIND: usize = 4_096;
 const MAX_NOW_PLAYING_RECORDS: usize = 4_096;
 const MAX_SECURITY_BANS: usize = 4_096;
 const MAX_SHARE_GRANTS: usize = 4_096;
+const MAX_LIBRARY_ITEMS: usize = 10_000;
+const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -6579,16 +6581,21 @@ impl LibraryStore {
     fn from_persisted(records: Vec<crate::persistence::LibraryItemRecord>) -> Self {
         let mut next_id = 1;
         let mut updated_at = unix_timestamp();
+        for record in &records {
+            if let Some(number) = record
+                .id
+                .strip_prefix("lib-")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                next_id = next_id.max(number.saturating_add(1));
+            }
+        }
+        let mut seen_ids = std::collections::HashSet::new();
         let records = records
             .into_iter()
+            .filter(|record| seen_ids.insert(record.id.clone()))
+            .take(MAX_LIBRARY_ITEMS)
             .map(|record| {
-                if let Some(number) = record
-                    .id
-                    .strip_prefix("lib-")
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    next_id = next_id.max(number.saturating_add(1));
-                }
                 let created_at = u64::try_from(record.created_at).unwrap_or(0);
                 updated_at = updated_at.max(created_at);
                 LibraryItemRecord {
@@ -6630,10 +6637,14 @@ impl LibraryStore {
         self.health_scans.iter().find(|scan| scan.id == id).cloned()
     }
 
-    fn create(&mut self, artist: String, title: String, kind: String) -> LibraryItemRecord {
+    fn create(&mut self, artist: String, title: String, kind: String) -> Option<LibraryItemRecord> {
+        if self.records.len() >= MAX_LIBRARY_ITEMS {
+            return None;
+        }
+        let next_id = self.next_id.checked_add(1)?;
         let now = unix_timestamp();
         let id = format!("lib-{}", self.next_id);
-        self.next_id += 1;
+        self.next_id = next_id;
         let record = LibraryItemRecord {
             id,
             artist,
@@ -6643,7 +6654,7 @@ impl LibraryStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn get(&self, id: &str) -> Option<LibraryItemRecord> {
@@ -7102,8 +7113,11 @@ impl DestinationStore {
         if records.is_empty() {
             return Self::new();
         }
+        let mut seen_ids = std::collections::HashSet::new();
         let mut records = records
             .into_iter()
+            .filter(|record| seen_ids.insert(record.id.clone()))
+            .take(MAX_DESTINATIONS)
             .map(|record| DestinationRecord {
                 id: record.id,
                 name: record.name,
@@ -7111,10 +7125,12 @@ impl DestinationStore {
                 is_default: record.is_default,
             })
             .collect::<Vec<_>>();
-        if !records.iter().any(|record| record.is_default) {
-            if let Some(first) = records.first_mut() {
-                first.is_default = true;
-            }
+        let default_index = records
+            .iter()
+            .position(|record| record.is_default)
+            .unwrap_or(0);
+        for (index, record) in records.iter_mut().enumerate() {
+            record.is_default = index == default_index;
         }
         records.sort_by(|left, right| {
             right
@@ -12148,7 +12164,9 @@ async fn route_http_request_with_headers(
             let title = extract_json_string_field(body, "title").unwrap_or_default();
             let kind = extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_string());
             let mut library = state.library.write().await;
-            let record = library.create(artist, title, kind);
+            let Some(record) = library.create(artist, title, kind) else {
+                return Ok(routing::service_unavailable_response("library item capacity is full"));
+            };
             let json = record.json();
             drop(library);
             persist_library_item(state, &record).await;
@@ -14744,7 +14762,9 @@ async fn route_http_request_with_headers(
                 let kind =
                     extract_json_string_field(body, "kind").unwrap_or_else(|| "Audio".to_owned());
                 let mut library = state.library.write().await;
-                let record = library.create(artist, title, kind);
+                let Some(record) = library.create(artist, title, kind) else {
+                    return Ok(routing::service_unavailable_response("library item capacity is full"));
+                };
                 let item = serde_json::from_str::<serde_json::Value>(&record.json())
                     .unwrap_or_else(|_| serde_json::json!({ "id": record.id }));
                 drop(library);
@@ -14982,7 +15002,9 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("target/artist or title is required"));
              }
              let mut library = state.library.write().await;
-             let record = library.create(target.clone(), title, "MusicBrainzTarget".to_owned());
+             let Some(record) = library.create(target.clone(), title, "MusicBrainzTarget".to_owned()) else {
+                 return Ok(routing::service_unavailable_response("library item capacity is full"));
+             };
              let target_projection = library.target_json(&target);
              drop(library);
              persist_library_item(state, &record).await;
@@ -31771,7 +31793,9 @@ mod tests {
     #[test]
     fn library_health_scans_are_bounded_snapshots_with_unique_ids() {
         let mut library = super::LibraryStore::new();
-        library.create("Artist".to_owned(), "Title".to_owned(), String::new());
+        library
+            .create("Artist".to_owned(), "Title".to_owned(), String::new())
+            .unwrap();
         let first = library.create_health_scan("/music".to_owned()).unwrap();
         let second = library.create_health_scan("/music".to_owned()).unwrap();
         assert_ne!(first.id, second.id);
@@ -31907,6 +31931,98 @@ mod tests {
         assert!(exhausted
             .create("collection".to_owned(), "user".to_owned())
             .is_none());
+    }
+
+    #[test]
+    fn library_items_bound_growth_and_checked_ids() {
+        let mut library = super::LibraryStore::new();
+        for index in 0..super::MAX_LIBRARY_ITEMS {
+            library
+                .create(
+                    "Artist".to_owned(),
+                    format!("Track {index}"),
+                    "Audio".to_owned(),
+                )
+                .unwrap();
+        }
+        assert!(library
+            .create(String::new(), "Overflow".to_owned(), "Audio".to_owned())
+            .is_none());
+        assert_eq!(library.records.len(), super::MAX_LIBRARY_ITEMS);
+        let mut exhausted = super::LibraryStore::new();
+        exhausted.next_id = u64::MAX;
+        assert!(exhausted
+            .create(String::new(), "Track".to_owned(), "Audio".to_owned())
+            .is_none());
+
+        let mut persisted = (1..=super::MAX_LIBRARY_ITEMS + 1)
+            .map(|index| crate::persistence::LibraryItemRecord {
+                id: format!("lib-{index}"),
+                artist: "Artist".to_owned(),
+                title: format!("Track {index}"),
+                kind: "Audio".to_owned(),
+                created_at: 1,
+            })
+            .collect::<Vec<_>>();
+        persisted.push(crate::persistence::LibraryItemRecord {
+            id: "lib-1".to_owned(),
+            artist: "Duplicate".to_owned(),
+            title: "Duplicate".to_owned(),
+            kind: "Audio".to_owned(),
+            created_at: 2,
+        });
+        let hydrated = super::LibraryStore::from_persisted(persisted);
+        assert_eq!(hydrated.records.len(), super::MAX_LIBRARY_ITEMS);
+        assert_eq!(
+            hydrated
+                .records
+                .iter()
+                .filter(|item| item.id == "lib-1")
+                .count(),
+            1
+        );
+        assert_eq!(hydrated.next_id, super::MAX_LIBRARY_ITEMS as u64 + 2);
+    }
+
+    #[test]
+    fn destinations_bound_deduplicate_and_select_one_default() {
+        let mut persisted = (0..super::MAX_DESTINATIONS + 2)
+            .map(|index| crate::persistence::DestinationRecord {
+                id: format!("destination-{index}"),
+                name: format!("Destination {index}"),
+                path: format!("/downloads/{index}"),
+                is_default: index < 2,
+                created_at: 1,
+                updated_at: 1,
+            })
+            .collect::<Vec<_>>();
+        persisted.push(crate::persistence::DestinationRecord {
+            id: "destination-0".to_owned(),
+            name: "Duplicate".to_owned(),
+            path: "/duplicate".to_owned(),
+            is_default: true,
+            created_at: 2,
+            updated_at: 2,
+        });
+        let destinations = super::DestinationStore::from_persisted(persisted);
+        assert_eq!(destinations.records.len(), super::MAX_DESTINATIONS);
+        assert_eq!(
+            destinations
+                .records
+                .iter()
+                .filter(|record| record.is_default)
+                .count(),
+            1
+        );
+        assert_eq!(
+            destinations
+                .records
+                .iter()
+                .filter(|record| record.id == "destination-0")
+                .count(),
+            1
+        );
+        assert!(destinations.records[0].is_default);
     }
 
     #[tokio::test]
