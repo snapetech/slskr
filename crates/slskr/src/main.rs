@@ -19728,6 +19728,21 @@ fn shared_local_file_metadata(state: &AppState, local_path: &Path) -> Option<fs:
     Some(metadata)
 }
 
+fn open_shared_local_file(state: &AppState, local_path: &Path) -> Result<fs::File, String> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        if !state.config.share_settings.follow_symlinks {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+    }
+    options
+        .open(local_path)
+        .map_err(|error| format!("local file open failed: {error}"))
+}
+
 fn search_target_static(target: &str) -> &'static str {
     match target {
         "user" => "user",
@@ -21196,7 +21211,9 @@ async fn upload_file_transfer_with_connection(
     if Path::new(local_path) != shared_file.local_path {
         return Err("upload local path does not match the share index".to_owned());
     }
-    let metadata = fs::metadata(&shared_file.local_path)
+    let mut file = open_shared_local_file(state, &shared_file.local_path)?;
+    let metadata = file
+        .metadata()
         .map_err(|error| format!("local file metadata failed: {error}"))?;
     if !metadata.is_file() {
         return Err("local path is not a file".to_owned());
@@ -21207,8 +21224,6 @@ async fn upload_file_transfer_with_connection(
         }
     }
     let size = metadata.len();
-    let mut file = fs::File::open(&shared_file.local_path)
-        .map_err(|error| format!("local file open failed: {error}"))?;
     let offset = upload_file_with_progress(state, transfer, connection, &mut file, size).await?;
     Ok((size.saturating_sub(offset), size))
 }
@@ -30823,6 +30838,7 @@ mod tests {
         assert!(super::find_shared_local_file(&state, "Remote/Song.flac")
             .await
             .is_none());
+        assert!(super::open_shared_local_file(&state, &shared_path).is_err());
 
         let _ = std::fs::remove_dir_all(dir);
     }
