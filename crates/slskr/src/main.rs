@@ -5934,6 +5934,26 @@ impl ShareGroupStore {
     }
 }
 
+fn share_group_resource_id(path: &str) -> Option<&str> {
+    let id = path.strip_prefix("/api/sharegroups/")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn share_group_members_id(path: &str) -> Option<&str> {
+    let path = path.strip_prefix("/api/sharegroups/")?;
+    let id = path.strip_suffix("/members")?;
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn share_group_member_path(path: &str) -> Option<(&str, String)> {
+    let path = path.strip_prefix("/api/sharegroups/")?;
+    let (id, username) = path.split_once("/members/")?;
+    if id.is_empty() || id.contains('/') || username.is_empty() || username.contains('/') {
+        return None;
+    }
+    Some((id, decoded_path_segment(username)))
+}
+
 // User Notes Models
 #[derive(Clone, Debug)]
 struct UserNoteRecord {
@@ -12506,12 +12526,10 @@ async fn route_http_request_with_headers(
             persist_share_group(state, &record).await;
             Ok(routing::created_response(json))
         }
-        ("GET", path) if path.starts_with("/api/sharegroups/") && !path.contains("/members") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 4 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
+        ("GET", path)
+            if path.starts_with("/api/sharegroups/") && share_group_resource_id(path).is_some() =>
+        {
+            let id = share_group_resource_id(path).expect("guarded share-group resource path");
             let sharegroups = state.sharegroups.read().await;
             if let Some(record) = sharegroups.get(id) {
                 let json = record.json();
@@ -12522,12 +12540,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("PUT", path) if path.starts_with("/api/sharegroups/") && !path.contains("/members") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 4 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
+        ("PUT", path)
+            if path.starts_with("/api/sharegroups/") && share_group_resource_id(path).is_some() =>
+        {
+            let id = share_group_resource_id(path).expect("guarded share-group resource path");
             let name = extract_json_string_field(body, "name").unwrap_or_else(|| "Untitled".to_string());
             let description = extract_json_string_field(body, "description").unwrap_or_default();
             let mut sharegroups = state.sharegroups.write().await;
@@ -12541,12 +12557,10 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("DELETE", path) if path.starts_with("/api/sharegroups/") && !path.contains("/members") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 4 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
+        ("DELETE", path)
+            if path.starts_with("/api/sharegroups/") && share_group_resource_id(path).is_some() =>
+        {
+            let id = share_group_resource_id(path).expect("guarded share-group resource path");
             let mut sharegroups = state.sharegroups.write().await;
             let deleted = sharegroups.delete(id);
             drop(sharegroups);
@@ -12557,12 +12571,12 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("GET", path) if path.starts_with("/api/sharegroups/") && path.ends_with("/members") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 5 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
+        ("GET", path)
+            if path.starts_with("/api/sharegroups/")
+                && path.ends_with("/members")
+                && share_group_members_id(path).is_some() =>
+        {
+            let id = share_group_members_id(path).expect("guarded share-group members path");
             let sharegroups = state.sharegroups.read().await;
             if let Some(record) = sharegroups.get(id) {
                 let members = record.members.iter()
@@ -12577,12 +12591,12 @@ async fn route_http_request_with_headers(
                 Ok(routing::not_found_response())
             }
         }
-        ("POST", path) if path.starts_with("/api/sharegroups/") && path.ends_with("/members") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 5 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
+        ("POST", path)
+            if path.starts_with("/api/sharegroups/")
+                && path.ends_with("/members")
+                && share_group_members_id(path).is_some() =>
+        {
+            let id = share_group_members_id(path).expect("guarded share-group members path");
             let username = extract_json_string_field(body, "username").unwrap_or_default();
             if username.is_empty() {
                 return Ok(routing::conflict_response("username is required"));
@@ -12621,20 +12635,17 @@ async fn route_http_request_with_headers(
               }
             }
         }
-        ("DELETE", path) if path.starts_with("/api/sharegroups/") && path.contains("/members/") => {
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() < 6 {
-                return Ok(routing::not_found_response());
-            }
-            let id = parts[3];
-            let username = parts[5];
-            if username.is_empty() {
-                return Ok(routing::not_found_response());
-            }
+        ("DELETE", path)
+            if path.starts_with("/api/sharegroups/")
+                && path.contains("/members/")
+                && share_group_member_path(path).is_some() =>
+        {
+            let (id, username) =
+                share_group_member_path(path).expect("guarded share-group member path");
             let mut sharegroups = state.sharegroups.write().await;
-            if let Some(record) = sharegroups.remove_member(id, username) {
+            if let Some(record) = sharegroups.remove_member(id, &username) {
                 drop(sharegroups);
-                persist_share_group_member_delete(state, id, username).await;
+                persist_share_group_member_delete(state, id, &username).await;
                 persist_share_group(state, &record).await;
                 Ok(routing::ok_response("{}".to_string()))
             } else {
@@ -33682,6 +33693,95 @@ mod tests {
         assert_eq!(unknown_json["group"], "default");
         assert_eq!(unknown_json["group_id"], serde_json::Value::Null);
         assert_eq!(unknown_json["groupCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn share_group_mutations_require_exact_paths_and_decode_members() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/sharegroups",
+            None,
+            r#"{"name":"Trusted","description":"original"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let group_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        super::route_http_request(
+            "POST",
+            &format!("/api/sharegroups/{group_id}/members"),
+            None,
+            r#"{"username":"Peer One"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+
+        super::route_http_request(
+            "PUT",
+            &format!("/api/sharegroups/{group_id}/extra"),
+            None,
+            r#"{"name":"Corrupted","description":"wrong"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        super::route_http_request(
+            "POST",
+            &format!("/api/sharegroups/{group_id}/extra/members"),
+            None,
+            r#"{"username":"intruder"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        super::route_http_request(
+            "DELETE",
+            &format!("/api/sharegroups/{group_id}/members/Peer%20One/extra"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        super::route_http_request(
+            "DELETE",
+            &format!("/api/sharegroups/{group_id}/extra"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+
+        let group = state.sharegroups.read().await.get(&group_id).unwrap();
+        assert_eq!(group.name, "Trusted");
+        assert_eq!(group.description, "original");
+        assert_eq!(group.members.len(), 1);
+        assert_eq!(group.members[0].username, "Peer One");
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/sharegroups/{group_id}/members/Peer%20One"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted.status, "200 OK");
+        assert!(state
+            .sharegroups
+            .read()
+            .await
+            .get(&group_id)
+            .unwrap()
+            .members
+            .is_empty());
     }
 
     #[tokio::test]
