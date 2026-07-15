@@ -11424,10 +11424,15 @@ async fn route_http_request_with_headers(
              };
 
               let mut messages = state.messages.write().await;
+              let previous = messages.clone();
               let record = messages.add(username.clone(), "outbound", message_body.clone());
+              let mutated = messages.clone();
               let message_id = record.id;
               drop(messages);
-              persist_message_record(state, &record).await;
+              if let Err(error) = persist_message_record_checked(state, &record).await {
+                  rollback_messages_if_unchanged(state, previous, &mutated).await;
+                  return Ok(routing::service_unavailable_response(&error));
+              }
               session_command_permit.send(SessionCommand::MessageUser {
                   username: username.clone(),
                   body: message_body.clone(),
@@ -11509,14 +11514,17 @@ async fn route_http_request_with_headers(
                 }
             };
             let mut messages = state.messages.write().await;
+            let previous = messages.clone();
 
-            if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
-                record.acknowledged = true;
-                record.updated_at = unix_timestamp();
+            if let Some(record) = messages.ack(id) {
+                let mutated = messages.clone();
                 let username = record.username.clone();
                 let json_response = record.json();
                 drop(messages);
-                persist_message_ack(state, id).await;
+                if let Err(error) = persist_message_ack_checked(state, id).await {
+                    rollback_messages_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 record_event(
                     state,
                     "message.acked",
@@ -11560,14 +11568,17 @@ async fn route_http_request_with_headers(
                  }
              };
              let mut messages = state.messages.write().await;
+             let previous = messages.clone();
 
-             if let Some(record) = messages.records.iter_mut().find(|m| m.id == id) {
-                 record.acknowledged = true;
-                 record.updated_at = unix_timestamp();
+             if let Some(record) = messages.ack(id) {
+                 let mutated = messages.clone();
                  let username = record.username.clone();
                  let json_response = record.json();
                  drop(messages);
-                 persist_message_ack(state, id).await;
+                 if let Err(error) = persist_message_ack_checked(state, id).await {
+                     rollback_messages_if_unchanged(state, previous, &mutated).await;
+                     return Ok(routing::service_unavailable_response(&error));
+                 }
                  record_event(
                      state,
                      "message.acked",
@@ -13866,14 +13877,17 @@ async fn route_http_request_with_headers(
             };
 
             let mut messages = state.messages.write().await;
+            let previous = messages.clone();
             let records: Vec<_> = command
                 .iter()
                 .map(|username| messages.add(username.clone(), "outbound", message_body.clone()))
                 .collect();
+            let mutated = messages.clone();
             drop(messages);
 
-            for record in &records {
-                persist_message_record(state, record).await;
+            if let Err(error) = persist_message_records_checked(state, &records).await {
+                rollback_messages_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
             }
             session_command_permit.send(SessionCommand::MessageUsers {
                 usernames: command.clone(),
@@ -13907,9 +13921,14 @@ async fn route_http_request_with_headers(
                 }
             };
             let mut messages = state.messages.write().await;
+            let previous = messages.clone();
             let record = messages.add(username.clone(), "outbound", message_body.clone());
+            let mutated = messages.clone();
             drop(messages);
-            persist_message_record(state, &record).await;
+            if let Err(error) = persist_message_record_checked(state, &record).await {
+                rollback_messages_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             session_command_permit.send(SessionCommand::MessageUser {
                 username,
                 body: message_body,
@@ -14465,17 +14484,24 @@ async fn route_http_request_with_headers(
             };
             let username = decoded_path_segment(username);
             let mut messages = state.messages.write().await;
+            let previous = messages.clone();
             let updated = messages
                 .records
                 .iter()
                 .any(|record| record.username == username && record.id == id);
             let response = if updated {
                 messages.ack(id);
+                let mutated = messages.clone();
+                drop(messages);
+                if let Err(error) = persist_message_ack_checked(state, id).await {
+                    rollback_messages_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 routing::ok_response("true".to_owned())
             } else {
+                drop(messages);
                 routing::not_found_response()
             };
-            drop(messages);
             Ok(response)
         }
         ("PUT", path) if path_segment_after(path, "/api/conversations/").is_some() => {
@@ -14484,8 +14510,20 @@ async fn route_http_request_with_headers(
             };
             let username = decoded_path_segment(username);
             let mut messages = state.messages.write().await;
+            let previous = messages.clone();
+            let ids = messages
+                .records
+                .iter()
+                .filter(|record| record.username == username && !record.acknowledged)
+                .map(|record| record.id)
+                .collect::<Vec<_>>();
             messages.ack_all_for_user(&username);
+            let mutated = messages.clone();
             drop(messages);
+            if let Err(error) = persist_message_acks_checked(state, &ids).await {
+                rollback_messages_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::ok_response("true".to_owned()))
         }
 
@@ -15981,11 +16019,19 @@ async fn route_http_request_with_headers(
             };
             let username = decoded_path_segment(username);
             let mut messages = state.messages.write().await;
+            let previous = messages.clone();
             let before = messages.records.len();
             messages.records.retain(|record| record.username != username);
             let removed = before.saturating_sub(messages.records.len());
+            let mutated = messages.clone();
             drop(messages);
-            let persisted_removed = persist_conversation_delete(state, &username).await;
+            let persisted_removed = match persist_conversation_delete_checked(state, &username).await {
+                Ok(removed) => removed.unwrap_or(0),
+                Err(error) => {
+                    rollback_messages_if_unchanged(state, previous, &mutated).await;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
+            };
             Ok(routing::ok_response(
                 (removed > 0 || persisted_removed > 0).to_string(),
             ))
@@ -23986,8 +24032,15 @@ async fn persist_event_record(state: &AppState, record: &EventRecord) {
     let _ = db.prune_events(EVENT_HISTORY_LIMIT as i32).await;
 }
 
-async fn persist_message_record(state: &AppState, record: &MessageRecord) {
-    let _ = persist_message_record_checked(state, record).await;
+fn persisted_message_record(record: &MessageRecord) -> crate::persistence::MessageRecord {
+    crate::persistence::MessageRecord {
+        id: record.id.to_string(),
+        username: record.username.clone(),
+        content: record.body.clone(),
+        direction: record.direction.to_owned(),
+        read: record.acknowledged,
+        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+    }
 }
 
 async fn persist_message_record_checked(
@@ -23997,22 +24050,30 @@ async fn persist_message_record_checked(
     let Some(db) = state.db.as_ref() else {
         return Ok(false);
     };
-    let persisted = crate::persistence::MessageRecord {
-        id: record.id.to_string(),
-        username: record.username.clone(),
-        content: record.body.clone(),
-        direction: record.direction.to_owned(),
-        read: record.acknowledged,
-        created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
-    };
-    db.insert_message(&persisted)
+    db.insert_message(&persisted_message_record(record))
         .await
         .map_err(|error| format!("message persistence failed: {error}"))?;
     Ok(true)
 }
 
-async fn persist_message_ack(state: &AppState, id: u64) {
-    let _ = persist_message_ack_checked(state, id).await;
+async fn persist_message_records_checked(
+    state: &AppState,
+    records: &[MessageRecord],
+) -> Result<bool, String> {
+    if records.is_empty() {
+        return Ok(state.db.is_some());
+    }
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    let persisted = records
+        .iter()
+        .map(persisted_message_record)
+        .collect::<Vec<_>>();
+    db.insert_messages(&persisted)
+        .await
+        .map_err(|error| format!("message persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_message_ack_checked(state: &AppState, id: u64) -> Result<bool, String> {
@@ -24020,6 +24081,20 @@ async fn persist_message_ack_checked(state: &AppState, id: u64) -> Result<bool, 
         return Ok(false);
     };
     db.mark_message_read(&id.to_string())
+        .await
+        .map_err(|error| format!("message acknowledgement persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn persist_message_acks_checked(state: &AppState, ids: &[u64]) -> Result<bool, String> {
+    if ids.is_empty() {
+        return Ok(state.db.is_some());
+    }
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    let ids = ids.iter().map(u64::to_string).collect::<Vec<_>>();
+    db.mark_messages_read(&ids)
         .await
         .map_err(|error| format!("message acknowledgement persistence failed: {error}"))?;
     Ok(true)
@@ -24036,11 +24111,17 @@ async fn rollback_messages_if_unchanged(
     }
 }
 
-async fn persist_conversation_delete(state: &AppState, username: &str) -> u64 {
+async fn persist_conversation_delete_checked(
+    state: &AppState,
+    username: &str,
+) -> Result<Option<u64>, String> {
     let Some(db) = state.db.as_ref() else {
-        return 0;
+        return Ok(None);
     };
-    db.delete_messages_from_user(username).await.unwrap_or(0)
+    db.delete_messages_from_user(username)
+        .await
+        .map(Some)
+        .map_err(|error| format!("conversation deletion persistence failed: {error}"))
 }
 
 async fn persist_room_join(state: &AppState, room: &str) {
@@ -41435,6 +41516,124 @@ mod tests {
                 "{path}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn message_routes_roll_back_when_persistence_fails() {
+        for (path, body) in [
+            ("/api/messages", r#"{"username":"friend","body":"direct"}"#),
+            ("/api/conversations/friend", r#"{"body":"conversation"}"#),
+            (
+                "/api/conversations/batch",
+                r#"{"usernames":["friend","peer"],"body":"batch"}"#,
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let previous = state.messages.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("failed message persistence response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("message persistence failed"),
+                "{path}"
+            );
+            assert_eq!(*state.messages.read().await, previous, "{path}");
+            assert!(receiver.try_recv().is_err(), "{path}");
+        }
+
+        for (method, path, expected_error) in [
+            (
+                "POST",
+                "/api/v0/messages/1/ack",
+                "message acknowledgement persistence failed",
+            ),
+            (
+                "PUT",
+                "/api/v0/messages/1/ack",
+                "message acknowledgement persistence failed",
+            ),
+            (
+                "PUT",
+                "/api/conversations/friend/1",
+                "message acknowledgement persistence failed",
+            ),
+            (
+                "PUT",
+                "/api/conversations/friend",
+                "message acknowledgement persistence failed",
+            ),
+            (
+                "DELETE",
+                "/api/conversations/friend",
+                "conversation deletion persistence failed",
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .messages
+                .write()
+                .await
+                .add("friend".to_owned(), "inbound", "message".to_owned());
+            let previous = state.messages.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request(method, path, None, "", &state)
+                .await
+                .expect("failed message mutation persistence response");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{method} {path}"
+            );
+            assert!(response.body.contains(expected_error), "{method} {path}");
+            assert_eq!(*state.messages.read().await, previous, "{method} {path}");
+            assert!(receiver.try_recv().is_err(), "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn message_batch_database_write_is_atomic() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let original = super::persistence::MessageRecord {
+            id: "1".to_owned(),
+            username: "friend".to_owned(),
+            content: "original".to_owned(),
+            direction: "outbound".to_owned(),
+            read: false,
+            created_at: 1,
+        };
+        db.insert_message(&original).await.unwrap();
+        let new_record = super::persistence::MessageRecord {
+            id: "2".to_owned(),
+            content: "new".to_owned(),
+            ..original.clone()
+        };
+        assert!(db
+            .insert_messages(&[new_record, original.clone()])
+            .await
+            .is_err());
+        let persisted = db.list_messages(10, 0).await.unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].id, "1");
+        assert_eq!(persisted[0].content, "original");
     }
 
     #[tokio::test]

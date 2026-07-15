@@ -1955,6 +1955,32 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Insert multiple message records atomically.
+    pub async fn insert_messages(
+        &self,
+        records: &[MessageRecord],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for record in records {
+            query(
+                r#"
+                INSERT INTO messages (id, username, content, direction, read, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&record.id)
+            .bind(&record.username)
+            .bind(&record.content)
+            .bind(&record.direction)
+            .bind(record.read as i32)
+            .bind(record.created_at)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// List messages from user
     pub async fn list_messages_from_user(
         &self,
@@ -1995,6 +2021,22 @@ impl DatabaseManager {
             .bind(id)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    /// Mark multiple messages as read atomically.
+    pub async fn mark_messages_read(
+        &self,
+        ids: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for id in ids {
+            query("UPDATE messages SET read = 1 WHERE id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
         Ok(())
     }
 
