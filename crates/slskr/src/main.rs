@@ -4216,7 +4216,7 @@ fn slskd_conversation_json(
     value
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomMessageRecord {
     username: String,
     body: String,
@@ -4243,7 +4243,7 @@ impl RoomMessageRecord {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomRecord {
     name: String,
     joined: bool,
@@ -4306,7 +4306,7 @@ impl RoomRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomStore {
     records: Vec<RoomRecord>,
     updated_at: u64,
@@ -11626,13 +11626,17 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut rooms = state.rooms.write().await;
+            let previous = rooms.clone();
             let Some(record) = rooms.join(room_name.to_string()) else {
                 return Ok(routing::service_unavailable_response(
                     "room capacity is full",
                 ));
             };
+            if let Err(error) = persist_room_join_checked(state, room_name).await {
+                *rooms = previous;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             drop(rooms);
-            persist_room_join(state, room_name).await;
             record_event(state, "room.joined", room_name.to_string(), None).await;
 
             send_room_join_if_connected(state, room_name.to_string()).await;
@@ -11645,13 +11649,15 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut rooms = state.rooms.write().await;
+            let previous = rooms.clone();
 
-            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
-                record.joined = false;
-                record.updated_at = unix_timestamp();
+            if let Some(record) = rooms.leave(room_name) {
                 let json_response = record.json();
+                if let Err(error) = persist_room_leave_checked(state, room_name).await {
+                    *rooms = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 drop(rooms);
-                persist_room_leave(state, room_name).await;
                 record_event(state, "room.left", room_name.to_string(), None).await;
 
                 send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
@@ -12330,14 +12336,18 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("room is required"));
             };
             let mut rooms = state.rooms.write().await;
+            let previous = rooms.clone();
             let Some(record) = rooms.join(room_name.to_string()) else {
                 return Ok(routing::service_unavailable_response(
                     "room capacity is full",
                 ));
             };
             let body = record.slskd_room_json().to_string();
+            if let Err(error) = persist_room_join_checked(state, &room_name).await {
+                *rooms = previous;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             drop(rooms);
-            persist_room_join(state, &room_name).await;
             record_event(state, "room.joined", room_name.clone(), None).await;
 
             send_room_join_if_connected(state, room_name).await;
@@ -12473,13 +12483,15 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("room is required"));
             }
             let mut rooms = state.rooms.write().await;
+            let previous = rooms.clone();
 
-            if let Some(record) = rooms.records.iter_mut().find(|r| r.name == room_name) {
-                record.joined = false;
-                record.updated_at = unix_timestamp();
+            if let Some(record) = rooms.leave(&room_name) {
                 let json_response = record.json();
+                if let Err(error) = persist_room_leave_checked(state, &room_name).await {
+                    *rooms = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
                 drop(rooms);
-                persist_room_leave(state, &room_name).await;
                 record_event(state, "room.left", room_name.to_string(), None).await;
 
                 send_session_command(state, SessionCommand::LeaveRoom(room_name.to_string())).await.ok();
@@ -24124,16 +24136,24 @@ async fn persist_conversation_delete_checked(
         .map_err(|error| format!("conversation deletion persistence failed: {error}"))
 }
 
-async fn persist_room_join(state: &AppState, room: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.subscribe_room(room, None).await;
-    }
+async fn persist_room_join_checked(state: &AppState, room: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.subscribe_room(room, None)
+        .await
+        .map_err(|error| format!("room subscription persistence failed: {error}"))?;
+    Ok(true)
 }
 
-async fn persist_room_leave(state: &AppState, room: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.unsubscribe_room(room).await;
-    }
+async fn persist_room_leave_checked(state: &AppState, room: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.unsubscribe_room(room)
+        .await
+        .map_err(|error| format!("room unsubscription persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_user_note_checked(
@@ -41860,6 +41880,65 @@ mod tests {
                     .all(|event| event.kind != "room.message"),
                 "{path}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn room_subscription_routes_roll_back_when_persistence_fails() {
+        for (method, path, body, seeded, expected_error) in [
+            (
+                "POST",
+                "/api/v0/rooms/music/join",
+                "",
+                false,
+                "room subscription persistence failed",
+            ),
+            (
+                "POST",
+                "/api/rooms/joined",
+                r#"{"room":"music"}"#,
+                false,
+                "room subscription persistence failed",
+            ),
+            (
+                "DELETE",
+                "/api/v0/rooms/music/join",
+                "",
+                true,
+                "room unsubscription persistence failed",
+            ),
+            (
+                "DELETE",
+                "/api/rooms/joined/music",
+                "",
+                true,
+                "room unsubscription persistence failed",
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            if seeded {
+                state.rooms.write().await.join("music".to_owned()).unwrap();
+            }
+            let previous = state.rooms.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .expect("failed room persistence response");
+            assert_eq!(
+                response.status, "503 Service Unavailable",
+                "{method} {path}"
+            );
+            assert!(response.body.contains(expected_error), "{method} {path}");
+            assert_eq!(*state.rooms.read().await, previous, "{method} {path}");
+            assert!(receiver.try_recv().is_err(), "{method} {path}");
         }
     }
 
