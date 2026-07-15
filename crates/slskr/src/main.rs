@@ -9050,7 +9050,12 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(body))
         }
         ("GET", path) if path.starts_with("/api/telemetry/reports/transfers/users/") => {
-            let username = decoded_path_segment(path.rsplit('/').next().unwrap_or(""));
+            let Some(username) =
+                path_segment_after(path, "/api/telemetry/reports/transfers/users/")
+            else {
+                return Ok(routing::not_found_response());
+            };
+            let username = decoded_path_segment(username);
             let transfers = state.transfers.read().await;
             let body = slskd_user_transfer_report(&username, &transfers);
             drop(transfers);
@@ -29001,6 +29006,16 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&user_transfers.body).unwrap();
         assert_eq!(user_transfers_json["username"], "telemetry peer");
         assert_eq!(user_transfers_json["count"], 1);
+        let aliased_user_transfers = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/reports/transfers/users/unrelated/telemetry%20peer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reject aliased user transfer report");
+        assert_eq!(aliased_user_transfers.status, "404 Not Found");
         let telemetry_transfer_id = user_transfers_json["transfers"][0]["id"]
             .as_str()
             .expect("telemetry transfer id")
