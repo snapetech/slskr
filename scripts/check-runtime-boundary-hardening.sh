@@ -32,6 +32,7 @@ for anchor in \
   'search_store_caps_results_from_peer_responses' \
   'libc::O_NOFOLLOW' \
   '.take(MAX_TRANSFER_STATE_BYTES + 1)' \
+  'transfer_state_loader_rejects_fifo_without_blocking' \
   'transfer event path must be a regular file' \
   'open_transfer_event_file' \
   'transfer_event_open_rejects_fifo_without_blocking' \

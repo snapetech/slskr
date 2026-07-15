@@ -25021,28 +25021,36 @@ struct TransferStateFile {
 fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<TransferEntry>, String> {
     use std::io::Read;
 
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("transfer state metadata read failed: {error}")),
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("transfer state path must be a regular file".to_owned());
+    #[cfg(not(unix))]
+    {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(format!("transfer state metadata read failed: {error}")),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("transfer state path must be a regular file".to_owned());
+        }
     }
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    let file = options
-        .open(path)
-        .map_err(|error| format!("transfer state open failed: {error}"))?;
-    let size = file
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("transfer state open failed: {error}")),
+    };
+    let opened_metadata = file
         .metadata()
-        .map_err(|error| format!("transfer state metadata read failed: {error}"))?
-        .len();
+        .map_err(|error| format!("transfer state metadata read failed: {error}"))?;
+    if !opened_metadata.is_file() {
+        return Err("transfer state path must be a regular file".to_owned());
+    }
+    let size = opened_metadata.len();
     if size > MAX_TRANSFER_STATE_BYTES {
         return Err(format!(
             "transfer state file is too large: {size} bytes, max is {MAX_TRANSFER_STATE_BYTES}"
@@ -36955,6 +36963,32 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn transfer_state_loader_rejects_fifo_without_blocking() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-transfer-state-fifo-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&state_dir).expect("state dir");
+        let state_path = super::transfer_state_path(&state_dir);
+        let status = std::process::Command::new("mkfifo")
+            .arg(&state_path)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success());
+
+        let error = super::load_transfer_state(&state_path, 100)
+            .expect_err("FIFO transfer state path must be rejected");
+        assert!(error.contains("must be a regular file"));
+
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn state_file_io_rejects_symlinks_without_touching_targets() {
         use std::os::unix::fs::symlink;
 
@@ -36973,7 +37007,7 @@ mod tests {
         let state_path = super::transfer_state_path(&state_dir);
         symlink(&target, &state_path).expect("state symlink");
         let error = super::load_transfer_state(&state_path, 100).expect_err("reject state symlink");
-        assert!(error.contains("must be a regular file"));
+        assert!(error.contains("transfer state open failed"));
 
         let destination = state_dir.join("destination.json");
         let temporary = state_dir.join("temporary.json");
