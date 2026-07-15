@@ -434,16 +434,18 @@ fn valid_request_target(method: &str, target: &str) -> bool {
     }
 
     let bytes = target.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
         let byte = bytes[index];
         if byte == b'%' {
-            if bytes
-                .get(index + 1..index + 3)
-                .is_none_or(|digits| !digits.iter().all(u8::is_ascii_hexdigit))
-            {
+            let Some(high) = bytes.get(index + 1).copied().and_then(http_hex_value) else {
                 return false;
-            }
+            };
+            let Some(low) = bytes.get(index + 2).copied().and_then(http_hex_value) else {
+                return false;
+            };
+            decoded.push((high << 4) | low);
             index += 3;
             continue;
         }
@@ -472,9 +474,22 @@ fn valid_request_target(method: &str, target: &str) -> bool {
         {
             return false;
         }
+        decoded.push(byte);
         index += 1;
     }
-    true
+    std::str::from_utf8(&decoded).is_ok()
+        && !decoded
+            .iter()
+            .any(|byte| byte.is_ascii_control() || *byte == b'\\')
+}
+
+fn http_hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 async fn read_limited_line<R: AsyncBufRead + Unpin>(
@@ -939,6 +954,10 @@ mod tests {
             "/api/health%",
             "/api/health%2",
             "/api/health%GG",
+            "/api/health%FF",
+            "/api/health%C3%28",
+            "/api/health%00",
+            "/api/health%5Cadmin",
             "/api/\0health",
             "/api/❤",
         ] {
@@ -949,6 +968,19 @@ mod tests {
             let error = read_http_request(&mut reader).await.unwrap_err();
             assert!(error.contains("request target"), "{target:?}: {error}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_percent_encoded_utf8_request_target_is_accepted() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"GET /api/%E2%9D%A4?q=a+b HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
+        assert_eq!(request.path, "/api/%E2%9D%A4");
+        assert_eq!(request.query.as_deref(), Some("q=a+b"));
     }
 
     #[tokio::test]

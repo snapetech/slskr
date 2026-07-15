@@ -17122,7 +17122,7 @@ fn path_segment_after<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 fn decoded_path_segment(segment: &str) -> String {
-    percent_decode(segment)
+    percent_decode_component(segment)
 }
 
 async fn create_preview_stream_ticket(
@@ -36433,6 +36433,13 @@ mod tests {
                 ("extension".to_owned(), "flac".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn path_segments_preserve_literal_plus_signs() {
+        assert_eq!(super::decoded_path_segment("a+b"), "a+b");
+        assert_eq!(super::decoded_path_segment("a%2Bb"), "a+b");
+        assert_eq!(super::decoded_path_segment("a%20b"), "a b");
     }
 
     #[test]
