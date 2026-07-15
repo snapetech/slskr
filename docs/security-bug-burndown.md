@@ -133,6 +133,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | High | SDK peer connection retention | The Rust SDK peer cache retained an unlimited number of live streams, and direct plus indirect manager connection paths inserted unique peers without backpressure. | Fixed with a default 1,024-connection ceiling, configurable smaller ceilings, explicit capacity errors, replacement-at-capacity behavior, and regression/gate coverage. |
 | High | Distributed child retention | The Rust SDK distributed tree retained unlimited child connections independently of the bounded peer-message cache. | Fixed with a default 128-child ceiling, configurable smaller ceilings, explicit capacity errors, replacement-at-capacity behavior, and regression/gate coverage. |
 | High | Daemon room projection retention | Remote room lists and global messages could create unlimited daemon room records, and room member lists grew without a ceiling. | Fixed with a 1,024-room ceiling, a 10,000-member per-room ceiling, explicit capacity responses for local mutations, bounded persisted-state hydration, and regression/gate coverage. |
+| High | User projection retention | The daemon accepted unlimited persisted and remote user records, while the Rust SDK retained unlimited unsolicited watch/status usernames across two maps. | Fixed with a 4,096-record daemon ceiling, a 1,024-username SDK ceiling, bounded persisted-state hydration, replacement-at-capacity behavior, explicit local capacity responses, and regression/gate coverage. |
 
 ## Open Burn-Down
 

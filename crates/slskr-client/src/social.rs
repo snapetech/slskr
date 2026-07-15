@@ -7,6 +7,7 @@ use crate::ClientError;
 pub const MAX_PRIVATE_MESSAGE_RECIPIENTS: usize = 100;
 pub const MAX_STORED_ROOM_MESSAGES: usize = 1_000;
 pub const MAX_STORED_PRIVATE_MESSAGES: usize = 1_000;
+pub const DEFAULT_MAX_USER_WATCH_RECORDS: usize = 1_024;
 
 fn retain_newest<T>(items: &mut Vec<T>, max: usize) {
     if items.len() > max {
@@ -51,16 +52,44 @@ where
     })
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserWatchState {
     watched: HashMap<String, WatchedUser>,
     statuses: HashMap<String, UserStatus>,
+    max_records: usize,
+}
+
+impl Default for UserWatchState {
+    fn default() -> Self {
+        Self::with_max_records(DEFAULT_MAX_USER_WATCH_RECORDS)
+    }
 }
 
 impl UserWatchState {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[must_use]
+    pub fn with_max_records(max_records: usize) -> Self {
+        Self {
+            watched: HashMap::new(),
+            statuses: HashMap::new(),
+            max_records: max_records.max(1),
+        }
+    }
+
+    fn can_insert(&self, username: &str) -> bool {
+        self.watched.contains_key(username)
+            || self.statuses.contains_key(username)
+            || self
+                .watched
+                .keys()
+                .chain(self.statuses.keys())
+                .collect::<HashSet<_>>()
+                .len()
+                < self.max_records
     }
 
     #[must_use]
@@ -80,10 +109,16 @@ impl UserWatchState {
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
         match message {
             ServerMessage::WatchUserResponse(user) => {
+                if !self.can_insert(&user.username) {
+                    return false;
+                }
                 self.watched.insert(user.username.clone(), user.clone());
                 true
             }
             ServerMessage::GetUserStatusResponse(status) => {
+                if !self.can_insert(&status.username) {
+                    return false;
+                }
                 self.statuses
                     .insert(status.username.clone(), status.clone());
                 true

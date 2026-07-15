@@ -132,6 +132,7 @@ const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ROOM_MESSAGES_PER_ROOM: usize = 1_000;
 const MAX_ROOM_RECORDS: usize = 1_024;
 const MAX_ROOM_MEMBERS_PER_ROOM: usize = 10_000;
+const MAX_USER_RECORDS: usize = 4_096;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 
 #[allow(dead_code)]
@@ -2653,13 +2654,19 @@ impl UserRecord {
 struct UserStore {
     records: Vec<UserRecord>,
     updated_at: u64,
+    max_records: usize,
 }
 
 impl UserStore {
     fn new() -> Self {
+        Self::with_max_records(MAX_USER_RECORDS)
+    }
+
+    fn with_max_records(max_records: usize) -> Self {
         Self {
             records: Vec::new(),
             updated_at: unix_timestamp(),
+            max_records: max_records.max(1),
         }
     }
 
@@ -2667,6 +2674,7 @@ impl UserStore {
         let mut updated_at = unix_timestamp();
         let records = records
             .into_iter()
+            .take(MAX_USER_RECORDS)
             .map(|record| {
                 updated_at = updated_at.max(record.updated_at as u64);
                 UserRecord {
@@ -2686,10 +2694,11 @@ impl UserStore {
         Self {
             records,
             updated_at,
+            max_records: MAX_USER_RECORDS,
         }
     }
 
-    fn watch(&mut self, username: String) -> UserRecord {
+    fn watch(&mut self, username: String) -> Option<UserRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -2699,7 +2708,10 @@ impl UserStore {
             record.watched = true;
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = UserRecord {
             username,
@@ -2713,7 +2725,7 @@ impl UserStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn unwatch(&mut self, username: &str) -> Option<UserRecord> {
@@ -2728,7 +2740,7 @@ impl UserStore {
         Some(record.clone())
     }
 
-    fn apply_watched_user(&mut self, user: &WatchedUser) -> UserRecord {
+    fn apply_watched_user(&mut self, user: &WatchedUser) -> Option<UserRecord> {
         let now = unix_timestamp();
         let status = user.status.map(|status| status.to_string());
         if let Some(record) = self
@@ -2745,7 +2757,10 @@ impl UserStore {
             }
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = UserRecord {
             username: user.username.clone(),
@@ -2759,10 +2774,10 @@ impl UserStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
-    fn apply_status(&mut self, status: &UserStatus) -> UserRecord {
+    fn apply_status(&mut self, status: &UserStatus) -> Option<UserRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -2772,7 +2787,10 @@ impl UserStore {
             record.status = Some(status.status.to_string());
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = UserRecord {
             username: status.username.clone(),
@@ -2786,10 +2804,10 @@ impl UserStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
-    fn apply_stats(&mut self, username: String, stats: &UserStats) -> UserRecord {
+    fn apply_stats(&mut self, username: String, stats: &UserStats) -> Option<UserRecord> {
         let now = unix_timestamp();
         if let Some(record) = self
             .records
@@ -2802,7 +2820,10 @@ impl UserStore {
             record.directory_count = Some(stats.directory_count);
             record.updated_at = now;
             self.updated_at = now;
-            return record.clone();
+            return Some(record.clone());
+        }
+        if self.records.len() >= self.max_records {
+            return None;
         }
         let record = UserRecord {
             username,
@@ -2816,7 +2837,7 @@ impl UserStore {
         };
         self.records.push(record.clone());
         self.updated_at = now;
-        record
+        Some(record)
     }
 
     fn json(&self) -> String {
@@ -10210,7 +10231,11 @@ async fn route_http_request_with_headers(
             };
 
             let mut users = state.users.write().await;
-            let record = users.watch(username.clone());
+            let Some(record) = users.watch(username.clone()) else {
+                return Ok(routing::service_unavailable_response(
+                    "user watch capacity is full",
+                ));
+            };
             drop(users);
 
             send_session_command(state, SessionCommand::WatchUser(username)).await.ok();
@@ -19630,21 +19655,27 @@ async fn project_server_message(
                 let mut users = state.users.write().await;
                 users.apply_watched_user(user)
             };
-            persist_user_projection(state, &record).await;
+            if let Some(record) = record {
+                persist_user_projection(state, &record).await;
+            }
         }
         ServerMessage::GetUserStatusResponse(status) => {
             let record = {
                 let mut users = state.users.write().await;
                 users.apply_status(status)
             };
-            persist_user_projection(state, &record).await;
+            if let Some(record) = record {
+                persist_user_projection(state, &record).await;
+            }
         }
         ServerMessage::GetUserStats { username, stats } => {
             let record = {
                 let mut users = state.users.write().await;
                 users.apply_stats(username.clone(), stats)
             };
-            persist_user_projection(state, &record).await;
+            if let Some(record) = record {
+                persist_user_projection(state, &record).await;
+            }
         }
         ServerMessage::CheckPrivilegesResponse { seconds } => {
             update_session(state, |snapshot| {
@@ -30632,6 +30663,31 @@ mod tests {
         assert_eq!(response.body, "{\"error\":\"filename is required\"}");
     }
 
+    #[test]
+    fn user_store_rejects_new_records_at_limit_but_updates_existing_users() {
+        let mut users = super::UserStore::with_max_records(1);
+        users.watch("alice".to_owned()).unwrap();
+
+        assert!(users.watch("bob".to_owned()).is_none());
+        let updated = users
+            .apply_status(&super::UserStatus {
+                username: "alice".to_owned(),
+                status: 2,
+                privileged: false,
+            })
+            .unwrap();
+        assert_eq!(updated.status.as_deref(), Some("2"));
+        assert!(users
+            .apply_status(&super::UserStatus {
+                username: "remote-unique".to_owned(),
+                status: 1,
+                privileged: false,
+            })
+            .is_none());
+        assert_eq!(users.records.len(), 1);
+        assert_eq!(users.records[0].username, "alice");
+    }
+
     #[tokio::test]
     async fn users_api_watches_lists_and_unwatches_users() {
         let (state, mut receiver) = test_state();
@@ -31013,8 +31069,7 @@ mod tests {
 
         {
             let mut users = state.users.write().await;
-            let mut user = users.watch("near-peer".to_owned());
-            user.status = Some("online".to_owned());
+            users.watch("near-peer".to_owned()).unwrap();
             if let Some(record) = users
                 .records
                 .iter_mut()

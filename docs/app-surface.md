@@ -108,7 +108,7 @@ The first app shell exposes:
 - `POST /api/v0/search-responses`: merge one flattened result into a search record from JSON body with `token`, `filename`, `size`, and optional `peer_username`, `extension`, `slot_free`, `average_speed`, and `queue_length`
 - `GET /api/v0/events`: list events as a slskd-compatible top-level array.
 - `GET /api/v0/events/records`: list events with the slskr metadata envelope for dashboard filtering and pagination.
-- `GET /api/v0/users`: list watched/user projection records. When persistence is enabled, startup hydrates this projection from SQLite.
+- `GET /api/v0/users`: list up to 4,096 watched/user projection records. When persistence is enabled, startup hydrates this bounded projection from SQLite.
 - `POST /api/v0/users/watch`: watch a username from JSON body `{"username":"..."}`, write the projection to SQLite when persistence is enabled, and enqueue the server watch command when connected
 - `DELETE /api/v0/users/:username/watch`: mark a user unwatched, write the projection to SQLite when persistence is enabled, and enqueue the server unwatch command when connected
 - `POST /api/v0/users/:username/stats/request`: enqueue a server user-stats request when connected; matching server stats update the user projection with average speed, upload count, file count, and directory count, and write the projection to SQLite when persistence is enabled

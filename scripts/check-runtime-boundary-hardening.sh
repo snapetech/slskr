@@ -34,6 +34,8 @@ for anchor in \
   'MAX_ROOM_MEMBERS_PER_ROOM' \
   'room_store_rejects_new_records_at_limit_but_updates_existing_rooms' \
   'room_store_rejects_new_members_at_limit_but_accepts_duplicates' \
+  'MAX_USER_RECORDS' \
+  'user_store_rejects_new_records_at_limit_but_updates_existing_users' \
   'MAX_INCOMING_CONNECTION_TASKS' \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
@@ -75,10 +77,13 @@ for anchor in \
 done
 
 for anchor in \
+  'DEFAULT_MAX_USER_WATCH_RECORDS' \
+  'user_watch_state_rejects_new_users_at_limit_but_updates_existing_users' \
+  'with_max_records' \
   'MAX_STORED_ROOM_MESSAGES' \
   'MAX_STORED_PRIVATE_MESSAGES' \
   'retain_newest(&mut self.messages'; do
-  if ! rg -n --fixed-strings -- "$anchor" "$client_social_source" >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" "$client_social_source" crates/slskr-client/tests/phase7.rs >/dev/null; then
     printf 'runtime boundary hardening check failed: missing client social anchor %s\n' "$anchor" >&2
     status=1
   fi
