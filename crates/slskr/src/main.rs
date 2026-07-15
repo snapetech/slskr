@@ -8418,6 +8418,7 @@ async fn route_http_request_with_headers(
                 }
                 (None, None) => {}
             }
+            let previous_session;
             {
                 let mut session = state.session.write().await;
                 let already_connecting = matches!(session.state, "connecting" | "connected");
@@ -8433,10 +8434,17 @@ async fn route_http_request_with_headers(
                     drop(session);
                     return Ok(routing::accepted_response(body));
                 }
+                previous_session = session.clone();
                 session.state = "connecting";
                 session.updated_at = unix_timestamp();
             }
-            send_session_command(state, SessionCommand::Connect).await.ok();
+            if let Err(error) = send_session_command(state, SessionCommand::Connect).await {
+                let mut session = state.session.write().await;
+                if session.state == "connecting" {
+                    *session = previous_session;
+                }
+                return Ok(routing::service_unavailable_response(&error));
+            }
             record_daemon_log(
                 state,
                 logging::LogLevel::Info,
@@ -8453,6 +8461,7 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(body))
         }
         ("DELETE", "/api/server") => {
+            let previous_session;
             {
                 let mut session = state.session.write().await;
                 if matches!(session.state, "disconnecting" | "disconnected") {
@@ -8467,10 +8476,17 @@ async fn route_http_request_with_headers(
                     drop(session);
                     return Ok(routing::accepted_response(body));
                 }
+                previous_session = session.clone();
                 session.state = "disconnecting";
                 session.updated_at = unix_timestamp();
             }
-            send_session_command(state, SessionCommand::Disconnect).await.ok();
+            if let Err(error) = send_session_command(state, SessionCommand::Disconnect).await {
+                let mut session = state.session.write().await;
+                if session.state == "disconnecting" {
+                    *session = previous_session;
+                }
+                return Ok(routing::service_unavailable_response(&error));
+            }
             record_daemon_log(
                 state,
                 logging::LogLevel::Info,
@@ -9985,19 +10001,27 @@ async fn route_http_request_with_headers(
             })
         }
         ("POST", "/api/session/connect") => {
-            send_session_command(state, SessionCommand::Connect).await.ok();
+            if let Err(error) = send_session_command(state, SessionCommand::Connect).await {
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
         ("POST", "/api/session/ping") => {
-            send_session_command(state, SessionCommand::Ping).await.ok();
+            if let Err(error) = send_session_command(state, SessionCommand::Ping).await {
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
         ("POST", "/api/session/disconnect") => {
-            send_session_command(state, SessionCommand::Disconnect).await.ok();
+            if let Err(error) = send_session_command(state, SessionCommand::Disconnect).await {
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
         ("POST", "/api/session/privileges/check") => {
-            send_session_command(state, SessionCommand::CheckPrivileges).await.ok();
+            if let Err(error) = send_session_command(state, SessionCommand::CheckPrivileges).await {
+                return Ok(routing::service_unavailable_response(&error));
+            }
             Ok(routing::accepted_response("{\"accepted\":true}".to_owned()))
         }
         ("GET", "/api/listeners") => {
@@ -28758,6 +28782,38 @@ mod tests {
                 std::mem::discriminant(&expected_command)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn session_control_routes_fail_when_manager_is_not_running() {
+        let (state, receiver) = test_state();
+        drop(receiver);
+
+        for path in [
+            "/api/session/connect",
+            "/api/session/ping",
+            "/api/session/disconnect",
+            "/api/session/privileges/check",
+        ] {
+            let response = super::route_http_request("POST", path, None, "", &state)
+                .await
+                .expect("route response");
+            assert_eq!(response.status, "503 Service Unavailable");
+            assert!(response.body.contains("session manager is not running"));
+        }
+
+        let connect = super::route_http_request("PUT", "/api/server", None, "", &state)
+            .await
+            .expect("connect response");
+        assert_eq!(connect.status, "503 Service Unavailable");
+        assert_eq!(state.session.read().await.state, "disconnected");
+
+        state.session.write().await.state = "connected";
+        let disconnect = super::route_http_request("DELETE", "/api/server", None, "", &state)
+            .await
+            .expect("disconnect response");
+        assert_eq!(disconnect.status, "503 Service Unavailable");
+        assert_eq!(state.session.read().await.state, "connected");
     }
 
     #[tokio::test]
