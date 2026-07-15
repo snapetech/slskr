@@ -231,6 +231,12 @@ const STORAGE_CAPABILITIES: &[&str] = &[
 
 const MAX_TRANSFER_STATE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TRANSFER_EVENTS_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_TRANSFER_USERNAME_BYTES: usize = 1024;
+const MAX_TRANSFER_FILENAME_BYTES: usize = 16 * 1024;
+const MAX_TRANSFER_LOCAL_PATH_BYTES: usize = 16 * 1024;
+const MAX_TRANSFER_BATCH_ID_BYTES: usize = 4 * 1024;
+const MAX_TRANSFER_STATUS_BYTES: usize = 64;
+const MAX_TRANSFER_REASON_BYTES: usize = 4 * 1024;
 
 fn same_origin_cors_headers(headers: &RequestSecurityHeaders, fallback_host: &str) -> String {
     let Some(origin) = headers.origin.as_deref() else {
@@ -2291,11 +2297,11 @@ impl TransferQueue {
         reason: Option<String>,
     ) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
-        entry.status = status.to_owned();
+        entry.status = truncate_utf8_bytes(status.to_owned(), MAX_TRANSFER_STATUS_BYTES);
         if let Some(bytes_transferred) = bytes_transferred {
             entry.bytes_transferred = bytes_transferred;
         }
-        entry.reason = reason;
+        entry.reason = bounded_transfer_reason(reason);
         entry.updated_at = unix_timestamp();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
@@ -2315,12 +2321,12 @@ impl TransferQueue {
         reason: Option<String>,
     ) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
-        entry.status = status.to_owned();
+        entry.status = truncate_utf8_bytes(status.to_owned(), MAX_TRANSFER_STATUS_BYTES);
         entry.bytes_transferred = bytes_transferred;
         if size.is_some() {
             entry.size = size;
         }
-        entry.reason = reason;
+        entry.reason = bounded_transfer_reason(reason);
         entry.updated_at = unix_timestamp();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
@@ -2347,20 +2353,22 @@ impl TransferQueue {
     }
 
     fn pending_peer_transfer(&self, username: &str) -> Option<TransferEntry> {
+        let username = bounded_transfer_username(username);
         self.entries
             .iter()
             .find(|entry| {
-                entry.peer_username.as_deref() == Some(username)
+                entry.peer_username.as_deref() == Some(username.as_str())
                     && (entry.status == "peer_lookup" || entry.status == "peer_negotiating")
             })
             .cloned()
     }
 
     fn pending_indirect_transfer(&self, username: &str, token: u32) -> Option<TransferEntry> {
+        let username = bounded_transfer_username(username);
         self.entries
             .iter()
             .find(|entry| {
-                entry.peer_username.as_deref() == Some(username)
+                entry.peer_username.as_deref() == Some(username.as_str())
                     && entry.token == token
                     && entry.status == "indirect_pending"
             })
@@ -2385,9 +2393,11 @@ impl TransferQueue {
         token: u32,
         size: Option<u64>,
     ) -> Option<TransferEntry> {
+        let username = bounded_transfer_username(username);
+        let filename = bounded_transfer_filename(filename);
         let entry = self.entries.iter_mut().find(|entry| {
             entry.direction == 0
-                && entry.peer_username.as_deref() == Some(username)
+                && entry.peer_username.as_deref() == Some(username.as_str())
                 && entry.filename == filename
                 && entry.local_path.is_some()
                 && entry.status == "queued"
@@ -2420,9 +2430,11 @@ impl TransferQueue {
         token: u32,
         size: Option<u64>,
     ) -> Option<TransferEntry> {
+        let username = bounded_transfer_username(username);
+        let filename = bounded_transfer_filename(filename);
         let entry = self.entries.iter_mut().find(|entry| {
             entry.direction == 1
-                && entry.peer_username.as_deref() == Some(username)
+                && entry.peer_username.as_deref() == Some(username.as_str())
                 && entry.filename == filename
                 && entry.local_path.is_some()
                 && entry.status == "queued"
@@ -2456,6 +2468,7 @@ impl TransferQueue {
     }
 
     fn push_entry(&mut self, entry: TransferEntry) -> TransferEntry {
+        let entry = bounded_transfer_entry(entry);
         self.entries.push(entry.clone());
         if self.entries.len() > self.history_limit {
             let extra = self.entries.len() - self.history_limit;
@@ -2647,6 +2660,34 @@ impl TransferQueue {
             self.updated_at
         )
     }
+}
+
+fn bounded_transfer_username(username: &str) -> String {
+    truncate_utf8_bytes(username.to_owned(), MAX_TRANSFER_USERNAME_BYTES)
+}
+
+fn bounded_transfer_filename(filename: &str) -> String {
+    truncate_utf8_bytes(filename.to_owned(), MAX_TRANSFER_FILENAME_BYTES)
+}
+
+fn bounded_transfer_reason(reason: Option<String>) -> Option<String> {
+    reason.map(|reason| truncate_utf8_bytes(reason, MAX_TRANSFER_REASON_BYTES))
+}
+
+fn bounded_transfer_entry(mut entry: TransferEntry) -> TransferEntry {
+    entry.peer_username = entry
+        .peer_username
+        .map(|username| truncate_utf8_bytes(username, MAX_TRANSFER_USERNAME_BYTES));
+    entry.filename = truncate_utf8_bytes(entry.filename, MAX_TRANSFER_FILENAME_BYTES);
+    entry.local_path = entry
+        .local_path
+        .filter(|path| path.len() <= MAX_TRANSFER_LOCAL_PATH_BYTES);
+    entry.batch_id = entry
+        .batch_id
+        .map(|batch_id| truncate_utf8_bytes(batch_id, MAX_TRANSFER_BATCH_ID_BYTES));
+    entry.status = truncate_utf8_bytes(entry.status, MAX_TRANSFER_STATUS_BYTES);
+    entry.reason = bounded_transfer_reason(entry.reason);
+    entry
 }
 
 #[derive(Clone, Debug)]
@@ -25548,6 +25589,11 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
             entry.updated_at = now;
         }
     }
+    state.entries = state
+        .entries
+        .into_iter()
+        .map(bounded_transfer_entry)
+        .collect();
     let mut seen_ids = std::collections::HashSet::new();
     state.entries.reverse();
     state.entries.retain(|entry| seen_ids.insert(entry.id));
@@ -38104,6 +38150,44 @@ mod tests {
         assert_eq!(queue.entries[0].status, "rejected");
 
         let _ = std::fs::remove_file(queue.events_path);
+    }
+
+    #[test]
+    fn transfer_queue_bounds_retained_text_and_normalizes_lookups() {
+        let oversized_username = "é".repeat(super::MAX_TRANSFER_USERNAME_BYTES);
+        let oversized_filename = "f".repeat(super::MAX_TRANSFER_FILENAME_BYTES + 1);
+        let oversized_path = "p".repeat(super::MAX_TRANSFER_LOCAL_PATH_BYTES + 1);
+        let oversized_batch = "b".repeat(super::MAX_TRANSFER_BATCH_ID_BYTES + 1);
+        let oversized_reason = "r".repeat(super::MAX_TRANSFER_REASON_BYTES + 1);
+        let mut queue = super::TransferQueue::new_in_memory(8);
+
+        let entry = queue.create_with_batch(
+            0,
+            Some(oversized_username.clone()),
+            oversized_filename,
+            Some(oversized_path),
+            Some(100),
+            Some(oversized_batch),
+        );
+        assert!(entry.peer_username.unwrap().len() <= super::MAX_TRANSFER_USERNAME_BYTES);
+        assert_eq!(entry.filename.len(), super::MAX_TRANSFER_FILENAME_BYTES);
+        assert!(entry.local_path.is_none());
+        assert_eq!(
+            entry.batch_id.unwrap().len(),
+            super::MAX_TRANSFER_BATCH_ID_BYTES
+        );
+
+        let updated = queue
+            .update_status(entry.id, "peer_lookup", None, Some(oversized_reason))
+            .unwrap();
+        assert_eq!(
+            updated.reason.unwrap().len(),
+            super::MAX_TRANSFER_REASON_BYTES
+        );
+        assert!(queue.pending_peer_transfer(&oversized_username).is_some());
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
     }
 
     #[test]
