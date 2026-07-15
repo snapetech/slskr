@@ -13,6 +13,7 @@ mod http_server;
     reason = "structured logging helpers are retained for optional runtime instrumentation"
 )]
 mod logging;
+mod multisource;
 #[allow(
     dead_code,
     reason = "OpenAPI generation is a supported developer surface"
@@ -9511,6 +9512,7 @@ struct AppState {
     rate_limiter: rate_limit::RateLimiter,
     oauth_states: RwLock<OAuthStateStore>,
     stream_tickets: RwLock<PreviewStreamTicketStore>,
+    multisource: Arc<RwLock<multisource::SwarmStore>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17522,8 +17524,15 @@ async fn route_http_request_with_headers(
 
           // ADDITIONAL MISSING GET ENDPOINTS (Phase 6)
           ("GET", "/api/multisource/jobs") => {
+              let swarm = state.multisource.read().await;
+              let mut jobs = swarm
+                  .list()
+                  .into_iter()
+                  .filter_map(|job| serde_json::to_value(job).ok())
+                  .collect::<Vec<_>>();
+              drop(swarm);
               let transfers = state.transfers.read().await;
-              let jobs = transfers
+              jobs.extend(transfers
                   .entries
                   .iter()
                   .filter(|entry| entry.direction == 0)
@@ -17544,8 +17553,7 @@ async fn route_http_request_with_headers(
                           "size": size,
                           "updated_at": entry.updated_at,
                       })
-                  })
-                  .collect::<Vec<_>>();
+                  }));
               let count = jobs.len();
               drop(transfers);
               let json = serde_json::json!({
@@ -17784,6 +17792,14 @@ async fn route_http_request_with_headers(
                   return Ok(routing::not_found_response());
               };
               let job_id = decoded_path_segment(job_id);
+              let swarm = state.multisource.read().await;
+              if let Some(job) = swarm.get(&job_id) {
+                  let body = serde_json::to_string(job)
+                      .map_err(|error| format!("multisource job serialization failed: {error}"))?;
+                  drop(swarm);
+                  return Ok(routing::ok_response(body));
+              }
+              drop(swarm);
               let transfer_id = job_id.strip_prefix("transfer-").unwrap_or(&job_id);
               let transfers = state.transfers.read().await;
               let body = transfer_id
@@ -19471,6 +19487,65 @@ async fn route_http_request_with_headers(
                 "capabilities": capability_count,
                 "interestTag": MESH_RENDEZVOUS_INTEREST_TAG,
             }).to_string()))
+        }
+
+        ("POST", "/api/multisource/swarm")
+        | ("POST", "/api/multisource/swarm/async")
+        | ("POST", "/api/multisource/download") if normalized_path != "/api/multisource/download"
+            || serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .and_then(|value| value.get("sources").and_then(serde_json::Value::as_array).cloned())
+                .is_some_and(|sources| !sources.is_empty()) =>
+        {
+            let mut request = match serde_json::from_str::<multisource::SwarmRequest>(body) {
+                Ok(request) => request,
+                Err(_) => return Ok(routing::bad_request_response("invalid swarm request")),
+            };
+            if let Err(error) = multisource::validate_request(&mut request) {
+                return Ok(routing::bad_request_response(&error));
+            }
+            let id = uuid::Uuid::new_v4().to_string();
+            let relative_path = request.output_path.clone().unwrap_or_else(|| {
+                format!(
+                    "multisource/{id}-{}",
+                    virtual_basename(&request.filename)
+                )
+            });
+            let output_path = match safe_download_path(&state.config.state_dir, &relative_path)
+                .and_then(|path| {
+                    ensure_scoped_download_path(
+                        &state.config.state_dir,
+                        path.to_string_lossy().as_ref(),
+                    )
+                })
+            {
+                Ok(path) => path,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            let job = multisource::new_job(id.clone(), &request, &output_path, unix_timestamp());
+            state.multisource.write().await.insert(job.clone());
+            let store = Arc::clone(&state.multisource);
+            if normalized_path == "/api/multisource/swarm/async" {
+                tokio::spawn(multisource::execute(
+                    id.clone(),
+                    request,
+                    output_path,
+                    store,
+                ));
+                return Ok(routing::accepted_response(
+                    serde_json::json!({
+                        "id": id,
+                        "status": "queued",
+                        "job": job,
+                    })
+                    .to_string(),
+                ));
+            }
+            let result = multisource::execute(id, request, output_path, store).await;
+            Ok(routing::ok_response(
+                serde_json::to_string(&result)
+                    .map_err(|error| format!("multisource result serialization failed: {error}"))?,
+            ))
         }
 
         ("POST", "/api/multisource/download") => {
@@ -23314,6 +23389,7 @@ async fn serve(once: bool) -> Result<(), String> {
         rate_limiter,
         oauth_states: RwLock::new(oauth_state_store),
         stream_tickets: RwLock::new(PreviewStreamTicketStore::default()),
+        multisource: Arc::new(RwLock::new(multisource::SwarmStore::default())),
     });
     match credential_store::load(&state.config) {
         Ok(Some(stored)) => {
@@ -32269,6 +32345,7 @@ mod tests {
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
             stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
+            multisource: Arc::new(RwLock::new(super::multisource::SwarmStore::default())),
         });
         (state, receiver)
     }
@@ -35120,6 +35197,16 @@ mod tests {
                 "POST",
                 "/api/multisource/download",
                 r#"{"filename":"x","size":1}"#,
+            ),
+            (
+                "POST",
+                "/api/multisource/swarm",
+                r#"{"filename":"x","size":1,"sources":[]}"#,
+            ),
+            (
+                "POST",
+                "/api/multisource/swarm/async",
+                r#"{"filename":"x","size":1,"sources":[]}"#,
             ),
             ("GET", "/api/multisource/jobs/job-1", ""),
             ("GET", "/api/podcore/content/search?query=cover", ""),
@@ -49891,6 +49978,7 @@ mod tests {
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
             stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
+            multisource: Arc::new(RwLock::new(super::multisource::SwarmStore::default())),
         };
 
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
@@ -50053,6 +50141,7 @@ mod tests {
             }),
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
             stream_tickets: RwLock::new(super::PreviewStreamTicketStore::default()),
+            multisource: Arc::new(RwLock::new(super::multisource::SwarmStore::default())),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",

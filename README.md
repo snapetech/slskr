@@ -97,7 +97,13 @@ queue, start, progress, completion, cancellation, retry, and failure state.
 `slskr` supports local file-backed projections for tests, outbound downloads,
 inbound shared-file serving, direct peer transfer sockets, type-1 obfuscated
 transfer sockets, indirect transfer fallback, offset/resume fields, and bounded
-transfer event history.
+transfer event history. Explicit accelerated downloads can use
+`POST /api/v0/multisource/swarm` (or `/swarm/async`) with two or more HTTP
+range-capable sources and an expected SHA-256 digest. The daemon dynamically
+assigns bounded chunks across free sources, retries failed chunks elsewhere,
+then verifies and atomically publishes the confined output. Ordinary Soulseek
+peers use sequential transfer/failover because Soulseek does not support
+harmless bounded range cancellation.
 
 ### Shares And Browse
 
