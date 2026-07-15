@@ -19,6 +19,9 @@ for anchor in \
   'slskd_storage_directory_json_unix' \
   'storage directory confined open failed' \
   'scoped_storage_listing_rejects_symlinked_parent' \
+  'open_shared_local_file_unix' \
+  'shared directory confined open failed' \
+  'shared_file_confined_open_rejects_symlinked_parent' \
   '.redirect(reqwest::redirect::Policy::none())' \
   'MAX_INTEGRATION_RESPONSE_BYTES' \
   'integration_json_reader_rejects_declared_oversized_response' \

@@ -19938,6 +19938,12 @@ fn shared_local_file_metadata(state: &AppState, local_path: &Path) -> Option<fs:
 }
 
 fn open_shared_local_file(state: &AppState, local_path: &Path) -> Result<fs::File, String> {
+    #[cfg(unix)]
+    if !state.config.share_settings.follow_symlinks && !state.config.share_settings.roots.is_empty()
+    {
+        return open_shared_local_file_unix(&state.config.share_settings.roots, local_path);
+    }
+
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -19950,6 +19956,43 @@ fn open_shared_local_file(state: &AppState, local_path: &Path) -> Result<fs::Fil
     options
         .open(local_path)
         .map_err(|error| format!("local file open failed: {error}"))
+}
+
+#[cfg(unix)]
+fn open_shared_local_file_unix(roots: &[PathBuf], local_path: &Path) -> Result<fs::File, String> {
+    use rustix::fs::{open, openat, Mode, OFlags};
+
+    let (root, relative) = roots
+        .iter()
+        .find_map(|root| {
+            local_path
+                .strip_prefix(root)
+                .ok()
+                .map(|relative| (root, relative))
+        })
+        .ok_or_else(|| "local file is outside configured share roots".to_owned())?;
+    let mut components = relative.components().peekable();
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, directory_flags, Mode::empty())
+        .map_err(|error| format!("share root confined open failed: {error}"))?;
+    while let Some(component) = components.next() {
+        let Component::Normal(component) = component else {
+            return Err("shared file path contains a non-relative component".to_owned());
+        };
+        if components.peek().is_none() {
+            let file = openat(
+                &directory,
+                component,
+                OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(|error| format!("shared file confined open failed: {error}"))?;
+            return Ok(fs::File::from(file));
+        }
+        directory = openat(&directory, component, directory_flags, Mode::empty())
+            .map_err(|error| format!("shared directory confined open failed: {error}"))?;
+    }
+    Err("shared file path is empty".to_owned())
 }
 
 fn search_target_static(target: &str) -> &'static str {
@@ -31263,6 +31306,39 @@ mod tests {
         assert!(super::open_shared_local_file(&state, &shared_path).is_err());
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shared_file_confined_open_rejects_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "slskr-share-parent-symlink-test-{}-{unique}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "slskr-share-parent-symlink-outside-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.flac"), b"secret").unwrap();
+        symlink(&outside, root.join("album")).unwrap();
+
+        let error = super::open_shared_local_file_unix(
+            std::slice::from_ref(&root),
+            &root.join("album/secret.flac"),
+        )
+        .expect_err("symlinked share parent must be rejected");
+        assert!(error.contains("confined open failed"));
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
     }
 
     #[tokio::test]
