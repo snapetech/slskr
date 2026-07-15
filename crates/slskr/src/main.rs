@@ -16006,26 +16006,26 @@ async fn route_http_request_with_headers(
                         record_event(
                             state,
                             "external_visualizer.launch",
-                            command.to_owned(),
+                            "external_visualizer".to_owned(),
                             Some("launch requested".to_owned()),
                         )
                         .await;
-                        Ok(routing::accepted_response(format!(
-                            "{{\"launched\":true,\"status\":\"launch_requested\",\"command\":\"{}\"}}",
-                            json_escape(command)
-                        )))
+                        Ok(routing::accepted_response(
+                            "{\"launched\":true,\"status\":\"launch_requested\"}".to_owned(),
+                        ))
                     }
-                    Err(error) => {
+                    Err(_) => {
                         drop(process_permit);
                         record_event(
                             state,
                             "external_visualizer.launch.failed",
-                            command.to_owned(),
-                            Some(error.to_string()),
+                            "external_visualizer".to_owned(),
+                            Some("launch failed".to_owned()),
                         )
                         .await;
-                        let message = format!("failed to launch external visualizer: {error}");
-                        Ok(routing::bad_request_response(&message))
+                        Ok(routing::bad_request_response(
+                            "failed to launch external visualizer",
+                        ))
                     }
                 }
             } else {
@@ -35011,11 +35011,45 @@ mod tests {
         .expect("external visualizer launch");
         assert_eq!(launch.status, "202 Accepted");
         assert!(launch.body.contains("\"launched\":true"));
+        assert!(!launch.body.contains("\"command\""));
         let events = state.events.read().await;
-        assert!(events
+        let event = events
             .records
             .iter()
-            .any(|event| event.kind == "external_visualizer.launch"));
+            .find(|event| event.kind == "external_visualizer.launch")
+            .expect("launch event");
+        assert_eq!(event.resource, "external_visualizer");
+        assert!(!event.resource.contains("true"));
+    }
+
+    #[tokio::test]
+    async fn external_visualizer_launch_errors_redact_command_details() {
+        let command = "/private/missing-visualizer-secret";
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
+                .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
+        );
+
+        let launch = super::route_http_request(
+            "POST",
+            "/api/player/external-visualizer/launch",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("external visualizer launch");
+        assert_eq!(launch.status, "400 Bad Request");
+        assert!(!launch.body.contains(command));
+        let events = state.events.read().await;
+        let event = events
+            .records
+            .iter()
+            .find(|event| event.kind == "external_visualizer.launch.failed")
+            .expect("failed launch event");
+        assert_eq!(event.resource, "external_visualizer");
+        assert_eq!(event.detail.as_deref(), Some("launch failed"));
     }
 
     #[tokio::test]
