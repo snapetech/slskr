@@ -30,6 +30,7 @@ pub const HEADER_LINE_LIMIT: usize = 8 * 1024;
 pub const HEADER_TOTAL_LIMIT: usize = 64 * 1024;
 pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 pub const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
+pub const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// HTTP headers
 #[derive(Debug, Clone, Default)]
@@ -138,6 +139,21 @@ pub fn parse_http_request(data: &str) -> Option<(String, String, Option<String>,
 /// Read HTTP request from stream with proper buffering.
 /// Returns `Ok(None)` on clean EOF, `Ok(Some(...))` on success, `Err(msg)` on protocol error.
 pub async fn read_http_request<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+) -> Result<Option<(HttpRequest, bool)>, String> {
+    read_http_request_with_timeout(reader, REQUEST_READ_TIMEOUT).await
+}
+
+async fn read_http_request_with_timeout<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    timeout: Duration,
+) -> Result<Option<(HttpRequest, bool)>, String> {
+    time::timeout(timeout, read_http_request_inner(reader))
+        .await
+        .map_err(|_| "request read deadline exceeded".to_owned())?
+}
+
+async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> Result<Option<(HttpRequest, bool)>, String> {
     let Some(request_line) =
@@ -698,6 +714,23 @@ mod tests {
         let mut reader = BufReader::new(server);
         let err = read_http_request(&mut reader).await.unwrap_err();
         assert!(err.contains("folded headers"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_request_deadline_is_not_reset_by_partial_progress() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            for byte in b"GET / HTTP/1.1\r\n" {
+                client.write_all(&[*byte]).await.expect("write slow byte");
+                time::sleep(Duration::from_millis(20)).await;
+            }
+        });
+
+        let mut reader = BufReader::new(server);
+        let error = read_http_request_with_timeout(&mut reader, Duration::from_millis(100))
+            .await
+            .expect_err("request must hit the absolute deadline");
+        assert!(error.contains("deadline exceeded"), "{error}");
     }
 
     #[tokio::test]

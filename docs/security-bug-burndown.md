@@ -8,6 +8,8 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 
 | Severity | Area | Finding | Status |
 | --- | --- | --- | --- |
+| Medium | Credential storage | File-backed credential writes followed an existing symlink and truncated its target; credential reads had no size ceiling. | Fixed with symlink rejection, private Unix directory/file permissions, atomic replacement, a 64 KiB read cap, and regression tests. |
+| Medium | HTTP availability | The per-read header timeout reset after every partial byte, allowing a slow client to occupy an HTTP connection slot indefinitely. | Fixed with a hard 60-second end-to-end request deadline and slow-progress regression coverage. |
 | High | Peer protocol | Compressed file-search responses used unbounded zlib decompression, allowing a small peer-controlled payload to expand until memory exhaustion. | Fixed with a 64 MiB decompression ceiling and adversarial expansion coverage. |
 | High | Peer listener | A silent TCP peer could hold the listener inside protocol demultiplexing indefinitely, and accepted connections spawned without a handler limit. | Fixed by bounding handshake time with the configured peer timeout and sharing a 128-task handler semaphore across regular and obfuscated listeners. |
 | Medium | Reverse-proxy rate limiting | Forwarded-address parsing trusted the leftmost value, so a client could prepend a spoofed address before a compliant proxy appended the real hop. | Fixed by walking the chain from the trusted socket peer inward, selecting the first untrusted hop, and failing malformed chains closed. |

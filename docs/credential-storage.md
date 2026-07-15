@@ -112,3 +112,6 @@ new credentials into systemd.
   Linux system services.
 - Treat `file` mode as plaintext-at-rest. Back it with filesystem permissions,
   disk encryption, and a dedicated service user when possible.
+- File-mode writes reject symlink targets, restrict the containing directory to
+  mode `0700` and the file to `0600` on Unix, and atomically replace the file.
+  Credential files larger than 64 KiB are rejected before parsing.

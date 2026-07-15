@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 source_file="crates/slskr/src/main.rs"
+http_source="crates/slskr/src/http_server.rs"
+credential_source="crates/slskr/src/credential_store.rs"
 status=0
 
 for anchor in \
@@ -19,6 +21,25 @@ for anchor in \
   'state.incoming_connections'; do
   if ! rg -n --fixed-strings -- "$anchor" "$source_file" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
+  'REQUEST_READ_TIMEOUT' \
+  'test_request_deadline_is_not_reset_by_partial_progress'; do
+  if ! rg -n --fixed-strings -- "$anchor" "$http_source" >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing HTTP anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+for anchor in \
+  'MAX_CREDENTIAL_FILE_BYTES' \
+  'credential_file_write_rejects_symlink_without_touching_target' \
+  'credential_file_read_rejects_oversized_input'; do
+  if ! rg -n --fixed-strings -- "$anchor" "$credential_source" >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing credential anchor %s\n' "$anchor" >&2
     status=1
   fi
 done
