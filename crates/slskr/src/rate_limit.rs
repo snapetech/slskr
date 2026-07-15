@@ -205,7 +205,7 @@ impl RateLimiter {
 
         if let Some(window) = windows.get(username) {
             if now < window.reset_at {
-                return window.reset_at.duration_since(now).as_secs();
+                return duration_ceiling_seconds(window.reset_at.duration_since(now));
             }
         }
 
@@ -220,7 +220,7 @@ impl RateLimiter {
 
         if let Some(window) = windows.get(&key) {
             if now < window.reset_at {
-                return window.reset_at.duration_since(now).as_secs();
+                return duration_ceiling_seconds(window.reset_at.duration_since(now));
             }
         }
 
@@ -241,11 +241,15 @@ impl RateLimiter {
         let user_windows = self.user_windows.read().await;
 
         let ip_entries = ip_windows.len();
-        let ip_requests: u32 = ip_windows.values().map(|w| w.count).sum();
+        let ip_requests = ip_windows
+            .values()
+            .fold(0_u32, |total, window| total.saturating_add(window.count));
         let ip_max = ip_windows.values().map(|w| w.count).max().unwrap_or(0);
 
         let user_entries = user_windows.len();
-        let user_requests: u32 = user_windows.values().map(|w| w.count).sum();
+        let user_requests = user_windows
+            .values()
+            .fold(0_u32, |total, window| total.saturating_add(window.count));
         let user_max = user_windows.values().map(|w| w.count).max().unwrap_or(0);
 
         RateLimitStats {
@@ -276,6 +280,12 @@ fn ip_key(remote_addr: Option<SocketAddr>) -> Option<String> {
         IpAddr::V4(ip) => ip.to_string(),
         IpAddr::V6(ip) => ip.to_string(),
     })
+}
+
+fn duration_ceiling_seconds(duration: Duration) -> u64 {
+    duration
+        .as_secs()
+        .saturating_add(u64::from(duration.subsec_nanos() != 0))
 }
 
 /// Rate limit statistics
@@ -553,5 +563,31 @@ mod tests {
         assert_eq!(stats.user_entries, 1);
         assert_eq!(stats.user_requests, 3);
         assert_eq!(stats.user_max_requests_seen, 3);
+    }
+
+    #[test]
+    fn reset_duration_rounds_up_while_window_is_active() {
+        assert_eq!(duration_ceiling_seconds(Duration::ZERO), 0);
+        assert_eq!(duration_ceiling_seconds(Duration::from_nanos(1)), 1);
+        assert_eq!(duration_ceiling_seconds(Duration::from_millis(999)), 1);
+        assert_eq!(duration_ceiling_seconds(Duration::from_millis(1001)), 2);
+    }
+
+    #[tokio::test]
+    async fn rate_limit_stats_saturate_instead_of_overflowing() {
+        let limiter = RateLimiter::new(RateLimitConfig::default());
+        let reset_at = Instant::now() + Duration::from_secs(60);
+        let mut windows = limiter.ip_windows.write().await;
+        windows.insert(
+            "first".to_owned(),
+            RequestWindow {
+                count: u32::MAX,
+                reset_at,
+            },
+        );
+        windows.insert("second".to_owned(), RequestWindow { count: 1, reset_at });
+        drop(windows);
+
+        assert_eq!(limiter.stats().await.ip_requests, u32::MAX);
     }
 }
