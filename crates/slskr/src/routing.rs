@@ -47,8 +47,16 @@ pub fn check_route_auth(
     headers: &RequestSecurityHeaders,
 ) -> Result<(), &'static str> {
     let normalized = normalize_api_path(path);
+    let delegated_share_route = (method == "GET" && normalized.starts_with("/api/streams/"))
+        || (method == "POST"
+            && normalized.starts_with("/api/streams/")
+            && normalized.ends_with("/share-ticket"))
+        || (method == "GET"
+            && normalized.starts_with("/api/share-grants/")
+            && normalized.ends_with("/manifest"));
 
     if route_requires_auth(config, normalized)
+        && !delegated_share_route
         && !is_authorized(config, auth, headers.cookie.as_deref())
     {
         return Err("unauthorized");

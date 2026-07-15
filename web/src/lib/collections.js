@@ -42,12 +42,12 @@ export const createShare = (data) => api.post('/share-grants', data);
 export const updateShare = (id, data) => api.put(`/share-grants/${id}`, data);
 export const deleteShare = (id) => api.delete(`/share-grants/${id}`);
 export const createShareToken = (id, expiresInSeconds) =>
-  api.post(`/share-grants/${id}/token`, { expiresInSeconds });
+  api.post(`/share-grants/${encodeURIComponent(id)}/token`, { expiresInSeconds });
 export const getShareManifest = (id, token) => {
-  const url = token
-    ? `/share-grants/${id}/manifest?token=${encodeURIComponent(token)}`
-    : `/share-grants/${id}/manifest`;
-  return api.get(url);
+  const url = `/share-grants/${encodeURIComponent(id)}/manifest`;
+  return token
+    ? api.get(url, { headers: { 'X-Share-Token': token } })
+    : api.get(url);
 };
 
 export const backfillShare = (id) => api.post(`/share-grants/${id}/backfill`);

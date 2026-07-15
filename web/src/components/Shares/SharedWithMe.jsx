@@ -1,5 +1,6 @@
 import * as collectionsAPI from '../../lib/collections';
 import * as identityAPI from '../../lib/identity';
+import * as streaming from '../../lib/streaming';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
 import React, { Component } from 'react';
@@ -140,11 +141,28 @@ export default class SharedWithMe extends Component {
     }
   };
 
-  handleStreamItem = (contentId, token) => {
-    const url = token
-      ? `/api/v0/streams/${contentId}?token=${encodeURIComponent(token)}`
-      : `/api/v0/streams/${contentId}`;
-    safeOpenBlank(url);
+  handleStreamItem = async (contentId, token) => {
+    try {
+      if (token) {
+        const ticket = await streaming.createShareStreamTicket(
+          contentId,
+          token,
+        );
+        if (ticket) {
+          safeOpenBlank(streaming.buildTicketedStreamUrl(contentId, ticket));
+          return;
+        }
+      }
+      safeOpenBlank(streaming.buildDirectStreamUrl(contentId));
+    } catch (error) {
+      const message =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        error.message ||
+        'Failed to start stream';
+      this.setState({ error: message });
+      toast.error(message);
+    }
   };
 
   handleBackfill = async () => {

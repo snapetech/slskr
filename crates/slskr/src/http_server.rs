@@ -47,6 +47,7 @@ pub struct HttpHeaders {
     pub transfer_encoding: Option<String>,
     pub authorization: Option<String>,
     pub x_api_key: Option<String>,
+    pub x_share_token: Option<String>,
     pub forwarded: Option<String>,
     pub x_forwarded_for: Option<String>,
     pub upgrade: Option<String>,
@@ -87,6 +88,7 @@ impl HttpHeaders {
                     "transfer-encoding" => headers.transfer_encoding = Some(value.to_lowercase()),
                     "authorization" => headers.authorization = Some(value.to_string()),
                     "x-api-key" => headers.x_api_key = Some(value.to_string()),
+                    "x-share-token" => headers.x_share_token = Some(value.to_string()),
                     "forwarded" => headers.forwarded = Some(value.to_string()),
                     "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
                     "upgrade" => headers.upgrade = Some(value.to_lowercase()),
@@ -289,6 +291,10 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
             "x-api-key" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.x_api_key = Some(value.to_string());
+            }
+            "x-share-token" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.x_share_token = Some(value.to_string());
             }
             "forwarded" => append_list_header(&mut headers.forwarded, value),
             "x-forwarded-for" => append_list_header(&mut headers.x_forwarded_for, value),
@@ -721,6 +727,7 @@ mod tests {
             "Content-Length: 256",
             "Authorization: Bearer token123",
             "X-API-Key: key123",
+            "X-Share-Token: share-secret",
             "Forwarded: for=198.51.100.24;proto=https",
             "X-Forwarded-For: 198.51.100.24, 127.0.0.1",
             "Connection: keep-alive",
@@ -732,6 +739,7 @@ mod tests {
         assert_eq!(headers.content_length, Some(256));
         assert_eq!(headers.authorization, Some("Bearer token123".to_string()));
         assert_eq!(headers.x_api_key, Some("key123".to_string()));
+        assert_eq!(headers.x_share_token, Some("share-secret".to_string()));
         assert_eq!(
             headers.forwarded,
             Some("for=198.51.100.24;proto=https".to_string())

@@ -629,12 +629,15 @@ impl BridgeIntegrationSettings {
         })
     }
 
+    pub fn endpoint_configured(&self) -> bool {
+        !self.host.trim().is_empty() && self.port != 0
+    }
+
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"enabled\":{},\"host\":\"{}\",\"port\":{}}}",
+            "{{\"enabled\":{},\"host\":null,\"port\":null,\"endpoint_configured\":{}}}",
             self.enabled,
-            json_escape(&self.host),
-            self.port
+            self.endpoint_configured()
         )
     }
 }

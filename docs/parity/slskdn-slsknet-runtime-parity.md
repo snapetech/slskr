@@ -42,6 +42,25 @@ and regression coverage match the parity target.
 | Security posture | Gate-backed/needs-live-proof | Bind/public-posture checks, WebSocket auth coverage, CSP, OAuth callback state isolation, webhook outbound policy, rate-limit proxy policy, storage/transfer pressure gates, secret scanning, protocol scalar/adversarial gates, and remediation baseline are implemented. Remaining work: optional live exposure/interoperability proof in deployment environments. |
 | Release/packaging/dependency posture | Gate-backed | Release workflow policy, package artifact matrix, release version metadata, dependency hygiene, audit-tooling inventory, SDK gates, OpenAPI drift, docs freshness, and remediation registry checks are implemented. Remaining work: keep gates green as upstream release/CI changes are classified. |
 
+## 2026-07-15 Upstream Delta Audit
+
+The previous ledger date is not a current upstream baseline. The sibling
+repositories now contain 456 `slskdN` commits and 57 `slskNet.Runtime` commits
+since 2026-05-13. The first behavior/security classification against their
+current worktrees is:
+
+| Upstream change | Classification | Current evidence and remaining closure |
+| --- | --- | --- |
+| `slskdN` reusable share tokens kept out of URLs (`1100d415d`) | Partially implemented | The React client sends reusable tokens in `X-Share-Token`, the daemon accepts the dedicated header or `Authorization: Bearer share:<token>`, grant manifests validate scoped tokens, and streaming exchanges them for 120-second content-bound tickets. Reusable query-token requests are rejected so credentials do not enter URLs, logs, or browser history. Hermetic Rust and Vitest regressions prove the Web UI does not construct token URLs and reject wrong-content ticket replay. Remaining: persist hashed share-token records across restart and serve actual ranged media bytes rather than only the current stream availability projection. |
+| `slskdN` incoming filter and blacklist regex timeouts (`efffb49d4`, `fedc1e9e7`) | Not applicable/current behavior needs a pinning test | `slskR` does not currently expose the sibling's user-supplied .NET backtracking-regex matchers; its filters and username bans use exact/sub-string matching. If regex syntax is added, it must use Rust's linear-time `regex` engine and bounded input. |
+| `slskNet.Runtime` legacy peer path encodings (`192c5e4a`) | Missing | `slskr-protocol::Reader` falls back only to Windows-1252 and returns a plain `String`, discarding the detected wire encoding. Folder, search-result, and transfer paths therefore cannot preserve Windows-1251/Latin-1 bytes when echoed to a legacy peer. Required closure: encoding-aware protocol strings plus round-trip tests for folder requests/responses, search results, and transfer requests. |
+| `slskdN` persisted ignored wishlist result folders (`9f2826466`) | Missing | The local wishlist model has enabled/search/auto-download state but no durable ignored-folder set or result suppression gate. |
+| `slskdN` transfer race/optional-port fixes (`e22877f25`) | Needs proof | The Rust runtime has direct/obfuscated/indirect fallbacks and bounded timeouts, but the new sibling race cases have not been mapped requirement-by-requirement to hermetic tests. |
+| `slskdN` bounded streaming fallback cache and forwarded async reads (`e228934ad`) | Missing/partially applicable | Preview tickets are bounded, but the primary `/api/v0/streams/:contentId` route still returns JSON availability instead of a byte/range streaming response, so full stream-wrapper parity is not present. |
+
+This table is intentionally incomplete. Every remaining non-doc upstream commit
+must still be classified before full parity can be claimed.
+
 ## Upstream Delta Buckets
 
 Use `scripts/collect-upstream-parity-delta.sh` to refresh the local inventory.

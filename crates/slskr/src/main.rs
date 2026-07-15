@@ -164,6 +164,10 @@ const MAX_MESSAGE_USERNAME_BYTES: usize = 1024;
 const MAX_MESSAGE_BODY_BYTES: usize = 64 * 1024;
 const MAX_OAUTH_STATES: usize = 256;
 const MAX_PREVIEW_STREAM_TICKETS: usize = 1_024;
+const MAX_SHARE_ACCESS_TOKENS: usize = 4_096;
+const DEFAULT_SHARE_ACCESS_TOKEN_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
+const MAX_SHARE_ACCESS_TOKEN_TTL_SECONDS: u64 = 365 * 24 * 60 * 60;
+const SHARE_STREAM_TICKET_TTL_SECONDS: u64 = 120;
 const MAX_CONTACT_RECORDS: usize = 4_096;
 const MAX_CONTACT_STATUS_BYTES: usize = 64;
 const MAX_SHARE_GROUPS: usize = 256;
@@ -7172,6 +7176,72 @@ struct ShareGrantStore {
     updated_at: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ShareAccessTokenRecord {
+    grant_id: String,
+    expires_at: u64,
+}
+
+#[derive(Debug)]
+struct ShareAccessTokenStore {
+    records: BTreeMap<String, ShareAccessTokenRecord>,
+    max_records: usize,
+}
+
+impl Default for ShareAccessTokenStore {
+    fn default() -> Self {
+        Self::with_max_records(MAX_SHARE_ACCESS_TOKENS)
+    }
+}
+
+impl ShareAccessTokenStore {
+    fn with_max_records(max_records: usize) -> Self {
+        Self {
+            records: BTreeMap::new(),
+            max_records: max_records.max(1),
+        }
+    }
+
+    fn issue(&mut self, grant_id: String, ttl_seconds: u64) -> Option<(String, u64)> {
+        let now = unix_timestamp();
+        self.prune(now);
+        if self.records.len() >= self.max_records {
+            return None;
+        }
+        let token = secure_share_grant_token()?;
+        let expires_at =
+            now.saturating_add(ttl_seconds.clamp(1, MAX_SHARE_ACCESS_TOKEN_TTL_SECONDS));
+        self.records.insert(
+            share_access_token_digest(&token),
+            ShareAccessTokenRecord {
+                grant_id,
+                expires_at,
+            },
+        );
+        Some((token, expires_at))
+    }
+
+    fn validate(&mut self, token: &str) -> Option<ShareAccessTokenRecord> {
+        let now = unix_timestamp();
+        self.prune(now);
+        self.records.get(&share_access_token_digest(token)).cloned()
+    }
+
+    fn revoke_grant(&mut self, grant_id: &str) {
+        self.records.retain(|_, record| record.grant_id != grant_id);
+    }
+
+    fn prune(&mut self, now: u64) {
+        self.records.retain(|_, record| record.expires_at > now);
+    }
+}
+
+fn share_access_token_digest(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
 impl ShareGrantStore {
     fn new() -> Self {
         Self {
@@ -7362,6 +7432,16 @@ fn share_grant_helper_id<'a>(path: &'a str, helper: &str) -> Option<&'a str> {
     let path = path.strip_prefix("/api/share-grants/")?;
     let id = path.strip_suffix(&format!("/{helper}"))?;
     (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+fn share_grant_manifest_id(path: &str) -> Option<&str> {
+    share_grant_helper_id(path, "manifest")
+}
+
+fn share_stream_content_id(path: &str) -> Option<String> {
+    let path = path.strip_prefix("/api/streams/")?;
+    let content_id = path.strip_suffix("/share-ticket")?;
+    (!content_id.is_empty() && !content_id.contains('/')).then(|| decoded_path_segment(content_id))
 }
 
 // Library Item Models
@@ -8159,6 +8239,7 @@ struct AppState {
     runtime: RwLock<RuntimeCompatState>,
     security: RwLock<SecurityState>,
     share_grants: RwLock<ShareGrantStore>,
+    share_access_tokens: RwLock<ShareAccessTokenStore>,
     library: RwLock<LibraryStore>,
     destinations: RwLock<DestinationStore>,
     db: Option<crate::persistence::DatabaseManager>,
@@ -12908,7 +12989,7 @@ async fn route_http_request_with_headers(
             let previous_grants = grants.clone();
             let deleted = collections.delete(id);
             if deleted {
-                grants.delete_by_collection(id);
+                let revoked_grants = grants.delete_by_collection(id);
                 if let Err(error) = persist_collection_delete(state, id).await {
                     *collections = previous_collections;
                     *grants = previous_grants;
@@ -12916,6 +12997,11 @@ async fn route_http_request_with_headers(
                 }
                 drop(collections);
                 drop(grants);
+                let mut tokens = state.share_access_tokens.write().await;
+                for grant in revoked_grants {
+                    tokens.revoke_grant(&grant.id);
+                }
+                drop(tokens);
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 drop(collections);
@@ -13710,6 +13796,67 @@ async fn route_http_request_with_headers(
             }
         }
         ("GET", path)
+            if path.starts_with("/api/share-grants/")
+                && path.ends_with("/manifest")
+                && share_grant_manifest_id(path).is_some() =>
+        {
+            let grant_id = share_grant_manifest_id(path)
+                .expect("guarded share-grant manifest path");
+            let api_authorized = !state.config.auth_required
+                || is_authorized(
+                    &state.config,
+                    authorization,
+                    headers.cookie.as_deref(),
+                );
+            let share_token = request_share_token(authorization, &headers)
+                .or_else(|| query_parameter(route.query, "token"));
+            if let Some(token) = share_token {
+                let mut tokens = state.share_access_tokens.write().await;
+                let token_record = tokens.validate(&token);
+                drop(tokens);
+                if token_record.as_ref().map(|record| record.grant_id.as_str()) != Some(grant_id) {
+                    return Ok(routing::unauthorized_response());
+                }
+            } else if !api_authorized {
+                return Ok(routing::unauthorized_response());
+            }
+
+            let grants = state.share_grants.read().await;
+            let Some(grant) = grants.get(grant_id) else {
+                drop(grants);
+                return Ok(routing::not_found_response());
+            };
+            drop(grants);
+            let collections = state.collections.read().await;
+            let Some(collection) = collections.get(&grant.collection_id) else {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            };
+            let items = collection
+                .items
+                .iter()
+                .map(|item| {
+                    serde_json::from_str::<serde_json::Value>(&item.json())
+                        .unwrap_or_else(|_| serde_json::json!({ "id": item.id }))
+                })
+                .collect::<Vec<_>>();
+            let item_count = items.len();
+            let collection_value = serde_json::from_str::<serde_json::Value>(&collection.json())
+                .unwrap_or_else(|_| serde_json::json!({ "id": collection.id }));
+            drop(collections);
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "share": serde_json::from_str::<serde_json::Value>(&grant.json())
+                        .unwrap_or_else(|_| serde_json::json!({ "id": grant.id })),
+                    "collection": collection_value,
+                    "items": items,
+                    "itemCount": item_count,
+                    "permissions": grant.permissions,
+                })
+                .to_string(),
+            ))
+        }
+        ("GET", path)
             if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
@@ -13772,6 +13919,7 @@ async fn route_http_request_with_headers(
                     return Ok(routing::service_unavailable_response(&error));
                 }
                 drop(grants);
+                state.share_access_tokens.write().await.revoke_grant(id);
                 Ok(routing::ok_response("{}".to_string()))
             } else {
                 drop(grants);
@@ -14409,11 +14557,10 @@ async fn route_http_request_with_headers(
          ("GET", "/api/bridge/admin/config") => {
              let bridge = &state.config.integrations.bridge;
              let json = format!(
-                 "{{\"bridge_host\":\"{}\",\"bridge_port\":{},\"enabled\":{},\"configured\":{},\"next_action\":\"{}\"}}",
-                 json_escape(&bridge.host),
-                 bridge.port,
+                 "{{\"bridge_host\":null,\"bridge_port\":null,\"endpoint_configured\":{},\"enabled\":{},\"configured\":{},\"next_action\":\"{}\"}}",
+                 bridge.endpoint_configured(),
                  bridge.enabled,
-                 bridge.enabled,
+                 bridge.enabled && bridge.endpoint_configured(),
                  if bridge.enabled { "start" } else { "set SLSKR_BRIDGE_ENABLED=true" }
              );
              Ok(routing::ok_response(json))
@@ -14434,7 +14581,7 @@ async fn route_http_request_with_headers(
                  .map(|entry| entry.bytes_transferred)
                  .sum::<u64>();
              let json = format!(
-                 "{{\"active_clients\":{},\"transfers\":{},\"active_transfers\":{},\"total_bytes\":{},\"uptime_seconds\":0,\"enabled\":{},\"running\":{},\"configUpdates\":{},\"host\":\"{}\",\"port\":{}}}",
+                 "{{\"active_clients\":{},\"transfers\":{},\"active_transfers\":{},\"total_bytes\":{},\"uptime_seconds\":0,\"enabled\":{},\"running\":{},\"configUpdates\":{},\"host\":null,\"port\":null,\"endpoint_configured\":{}}}",
                  active_transfers,
                  transfers.entries.len(),
                  active_transfers,
@@ -14442,8 +14589,7 @@ async fn route_http_request_with_headers(
                  bridge.enabled,
                  runtime.bridge_running,
                  runtime.bridge_config_updates,
-                 json_escape(&bridge.host),
-                 bridge.port
+                 bridge.endpoint_configured()
              );
              drop(transfers);
              drop(runtime);
@@ -14485,14 +14631,13 @@ async fn route_http_request_with_headers(
              let transfer_count = transfers.entries.len();
              drop(transfers);
              let json = format!(
-                 "{{\"status\":\"{}\",\"version\":\"1.0.0\",\"uptime_seconds\":0,\"enabled\":{},\"configured\":{},\"running\":{},\"configUpdates\":{},\"host\":\"{}\",\"port\":{},\"transfers\":{},\"next_action\":\"{}\"}}",
+                 "{{\"status\":\"{}\",\"version\":\"1.0.0\",\"uptime_seconds\":0,\"enabled\":{},\"configured\":{},\"running\":{},\"configUpdates\":{},\"host\":null,\"port\":null,\"endpoint_configured\":{},\"transfers\":{},\"next_action\":\"{}\"}}",
                  if runtime.bridge_running { "running" } else if bridge.enabled { "configured" } else { "disabled" },
                  bridge.enabled,
-                 bridge.enabled,
+                 bridge.enabled && bridge.endpoint_configured(),
                  runtime.bridge_running,
                  runtime.bridge_config_updates,
-                 json_escape(&bridge.host),
-                 bridge.port,
+                 bridge.endpoint_configured(),
                  transfer_count,
                  if runtime.bridge_running {
                      "accept bridge traffic"
@@ -17026,20 +17171,33 @@ async fn route_http_request_with_headers(
              let share_grants = state.share_grants.read().await;
              let grant = share_grants.get(grant_id);
              drop(share_grants);
-             let token = if grant.is_some() {
-                 let Some(token) = secure_share_grant_token() else {
-                     return Ok(routing::service_unavailable_response(
-                         "secure share token generation failed",
-                     ));
-                 };
-                 Some(token)
+             let ttl_seconds = extract_json_u64_field(body, "expiresInSeconds")
+                 .or_else(|| extract_json_u64_field(body, "expires_in_seconds"))
+                .unwrap_or(DEFAULT_SHARE_ACCESS_TOKEN_TTL_SECONDS)
+                .clamp(1, MAX_SHARE_ACCESS_TOKEN_TTL_SECONDS);
+             let issued = if grant.is_some() {
+                 state
+                     .share_access_tokens
+                     .write()
+                     .await
+                     .issue(grant_id.to_owned(), ttl_seconds)
              } else {
                  None
              };
-             let created = token.is_some();
+             if grant.is_some() && issued.is_none() {
+                 return Ok(routing::service_unavailable_response(
+                     "share access token capacity is full or secure token generation failed",
+                 ));
+             }
+             let created = issued.is_some();
+             let (token, expires_at) = issued
+                 .map(|(token, expires_at)| (Some(token), Some(expires_at)))
+                 .unwrap_or((None, None));
              Ok(routing::created_response(serde_json::json!({
                  "grant_id": grant_id,
                  "token": token,
+                 "expiresAt": expires_at,
+                 "expiresInSeconds": if created { Some(ttl_seconds) } else { None },
                  "created": created,
                  "persisted": false,
                  "status": if created { "ephemeral_compatibility_token" } else { "compatibility_acknowledgement" },
@@ -17108,8 +17266,123 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(body))
         }
 
+        ("POST", path)
+            if path.starts_with("/api/streams/")
+                && path.ends_with("/share-ticket")
+                && share_stream_content_id(path).is_some() =>
+        {
+            let content_id = share_stream_content_id(path)
+                .expect("guarded share stream ticket path");
+            let Some(token) = request_share_token(authorization, &headers) else {
+                return Ok(routing::unauthorized_response());
+            };
+            let mut tokens = state.share_access_tokens.write().await;
+            let token_record = tokens.validate(&token);
+            drop(tokens);
+            let Some(token_record) = token_record else {
+                return Ok(routing::unauthorized_response());
+            };
+            let grants = state.share_grants.read().await;
+            let Some(grant) = grants.get(&token_record.grant_id) else {
+                drop(grants);
+                return Ok(routing::unauthorized_response());
+            };
+            drop(grants);
+            let collections = state.collections.read().await;
+            let Some(collection) = collections.get(&grant.collection_id) else {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            };
+            let Some(item) = collection
+                .items
+                .iter()
+                .find(|item| item.content_id == content_id)
+                .cloned()
+            else {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            };
+            drop(collections);
+            let filename = if item.title.trim().is_empty() {
+                item.content_id.clone()
+            } else {
+                item.title.clone()
+            };
+            let mut tickets = state.stream_tickets.write().await;
+            let Some((ticket, _)) = tickets.issue(
+                "share",
+                &format!("share:{}", grant.id),
+                item.content_id,
+                filename.clone(),
+                Some(grant.username),
+                0,
+                preview_stream_content_type(&filename).to_owned(),
+                SHARE_STREAM_TICKET_TTL_SECONDS,
+            ) else {
+                return Ok(routing::service_unavailable_response(
+                    "share stream ticket capacity is full",
+                ));
+            };
+            drop(tickets);
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "ticket": ticket,
+                    "expiresInSeconds": SHARE_STREAM_TICKET_TTL_SECONDS,
+                })
+                .to_string(),
+            ))
+        }
+
         ("GET", path) if path.starts_with("/api/streams/") && path.len() > 13 => {
             let stream_id = decoded_path_segment(&path[13..]);
+            let api_authorized = !state.config.auth_required
+                || is_authorized(
+                    &state.config,
+                    authorization,
+                    headers.cookie.as_deref(),
+                );
+            let ticket = query_parameter(route.query, "ticket");
+            let ticket_record = if let Some(ticket) = ticket.as_deref() {
+                let mut tickets = state.stream_tickets.write().await;
+                let record = tickets.get(ticket);
+                drop(tickets);
+                record.filter(|record| record.family == "share" && record.content_id == stream_id)
+            } else {
+                None
+            };
+            if ticket.is_some() && ticket_record.is_none() {
+                return Ok(routing::unauthorized_response());
+            }
+            let legacy_share_token = query_parameter(route.query, "token");
+            let legacy_share_authorized = if let Some(token) = legacy_share_token.as_deref() {
+                let mut tokens = state.share_access_tokens.write().await;
+                let token_record = tokens.validate(token);
+                drop(tokens);
+                if let Some(token_record) = token_record {
+                    let grants = state.share_grants.read().await;
+                    let grant = grants.get(&token_record.grant_id);
+                    drop(grants);
+                    if let Some(grant) = grant {
+                        let collections = state.collections.read().await;
+                        let allowed = collections
+                            .get(&grant.collection_id)
+                            .is_some_and(|collection| {
+                                collection
+                                    .items
+                                    .iter()
+                                    .any(|item| item.content_id == stream_id)
+                            });
+                        drop(collections);
+                        allowed
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
             let transfers = state.transfers.read().await;
             let shares = state.shares.read().await;
             let transfer = stream_id
@@ -17119,9 +17392,20 @@ async fn route_http_request_with_headers(
             let share = shares.entries.iter().find(|entry| {
                 entry.filename == stream_id || stable_content_hash(&entry.filename, entry.size).to_string() == stream_id
             });
+            if legacy_share_token.is_some() && !legacy_share_authorized {
+                drop(shares);
+                drop(transfers);
+                return Ok(routing::unauthorized_response());
+            }
+            if !api_authorized && ticket_record.is_none() && !legacy_share_authorized {
+                drop(shares);
+                drop(transfers);
+                return Ok(routing::unauthorized_response());
+            }
             let body = serde_json::json!({
                 "id": stream_id,
-                "status": if transfer.is_some() || share.is_some() { "available" } else { "not_found" },
+                "status": if transfer.is_some() || share.is_some() || ticket_record.is_some() || legacy_share_authorized { "available" } else { "not_found" },
+                "ticket": ticket.as_ref().map(|_| "accepted"),
                 "transfer": transfer.map(|entry| serde_json::json!({
                     "id": entry.id,
                     "filename": entry.filename,
@@ -18010,8 +18294,9 @@ fn slskd_application_state_json(
             "enabled": config.integrations.bridge.enabled,
             "running": runtime.bridge_running,
             "configUpdates": runtime.bridge_config_updates,
-            "host": config.integrations.bridge.host,
-            "port": config.integrations.bridge.port,
+            "host": null,
+            "port": null,
+            "endpointConfigured": config.integrations.bridge.endpoint_configured(),
         },
         "operations": {
             "profileInvitesCreated": runtime.profile_invites_created,
@@ -18114,6 +18399,36 @@ fn secure_share_grant_token() -> Option<String> {
 fn secure_share_grant_token_with(fill: impl FnOnce(&mut [u8; 32]) -> bool) -> Option<String> {
     let mut bytes = [0_u8; 32];
     fill(&mut bytes).then(|| format!("share-{}", hex::encode(bytes)))
+}
+
+fn request_share_token(
+    authorization: Option<&str>,
+    headers: &RequestSecurityHeaders,
+) -> Option<String> {
+    if let Some(token) = headers
+        .x_share_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        return Some(token.to_owned());
+    }
+
+    let authorization = authorization?.trim();
+    let (scheme, value) = authorization.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let (prefix, token) = value.trim().split_once(':')?;
+    let token = token.trim();
+    (prefix.eq_ignore_ascii_case("share") && !token.is_empty()).then(|| token.to_owned())
+}
+
+fn query_parameter(query: Option<&str>, name: &str) -> Option<String> {
+    query?.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        (percent_decode_component(key) == name).then(|| percent_decode_component(value))
+    })
 }
 
 fn webhook_from_persisted(record: crate::persistence::WebhookRecord) -> Option<webhooks::Webhook> {
@@ -20786,6 +21101,7 @@ async fn serve(once: bool) -> Result<(), String> {
         runtime: RwLock::new(runtime_compat_state),
         security: RwLock::new(security_state),
         share_grants: RwLock::new(share_grant_store),
+        share_access_tokens: RwLock::new(ShareAccessTokenStore::default()),
         library: RwLock::new(library_store),
         destinations: RwLock::new(destination_store),
         db,
@@ -28723,6 +29039,7 @@ mod tests {
             runtime: RwLock::new(super::RuntimeCompatState::new()),
             security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
+            share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
             library: RwLock::new(super::LibraryStore::new()),
             destinations: RwLock::new(super::DestinationStore::new()),
             db,
@@ -39855,6 +40172,7 @@ mod tests {
         assert_eq!(token_json["created"], true);
         assert_eq!(token_json["persisted"], false);
         assert_eq!(token_json["status"], "ephemeral_compatibility_token");
+        assert_eq!(token_json["expiresInSeconds"], 2_592_000);
         let token_value = token_json["token"].as_str().unwrap();
         assert_eq!(token_value.len(), "share-".len() + 64);
         assert!(!token_value.contains(&grant_id));
@@ -39870,6 +40188,12 @@ mod tests {
         let second_token_json =
             serde_json::from_str::<serde_json::Value>(&second_token.body).unwrap();
         assert_ne!(second_token_json["token"], token_json["token"]);
+        assert!(!state
+            .share_access_tokens
+            .read()
+            .await
+            .records
+            .contains_key(token_value));
         let malformed_token = super::route_http_request(
             "POST",
             &format!("/api/share-grants/{grant_id}/extra/token"),
@@ -39894,6 +40218,182 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn share_tokens_use_headers_and_content_bound_stream_tickets() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", "route-token"),
+        );
+        let api_authorization = Some("Bearer route-token");
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            api_authorization,
+            r#"{"name":"Private"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let item = super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/items"),
+            api_authorization,
+            r#"{"content_id":"content/one","title":"track.flac","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(item.status, "201 Created");
+        let grant = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            api_authorization,
+            &format!("{{\"collection_id\":\"{collection_id}\",\"username\":\"friend\"}}"),
+            &state,
+        )
+        .await
+        .unwrap();
+        let grant_id = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let issued = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/token"),
+            api_authorization,
+            r#"{"expiresInSeconds":600}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let issued_json = serde_json::from_str::<serde_json::Value>(&issued.body).unwrap();
+        let token = issued_json["token"].as_str().unwrap().to_owned();
+        assert_eq!(issued_json["expiresInSeconds"], 600);
+        assert!(!issued.body.contains("?token="));
+
+        let query_token = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/share-grants/{grant_id}/manifest?token={}",
+                super::url_encode(&token)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(query_token.status, "200 OK");
+        assert!(!query_token.body.contains(&token));
+
+        let share_headers = super::RequestSecurityHeaders {
+            x_share_token: Some(token.clone()),
+            ..Default::default()
+        };
+        let manifest = super::route_http_request_with_headers(
+            "GET",
+            &format!("/api/share-grants/{grant_id}/manifest"),
+            None,
+            "",
+            &state,
+            share_headers.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(manifest.status, "200 OK");
+        let manifest_json = serde_json::from_str::<serde_json::Value>(&manifest.body).unwrap();
+        assert_eq!(manifest_json["itemCount"], 1);
+        assert_eq!(manifest_json["items"][0]["contentId"], "content/one");
+        assert!(!manifest.body.contains(&token));
+
+        let legacy_stream = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/content%2Fone?token={}",
+                super::url_encode(&token)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(legacy_stream.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&legacy_stream.body).unwrap()["status"],
+            "available"
+        );
+        assert!(!legacy_stream.body.contains(&token));
+
+        let ticket_response = super::route_http_request_with_headers(
+            "POST",
+            "/api/v0/streams/content%2Fone/share-ticket",
+            None,
+            "",
+            &state,
+            share_headers,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ticket_response.status, "200 OK");
+        let ticket = serde_json::from_str::<serde_json::Value>(&ticket_response.body).unwrap()
+            ["ticket"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(!ticket_response.body.contains(&token));
+
+        let stream = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/content%2Fone?ticket={}",
+                super::url_encode(&ticket)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stream.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stream.body).unwrap()["status"],
+            "available"
+        );
+
+        let wrong_content = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/different?ticket={}",
+                super::url_encode(&ticket)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(wrong_content.status, "401 Unauthorized");
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/share-grants/{grant_id}"),
+            api_authorization,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted.status, "200 OK");
+        assert!(state.share_access_tokens.read().await.records.is_empty());
     }
 
     #[test]
@@ -43690,6 +44190,7 @@ mod tests {
             origin: Some("https://evil.example".to_owned()),
             referer: None,
             cookie: None,
+            x_share_token: None,
         };
         assert!(!super::request_origin_matches_host(
             &headers,
@@ -43701,6 +44202,7 @@ mod tests {
             origin: Some("http://127.0.0.1:5030".to_owned()),
             referer: None,
             cookie: None,
+            x_share_token: None,
         };
         assert!(super::request_origin_matches_host(
             &headers,
@@ -43712,6 +44214,7 @@ mod tests {
             origin: Some("http://[::1]:5030".to_owned()),
             referer: None,
             cookie: None,
+            x_share_token: None,
         };
         assert!(super::request_origin_matches_host(&headers, "[::1]:5030"));
 
@@ -43728,6 +44231,7 @@ mod tests {
                 origin: Some(malformed_origin.to_owned()),
                 referer: None,
                 cookie: None,
+                x_share_token: None,
             };
             assert!(!super::request_origin_matches_host(
                 &headers,
@@ -43748,6 +44252,7 @@ mod tests {
                 origin: Some(origin.to_owned()),
                 referer: None,
                 cookie: None,
+                x_share_token: None,
             };
             assert!(super::request_origin_matches_host(&headers, "localhost"));
         }
@@ -43868,6 +44373,7 @@ mod tests {
             origin: Some("http://127.0.0.1:5030".to_string()),
             referer: None,
             cookie: None,
+            x_share_token: None,
         };
         let auth = super::websocket_protocol_authorization(Some("slskr.api-token.route%2Dtoken"));
 
@@ -44294,6 +44800,37 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn bridge_projections_redact_internal_endpoint() {
+        let internal_host = "bridge.internal.private";
+        let internal_port = "43127";
+        let env = MapEnv::default()
+            .with("SLSKR_BRIDGE_ENABLED", "true")
+            .with("SLSKR_BRIDGE_HOST", internal_host)
+            .with("SLSKR_BRIDGE_PORT", internal_port);
+        let (state, _receiver) = test_state_with_env_parts(env, super::SearchStore::new(), None);
+
+        let sanitized = state.config.integrations.bridge.sanitized_json();
+        assert!(sanitized.contains("\"host\":null"));
+        assert!(sanitized.contains("\"port\":null"));
+        assert!(!sanitized.contains(internal_host));
+        assert!(!sanitized.contains(internal_port));
+
+        for path in [
+            "/api/bridge/admin/config",
+            "/api/bridge/admin/dashboard",
+            "/api/bridge/status",
+            "/api/application",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("bridge projection");
+            assert_eq!(response.status, "200 OK", "{path}");
+            assert!(!response.body.contains(internal_host), "{path}");
+            assert!(!response.body.contains(internal_port), "{path}");
+        }
+    }
+
     #[test]
     fn non_loopback_bind_requires_api_token() {
         let env = MapEnv::default().with("SLSKR_HTTP_BIND", "0.0.0.0:5030");
@@ -44537,6 +45074,7 @@ mod tests {
             runtime: RwLock::new(super::RuntimeCompatState::new()),
             security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
+            share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
             library: RwLock::new(super::LibraryStore::new()),
             destinations: RwLock::new(super::DestinationStore::new()),
             db: None,
@@ -44591,6 +45129,7 @@ mod tests {
                 origin: Some("https://evil.example".to_string()),
                 referer: None,
                 cookie: None,
+                x_share_token: None,
             },
         )
         .await
@@ -44612,6 +45151,7 @@ mod tests {
                 origin: Some("http://127.0.0.1:5030".to_string()),
                 referer: None,
                 cookie: None,
+                x_share_token: None,
             },
         )
         .await
@@ -44629,6 +45169,7 @@ mod tests {
                 origin: None,
                 referer: None,
                 cookie: Some("other=value; slskr.session=route-token".to_string()),
+                x_share_token: None,
             },
         )
         .await
@@ -44683,6 +45224,7 @@ mod tests {
             runtime: RwLock::new(super::RuntimeCompatState::new()),
             security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
+            share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
             library: RwLock::new(super::LibraryStore::new()),
             destinations: RwLock::new(super::DestinationStore::new()),
             db: None,
@@ -44708,6 +45250,7 @@ mod tests {
                 origin: None,
                 referer: None,
                 cookie: Some("other=value; slskr.session=route-token".to_string()),
+                x_share_token: None,
             },
         )
         .await

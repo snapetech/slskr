@@ -79,6 +79,7 @@ pub struct RequestSecurityHeaders {
     pub origin: Option<String>,
     pub referer: Option<String>,
     pub cookie: Option<String>,
+    pub x_share_token: Option<String>,
 }
 
 impl RequestSecurityHeaders {
@@ -88,6 +89,7 @@ impl RequestSecurityHeaders {
             origin: h.origin.clone(),
             referer: h.referer.clone(),
             cookie: h.cookie.clone(),
+            x_share_token: h.x_share_token.clone(),
         }
     }
 }
@@ -818,7 +820,7 @@ pub fn cors_headers(origin: Option<&str>, allowed_origins: &[&str]) -> String {
         "Access-Control-Allow-Origin: {}\r\n\
          Vary: Origin\r\n\
          Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS\r\n\
-         Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key, X-Share-Token\r\n\
          Access-Control-Max-Age: 86400\r\n",
         origin
     )
