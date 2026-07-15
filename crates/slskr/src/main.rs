@@ -20346,20 +20346,33 @@ fn safe_download_path(state_dir: &Path, filename: &str) -> Result<PathBuf, Strin
     let root = download_root(state_dir);
     let mut path = root.clone();
     let mut appended = false;
-    for component in Path::new(filename).components() {
-        match component {
-            Component::Normal(part) => {
-                path.push(part);
-                appended = true;
-            }
-            Component::CurDir => {}
-            Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
-                return Err(
-                    "download filename must be relative and stay within the download root"
-                        .to_owned(),
-                );
-            }
+    if filename.starts_with(['/', '\\']) {
+        return Err(
+            "download filename must be relative and stay within the download root".to_owned(),
+        );
+    }
+    for part in filename.split(['/', '\\']) {
+        if part.is_empty() || part == "." {
+            continue;
         }
+        if part == ".." {
+            return Err(
+                "download filename must be relative and stay within the download root".to_owned(),
+            );
+        }
+        let mut components = Path::new(part).components();
+        let Some(Component::Normal(component)) = components.next() else {
+            return Err(
+                "download filename must be relative and stay within the download root".to_owned(),
+            );
+        };
+        if components.next().is_some() {
+            return Err(
+                "download filename must be relative and stay within the download root".to_owned(),
+            );
+        }
+        path.push(component);
+        appended = true;
     }
     if !appended {
         return Err("download filename is empty".to_owned());
@@ -31837,6 +31850,33 @@ mod tests {
         assert!(created
             .body
             .contains("local_path is not accepted for uploads"));
+    }
+
+    #[test]
+    fn download_path_normalizes_protocol_separators_and_rejects_traversal() {
+        let state_dir = PathBuf::from("state");
+        let expected = state_dir.join("downloads").join("Remote").join("Song.flac");
+        assert_eq!(
+            super::safe_download_path(&state_dir, "Remote/Song.flac").unwrap(),
+            expected
+        );
+        assert_eq!(
+            super::safe_download_path(&state_dir, "Remote\\Song.flac").unwrap(),
+            expected
+        );
+
+        for filename in [
+            "../outside.flac",
+            "..\\outside.flac",
+            "Remote/../../outside.flac",
+            "Remote\\..\\..\\outside.flac",
+            "/absolute.flac",
+            "\\absolute.flac",
+        ] {
+            let error = super::safe_download_path(&state_dir, filename)
+                .expect_err("absolute and traversal paths must fail");
+            assert!(error.contains("must be relative"), "{filename:?}: {error}");
+        }
     }
 
     #[cfg(unix)]
