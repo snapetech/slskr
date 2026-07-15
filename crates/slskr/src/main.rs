@@ -4586,8 +4586,7 @@ impl CollectionStore {
             return None;
         }
         let now = unix_timestamp();
-        let id = format!("col-{}", self.next_id);
-        self.next_id = self.next_id.checked_add(1)?;
+        let id = format!("col-{}", self.allocate_id());
         let record = CollectionRecord {
             id,
             name,
@@ -4634,26 +4633,62 @@ impl CollectionStore {
         kind: String,
     ) -> Result<Option<CollectionItem>, ()> {
         let now = unix_timestamp();
-        let Some(record) = self.records.iter_mut().find(|r| r.id == collection_id) else {
+        let Some(index) = self.records.iter().position(|r| r.id == collection_id) else {
             return Ok(None);
         };
-        if record.items.len() >= self.max_items_per_collection {
+        if self.records[index].items.len() >= self.max_items_per_collection {
             return Err(());
         }
-        let next_item_id = self.next_item_id.checked_add(1).ok_or(())?;
+        let item_id = self.allocate_item_id();
         let item = CollectionItem {
-            id: format!("item-{}", self.next_item_id),
+            id: format!("item-{item_id}"),
             content_id,
             artist,
             title,
             kind,
             added_at: now,
         };
-        self.next_item_id = next_item_id;
+        let record = &mut self.records[index];
         record.items.push(item.clone());
         record.updated_at = now;
         self.updated_at = now;
         Ok(Some(item))
+    }
+
+    fn allocate_id(&mut self) -> u64 {
+        let mut candidate = self.next_id.max(1);
+        for _ in 0..=self.records.len() {
+            let id = format!("col-{candidate}");
+            if !self.records.iter().any(|record| record.id == id) {
+                self.next_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded collection store must leave an available u64 id")
+    }
+
+    fn allocate_item_id(&mut self) -> u64 {
+        let retained_items = self
+            .records
+            .iter()
+            .map(|record| record.items.len())
+            .sum::<usize>();
+        let mut candidate = self.next_item_id.max(1);
+        for _ in 0..=retained_items {
+            let id = format!("item-{candidate}");
+            if !self
+                .records
+                .iter()
+                .flat_map(|record| &record.items)
+                .any(|item| item.id == id)
+            {
+                self.next_item_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded collection items must leave an available u64 id")
     }
 
     fn update_item(
@@ -4911,27 +4946,50 @@ impl WishlistStore {
     ) -> Result<WishlistItem, ()> {
         let now = unix_timestamp();
         self.get_or_create();
-        let record = self
+        let index = self
             .records
-            .iter_mut()
-            .find(|record| record.id == "default")
+            .iter()
+            .position(|record| record.id == "default")
             .ok_or(())?;
-        if record.items.len() >= self.max_items {
+        if self.records[index].items.len() >= self.max_items {
             return Err(());
         }
-        let next_item_id = self.next_item_id.checked_add(1).ok_or(())?;
+        let item_id = self.allocate_item_id();
         let item = WishlistItem {
-            id: format!("wish-{}", self.next_item_id),
+            id: format!("wish-{item_id}"),
             artist,
             title,
             kind,
             added_at: now,
         };
-        self.next_item_id = next_item_id;
+        let record = &mut self.records[index];
         record.items.push(item.clone());
         record.updated_at = now;
         self.updated_at = now;
         Ok(item)
+    }
+
+    fn allocate_item_id(&mut self) -> u64 {
+        let retained_items = self
+            .records
+            .iter()
+            .map(|record| record.items.len())
+            .sum::<usize>();
+        let mut candidate = self.next_item_id.max(1);
+        for _ in 0..=retained_items {
+            let id = format!("wish-{candidate}");
+            if !self
+                .records
+                .iter()
+                .flat_map(|record| &record.items)
+                .any(|item| item.id == id)
+            {
+                self.next_item_id = candidate.wrapping_add(1).max(1);
+                return candidate;
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+        unreachable!("bounded wishlist store must leave an available u64 id")
     }
 
     fn remaining_capacity(&mut self) -> usize {
@@ -4945,10 +5003,6 @@ impl WishlistStore {
 
     fn can_add_items(&mut self, count: usize) -> bool {
         count <= self.remaining_capacity()
-            && u64::try_from(count)
-                .ok()
-                .and_then(|count| self.next_item_id.checked_add(count))
-                .is_some()
     }
 
     fn remove_item(&mut self, item_id: &str) -> Option<WishlistRecord> {
@@ -32106,6 +32160,54 @@ mod tests {
             .is_err());
         wishlist.next_item_id = u64::MAX;
         assert!(!wishlist.can_add_items(1));
+    }
+
+    #[test]
+    fn collection_and_wishlist_ids_wrap_without_collisions() {
+        let mut collections = super::CollectionStore::with_limits(3, 3);
+        collections.next_id = u64::MAX;
+        let max_collection = collections.create("Max".to_owned(), String::new()).unwrap();
+        let wrapped_collection = collections
+            .create("Wrapped".to_owned(), String::new())
+            .unwrap();
+        assert_eq!(max_collection.id, format!("col-{}", u64::MAX));
+        assert_eq!(wrapped_collection.id, "col-1");
+
+        collections.next_item_id = u64::MAX;
+        let max_item = collections
+            .add_item(
+                &max_collection.id,
+                "max".to_owned(),
+                String::new(),
+                "Max".to_owned(),
+                "Audio".to_owned(),
+            )
+            .unwrap()
+            .unwrap();
+        let wrapped_item = collections
+            .add_item(
+                &wrapped_collection.id,
+                "wrapped".to_owned(),
+                String::new(),
+                "Wrapped".to_owned(),
+                "Audio".to_owned(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(max_item.id, format!("item-{}", u64::MAX));
+        assert_eq!(wrapped_item.id, "item-1");
+
+        let mut wishlist = super::WishlistStore::with_max_items(3);
+        wishlist.next_item_id = u64::MAX;
+        assert!(wishlist.can_add_items(2));
+        let max_wish = wishlist
+            .add_item(String::new(), "Max".to_owned(), "Audio".to_owned())
+            .unwrap();
+        let wrapped_wish = wishlist
+            .add_item(String::new(), "Wrapped".to_owned(), "Audio".to_owned())
+            .unwrap();
+        assert_eq!(max_wish.id, format!("wish-{}", u64::MAX));
+        assert_eq!(wrapped_wish.id, "wish-1");
     }
 
     #[test]

@@ -79,6 +79,9 @@ for anchor in \
   'bounded_content_store_ids_wrap_without_collisions' \
   'bounded user-note store must leave an available u64 id' \
   'bounded library scan store must leave an available u64 id' \
+  'collection_and_wishlist_ids_wrap_without_collisions' \
+  'bounded collection items must leave an available u64 id' \
+  'bounded wishlist store must leave an available u64 id' \
   'browse_indirect_tokens_wrap_without_aliasing_pending_records' \
   'bounded browse store must leave an available u32 token' \
   'MAX_INCOMING_CONNECTION_TASKS' \
