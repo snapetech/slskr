@@ -18624,13 +18624,17 @@ fn slskd_file_storage_resource_path(path: &str) -> Option<(&str, &str, &str)> {
 fn file_storage_error_response(error: &str) -> HttpResponse {
     if matches!(
         error,
-        STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR | STORAGE_DIRECTORY_DELETE_DEPTH_ERROR
+        STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR
+            | STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR
+            | STORAGE_DIRECTORY_DELETE_DEPTH_ERROR
     ) {
         HttpResponse {
             status: "413 Payload Too Large",
             content_type: "application/json",
             body: if error == STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR {
                 "{\"error\":\"storage directory is too large to list\"}".to_owned()
+            } else if error == STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR {
+                "{\"error\":\"storage directory is too large to delete\"}".to_owned()
             } else {
                 "{\"error\":\"storage directory tree is too deep to delete\"}".to_owned()
             },
@@ -19406,6 +19410,8 @@ const SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES: usize = 16_384;
 const SLSKD_STORAGE_MAX_RECURSION_DEPTH: usize = 24;
 const SLSKD_STORAGE_MAX_DELETE_DEPTH: usize = 64;
 const STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR: &str = "storage directory entry limit exceeded";
+const STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR: &str =
+    "storage directory delete entry limit exceeded";
 const STORAGE_DIRECTORY_DELETE_DEPTH_ERROR: &str = "storage directory delete depth exceeded";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19487,6 +19493,14 @@ impl StorageDirectoryListState {
 fn reserve_storage_scan_entry(scanned: &mut usize) -> Result<(), String> {
     if *scanned >= SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES {
         return Err(STORAGE_DIRECTORY_ENTRY_LIMIT_ERROR.to_owned());
+    }
+    *scanned += 1;
+    Ok(())
+}
+
+fn reserve_storage_delete_entry(scanned: &mut usize) -> Result<(), String> {
+    if *scanned >= SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES {
+        return Err(STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR.to_owned());
     }
     *scanned += 1;
     Ok(())
@@ -21944,9 +21958,11 @@ fn remove_directory_contents_unix(
     let mut entries = Dir::read_from(directory)
         .map_err(|error| format!("storage directory read failed: {error}"))?;
     let mut names = Vec::new();
+    let mut scanned = 0;
     while let Some(entry) = entries.read() {
         let entry = entry.map_err(|error| format!("storage directory entry failed: {error}"))?;
         if !matches!(entry.file_name().to_bytes(), b"." | b"..") {
+            reserve_storage_delete_entry(&mut scanned)?;
             names.push(entry.file_name().to_owned());
         }
     }
@@ -29978,6 +29994,14 @@ mod tests {
         assert_eq!(
             too_deep.body,
             "{\"error\":\"storage directory tree is too deep to delete\"}"
+        );
+
+        let too_wide =
+            super::file_storage_error_response(super::STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR);
+        assert_eq!(too_wide.status, "413 Payload Too Large");
+        assert_eq!(
+            too_wide.body,
+            "{\"error\":\"storage directory is too large to delete\"}"
         );
     }
 
@@ -44034,6 +44058,17 @@ mod tests {
         assert!(directory.exists());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scoped_storage_delete_bounds_directory_width() {
+        let mut scanned = super::SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES - 1;
+        super::reserve_storage_delete_entry(&mut scanned).expect("last delete scan slot");
+        assert_eq!(scanned, super::SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES);
+        assert_eq!(
+            super::reserve_storage_delete_entry(&mut scanned).unwrap_err(),
+            super::STORAGE_DIRECTORY_DELETE_ENTRY_LIMIT_ERROR
+        );
     }
 
     #[tokio::test]
