@@ -186,6 +186,7 @@ Initial configuration sources:
 - `SLSKR_ADVERTISED_PORT` for the public regular peer port advertised to the server
 - `SLSKR_OBFUSCATED_LISTENER_BIND` to enable and bind the type-1 obfuscated peer listener
 - `SLSKR_OBFUSCATED_ADVERTISED_PORT` for the public obfuscated peer port advertised to the server
+- `SLSK_OBFUSCATION` enables type-1 obfuscated listener advertisement and fallback paths; defaults to `true`. `SLSK_OBFUSCATION_MODE=compatibility` is the default and dials regular peer-message, browse, and file-transfer endpoints before obfuscated endpoints. `prefer` reverses that order when `SLSK_OBFUSCATION_PREFER_OUTBOUND=true`; both modes retain the other transport as fallback. Unsupported `only` mode fails startup. Equivalent TOML keys live under `[network.obfuscation]`.
 - `SLSKR_USER_INFO_DESCRIPTION` for the minimal `UserInfoResponse` profile text; defaults to `slskr daemon`
 - `SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS` for listener-owned peer request handling; defaults to `5`
 - `SLSKR_SHARE_DIRS` for semicolon-separated share roots. The daemon scans explicit roots into virtual `root/file` paths at startup.

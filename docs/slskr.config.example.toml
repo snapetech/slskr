@@ -26,6 +26,11 @@ listen_port = 2234
 # username = "user"
 # password = "pass"
 
+[network.obfuscation]
+enabled = true
+mode = "compatibility" # compatibility tries regular first; prefer tries obfuscated first
+prefer_outbound = true # effective only in prefer mode
+
 [listeners]
 regular_bind = "0.0.0.0:2234"
 advertised_port = 2234

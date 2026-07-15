@@ -271,6 +271,7 @@ Common settings:
 | `SLSKR_ADVERTISED_PORT` | Public regular peer port advertised to the network. |
 | `SLSKR_OBFUSCATED_LISTENER_BIND` | Optional obfuscated peer listener bind address. |
 | `SLSKR_OBFUSCATED_ADVERTISED_PORT` | Public obfuscated peer port. |
+| `SLSK_OBFUSCATION_MODE` | Outbound dial posture: regular-first `compatibility` (default) or obfuscated-first `prefer`. |
 | `SLSKR_TRANSFER_MAX_ACTIVE` | Maximum active transfers. |
 | `SLSKR_TRANSFER_ALLOW_INBOUND` | Enable inbound shared-file serving. |
 | `SLSKR_TRANSFER_ALLOW_OUTBOUND` | Enable outbound downloads. |

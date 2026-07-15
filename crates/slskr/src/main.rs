@@ -3687,7 +3687,10 @@ impl ListenerSnapshot {
         Self {
             regular_bind: config.listener_bind.clone(),
             regular_local_addr: None,
-            obfuscated_bind: config.obfuscated_listener_bind.clone(),
+            obfuscated_bind: config
+                .obfuscation_enabled
+                .then(|| config.obfuscated_listener_bind.clone())
+                .flatten(),
             obfuscated_local_addr: None,
             regular_accepts: 0,
             obfuscated_accepts: 0,
@@ -24304,8 +24307,10 @@ fn spawn_configured_listeners(state: Arc<AppState>) {
     if let Some(bind) = state.config.listener_bind.clone() {
         tokio::spawn(run_listener(Arc::clone(&state), bind, false));
     }
-    if let Some(bind) = state.config.obfuscated_listener_bind.clone() {
-        tokio::spawn(run_listener(Arc::clone(&state), bind, true));
+    if state.config.obfuscation_enabled {
+        if let Some(bind) = state.config.obfuscated_listener_bind.clone() {
+            tokio::spawn(run_listener(Arc::clone(&state), bind, true));
+        }
     }
 }
 
@@ -26370,14 +26375,20 @@ async fn connect_session(
             return false;
         }
     };
-    let wait_port_result = if let Some(obfuscated_port) = state.config.obfuscated_advertised_port {
-        new_session
-            .set_wait_port_obfuscated(
-                state.config.advertised_port,
-                ROTATED_OBFUSCATION_TYPE,
-                obfuscated_port,
-            )
-            .await
+    let wait_port_result = if state.config.obfuscation_enabled {
+        if let Some(obfuscated_port) = state.config.obfuscated_advertised_port {
+            new_session
+                .set_wait_port_obfuscated(
+                    state.config.advertised_port,
+                    ROTATED_OBFUSCATION_TYPE,
+                    obfuscated_port,
+                )
+                .await
+        } else {
+            new_session
+                .set_wait_port(state.config.advertised_port)
+                .await
+        }
     } else {
         new_session
             .set_wait_port(state.config.advertised_port)
@@ -28002,34 +28013,81 @@ async fn update_transfer_progress(state: &AppState, transfer_id: u64, bytes_tran
     transfers.update_progress(transfer_id, bytes_transferred);
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OutboundPeerTransport {
+    Regular,
+    Obfuscated,
+}
+
+fn outbound_peer_dial_order(
+    config: &AppConfig,
+    regular_available: bool,
+    obfuscated_available: bool,
+) -> Vec<OutboundPeerTransport> {
+    let obfuscated_available = config.obfuscation_enabled && obfuscated_available;
+    let mut order = Vec::with_capacity(2);
+    if config.prefer_obfuscated_outbound() {
+        if obfuscated_available {
+            order.push(OutboundPeerTransport::Obfuscated);
+        }
+        if regular_available {
+            order.push(OutboundPeerTransport::Regular);
+        }
+    } else {
+        if regular_available {
+            order.push(OutboundPeerTransport::Regular);
+        }
+        if obfuscated_available {
+            order.push(OutboundPeerTransport::Obfuscated);
+        }
+    }
+    order
+}
+
+fn peer_supports_obfuscated_dial(address: &PeerAddress) -> bool {
+    address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0
+}
+
 async fn connect_file_transfer_preferred(
     state: &AppState,
     address: &PeerAddress,
 ) -> Result<slskr_client::file_transfer::FileTransferConnection<TcpStream>, String> {
-    let mut obfuscated_error = None;
     let peer_ip = peer_connect_ip(state, address);
-    if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
-        match connect_obfuscated_file_transfer(state, address).await {
+    let regular_port = u16::try_from(address.port).ok().filter(|port| *port != 0);
+    let mut last_error = (address.port != 0 && regular_port.is_none())
+        .then(|| "peer port is out of range".to_owned());
+    let username = outgoing_peer_init_username(state)?;
+    for transport in outbound_peer_dial_order(
+        &state.config,
+        regular_port.is_some(),
+        peer_supports_obfuscated_dial(address),
+    ) {
+        let result = match transport {
+            OutboundPeerTransport::Regular => time::timeout(
+                state.config.peer_response_timeout,
+                connect_file_transfer(
+                    SocketAddr::V4(SocketAddrV4::new(
+                        peer_ip,
+                        regular_port.expect("regular transport requires a port"),
+                    )),
+                    username.clone(),
+                ),
+            )
+            .await
+            .map_err(|_| "file-transfer connect timed out".to_owned())
+            .and_then(|result| {
+                result.map_err(|error| format!("file-transfer connect failed: {error}"))
+            }),
+            OutboundPeerTransport::Obfuscated => {
+                connect_obfuscated_file_transfer(state, address).await
+            }
+        };
+        match result {
             Ok(connection) => return Ok(connection),
-            Err(error) => obfuscated_error = Some(error),
+            Err(error) => last_error = Some(error),
         }
     }
-
-    let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
-    if port == 0 {
-        return Err(obfuscated_error
-            .unwrap_or_else(|| "peer did not advertise a file-transfer port".to_owned()));
-    }
-    time::timeout(
-        state.config.peer_response_timeout,
-        connect_file_transfer(
-            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
-            outgoing_peer_init_username(state)?,
-        ),
-    )
-    .await
-    .map_err(|_| "file-transfer connect timed out".to_owned())?
-    .map_err(|error| format!("file-transfer connect failed: {error}"))
+    Err(last_error.unwrap_or_else(|| "peer did not advertise a file-transfer port".to_owned()))
 }
 
 async fn connect_obfuscated_file_transfer(
@@ -28140,36 +28198,46 @@ async fn negotiate_peer_transfer(
         size: (transfer.direction == 1).then_some(transfer.size).flatten(),
     });
     let username = outgoing_peer_init_username(state)?;
-    let mut obfuscated_error = None;
     let peer_ip = peer_connect_ip(state, address);
-    if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
-        match negotiate_obfuscated_peer_transfer(
-            SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
-            username.clone(),
-            message.clone(),
-            transfer,
-            state.config.peer_response_timeout,
-        )
-        .await
-        {
+    let regular_port = u16::try_from(address.port).ok().filter(|port| *port != 0);
+    let mut last_error = (address.port != 0 && regular_port.is_none())
+        .then(|| "peer port is out of range".to_owned());
+    for transport in outbound_peer_dial_order(
+        &state.config,
+        regular_port.is_some(),
+        peer_supports_obfuscated_dial(address),
+    ) {
+        let result = match transport {
+            OutboundPeerTransport::Regular => {
+                negotiate_plain_peer_transfer(
+                    SocketAddr::V4(SocketAddrV4::new(
+                        peer_ip,
+                        regular_port.expect("regular transport requires a port"),
+                    )),
+                    username.clone(),
+                    message.clone(),
+                    transfer,
+                    state.config.peer_response_timeout,
+                )
+                .await
+            }
+            OutboundPeerTransport::Obfuscated => {
+                negotiate_obfuscated_peer_transfer(
+                    SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
+                    username.clone(),
+                    message.clone(),
+                    transfer,
+                    state.config.peer_response_timeout,
+                )
+                .await
+            }
+        };
+        match result {
             Ok(response) => return Ok(response),
-            Err(error) => obfuscated_error = Some(error),
+            Err(error) => last_error = Some(error),
         }
     }
-
-    let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
-    if port != 0 {
-        return negotiate_plain_peer_transfer(
-            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
-            username,
-            message,
-            transfer,
-            state.config.peer_response_timeout,
-        )
-        .await;
-    }
-
-    Err(obfuscated_error.unwrap_or_else(|| "peer did not advertise a peer-message port".to_owned()))
+    Err(last_error.unwrap_or_else(|| "peer did not advertise a peer-message port".to_owned()))
 }
 
 async fn fetch_peer_browse(
@@ -28177,32 +28245,42 @@ async fn fetch_peer_browse(
     address: &PeerAddress,
 ) -> Result<Vec<BrowseEntry>, String> {
     let username = outgoing_peer_init_username(state)?;
-    let mut obfuscated_error = None;
     let peer_ip = peer_connect_ip(state, address);
-    if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
-        match browse_obfuscated_peer(
-            SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
-            username.clone(),
-            state.config.peer_response_timeout,
-        )
-        .await
-        {
+    let regular_port = u16::try_from(address.port).ok().filter(|port| *port != 0);
+    let mut last_error = (address.port != 0 && regular_port.is_none())
+        .then(|| "peer port is out of range".to_owned());
+    for transport in outbound_peer_dial_order(
+        &state.config,
+        regular_port.is_some(),
+        peer_supports_obfuscated_dial(address),
+    ) {
+        let result = match transport {
+            OutboundPeerTransport::Regular => {
+                browse_plain_peer(
+                    SocketAddr::V4(SocketAddrV4::new(
+                        peer_ip,
+                        regular_port.expect("regular transport requires a port"),
+                    )),
+                    username.clone(),
+                    state.config.peer_response_timeout,
+                )
+                .await
+            }
+            OutboundPeerTransport::Obfuscated => {
+                browse_obfuscated_peer(
+                    SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
+                    username.clone(),
+                    state.config.peer_response_timeout,
+                )
+                .await
+            }
+        };
+        match result {
             Ok(entries) => return Ok(entries),
-            Err(error) => obfuscated_error = Some(error),
+            Err(error) => last_error = Some(error),
         }
     }
-
-    let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
-    if port != 0 {
-        return browse_plain_peer(
-            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
-            username,
-            state.config.peer_response_timeout,
-        )
-        .await;
-    }
-
-    Err(obfuscated_error.unwrap_or_else(|| "peer did not advertise a browse port".to_owned()))
+    Err(last_error.unwrap_or_else(|| "peer did not advertise a browse port".to_owned()))
 }
 
 async fn fetch_peer_folder(
@@ -28330,34 +28408,44 @@ async fn send_peer_message_request(
     message: PeerMessage,
 ) -> Result<PeerMessage, String> {
     let username = outgoing_peer_init_username(state)?;
-    let mut obfuscated_error = None;
     let peer_ip = peer_connect_ip(state, address);
-    if address.obfuscation_type == ROTATED_OBFUSCATION_TYPE && address.obfuscated_port != 0 {
-        match send_obfuscated_peer_message_request(
-            SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
-            username.clone(),
-            message.clone(),
-            state.config.peer_response_timeout,
-        )
-        .await
-        {
+    let regular_port = u16::try_from(address.port).ok().filter(|port| *port != 0);
+    let mut last_error = (address.port != 0 && regular_port.is_none())
+        .then(|| "peer port is out of range".to_owned());
+    for transport in outbound_peer_dial_order(
+        &state.config,
+        regular_port.is_some(),
+        peer_supports_obfuscated_dial(address),
+    ) {
+        let result = match transport {
+            OutboundPeerTransport::Regular => {
+                send_plain_peer_message_request(
+                    SocketAddr::V4(SocketAddrV4::new(
+                        peer_ip,
+                        regular_port.expect("regular transport requires a port"),
+                    )),
+                    username.clone(),
+                    message.clone(),
+                    state.config.peer_response_timeout,
+                )
+                .await
+            }
+            OutboundPeerTransport::Obfuscated => {
+                send_obfuscated_peer_message_request(
+                    SocketAddr::V4(SocketAddrV4::new(peer_ip, address.obfuscated_port)),
+                    username.clone(),
+                    message.clone(),
+                    state.config.peer_response_timeout,
+                )
+                .await
+            }
+        };
+        match result {
             Ok(response) => return Ok(response),
-            Err(error) => obfuscated_error = Some(error),
+            Err(error) => last_error = Some(error),
         }
     }
-
-    let port = u16::try_from(address.port).map_err(|_| "peer port is out of range".to_owned())?;
-    if port != 0 {
-        return send_plain_peer_message_request(
-            SocketAddr::V4(SocketAddrV4::new(peer_ip, port)),
-            username,
-            message,
-            state.config.peer_response_timeout,
-        )
-        .await;
-    }
-
-    Err(obfuscated_error.unwrap_or_else(|| "peer did not advertise a peer-message port".to_owned()))
+    Err(last_error.unwrap_or_else(|| "peer did not advertise a peer-message port".to_owned()))
 }
 
 fn peer_connect_ip(state: &AppState, address: &PeerAddress) -> std::net::Ipv4Addr {
@@ -42941,7 +43029,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peer_address_response_uses_obfuscated_file_transfer_when_advertised() {
+    async fn compatibility_dials_fall_back_to_obfuscated_file_transfer_when_regular_fails() {
         let (state, _receiver) = test_state();
         let path = std::env::temp_dir().join(format!(
             "slskr-transfer-f-{}-obfuscated-upload.bin",
@@ -42966,6 +43054,12 @@ mod tests {
             .await
             .expect("listener");
         let local_addr = listener.local_addr().expect("local addr");
+        let unused_regular = {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("unused regular listener");
+            listener.local_addr().expect("unused regular addr").port()
+        };
         let server = tokio::spawn(async move {
             let (incoming, _) = listener.accept_obfuscated().await.expect("accept p");
             let slskr_client::listener::IncomingConnection::ObfuscatedPeerMessages(mut peer) =
@@ -43013,7 +43107,7 @@ mod tests {
         let address = slskr_client::protocol::server::PeerAddress {
             username: "friend".to_owned(),
             ip: "127.0.0.1".parse().unwrap(),
-            port: 0,
+            port: u32::from(unused_regular),
             obfuscation_type: super::ROTATED_OBFUSCATION_TYPE,
             obfuscated_port: local_addr.port(),
         };
@@ -43033,7 +43127,11 @@ mod tests {
 
     #[tokio::test]
     async fn peer_address_response_falls_back_to_plain_file_transfer_when_obfuscated_fails() {
-        let (state, _receiver) = test_state();
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSK_OBFUSCATION_MODE", "prefer"),
+            super::SearchStore::new(),
+            None,
+        );
         let path = std::env::temp_dir().join(format!(
             "slskr-transfer-f-{}-obfuscated-fallback-upload.bin",
             std::process::id()
@@ -49000,7 +49098,11 @@ mod tests {
 
     #[tokio::test]
     async fn peer_address_response_falls_back_to_plain_browse_when_obfuscated_fails() {
-        let (state, _receiver) = test_state();
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSK_OBFUSCATION_MODE", "prefer"),
+            super::SearchStore::new(),
+            None,
+        );
         {
             let mut browse = state.browse.write().await;
             browse.request("friend".to_owned());
@@ -50957,6 +51059,11 @@ mod tests {
                 username = "alice"
                 password = "secret-password"
 
+                [network.obfuscation]
+                enabled = true
+                mode = "prefer"
+                prefer_outbound = true
+
                 [listeners]
                 regular_bind = "0.0.0.0:3333"
                 advertised_port = 4444
@@ -51007,6 +51114,8 @@ mod tests {
         assert_eq!(config.listen_port, 3333);
         assert_eq!(config.advertised_port, 4444);
         assert_eq!(config.obfuscated_advertised_port, Some(4445));
+        assert_eq!(config.obfuscation_mode.as_str(), "prefer");
+        assert!(config.prefer_obfuscated_outbound());
         assert!(config.auto_connect);
         assert!(!config.reconnect);
         assert_eq!(config.reconnect_delay.as_secs(), 7);
@@ -51871,6 +51980,45 @@ mod tests {
         assert_eq!(queue.entries[0].status, "rejected");
 
         let _ = std::fs::remove_file(queue.events_path);
+    }
+
+    #[test]
+    fn outbound_peer_dial_order_honors_compatibility_prefer_and_disabled_modes() {
+        let compatibility =
+            super::AppConfig::from_layers(None, FileConfig::default(), &MapEnv::default())
+                .expect("compatibility config");
+        assert_eq!(
+            super::outbound_peer_dial_order(&compatibility, true, true),
+            vec![
+                super::OutboundPeerTransport::Regular,
+                super::OutboundPeerTransport::Obfuscated,
+            ]
+        );
+
+        let prefer = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default().with("SLSK_OBFUSCATION_MODE", "prefer"),
+        )
+        .expect("prefer config");
+        assert_eq!(
+            super::outbound_peer_dial_order(&prefer, true, true),
+            vec![
+                super::OutboundPeerTransport::Obfuscated,
+                super::OutboundPeerTransport::Regular,
+            ]
+        );
+
+        let disabled = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default().with("SLSK_OBFUSCATION", "false"),
+        )
+        .expect("disabled config");
+        assert_eq!(
+            super::outbound_peer_dial_order(&disabled, true, true),
+            vec![super::OutboundPeerTransport::Regular]
+        );
     }
 
     #[test]

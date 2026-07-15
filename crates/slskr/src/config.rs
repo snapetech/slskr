@@ -37,6 +37,9 @@ pub struct AppConfig {
     pub advertised_port: u32,
     pub obfuscated_listener_bind: Option<String>,
     pub obfuscated_advertised_port: Option<u32>,
+    pub obfuscation_enabled: bool,
+    pub obfuscation_mode: SoulseekObfuscationMode,
+    pub obfuscation_prefer_outbound: bool,
     pub peer_host_override: Option<Ipv4Addr>,
     pub test_user_endpoint_overrides: BTreeMap<String, SocketAddr>,
     pub user_info_description: String,
@@ -150,6 +153,26 @@ impl AppConfig {
             env,
             "SLSKR_OBFUSCATED_ADVERTISED_PORT",
             file_config.listeners.obfuscated_advertised_port,
+        )?;
+        let obfuscation_enabled = env_bool_layer(
+            env,
+            "SLSK_OBFUSCATION",
+            file_config.network.obfuscation.enabled.unwrap_or(true),
+        )?;
+        let obfuscation_mode = SoulseekObfuscationMode::parse(
+            env.var("SLSK_OBFUSCATION_MODE")
+                .or(file_config.network.obfuscation.mode)
+                .as_deref()
+                .unwrap_or("compatibility"),
+        )?;
+        let obfuscation_prefer_outbound = env_bool_layer(
+            env,
+            "SLSK_OBFUSCATION_PREFER_OUTBOUND",
+            file_config
+                .network
+                .obfuscation
+                .prefer_outbound
+                .unwrap_or(true),
         )?;
         let peer_host_override = env
             .var("SLSKR_PEER_HOST_OVERRIDE")
@@ -287,6 +310,9 @@ impl AppConfig {
             advertised_port,
             obfuscated_listener_bind,
             obfuscated_advertised_port,
+            obfuscation_enabled,
+            obfuscation_mode,
+            obfuscation_prefer_outbound,
             peer_host_override,
             test_user_endpoint_overrides,
             user_info_description,
@@ -319,7 +345,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -334,6 +360,13 @@ impl AppConfig {
             json_option(self.listener_bind.as_deref()),
             json_option(self.obfuscated_listener_bind.as_deref()),
             json_u32_option(self.obfuscated_advertised_port),
+            format_args!(
+                "{{\"enabled\":{},\"mode\":\"{}\",\"prefer_outbound\":{},\"effective_prefer_outbound\":{}}}",
+                self.obfuscation_enabled,
+                self.obfuscation_mode.as_str(),
+                self.obfuscation_prefer_outbound,
+                self.prefer_obfuscated_outbound(),
+            ),
             json_option(self.peer_host_override.map(|ip| ip.to_string()).as_deref()),
             self.test_user_endpoint_overrides.len(),
             json_option(self.username.as_deref().map(redact_username).as_deref()),
@@ -365,6 +398,36 @@ impl AppConfig {
             self.persistence_enabled,
             self.integrations.sanitized_json()
         )
+    }
+
+    pub fn prefer_obfuscated_outbound(&self) -> bool {
+        self.obfuscation_enabled
+            && self.obfuscation_mode == SoulseekObfuscationMode::Prefer
+            && self.obfuscation_prefer_outbound
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SoulseekObfuscationMode {
+    Compatibility,
+    Prefer,
+}
+
+impl SoulseekObfuscationMode {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "compatibility" => Ok(Self::Compatibility),
+            "prefer" => Ok(Self::Prefer),
+            "only" => Err("Soulseek obfuscation only mode is not supported because regular fallback is required for legacy compatibility".to_owned()),
+            _ => Err("SLSK_OBFUSCATION_MODE must be compatibility or prefer".to_owned()),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Compatibility => "compatibility",
+            Self::Prefer => "prefer",
+        }
     }
 }
 
@@ -1016,6 +1079,15 @@ pub struct NetworkFileConfig {
     credential_store: Option<String>,
     credential_file: Option<PathBuf>,
     private_message_auto_response: PrivateMessageAutoResponseFileConfig,
+    obfuscation: SoulseekObfuscationFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SoulseekObfuscationFileConfig {
+    enabled: Option<bool>,
+    mode: Option<String>,
+    prefer_outbound: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1865,6 +1937,41 @@ mod tests {
             )
             .expect_err("out-of-range auto-retry config must fail");
             assert!(error.contains("must be between"), "{name}={value}: {error}");
+        }
+    }
+
+    #[test]
+    fn soulseek_obfuscation_defaults_to_regular_first_compatibility() {
+        let compatibility =
+            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
+                .expect("default obfuscation config");
+        assert!(compatibility.obfuscation_enabled);
+        assert_eq!(
+            compatibility.obfuscation_mode,
+            super::SoulseekObfuscationMode::Compatibility
+        );
+        assert!(compatibility.obfuscation_prefer_outbound);
+        assert!(!compatibility.prefer_obfuscated_outbound());
+
+        let prefer = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSK_OBFUSCATION_MODE", "prefer"),
+        )
+        .expect("prefer obfuscation config");
+        assert!(prefer.prefer_obfuscated_outbound());
+
+        for value in ["only", "unknown"] {
+            let error = super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default().with("SLSK_OBFUSCATION_MODE", value),
+            )
+            .expect_err("unsupported obfuscation mode must fail");
+            assert!(
+                error.to_ascii_lowercase().contains("obfuscation"),
+                "{error}"
+            );
         }
     }
 }
