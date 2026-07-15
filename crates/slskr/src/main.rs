@@ -26054,6 +26054,9 @@ mod tests {
             "slskr.session=token-%FF",
             "slskr.session=token-%",
             "slskr.session=token-%G0",
+            "slskr.session=token-%FF; slskr.session=token-%EF%BF%BD",
+            "slskr.session=token-%EF%BF%BD; slskr.session=token-%EF%BF%BD",
+            "slskr.session=wrong; slskr.session=token-%EF%BF%BD",
         ] {
             assert!(
                 !super::is_authorized(&config, None, Some(cookie)),

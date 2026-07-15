@@ -240,14 +240,20 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 }
 
 pub(crate) fn cookie_session_token(cookie: Option<&str>) -> Option<String> {
-    cookie?
-        .split(';')
-        .filter_map(|part| part.trim().split_once('='))
-        .find_map(|(name, value)| {
-            (name == "slskr.session")
-                .then(|| strict_percent_decode_component(value.trim()))
-                .flatten()
-        })
+    let mut session_token = None;
+    for part in cookie?.split(';') {
+        let Some((name, value)) = part.trim().split_once('=') else {
+            continue;
+        };
+        if name != "slskr.session" {
+            continue;
+        }
+        if session_token.is_some() {
+            return None;
+        }
+        session_token = Some(strict_percent_decode_component(value.trim())?);
+    }
+    session_token
 }
 
 fn strict_percent_decode_component(value: &str) -> Option<String> {
