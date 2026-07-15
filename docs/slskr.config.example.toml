@@ -47,7 +47,7 @@ peer_response_seconds = 5
 # off matches the upstream compatibility default; warn accepts unsigned/legacy
 # requests but strictly verifies any ed25519: signature supplied; enforce also
 # requires a fresh timestamp and one-use nonce. Sign the compact JSON array
-# [1,"join-request",podId,peerId,requestedRole,timestampUnixMs,message,nonce].
+# [1,"join-request",podId,peerId,role,timestamp,message,nonce].
 signature_mode = "off"
 
 [shares]

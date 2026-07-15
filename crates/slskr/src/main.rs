@@ -9861,6 +9861,7 @@ struct AppState {
     private_message_auto_responses: RwLock<PrivateMessageAutoResponseTracker>,
     rooms: RwLock<RoomStore>,
     pod_join_replays: RwLock<BTreeMap<String, u64>>,
+    pod_membership_workflow: RwLock<PodMembershipWorkflowStore>,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
@@ -20027,28 +20028,326 @@ async fn route_http_request_with_headers(
                     return Ok(routing::bad_request_response(&error));
                 }
             }
-            let pod_id = input.pod_id.clone();
-            let mut rooms = state.rooms.write().await;
-            let Some(record) = rooms.join(pod_id.clone()) else {
-                drop(rooms);
+            let pod_exists_and_is_not_member = {
+                let rooms = state.rooms.read().await;
+                rooms.records.iter().find(|room| room.name == input.pod_id).map(|room| {
+                    !room
+                        .members
+                        .iter()
+                        .any(|member| member.eq_ignore_ascii_case(&input.peer_id))
+                })
+            };
+            match pod_exists_and_is_not_member {
+                None => {
+                    if mode == PodSignatureMode::Enforce {
+                        release_pod_join_replay_key(state, &input).await;
+                    }
+                    return Ok(routing::bad_request_response("Pod not found"));
+                }
+                Some(false) => {
+                    if mode == PodSignatureMode::Enforce {
+                        release_pod_join_replay_key(state, &input).await;
+                    }
+                    return Ok(routing::bad_request_response(
+                        "Already a member of this pod",
+                    ));
+                }
+                Some(true) => {}
+            }
+            let mut workflow = state.pod_membership_workflow.write().await;
+            if let Err(error) = workflow.add_join(input.clone()) {
+                drop(workflow);
                 if mode == PodSignatureMode::Enforce {
                     release_pod_join_replay_key(state, &input).await;
                 }
-                return Ok(routing::service_unavailable_response(
-                    "room capacity is full",
-                ));
-            };
+                return Ok(routing::bad_request_response(error));
+            }
+            drop(workflow);
             let body = serde_json::json!({
-                "podId": pod_id,
-                "joined": true,
+                "success": true,
+                "podId": input.pod_id,
                 "peerId": input.peer_id,
-                "requestedRole": input.requested_role,
+                "joinRequest": input,
                 "signatureMode": mode.as_str(),
                 "signatureVerified": verified,
-                "membership": serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_else(|_| serde_json::json!({})),
             }).to_string();
-            drop(rooms);
             Ok(routing::ok_response(body))
+        }
+
+        ("POST", "/api/podcore/membership/join/accept") => {
+            let input = match PodJoinAcceptanceInput::from_json(body) {
+                Ok(input) => input,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            let mode = state.config.pod_join_signature_mode;
+            let verified = match verify_pod_signed_payload(
+                mode,
+                &input.signature,
+                &input.acceptor_public_key,
+                input.timestamp_unix_ms,
+                unix_timestamp().saturating_mul(1_000),
+                &input.canonical_payload(),
+                "pod join acceptance",
+            ) {
+                Ok(verified) => verified,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            if !pod_acceptor_has_permission(state, &input.pod_id, &input.acceptor_peer_id).await {
+                return Ok(routing::bad_request_response(
+                    "Acceptor does not have permission to accept join requests",
+                ));
+            }
+            let request = {
+                state
+                    .pod_membership_workflow
+                    .write()
+                    .await
+                    .remove_join(&input.pod_id, &input.peer_id)
+            };
+            let Some(request) = request else {
+                return Ok(routing::bad_request_response(
+                    "No pending join request found",
+                ));
+            };
+            let added = state
+                .rooms
+                .write()
+                .await
+                .add_member(&input.pod_id, input.peer_id.clone());
+            match added {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    let _ = state
+                        .pod_membership_workflow
+                        .write()
+                        .await
+                        .add_join(request);
+                    return Ok(routing::bad_request_response("Pod not found"));
+                }
+                Err(()) => {
+                    let _ = state
+                        .pod_membership_workflow
+                        .write()
+                        .await
+                        .add_join(request);
+                    return Ok(routing::service_unavailable_response(
+                        "pod member capacity is full",
+                    ));
+                }
+            }
+            state
+                .pod_membership_workflow
+                .write()
+                .await
+                .set_role(&input.pod_id, &input.peer_id, input.accepted_role.clone());
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "success": true,
+                    "podId": input.pod_id,
+                    "peerId": input.peer_id,
+                    "operation": "join_acceptance",
+                    "request": request,
+                    "response": input,
+                    "signatureMode": mode.as_str(),
+                    "signatureVerified": verified,
+                })
+                .to_string(),
+            ))
+        }
+
+        ("POST", "/api/podcore/membership/leave") => {
+            let input = match PodLeaveRequestInput::from_json(body) {
+                Ok(input) => input,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            let mode = state.config.pod_join_signature_mode;
+            let verified = match verify_pod_signed_payload(
+                mode,
+                &input.signature,
+                &input.public_key,
+                input.timestamp_unix_ms,
+                unix_timestamp().saturating_mul(1_000),
+                &input.canonical_payload(),
+                "pod leave",
+            ) {
+                Ok(verified) => verified,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            let is_member = state
+                .rooms
+                .read()
+                .await
+                .records
+                .iter()
+                .find(|room| room.name == input.pod_id)
+                .is_some_and(|room| {
+                    room.members
+                        .iter()
+                        .any(|member| member.eq_ignore_ascii_case(&input.peer_id))
+                });
+            if !is_member {
+                return Ok(routing::bad_request_response("Not a member of this pod"));
+            }
+            let privileged = matches!(
+                state
+                    .pod_membership_workflow
+                    .read()
+                    .await
+                    .role(&input.pod_id, &input.peer_id),
+                "owner" | "moderator"
+            );
+            if privileged {
+                if let Err(error) = state
+                    .pod_membership_workflow
+                    .write()
+                    .await
+                    .add_leave(input.clone())
+                {
+                    return Ok(routing::bad_request_response(error));
+                }
+            } else {
+                state
+                    .rooms
+                    .write()
+                    .await
+                    .remove_member(&input.pod_id, &input.peer_id);
+                state
+                    .pod_membership_workflow
+                    .write()
+                    .await
+                    .remove_role(&input.pod_id, &input.peer_id);
+            }
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "success": true,
+                    "podId": input.pod_id,
+                    "peerId": input.peer_id,
+                    "leaveRequest": input,
+                    "pending": privileged,
+                    "signatureMode": mode.as_str(),
+                    "signatureVerified": verified,
+                })
+                .to_string(),
+            ))
+        }
+
+        ("POST", "/api/podcore/membership/leave/accept") => {
+            let input = match PodLeaveAcceptanceInput::from_json(body) {
+                Ok(input) => input,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            let mode = state.config.pod_join_signature_mode;
+            let verified = match verify_pod_signed_payload(
+                mode,
+                &input.signature,
+                &input.acceptor_public_key,
+                input.timestamp_unix_ms,
+                unix_timestamp().saturating_mul(1_000),
+                &input.canonical_payload(),
+                "pod leave acceptance",
+            ) {
+                Ok(verified) => verified,
+                Err(error) => return Ok(routing::bad_request_response(&error)),
+            };
+            if !pod_acceptor_has_permission(state, &input.pod_id, &input.acceptor_peer_id).await {
+                return Ok(routing::bad_request_response(
+                    "Acceptor does not have permission to accept leave requests",
+                ));
+            }
+            let request = state
+                .pod_membership_workflow
+                .write()
+                .await
+                .remove_leave(&input.pod_id, &input.peer_id);
+            let Some(request) = request else {
+                return Ok(routing::bad_request_response(
+                    "No pending leave request found",
+                ));
+            };
+            if state
+                .rooms
+                .write()
+                .await
+                .remove_member(&input.pod_id, &input.peer_id)
+                .is_none()
+            {
+                let _ = state
+                    .pod_membership_workflow
+                    .write()
+                    .await
+                    .add_leave(request);
+                return Ok(routing::bad_request_response("Not a member of this pod"));
+            }
+            state
+                .pod_membership_workflow
+                .write()
+                .await
+                .remove_role(&input.pod_id, &input.peer_id);
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "success": true,
+                    "podId": input.pod_id,
+                    "peerId": input.peer_id,
+                    "operation": "leave_acceptance",
+                    "request": request,
+                    "response": input,
+                    "signatureMode": mode.as_str(),
+                    "signatureVerified": verified,
+                })
+                .to_string(),
+            ))
+        }
+
+        ("GET", path) if pod_pending_request_path(path, "join").is_some() => {
+            let pod_id = pod_pending_request_path(path, "join").unwrap_or_default();
+            let workflow = state.pod_membership_workflow.read().await;
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "pendingJoinRequests": workflow.pending_joins(&pod_id),
+                })
+                .to_string(),
+            ))
+        }
+
+        ("GET", path) if pod_pending_request_path(path, "leave").is_some() => {
+            let pod_id = pod_pending_request_path(path, "leave").unwrap_or_default();
+            let workflow = state.pod_membership_workflow.read().await;
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "pendingLeaveRequests": workflow.pending_leaves(&pod_id),
+                })
+                .to_string(),
+            ))
+        }
+
+        ("DELETE", path) if pod_cancel_request_path(path, "join").is_some() => {
+            let (pod_id, peer_id) = pod_cancel_request_path(path, "join").unwrap_or_default();
+            if state
+                .pod_membership_workflow
+                .write()
+                .await
+                .remove_join(&pod_id, &peer_id)
+                .is_some()
+            {
+                Ok(routing::ok_response(r#"{"cancelled":true}"#.to_owned()))
+            } else {
+                Ok(routing::not_found_response())
+            }
+        }
+
+        ("DELETE", path) if pod_cancel_request_path(path, "leave").is_some() => {
+            let (pod_id, peer_id) = pod_cancel_request_path(path, "leave").unwrap_or_default();
+            if state
+                .pod_membership_workflow
+                .write()
+                .await
+                .remove_leave(&pod_id, &peer_id)
+                .is_some()
+            {
+                Ok(routing::ok_response(r#"{"cancelled":true}"#.to_owned()))
+            } else {
+                Ok(routing::not_found_response())
+            }
         }
 
         ("GET", "/api/playback/status") => {
@@ -23325,7 +23624,8 @@ fn slskd_download_user_stats_json(query: Option<&str>, transfers: &TransferQueue
     .to_string()
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PodJoinSignatureInput {
     pod_id: String,
     peer_id: String,
@@ -23387,6 +23687,20 @@ impl PodJoinSignatureInput {
                 return Err(format!("pod join {name} exceeds {limit} bytes"));
             }
         }
+        if [
+            &input.pod_id,
+            &input.peer_id,
+            &input.requested_role,
+            &input.message,
+            &input.nonce,
+        ]
+        .iter()
+        .any(|value| value.contains('|'))
+        {
+            return Err(
+                "pod join signed fields must not contain the canonical delimiter".to_owned(),
+            );
+        }
         if input.pod_id.trim().is_empty() {
             return Err("pod join podId is required".to_owned());
         }
@@ -23397,17 +23711,277 @@ impl PodJoinSignatureInput {
     }
 
     fn canonical_payload(&self) -> String {
-        serde_json::to_string(&(
-            1,
-            "join-request",
-            &self.pod_id,
-            &self.peer_id,
-            &self.requested_role,
+        format!(
+            "1|join-request|{}|{}|{}|{}|{}|{}",
+            self.pod_id,
+            self.peer_id,
+            self.requested_role,
             self.timestamp_unix_ms,
-            &self.message,
-            &self.nonce,
+            self.message,
+            self.nonce
+        )
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PodJoinAcceptanceInput {
+    pod_id: String,
+    peer_id: String,
+    accepted_role: String,
+    acceptor_peer_id: String,
+    acceptor_public_key: String,
+    timestamp_unix_ms: u64,
+    signature: String,
+    message: String,
+}
+
+impl PodJoinAcceptanceInput {
+    fn from_json(body: &str) -> Result<Self, String> {
+        serde_json::from_str::<serde_json::Value>(body)
+            .map_err(|error| format!("invalid pod join acceptance JSON: {error}"))?;
+        let input = Self {
+            pod_id: pod_string_field(body, "podId"),
+            peer_id: pod_string_field(body, "peerId"),
+            accepted_role: extract_json_string_field(body, "acceptedRole")
+                .unwrap_or_else(|| "member".to_owned())
+                .trim()
+                .to_owned(),
+            acceptor_peer_id: pod_string_field(body, "acceptorPeerId"),
+            acceptor_public_key: pod_string_field(body, "acceptorPublicKey"),
+            timestamp_unix_ms: extract_json_u64_field(body, "timestampUnixMs").unwrap_or(0),
+            signature: pod_string_field(body, "signature"),
+            message: pod_string_field(body, "message"),
+        };
+        validate_pod_fields(
+            "pod join acceptance",
+            &[
+                ("podId", &input.pod_id, 512),
+                ("peerId", &input.peer_id, 512),
+                ("acceptedRole", &input.accepted_role, 128),
+                ("acceptorPeerId", &input.acceptor_peer_id, 512),
+                ("acceptorPublicKey", &input.acceptor_public_key, 512),
+                ("signature", &input.signature, 1024),
+                ("message", &input.message, 4 * 1024),
+            ],
+        )?;
+        require_pod_and_peer("pod join acceptance", &input.pod_id, &input.peer_id)?;
+        Ok(input)
+    }
+
+    fn canonical_payload(&self) -> String {
+        format!(
+            "1|join-acceptance|{}|{}|{}|{}|{}|{}",
+            self.pod_id,
+            self.peer_id,
+            self.accepted_role,
+            self.acceptor_peer_id,
+            self.timestamp_unix_ms,
+            self.message
+        )
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PodLeaveRequestInput {
+    pod_id: String,
+    peer_id: String,
+    public_key: String,
+    timestamp_unix_ms: u64,
+    signature: String,
+    message: String,
+}
+
+impl PodLeaveRequestInput {
+    fn from_json(body: &str) -> Result<Self, String> {
+        serde_json::from_str::<serde_json::Value>(body)
+            .map_err(|error| format!("invalid pod leave JSON: {error}"))?;
+        let input = Self {
+            pod_id: pod_string_field(body, "podId"),
+            peer_id: pod_string_field(body, "peerId"),
+            public_key: pod_string_field(body, "publicKey"),
+            timestamp_unix_ms: extract_json_u64_field(body, "timestampUnixMs").unwrap_or(0),
+            signature: pod_string_field(body, "signature"),
+            message: pod_string_field(body, "message"),
+        };
+        validate_pod_fields(
+            "pod leave",
+            &[
+                ("podId", &input.pod_id, 512),
+                ("peerId", &input.peer_id, 512),
+                ("publicKey", &input.public_key, 512),
+                ("signature", &input.signature, 1024),
+                ("message", &input.message, 4 * 1024),
+            ],
+        )?;
+        require_pod_and_peer("pod leave", &input.pod_id, &input.peer_id)?;
+        Ok(input)
+    }
+
+    fn canonical_payload(&self) -> String {
+        format!(
+            "1|leave-request|{}|{}|{}|{}",
+            self.pod_id, self.peer_id, self.timestamp_unix_ms, self.message
+        )
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PodLeaveAcceptanceInput {
+    pod_id: String,
+    peer_id: String,
+    acceptor_peer_id: String,
+    acceptor_public_key: String,
+    timestamp_unix_ms: u64,
+    signature: String,
+    message: String,
+}
+
+impl PodLeaveAcceptanceInput {
+    fn from_json(body: &str) -> Result<Self, String> {
+        serde_json::from_str::<serde_json::Value>(body)
+            .map_err(|error| format!("invalid pod leave acceptance JSON: {error}"))?;
+        let input = Self {
+            pod_id: pod_string_field(body, "podId"),
+            peer_id: pod_string_field(body, "peerId"),
+            acceptor_peer_id: pod_string_field(body, "acceptorPeerId"),
+            acceptor_public_key: pod_string_field(body, "acceptorPublicKey"),
+            timestamp_unix_ms: extract_json_u64_field(body, "timestampUnixMs").unwrap_or(0),
+            signature: pod_string_field(body, "signature"),
+            message: pod_string_field(body, "message"),
+        };
+        validate_pod_fields(
+            "pod leave acceptance",
+            &[
+                ("podId", &input.pod_id, 512),
+                ("peerId", &input.peer_id, 512),
+                ("acceptorPeerId", &input.acceptor_peer_id, 512),
+                ("acceptorPublicKey", &input.acceptor_public_key, 512),
+                ("signature", &input.signature, 1024),
+                ("message", &input.message, 4 * 1024),
+            ],
+        )?;
+        require_pod_and_peer("pod leave acceptance", &input.pod_id, &input.peer_id)?;
+        Ok(input)
+    }
+
+    fn canonical_payload(&self) -> String {
+        format!(
+            "1|leave-acceptance|{}|{}|{}|{}|{}",
+            self.pod_id, self.peer_id, self.acceptor_peer_id, self.timestamp_unix_ms, self.message
+        )
+    }
+}
+
+fn pod_string_field(body: &str, field: &str) -> String {
+    extract_json_string_field(body, field)
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
+}
+
+fn validate_pod_fields(operation: &str, fields: &[(&str, &String, usize)]) -> Result<(), String> {
+    for (name, value, limit) in fields {
+        if value.len() > *limit {
+            return Err(format!("{operation} {name} exceeds {limit} bytes"));
+        }
+        if value.contains('|') {
+            return Err(format!(
+                "{operation} signed fields must not contain the canonical delimiter"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_pod_and_peer(operation: &str, pod_id: &str, peer_id: &str) -> Result<(), String> {
+    if pod_id.is_empty() || peer_id.is_empty() {
+        return Err(format!("{operation} podId and peerId are required"));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct PodMembershipWorkflowStore {
+    pending_joins: BTreeMap<String, PodJoinSignatureInput>,
+    pending_leaves: BTreeMap<String, PodLeaveRequestInput>,
+    roles: BTreeMap<String, String>,
+}
+
+impl PodMembershipWorkflowStore {
+    fn key(pod_id: &str, peer_id: &str) -> String {
+        serde_json::to_string(&(
+            pod_id.trim().to_ascii_lowercase(),
+            peer_id.trim().to_ascii_lowercase(),
         ))
-        .expect("pod join canonical tuple is serializable")
+        .expect("pod membership key is serializable")
+    }
+
+    fn total_pending(&self) -> usize {
+        self.pending_joins.len() + self.pending_leaves.len()
+    }
+
+    fn add_join(&mut self, request: PodJoinSignatureInput) -> Result<(), &'static str> {
+        let key = Self::key(&request.pod_id, &request.peer_id);
+        if self.pending_joins.contains_key(&key) {
+            return Err("Pending join request already exists");
+        }
+        if self.total_pending() >= MAX_POD_PENDING_MEMBERSHIP_RECORDS {
+            return Err("Pending membership request capacity is full");
+        }
+        self.pending_joins.insert(key, request);
+        Ok(())
+    }
+
+    fn add_leave(&mut self, request: PodLeaveRequestInput) -> Result<(), &'static str> {
+        let key = Self::key(&request.pod_id, &request.peer_id);
+        if self.pending_leaves.contains_key(&key) {
+            return Err("Pending leave request already exists");
+        }
+        if self.total_pending() >= MAX_POD_PENDING_MEMBERSHIP_RECORDS {
+            return Err("Pending membership request capacity is full");
+        }
+        self.pending_leaves.insert(key, request);
+        Ok(())
+    }
+
+    fn pending_joins(&self, pod_id: &str) -> Vec<&PodJoinSignatureInput> {
+        self.pending_joins
+            .values()
+            .filter(|request| request.pod_id.eq_ignore_ascii_case(pod_id))
+            .collect()
+    }
+
+    fn pending_leaves(&self, pod_id: &str) -> Vec<&PodLeaveRequestInput> {
+        self.pending_leaves
+            .values()
+            .filter(|request| request.pod_id.eq_ignore_ascii_case(pod_id))
+            .collect()
+    }
+
+    fn remove_join(&mut self, pod_id: &str, peer_id: &str) -> Option<PodJoinSignatureInput> {
+        self.pending_joins.remove(&Self::key(pod_id, peer_id))
+    }
+
+    fn remove_leave(&mut self, pod_id: &str, peer_id: &str) -> Option<PodLeaveRequestInput> {
+        self.pending_leaves.remove(&Self::key(pod_id, peer_id))
+    }
+
+    fn role(&self, pod_id: &str, peer_id: &str) -> &str {
+        self.roles
+            .get(&Self::key(pod_id, peer_id))
+            .map(String::as_str)
+            .unwrap_or("member")
+    }
+
+    fn set_role(&mut self, pod_id: &str, peer_id: &str, role: String) {
+        self.roles.insert(Self::key(pod_id, peer_id), role);
+    }
+
+    fn remove_role(&mut self, pod_id: &str, peer_id: &str) {
+        self.roles.remove(&Self::key(pod_id, peer_id));
     }
 }
 
@@ -23416,66 +23990,88 @@ fn verify_pod_join_signature(
     input: &PodJoinSignatureInput,
     now_millis: u64,
 ) -> Result<bool, String> {
-    if mode == PodSignatureMode::Off {
-        return Ok(false);
-    }
-    if input.signature.trim().is_empty() {
-        return if mode == PodSignatureMode::Enforce {
-            Err("pod join Ed25519 signature is required".to_owned())
-        } else {
-            Ok(false)
-        };
-    }
-    if !input
-        .signature
-        .get(..8)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("ed25519:"))
-    {
-        return if mode == PodSignatureMode::Enforce {
-            Err("pod join signature must use the ed25519:<base64> format".to_owned())
-        } else {
-            Ok(false)
-        };
-    }
-    if input.peer_id.trim().is_empty() {
-        return Err("pod join peerId is required for Ed25519 verification".to_owned());
-    }
-    if input.public_key.trim().is_empty() {
-        return Err("pod join publicKey is required for Ed25519 verification".to_owned());
-    }
-    if input.timestamp_unix_ms == 0
-        || now_millis.abs_diff(input.timestamp_unix_ms) > POD_JOIN_TIMESTAMP_SKEW_MILLIS
-    {
-        return Err("pod join timestamp is outside the allowed five-minute skew".to_owned());
-    }
     if [
-        input.pod_id.as_str(),
-        input.peer_id.as_str(),
-        input.requested_role.as_str(),
-        input.message.as_str(),
-        input.nonce.as_str(),
+        &input.pod_id,
+        &input.peer_id,
+        &input.requested_role,
+        &input.message,
+        &input.nonce,
     ]
     .iter()
     .any(|value| value.contains('|'))
     {
         return Err("pod join signed fields must not contain the canonical delimiter".to_owned());
     }
+    verify_pod_signed_payload(
+        mode,
+        &input.signature,
+        &input.public_key,
+        input.timestamp_unix_ms,
+        now_millis,
+        &input.canonical_payload(),
+        "pod join",
+    )
+}
+
+fn verify_pod_signed_payload(
+    mode: PodSignatureMode,
+    signature: &str,
+    public_key: &str,
+    timestamp_unix_ms: u64,
+    now_millis: u64,
+    canonical_payload: &str,
+    operation: &str,
+) -> Result<bool, String> {
+    if mode == PodSignatureMode::Off {
+        return Ok(false);
+    }
+    if signature.trim().is_empty() {
+        return if mode == PodSignatureMode::Enforce {
+            Err(format!("{operation} Ed25519 signature is required"))
+        } else {
+            Ok(false)
+        };
+    }
+    if !signature
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("ed25519:"))
+    {
+        return if mode == PodSignatureMode::Enforce {
+            Err(format!(
+                "{operation} signature must use the ed25519:<base64> format"
+            ))
+        } else {
+            Ok(false)
+        };
+    }
+    if public_key.trim().is_empty() {
+        return Err(format!(
+            "{operation} public key is required for Ed25519 verification"
+        ));
+    }
+    if timestamp_unix_ms == 0
+        || now_millis.abs_diff(timestamp_unix_ms) > POD_JOIN_TIMESTAMP_SKEW_MILLIS
+    {
+        return Err(format!(
+            "{operation} timestamp is outside the allowed five-minute skew"
+        ));
+    }
     let signature_bytes = STANDARD
-        .decode(&input.signature[8..])
-        .map_err(|_| "pod join signature is not valid base64".to_owned())?;
+        .decode(&signature[8..])
+        .map_err(|_| format!("{operation} signature is not valid base64"))?;
     let signature = Signature::from_slice(&signature_bytes)
-        .map_err(|_| "pod join Ed25519 signature must be 64 bytes".to_owned())?;
+        .map_err(|_| format!("{operation} Ed25519 signature must be 64 bytes"))?;
     let public_key_bytes = STANDARD
-        .decode(input.public_key.as_bytes())
-        .map_err(|_| "pod join publicKey is not valid base64".to_owned())?;
+        .decode(public_key.as_bytes())
+        .map_err(|_| format!("{operation} public key is not valid base64"))?;
     let public_key_bytes: [u8; 32] = public_key_bytes
         .try_into()
-        .map_err(|_| "pod join Ed25519 publicKey must be 32 bytes".to_owned())?;
+        .map_err(|_| format!("{operation} Ed25519 public key must be 32 bytes"))?;
     let verifying_key = VerifyingKey::from_bytes(&public_key_bytes)
-        .map_err(|_| "pod join Ed25519 publicKey is invalid".to_owned())?;
+        .map_err(|_| format!("{operation} Ed25519 public key is invalid"))?;
     verifying_key
-        .verify_strict(input.canonical_payload().as_bytes(), &signature)
-        .map_err(|_| "pod join Ed25519 signature is invalid".to_owned())?;
+        .verify_strict(canonical_payload.as_bytes(), &signature)
+        .map_err(|_| format!("{operation} Ed25519 signature is invalid"))?;
     Ok(true)
 }
 
@@ -23505,6 +24101,49 @@ async fn release_pod_join_replay_key(state: &AppState, input: &PodJoinSignatureI
     let replay_key = serde_json::to_string(&(&input.pod_id, &input.peer_id, &input.nonce))
         .expect("pod join replay tuple is serializable");
     state.pod_join_replays.write().await.remove(&replay_key);
+}
+
+async fn pod_acceptor_has_permission(state: &AppState, pod_id: &str, peer_id: &str) -> bool {
+    if peer_id.trim().is_empty() {
+        return false;
+    }
+    let role_has_permission = {
+        let workflow = state.pod_membership_workflow.read().await;
+        matches!(workflow.role(pod_id, peer_id), "owner" | "moderator")
+    };
+    if role_has_permission {
+        return true;
+    }
+    let configured_username = state.config.username.as_deref().unwrap_or_default();
+    state
+        .rooms
+        .read()
+        .await
+        .records
+        .iter()
+        .find(|room| room.name == pod_id)
+        .is_some_and(|room| room.operated && peer_id.eq_ignore_ascii_case(configured_username))
+}
+
+fn pod_pending_request_path(path: &str, operation: &str) -> Option<String> {
+    let prefix = format!("/api/podcore/membership/{operation}/pending/");
+    let encoded = path.strip_prefix(&prefix)?;
+    if encoded.is_empty() || encoded.contains('/') {
+        return None;
+    }
+    let decoded = decoded_path_segment(encoded).trim().to_owned();
+    (!decoded.is_empty()).then_some(decoded)
+}
+
+fn pod_cancel_request_path(path: &str, operation: &str) -> Option<(String, String)> {
+    let prefix = format!("/api/podcore/membership/{operation}/");
+    let mut segments = path.strip_prefix(&prefix)?.split('/');
+    let pod_id = decoded_path_segment(segments.next()?).trim().to_owned();
+    let peer_id = decoded_path_segment(segments.next()?).trim().to_owned();
+    if pod_id.is_empty() || peer_id.is_empty() || segments.next().is_some() {
+        return None;
+    }
+    Some((pod_id, peer_id))
 }
 
 fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueue) -> String {
@@ -24076,6 +24715,7 @@ async fn serve(once: bool) -> Result<(), String> {
         private_message_auto_responses: RwLock::new(PrivateMessageAutoResponseTracker::default()),
         rooms: RwLock::new(room_store),
         pod_join_replays: RwLock::new(BTreeMap::new()),
+        pod_membership_workflow: RwLock::new(PodMembershipWorkflowStore::default()),
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
         event_tx,
@@ -33847,6 +34487,7 @@ mod tests {
             ),
             rooms: RwLock::new(room_store),
             pod_join_replays: RwLock::new(BTreeMap::new()),
+            pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -51359,19 +52000,17 @@ mod tests {
             super::SearchStore::new(),
             None,
         );
+        state
+            .rooms
+            .write()
+            .await
+            .join("pod:ambient".to_owned())
+            .expect("test pod");
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let timestamp = super::unix_timestamp().saturating_mul(1_000);
-        let payload = serde_json::to_string(&(
-            1,
-            "join-request",
-            "pod:ambient",
-            "peer-one",
-            "member",
-            timestamp,
-            "Please add me",
-            "nonce-one",
-        ))
-        .unwrap();
+        let payload = format!(
+            "1|join-request|pod:ambient|peer-one|member|{timestamp}|Please add me|nonce-one"
+        );
         let signature = base64::engine::general_purpose::STANDARD
             .encode(signing_key.sign(payload.as_bytes()).to_bytes());
         let public_key = base64::engine::general_purpose::STANDARD
@@ -51392,11 +52031,14 @@ mod tests {
             super::route_http_request("POST", "/api/podcore/membership/join", None, &body, &state)
                 .await
                 .expect("verified pod join");
-        assert_eq!(joined.status, "200 OK");
+        assert_eq!(joined.status, "200 OK", "{}", joined.body);
         let joined_json = serde_json::from_str::<serde_json::Value>(&joined.body).unwrap();
         assert_eq!(joined_json["signatureMode"], "enforce");
         assert_eq!(joined_json["signatureVerified"], true);
+        assert_eq!(joined_json["success"], true);
+        assert_eq!(joined_json["joinRequest"]["peerId"], "peer-one");
         assert_eq!(state.rooms.read().await.records.len(), 1);
+        assert!(state.rooms.read().await.records[0].members.is_empty());
 
         let replay =
             super::route_http_request("POST", "/api/podcore/membership/join", None, &body, &state)
@@ -51429,6 +52071,11 @@ mod tests {
             super::SearchStore::new(),
             None,
         );
+        {
+            let mut rooms = state.rooms.write().await;
+            rooms.join("legacy-pod".to_owned()).expect("legacy pod");
+            rooms.join("invalid-pod".to_owned()).expect("invalid pod");
+        }
         let legacy = super::route_http_request(
             "POST",
             "/api/podcore/membership/join",
@@ -51438,7 +52085,7 @@ mod tests {
         )
         .await
         .expect("legacy pod join");
-        assert_eq!(legacy.status, "200 OK");
+        assert_eq!(legacy.status, "200 OK", "{}", legacy.body);
         let legacy_json = serde_json::from_str::<serde_json::Value>(&legacy.body).unwrap();
         assert_eq!(legacy_json["signatureMode"], "warn");
         assert_eq!(legacy_json["signatureVerified"], false);
@@ -51459,7 +52106,159 @@ mod tests {
         .await
         .expect("invalid signed pod join");
         assert_eq!(invalid.status, "400 Bad Request");
-        assert_eq!(state.rooms.read().await.records.len(), 1);
+        assert_eq!(state.rooms.read().await.records.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn pod_membership_workflow_queues_accepts_lists_leaves_and_cancels() {
+        let (state, _receiver) = test_state();
+        {
+            let mut rooms = state.rooms.write().await;
+            rooms.join("pod:workflow".to_owned()).expect("workflow pod");
+            rooms
+                .add_member("pod:workflow", "owner-peer".to_owned())
+                .expect("owner capacity")
+                .expect("workflow pod");
+            rooms
+                .add_member("pod:workflow", "ordinary-peer".to_owned())
+                .expect("ordinary member capacity")
+                .expect("workflow pod");
+            rooms.records[0].operated = true;
+        }
+        state.pod_membership_workflow.write().await.set_role(
+            "pod:workflow",
+            "owner-peer",
+            "owner".to_owned(),
+        );
+
+        let join = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            None,
+            r#"{"podId":"pod:workflow","peerId":"applicant","requestedRole":"moderator"}"#,
+            &state,
+        )
+        .await
+        .expect("join request");
+        assert_eq!(join.status, "200 OK");
+        assert!(!state.rooms.read().await.records[0]
+            .members
+            .iter()
+            .any(|member| member == "applicant"));
+
+        let pending = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/membership/join/pending/pod%3Aworkflow",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("pending joins");
+        assert_eq!(pending.status, "200 OK");
+        let pending_json = serde_json::from_str::<serde_json::Value>(&pending.body).unwrap();
+        assert_eq!(
+            pending_json["pendingJoinRequests"][0]["peerId"],
+            "applicant"
+        );
+
+        let unauthorized = super::route_http_request(
+            "POST",
+            "/api/podcore/membership/join/accept",
+            None,
+            r#"{"podId":"pod:workflow","peerId":"applicant","acceptedRole":"moderator","acceptorPeerId":"ordinary-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("unauthorized join acceptance");
+        assert_eq!(unauthorized.status, "400 Bad Request");
+        assert!(unauthorized.body.contains("does not have permission"));
+        assert_eq!(
+            state
+                .pod_membership_workflow
+                .read()
+                .await
+                .pending_joins("pod:workflow")
+                .len(),
+            1
+        );
+
+        let accepted = super::route_http_request(
+            "POST",
+            "/api/podcore/membership/join/accept",
+            None,
+            r#"{"podId":"pod:workflow","peerId":"applicant","acceptedRole":"moderator","acceptorPeerId":"owner-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("join acceptance");
+        assert_eq!(accepted.status, "200 OK");
+        assert!(state.rooms.read().await.records[0]
+            .members
+            .iter()
+            .any(|member| member == "applicant"));
+
+        let leave = super::route_http_request(
+            "POST",
+            "/api/podcore/membership/leave",
+            None,
+            r#"{"podId":"pod:workflow","peerId":"applicant"}"#,
+            &state,
+        )
+        .await
+        .expect("leave request");
+        assert_eq!(leave.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&leave.body).unwrap()["pending"],
+            true
+        );
+        let pending_leave = super::route_http_request(
+            "GET",
+            "/api/podcore/membership/leave/pending/pod%3Aworkflow",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("pending leaves");
+        assert!(pending_leave.body.contains("applicant"));
+
+        let accepted_leave = super::route_http_request(
+            "POST",
+            "/api/podcore/membership/leave/accept",
+            None,
+            r#"{"podId":"pod:workflow","peerId":"applicant","acceptorPeerId":"owner-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("leave acceptance");
+        assert_eq!(accepted_leave.status, "200 OK");
+        assert!(!state.rooms.read().await.records[0]
+            .members
+            .iter()
+            .any(|member| member == "applicant"));
+
+        let second_join = super::route_http_request(
+            "POST",
+            "/api/podcore/membership/join",
+            None,
+            r#"{"podId":"pod:workflow","peerId":"peer-two"}"#,
+            &state,
+        )
+        .await
+        .expect("second join request");
+        assert_eq!(second_join.status, "200 OK");
+        let cancelled = super::route_http_request(
+            "DELETE",
+            "/api/v0/podcore/membership/join/pod%3Aworkflow/peer-two",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("cancel join");
+        assert_eq!(cancelled.status, "200 OK");
+        assert_eq!(cancelled.body, r#"{"cancelled":true}"#);
     }
 
     #[tokio::test]
@@ -52034,6 +52833,7 @@ mod tests {
             ),
             rooms: RwLock::new(super::RoomStore::new()),
             pod_join_replays: RwLock::new(BTreeMap::new()),
+            pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -52195,6 +52995,7 @@ mod tests {
             ),
             rooms: RwLock::new(super::RoomStore::new()),
             pod_join_replays: RwLock::new(BTreeMap::new()),
+            pod_membership_workflow: RwLock::new(super::PodMembershipWorkflowStore::default()),
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -52589,11 +53390,23 @@ mod tests {
 
         assert_eq!(
             input.canonical_payload(),
-            format!(
-                "[1,\"join-request\",\"pod-alpha\",\"peer\",\"member\",{now_millis},\"hello world\",\"nonce-one\"]"
-            )
+            format!("1|join-request|pod-alpha|peer|member|{now_millis}|hello world|nonce-one")
         );
         input.message = "hello|world".to_owned();
+        let delimiter_signature = signing_key.sign(input.canonical_payload().as_bytes());
+        input.signature = format!(
+            "ed25519:{}",
+            super::STANDARD.encode(delimiter_signature.to_bytes())
+        );
+        assert!(super::verify_pod_join_signature(
+            super::PodSignatureMode::Enforce,
+            &input,
+            now_millis,
+        )
+        .is_err());
+
+        input.message = "hello".to_owned();
+        input.nonce = "world|nonce-one".to_owned();
         assert!(super::verify_pod_join_signature(
             super::PodSignatureMode::Enforce,
             &input,
