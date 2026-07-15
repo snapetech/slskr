@@ -18,6 +18,7 @@ for anchor in \
   'integration_json_reader_rejects_chunked_oversized_response' \
   'integration_ssrf_filter_blocks_special_use_ipv6_ranges' \
   'MAX_INCOMING_CONNECTION_TASKS' \
+  'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
   'state.incoming_connections'; do
   if ! rg -n --fixed-strings -- "$anchor" "$source_file" >/dev/null; then
@@ -28,7 +29,9 @@ done
 
 for anchor in \
   'REQUEST_READ_TIMEOUT' \
+  'RESPONSE_WRITE_TIMEOUT' \
   'test_request_deadline_is_not_reset_by_partial_progress' \
+  'test_response_write_deadline_releases_blocked_writer' \
   'test_http11_requires_one_nonempty_host_header' \
   'test_duplicate_authentication_headers_are_rejected' \
   'test_repeated_forwarding_headers_are_combined_in_wire_order'; do
@@ -37,6 +40,23 @@ for anchor in \
     status=1
   fi
 done
+
+
+for anchor in \
+  'WEBSOCKET_WRITE_TIMEOUT' \
+  'websocket_write_deadline_releases_blocked_writer'; do
+  if ! rg -n --fixed-strings -- "$anchor" crates/slskr/src/events_ws.rs >/dev/null; then
+    printf 'runtime boundary hardening check failed: missing WebSocket anchor %s\n' "$anchor" >&2
+    status=1
+  fi
+done
+
+if ! rg -n --fixed-strings -- \
+  'http_server::write_http_response(&mut writer, &response, keep_alive, &extra).await?;' \
+  "$source_file" >/dev/null; then
+  printf 'runtime boundary hardening check failed: API response write failures must terminate the connection\n' >&2
+  status=1
+fi
 
 for anchor in \
   'MAX_CREDENTIAL_FILE_BYTES' \

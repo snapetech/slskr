@@ -13,6 +13,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const WEBSOCKET_KEY_DECODED_LEN: usize = 16;
 const CLIENT_FRAME_CHANNEL_CAPACITY: usize = 16;
+const WEBSOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn valid_sec_websocket_key(sec_websocket_key: &str) -> bool {
     let Ok(decoded) = STANDARD.decode(sec_websocket_key.as_bytes()) else {
@@ -218,11 +219,7 @@ async fn write_ping_frame<W>(writer: &mut W) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
-    writer
-        .write_all(&[0x89, 0x00])
-        .await
-        .map_err(|error| error.to_string())?;
-    writer.flush().await.map_err(|error| error.to_string())
+    write_frame(writer, 0x89, &[]).await
 }
 
 async fn write_text_frame<W>(writer: &mut W, payload: &str) -> Result<(), String>
@@ -233,6 +230,27 @@ where
 }
 
 async fn write_frame<W>(writer: &mut W, opcode: u8, payload: &[u8]) -> Result<(), String>
+where
+    W: AsyncWrite + Unpin,
+{
+    write_frame_with_timeout(writer, opcode, payload, WEBSOCKET_WRITE_TIMEOUT).await
+}
+
+async fn write_frame_with_timeout<W>(
+    writer: &mut W,
+    opcode: u8,
+    payload: &[u8],
+    timeout: Duration,
+) -> Result<(), String>
+where
+    W: AsyncWrite + Unpin,
+{
+    time::timeout(timeout, write_frame_inner(writer, opcode, payload))
+        .await
+        .map_err(|_| "websocket write deadline exceeded".to_owned())?
+}
+
+async fn write_frame_inner<W>(writer: &mut W, opcode: u8, payload: &[u8]) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
@@ -369,5 +387,16 @@ mod tests {
         let mut reader = &frame[..];
         let error = read_client_frame(&mut reader).await.unwrap_err();
         assert_eq!(error, "client websocket frame used reserved opcode");
+    }
+
+    #[tokio::test]
+    async fn websocket_write_deadline_releases_blocked_writer() {
+        let (mut writer, _unread_peer) = tokio::io::duplex(64);
+        let payload = vec![b'x'; 1024 * 1024];
+        let error =
+            write_frame_with_timeout(&mut writer, 0x82, &payload, Duration::from_millis(50))
+                .await
+                .expect_err("blocked websocket writer must time out");
+        assert!(error.contains("deadline exceeded"), "{error}");
     }
 }

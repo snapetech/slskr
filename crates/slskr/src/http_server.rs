@@ -32,6 +32,7 @@ pub const HEADER_TOTAL_LIMIT: usize = 64 * 1024;
 pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 pub const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
 pub const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(60);
+pub const RESPONSE_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// HTTP headers
 #[derive(Debug, Clone, Default)]
@@ -458,6 +459,37 @@ async fn read_limited_line<R: AsyncBufRead + Unpin>(
 
 /// Write HTTP response to stream with minimal allocations (streaming)
 pub async fn write_http_response<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    response: &HttpResponse,
+    keep_alive: bool,
+    extra_headers: &str,
+) -> Result<(), String> {
+    write_http_response_with_timeout(
+        writer,
+        response,
+        keep_alive,
+        extra_headers,
+        RESPONSE_WRITE_TIMEOUT,
+    )
+    .await
+}
+
+async fn write_http_response_with_timeout<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    response: &HttpResponse,
+    keep_alive: bool,
+    extra_headers: &str,
+    timeout: Duration,
+) -> Result<(), String> {
+    time::timeout(
+        timeout,
+        write_http_response_inner(writer, response, keep_alive, extra_headers),
+    )
+    .await
+    .map_err(|_| "response write deadline exceeded".to_owned())?
+}
+
+async fn write_http_response_inner<W: AsyncWrite + Unpin>(
     writer: &mut W,
     response: &HttpResponse,
     keep_alive: bool,
@@ -923,6 +955,26 @@ mod tests {
         assert!(raw.contains(&format!("Content-Length: {}\r\n", response.body.len())));
         assert!(raw.contains("Connection: keep-alive\r\n"));
         assert!(raw.ends_with(&response.body));
+    }
+
+    #[tokio::test]
+    async fn test_response_write_deadline_releases_blocked_writer() {
+        let (mut writer, _unread_peer) = tokio::io::duplex(64);
+        let response = HttpResponse {
+            status: "200 OK",
+            content_type: "application/octet-stream",
+            body: "x".repeat(1024 * 1024),
+        };
+        let error = write_http_response_with_timeout(
+            &mut writer,
+            &response,
+            false,
+            "",
+            Duration::from_millis(50),
+        )
+        .await
+        .expect_err("blocked response writer must time out");
+        assert!(error.contains("deadline exceeded"), "{error}");
     }
 
     #[tokio::test]

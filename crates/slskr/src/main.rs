@@ -15089,17 +15089,21 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
         security_headers(&file),
         extra_headers,
     );
-    writer
-        .write_all(headers.as_bytes())
-        .await
-        .map_err(|error| error.to_string())?;
-    if include_body {
+    time::timeout(http_server::RESPONSE_WRITE_TIMEOUT, async {
         writer
-            .write_all(&bytes)
+            .write_all(headers.as_bytes())
             .await
             .map_err(|error| error.to_string())?;
-    }
-    writer.flush().await.map_err(|error| error.to_string())?;
+        if include_body {
+            writer
+                .write_all(&bytes)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        writer.flush().await.map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "static response write deadline exceeded".to_owned())??;
     Ok(Some(bytes.len()))
 }
 
@@ -22102,7 +22106,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         );
 
         // Write response
-        let _ = http_server::write_http_response(&mut writer, &response, keep_alive, &extra).await;
+        http_server::write_http_response(&mut writer, &response, keep_alive, &extra).await?;
 
         // Log
         let resp_log = logging::HttpResponseLog {
