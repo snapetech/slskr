@@ -1962,9 +1962,7 @@ async fn transfer_resume_smoke() -> Result<(), String> {
             remaining.len()
         ));
     }
-    server_task
-        .await
-        .map_err(|e| format!("resume server task failed: {e}"))??;
+    await_fixture_server_task(server_task, "resume").await?;
 
     emit_and_result(
         ctx.with_bytes(remaining.len() as u64)
@@ -2063,10 +2061,16 @@ async fn transfer_reject_smoke() -> Result<(), String> {
         )),
     };
 
-    let _ = server_task
-        .await
-        .map_err(|e| format!("reject server task failed: {e}"));
+    await_fixture_server_task(server_task, "reject").await?;
     emit_and_result(result)
+}
+
+async fn await_fixture_server_task(
+    task: tokio::task::JoinHandle<Result<(), String>>,
+    probe: &str,
+) -> Result<(), String> {
+    task.await
+        .map_err(|error| format!("{probe} server task failed: {error}"))?
 }
 
 async fn run_fixture_browse_smoke(
@@ -4083,8 +4087,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        incoming_connection_name, normalize_command, peer_probe_messages, redact_peer_text,
-        scrub_socket_addr, validated_duration_secs,
+        await_fixture_server_task, incoming_connection_name, normalize_command,
+        peer_probe_messages, redact_peer_text, scrub_socket_addr, validated_duration_secs,
     };
     use slskr_client::{
         listener::IncomingConnection, protocol::server::ServerMessage,
@@ -4165,5 +4169,21 @@ mod tests {
         let (stream, _) = duplex(8);
         let incoming = IncomingConnection::PeerMessages(PeerMessageConnection::new(stream));
         assert_eq!(incoming_connection_name(&incoming), "peer_messages");
+    }
+
+    #[tokio::test]
+    async fn fixture_server_task_errors_fail_the_probe() {
+        let failed = tokio::spawn(async { Err("fixture send failed".to_owned()) });
+        assert_eq!(
+            await_fixture_server_task(failed, "reject")
+                .await
+                .expect_err("fixture error must propagate"),
+            "fixture send failed"
+        );
+
+        let completed = tokio::spawn(async { Ok(()) });
+        await_fixture_server_task(completed, "resume")
+            .await
+            .expect("successful fixture task");
     }
 }
