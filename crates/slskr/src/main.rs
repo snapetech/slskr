@@ -16158,19 +16158,23 @@ async fn route_http_request_with_headers(
              let share_grants = state.share_grants.read().await;
              let grant = share_grants.get(grant_id);
              drop(share_grants);
-             let token = grant.as_ref().map(|grant| {
-                 format!(
-                     "share-{}-{}-{}",
-                     grant.id, grant.collection_id, grant.shared_at
-                 )
-             });
+             let token = if grant.is_some() {
+                 let Some(token) = secure_share_grant_token() else {
+                     return Ok(routing::service_unavailable_response(
+                         "secure share token generation failed",
+                     ));
+                 };
+                 Some(token)
+             } else {
+                 None
+             };
              let created = token.is_some();
              Ok(routing::created_response(serde_json::json!({
                  "grant_id": grant_id,
                  "token": token,
                  "created": created,
-                 "persisted": created,
-                 "status": if created { "local" } else { "compatibility_acknowledgement" },
+                 "persisted": false,
+                 "status": if created { "ephemeral_compatibility_token" } else { "compatibility_acknowledgement" },
              }).to_string()))
          }
 
@@ -17219,6 +17223,15 @@ fn secure_oauth_state() -> Option<String> {
 fn secure_oauth_state_with(fill: impl FnOnce(&mut [u8; 32]) -> bool) -> Option<String> {
     let mut bytes = [0_u8; 32];
     fill(&mut bytes).then(|| format!("slskr-{}", hex::encode(bytes)))
+}
+
+fn secure_share_grant_token() -> Option<String> {
+    secure_share_grant_token_with(|bytes| SysRng.try_fill_bytes(bytes).is_ok())
+}
+
+fn secure_share_grant_token_with(fill: impl FnOnce(&mut [u8; 32]) -> bool) -> Option<String> {
+    let mut bytes = [0_u8; 32];
+    fill(&mut bytes).then(|| format!("share-{}", hex::encode(bytes)))
 }
 
 fn webhook_from_persisted(record: crate::persistence::WebhookRecord) -> Option<webhooks::Webhook> {
@@ -26591,6 +26604,14 @@ mod tests {
         })
         .expect("deterministic randomness fixture");
         assert_eq!(token, format!("slskr-{}", "ab".repeat(32)));
+
+        assert!(super::secure_share_grant_token_with(|_| false).is_none());
+        let share_token = super::secure_share_grant_token_with(|bytes| {
+            bytes.fill(0xcd);
+            true
+        })
+        .expect("deterministic randomness fixture");
+        assert_eq!(share_token, format!("share-{}", "cd".repeat(32)));
     }
 
     #[derive(Default)]
@@ -36410,6 +36431,25 @@ mod tests {
         )
         .await
         .unwrap();
+        let token_json = serde_json::from_str::<serde_json::Value>(&token.body).unwrap();
+        assert_eq!(token_json["created"], true);
+        assert_eq!(token_json["persisted"], false);
+        assert_eq!(token_json["status"], "ephemeral_compatibility_token");
+        let token_value = token_json["token"].as_str().unwrap();
+        assert_eq!(token_value.len(), "share-".len() + 64);
+        assert!(!token_value.contains(&grant_id));
+        let second_token = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/token"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        let second_token_json =
+            serde_json::from_str::<serde_json::Value>(&second_token.body).unwrap();
+        assert_ne!(second_token_json["token"], token_json["token"]);
         let malformed_token = super::route_http_request(
             "POST",
             &format!("/api/share-grants/{grant_id}/extra/token"),
@@ -38118,9 +38158,9 @@ mod tests {
         .expect("share grant token");
         let token_json = serde_json::from_str::<serde_json::Value>(&token.body).unwrap();
         assert_eq!(token_json["created"], true);
-        assert!(token_json["token"].as_str().unwrap().contains(grant_id));
-        assert_eq!(token_json["persisted"], true);
-        assert_eq!(token_json["status"], "local");
+        assert_eq!(token_json["token"].as_str().unwrap().len(), 70);
+        assert_eq!(token_json["persisted"], false);
+        assert_eq!(token_json["status"], "ephemeral_compatibility_token");
         let backfill = super::route_http_request(
             "POST",
             &format!("/api/share-grants/{grant_id}/backfill"),
