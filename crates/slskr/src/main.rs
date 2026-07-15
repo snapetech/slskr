@@ -3308,7 +3308,7 @@ impl MeshState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct BrowseEntry {
     filename: String,
     size: u64,
@@ -3353,7 +3353,7 @@ impl BrowseEntry {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct BrowseRecord {
     username: String,
     status: &'static str,
@@ -3437,7 +3437,7 @@ fn persisted_browse_status(status: &str) -> &'static str {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct BrowseStore {
     records: Vec<BrowseRecord>,
     next_indirect_token: u32,
@@ -11916,14 +11916,19 @@ async fn route_http_request_with_headers(
                 }
             };
             let mut browse = state.browse.write().await;
+            let previous = browse.clone();
             let Some(record) = browse.request(username.to_string()) else {
                 return Ok(routing::service_unavailable_response(
                     "browse record capacity is full",
                 ));
             };
+            let mutated = browse.clone();
             drop(browse);
 
-            persist_browse_record(state, &record).await;
+            if let Err(error) = persist_browse_record_checked(state, &record).await {
+                rollback_browse_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             session_command_permit.send(SessionCommand::BrowseUser(username.to_string()));
 
             Ok(routing::accepted_response(record.json()))
@@ -11944,14 +11949,19 @@ async fn route_http_request_with_headers(
                 }
             };
             let mut browse = state.browse.write().await;
+            let previous = browse.clone();
             let Some(record) = browse.request_folder(username.to_string(), folder.clone()) else {
                 return Ok(routing::service_unavailable_response(
                     "browse record capacity is full",
                 ));
             };
+            let mutated = browse.clone();
             drop(browse);
 
-            persist_browse_record(state, &record).await;
+            if let Err(error) = persist_browse_record_checked(state, &record).await {
+                rollback_browse_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             session_command_permit.send(SessionCommand::BrowseFolder {
                 username: username.to_string(),
                 folder,
@@ -11967,13 +11977,18 @@ async fn route_http_request_with_headers(
             let reason = extract_json_string_field(body, "reason").unwrap_or_default();
 
             let mut browse = state.browse.write().await;
+            let previous = browse.clone();
             let Some(record) = browse.fail(username.to_owned(), reason.clone()) else {
                 return Ok(routing::service_unavailable_response(
                     "browse record capacity is full",
                 ));
             };
+            let mutated = browse.clone();
             drop(browse);
-            persist_browse_record(state, &record).await;
+            if let Err(error) = persist_browse_record_checked(state, &record).await {
+                rollback_browse_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
 
             Ok(routing::ok_response(format!("{{\"username\":\"{}\",\"status\":\"failed\",\"reason\":\"{}\"}}", json_escape(username), json_escape(&reason))))
         }
@@ -11987,14 +12002,19 @@ async fn route_http_request_with_headers(
                 .unwrap_or_else(|| "cancelled by client".to_owned());
 
             let mut browse = state.browse.write().await;
+            let previous = browse.clone();
             let Some(record) = browse.cancel(username, reason) else {
                 return Ok(routing::service_unavailable_response(
                     "browse record capacity is full",
                 ));
             };
+            let mutated = browse.clone();
             let body = record.json();
             drop(browse);
-            persist_browse_record(state, &record).await;
+            if let Err(error) = persist_browse_record_checked(state, &record).await {
+                rollback_browse_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
 
             Ok(routing::ok_response(body))
         }
@@ -12051,13 +12071,18 @@ async fn route_http_request_with_headers(
             }
 
             let mut browse = state.browse.write().await;
+            let previous = browse.clone();
             let Some(record) = browse.add_entries(username, entries, complete) else {
                 return Ok(routing::service_unavailable_response(
                     "browse record capacity is full",
                 ));
             };
+            let mutated = browse.clone();
             drop(browse);
-            persist_browse_record(state, &record).await;
+            if let Err(error) = persist_browse_record_checked(state, &record).await {
+                rollback_browse_if_unchanged(state, previous, &mutated).await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
 
             Ok(routing::ok_response(record.json()))
         }
@@ -22660,7 +22685,7 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
             let record = browse.add_entries(address.username.clone(), entries, true);
             drop(browse);
             if let Some(record) = record {
-                persist_browse_record(state, &record).await;
+                persist_browse_projection(state, &record).await;
             }
         }
         Err(error) => {
@@ -22670,7 +22695,7 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
             let pending_record = browse.get(&address.username);
             drop(browse);
             if let Some(record) = pending_record {
-                persist_browse_record(state, &record).await;
+                persist_browse_projection(state, &record).await;
             }
             if let Some(token) = token {
                 try_send_session_command(
@@ -22692,7 +22717,7 @@ async fn project_peer_browse_response(state: &AppState, address: &PeerAddress) {
                 let record = browse.fail(address.username.clone(), error.clone());
                 drop(browse);
                 if let Some(record) = record {
-                    persist_browse_record(state, &record).await;
+                    persist_browse_projection(state, &record).await;
                 }
                 record_event(
                     state,
@@ -22739,7 +22764,7 @@ async fn project_indirect_browse_response(state: &AppState, response: &ConnectTo
             let record = browse.add_entries(response.username.clone(), entries, true);
             drop(browse);
             if let Some(record) = record {
-                persist_browse_record(state, &record).await;
+                persist_browse_projection(state, &record).await;
             }
         }
         Err(error) => {
@@ -22747,7 +22772,7 @@ async fn project_indirect_browse_response(state: &AppState, response: &ConnectTo
             let record = browse.fail(response.username.clone(), error.clone());
             drop(browse);
             if let Some(record) = record {
-                persist_browse_record(state, &record).await;
+                persist_browse_projection(state, &record).await;
             }
             record_event(
                 state,
@@ -23036,7 +23061,7 @@ async fn fail_indirect_browse(state: &AppState, token: u32, reason: String) {
         browse.fail_indirect(token, reason.clone())
     };
     if let Some(record) = failed {
-        persist_browse_record(state, &record).await;
+        persist_browse_projection(state, &record).await;
         record_event(
             state,
             "browse.failed",
@@ -24441,9 +24466,12 @@ async fn persist_now_playing_clear_checked(state: &AppState) -> Result<bool, Str
     Ok(true)
 }
 
-async fn persist_browse_record(state: &AppState, record: &BrowseRecord) {
+async fn persist_browse_record_checked(
+    state: &AppState,
+    record: &BrowseRecord,
+) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
-        return;
+        return Ok(false);
     };
     let entries_json = serde_json::Value::Array(
         record
@@ -24471,7 +24499,33 @@ async fn persist_browse_record(state: &AppState, record: &BrowseRecord) {
             .map(|timestamp| i64::try_from(timestamp).unwrap_or(i64::MAX)),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
     };
-    let _ = db.upsert_browse_record(&persisted).await;
+    db.upsert_browse_record(&persisted)
+        .await
+        .map_err(|error| format!("browse persistence failed: {error}"))?;
+    Ok(true)
+}
+
+async fn rollback_browse_if_unchanged(
+    state: &AppState,
+    previous: BrowseStore,
+    mutated: &BrowseStore,
+) {
+    let mut browse = state.browse.write().await;
+    if *browse == *mutated {
+        *browse = previous;
+    }
+}
+
+async fn persist_browse_projection(state: &AppState, record: &BrowseRecord) {
+    if let Err(error) = persist_browse_record_checked(state, record).await {
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(format!(
+                "browse persistence for {} failed: {error}",
+                redact_username(&record.username)
+            ));
+        })
+        .await;
+    }
 }
 
 async fn persist_runtime_compat_state(state: &AppState) {
@@ -40223,6 +40277,77 @@ mod tests {
             );
             assert!(state.browse.read().await.records.is_empty(), "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn browse_routes_roll_back_when_persistence_fails() {
+        for (path, body) in [
+            ("/api/v0/users/friend/browse/request", ""),
+            (
+                "/api/v0/users/friend/browse/folder",
+                r#"{"folder":"Remote/Album"}"#,
+            ),
+            ("/api/v0/users/friend/browse/fail", r#"{"reason":"failed"}"#),
+            (
+                "/api/v0/users/friend/browse/cancel",
+                r#"{"reason":"cancelled"}"#,
+            ),
+            (
+                "/api/v0/browse-responses",
+                r#"{"username":"friend","entries":[{"filename":"Song.flac"}]}"#,
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let previous = state.browse.read().await.clone();
+            db.close_for_test().await;
+
+            let response = super::route_http_request("POST", path, None, body, &state)
+                .await
+                .expect("failed browse persistence response");
+            assert_eq!(response.status, "503 Service Unavailable", "{path}");
+            assert!(
+                response.body.contains("browse persistence failed"),
+                "{path}"
+            );
+            assert_eq!(*state.browse.read().await, previous, "{path}");
+            assert!(receiver.try_recv().is_err(), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn async_browse_projection_reports_persistence_failure() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let record = state
+            .browse
+            .write()
+            .await
+            .request("friend".to_owned())
+            .unwrap();
+        db.close_for_test().await;
+
+        super::persist_browse_projection(&state, &record).await;
+        assert!(state
+            .session
+            .read()
+            .await
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("browse persistence")));
+        assert!(state.browse.read().await.get("friend").is_some());
     }
 
     #[tokio::test]
