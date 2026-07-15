@@ -4744,7 +4744,7 @@ impl CollectionRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct CollectionStore {
     records: Vec<CollectionRecord>,
     next_id: u64,
@@ -12368,19 +12368,24 @@ async fn route_http_request_with_headers(
             if id.is_empty() {
                 return Ok(routing::not_found_response());
             }
+            let mut grants = state.share_grants.write().await;
             let mut collections = state.collections.write().await;
+            let previous_collections = collections.clone();
+            let previous_grants = grants.clone();
             let deleted = collections.delete(id);
-            drop(collections);
             if deleted {
-                let mut grants = state.share_grants.write().await;
-                let removed_grants = grants.delete_by_collection(id);
-                drop(grants);
-                persist_collection_delete(state, id).await;
-                for grant in removed_grants {
-                    persist_share_grant_delete(state, &grant.id).await;
+                grants.delete_by_collection(id);
+                if let Err(error) = persist_collection_delete(state, id).await {
+                    *collections = previous_collections;
+                    *grants = previous_grants;
+                    return Ok(routing::service_unavailable_response(&error));
                 }
+                drop(collections);
+                drop(grants);
                 Ok(routing::ok_response("{}".to_string()))
             } else {
+                drop(collections);
+                drop(grants);
                 Ok(routing::not_found_response())
             }
         }
@@ -23537,10 +23542,6 @@ async fn persist_share_grant(state: &AppState, record: &ShareGrantRecord) -> Res
     Ok(true)
 }
 
-async fn persist_share_grant_delete(state: &AppState, id: &str) {
-    let _ = persist_share_grant_delete_checked(state, id).await;
-}
-
 async fn persist_share_grant_delete_checked(state: &AppState, id: &str) -> Result<bool, String> {
     let Some(db) = state.db.as_ref() else {
         return Ok(false);
@@ -23621,10 +23622,14 @@ async fn persist_collection(state: &AppState, record: &CollectionRecord) {
     }
 }
 
-async fn persist_collection_delete(state: &AppState, id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        let _ = db.delete_collection(id).await;
-    }
+async fn persist_collection_delete(state: &AppState, id: &str) -> Result<bool, String> {
+    let Some(db) = state.db.as_ref() else {
+        return Ok(false);
+    };
+    db.delete_collection(id)
+        .await
+        .map_err(|error| format!("collection deletion persistence failed: {error}"))?;
+    Ok(true)
 }
 
 async fn persist_collection_item(state: &AppState, collection_id: &str, item: &CollectionItem) {
@@ -36060,6 +36065,48 @@ mod tests {
         .unwrap();
         assert_eq!(deleted.status, "200 OK");
         assert!(state.share_grants.read().await.records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn collection_delete_rolls_back_grant_revocation_when_persistence_fails() {
+        let db = super::persistence::DatabaseManager::in_memory()
+            .await
+            .expect("in-memory db");
+        let (state, _receiver) = test_state_with_env_parts(
+            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            super::SearchStore::new(),
+            Some(db.clone()),
+        );
+        let collection_id = state
+            .collections
+            .write()
+            .await
+            .create("Private".to_owned(), String::new())
+            .expect("collection")
+            .id;
+        state
+            .share_grants
+            .write()
+            .await
+            .create(collection_id.clone(), "friend".to_owned())
+            .expect("share grant");
+        db.close_for_test().await;
+
+        let response = super::route_http_request(
+            "DELETE",
+            &format!("/api/collections/{collection_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("failed persistence response");
+        assert_eq!(response.status, "503 Service Unavailable");
+        assert!(response
+            .body
+            .contains("collection deletion persistence failed"));
+        assert!(state.collections.read().await.get(&collection_id).is_some());
+        assert!(state.share_grants.read().await.get("grant-1").is_some());
     }
 
     #[tokio::test]

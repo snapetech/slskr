@@ -2582,16 +2582,22 @@ impl DatabaseManager {
         Ok(())
     }
 
-    /// Delete a collection and its items.
+    /// Delete a collection, its items, and its access grants atomically.
     pub async fn delete_collection(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query("DELETE FROM share_grants WHERE collection_id = ?")
+            .bind(id)
+            .execute(&mut *transaction)
+            .await?;
         query("DELETE FROM collection_items WHERE collection_id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
         query("DELETE FROM collections WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
