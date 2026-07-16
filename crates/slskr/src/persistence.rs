@@ -1813,9 +1813,10 @@ impl DatabaseManager {
         search_id: &str,
         records: &[SearchResultRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
         query("DELETE FROM search_results WHERE search_id = ?")
             .bind(search_id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
         for record in records {
             query(
@@ -1835,9 +1836,10 @@ impl DatabaseManager {
             .bind(record.average_speed)
             .bind(record.queue_length)
             .bind(record.created_at)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
         }
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -1882,23 +1884,29 @@ impl DatabaseManager {
 
     /// Delete a search record
     pub async fn delete_search(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
         query("DELETE FROM search_results WHERE search_id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
         query("DELETE FROM searches WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
     /// Delete all search records
     pub async fn delete_all_searches(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
         query("DELETE FROM search_results")
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
-        query("DELETE FROM searches").execute(&self.pool).await?;
+        query("DELETE FROM searches")
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -4339,6 +4347,54 @@ mod tests {
             .unwrap();
         let updated = db.get_search("search_1").await.unwrap().unwrap();
         assert_eq!(updated.status, "archived");
+    }
+
+    #[tokio::test]
+    async fn search_result_replacement_rolls_back_on_insert_failure() {
+        let db = DatabaseManager::in_memory().await.unwrap();
+        let result = |filename: &str| SearchResultRecord {
+            id: 0,
+            search_id: "search_atomic".to_owned(),
+            peer_username: Some("peer".to_owned()),
+            filename: filename.to_owned(),
+            size: 10,
+            extension: "flac".to_owned(),
+            locked: false,
+            slot_free: Some(true),
+            average_speed: Some(1),
+            queue_length: Some(0),
+            created_at: 1,
+        };
+        db.replace_search_results("search_atomic", &[result("original.flac")])
+            .await
+            .unwrap();
+        query(
+            r#"
+            CREATE TRIGGER reject_bad_search_result
+            BEFORE INSERT ON search_results
+            WHEN NEW.filename = 'rejected.flac'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced search result failure');
+            END
+            "#,
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(db
+            .replace_search_results(
+                "search_atomic",
+                &[result("new.flac"), result("rejected.flac")],
+            )
+            .await
+            .is_err());
+        let persisted = db
+            .list_search_results(Some("search_atomic"), 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].filename, "original.flac");
     }
 
     #[tokio::test]
