@@ -16,6 +16,7 @@ use crate::{
 
 pub const MAX_SEARCH_RESPONSES_PER_TOKEN: usize = 1_000;
 pub const MAX_SEARCH_RESULT_FILES_PER_TOKEN: usize = 10_000;
+pub const MAX_TRACKED_SEARCH_RESULT_TOKENS: usize = 1_024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -258,6 +259,11 @@ impl SearchResults {
     pub fn accept_peer_message(&mut self, message: PeerMessage) -> Result<bool, ClientError> {
         match message {
             PeerMessage::FileSearchResponse(mut response) => {
+                if self.by_token.len() >= MAX_TRACKED_SEARCH_RESULT_TOKENS
+                    && !self.by_token.contains_key(&response.token)
+                {
+                    return Ok(true);
+                }
                 let responses = self.by_token.entry(response.token).or_default();
                 if responses.contains(&response) {
                     return Ok(true);
@@ -295,6 +301,11 @@ impl SearchResults {
     #[must_use]
     pub fn len_for(&self, token: u32) -> usize {
         self.responses_for(token).len()
+    }
+
+    #[must_use]
+    pub fn tracked_tokens_len(&self) -> usize {
+        self.by_token.len()
     }
 }
 

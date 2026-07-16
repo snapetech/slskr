@@ -3,7 +3,7 @@ use slskr_client::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
         WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN,
-        MAX_SEARCH_RESULT_FILES_PER_TOKEN,
+        MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -180,6 +180,37 @@ fn search_results_bound_responses_and_files_per_token() {
         results.responses_for(10).len(),
         MAX_SEARCH_RESPONSES_PER_TOKEN
     );
+}
+
+#[test]
+fn search_results_bound_attacker_controlled_token_keys() {
+    let mut results = SearchResults::new();
+    for token in 0..u32::try_from(MAX_TRACKED_SEARCH_RESULT_TOKENS).unwrap() {
+        results
+            .accept_peer_message(PeerMessage::FileSearchResponse(response("peer", token)))
+            .unwrap();
+    }
+
+    assert_eq!(
+        results.tracked_tokens_len(),
+        MAX_TRACKED_SEARCH_RESULT_TOKENS
+    );
+    assert!(results
+        .accept_peer_message(PeerMessage::FileSearchResponse(response(
+            "ignored",
+            u32::MAX,
+        )))
+        .unwrap());
+    assert_eq!(
+        results.tracked_tokens_len(),
+        MAX_TRACKED_SEARCH_RESULT_TOKENS
+    );
+    assert!(results.responses_for(u32::MAX).is_empty());
+
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(response("second", 0)))
+        .unwrap();
+    assert_eq!(results.len_for(0), 2);
 }
 
 #[test]
