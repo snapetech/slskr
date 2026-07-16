@@ -29,8 +29,10 @@ DELETE :var/:var/:var/cleanup
 DELETE /wishlist/:var
 GET /api/library/health/issues
 GET /api/library/health/issues/by-artist
+GET /api/library/health/dashboard
+GET /api/library/health/issues/by-codec
 GET /api/library/health/issues/by-release
-GET /api/library/health/issues/by-type:var
+GET /api/library/health/issues/by-type
 GET /api/library/health/scans/:var
 GET /application
 GET /application/version/latest
@@ -116,6 +118,7 @@ GET /transfers/speeds
 GET /transfers/:vars
 GET /users/notes
 GET /users/notes/:var
+GET /users/groups
 GET /users/:var/browse
 GET /users/:var/browse/status
 GET /users/:var/endpoint

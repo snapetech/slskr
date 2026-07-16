@@ -216,6 +216,7 @@ const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
 const MAX_SONGID_RUNS: usize = 256;
 const MAX_USER_NOTES: usize = 4_096;
 const MAX_USER_NOTE_BYTES: usize = 16 * 1024;
+const MAX_USER_GROUP_BATCH: usize = 100;
 const MAX_INTERESTS_PER_KIND: usize = 4_096;
 const MAX_INTEREST_NAME_BYTES: usize = 4 * 1024;
 const MAX_NOW_PLAYING_RECORDS: usize = 4_096;
@@ -8275,6 +8276,7 @@ impl ShareGroupStore {
         }
     }
 
+    #[cfg(test)]
     fn user_group_json(&self, username: &str) -> String {
         let username = bounded_user_username(username);
         let groups = self
@@ -8307,6 +8309,20 @@ impl ShareGroupStore {
             "groupCount": groups.len(),
         })
         .to_string()
+    }
+
+    fn user_group_name(&self, username: &str) -> String {
+        let username = bounded_user_username(username);
+        self.records
+            .iter()
+            .find(|record| {
+                record
+                    .members
+                    .iter()
+                    .any(|member| member.username.eq_ignore_ascii_case(&username))
+            })
+            .map(|record| record.name.clone())
+            .unwrap_or_else(|| "default".to_owned())
     }
 
     fn total_members(&self) -> usize {
@@ -10096,31 +10112,106 @@ impl LibraryStore {
     }
 
     fn health_summary_json(&self, library_path: String) -> String {
-        let issues = self.health_issues();
-        let count = issues.len();
+        self.health_summary_value(library_path).to_string()
+    }
+
+    fn health_summary_value(&self, library_path: String) -> serde_json::Value {
+        let total_issues = self.health_issues().len();
         serde_json::json!({
             "libraryPath": library_path,
-            "items": self.records.len(),
-            "issues": count,
-            "critical": 0,
-            "warning": count,
-            "healthy": count == 0,
-            "updated_at": self.updated_at,
+            "totalIssues": total_issues,
+            "issuesOpen": total_issues,
+            "issuesResolved": 0,
         })
-        .to_string()
     }
 
-    fn health_issues_json(&self) -> String {
-        let issues = self.health_issues();
+    fn health_api_issues(&self) -> Vec<serde_json::Value> {
+        self.health_issues()
+            .into_iter()
+            .map(|issue| {
+                let issue_id = issue
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let issue_kind = issue
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("missing_metadata");
+                let detected_at = issue
+                    .get("item_id")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|item_id| self.records.iter().find(|item| item.id == item_id))
+                    .and_then(|item| i64::try_from(item.created_at).ok())
+                    .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+                    .map(|timestamp| {
+                        timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                    })
+                    .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH.to_rfc3339());
+                serde_json::json!({
+                    "issueId": issue_id,
+                    "type": "MissingMetadata",
+                    "severity": "Medium",
+                    "filePath": "",
+                    "musicBrainzRecordingId": "",
+                    "musicBrainzReleaseId": "",
+                    "artist": issue.get("artist").and_then(serde_json::Value::as_str).unwrap_or_default(),
+                    "album": "",
+                    "title": issue.get("title").and_then(serde_json::Value::as_str).unwrap_or_default(),
+                    "reason": issue.get("message").and_then(serde_json::Value::as_str).unwrap_or("Library metadata is incomplete"),
+                    "metadata": {
+                        "itemId": issue.get("item_id").and_then(serde_json::Value::as_str).unwrap_or_default(),
+                        "missingField": issue_kind,
+                    },
+                    "canAutoFix": true,
+                    "suggestedAction": "Review and complete the missing library metadata",
+                    "remediationJobId": "",
+                    "status": "Detected",
+                    "detectedAt": detected_at,
+                    "resolvedAt": serde_json::Value::Null,
+                    "resolvedBy": "",
+                })
+            })
+            .collect()
+    }
+
+    fn health_issues_json(&self, limit: usize, offset: usize) -> String {
+        let issues = self.health_api_issues();
+        let total_count = issues.len();
+        let issues = issues
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>();
         serde_json::json!({
             "issues": issues,
-            "count": issues.len(),
-            "updated_at": self.updated_at,
+            "totalCount": total_count,
+            "filter": {
+                "libraryPath": "",
+                "types": [],
+                "severities": [],
+                "statuses": [],
+                "musicBrainzReleaseId": "",
+                "limit": limit,
+                "offset": offset,
+            },
         })
         .to_string()
     }
 
-    fn health_issues_by_artist_json(&self) -> String {
+    fn health_issue_type_summaries(&self) -> Vec<serde_json::Value> {
+        let count = self.health_issues().len();
+        if count == 0 {
+            Vec::new()
+        } else {
+            vec![serde_json::json!({
+                "type": "MissingMetadata",
+                "count": count,
+                "bySeverity": { "Medium": count },
+            })]
+        }
+    }
+
+    fn health_issue_artist_summaries(&self, limit: usize) -> Vec<serde_json::Value> {
         let mut grouped = std::collections::BTreeMap::<String, usize>::new();
         for issue in self.health_issues() {
             let artist = issue
@@ -10131,20 +10222,38 @@ impl LibraryStore {
                 .to_owned();
             *grouped.entry(artist).or_default() += 1;
         }
-        let rows = grouped
+        let mut rows = grouped
             .into_iter()
-            .map(|(artist, count)| serde_json::json!({ "artist": artist, "count": count }))
+            .map(|(artist, count)| {
+                serde_json::json!({
+                    "artist": artist,
+                    "count": count,
+                    "byType": { "MissingMetadata": count },
+                })
+            })
             .collect::<Vec<_>>();
+        rows.sort_by(|left, right| {
+            right["count"]
+                .as_u64()
+                .cmp(&left["count"].as_u64())
+                .then_with(|| left["artist"].as_str().cmp(&right["artist"].as_str()))
+        });
+        rows.truncate(limit);
+        rows
+    }
+
+    fn health_issues_by_artist_json(&self, limit: usize) -> String {
+        let total_artists = self.health_issue_artist_summaries(usize::MAX).len();
+        let rows = self.health_issue_artist_summaries(limit);
         serde_json::json!({
-            "issues_by_artist": rows,
-            "count": rows.len(),
-            "updated_at": self.updated_at,
+            "groups": rows,
+            "totalArtists": total_artists,
         })
         .to_string()
     }
 
-    fn health_issues_by_release_json(&self) -> String {
-        let rows = self
+    fn health_issues_by_release_json(&self, limit: usize) -> String {
+        let mut rows = self
             .records
             .iter()
             .filter(|item| {
@@ -10162,41 +10271,71 @@ impl LibraryStore {
                 .filter(|missing| *missing)
                 .count();
                 serde_json::json!({
-                    "release": item.title,
                     "artist": item.artist,
-                    "item_id": item.id,
+                    "album": item.title,
+                    "musicBrainzReleaseId": "",
                     "count": count,
+                    "byType": { "MissingMetadata": count },
                 })
             })
             .collect::<Vec<_>>();
+        rows.sort_by(|left, right| {
+            right["count"]
+                .as_u64()
+                .cmp(&left["count"].as_u64())
+                .then_with(|| left["artist"].as_str().cmp(&right["artist"].as_str()))
+                .then_with(|| left["album"].as_str().cmp(&right["album"].as_str()))
+        });
+        let total_releases = rows.len();
+        rows.truncate(limit);
         serde_json::json!({
-            "issues_by_release": rows,
-            "count": rows.len(),
-            "updated_at": self.updated_at,
+            "groups": rows,
+            "totalReleases": total_releases,
         })
         .to_string()
     }
 
     fn health_issues_by_type_json(&self, issue_type: Option<&str>) -> String {
-        let mut grouped = std::collections::BTreeMap::<String, usize>::new();
-        for issue in self.health_issues() {
-            let kind = issue
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown");
-            if issue_type.is_some_and(|requested| requested != kind) {
-                continue;
-            }
-            *grouped.entry(kind.to_owned()).or_default() += 1;
-        }
-        let rows = grouped
-            .into_iter()
-            .map(|(kind, count)| serde_json::json!({ "type": kind, "count": count }))
-            .collect::<Vec<_>>();
+        let rows = if issue_type.is_some_and(|requested| {
+            !requested.eq_ignore_ascii_case("MissingMetadata") && !requested.starts_with("missing_")
+        }) {
+            Vec::new()
+        } else {
+            self.health_issue_type_summaries()
+        };
+        let total_issues = rows
+            .iter()
+            .filter_map(|row| row.get("count").and_then(serde_json::Value::as_u64))
+            .sum::<u64>();
         serde_json::json!({
-            "issues_by_type": rows,
-            "count": rows.len(),
-            "updated_at": self.updated_at,
+            "groups": rows,
+            "totalIssues": total_issues,
+        })
+        .to_string()
+    }
+
+    fn health_dashboard_json(
+        &self,
+        library_path: String,
+        artist_limit: usize,
+        issue_limit: usize,
+    ) -> String {
+        let issues = self.health_api_issues();
+        let total_issues = issues.len();
+        serde_json::json!({
+            "summary": self.health_summary_value(library_path),
+            "issuesByType": self.health_issue_type_summaries(),
+            "issuesByArtist": self.health_issue_artist_summaries(artist_limit),
+            "issues": issues.into_iter().take(issue_limit).collect::<Vec<_>>(),
+            "totalIssues": total_issues,
+        })
+        .to_string()
+    }
+
+    fn health_issues_by_codec_json(&self) -> String {
+        serde_json::json!({
+            "groups": [],
+            "totalIssues": 0,
         })
         .to_string()
     }
@@ -14530,14 +14669,54 @@ async fn route_http_request_with_headers(
             }
         }
 
+        ("GET", "/api/users/groups") => {
+            let mut usernames = Vec::<String>::new();
+            for (key, username) in route.query.map(query_params).unwrap_or_default() {
+                let username = username.trim();
+                if key != "usernames" || username.is_empty() {
+                    continue;
+                }
+                if username.len() > MAX_USER_USERNAME_BYTES {
+                    return Ok(routing::bad_request_response("username is too long"));
+                }
+                if usernames
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(username))
+                {
+                    continue;
+                }
+                if usernames.len() == MAX_USER_GROUP_BATCH {
+                    return Ok(routing::bad_request_response(
+                        "a maximum of 100 usernames is allowed",
+                    ));
+                }
+                usernames.push(username.to_owned());
+            }
+
+            let sharegroups = state.sharegroups.read().await;
+            let groups = usernames
+                .into_iter()
+                .map(|username| {
+                    let group = sharegroups.user_group_name(&username);
+                    (username, group)
+                })
+                .collect::<BTreeMap<_, _>>();
+            drop(sharegroups);
+            Ok(routing::ok_response(
+                serde_json::to_string(&groups).unwrap_or_else(|_| "{}".to_owned()),
+            ))
+        }
+
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
             let Some(username) = user_route_username(path, "/group") else {
                 return Ok(routing::not_found_response());
             };
             let sharegroups = state.sharegroups.read().await;
-            let json = sharegroups.user_group_json(&username);
+            let group = sharegroups.user_group_name(&username);
             drop(sharegroups);
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response(
+                serde_json::to_string(&group).unwrap_or_else(|_| "\"default\"".to_owned()),
+            ))
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/endpoint") => {
@@ -17695,26 +17874,97 @@ async fn route_http_request_with_headers(
                         .map(|(_, value)| value)
                 })
                 .unwrap_or_default();
+            if library_path.trim().is_empty() {
+                return Ok(routing::bad_request_response(
+                    "libraryPath query parameter is required",
+                ));
+            }
             let library = state.library.read().await;
             let json = library.health_summary_json(library_path);
             drop(library);
             Ok(routing::ok_response(json))
         }
-        ("GET", "/api/library/health/issues") => {
+        ("GET", "/api/library/health/dashboard") => {
+            let library_path = query_parameter(route.query, "libraryPath").unwrap_or_default();
+            if library_path.trim().is_empty() {
+                return Ok(routing::bad_request_response(
+                    "libraryPath query parameter is required",
+                ));
+            }
+            let artist_limit = match query_bounded_usize(route.query, "artistLimit", 1, 100) {
+                Ok(value) => value.unwrap_or(10),
+                Err(()) => {
+                    return Ok(routing::bad_request_response(
+                        "artistLimit must be between 1 and 100",
+                    ));
+                }
+            };
+            let issue_limit = match query_bounded_usize(route.query, "issueLimit", 1, 250) {
+                Ok(value) => value.unwrap_or(100),
+                Err(()) => {
+                    return Ok(routing::bad_request_response(
+                        "issueLimit must be between 1 and 250",
+                    ));
+                }
+            };
             let library = state.library.read().await;
-            let json = library.health_issues_json();
+            let json = library.health_dashboard_json(library_path, artist_limit, issue_limit);
+            drop(library);
+            Ok(routing::ok_response(json))
+        }
+        ("GET", "/api/library/health/issues") => {
+            let limit = match query_bounded_usize(route.query, "limit", 1, 250) {
+                Ok(value) => value.unwrap_or(100),
+                Err(()) => {
+                    return Ok(routing::bad_request_response(
+                        "limit must be between 1 and 250",
+                    ));
+                }
+            };
+            let offset = match query_bounded_usize(route.query, "offset", 0, MAX_LIBRARY_ITEMS) {
+                Ok(value) => value.unwrap_or(0),
+                Err(()) => {
+                    return Ok(routing::bad_request_response(
+                        "offset must be non-negative and bounded",
+                    ));
+                }
+            };
+            let library = state.library.read().await;
+            let json = library.health_issues_json(limit, offset);
             drop(library);
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/health/issues/by-artist") => {
+            let limit = match query_bounded_usize(route.query, "limit", 1, 100) {
+                Ok(value) => value.unwrap_or(20),
+                Err(()) => {
+                    return Ok(routing::bad_request_response(
+                        "limit must be between 1 and 100",
+                    ));
+                }
+            };
             let library = state.library.read().await;
-            let json = library.health_issues_by_artist_json();
+            let json = library.health_issues_by_artist_json(limit);
             drop(library);
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/health/issues/by-release") => {
+            let limit = match query_bounded_usize(route.query, "limit", 1, 100) {
+                Ok(value) => value.unwrap_or(20),
+                Err(()) => {
+                    return Ok(routing::bad_request_response(
+                        "limit must be between 1 and 100",
+                    ));
+                }
+            };
             let library = state.library.read().await;
-            let json = library.health_issues_by_release_json();
+            let json = library.health_issues_by_release_json(limit);
+            drop(library);
+            Ok(routing::ok_response(json))
+        }
+        ("GET", "/api/library/health/issues/by-codec") => {
+            let library = state.library.read().await;
+            let json = library.health_issues_by_codec_json();
             drop(library);
             Ok(routing::ok_response(json))
         }
@@ -25698,70 +25948,56 @@ fn slskd_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueue) ->
     .to_string()
 }
 
-fn slskd_download_user_stats_json(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let username_filter = slskd_transfer_query_username(query);
-    let (limit, offset) = slskd_transfer_query_limit_offset(query);
-    let mut grouped: BTreeMap<String, (usize, usize, usize, usize, u64, u64)> = BTreeMap::new();
+fn slskd_download_user_stats_json(_query: Option<&str>, transfers: &TransferQueue) -> String {
+    let mut grouped: BTreeMap<String, (usize, usize, usize, u64, Option<u64>)> = BTreeMap::new();
     for entry in transfers
         .entries
         .iter()
         .filter(|entry| entry.direction == 0)
-        .filter(|entry| slskd_transfer_matches_query(entry, None, username_filter.as_deref()))
     {
         let stats = grouped
             .entry(entry.peer_username.clone().unwrap_or_default())
-            .or_insert((0, 0, 0, 0, 0, 0));
+            .or_insert((0, 0, 0, 0, None));
         stats.0 += 1;
-        if entry.status == "queued" {
+        if matches!(entry.status.as_str(), "succeeded" | "completed") {
             stats.1 += 1;
+            stats.3 = stats.3.saturating_add(entry.bytes_transferred);
         }
-        if is_active_transfer_status(&entry.status) {
+        if matches!(entry.status.as_str(), "failed" | "rejected" | "cancelled") {
             stats.2 += 1;
         }
-        if matches!(
-            entry.status.as_str(),
-            "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
-        ) {
-            stats.3 += 1;
+        if is_terminal_transfer_status(&entry.status) {
+            stats.4 = Some(stats.4.unwrap_or(0).max(entry.updated_at));
         }
-        stats.4 = stats.4.saturating_add(entry.bytes_transferred);
-        stats.5 = stats.5.saturating_add(entry.size.unwrap_or(0));
     }
-    let mut users = grouped
+
+    let stats = grouped
         .into_iter()
         .map(
-            |(username, (total, queued, active, terminal, bytes_transferred, total_size))| {
-                serde_json::json!({
-                    "username": username,
-                    "total": total,
-                    "queued": queued,
-                    "active": active,
-                    "terminal": terminal,
-                    "bytesTransferred": bytes_transferred,
-                    "totalSize": total_size,
-                })
+            |(username, (total, successful, failed, total_bytes, last_download_at))| {
+                let last_download_at = last_download_at.and_then(|timestamp| {
+                    i64::try_from(timestamp)
+                        .ok()
+                        .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+                        .map(|timestamp| {
+                            timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                        })
+                });
+                (
+                    username.clone(),
+                    serde_json::json!({
+                        "username": username,
+                        "totalDownloads": total,
+                        "successfulDownloads": successful,
+                        "failedDownloads": failed,
+                        "totalBytes": total_bytes,
+                        "lastDownloadAt": last_download_at,
+                    }),
+                )
             },
         )
-        .collect::<Vec<_>>();
-    users.sort_by(|left, right| {
-        right["total"]
-            .as_u64()
-            .cmp(&left["total"].as_u64())
-            .then_with(|| left["username"].as_str().cmp(&right["username"].as_str()))
-    });
-    let count = users.len();
-    let users = users
-        .into_iter()
-        .skip(offset)
-        .take(limit)
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "users": users,
-        "count": count,
-        "offset": offset,
-        "limit": limit,
-    })
-    .to_string()
+        .collect::<BTreeMap<_, _>>();
+    serde_json::to_string(&stats).unwrap_or_else(|_| "{}".to_owned())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -47238,7 +47474,7 @@ mod tests {
 
         let user_stats = super::route_http_request(
             "GET",
-            "/api/v0/transfers/downloads/user-stats?limit=1",
+            "/api/v0/transfers/downloads/user-stats",
             None,
             "",
             &state,
@@ -47247,14 +47483,19 @@ mod tests {
         .expect("user stats report");
         assert_eq!(user_stats.status, "200 OK");
         let user_stats_json = serde_json::from_str::<serde_json::Value>(&user_stats.body).unwrap();
-        assert_eq!(user_stats_json["count"], 2);
-        assert_eq!(user_stats_json["users"].as_array().unwrap().len(), 1);
-        assert_eq!(user_stats_json["users"][0]["username"], "friend");
-        assert_eq!(user_stats_json["users"][0]["total"], 2);
-        assert_eq!(user_stats_json["users"][0]["active"], 1);
-        assert_eq!(user_stats_json["users"][0]["terminal"], 1);
-        assert_eq!(user_stats_json["users"][0]["bytesTransferred"], 2);
-        assert_eq!(user_stats_json["users"][0]["totalSize"], 30);
+        assert_eq!(user_stats_json.as_object().unwrap().len(), 2);
+        assert_eq!(user_stats_json["friend"]["username"], "friend");
+        assert_eq!(user_stats_json["friend"]["totalDownloads"], 2);
+        assert_eq!(user_stats_json["friend"]["successfulDownloads"], 0);
+        assert_eq!(user_stats_json["friend"]["failedDownloads"], 1);
+        assert_eq!(user_stats_json["friend"]["totalBytes"], 0);
+        assert!(user_stats_json["friend"]["lastDownloadAt"].is_string());
+        assert_eq!(user_stats_json["other"]["username"], "other");
+        assert_eq!(user_stats_json["other"]["totalDownloads"], 1);
+        assert_eq!(user_stats_json["other"]["successfulDownloads"], 1);
+        assert_eq!(user_stats_json["other"]["failedDownloads"], 0);
+        assert_eq!(user_stats_json["other"]["totalBytes"], 30);
+        assert!(user_stats_json["other"]["lastDownloadAt"].is_string());
 
         let accelerated = super::route_http_request(
             "GET",
@@ -49243,22 +49484,49 @@ mod tests {
             .await
             .expect("user group");
         assert_eq!(group.status, "200 OK");
-        let group_json = serde_json::from_str::<serde_json::Value>(&group.body).unwrap();
-        assert_eq!(group_json["username"], "friend");
-        assert_eq!(group_json["group"], "Trusted peers");
-        assert_eq!(group_json["group_id"], group_id);
-        assert_eq!(group_json["groupCount"], 1);
-        assert_eq!(group_json["groups"][0]["id"], group_id);
-        assert_eq!(group_json["groups"][0]["name"], "Trusted peers");
+        assert_eq!(
+            serde_json::from_str::<String>(&group.body).unwrap(),
+            "Trusted peers"
+        );
 
         let unknown =
             super::route_http_request("GET", "/api/v0/users/stranger/group", None, "", &state)
                 .await
                 .expect("unknown user group");
-        let unknown_json = serde_json::from_str::<serde_json::Value>(&unknown.body).unwrap();
-        assert_eq!(unknown_json["group"], "default");
-        assert_eq!(unknown_json["group_id"], serde_json::Value::Null);
-        assert_eq!(unknown_json["groupCount"], 0);
+        assert_eq!(
+            serde_json::from_str::<String>(&unknown.body).unwrap(),
+            "default"
+        );
+
+        let groups = super::route_http_request(
+            "GET",
+            "/api/v0/users/groups?usernames=%20friend%20&usernames=FRIEND&usernames=stranger&usernames=",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("user group batch");
+        assert_eq!(groups.status, "200 OK");
+        let groups_json = serde_json::from_str::<serde_json::Value>(&groups.body).unwrap();
+        assert_eq!(groups_json.as_object().unwrap().len(), 2);
+        assert_eq!(groups_json["friend"], "Trusted peers");
+        assert_eq!(groups_json["stranger"], "default");
+
+        let too_many = (0..=super::MAX_USER_GROUP_BATCH)
+            .map(|index| format!("usernames=user-{index}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let rejected = super::route_http_request(
+            "GET",
+            &format!("/api/v0/users/groups?{too_many}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("bounded user group batch");
+        assert_eq!(rejected.status, "400 Bad Request");
     }
 
     #[tokio::test]
@@ -50344,6 +50612,29 @@ mod tests {
         assert_eq!(library.health_scans.len(), super::MAX_LIBRARY_HEALTH_SCANS);
         assert!(library.health_scan(&first.id).is_none());
         assert!(library.health_scan("scan-does-not-exist").is_none());
+    }
+
+    #[test]
+    fn library_health_group_totals_are_not_truncated_by_page_limits() {
+        let mut library = super::LibraryStore::new();
+        library
+            .create("Artist A".to_owned(), "Release A".to_owned(), String::new())
+            .unwrap();
+        library
+            .create("Artist B".to_owned(), "Release B".to_owned(), String::new())
+            .unwrap();
+
+        let artists =
+            serde_json::from_str::<serde_json::Value>(&library.health_issues_by_artist_json(1))
+                .unwrap();
+        assert_eq!(artists["groups"].as_array().unwrap().len(), 1);
+        assert_eq!(artists["totalArtists"], 2);
+
+        let releases =
+            serde_json::from_str::<serde_json::Value>(&library.health_issues_by_release_json(1))
+                .unwrap();
+        assert_eq!(releases["groups"].as_array().unwrap().len(), 1);
+        assert_eq!(releases["totalReleases"], 2);
     }
 
     #[test]
@@ -52751,8 +53042,14 @@ mod tests {
                 .await
                 .expect("library issues");
         let health_json = serde_json::from_str::<serde_json::Value>(&health.body).unwrap();
-        assert_eq!(health_json["count"], 1);
-        assert_eq!(health_json["issues"][0]["type"], "missing_artist");
+        assert_eq!(health_json["totalCount"], 1);
+        assert_eq!(health_json["issues"][0]["type"], "MissingMetadata");
+        assert_eq!(
+            health_json["issues"][0]["metadata"]["missingField"],
+            "missing_artist"
+        );
+        assert_eq!(health_json["filter"]["limit"], 100);
+        assert_eq!(health_json["filter"]["offset"], 0);
 
         let by_artist = super::route_http_request(
             "GET",
@@ -52764,7 +53061,9 @@ mod tests {
         .await
         .expect("issues by artist");
         let by_artist_json = serde_json::from_str::<serde_json::Value>(&by_artist.body).unwrap();
-        assert_eq!(by_artist_json["issues_by_artist"][0]["artist"], "(unknown)");
+        assert_eq!(by_artist_json["groups"][0]["artist"], "(unknown)");
+        assert_eq!(by_artist_json["groups"][0]["byType"]["MissingMetadata"], 1);
+        assert_eq!(by_artist_json["totalArtists"], 1);
 
         let summary = super::route_http_request(
             "GET",
@@ -52776,9 +53075,44 @@ mod tests {
         .await
         .expect("library health summary");
         assert_eq!(summary.status, "200 OK");
+        let summary_json = serde_json::from_str::<serde_json::Value>(&summary.body).unwrap();
+        assert_eq!(summary_json["libraryPath"], "/music");
+        assert_eq!(summary_json["totalIssues"], 1);
+        assert_eq!(summary_json["issuesOpen"], 1);
+
+        let dashboard = super::route_http_request(
+            "GET",
+            "/api/library/health/dashboard?libraryPath=%2Fmusic&artistLimit=1&issueLimit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("library health dashboard");
+        assert_eq!(dashboard.status, "200 OK");
+        let dashboard_json = serde_json::from_str::<serde_json::Value>(&dashboard.body).unwrap();
+        assert_eq!(dashboard_json["summary"]["libraryPath"], "/music");
+        assert_eq!(dashboard_json["issuesByType"][0]["type"], "MissingMetadata");
+        assert_eq!(dashboard_json["issuesByArtist"][0]["artist"], "(unknown)");
+        assert_eq!(dashboard_json["issues"].as_array().unwrap().len(), 1);
+        assert_eq!(dashboard_json["totalIssues"], 1);
+
+        let by_codec = super::route_http_request(
+            "GET",
+            "/api/library/health/issues/by-codec",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("issues by codec");
+        let by_codec_json = serde_json::from_str::<serde_json::Value>(&by_codec.body).unwrap();
+        assert_eq!(by_codec_json["groups"].as_array().unwrap().len(), 0);
+        assert_eq!(by_codec_json["totalIssues"], 0);
+
         let by_type = super::route_http_request(
             "GET",
-            "/api/library/health/issues/by-type/missing_artist",
+            "/api/library/health/issues/by-type",
             None,
             "",
             &state,
@@ -52786,7 +53120,25 @@ mod tests {
         .await
         .expect("issues by type");
         assert_eq!(by_type.status, "200 OK");
-        assert!(by_type.body.contains("missing_artist"));
+        let by_type_json = serde_json::from_str::<serde_json::Value>(&by_type.body).unwrap();
+        assert_eq!(by_type_json["groups"][0]["type"], "MissingMetadata");
+        assert_eq!(by_type_json["totalIssues"], 1);
+
+        for path in [
+            "/api/library/health/summary",
+            "/api/library/health/dashboard?libraryPath=%2Fmusic&artistLimit=0",
+            "/api/library/health/dashboard?libraryPath=%2Fmusic&issueLimit=251",
+            "/api/library/health/issues?limit=0",
+            "/api/library/health/issues?limit=251",
+            "/api/library/health/issues?offset=-1",
+            "/api/library/health/issues/by-artist?limit=101",
+            "/api/library/health/issues/by-release?limit=0",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(response.status, "400 Bad Request", "{path}");
+        }
         for path in [
             "/api/library/health/summary-untrusted",
             "/api/library/health/issues/by-type-untrusted",
