@@ -223,6 +223,38 @@ async fn receive_file_rejects_range_that_does_not_complete_negotiated_size() {
     assert_eq!(transfer.state, DownloadState::Accepted { size: Some(5) });
 }
 
+#[tokio::test]
+async fn receive_file_rejects_overflowing_range_before_io() {
+    let (downloader, _uploader) = duplex(64);
+    let mut downloader = FileTransferConnection::new(downloader);
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(u64::MAX),
+        }))
+        .unwrap();
+
+    let error = transfer
+        .receive_file_from(&mut downloader, u64::MAX - 1, 2)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::TransferOffsetOutOfRange {
+            offset,
+            size: u64::MAX,
+        } if offset == u64::MAX - 1
+    ));
+    assert_eq!(
+        transfer.state,
+        DownloadState::Accepted {
+            size: Some(u64::MAX)
+        }
+    );
+}
+
 #[test]
 fn upload_transfer_request_marks_requested() {
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 100);

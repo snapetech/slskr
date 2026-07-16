@@ -124,7 +124,13 @@ impl DownloadTransfer {
     {
         if let Some(expected) = self.expected_size() {
             let remaining = u64::try_from(remaining).unwrap_or(u64::MAX);
-            let actual = offset.saturating_add(remaining);
+            let actual =
+                offset
+                    .checked_add(remaining)
+                    .ok_or(ClientError::TransferOffsetOutOfRange {
+                        offset,
+                        size: expected,
+                    })?;
             if actual != expected {
                 return Err(ClientError::TransferSizeMismatch { expected, actual });
             }
