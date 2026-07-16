@@ -304,6 +304,11 @@ fn store_file(path: &Path, credentials: &LoginCredentials) -> Result<&'static st
         password: credentials.password.clone(),
     })
     .map_err(|error| format!("failed to serialize Soulseek credentials: {error}"))?;
+    if payload.len() as u64 > MAX_CREDENTIAL_FILE_BYTES {
+        return Err(format!(
+            "Soulseek credential payload exceeds {MAX_CREDENTIAL_FILE_BYTES} bytes"
+        ));
+    }
 
     write_secret_file(path, payload.as_bytes())?;
     Ok("file")
@@ -456,6 +461,24 @@ mod tests {
         let error = read_bounded_secret_file(&path, "credential fixture", false)
             .expect_err("reject oversized credential file");
         assert!(error.contains("exceeds"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn credential_file_write_rejects_payload_that_cannot_be_reloaded() {
+        let root = test_dir("oversized-write");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create fixture directory");
+        let path = root.join("credentials.json");
+        let credentials = LoginCredentials::default_client(
+            "user".to_owned(),
+            "x".repeat(MAX_CREDENTIAL_FILE_BYTES as usize),
+        );
+
+        let error = store_file(&path, &credentials)
+            .expect_err("reject credentials larger than the loader accepts");
+        assert!(error.contains("exceeds"));
+        assert!(!path.exists());
         let _ = fs::remove_dir_all(root);
     }
 
