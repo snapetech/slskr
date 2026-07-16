@@ -7,6 +7,7 @@ use crate::ClientError;
 pub const MAX_PRIVATE_MESSAGE_RECIPIENTS: usize = 100;
 pub const MAX_STORED_ROOM_MESSAGES: usize = 1_000;
 pub const MAX_STORED_PRIVATE_MESSAGES: usize = 1_000;
+pub const MAX_STORED_SOCIAL_FIELD_BYTES: usize = 64 * 1024;
 pub const DEFAULT_MAX_USER_WATCH_RECORDS: usize = 1_024;
 pub const DEFAULT_MAX_JOINED_ROOMS: usize = 1_024;
 
@@ -208,6 +209,12 @@ impl RoomState {
                 username,
                 message,
             } => {
+                if [room, username, message]
+                    .iter()
+                    .any(|value| value.len() > MAX_STORED_SOCIAL_FIELD_BYTES)
+                {
+                    return false;
+                }
                 let key = room_key(room);
                 if self.joined.len() >= self.max_joined_rooms && !self.joined.contains(&key) {
                     return false;
@@ -258,6 +265,11 @@ impl PrivateMessageInbox {
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> Option<ServerMessage> {
         match message {
             ServerMessage::MessageUserResponse(message) => {
+                if message.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES
+                    || message.message.len() > MAX_STORED_SOCIAL_FIELD_BYTES
+                {
+                    return Some(ServerMessage::MessageAcked { id: message.id });
+                }
                 if !self.messages.iter().any(|stored| stored.id == message.id) {
                     self.messages.push(message.clone());
                     retain_newest(&mut self.messages, MAX_STORED_PRIVATE_MESSAGES);

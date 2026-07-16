@@ -11,6 +11,7 @@ use slskr_client::{
     social::{
         private_message_users_command, PrivateMessageInbox, RoomState, UserWatchState,
         MAX_PRIVATE_MESSAGE_RECIPIENTS, MAX_STORED_PRIVATE_MESSAGES, MAX_STORED_ROOM_MESSAGES,
+        MAX_STORED_SOCIAL_FIELD_BYTES,
     },
     ClientError,
 };
@@ -354,6 +355,34 @@ fn social_message_histories_evict_oldest_entries_at_limits() {
     }
     assert_eq!(inbox.messages().len(), MAX_STORED_PRIVATE_MESSAGES);
     assert_eq!(inbox.messages().first().unwrap().message, "private-5");
+}
+
+#[test]
+fn social_histories_reject_oversized_peer_controlled_fields() {
+    let oversized = "x".repeat(MAX_STORED_SOCIAL_FIELD_BYTES + 1);
+    let mut rooms = RoomState::new();
+    assert!(
+        !rooms.apply_server_message(&ServerMessage::GlobalRoomMessage {
+            room: "lobby".to_owned(),
+            username: "alice".to_owned(),
+            message: oversized.clone(),
+        })
+    );
+    assert!(rooms.messages().is_empty());
+    assert!(!rooms.is_joined("lobby"));
+
+    let mut inbox = PrivateMessageInbox::new();
+    assert_eq!(
+        inbox.apply_server_message(&ServerMessage::MessageUserResponse(PrivateMessage {
+            id: 99,
+            timestamp: 123,
+            username: "alice".to_owned(),
+            message: oversized,
+            is_new: true,
+        })),
+        Some(ServerMessage::MessageAcked { id: 99 })
+    );
+    assert!(inbox.messages().is_empty());
 }
 
 #[test]
