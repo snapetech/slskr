@@ -200,6 +200,34 @@ async def test_websocket_disconnect_cancels_pending_subscription_writes():
     session.close.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_websocket_dispatches_sync_and_async_listeners_without_false_errors():
+    client = WebSocketClient("https://example.test", "token")
+    received = []
+    errors = []
+
+    def sync_listener(event):
+        received.append(("sync", event["data"]))
+
+    async def async_listener(event):
+        received.append(("async", event["data"]))
+
+    client.on("search.completed", sync_listener)
+    client.on("search.completed", async_listener)
+    client.on_error(errors.append)
+
+    await client._process_message(
+        json.dumps({"type": "search.completed", "data": {"id": "search-1"}})
+    )
+    await asyncio.sleep(0)
+
+    assert sorted(received) == [
+        ("async", {"id": "search-1"}),
+        ("sync", {"id": "search-1"}),
+    ]
+    assert errors == []
+
+
 def test_api_error_helpers():
     not_found = ApiError(404, "not_found")
     server_error = ApiError(503, "unavailable")

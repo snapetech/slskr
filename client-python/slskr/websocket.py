@@ -146,7 +146,7 @@ class WebSocketClient:
             if event_type in self.event_listeners:
                 for listener in self.event_listeners[event_type]:
                     try:
-                        await listener(event)
+                        await self._call_listener(listener, event)
                     except Exception as e:
                         self._notify_error_listeners(e)
         except Exception as e:
