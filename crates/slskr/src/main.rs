@@ -29641,11 +29641,14 @@ fn file_storage_root(state_dir: &Path, kind: &str) -> PathBuf {
 }
 
 fn decode_slskd_base64_path_segment(encoded: &str) -> Result<String, String> {
-    let encoded = percent_decode(encoded);
-    let encoded = encoded.trim();
+    let encoded = percent_decode_component(encoded);
+    let encoded = encoded
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect::<Vec<_>>();
     let bytes = STANDARD
-        .decode(encoded.as_bytes())
-        .or_else(|_| STANDARD_NO_PAD.decode(encoded.as_bytes()))
+        .decode(&encoded)
+        .or_else(|_| STANDARD_NO_PAD.decode(&encoded))
         .map_err(|_| "path segment must be base64 encoded".to_owned())?;
     String::from_utf8(bytes).map_err(|_| "path segment must decode to UTF-8".to_owned())
 }
@@ -40743,6 +40746,23 @@ mod tests {
         .expect("delete slskd encoded directory");
         assert_eq!(newline_encoded_missing.status, "200 OK");
         assert_eq!(newline_encoded_missing.body, "false");
+    }
+
+    #[test]
+    fn slskd_base64_storage_paths_accept_mime_whitespace_but_reject_bad_data() {
+        let raw = "a".repeat(80);
+        let encoded = super::STANDARD.encode(raw.as_bytes());
+        let wrapped = format!("{}%0A{}%0D%0A", &encoded[..76], &encoded[76..]);
+        assert_eq!(
+            super::decode_slskd_base64_path_segment(&wrapped).unwrap(),
+            raw
+        );
+        assert_eq!(
+            super::decode_slskd_base64_path_segment("4KC+").unwrap(),
+            "࠾"
+        );
+        assert!(super::decode_slskd_base64_path_segment("Zm9v%00").is_err());
+        assert!(super::decode_slskd_base64_path_segment("not-base64!").is_err());
     }
 
     #[tokio::test]

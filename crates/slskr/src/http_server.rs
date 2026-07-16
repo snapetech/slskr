@@ -521,11 +521,7 @@ fn valid_request_target(method: &str, target: &str) -> bool {
         decoded.push(byte);
         index += 1;
     }
-    if std::str::from_utf8(&decoded).is_err()
-        || decoded
-            .iter()
-            .any(|byte| byte.is_ascii_control() || *byte == b'\\')
-    {
+    if std::str::from_utf8(&decoded).is_err() || decoded.contains(&b'\\') {
         return false;
     }
     let decoded_path_end = decoded
@@ -533,6 +529,31 @@ fn valid_request_target(method: &str, target: &str) -> bool {
         .position(|byte| *byte == b'?')
         .unwrap_or(decoded.len());
     let decoded_path = &decoded[..decoded_path_end];
+    let storage_segment_start = [
+        b"/api/files/downloads/directories/".as_slice(),
+        b"/api/files/downloads/files/".as_slice(),
+        b"/api/files/incomplete/directories/".as_slice(),
+        b"/api/files/incomplete/files/".as_slice(),
+        b"/api/v0/files/downloads/directories/".as_slice(),
+        b"/api/v0/files/downloads/files/".as_slice(),
+        b"/api/v0/files/incomplete/directories/".as_slice(),
+        b"/api/v0/files/incomplete/files/".as_slice(),
+    ]
+    .into_iter()
+    .find_map(|prefix| {
+        decoded_path
+            .strip_prefix(prefix)
+            .filter(|segment| !segment.is_empty() && !segment.contains(&b'/'))
+            .map(|_| prefix.len())
+    });
+    if decoded.iter().enumerate().any(|(index, byte)| {
+        byte.is_ascii_control()
+            && !(index < decoded_path_end
+                && storage_segment_start.is_some_and(|start| index >= start)
+                && byte.is_ascii_whitespace())
+    }) {
+        return false;
+    }
     let mut segments = decoded_path.split(|byte| *byte == b'/').peekable();
     let _leading_empty = segments.next();
     while let Some(segment) = segments.next() {
@@ -1257,6 +1278,34 @@ mod tests {
         let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
         assert_eq!(request.path, "/api/%E2%9D%A4");
         assert_eq!(request.query.as_deref(), Some("q=%2Fvalue%3Fpart%23anchor"));
+    }
+
+    #[tokio::test]
+    async fn slskd_file_routes_accept_client_base64_whitespace_only_in_the_final_segment() {
+        for target in [
+            "/api/v0/files/downloads/directories/Zm9v%0A?recursive=True",
+            "/api/files/incomplete/files/Zm9v%0D%0A",
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            client.write_all(request.as_bytes()).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let (request, _) = read_http_request(&mut reader).await.unwrap().unwrap();
+            assert!(request.path.starts_with("/api/"));
+        }
+
+        for target in [
+            "/api/health%0A",
+            "/api/v0/files/downloads/directories/Zm9v%00",
+            "/api/v0/files/downloads/directories/%0AZm9v/extra",
+        ] {
+            let (mut client, server) = tokio::io::duplex(4096);
+            let request = format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            client.write_all(request.as_bytes()).await.unwrap();
+            let mut reader = BufReader::new(server);
+            let error = read_http_request(&mut reader).await.unwrap_err();
+            assert!(error.contains("request target"), "{target}: {error}");
+        }
     }
 
     #[tokio::test]

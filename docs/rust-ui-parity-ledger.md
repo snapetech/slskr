@@ -4,11 +4,17 @@ This ledger tracks the Rust/WASM UI against the current React UI. It is
 intended to stay blunt: a route is not complete until the Rust page has the same
 primary workflow, state handling, and route-specific actions as the React page.
 
-Last audited: 2026-05-06.
+Last audited: 2026-07-15.
 
 ## Current Status
 
 Estimated completion: 95-98%.
+
+The 2026-07-15 headless audit passed all 15 main routes on desktop and mobile,
+including mocked daemon responses, keyboard row selection, selected-row
+actions, confirmation flows, hidden Developer surfaces, bottom-player spacing,
+and browser console/error checks. The percentage remains below 100 because the
+route-specific live-backend validations listed below have not all been run.
 
 The Rust UI now has human-usable workflow parity across the audited slskdN page
 set. The remaining work is no longer generic workbench removal or missing page

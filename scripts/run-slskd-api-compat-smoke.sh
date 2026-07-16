@@ -14,7 +14,9 @@ fi
 work_dir="${SLSKR_SLSKD_API_SMOKE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-slskd-api-smoke.XXXXXX")}"
 state_dir="$work_dir/state"
 log_file="$work_dir/slskr.log"
-mkdir -p "$state_dir"
+mkdir -p "$state_dir/downloads/foo" "$state_dir/incomplete/foo"
+printf 'download fixture\n' >"$state_dir/downloads/foo.mp3"
+printf 'incomplete fixture\n' >"$state_dir/incomplete/foo.mp3"
 
 pick_free_port() {
   "$python_bin" - <<'PY'
@@ -447,13 +449,13 @@ record("shares.all_contents", client.shares.all_contents, lambda v: isinstance(v
 record("shares.contents", lambda: client.shares.contents("Virtual"), lambda v: isinstance(v, list) and all(is_user_directory(item) for item in v))
 
 record("files.get_downloads_dir", lambda: client.files.get_downloads_dir(recursive=True), is_directory)
-record("files.get_downloaded_directory", lambda: client.files.get_downloaded_directory("Zm9v", recursive=True), is_directory)
-record("files.delete_downloaded_directory", lambda: client.files.delete_downloaded_directory("Zm9v"), lambda v: v is True)
-record("files.delete_downloaded_file", lambda: client.files.delete_downloaded_file("Zm9vLm1wMw"), lambda v: v is True)
+record("files.get_downloaded_directory", lambda: client.files.get_downloaded_directory("foo", recursive=True), is_directory)
+record("files.delete_downloaded_directory", lambda: client.files.delete_downloaded_directory("foo"), lambda v: v is True)
+record("files.delete_downloaded_file", lambda: client.files.delete_downloaded_file("foo.mp3"), lambda v: v is True)
 record("files.get_incomplete_dir", lambda: client.files.get_incomplete_dir(recursive=True), is_directory)
-record("files.get_incomplete_directory", lambda: client.files.get_incomplete_directory("Zm9v", recursive=True), is_directory)
-record("files.delete_incomplete_directory", lambda: client.files.delete_incomplete_directory("Zm9v"), lambda v: v is True)
-record("files.delete_incomplete_file", lambda: client.files.delete_incomplete_file("Zm9vLm1wMw"), lambda v: v is True)
+record("files.get_incomplete_directory", lambda: client.files.get_incomplete_directory("foo", recursive=True), is_directory)
+record("files.delete_incomplete_directory", lambda: client.files.delete_incomplete_directory("foo"), lambda v: v is True)
+record("files.delete_incomplete_file", lambda: client.files.delete_incomplete_file("foo.mp3"), lambda v: v is True)
 
 record("relay.connect", client.relay.connect, lambda v: v is True)
 record("relay.disconnect", client.relay.disconnect, lambda v: v is True)

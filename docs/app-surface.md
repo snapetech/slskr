@@ -269,7 +269,7 @@ Target distribution shape:
 ## Remaining Hardening
 
 The large backfill phase is closed for the current cut: endpoint drift gates
-report 290/290 canonical WebUI routes, the share TSV mirror is toggleable, the
+report 296/296 canonical WebUI routes, the share TSV mirror is toggleable, the
 event APIs share one topic taxonomy, and SQLite write-through/hydration covers
 the current compatibility stores.
 
