@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use slskr_protocol::server::ServerMessage;
 
 pub const MAX_EXCLUDED_SEARCH_PHRASES: usize = 256;
@@ -12,13 +14,20 @@ pub struct ExcludedPhraseFilter {
 impl ExcludedPhraseFilter {
     #[must_use]
     pub fn new(phrases: impl IntoIterator<Item = String>) -> Self {
-        let phrases = phrases
-            .into_iter()
-            .take(MAX_EXCLUDED_SEARCH_PHRASES)
-            .map(|phrase| phrase.trim().to_ascii_lowercase())
-            .map(|phrase| truncate_utf8_bytes(phrase, MAX_EXCLUDED_SEARCH_PHRASE_BYTES))
-            .filter(|phrase| !phrase.is_empty())
-            .collect();
+        let mut normalized = Vec::new();
+        let mut seen = HashSet::new();
+        for phrase in phrases {
+            let phrase = phrase.trim().to_ascii_lowercase();
+            let phrase = truncate_utf8_bytes(phrase, MAX_EXCLUDED_SEARCH_PHRASE_BYTES);
+            if phrase.is_empty() || !seen.insert(phrase.clone()) {
+                continue;
+            }
+            normalized.push(phrase);
+            if normalized.len() == MAX_EXCLUDED_SEARCH_PHRASES {
+                break;
+            }
+        }
+        let phrases = normalized;
         Self { phrases }
     }
 

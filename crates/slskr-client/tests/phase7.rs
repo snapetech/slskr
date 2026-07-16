@@ -86,6 +86,18 @@ fn excluded_phrase_filter_is_literal_and_bounds_remote_inputs() {
 }
 
 #[test]
+fn excluded_phrase_filter_does_not_let_junk_crowd_out_denials() {
+    let mut phrases = vec!["   ".to_owned(); MAX_EXCLUDED_SEARCH_PHRASES];
+    phrases.extend(vec!["DUPLICATE".to_owned(); MAX_EXCLUDED_SEARCH_PHRASES]);
+    phrases.push("blocked phrase".to_owned());
+
+    let filter = ExcludedPhraseFilter::new(phrases);
+
+    assert_eq!(filter.phrases(), &["duplicate", "blocked phrase"]);
+    assert!(!filter.allows_query("contains BLOCKED PHRASE"));
+}
+
+#[test]
 fn user_watch_state_builds_requests_and_applies_watch_and_status_updates() {
     let mut state = UserWatchState::new();
 
