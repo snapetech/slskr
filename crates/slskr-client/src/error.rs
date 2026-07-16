@@ -23,6 +23,8 @@ pub enum ClientError {
         expected: crate::connection::ConnectionKind,
         received: crate::connection::ConnectionKind,
     },
+    #[error("indirect connection requires a token-bearing initialization message")]
+    IndirectInitRequired,
     #[error("transfer token mismatch: expected {expected}, received {received}")]
     TransferTokenMismatch { expected: u32, received: u32 },
     #[error("transfer filename mismatch: expected {expected}, received {received}")]

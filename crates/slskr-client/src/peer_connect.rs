@@ -60,22 +60,10 @@ impl IndirectPeerRequest {
                 self.validate_token(token)?;
                 Ok(stream)
             }
-            IncomingConnection::PeerMessages(connection) => {
-                self.validate_kind(ConnectionKind::PeerMessages)?;
-                Ok(connection.into_inner())
-            }
-            IncomingConnection::ObfuscatedPeerMessages(connection) => {
-                self.validate_kind(ConnectionKind::PeerMessages)?;
-                Ok(connection.into_inner())
-            }
-            IncomingConnection::Distributed(connection) => {
-                self.validate_kind(ConnectionKind::Distributed)?;
-                Ok(connection.into_inner())
-            }
-            IncomingConnection::FileTransfer(stream) => {
-                self.validate_kind(ConnectionKind::FileTransfer)?;
-                Ok(stream.into_inner())
-            }
+            IncomingConnection::PeerMessages(_)
+            | IncomingConnection::ObfuscatedPeerMessages(_)
+            | IncomingConnection::Distributed(_)
+            | IncomingConnection::FileTransfer(_) => Err(ClientError::IndirectInitRequired),
             IncomingConnection::UnknownInit { code, payload, .. } => {
                 Err(ClientError::UnexpectedInitMessage {
                     code,

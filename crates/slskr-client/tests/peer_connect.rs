@@ -89,15 +89,17 @@ fn indirect_request_accepts_matching_pierce_firewall() {
 }
 
 #[test]
-fn indirect_request_accepts_matching_tagged_connection() {
+fn indirect_request_rejects_untokened_tagged_connection() {
     let request = IndirectPeerRequest::new(42, "peer", ConnectionKind::PeerMessages);
     let (stream, _) = duplex(64);
 
-    let completed = request.complete(IncomingConnection::PeerMessages(
-        PeerMessageConnection::new(stream),
-    ));
+    let error = request
+        .complete(IncomingConnection::PeerMessages(
+            PeerMessageConnection::new(stream),
+        ))
+        .unwrap_err();
 
-    assert!(completed.is_ok());
+    assert!(matches!(error, ClientError::IndirectInitRequired));
 }
 
 #[test]
@@ -143,8 +145,12 @@ fn indirect_request_rejects_wrong_username() {
 fn indirect_request_rejects_wrong_connection_kind() {
     let request = IndirectPeerRequest::new(42, "peer", ConnectionKind::Distributed);
     let (stream, _) = duplex(64);
-    let incoming: IncomingConnection<DuplexStream> =
-        IncomingConnection::PeerMessages(PeerMessageConnection::new(stream));
+    let incoming: IncomingConnection<DuplexStream> = IncomingConnection::PeerInit {
+        username: "peer".to_owned(),
+        kind: ConnectionKind::PeerMessages,
+        token: 42,
+        stream,
+    };
 
     let error = request.complete(incoming).unwrap_err();
 
@@ -158,21 +164,27 @@ fn indirect_request_rejects_wrong_connection_kind() {
 }
 
 #[test]
-fn indirect_request_accepts_distributed_tagged_connection() {
+fn indirect_request_rejects_distributed_tagged_connection_without_token() {
     let request = IndirectPeerRequest::new(42, "peer", ConnectionKind::Distributed);
     let (stream, _) = duplex(64);
     let incoming: IncomingConnection<DuplexStream> =
         IncomingConnection::Distributed(DistributedConnection::new(stream));
 
-    assert!(request.complete(incoming).is_ok());
+    assert!(matches!(
+        request.complete(incoming).unwrap_err(),
+        ClientError::IndirectInitRequired
+    ));
 }
 
 #[test]
-fn indirect_request_accepts_file_transfer_tagged_connection() {
+fn indirect_request_rejects_file_transfer_tagged_connection_without_token() {
     let request = IndirectPeerRequest::new(42, "peer", ConnectionKind::FileTransfer);
     let (stream, _) = duplex(64);
     let incoming: IncomingConnection<DuplexStream> =
         IncomingConnection::FileTransfer(FileTransferConnection::new(stream));
 
-    assert!(request.complete(incoming).is_ok());
+    assert!(matches!(
+        request.complete(incoming).unwrap_err(),
+        ClientError::IndirectInitRequired
+    ));
 }

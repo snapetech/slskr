@@ -5,13 +5,12 @@ use std::sync::{
 
 use slskr_client::{
     connection::ConnectionKind,
-    file_transfer::FileTransferConnection,
     listener::IncomingConnection,
     manager::{ConnectionManager, PeerConnector, TokenGenerator},
     peer_cache::PeerConnectionCache,
     peer_connect::IndirectPeerRequest,
     server::ServerSession,
-    stream::{DistributedConnection, PeerMessageConnection, ServerConnection},
+    stream::{PeerMessageConnection, ServerConnection},
 };
 use slskr_protocol::server::Direction;
 use tokio::io::{duplex, DuplexStream};
@@ -164,7 +163,12 @@ fn complete_inbound_distributed_returns_typed_connection() {
     let connection = manager
         .complete_inbound_distributed(
             &request,
-            IncomingConnection::Distributed(DistributedConnection::new(stream)),
+            IncomingConnection::PeerInit {
+                username: "peer".to_owned(),
+                kind: ConnectionKind::Distributed,
+                token: 42,
+                stream,
+            },
         )
         .unwrap();
 
@@ -183,7 +187,12 @@ fn complete_inbound_file_transfer_returns_typed_connection() {
     let connection = manager
         .complete_inbound_file_transfer(
             &request,
-            IncomingConnection::FileTransfer(FileTransferConnection::new(stream)),
+            IncomingConnection::PeerInit {
+                username: "peer".to_owned(),
+                kind: ConnectionKind::FileTransfer,
+                token: 42,
+                stream,
+            },
         )
         .unwrap();
 
