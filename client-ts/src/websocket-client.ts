@@ -22,6 +22,8 @@ export class WebSocketClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentionallyDisconnected = false;
   private pingInterval: number | null = null;
   private subscribedTopics: Set<string> = new Set();
 
@@ -40,30 +42,47 @@ export class WebSocketClient {
    * Connect to WebSocket
    */
   async connect(): Promise<void> {
+    this.intentionallyDisconnected = false;
+    this.clearReconnectTimer();
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url, websocketAuthProtocols(this.token));
+        let settled = false;
+        const socket = new WebSocket(this.url, websocketAuthProtocols(this.token));
+        this.ws = socket;
 
-        this.ws.onopen = () => {
+        socket.onopen = () => {
+          if (this.ws !== socket) return;
           this.reconnectAttempts = 0;
           this.notifyConnectionListeners(true);
           this.setupPingInterval();
+          settled = true;
           resolve();
         };
 
-        this.ws.onmessage = (event) => {
+        socket.onmessage = (event) => {
+          if (this.ws !== socket) return;
           this.handleMessage(event.data);
         };
 
-        this.ws.onerror = () => {
+        socket.onerror = () => {
+          if (this.ws !== socket) return;
           this.notifyErrorListeners(new Error('WebSocket error'));
+          settled = true;
           reject(new Error('WebSocket connection error'));
         };
 
-        this.ws.onclose = () => {
+        socket.onclose = () => {
+          if (this.ws !== socket) return;
+          this.ws = null;
           this.notifyConnectionListeners(false);
           this.clearPingInterval();
-          this.attemptReconnect();
+          if (!settled) {
+            settled = true;
+            reject(new Error('WebSocket closed before opening'));
+          }
+          if (!this.intentionallyDisconnected) {
+            this.attemptReconnect();
+          }
         };
       } catch (error) {
         reject(error);
@@ -75,6 +94,8 @@ export class WebSocketClient {
    * Disconnect from WebSocket
    */
   disconnect(): void {
+    this.intentionallyDisconnected = true;
+    this.clearReconnectTimer();
     this.clearPingInterval();
     if (this.ws) {
       this.ws.close();
@@ -229,15 +250,24 @@ export class WebSocketClient {
   }
 
   private attemptReconnect(): void {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+    if (!this.intentionallyDisconnected && this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
 
-      setTimeout(() => {
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        if (this.intentionallyDisconnected) return;
         this.connect().catch((error) => {
           this.notifyErrorListeners(error);
         });
       }, delay);
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 }

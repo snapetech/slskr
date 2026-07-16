@@ -14,6 +14,8 @@ export declare class WebSocketClient {
     private reconnectAttempts;
     private maxReconnectAttempts;
     private reconnectDelay;
+    private reconnectTimer;
+    private intentionallyDisconnected;
     private pingInterval;
     private subscribedTopics;
     private listeners;
@@ -66,5 +68,6 @@ export declare class WebSocketClient {
     private setupPingInterval;
     private clearPingInterval;
     private attemptReconnect;
+    private clearReconnectTimer;
 }
 //# sourceMappingURL=websocket-client.d.ts.map
