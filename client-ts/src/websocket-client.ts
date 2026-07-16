@@ -65,12 +65,18 @@ export class WebSocketClient {
 
         socket.onopen = () => {
           if (this.ws !== socket) return;
-          this.reconnectAttempts = 0;
-          this.notifyConnectionListeners(true);
-          this.setupPingInterval();
-          this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
-          settled = true;
-          resolve();
+          try {
+            this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
+            this.reconnectAttempts = 0;
+            this.notifyConnectionListeners(true);
+            this.setupPingInterval();
+            settled = true;
+            resolve();
+          } catch (error) {
+            settled = true;
+            reject(error);
+            socket.close();
+          }
         };
 
         socket.onmessage = (event) => {
@@ -120,13 +126,20 @@ export class WebSocketClient {
    * Subscribe to event types
    */
   subscribe(...topics: EventType[]): void {
-    const newTopics = topics.filter((t) => !this.subscribedTopics.has(t));
+    const newTopics = topics.filter(
+      (topic, index) => topics.indexOf(topic) === index && !this.subscribedTopics.has(topic)
+    );
     if (newTopics.length === 0) return;
 
     newTopics.forEach((t) => this.subscribedTopics.add(t));
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.sendSubscription('subscribe', newTopics);
+      try {
+        this.sendSubscription('subscribe', newTopics);
+      } catch (error) {
+        newTopics.forEach((topic) => this.subscribedTopics.delete(topic));
+        throw error;
+      }
     }
   }
 
@@ -140,7 +153,12 @@ export class WebSocketClient {
     if (removedTopics.length === 0) return;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.sendSubscription('unsubscribe', removedTopics);
+      try {
+        this.sendSubscription('unsubscribe', removedTopics);
+      } catch (error) {
+        removedTopics.forEach((topic) => this.subscribedTopics.add(topic));
+        throw error;
+      }
     }
   }
 

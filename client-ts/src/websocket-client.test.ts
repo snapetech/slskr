@@ -11,6 +11,7 @@ class MockWebSocket {
   onclose: (() => void) | null = null;
   sent: string[] = [];
   url: string;
+  sendError: Error | null = null;
 
   constructor(url: string, _protocols?: string | string[]) {
     this.url = url;
@@ -28,6 +29,7 @@ class MockWebSocket {
   }
 
   send(data: string): void {
+    if (this.sendError) throw this.sendError;
     this.sent.push(data);
   }
 }
@@ -151,12 +153,47 @@ describe('WebSocketClient reconnect lifecycle', () => {
     await connected;
 
     client.subscribe('search.completed');
+    client.subscribe('transfer.completed', 'transfer.completed');
     client.unsubscribe('transfer.completed', 'search.completed', 'search.completed');
 
     const frames = MockWebSocket.instances[0].sent.map((frame) => JSON.parse(frame));
     expect(frames).toEqual([
       { type: 'subscribe', data: { topics: ['search.completed'] } },
-      { type: 'unsubscribe', data: { topics: ['search.completed'] } },
+      { type: 'subscribe', data: { topics: ['transfer.completed'] } },
+      {
+        type: 'unsubscribe',
+        data: { topics: ['transfer.completed', 'search.completed'] },
+      },
     ]);
+  });
+
+  it('rolls back subscription state when a write throws', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const connected = client.connect();
+    MockWebSocket.instances[0].open();
+    await connected;
+
+    MockWebSocket.instances[0].sendError = new Error('write failed');
+    expect(() => client.subscribe('search.completed')).toThrow('write failed');
+    expect(client.getSubscribedTopics()).toEqual([]);
+
+    MockWebSocket.instances[0].sendError = null;
+    client.subscribe('transfer.completed');
+    MockWebSocket.instances[0].sendError = new Error('write failed');
+    expect(() => client.unsubscribe('transfer.completed')).toThrow('write failed');
+    expect(client.getSubscribedTopics()).toEqual(['transfer.completed']);
+    client.disconnect();
+  });
+
+  it('rejects connect when restoring subscriptions throws', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    client.subscribe('search.completed');
+    const connected = client.connect();
+    MockWebSocket.instances[0].sendError = new Error('restore failed');
+
+    MockWebSocket.instances[0].open();
+
+    await expect(connected).rejects.toThrow('restore failed');
+    expect(client.isConnected()).toBe(false);
   });
 });
