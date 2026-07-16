@@ -281,6 +281,34 @@ fn timed_search_results_finish_returns_responses() {
 }
 
 #[test]
+fn timed_search_token_reuse_discards_stale_responses() {
+    let now = Instant::now();
+    let mut results = TimedSearchResults::new(Duration::from_secs(5));
+    let original = handle(10);
+    results.track(original.clone(), now);
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(response("alice", 10)))
+        .unwrap();
+    assert_eq!(results.len_for(10), 1);
+
+    let mut replacement = handle(10);
+    replacement.query = "replacement query".to_owned();
+    assert_eq!(
+        results.track(replacement.clone(), now + Duration::from_secs(1)),
+        Some(slskr_client::search::TimedSearch {
+            handle: original,
+            created_at: now,
+            expires_at: now + Duration::from_secs(5),
+        })
+    );
+    assert!(results.responses_for(10).is_empty());
+
+    let (search, responses) = results.finish(10).unwrap();
+    assert_eq!(search.handle, replacement);
+    assert!(responses.is_empty());
+}
+
+#[test]
 fn timed_search_results_drain_expired() {
     let now = Instant::now();
     let mut results = TimedSearchResults::new(Duration::from_secs(5));

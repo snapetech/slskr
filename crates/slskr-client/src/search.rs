@@ -325,7 +325,12 @@ impl TimedSearchResults {
             created_at: now,
             expires_at: now + self.window,
         };
-        self.searches.insert(timed.handle.token, timed)
+        let token = timed.handle.token;
+        let replaced = self.searches.insert(token, timed);
+        if replaced.is_some() {
+            let _ = self.results.take(token);
+        }
+        replaced
     }
 
     pub fn accept_peer_message(&mut self, message: PeerMessage) -> Result<bool, ClientError> {
