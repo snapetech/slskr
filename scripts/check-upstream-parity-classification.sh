@@ -41,6 +41,22 @@ check_committed_registry() {
     "$runtime_prefixes"
 }
 
+check_current_delta_registry() {
+  local section prefixes
+  section="$(sed -n '/^### Post-freeze current-head source-commit registry$/,/^## Upstream Delta Buckets$/p' "$ledger")"
+  if [[ -z "$section" ]]; then
+    printf 'upstream parity classification failed: missing current-head delta registry\n' >&2
+    status=1
+    return
+  fi
+  prefixes="$(printf '%s\n' "$section" | rg -o '`[0-9a-f]{8}`' | tr -d '`')"
+  check_prefix_set \
+    "slskdN current-head delta" \
+    10 \
+    "b68a78bfef5a542122ec8c8cabc767a1a7d24073966e2233cc20b1d0512a9ce0" \
+    "$prefixes"
+}
+
 check_prefix_set() {
   local label="$1"
   local expected="$2"
@@ -131,7 +147,84 @@ check_repo() {
     "$label" "$total" "$explicit" "$path_classified"
 }
 
+check_delta_repo() {
+  local label="$1"
+  local repo="$2"
+  local base="$3"
+  local snapshot="$4"
+  local expected_total="$5"
+  local expected_explicit="$6"
+  local total=0
+  local explicit=0
+  local path_classified=0
+
+  if [[ ! -d "$repo/.git" ]]; then
+    printf '%s current-head delta cross-check skipped: repository absent at %s\n' "$label" "$repo"
+    return
+  fi
+  for commit in "$base" "$snapshot"; do
+    if ! git -C "$repo" cat-file -e "${commit}^{commit}" 2>/dev/null; then
+      printf 'upstream parity classification failed: missing %s delta commit %s\n' \
+        "$label" "$commit" >&2
+      status=1
+      return
+    fi
+  done
+  if ! git -C "$repo" merge-base --is-ancestor "$base" "$snapshot"; then
+    printf 'upstream parity classification failed: %s delta base is not an ancestor of snapshot\n' \
+      "$label" >&2
+    status=1
+    return
+  fi
+  if ! git -C "$repo" merge-base --is-ancestor "$snapshot" HEAD; then
+    printf 'upstream parity classification failed: %s delta snapshot is not an ancestor of HEAD\n' \
+      "$label" >&2
+    status=1
+  fi
+
+  while IFS= read -r commit; do
+    [[ -n "$commit" ]] || continue
+    total=$((total + 1))
+    local requires_explicit=0
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      case "$path" in
+        src/*|config/*)
+          requires_explicit=1
+          ;;
+        docs/*|memory-bank/*|tests/*|test/*|examples/*|.github/*|packaging/*|Formula/*|scripts/*|tools/*|vendor/*|publish/*|bin/*|analyzers/*|.council/*|.cursor/*|.kilo/*|*.md|.gitlab-ci.yml|flake.nix|Dockerfile|coverage-baseline.json|task_validation_*|.gitignore|.dockerignore)
+          ;;
+        *)
+          requires_explicit=1
+          ;;
+      esac
+    done < <(git -C "$repo" diff-tree --no-commit-id --name-only -r "$commit")
+
+    if (( requires_explicit )); then
+      local prefix="${commit:0:8}"
+      if rg -q --fixed-strings -- "$prefix" "$ledger"; then
+        explicit=$((explicit + 1))
+      else
+        printf 'upstream parity classification failed: unclassified %s delta commit %s %s\n' \
+          "$label" "$prefix" "$(git -C "$repo" show -s --format=%s "$commit")" >&2
+        status=1
+      fi
+    else
+      path_classified=$((path_classified + 1))
+    fi
+  done < <(git -C "$repo" rev-list --no-merges "$base..$snapshot")
+
+  if [[ "$total" -ne "$expected_total" || "$explicit" -ne "$expected_explicit" ]]; then
+    printf 'upstream parity classification failed: %s delta classified %d commits (%d explicit), expected %d (%d explicit)\n' \
+      "$label" "$total" "$explicit" "$expected_total" "$expected_explicit" >&2
+    status=1
+  fi
+  printf '%s current-head delta classification: %d commits (%d explicit, %d path-classified)\n' \
+    "$label" "$total" "$explicit" "$path_classified"
+}
+
 check_committed_registry
+check_current_delta_registry
 
 check_repo \
   "slskdN" \
@@ -141,6 +234,13 @@ check_repo \
   "slskNet.Runtime" \
   "${SLSKR_SLSKNET_RUNTIME_REPO:-$repo_root/../slskNet.Runtime}" \
   "af73ff3f84fda7ba890bb5aea3adf712e5400cf6"
+check_delta_repo \
+  "slskdN" \
+  "${SLSKR_SLSKDN_REPO:-$repo_root/../slskdn}" \
+  "c2586f576d8443e0229bf53501989568e6cbd61e" \
+  "7527bfe9d5622b40e893d13766ce51aafacc1d38" \
+  40 \
+  10
 
 if (( status != 0 )); then
   exit "$status"

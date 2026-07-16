@@ -1,6 +1,6 @@
 # slskdN and slskNet.Runtime Parity Ledger
 
-Date: 2026-05-13
+Date: 2026-07-15
 
 This ledger tracks the work required for `slskR` to reach full feature,
 function, and security parity with the sibling repositories:
@@ -18,11 +18,14 @@ as a compatibility acknowledgement or intentionally Rust-native.
 - `slskR` scaffold baseline: `f01cdc30`, 2026-04-30.
 - `slskR` WebUI port baseline: `6b0809cd`, 2026-05-04.
 - Current endpoint shape result: `scripts/check-endpoint-parity-drift.sh`
-  reports `293 / 293` canonical WebUI endpoints implemented.
+  reports `296 / 296` canonical WebUI endpoints implemented.
 - Frozen upstream audit heads for the 2026-07-15 pass are slskdN
   `c2586f576d8443e0229bf53501989568e6cbd61e` and slskNet.Runtime
   `af73ff3f84fda7ba890bb5aea3adf712e5400cf6`. Newer sibling changes start a
   new delta; they do not silently move this audit's evidence boundary.
+- The post-freeze delta is audited through slskdN
+  `7527bfe9d5622b40e893d13766ce51aafacc1d38` (40 non-merge commits, 10
+  touching `src`) and the unchanged slskNet.Runtime head above.
 - `slskNet.Runtime` comparison baseline: fork changes since Soulseek.NET
   `10.0.0`, plus local commits after the `slskR` scaffold date.
 - `slskdN` comparison baseline: local commits after the `slskR` scaffold date.
@@ -132,7 +135,30 @@ non-runtime or gate-backed rather than copied into this ledger individually.
 - `not-applicable` frozen Rust-native/UI polling additions (6): `565898635` `65c367283` `21dae85ae` `6acaa23e0` `d50e337d7` `3fcb7ff8b`.
 - `slskNet.Runtime` source registry: `192c5e4a` is implemented/needs-live-proof; `af73ff3f` is not-applicable logging severity; `1fce75fa`, `681c48c9`, `0fa803d5`, and `09b16f96` are not-applicable .NET dependency changes covered by dependency gates.
 
-The inventory is now exhaustive at the frozen heads, but parity is not closed:
+### Post-freeze current-head delta
+
+The 40 non-merge slskdN commits after the frozen head and through
+`7527bfe9d5622b40e893d13766ce51aafacc1d38` contain 30 documentation/test-only
+changes and the following 10 source changes. The classification gate validates
+this exact range and registry.
+
+| Upstream change | Classification | Current evidence and remaining closure |
+| --- | --- | --- |
+| UI polling ownership (`d4490193`, `429ae017`) | Implemented/not-applicable | The Rust WebUI has one active route owner, starts hidden RustyMilk stopped, and has no React Bridge, Lyrics, or Lidarr hidden-tab timers. Existing native renderer and WebAssembly tests enforce lazy hidden panes and the absence of hidden polling loops. |
+| Bounded security dashboard aggregation (`cd9bd234`) | Implemented/hermetic | Security counts and rows are derived directly from bounded Rust ban, user, event, webhook, and mesh stores. The security dashboard projection test covers state-backed counts; no unbounded .NET singleton event lists exist in the Rust runtime. |
+| Passive mesh diagnostics (`e4d2cd0a`) | Implemented/hermetic | Rust mesh status reads bounded local snapshots and does not trigger NAT, DHT, or external status probes. The active-route UI ownership tests prevent hidden diagnostic polling; live mesh work remains in explicit background services. |
+| Bounded listen-along directory hydration (`3d04928e`) | Implemented/hermetic | Listening-party and Pod channel projections read bounded room/message/share stores and do not enumerate an unbounded distributed directory. Existing joined-room listening-party tests cover local state and message projection. |
+| SQLite library-health dashboard aggregation (`e2d53ea5`) | Implemented/hermetic | `summary`, `dashboard`, paged/filtered `issues`, and type/artist/release/codec group routes now expose the current camel-case DTOs and exact request bounds. Rust library state is capped at 10,000 items, and route tests cover dashboard aggregation, enum filters, large offsets, limited group totals, blank-artist exclusion, the `UNKNOWN` codec bucket, required paths, and rejected limits. |
+| SQLite user download-history aggregation (`6debd9f8`) | Implemented/hermetic | `/transfers/downloads/user-stats` now returns the current username-keyed map with exact total/success/failure/byte/time fields from the bounded transfer store. A route regression covers active, failed, successful, and upload exclusion semantics. |
+| Batched search-result user groups (`f9f7c450`) | Implemented/hermetic | `/users/:username/group` now returns the current JSON string and `/users/groups` returns a trimmed, case-insensitively deduplicated username map capped at 100. Tests cover custom/default groups, duplicates, blanks, version aliases, and overflow rejection. |
+| Indexed MediaCore registry reads (`f534bd51`) | Implemented/not-applicable | Rust content-discovery and content-ID projections are already bounded in-memory maps/vectors with fixed retention; they do not repeatedly deserialize the .NET registry JSON file. Existing content discovery, hash lookup, and MediaCore projection tests cover reads and bounded merges. |
+| Streamed auto-retry candidates (`4e749246`) | Implemented/not-applicable | Rust auto-retry scans an already bounded retained transfer queue, orders eligible failures stably by update time and ID, enforces global/per-peer/active-slot caps, and stops plan construction at the configured limit. Planner and cycle tests cover stable selection, attempt/cooldown limits, latest-attempt filtering, metadata preservation, and tracker pruning. |
+
+### Post-freeze current-head source-commit registry
+
+- `implemented` slskdN delta (10): `d4490193` `cd9bd234` `e4d2cd0a` `3d04928e` `e2d53ea5` `429ae017` `6debd9f8` `f9f7c450` `f534bd51` `4e749246`.
+
+The inventory is exhaustive through the current-head delta, but parity is not closed:
 all `needs-proof`, partial, and missing classifications must be resolved or
 explicitly accepted before full parity can be claimed.
 
@@ -161,7 +187,7 @@ Required classification values:
 | Wishlist scheduling | Server-interval-aware scheduler with positive guardrails | Interval guard, term replacement, daemon term extraction, and scheduled search record tests are implemented; live daemon interop remains optional. |
 | Room failures | `CantCreateRoom`/reconnect state reaches API/UI instead of timing out silently | `CantCreateRoom` projection clears optimistic joins and records `last_error`; disconnected/reconnecting joins return HTTP `503`. |
 | Multi-user private messages | Deduped, bounded recipient list and compatible API surface | Client/protocol tests cover dedupe, max count, blank recipients, and command emission; daemon API tests cover `/api/conversations/batch` recording and `MessageUsers` dispatch. |
-| User groups | Sharegroup membership reaches slskd-compatible user group API | Daemon API tests cover `/api/users/:username/group` deriving primary and full group membership from sharegroup members while preserving default projection for unknown users. |
+| User groups | Sharegroup membership reaches slskd-compatible user group API | Daemon API tests cover the current `/api/users/:username/group` JSON string and the trimmed, case-insensitive, 100-user `/api/users/groups` map while preserving the default projection for unknown users. |
 | Store-backed compatibility projections | Collection, wishlist, contact, share, and bridge helper routes expose local state | Daemon API tests cover `/api/shared`, `/api/contacts/nearby`, collection item update/delete/reorder, wishlist update/delete, and `/api/bridge/transfer/:id/progress` projecting existing local stores instead of fixed compatibility shells. |
 | Activity and recommendation projections | Interests, now-playing, source-feed, and bridge admin compatibility routes expose local state | Daemon API tests cover user interest projection, interest-backed Soulseek recommendations, item recommendation/similar-user projections, now-playing POST/GET, source-feed preview/feed projection, and bridge admin stats deriving transfer totals instead of fixed empty compatibility shells. |
 | Library, job, and discovery projections | Library health, MusicBrainz, Lidarr fallback, taste/discovery, destinations, listening-party, and multisource routes expose local state | Daemon API tests cover library health issue grouping from library items, unconfigured Lidarr wanted/missing and sync fallback from library health, Lidarr manual import seeding local library items, MusicBrainz completion/coverage, release-radar wishlist projection and persisted subscription creation, taste recommendations and discovery graph seeds, destination validation against the local destination store, joined-room listening parties with party content messages and now-playing state, generic job lists from searches/transfers, and multisource transfer job projections. |

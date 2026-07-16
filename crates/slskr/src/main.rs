@@ -14792,7 +14792,7 @@ async fn route_http_request_with_headers(
             let mut usernames = Vec::<String>::new();
             for (key, username) in route.query.map(query_params).unwrap_or_default() {
                 let username = username.trim();
-                if key != "usernames" || username.is_empty() {
+                if !key.eq_ignore_ascii_case("usernames") || username.is_empty() {
                     continue;
                 }
                 if username.len() > MAX_USER_USERNAME_BYTES {
@@ -17984,15 +17984,7 @@ async fn route_http_request_with_headers(
 
         // LIBRARY HEALTH ENDPOINTS
         ("GET", "/api/library/health/summary") => {
-            let library_path = route
-                .query
-                .and_then(|query| {
-                    query_params(query)
-                        .into_iter()
-                        .find(|(key, _)| key == "libraryPath")
-                        .map(|(_, value)| value)
-                })
-                .unwrap_or_default();
+            let library_path = query_parameter(route.query, "libraryPath").unwrap_or_default();
             if library_path.trim().is_empty() {
                 return Ok(routing::bad_request_response(
                     "libraryPath query parameter is required",
@@ -23707,7 +23699,9 @@ fn request_share_token(
 fn query_parameter(query: Option<&str>, name: &str) -> Option<String> {
     query?.split('&').find_map(|pair| {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        (percent_decode_component(key) == name).then(|| percent_decode_component(value))
+        percent_decode_component(key)
+            .eq_ignore_ascii_case(name)
+            .then(|| percent_decode_component(value))
     })
 }
 
@@ -49609,7 +49603,7 @@ mod tests {
 
         let groups = super::route_http_request(
             "GET",
-            "/api/v0/users/groups?usernames=%20friend%20&usernames=FRIEND&usernames=stranger&usernames=",
+            "/api/v0/users/groups?UserNames=%20friend%20&usernames=FRIEND&usernames=stranger&usernames=",
             None,
             "",
             &state,
@@ -53191,7 +53185,7 @@ mod tests {
 
         let summary = super::route_http_request(
             "GET",
-            "/api/library/health/summary?libraryPath=%2Fmusic",
+            "/api/library/health/summary?LibraryPath=%2Fmusic",
             None,
             "",
             &state,
@@ -53242,7 +53236,7 @@ mod tests {
 
         let filtered = super::route_http_request(
             "GET",
-            "/api/library/health/issues?libraryPath=%2Fmusic&types=CorruptedFile&severities=Medium&statuses=Detected&limit=2&offset=999999",
+            "/api/library/health/issues?LibraryPath=%2Fmusic&types=CorruptedFile&severities=Medium&statuses=Detected&Limit=2&Offset=999999",
             None,
             "",
             &state,
