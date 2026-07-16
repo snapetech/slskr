@@ -91,13 +91,13 @@ impl RateLimiter {
 
         let window = windows.entry(key).or_insert_with(|| RequestWindow {
             count: 0,
-            reset_at: now + Duration::from_secs(self.config.window_seconds),
+            reset_at: reset_deadline(now, self.config.window_seconds),
         });
 
         // Reset window if expired
         if now >= window.reset_at {
             window.count = 0;
-            window.reset_at = now + Duration::from_secs(self.config.window_seconds);
+            window.reset_at = reset_deadline(now, self.config.window_seconds);
         }
 
         // Check limit
@@ -125,13 +125,13 @@ impl RateLimiter {
 
         let window = windows.entry(key).or_insert_with(|| RequestWindow {
             count: 0,
-            reset_at: now + Duration::from_secs(self.config.window_seconds),
+            reset_at: reset_deadline(now, self.config.window_seconds),
         });
 
         // Reset window if expired
         if now >= window.reset_at {
             window.count = 0;
-            window.reset_at = now + Duration::from_secs(self.config.window_seconds);
+            window.reset_at = reset_deadline(now, self.config.window_seconds);
         }
 
         // Check limit
@@ -296,6 +296,25 @@ fn duration_ceiling_seconds(duration: Duration) -> u64 {
     duration
         .as_secs()
         .saturating_add(u64::from(duration.subsec_nanos() != 0))
+}
+
+fn reset_deadline(now: Instant, window_seconds: u64) -> Instant {
+    now.checked_add(Duration::from_secs(window_seconds))
+        .unwrap_or_else(|| farthest_deadline(now))
+}
+
+fn farthest_deadline(now: Instant) -> Instant {
+    let mut low = Duration::ZERO;
+    let mut high = Duration::MAX;
+    while low < high {
+        let midpoint = low + (high - low) / 2 + Duration::from_nanos(1);
+        if now.checked_add(midpoint).is_some() {
+            low = midpoint;
+        } else {
+            high = midpoint - Duration::from_nanos(1);
+        }
+    }
+    now.checked_add(low).unwrap_or(now)
 }
 
 /// Rate limit statistics
@@ -652,5 +671,18 @@ mod tests {
         drop(windows);
 
         assert_eq!(limiter.stats().await.ip_requests, u32::MAX);
+    }
+
+    #[tokio::test]
+    async fn unrepresentable_window_does_not_panic_on_first_request() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            max_requests_anonymous: 1,
+            window_seconds: u64::MAX,
+            ..RateLimitConfig::default()
+        });
+
+        assert!(limiter.check_rate_limit(None, None).await);
+        assert!(!limiter.check_rate_limit(None, None).await);
+        assert!(limiter.get_reset_time(None, None).await > 0);
     }
 }
