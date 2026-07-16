@@ -291,6 +291,7 @@ impl MeshHello {
             &self.features,
             self.nonce.as_deref(),
         )?;
+        validate_advertised_ports(self.soulseek_ports.as_ref(), self.overlay_port)?;
         if self.auth_public_key.is_some() != self.auth_signature.is_some()
             || self
                 .auth_signature
@@ -379,7 +380,8 @@ impl MeshHelloAck {
             &self.username,
             &self.features,
             self.nonce_echo.as_deref(),
-        )
+        )?;
+        validate_advertised_ports(self.soulseek_ports.as_ref(), self.overlay_port)
     }
 }
 
@@ -671,6 +673,8 @@ pub enum OverlayError {
     InvalidPeerAuthentication,
     #[error("overlay handshake nonce does not match")]
     NonceMismatch,
+    #[error("overlay handshake advertises an invalid {0} port")]
+    InvalidAdvertisedPort(&'static str),
     #[error("overlay service field {0} is invalid")]
     InvalidServiceField(&'static str),
     #[error("remote overlay does not advertise mesh_service")]
@@ -758,6 +762,22 @@ fn validate_overlay_base(
     }
     if message_type.trim().is_empty() {
         return Err(OverlayError::InvalidMessageType);
+    }
+    Ok(())
+}
+
+fn validate_advertised_ports(
+    soulseek_ports: Option<&SoulseekPorts>,
+    overlay_port: Option<u16>,
+) -> Result<(), OverlayError> {
+    if soulseek_ports.is_some_and(|ports| ports.peer == 0) {
+        return Err(OverlayError::InvalidAdvertisedPort("Soulseek peer"));
+    }
+    if soulseek_ports.is_some_and(|ports| ports.file == 0) {
+        return Err(OverlayError::InvalidAdvertisedPort("Soulseek file"));
+    }
+    if overlay_port == Some(0) {
+        return Err(OverlayError::InvalidAdvertisedPort("overlay"));
     }
     Ok(())
 }
@@ -920,6 +940,55 @@ mod tests {
                 }
                 .validate(),
                 Err(OverlayError::InvalidVersion(rejected)) if rejected == version
+            ));
+        }
+    }
+
+    #[test]
+    fn overlay_handshakes_reject_zero_advertised_ports() {
+        for (soulseek_ports, overlay_port, field) in [
+            (
+                Some(SoulseekPorts {
+                    peer: 0,
+                    file: 22_35,
+                }),
+                None,
+                "Soulseek peer",
+            ),
+            (
+                Some(SoulseekPorts {
+                    peer: 22_34,
+                    file: 0,
+                }),
+                None,
+                "Soulseek file",
+            ),
+            (None, Some(0), "overlay"),
+        ] {
+            let hello = MeshHello::new(
+                "peer",
+                vec![FEATURE_MESH_SERVICE.to_owned()],
+                soulseek_ports.clone(),
+                overlay_port,
+                "nonce",
+            );
+            assert!(matches!(
+                hello,
+                Err(OverlayError::InvalidAdvertisedPort(rejected)) if rejected == field
+            ));
+            let acknowledgement = MeshHelloAck {
+                magic: OVERLAY_MAGIC.to_owned(),
+                message_type: "mesh_hello_ack".to_owned(),
+                version: OVERLAY_VERSION,
+                username: "peer".to_owned(),
+                features: vec![FEATURE_MESH_SERVICE.to_owned()],
+                soulseek_ports,
+                overlay_port,
+                nonce_echo: Some("nonce".to_owned()),
+            };
+            assert!(matches!(
+                acknowledgement.validate(),
+                Err(OverlayError::InvalidAdvertisedPort(rejected)) if rejected == field
             ));
         }
     }
