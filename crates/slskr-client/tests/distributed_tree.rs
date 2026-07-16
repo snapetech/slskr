@@ -18,7 +18,7 @@ use tokio::io::duplex;
 fn choose_parent_ignores_self_and_zero_ports_then_picks_stable_candidate() {
     let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
     let candidates = vec![
-        possible_parent("local", [10, 0, 0, 1], 2234),
+        possible_parent("LOCAL", [10, 0, 0, 1], 2234),
         possible_parent("zero", [10, 0, 0, 2], 0),
         possible_parent("zoe", [10, 0, 0, 4], 2234),
         possible_parent("alice", [10, 0, 0, 3], 2234),
@@ -219,6 +219,51 @@ fn distributed_tree_rejects_new_children_at_limit_but_allows_replacement() {
     ));
     assert_eq!(tree.children_len(), 1);
     assert!(tree.child_info("first").is_some());
+}
+
+#[test]
+fn distributed_tree_treats_child_username_casing_as_one_identity() {
+    let mut tree = DistributedTree::with_max_children("local", 1);
+    let (first, _) = duplex(64);
+    tree.add_child("Alice", DistributedConnection::new(first))
+        .unwrap();
+
+    let (replacement, _) = duplex(64);
+    assert!(tree
+        .add_child("alice", DistributedConnection::new(replacement))
+        .unwrap());
+    assert_eq!(tree.children_len(), 1);
+    assert_eq!(tree.child_info("ALICE").unwrap().username, "alice");
+
+    assert_eq!(
+        tree.handle_child_message("aLiCe", DistributedMessage::ChildDepth { depth: 3 }),
+        DistributedEvent::BranchChanged
+    );
+    assert_eq!(tree.child_info("alice").unwrap().depth, 3);
+    assert_eq!(tree.remove_child("ALICE").unwrap().username, "alice");
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[tokio::test]
+async fn distributed_search_source_exclusion_is_case_insensitive() {
+    let (tree_side, peer_side) = duplex(1024);
+    let mut tree = DistributedTree::new("local");
+    let mut peer = DistributedConnection::new(peer_side);
+    let search = distributed_search(5, "origin", 44, "album");
+    tree.add_child("Alice", DistributedConnection::new(tree_side))
+        .unwrap();
+
+    assert_eq!(
+        tree.forward_search_to_children(&search, Some("ALICE"))
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), peer.receive())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

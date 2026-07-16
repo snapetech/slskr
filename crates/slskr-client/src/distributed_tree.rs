@@ -120,7 +120,9 @@ impl<S> DistributedTree<S> {
 
     #[must_use]
     pub fn child_info(&self, username: &str) -> Option<&ChildInfo> {
-        self.children.get(username).map(|child| &child.info)
+        self.children
+            .get(&username_key(username))
+            .map(|child| &child.info)
     }
 
     #[must_use]
@@ -136,7 +138,11 @@ impl<S> DistributedTree<S> {
     pub fn choose_parent(&self, candidates: &[PossibleParent]) -> Option<ParentInfo> {
         candidates
             .iter()
-            .filter(|candidate| candidate.username != self.local_username)
+            .filter(|candidate| {
+                !candidate
+                    .username
+                    .eq_ignore_ascii_case(&self.local_username)
+            })
             .filter(|candidate| candidate.port != 0)
             .map(ParentInfo::from_possible_parent)
             .min_by(|left, right| {
@@ -210,13 +216,14 @@ impl<S> DistributedTree<S> {
         connection: DistributedConnection<S>,
     ) -> Result<bool, ClientError> {
         let username = username.into();
-        if self.children.len() >= self.max_children && !self.children.contains_key(&username) {
+        let key = username_key(&username);
+        if self.children.len() >= self.max_children && !self.children.contains_key(&key) {
             return Err(ClientError::DistributedChildCapacityFull {
                 max: self.max_children,
             });
         }
         let replaced = self.children.insert(
-            username.clone(),
+            key,
             ChildConnection {
                 info: ChildInfo { username, depth: 0 },
                 connection,
@@ -226,7 +233,9 @@ impl<S> DistributedTree<S> {
     }
 
     pub fn remove_child(&mut self, username: &str) -> Option<ChildInfo> {
-        self.children.remove(username).map(|child| child.info)
+        self.children
+            .remove(&username_key(username))
+            .map(|child| child.info)
     }
 
     pub fn handle_parent_message(&mut self, message: DistributedMessage) -> DistributedEvent {
@@ -257,7 +266,7 @@ impl<S> DistributedTree<S> {
             DistributedMessage::Ping => DistributedEvent::Ping,
             DistributedMessage::Search(search) => DistributedEvent::Search(search),
             DistributedMessage::ChildDepth { depth } => {
-                if let Some(child) = self.children.get_mut(username) {
+                if let Some(child) = self.children.get_mut(&username_key(username)) {
                     child.info.depth = depth;
                     DistributedEvent::BranchChanged
                 } else {
@@ -295,8 +304,9 @@ where
         except_username: Option<&str>,
     ) -> Result<usize, ClientError> {
         let mut sent = 0;
+        let except_key = except_username.map(username_key);
         for (username, child) in &mut self.children {
-            if except_username == Some(username.as_str()) {
+            if except_key.as_deref() == Some(username.as_str()) {
                 continue;
             }
             child
@@ -320,6 +330,10 @@ where
         }
         Ok(())
     }
+}
+
+fn username_key(username: &str) -> String {
+    username.to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
