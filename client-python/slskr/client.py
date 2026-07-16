@@ -58,24 +58,24 @@ class SlskrClient:
 
     async def __aenter__(self):
         """Context manager entry"""
-        self.session = aiohttp.ClientSession()
+        await self._ensure_session()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit"""
-        if self.session:
-            await self.session.close()
+        await self.close()
 
     async def _ensure_session(self):
         """Ensure session is open"""
-        if self.session is None:
+        if self.session is None or self.session.closed is True:
             self.session = aiohttp.ClientSession()
 
     async def close(self):
         """Close session"""
-        if self.session:
-            await self.session.close()
-            self.session = None
+        session = self.session
+        self.session = None
+        if session:
+            await session.close()
         if self.ws:
             await self.ws.disconnect()
             self.ws = None

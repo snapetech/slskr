@@ -302,6 +302,33 @@ def test_public_exports_are_available():
     assert inspect.iscoroutinefunction(SlskrClient.close)
 
 
+@pytest.mark.asyncio
+async def test_python_client_context_reuses_and_detaches_sessions():
+    first_session = MagicMock()
+    first_session.closed = False
+    first_session.close = AsyncMock()
+    second_session = MagicMock()
+    second_session.closed = False
+    second_session.close = AsyncMock()
+
+    client = SlskrClient("https://example.test", "token")
+    with patch(
+        "slskr.client.aiohttp.ClientSession",
+        side_effect=[first_session, second_session],
+    ) as create_session:
+        await client._ensure_session()
+        async with client:
+            assert client.session is first_session
+        assert client.session is None
+        await client._ensure_session()
+        assert client.session is second_session
+
+    assert create_session.call_count == 2
+    first_session.close.assert_awaited_once()
+    await client.close()
+    second_session.close.assert_awaited_once()
+
+
 class FakeContent:
     def __init__(self, chunks):
         self.chunks = chunks
