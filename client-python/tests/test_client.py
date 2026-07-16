@@ -329,6 +329,36 @@ async def test_python_client_context_reuses_and_detaches_sessions():
     second_session.close.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_python_client_coalesces_concurrent_websocket_connects():
+    connect_started = asyncio.Event()
+    release_connect = asyncio.Event()
+    websocket = MagicMock()
+    websocket.is_connected.side_effect = [False, True]
+
+    async def connect():
+        connect_started.set()
+        await release_connect.wait()
+
+    websocket.connect = AsyncMock(side_effect=connect)
+    websocket.disconnect = AsyncMock()
+
+    client = SlskrClient("https://example.test", "token")
+    with patch("slskr.client.WebSocketClient", return_value=websocket) as constructor:
+        first = asyncio.create_task(client.connect_ws())
+        await connect_started.wait()
+        second = asyncio.create_task(client.connect_ws())
+        release_connect.set()
+        first_result, second_result = await asyncio.gather(first, second)
+
+    assert first_result is websocket
+    assert second_result is websocket
+    constructor.assert_called_once()
+    websocket.connect.assert_awaited_once()
+    await client.close()
+    websocket.disconnect.assert_awaited_once()
+
+
 class FakeContent:
     def __init__(self, chunks):
         self.chunks = chunks

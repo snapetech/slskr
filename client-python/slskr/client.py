@@ -55,6 +55,7 @@ class SlskrClient:
         # Initialize batch and websocket clients
         self.batch = BatchClient(self)
         self.ws = None  # WebSocket client created on demand
+        self._ws_lock = asyncio.Lock()
 
     async def __aenter__(self):
         """Context manager entry"""
@@ -76,9 +77,11 @@ class SlskrClient:
         self.session = None
         if session:
             await session.close()
-        if self.ws:
-            await self.ws.disconnect()
+        async with self._ws_lock:
+            ws = self.ws
             self.ws = None
+            if ws:
+                await ws.disconnect()
 
     # =========================================================================
     # WebSocket Connection
@@ -86,18 +89,20 @@ class SlskrClient:
 
     async def connect_ws(self) -> WebSocketClient:
         """Connect to WebSocket for real-time events"""
-        if self.ws is None:
-            self.ws = WebSocketClient(self.base_url, self.token, debug=self.debug)
-        
-        if not self.ws.is_connected():
-            await self.ws.connect()
-        
-        return self.ws
+        async with self._ws_lock:
+            if self.ws is None:
+                self.ws = WebSocketClient(self.base_url, self.token, debug=self.debug)
+
+            if not self.ws.is_connected():
+                await self.ws.connect()
+
+            return self.ws
 
     async def disconnect_ws(self):
         """Disconnect WebSocket"""
-        if self.ws:
-            await self.ws.disconnect()
+        async with self._ws_lock:
+            if self.ws:
+                await self.ws.disconnect()
 
     def get_ws(self) -> Optional[WebSocketClient]:
         """Get WebSocket client (must be connected first)"""
