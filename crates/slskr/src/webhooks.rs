@@ -9,8 +9,10 @@ use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::future::Future;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -477,7 +479,9 @@ impl WebhookDispatcher {
         // Create HMAC signature
         let sig = WebhookSignature::create(payload_bytes, secret)?;
 
-        let resolved = validate_and_resolve_webhook_url(url)?;
+        let timeout = timeout_secs.clamp(WEBHOOK_MIN_TIMEOUT_SECONDS, WEBHOOK_MAX_TIMEOUT_SECONDS);
+        let request_timeout = Duration::from_secs(timeout as u64);
+        let resolved = validate_and_resolve_webhook_url(url, request_timeout).await?;
 
         // Disable redirects so validation cannot be bypassed after the initial URL check.
         let mut client_builder =
@@ -487,14 +491,13 @@ impl WebhookDispatcher {
         }
         let client = client_builder.build()?;
 
-        let timeout = timeout_secs.clamp(WEBHOOK_MIN_TIMEOUT_SECONDS, WEBHOOK_MAX_TIMEOUT_SECONDS);
         let response = client
             .post(url)
             .header("X-Webhook-Signature", sig.as_header())
             .header("X-Webhook-Event", "webhook")
             .header("Content-Type", "application/json")
             .body(payload.to_string())
-            .timeout(std::time::Duration::from_secs(timeout as u64))
+            .timeout(request_timeout)
             .send()
             .await?;
         let status = response.status();
@@ -564,8 +567,9 @@ pub(crate) fn validate_webhook_url_for_registration(
     Ok(())
 }
 
-fn validate_and_resolve_webhook_url(
+async fn validate_and_resolve_webhook_url(
     url: &str,
+    timeout: Duration,
 ) -> Result<ResolvedWebhookTarget, Box<dyn std::error::Error>> {
     validate_webhook_url_for_registration(url)?;
     let parsed = reqwest::Url::parse(url)?;
@@ -574,7 +578,15 @@ fn validate_and_resolve_webhook_url(
     let port = parsed
         .port_or_known_default()
         .ok_or("webhook URL port is unknown")?;
-    let addrs = (host, port).to_socket_addrs()?.collect::<Vec<_>>();
+    let addrs = resolve_webhook_addrs(
+        async move {
+            tokio::net::lookup_host((host, port))
+                .await
+                .map(|addrs| addrs.collect())
+        },
+        timeout,
+    )
+    .await?;
     if addrs.is_empty() {
         return Err("webhook URL did not resolve".into());
     }
@@ -587,6 +599,19 @@ fn validate_and_resolve_webhook_url(
         host: host.to_string(),
         addrs,
     })
+}
+
+async fn resolve_webhook_addrs<F>(
+    resolution: F,
+    timeout: Duration,
+) -> Result<Vec<SocketAddr>, Box<dyn std::error::Error>>
+where
+    F: Future<Output = std::io::Result<Vec<SocketAddr>>>,
+{
+    tokio::time::timeout(timeout, resolution)
+        .await
+        .map_err(|_| "webhook DNS resolution timed out")?
+        .map_err(Into::into)
 }
 
 fn is_blocked_webhook_ip(ip: IpAddr) -> bool {
@@ -1012,6 +1037,17 @@ mod tests {
         assert!(validate_webhook_url_for_registration("http://127.0.0.1/hook").is_err());
         assert!(validate_webhook_url_for_registration("http://10.0.0.5/hook").is_err());
         assert!(validate_webhook_url_for_registration("http://169.254.169.254/hook").is_err());
+    }
+
+    #[tokio::test]
+    async fn webhook_dns_resolution_is_bounded() {
+        let error = resolve_webhook_addrs(
+            std::future::pending::<std::io::Result<Vec<SocketAddr>>>(),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "webhook DNS resolution timed out");
     }
 
     #[test]
