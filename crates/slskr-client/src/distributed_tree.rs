@@ -375,10 +375,12 @@ impl BranchInfoReporter {
                 field: "branch info",
             });
         }
-        Ok(Self {
-            interval,
-            next_due: now + interval,
-        })
+        let next_due = now
+            .checked_add(interval)
+            .ok_or(ClientError::InvalidInterval {
+                field: "branch info",
+            })?;
+        Ok(Self { interval, next_due })
     }
 
     #[must_use]

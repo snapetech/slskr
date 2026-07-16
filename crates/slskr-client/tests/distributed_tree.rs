@@ -368,6 +368,16 @@ fn branch_info_reporter_rejects_zero_interval() {
     ));
 }
 
+#[test]
+fn branch_info_reporter_rejects_interval_that_overflows_deadline() {
+    assert!(matches!(
+        BranchInfoReporter::new(Duration::MAX, Instant::now()),
+        Err(ClientError::InvalidInterval {
+            field: "branch info"
+        })
+    ));
+}
+
 fn possible_parent(username: &str, ip: [u8; 4], port: u32) -> PossibleParent {
     PossibleParent {
         username: username.to_owned(),
