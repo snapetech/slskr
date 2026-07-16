@@ -63,6 +63,7 @@ export declare class SlskrClient {
     private putAuth;
     private deleteAuth;
     private request;
+    private readJson;
     private buildUrl;
     private pathSegment;
 }

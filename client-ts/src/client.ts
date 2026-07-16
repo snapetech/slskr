@@ -27,6 +27,9 @@ import {
 } from './types';
 import { ApiError, NetworkError, TimeoutError } from './errors';
 
+const MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_HTTP_ERROR_BYTES = 64 * 1024;
+
 export class SlskrClient {
   private baseUrl: string;
   private token: string;
@@ -329,7 +332,7 @@ export class SlskrClient {
       }
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({})) as {
+        const errorData = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({})) as {
           error?: string;
           details?: string;
         };
@@ -340,10 +343,14 @@ export class SlskrClient {
         );
       }
 
-      const data = await response.json();
+      if (response.status === 204) {
+        return undefined as T;
+      }
+
+      const data = await this.readJson(response, MAX_HTTP_RESPONSE_BYTES);
       return data as T;
     } catch (error) {
-      if (error instanceof ApiError) {
+      if (error instanceof ApiError || error instanceof NetworkError) {
         throw error;
       }
 
@@ -361,6 +368,43 @@ export class SlskrClient {
         error instanceof Error ? error : undefined
       );
     }
+  }
+
+  private async readJson(response: Response, maximum: number): Promise<unknown> {
+    const declaredLength = response.headers.get('content-length');
+    if (declaredLength !== null && Number(declaredLength) > maximum) {
+      throw new NetworkError(`HTTP response body exceeds ${maximum} bytes`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      const text = await response.text();
+      if (new TextEncoder().encode(text).byteLength > maximum) {
+        throw new NetworkError(`HTTP response body exceeds ${maximum} bytes`);
+      }
+      return JSON.parse(text);
+    }
+
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > maximum) {
+        await reader.cancel();
+        throw new NetworkError(`HTTP response body exceeds ${maximum} bytes`);
+      }
+      chunks.push(value);
+    }
+
+    const body = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(body));
   }
 
   // =========================================================================
