@@ -1,4 +1,10 @@
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::hash_map::DefaultHasher,
+    future::Future,
+    hash::{Hash, Hasher},
+    pin::Pin,
+    sync::Arc,
+};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
@@ -18,6 +24,8 @@ type ConnectFuture<S> =
     Pin<Box<dyn Future<Output = Result<PeerMessageConnection<S>, ClientError>> + Send>>;
 
 pub type PeerConnector<S> = Arc<dyn Fn(String) -> ConnectFuture<S> + Send + Sync>;
+
+const PEER_CONNECT_STRIPES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenGenerator {
@@ -49,7 +57,7 @@ pub struct ConnectionManager<ServerStream, PeerStream> {
     peer_cache: PeerConnectionCache<PeerStream>,
     connector: PeerConnector<PeerStream>,
     tokens: Arc<Mutex<TokenGenerator>>,
-    peer_connects: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    peer_connects: Arc<[Mutex<()>; PEER_CONNECT_STRIPES]>,
 }
 
 impl<ServerStream, PeerStream> ConnectionManager<ServerStream, PeerStream>
@@ -68,7 +76,7 @@ where
             peer_cache,
             connector,
             tokens: Arc::new(Mutex::new(TokenGenerator::default())),
-            peer_connects: Arc::new(Mutex::new(HashMap::new())),
+            peer_connects: Arc::new(std::array::from_fn(|_| Mutex::new(()))),
         }
     }
 
@@ -88,36 +96,17 @@ where
             return Ok(false);
         }
 
-        let key = username.to_ascii_lowercase();
-        let connect_gate = {
-            let mut peer_connects = self.peer_connects.lock().await;
-            Arc::clone(
-                peer_connects
-                    .entry(key.clone())
-                    .or_insert_with(|| Arc::new(Mutex::new(()))),
-            )
-        };
-        let gate = connect_gate.lock().await;
-        let result = async {
-            if self.peer_cache.contains(username).await {
-                return Ok(false);
-            }
-            let connection = (self.connector)(username.to_owned()).await?;
-            self.peer_cache
-                .insert(username.to_owned(), connection)
-                .await?;
-            Ok(true)
+        let _gate = self.peer_connects[peer_connect_stripe(username)]
+            .lock()
+            .await;
+        if self.peer_cache.contains(username).await {
+            return Ok(false);
         }
-        .await;
-        drop(gate);
-        let mut peer_connects = self.peer_connects.lock().await;
-        if peer_connects
-            .get(&key)
-            .is_some_and(|current| Arc::ptr_eq(current, &connect_gate))
-        {
-            peer_connects.remove(&key);
-        }
-        result
+        let connection = (self.connector)(username.to_owned()).await?;
+        self.peer_cache
+            .insert(username.to_owned(), connection)
+            .await?;
+        Ok(true)
     }
 
     pub async fn request_indirect_peer_messages(
@@ -188,4 +177,10 @@ where
             .await?;
         Ok(())
     }
+}
+
+fn peer_connect_stripe(username: &str) -> usize {
+    let mut hasher = DefaultHasher::new();
+    username.to_ascii_lowercase().hash(&mut hasher);
+    usize::try_from(hasher.finish() % PEER_CONNECT_STRIPES as u64).unwrap_or(0)
 }

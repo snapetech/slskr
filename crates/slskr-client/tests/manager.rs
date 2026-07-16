@@ -90,6 +90,41 @@ async fn concurrent_ensure_peer_messages_connects_once_per_peer() {
 }
 
 #[tokio::test]
+async fn cancelled_peer_connect_does_not_block_retry() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_connector = Arc::clone(&calls);
+    let release = Arc::new(Barrier::new(2));
+    let release_for_connector = Arc::clone(&release);
+    let (client, _) = duplex(512);
+    let manager = Arc::new(ConnectionManager::new(
+        ServerSession::new(ServerConnection::new(client)),
+        PeerConnectionCache::new(),
+        Arc::new(move |_| {
+            let call = calls_for_connector.fetch_add(1, Ordering::SeqCst);
+            let release = Arc::clone(&release_for_connector);
+            Box::pin(async move {
+                if call == 0 {
+                    release.wait().await;
+                }
+                let (stream, _) = duplex(64);
+                Ok(PeerMessageConnection::new(stream))
+            })
+        }),
+    ));
+
+    let first_manager = Arc::clone(&manager);
+    let first = tokio::spawn(async move { first_manager.ensure_peer_messages("peer").await });
+    while calls.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    first.abort();
+    let _ = first.await;
+
+    assert!(manager.ensure_peer_messages("PEER").await.unwrap());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
 async fn request_indirect_peer_messages_sends_server_connect_message() {
     let (client, server) = duplex(512);
     let manager = ConnectionManager::new(
