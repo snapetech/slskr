@@ -9,6 +9,7 @@ use slskr_client::{
 use slskr_protocol::{distributed::DistributedMessage, init::InitMessage, peer::PeerMessage};
 use tokio::io::duplex;
 use tokio::net::TcpStream;
+use tokio::time::Duration;
 
 #[tokio::test]
 async fn demuxes_tagged_peer_message_connection() {
@@ -246,4 +247,42 @@ async fn listener_accepts_and_demuxes_tcp_connection() {
     assert!(remote_addr.ip().is_loopback());
     assert!(matches!(incoming, IncomingConnection::PeerMessages(_)));
     client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn listener_times_out_silent_initialization_handshake() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let _silent_peer = TcpStream::connect(address).await.unwrap();
+
+    let error = listener
+        .accept_with_timeout(Duration::from_millis(10))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::TimedOut {
+            operation: "peer initialization handshake"
+        }
+    ));
+}
+
+#[tokio::test]
+async fn obfuscated_listener_times_out_silent_initialization_handshake() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let _silent_peer = TcpStream::connect(address).await.unwrap();
+
+    let error = listener
+        .accept_obfuscated_with_timeout(Duration::from_millis(10))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::TimedOut {
+            operation: "obfuscated peer initialization handshake"
+        }
+    ));
 }

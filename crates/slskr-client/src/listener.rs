@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
     net::{TcpListener, TcpStream, ToSocketAddrs},
+    time::{self, Duration},
 };
 
 use crate::{
@@ -12,6 +13,8 @@ use crate::{
     stream::{DistributedConnection, ObfuscatedPeerMessageConnection, PeerMessageConnection},
     ClientError,
 };
+
+pub const DEFAULT_INIT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub enum IncomingConnection<S> {
@@ -55,8 +58,21 @@ impl Listener {
     }
 
     pub async fn accept(&self) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
+        self.accept_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+            .await
+    }
+
+    pub async fn accept_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
         let (stream, address) = self.inner.accept().await?;
-        Ok((demux_incoming(stream).await?, address))
+        let incoming = time::timeout(timeout, demux_incoming(stream))
+            .await
+            .map_err(|_| ClientError::TimedOut {
+                operation: "peer initialization handshake",
+            })??;
+        Ok((incoming, address))
     }
 
     pub async fn accept_raw(&self) -> Result<(TcpStream, SocketAddr), ClientError> {
@@ -66,8 +82,21 @@ impl Listener {
     pub async fn accept_obfuscated(
         &self,
     ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
+        self.accept_obfuscated_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+            .await
+    }
+
+    pub async fn accept_obfuscated_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
         let (stream, address) = self.inner.accept().await?;
-        Ok((demux_obfuscated_incoming(stream).await?, address))
+        let incoming = time::timeout(timeout, demux_obfuscated_incoming(stream))
+            .await
+            .map_err(|_| ClientError::TimedOut {
+                operation: "obfuscated peer initialization handshake",
+            })??;
+        Ok((incoming, address))
     }
 
     #[must_use]
