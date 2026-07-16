@@ -429,6 +429,27 @@ fn responder_suppresses_excluded_search_phrases() {
         .is_none());
 }
 
+#[test]
+fn responder_bounds_files_in_a_single_search_response() {
+    let entries = (0..(MAX_SEARCH_RESULT_FILES_PER_TOKEN + 1))
+        .map(|index| entry(&format!("Music/match-{index}.flac")))
+        .collect();
+    let responder = SearchResponder::new("local", InMemoryShareIndex::new(entries));
+
+    let message = responder
+        .respond_to_server_search(&ServerMessage::FileSearchIncoming {
+            username: "remote".to_owned(),
+            token: 55,
+            query: "match".to_owned(),
+        })
+        .unwrap();
+
+    let PeerMessage::FileSearchResponse(response) = message else {
+        panic!("expected search response");
+    };
+    assert_eq!(response.results.len(), MAX_SEARCH_RESULT_FILES_PER_TOKEN);
+}
+
 fn response(username: &str, token: u32) -> FileSearchResponse {
     FileSearchResponse {
         username: username.to_owned(),

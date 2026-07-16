@@ -389,7 +389,11 @@ impl TimedSearchResults {
 }
 
 pub trait ShareIndex {
-    fn search(&self, query: &str) -> Vec<FileEntry>;
+    fn search_limited(&self, query: &str, limit: usize) -> Vec<FileEntry>;
+
+    fn search(&self, query: &str) -> Vec<FileEntry> {
+        self.search_limited(query, usize::MAX)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -410,9 +414,9 @@ impl InMemoryShareIndex {
 }
 
 impl ShareIndex for InMemoryShareIndex {
-    fn search(&self, query: &str) -> Vec<FileEntry> {
+    fn search_limited(&self, query: &str, limit: usize) -> Vec<FileEntry> {
         let terms = normalize_terms(query);
-        if terms.is_empty() {
+        if terms.is_empty() || limit == 0 {
             return Vec::new();
         }
 
@@ -422,6 +426,7 @@ impl ShareIndex for InMemoryShareIndex {
                 let filename = entry.filename.to_ascii_lowercase();
                 terms.iter().all(|term| filename.contains(term))
             })
+            .take(limit)
             .cloned()
             .collect()
     }
@@ -493,7 +498,9 @@ where
             return None;
         }
 
-        let results = self.index.search(query);
+        let results = self
+            .index
+            .search_limited(query, MAX_SEARCH_RESULT_FILES_PER_TOKEN);
         if results.is_empty() {
             return None;
         }
