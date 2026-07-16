@@ -12,6 +12,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::{server::ServerSession, stream::DistributedConnection, ClientError};
 
 pub const DEFAULT_MAX_DISTRIBUTED_CHILDREN: usize = 128;
+pub const MAX_DISTRIBUTED_USERNAME_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParentInfo {
@@ -216,6 +217,12 @@ impl<S> DistributedTree<S> {
         connection: DistributedConnection<S>,
     ) -> Result<bool, ClientError> {
         let username = username.into();
+        if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+            return Err(ClientError::DistributedUsernameTooLong {
+                length: username.len(),
+                max: MAX_DISTRIBUTED_USERNAME_BYTES,
+            });
+        }
         let key = username_key(&username);
         if self.children.len() >= self.max_children && !self.children.contains_key(&key) {
             return Err(ClientError::DistributedChildCapacityFull {

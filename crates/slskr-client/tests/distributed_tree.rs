@@ -4,7 +4,10 @@ use std::{
 };
 
 use slskr_client::{
-    distributed_tree::{BranchInfoReporter, DistributedEvent, DistributedTree, ParentInfo},
+    distributed_tree::{
+        BranchInfoReporter, DistributedEvent, DistributedTree, ParentInfo,
+        MAX_DISTRIBUTED_USERNAME_BYTES,
+    },
     server::ServerSession,
     stream::{DistributedConnection, ServerConnection},
     ClientError,
@@ -262,6 +265,25 @@ fn distributed_tree_treats_child_username_casing_as_one_identity() {
     );
     assert_eq!(tree.child_info("alice").unwrap().depth, 3);
     assert_eq!(tree.remove_child("ALICE").unwrap().username, "alice");
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[test]
+fn distributed_tree_rejects_oversized_child_username_without_storing_it() {
+    let mut tree = DistributedTree::new("local");
+    let (child, _) = duplex(64);
+    let oversized = "x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1);
+
+    let error = tree
+        .add_child(&oversized, DistributedConnection::new(child))
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::DistributedUsernameTooLong { length, max }
+            if length == MAX_DISTRIBUTED_USERNAME_BYTES + 1
+                && max == MAX_DISTRIBUTED_USERNAME_BYTES
+    ));
     assert_eq!(tree.children_len(), 0);
 }
 
