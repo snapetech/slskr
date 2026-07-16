@@ -211,17 +211,54 @@ fn load_os() -> Result<Option<StoredCredentials>, String> {
 }
 
 fn store_os(credentials: &LoginCredentials) -> Result<&'static str, String> {
-    keyring_entry(KEYRING_USERNAME_KEY)
-        .set_password(&credentials.username)
-        .map_err(|error| {
-            format!("failed to store Soulseek username in OS credential store: {error}")
-        })?;
-    keyring_entry(KEYRING_PASSWORD_KEY)
-        .set_password(&credentials.password)
-        .map_err(|error| {
-            format!("failed to store Soulseek password in OS credential store: {error}")
-        })?;
+    store_os_with(
+        credentials,
+        |user| match keyring_entry(user).get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        },
+        |user, value| {
+            keyring_entry(user)
+                .set_password(value)
+                .map_err(|error| error.to_string())
+        },
+        |user| {
+            keyring_entry(user)
+                .delete_credential()
+                .map_err(|error| error.to_string())
+        },
+    )?;
     Ok("os")
+}
+
+fn store_os_with(
+    credentials: &LoginCredentials,
+    mut get: impl FnMut(&str) -> Result<Option<String>, String>,
+    mut set: impl FnMut(&str, &str) -> Result<(), String>,
+    mut delete: impl FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let previous_username = get(KEYRING_USERNAME_KEY).map_err(|error| {
+        format!("failed to snapshot Soulseek username in OS credential store: {error}")
+    })?;
+    set(KEYRING_USERNAME_KEY, &credentials.username).map_err(|error| {
+        format!("failed to store Soulseek username in OS credential store: {error}")
+    })?;
+    if let Err(error) = set(KEYRING_PASSWORD_KEY, &credentials.password) {
+        let rollback = match previous_username {
+            Some(value) => set(KEYRING_USERNAME_KEY, &value),
+            None => delete(KEYRING_USERNAME_KEY),
+        };
+        if let Err(rollback_error) = rollback {
+            return Err(format!(
+                "failed to store Soulseek password in OS credential store: {error}; username rollback failed: {rollback_error}"
+            ));
+        }
+        return Err(format!(
+            "failed to store Soulseek password in OS credential store: {error}"
+        ));
+    }
+    Ok(())
 }
 
 fn keyring_entry(user: &str) -> Entry {
@@ -496,6 +533,41 @@ mod tests {
         let error = load_file(&path).expect_err("reject exposed credential file");
         assert!(error.contains("must not be accessible by group or other users"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn os_credential_password_failure_rolls_back_username() {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+
+        let values = RefCell::new(HashMap::from([
+            (KEYRING_USERNAME_KEY.to_owned(), "old-user".to_owned()),
+            (KEYRING_PASSWORD_KEY.to_owned(), "old-password".to_owned()),
+        ]));
+        let credentials =
+            LoginCredentials::default_client("new-user".to_owned(), "new-password".to_owned());
+
+        let error = store_os_with(
+            &credentials,
+            |key| Ok(values.borrow().get(key).cloned()),
+            |key, value| {
+                if key == KEYRING_PASSWORD_KEY {
+                    Err("simulated password write failure".to_owned())
+                } else {
+                    values.borrow_mut().insert(key.to_owned(), value.to_owned());
+                    Ok(())
+                }
+            },
+            |key| {
+                values.borrow_mut().remove(key);
+                Ok(())
+            },
+        )
+        .expect_err("password failure must be reported");
+
+        assert!(error.contains("failed to store Soulseek password"));
+        assert_eq!(values.borrow()[KEYRING_USERNAME_KEY], "old-user");
+        assert_eq!(values.borrow()[KEYRING_PASSWORD_KEY], "old-password");
     }
 }
 
