@@ -27,6 +27,7 @@ mod openapi;
 mod persistence;
 mod pod_channels;
 mod pods;
+mod port_forwarding;
 #[allow(
     dead_code,
     reason = "probe metadata builders are shared by optional live probes"
@@ -10486,6 +10487,7 @@ struct AppState {
     pod_membership_workflow: RwLock<PodMembershipWorkflowStore>,
     pod_channels: RwLock<pod_channels::PodChannelStore>,
     pods: RwLock<pods::PodStore>,
+    port_forwarding: port_forwarding::Manager,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
@@ -21861,7 +21863,10 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/port-forwarding/status") => {
-            Ok(routing::ok_response("[]".to_owned()))
+            Ok(routing::ok_response(
+                serde_json::to_string(&state.port_forwarding.statuses().await)
+                    .unwrap_or_else(|_| "[]".to_owned()),
+            ))
         }
 
         ("GET", path) if path.starts_with("/api/port-forwarding/status/") => {
@@ -21871,7 +21876,13 @@ async fn route_http_request_with_headers(
             if local_port.parse::<u16>().is_err() || local_port == "0" {
                 return Ok(routing::not_found_response());
             }
-            Ok(routing::not_found_response())
+            let local_port = local_port.parse::<u16>().unwrap_or_default();
+            match state.port_forwarding.status(local_port).await {
+                Some(status) => Ok(routing::ok_response(
+                    serde_json::to_string(&status).unwrap_or_else(|_| "{}".to_owned()),
+                )),
+                None => Ok(routing::not_found_response()),
+            }
         }
 
         ("GET", "/api/port-forwarding/available-ports") => {
@@ -21898,29 +21909,39 @@ async fn route_http_request_with_headers(
                     ));
                 }
             };
-            let available_port_count = end_port - start_port + 1;
+            let used_ports = state
+                .port_forwarding
+                .used_ports()
+                .await
+                .into_iter()
+                .map(usize::from)
+                .filter(|port| (start_port..=end_port).contains(port))
+                .collect::<HashSet<_>>();
+            let available_port_count = end_port - start_port + 1 - used_ports.len();
             let returned_port_count = limit.unwrap_or(1_000).min(available_port_count);
             let available_ports = (start_port..=end_port)
+                .filter(|port| !used_ports.contains(port))
                 .take(returned_port_count)
                 .collect::<Vec<_>>();
             Ok(routing::ok_response(
                 serde_json::json!({
                     "availablePortCount": available_port_count,
                     "availablePorts": available_ports,
-                    "usedPortCount": 0,
+                    "usedPortCount": used_ports.len(),
                 })
                 .to_string(),
             ))
         }
 
         ("GET", "/api/port-forwarding/stream-stats") => {
+            let rules = state.port_forwarding.statuses().await;
             Ok(routing::ok_response(
                 serde_json::json!({
-                    "totalForwardingRules": 0,
-                    "activeRules": 0,
-                    "totalConnections": 0,
-                    "totalBytesForwarded": 0,
-                    "rules": [],
+                    "totalForwardingRules": rules.len(),
+                    "activeRules": rules.iter().filter(|rule| rule.is_active).count(),
+                    "totalConnections": rules.iter().map(|rule| rule.active_connections).sum::<usize>(),
+                    "totalBytesForwarded": rules.iter().map(|rule| rule.bytes_forwarded).sum::<u64>(),
+                    "rules": rules,
                 })
                 .to_string(),
             ))
@@ -21974,9 +21995,108 @@ async fn route_http_request_with_headers(
                     "Service name must be at most 100 characters",
                 ));
             }
-            Ok(routing::service_unavailable_response(
-                "Pod private-gateway tunnel transport is unavailable",
-            ))
+            let local_port = local_port.unwrap_or_default() as u16;
+            let destination_port = destination_port.unwrap_or_default() as u16;
+            let Some(local_username) = pod_request_peer_id(state).await else {
+                return Ok(routing::forbidden_response(
+                    "Authenticated peer identity is required",
+                ));
+            };
+            let (pod, gateway_certificate_sha256) = {
+                let pods = state.pods.read().await;
+                if !pods.is_member(pod_id, &local_username) {
+                    return Ok(routing::forbidden_response(
+                        "Only pod members can start port forwarding",
+                    ));
+                }
+                if !pods.destination_allowed(pod_id, destination_host, destination_port) {
+                    return Ok(routing::forbidden_response(
+                        "Destination is not allowed by the Pod private-gateway policy",
+                    ));
+                }
+                (
+                    pods.get(pod_id),
+                    pods.gateway_certificate_sha256(pod_id),
+                )
+            };
+            let Some(pod) = pod else {
+                return Ok(routing::not_found_response());
+            };
+            let Some(gateway_certificate_sha256) = gateway_certificate_sha256 else {
+                return Ok(routing::service_unavailable_response(
+                    "Pod private-gateway policy has no authenticated TLS certificate pin",
+                ));
+            };
+            let gateway_peer_id = pod
+                .private_service_policy
+                .as_ref()
+                .and_then(serde_json::Value::as_object)
+                .and_then(|policy| policy.get("gatewayPeerId"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let Some(gateway_peer_id) = gateway_peer_id else {
+                return Ok(routing::service_unavailable_response(
+                    "Pod private-gateway policy has no designated gateway",
+                ));
+            };
+            let descriptor = state
+                .mesh
+                .read()
+                .await
+                .capability_records
+                .iter()
+                .find(|descriptor| {
+                    descriptor.peer_id.eq_ignore_ascii_case(gateway_peer_id)
+                        || descriptor.username.eq_ignore_ascii_case(gateway_peer_id)
+                })
+                .cloned();
+            let Some(descriptor) = descriptor else {
+                return Ok(routing::service_unavailable_response(
+                    "Gateway peer capability record is unavailable",
+                ));
+            };
+            let Some(overlay_port) = descriptor.overlay_port else {
+                return Ok(routing::service_unavailable_response(
+                    "Gateway peer did not advertise an overlay port",
+                ));
+            };
+            let peer_address = match request_peer_endpoint(state, &descriptor.username).await {
+                Ok(address) => address,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
+            let gateway_endpoint = SocketAddr::V4(SocketAddrV4::new(
+                peer_connect_ip(state, &peer_address),
+                overlay_port,
+            ));
+            match state
+                .port_forwarding
+                .start(port_forwarding::StartRequest {
+                    local_port,
+                    pod_id: pod_id.to_owned(),
+                    destination_host: destination_host.to_owned(),
+                    destination_port,
+                    service_name: service_name.map(str::to_owned),
+                    gateway_username: descriptor.username,
+                    gateway_endpoint,
+                    gateway_certificate_sha256,
+                    local_username,
+                })
+                .await
+            {
+                Ok(_) => Ok(routing::ok_response(
+                    r#"{"message":"Port forwarding started"}"#.to_owned(),
+                )),
+                Err(error) if error.contains("already being forwarded") => {
+                    Ok(routing::conflict_response(&error))
+                }
+                Err(error) => {
+                    eprintln!("port forwarding start failed: {error}");
+                    Ok(routing::service_unavailable_response(
+                        "port forwarding is unavailable",
+                    ))
+                }
+            }
         }
 
         ("POST", path) if path.starts_with("/api/port-forwarding/stop/") => {
@@ -21986,6 +22106,7 @@ async fn route_http_request_with_headers(
             if local_port.parse::<u16>().is_err() || local_port == "0" {
                 return Ok(routing::not_found_response());
             }
+            state.port_forwarding.stop(local_port.parse().unwrap_or_default()).await;
             Ok(routing::ok_response(
                 r#"{"message":"Port forwarding stopped"}"#.to_owned(),
             ))
@@ -26404,6 +26525,7 @@ async fn serve(once: bool) -> Result<(), String> {
         pod_membership_workflow: RwLock::new(PodMembershipWorkflowStore::default()),
         pod_channels: RwLock::new(pod_channel_store),
         pods: RwLock::new(pod_store),
+        port_forwarding: port_forwarding::Manager::new(),
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
         event_tx,
@@ -36711,6 +36833,7 @@ mod tests {
                 &config.state_dir,
             )),
             pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
+            port_forwarding: super::port_forwarding::Manager::new(),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -37704,8 +37827,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn port_forwarding_reads_are_bounded_and_mutations_fail_truthfully() {
-        let (state, _receiver) = test_state();
+    async fn port_forwarding_reads_are_bounded_and_start_requires_an_authorized_pinned_gateway() {
+        let (state, _receiver) = test_state_with_env(MapEnv::default().with(
+            "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
+            "gateway=127.0.0.1:2234",
+        ));
 
         let status =
             super::route_http_request("GET", "/api/v0/port-forwarding/status", None, "", &state)
@@ -37781,13 +37907,65 @@ mod tests {
         )
         .await
         .expect("unsupported port forwarding start");
-        assert_eq!(start.status, "503 Service Unavailable");
-        assert!(start.body.contains("private-gateway"));
+        assert_eq!(start.status, "403 Forbidden");
 
-        let stop =
-            super::route_http_request("POST", "/api/port-forwarding/stop/2000", None, "", &state)
-                .await
-                .expect("idempotent port forwarding stop");
+        let pin = "07".repeat(32);
+        let create = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            &format!(
+                r#"{{"pod":{{"podId":"pod-forward","name":"Forward","capabilities":[0],"privateServicePolicy":{{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","gatewayCertificateSha256":"{pin}","registeredServices":[],"allowedDestinations":[{{"hostPattern":"service","port":80,"protocol":"tcp","allowPublic":false}}]}}}}}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create gateway pod");
+        assert_eq!(create.status, "201 Created", "{}", create.body);
+        let mut gateway = test_capability_descriptor(
+            "gateway",
+            vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+        );
+        gateway.peer_id = "tester".to_owned();
+        state.mesh.write().await.capability_records.push(gateway);
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("port probe");
+        let local_port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let start = super::route_http_request(
+            "POST",
+            "/api/v0/port-forwarding/start",
+            None,
+            &format!(
+                r#"{{"localPort":{local_port},"podId":"pod-forward","destinationHost":"service","destinationPort":80}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("start port forwarding");
+        assert_eq!(start.status, "200 OK", "{}", start.body);
+        let status = super::route_http_request(
+            "GET",
+            &format!("/api/v0/port-forwarding/status/{local_port}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forwarding status");
+        assert_eq!(status.status, "200 OK");
+        assert!(status.body.contains("pod-forward"));
+
+        let stop = super::route_http_request(
+            "POST",
+            &format!("/api/port-forwarding/stop/{local_port}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("port forwarding stop");
         assert_eq!(stop.status, "200 OK");
     }
 
@@ -56091,6 +56269,7 @@ mod tests {
                 &config.state_dir,
             )),
             pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
+            port_forwarding: super::port_forwarding::Manager::new(),
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -56264,6 +56443,7 @@ mod tests {
             pods: RwLock::new(super::pods::PodStore::empty(
                 &cookie_enabled_config.state_dir,
             )),
+            port_forwarding: super::port_forwarding::Manager::new(),
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),

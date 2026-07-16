@@ -211,6 +211,28 @@ impl PodStore {
             .then(|| gateway_peer_id(proposed).unwrap_or_default().to_owned())
     }
 
+    pub fn destination_allowed(&self, pod_id: &str, host: &str, port: u16) -> bool {
+        self.pods.get(pod_id).is_some_and(|stored| {
+            allowed_destinations(&stored.pod).is_some_and(|destinations| {
+                destinations.iter().any(|destination| {
+                    destination
+                        .get("hostPattern")
+                        .and_then(Value::as_str)
+                        .is_some_and(|allowed| allowed.trim().eq_ignore_ascii_case(host.trim()))
+                        && destination.get("port").and_then(Value::as_u64) == Some(u64::from(port))
+                        && destination.get("protocol").and_then(Value::as_str) == Some("tcp")
+                        && destination.get("allowPublic").and_then(Value::as_bool) != Some(true)
+                })
+            })
+        })
+    }
+
+    pub fn gateway_certificate_sha256(&self, pod_id: &str) -> Option<[u8; 32]> {
+        self.pods
+            .get(pod_id)
+            .and_then(|stored| gateway_certificate_sha256(&stored.pod))
+    }
+
     pub fn create(&mut self, mut pod: PodRecord, creator: String) -> Result<PodRecord, String> {
         normalize_pod(&mut pod)?;
         validate_peer_id(&creator)?;
@@ -662,6 +684,28 @@ fn gateway_peer_id(pod: &PodRecord) -> Option<&str> {
         .filter(|gateway| !gateway.is_empty())
 }
 
+fn allowed_destinations(pod: &PodRecord) -> Option<&[Value]> {
+    pod.private_service_policy
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|policy| policy.get("allowedDestinations"))
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+}
+
+fn gateway_certificate_sha256(pod: &PodRecord) -> Option<[u8; 32]> {
+    let encoded = pod
+        .private_service_policy
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|policy| policy.get("gatewayCertificateSha256"))
+        .and_then(Value::as_str)
+        .map(str::trim)?;
+    let mut fingerprint = [0_u8; 32];
+    hex::decode_to_slice(encoded, &mut fingerprint).ok()?;
+    Some(fingerprint)
+}
+
 fn private_gateway_member_limit(pod: &PodRecord) -> Option<usize> {
     private_gateway_enabled(pod).then(|| {
         pod.private_service_policy
@@ -735,6 +779,12 @@ fn validate_private_gateway_policy(pod: &PodRecord) -> Result<(), String> {
         .map(str::trim)
         .unwrap_or_default();
     validate_peer_id(gateway)?;
+    if policy.contains_key("gatewayCertificateSha256") && gateway_certificate_sha256(pod).is_none()
+    {
+        return Err(
+            "GatewayCertificateSha256 must be a 64-character hexadecimal digest".to_owned(),
+        );
+    }
 
     let services = policy
         .get("registeredServices")
@@ -1172,6 +1222,9 @@ mod tests {
             }]
         }));
         store.create(pod, "owner".to_owned()).unwrap();
+        assert!(store.destination_allowed("pod:test", "SERVER.LAN", 22));
+        assert!(!store.destination_allowed("pod:test", "server.lan", 23));
+        assert!(store.gateway_certificate_sha256("pod:test").is_none());
         assert!(store
             .join("pod:test", "member".to_owned())
             .unwrap()

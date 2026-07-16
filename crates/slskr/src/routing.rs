@@ -157,6 +157,14 @@ pub fn service_unavailable_response(message: &str) -> HttpResponse {
     }
 }
 
+pub fn internal_server_error_response(message: &str) -> HttpResponse {
+    HttpResponse {
+        status: "500 Internal Server Error",
+        content_type: "application/json",
+        body: format!("{{\"error\":\"{}\"}}", crate::config::json_escape(message)),
+    }
+}
+
 pub fn not_implemented_response(message: &str) -> HttpResponse {
     HttpResponse {
         status: "501 Not Implemented",
