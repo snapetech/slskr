@@ -4106,14 +4106,16 @@ impl DatabaseManager {
 
     /// Delete webhook
     pub async fn delete_webhook(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
         query("DELETE FROM webhook_logs WHERE webhook_id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
         query("DELETE FROM webhooks WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -4488,6 +4490,58 @@ mod tests {
                 "{id}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn webhook_delete_rolls_back_log_deletion_on_failure() {
+        let db = DatabaseManager::in_memory().await.unwrap();
+        let webhook = WebhookRecord {
+            id: "hook_atomic".to_owned(),
+            url: "https://example.com/hook".to_owned(),
+            events: "search.created".to_owned(),
+            secret: crate::webhooks::Webhook::generate_secret().expect("test randomness"),
+            active: true,
+            created_at: 1,
+            last_triggered: None,
+            retry_count: 0,
+            max_retries: 3,
+            timeout_seconds: 30,
+        };
+        db.insert_webhook(&webhook).await.unwrap();
+        db.insert_webhook_log(&WebhookLogRecord {
+            id: "log_atomic".to_owned(),
+            webhook_id: webhook.id.clone(),
+            event: "search.created".to_owned(),
+            correlation_id: "correlation".to_owned(),
+            status: "success".to_owned(),
+            request_body: "{}".to_owned(),
+            response_status: Some(200),
+            response_body: None,
+            error_message: None,
+            attempt: 1,
+            timestamp: 1,
+        })
+        .await
+        .unwrap();
+        query(
+            r#"
+            CREATE TRIGGER reject_webhook_delete
+            BEFORE DELETE ON webhooks
+            WHEN OLD.id = 'hook_atomic'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced webhook delete failure');
+            END
+            "#,
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(db.delete_webhook(&webhook.id).await.is_err());
+        assert!(db.get_webhook(&webhook.id).await.unwrap().is_some());
+        let logs = db.get_webhook_logs(&webhook.id, 10, 0).await.unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].id, "log_atomic");
     }
 
     #[tokio::test]
