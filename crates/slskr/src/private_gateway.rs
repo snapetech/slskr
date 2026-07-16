@@ -1189,9 +1189,14 @@ fn write_secret(path: &Path, bytes: &[u8]) -> Result<(), String> {
         return Err(format!("overlay identity write failed: {error}"));
     }
     drop(file);
-    if let Err(error) = fs::rename(&temporary, path) {
+    if let Err(error) = fs::hard_link(&temporary, path) {
         let _ = fs::remove_file(&temporary);
         return Err(format!("overlay identity publish failed: {error}"));
+    }
+    if let Err(error) = fs::remove_file(&temporary) {
+        return Err(format!(
+            "overlay identity published but temporary cleanup failed: {error}"
+        ));
     }
     Ok(())
 }
@@ -1367,6 +1372,25 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("publish failed"));
         assert!(!certificate.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn secret_publish_never_replaces_existing_identity() {
+        let root = temporary_directory("gateway-existing-identity");
+        let path = root.join("overlay-private-key.der");
+        fs::write(&path, b"existing-key").unwrap();
+
+        let error = write_secret(&path, b"replacement-key").unwrap_err();
+
+        assert!(error.contains("publish failed"), "{error}");
+        assert_eq!(fs::read(&path).unwrap(), b"existing-key");
+        let temporary_files = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name() != "overlay-private-key.der")
+            .count();
+        assert_eq!(temporary_files, 0);
         fs::remove_dir_all(root).unwrap();
     }
 }
