@@ -15,6 +15,9 @@ from .websocket import WebSocketClient
 
 logger = logging.getLogger(__name__)
 
+MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_HTTP_ERROR_BYTES = 64 * 1024
+
 
 class SlskrClient:
     """Main HTTP client for slskr API"""
@@ -289,7 +292,7 @@ class SlskrClient:
                 if response.status >= 400:
                     error_data = {}
                     try:
-                        error_data = await response.json()
+                        error_data = await self._read_json(response, MAX_HTTP_ERROR_BYTES)
                     except Exception:
                         pass
 
@@ -302,11 +305,11 @@ class SlskrClient:
                 if response.status == 204:
                     return None
 
-                return await response.json()
+                return await self._read_json(response, MAX_HTTP_RESPONSE_BYTES)
 
         except asyncio.TimeoutError:
             raise TimeoutError(f"Request timeout after {self.timeout}s")
-        except ApiError:
+        except (ApiError, NetworkError):
             raise
         except Exception as e:
             if attempt < self.retries:
@@ -321,6 +324,20 @@ class SlskrClient:
                 )
 
             raise NetworkError(f"Failed to {method} {url}", cause=e)
+
+    async def _read_json(self, response, maximum: int) -> Dict:
+        content_length = response.content_length
+        if content_length is not None and content_length > maximum:
+            raise NetworkError(f"HTTP response body exceeds {maximum} bytes")
+
+        chunks = []
+        length = 0
+        async for chunk in response.content.iter_chunked(64 * 1024):
+            length += len(chunk)
+            if length > maximum:
+                raise NetworkError(f"HTTP response body exceeds {maximum} bytes")
+            chunks.append(chunk)
+        return json.loads(b"".join(chunks))
 
     def _path_segment(self, value: str) -> str:
         return quote(str(value), safe="")

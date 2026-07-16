@@ -1,11 +1,12 @@
 import inspect
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from slskr import BatchClient, BatchBuilder, SlskrClient, WebSocketClient
 from slskr.batch import BatchOperation, BatchResponse, BatchResult
-from slskr.exceptions import ApiError
+from slskr.exceptions import ApiError, NetworkError
 
 
 def test_client_url_and_path_segments_are_safe():
@@ -127,3 +128,63 @@ def test_public_exports_are_available():
     assert BatchClient is not None
     assert BatchOperation("id", "GET", "/api/health").to_dict()["id"] == "id"
     assert inspect.iscoroutinefunction(SlskrClient.close)
+
+
+class FakeContent:
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    async def iter_chunked(self, _size):
+        for chunk in self.chunks:
+            yield chunk
+
+
+class FakeResponse:
+    def __init__(self, chunks, content_length=None):
+        self.content = FakeContent(chunks)
+        self.content_length = content_length
+
+
+@pytest.mark.asyncio
+async def test_python_client_rejects_oversized_declared_response():
+    client = SlskrClient("https://example.test", "token")
+    response = FakeResponse([], content_length=8 * 1024 * 1024 + 1)
+
+    with pytest.raises(NetworkError, match="exceeds"):
+        await client._read_json(response, 8 * 1024 * 1024)
+
+
+@pytest.mark.asyncio
+async def test_python_client_bounds_chunked_response():
+    client = SlskrClient("https://example.test", "token")
+    response = FakeResponse([b"x" * 65, b"y" * 64])
+
+    with pytest.raises(NetworkError, match="exceeds"):
+        await client._read_json(response, 128)
+
+
+@pytest.mark.asyncio
+async def test_python_client_rejects_trailing_json():
+    client = SlskrClient("https://example.test", "token")
+    response = FakeResponse([b'{"status":"ok"} {"unexpected":true}'])
+
+    with pytest.raises(json.JSONDecodeError):
+        await client._read_json(response, 1024)
+
+
+@pytest.mark.asyncio
+async def test_python_client_does_not_retry_oversized_response():
+    response = MagicMock(status=200)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=response)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.request.return_value = context
+    client = SlskrClient("https://example.test", "token", retries=3)
+    client.session = session
+    client._read_json = AsyncMock(side_effect=NetworkError("response too large"))
+
+    with pytest.raises(NetworkError, match="too large"):
+        await client._request("GET", "/api/health")
+
+    session.request.assert_called_once()
