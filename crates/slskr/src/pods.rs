@@ -21,6 +21,8 @@ const MAX_DESCRIPTION_BYTES: usize = 8 * 1024;
 const MAX_PEER_ID_BYTES: usize = 512;
 const MAX_PUBLIC_KEY_BYTES: usize = 2 * 1024;
 const MAX_POLICY_BYTES: usize = 256 * 1024;
+const MAX_REGISTERED_SERVICES: usize = 20;
+const MAX_ALLOWED_DESTINATIONS: usize = 50;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,9 +136,10 @@ impl PodStore {
             .filter(|stored| {
                 stored.pod.is_public
                     || peer_id.is_some_and(|peer_id| {
-                        stored.members.iter().any(|member| {
-                            !member.is_banned && member.peer_id.eq_ignore_ascii_case(peer_id)
-                        })
+                        stored
+                            .members
+                            .iter()
+                            .any(|member| !member.is_banned && member.peer_id == peer_id)
                     })
             })
             .map(|stored| public_pod(stored, false))
@@ -181,7 +184,7 @@ impl PodStore {
             stored
                 .members
                 .iter()
-                .any(|member| !member.is_banned && member.peer_id.eq_ignore_ascii_case(peer_id))
+                .any(|member| !member.is_banned && member.peer_id == peer_id)
         })
     }
 
@@ -189,9 +192,22 @@ impl PodStore {
         self.pods.get(pod_id).is_some_and(|stored| {
             stored.members.iter().any(|member| {
                 !member.is_banned
-                    && member.peer_id.eq_ignore_ascii_case(peer_id)
+                    && member.peer_id == peer_id
                     && matches!(member.role.as_str(), "owner" | "mod")
             })
+        })
+    }
+
+    pub fn gateway_peer_for_update(&self, pod_id: &str, proposed: &PodRecord) -> Option<String> {
+        let existing = self.pods.get(pod_id)?;
+        let requires_gateway = private_gateway_enabled(proposed)
+            || (private_gateway_enabled(&existing.pod)
+                && proposed.private_service_policy.is_some());
+        requires_gateway.then(|| {
+            gateway_peer_id(proposed)
+                .or_else(|| gateway_peer_id(&existing.pod))
+                .unwrap_or_default()
+                .to_owned()
         })
     }
 
@@ -205,12 +221,7 @@ impl PodStore {
             return Err("Pod capacity is full".to_owned());
         }
         if private_gateway_enabled(&pod)
-            && pod
-                .private_service_policy
-                .as_ref()
-                .and_then(|policy| policy.get("gatewayPeerId"))
-                .and_then(Value::as_str)
-                .is_none_or(|gateway| gateway != creator)
+            && gateway_peer_id(&pod).is_none_or(|gateway| gateway != creator)
         {
             return Err(
                 "When creating a VPN pod, RequestingPeerId must match GatewayPeerId".to_owned(),
@@ -248,6 +259,7 @@ impl PodStore {
         let Some(previous) = self.pods.get(pod_id).cloned() else {
             return Ok(None);
         };
+        validate_pod_members(&pod, &previous.members)?;
         pod.members = None;
         pod.updated_at = current_timestamp();
         let updated = pod.clone();
@@ -284,18 +296,24 @@ impl PodStore {
         if stored
             .members
             .iter()
-            .any(|member| member.is_banned && member.peer_id.eq_ignore_ascii_case(&peer_id))
+            .any(|member| member.is_banned && member.peer_id == peer_id)
         {
             return Err("Peer is banned from this pod".to_owned());
         }
         if stored
             .members
             .iter()
-            .any(|member| member.peer_id.eq_ignore_ascii_case(&peer_id))
+            .any(|member| member.peer_id == peer_id)
         {
             return Ok(Some(false));
         }
-        if stored.members.len() >= stored.pod.max_members.min(MAX_MEMBERS) {
+        let private_limit = private_gateway_member_limit(&stored.pod).unwrap_or(MAX_MEMBERS);
+        let active_member_count = stored
+            .members
+            .iter()
+            .filter(|member| !member.is_banned)
+            .count();
+        if active_member_count >= stored.pod.max_members.min(private_limit).min(MAX_MEMBERS) {
             return Err("Pod member capacity is full".to_owned());
         }
         let now = current_timestamp();
@@ -322,15 +340,16 @@ impl PodStore {
         if !stored
             .members
             .iter()
-            .any(|member| !member.is_banned && member.peer_id.eq_ignore_ascii_case(peer_id))
+            .any(|member| !member.is_banned && member.peer_id == peer_id)
         {
             return Ok(Some(false));
         }
+        if removal_would_orphan_pod(stored, peer_id) {
+            return Err("Cannot remove the last Pod moderator".to_owned());
+        }
         self.commit_change(|pods| {
             if let Some(stored) = pods.get_mut(pod_id) {
-                stored
-                    .members
-                    .retain(|member| !member.peer_id.eq_ignore_ascii_case(peer_id));
+                stored.members.retain(|member| member.peer_id != peer_id);
                 stored.pod.updated_at = current_timestamp();
             }
         })?;
@@ -345,16 +364,19 @@ impl PodStore {
         if !stored
             .members
             .iter()
-            .any(|member| member.peer_id.eq_ignore_ascii_case(peer_id))
+            .any(|member| member.peer_id == peer_id)
         {
             return Ok(Some(false));
+        }
+        if removal_would_orphan_pod(stored, peer_id) {
+            return Err("Cannot remove the last Pod moderator".to_owned());
         }
         self.commit_change(|pods| {
             if let Some(stored) = pods.get_mut(pod_id) {
                 if let Some(member) = stored
                     .members
                     .iter_mut()
-                    .find(|member| member.peer_id.eq_ignore_ascii_case(peer_id))
+                    .find(|member| member.peer_id == peer_id)
                 {
                     member.is_banned = true;
                 }
@@ -484,6 +506,21 @@ fn public_pod(stored: &StoredPod, include_members: bool) -> PodRecord {
     pod
 }
 
+fn removal_would_orphan_pod(stored: &StoredPod, peer_id: &str) -> bool {
+    let removes_moderator = stored.members.iter().any(|member| {
+        !member.is_banned
+            && member.peer_id == peer_id
+            && matches!(member.role.as_str(), "owner" | "mod")
+    });
+    removes_moderator
+        && stored
+            .members
+            .iter()
+            .filter(|member| !member.is_banned && matches!(member.role.as_str(), "owner" | "mod"))
+            .count()
+            <= 1
+}
+
 fn normalize_pod(pod: &mut PodRecord) -> Result<(), String> {
     pod.pod_id = pod.pod_id.trim().to_owned();
     pod.name = pod.name.trim().to_owned();
@@ -544,6 +581,7 @@ fn normalize_pod(pod: &mut PodRecord) -> Result<(), String> {
             "PrivateServicePolicy exceeds {MAX_POLICY_BYTES} bytes"
         ));
     }
+    validate_private_gateway_policy(pod)?;
     pod.members = None;
     Ok(())
 }
@@ -608,6 +646,201 @@ fn private_gateway_enabled(pod: &PodRecord) -> bool {
     })
 }
 
+fn gateway_peer_id(pod: &PodRecord) -> Option<&str> {
+    pod.private_service_policy
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|policy| policy.get("gatewayPeerId"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|gateway| !gateway.is_empty())
+}
+
+fn private_gateway_member_limit(pod: &PodRecord) -> Option<usize> {
+    private_gateway_enabled(pod).then(|| {
+        pod.private_service_policy
+            .as_ref()
+            .and_then(|policy| policy.get("maxMembers"))
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(3)
+    })
+}
+
+fn validate_private_gateway_member_count(
+    pod: &PodRecord,
+    member_count: usize,
+) -> Result<(), String> {
+    if private_gateway_member_limit(pod).is_some_and(|limit| member_count > limit) {
+        return Err("Pod member count exceeds the private service gateway limit".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_pod_members(pod: &PodRecord, members: &[PodMember]) -> Result<(), String> {
+    let active_members = members
+        .iter()
+        .filter(|member| !member.is_banned)
+        .collect::<Vec<_>>();
+    if active_members.len() > pod.max_members {
+        return Err("Pod member count exceeds MaxMembers".to_owned());
+    }
+    validate_private_gateway_member_count(pod, active_members.len())?;
+    if !active_members
+        .iter()
+        .any(|member| matches!(member.role.as_str(), "owner" | "mod"))
+    {
+        return Err("Pod must retain at least one moderator".to_owned());
+    }
+    if private_gateway_enabled(pod) {
+        let gateway = gateway_peer_id(pod).unwrap_or_default();
+        if !active_members
+            .iter()
+            .any(|member| member.peer_id == gateway)
+        {
+            return Err("GatewayPeerId must be a pod member".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn validate_private_gateway_policy(pod: &PodRecord) -> Result<(), String> {
+    if !private_gateway_enabled(pod) {
+        return Ok(());
+    }
+    let policy = pod
+        .private_service_policy
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| "PrivateServiceGateway capability requires a policy".to_owned())?;
+    if policy.get("enabled").and_then(Value::as_bool) != Some(true) {
+        return Err("PrivateServiceGateway capability requires policy.Enabled = true".to_owned());
+    }
+    let max_members = policy
+        .get("maxMembers")
+        .and_then(Value::as_u64)
+        .unwrap_or(3);
+    if !(2..=3).contains(&max_members) {
+        return Err("PrivateServiceGateway allows between 2 and 3 members".to_owned());
+    }
+    let gateway = policy
+        .get("gatewayPeerId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    validate_peer_id(gateway)?;
+
+    let services = policy
+        .get("registeredServices")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "RegisteredServices cannot be null".to_owned())?;
+    if services.len() > MAX_REGISTERED_SERVICES {
+        return Err(format!(
+            "Cannot have more than {MAX_REGISTERED_SERVICES} registered services"
+        ));
+    }
+    for service in services {
+        let service = service
+            .as_object()
+            .ok_or_else(|| "RegisteredService must be an object".to_owned())?;
+        validate_policy_text(service, "name", "Service name", 50)?;
+        if let Some(description) = service.get("description").and_then(Value::as_str) {
+            validate_text("Service description", description, 200, true)?;
+        }
+        validate_policy_host(service, "host", "Host")?;
+        validate_policy_port(service)?;
+        validate_policy_protocol(service)?;
+    }
+
+    let destinations = policy
+        .get("allowedDestinations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "AllowedDestinations cannot be null".to_owned())?;
+    if destinations.is_empty() {
+        return Err(
+            "PrivateServiceGateway capability requires at least one allowed destination".to_owned(),
+        );
+    }
+    if destinations.len() > MAX_ALLOWED_DESTINATIONS {
+        return Err(format!(
+            "Cannot have more than {MAX_ALLOWED_DESTINATIONS} allowed destinations"
+        ));
+    }
+    for destination in destinations {
+        let destination = destination
+            .as_object()
+            .ok_or_else(|| "AllowedDestination must be an object".to_owned())?;
+        validate_policy_host(destination, "hostPattern", "HostPattern")?;
+        validate_policy_port(destination)?;
+        validate_policy_protocol(destination)?;
+        if destination.get("allowPublic").and_then(Value::as_bool) == Some(true) {
+            return Err("Public destinations are not allowed in MVP".to_owned());
+        }
+    }
+    validate_private_gateway_member_count(pod, 0)
+}
+
+fn validate_policy_text(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+    name: &str,
+    maximum: usize,
+) -> Result<(), String> {
+    let value = object
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    validate_text(name, value, maximum, false)
+}
+
+fn validate_policy_host(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+    name: &str,
+) -> Result<(), String> {
+    let host = object
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    validate_text(name, host, 255, false)?;
+    if host.contains(['*', '?']) || !valid_exact_host(host) {
+        return Err(format!(
+            "Invalid {name} format (must be exact hostname or IP address)"
+        ));
+    }
+    Ok(())
+}
+
+fn valid_exact_host(host: &str) -> bool {
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    host.len() <= 253
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+fn validate_policy_port(object: &serde_json::Map<String, Value>) -> Result<(), String> {
+    if !matches!(object.get("port").and_then(Value::as_u64), Some(1..=65_535)) {
+        return Err("Port must be between 1 and 65535".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_policy_protocol(object: &serde_json::Map<String, Value>) -> Result<(), String> {
+    if object.get("protocol").and_then(Value::as_str) != Some("tcp") {
+        return Err("Only TCP protocol is currently supported".to_owned());
+    }
+    Ok(())
+}
+
 fn load_state(path: &Path) -> Result<BTreeMap<String, StoredPod>, String> {
     #[cfg(not(unix))]
     {
@@ -668,15 +901,25 @@ fn load_state(path: &Path) -> Result<BTreeMap<String, StoredPod>, String> {
         stored.members.retain(|member| {
             !member.peer_id.trim().is_empty()
                 && member.peer_id.len() <= MAX_PEER_ID_BYTES
+                && matches!(member.role.as_str(), "owner" | "mod" | "member")
                 && member
                     .public_key
                     .as_ref()
                     .is_none_or(|key| key.len() <= MAX_PUBLIC_KEY_BYTES)
-                && peers.insert(member.peer_id.to_ascii_lowercase())
+                && member
+                    .joined_at
+                    .as_ref()
+                    .is_none_or(|timestamp| timestamp.len() <= 128)
+                && member
+                    .last_seen
+                    .as_ref()
+                    .is_none_or(|timestamp| timestamp.len() <= 128)
+                && peers.insert(member.peer_id.clone())
         });
-        stored
-            .members
-            .truncate(MAX_MEMBERS.min(stored.pod.max_members));
+        stored.members.truncate(MAX_MEMBERS);
+        if validate_pod_members(&stored.pod, &stored.members).is_err() {
+            continue;
+        }
         pods.insert(stored.pod.pod_id.clone(), stored);
     }
     Ok(pods)
@@ -726,6 +969,28 @@ mod tests {
             "isPublic": true,
             "maxMembers": 3,
             "channels": [{ "channelId": "general", "kind": 0, "name": "General" }]
+        }))
+        .unwrap()
+    }
+
+    fn private_gateway_fixture() -> PodRecord {
+        serde_json::from_value(serde_json::json!({
+            "podId": "pod:gateway",
+            "name": "Gateway Pod",
+            "maxMembers": 3,
+            "capabilities": ["PrivateServiceGateway"],
+            "privateServicePolicy": {
+                "enabled": true,
+                "maxMembers": 3,
+                "gatewayPeerId": "owner",
+                "registeredServices": [],
+                "allowedDestinations": [{
+                    "hostPattern": "internal.local",
+                    "port": 443,
+                    "protocol": "tcp",
+                    "allowPublic": false
+                }]
+            }
         }))
         .unwrap()
     }
@@ -795,6 +1060,125 @@ mod tests {
             pod.channels[0].binding_info.as_deref(),
             Some("soulseek-room:music-99")
         );
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn private_gateway_update_authorization_matches_the_controller_contract() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-gateway-update-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodStore::empty(&state_dir);
+        store
+            .create(private_gateway_fixture(), "owner".to_owned())
+            .unwrap();
+
+        let mut unrelated_update = store.get("pod:gateway").unwrap();
+        unrelated_update.name = "Renamed Gateway Pod".to_owned();
+        assert_eq!(
+            store.gateway_peer_for_update("pod:gateway", &unrelated_update),
+            Some("owner".to_owned())
+        );
+
+        let mut removal = store.get("pod:gateway").unwrap();
+        removal.capabilities.clear();
+        removal.private_service_policy = None;
+        assert_eq!(store.gateway_peer_for_update("pod:gateway", &removal), None);
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn private_gateway_policy_is_validated_and_limits_membership() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-private-policy-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodStore::empty(&state_dir);
+        let mut pod = fixture();
+        pod.capabilities = vec![serde_json::json!(0)];
+        pod.private_service_policy = Some(serde_json::json!({
+            "enabled": true,
+            "maxMembers": 2,
+            "gatewayPeerId": "owner",
+            "registeredServices": [{
+                "name": "SSH",
+                "host": "server.lan",
+                "port": 22,
+                "protocol": "tcp"
+            }],
+            "allowedDestinations": [{
+                "hostPattern": "server.lan",
+                "port": 22,
+                "protocol": "tcp",
+                "allowPublic": false
+            }]
+        }));
+        store.create(pod, "owner".to_owned()).unwrap();
+        assert!(store
+            .join("pod:test", "member".to_owned())
+            .unwrap()
+            .unwrap());
+        assert_eq!(
+            store.join("pod:test", "overflow".to_owned()).unwrap_err(),
+            "Pod member capacity is full"
+        );
+        assert!(store.ban("pod:test", "member").unwrap().unwrap());
+        assert!(store
+            .join("pod:test", "replacement".to_owned())
+            .unwrap()
+            .unwrap());
+
+        let mut invalid_gateway = store.get("pod:test").unwrap();
+        invalid_gateway.private_service_policy.as_mut().unwrap()["gatewayPeerId"] =
+            serde_json::json!("outsider");
+        assert_eq!(
+            store.update("pod:test", invalid_gateway).unwrap_err(),
+            "GatewayPeerId must be a pod member"
+        );
+
+        let mut invalid = fixture();
+        invalid.pod_id = "pod:invalid".to_owned();
+        invalid.capabilities = vec![serde_json::json!(0)];
+        invalid.private_service_policy = Some(serde_json::json!({
+            "enabled": true,
+            "maxMembers": 3,
+            "gatewayPeerId": "owner",
+            "registeredServices": [],
+            "allowedDestinations": [{
+                "hostPattern": "*.lan",
+                "port": 80,
+                "protocol": "tcp"
+            }]
+        }));
+        assert!(store
+            .create(invalid, "owner".to_owned())
+            .unwrap_err()
+            .contains("exact hostname"));
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn the_last_pod_moderator_cannot_leave_or_be_banned() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-last-moderator-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodStore::empty(&state_dir);
+        store.create(fixture(), "owner".to_owned()).unwrap();
+
+        assert_eq!(
+            store.leave("pod:test", "owner").unwrap_err(),
+            "Cannot remove the last Pod moderator"
+        );
+        assert_eq!(
+            store.ban("pod:test", "owner").unwrap_err(),
+            "Cannot remove the last Pod moderator"
+        );
+        assert!(store.is_member("pod:test", "owner"));
         std::fs::remove_dir_all(state_dir).unwrap();
     }
 }

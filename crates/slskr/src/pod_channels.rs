@@ -146,6 +146,37 @@ impl PodChannelStore {
         self.messages = messages;
         Ok(message)
     }
+
+    pub fn delete_pod(&mut self, pod_id: &str) -> Result<Vec<PodChannelMessage>, String> {
+        let mut messages = self.messages.clone();
+        let mut removed = Vec::new();
+        messages.retain(|message| {
+            if message.pod_id == pod_id {
+                removed.push(message.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if removed.is_empty() {
+            return Ok(removed);
+        }
+        write_state(&self.state_path, &messages)?;
+        self.messages = messages;
+        Ok(removed)
+    }
+
+    pub fn restore(&mut self, restored: Vec<PodChannelMessage>) -> Result<(), String> {
+        if restored.is_empty() {
+            return Ok(());
+        }
+        let mut messages = self.messages.clone();
+        messages.extend(restored);
+        messages.sort_by_key(|message| (message.timestamp_unix_ms, message.message_id.clone()));
+        write_state(&self.state_path, &messages)?;
+        self.messages = messages;
+        Ok(())
+    }
 }
 
 fn validate_field(name: &str, value: &str, maximum: usize) -> Result<(), String> {
@@ -321,6 +352,40 @@ mod tests {
         assert_eq!(first.timestamp_unix_ms, 50);
         assert_eq!(second.timestamp_unix_ms, 51);
         assert_eq!(store.list("pod-1", "chat", Some(50)).len(), 1);
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn pod_deletion_removes_only_its_messages_and_can_be_rolled_back() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-channel-delete-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodChannelStore::empty(&state_dir);
+        for pod_id in ["pod-1", "pod-2"] {
+            store
+                .append(
+                    pod_id.to_owned(),
+                    "chat".to_owned(),
+                    "peer-1".to_owned(),
+                    format!("message-{pod_id}"),
+                    String::new(),
+                    1,
+                )
+                .unwrap();
+        }
+
+        let removed = store.delete_pod("pod-1").unwrap();
+        assert_eq!(removed.len(), 1);
+        assert!(store.list("pod-1", "chat", None).is_empty());
+        assert_eq!(store.list("pod-2", "chat", None).len(), 1);
+
+        store.restore(removed).unwrap();
+        assert_eq!(store.list("pod-1", "chat", None).len(), 1);
+        let loaded = PodChannelStore::load(&state_dir).unwrap();
+        assert_eq!(loaded.list("pod-1", "chat", None).len(), 1);
+        assert_eq!(loaded.list("pod-2", "chat", None).len(), 1);
         std::fs::remove_dir_all(state_dir).unwrap();
     }
 }
