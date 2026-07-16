@@ -145,10 +145,9 @@ impl PodStore {
             .filter(|stored| {
                 stored.pod.is_public
                     || peer_id.is_some_and(|peer_id| {
-                        stored
-                            .members
-                            .iter()
-                            .any(|member| !member.is_banned && member.peer_id == peer_id)
+                        stored.members.iter().any(|member| {
+                            !member.is_banned && peer_ids_equal(&member.peer_id, peer_id)
+                        })
                     })
             })
             .map(|stored| public_pod(stored, false))
@@ -250,7 +249,7 @@ impl PodStore {
             stored
                 .members
                 .iter()
-                .any(|member| !member.is_banned && member.peer_id == peer_id)
+                .any(|member| !member.is_banned && peer_ids_equal(&member.peer_id, peer_id))
         })
     }
 
@@ -258,7 +257,7 @@ impl PodStore {
         self.pods.get(pod_id).is_some_and(|stored| {
             stored.members.iter().any(|member| {
                 !member.is_banned
-                    && member.peer_id == peer_id
+                    && peer_ids_equal(&member.peer_id, peer_id)
                     && matches!(member.role.as_str(), "owner" | "mod")
             })
         })
@@ -309,7 +308,7 @@ impl PodStore {
             return Err("Pod capacity is full".to_owned());
         }
         if private_gateway_enabled(&pod)
-            && gateway_peer_id(&pod).is_none_or(|gateway| gateway != creator)
+            && gateway_peer_id(&pod).is_none_or(|gateway| !peer_ids_equal(gateway, &creator))
         {
             return Err(
                 "When creating a VPN pod, RequestingPeerId must match GatewayPeerId".to_owned(),
@@ -384,14 +383,14 @@ impl PodStore {
         if stored
             .members
             .iter()
-            .any(|member| member.is_banned && member.peer_id == peer_id)
+            .any(|member| member.is_banned && peer_ids_equal(&member.peer_id, &peer_id))
         {
             return Err("Peer is banned from this pod".to_owned());
         }
         if stored
             .members
             .iter()
-            .any(|member| member.peer_id == peer_id)
+            .any(|member| peer_ids_equal(&member.peer_id, &peer_id))
         {
             return Ok(Some(false));
         }
@@ -428,7 +427,7 @@ impl PodStore {
         if !stored
             .members
             .iter()
-            .any(|member| !member.is_banned && member.peer_id == peer_id)
+            .any(|member| !member.is_banned && peer_ids_equal(&member.peer_id, peer_id))
         {
             return Ok(Some(false));
         }
@@ -437,7 +436,9 @@ impl PodStore {
         }
         self.commit_change(|pods| {
             if let Some(stored) = pods.get_mut(pod_id) {
-                stored.members.retain(|member| member.peer_id != peer_id);
+                stored
+                    .members
+                    .retain(|member| !peer_ids_equal(&member.peer_id, peer_id));
                 stored.pod.updated_at = current_timestamp();
             }
         })?;
@@ -452,7 +453,7 @@ impl PodStore {
         if !stored
             .members
             .iter()
-            .any(|member| member.peer_id == peer_id)
+            .any(|member| peer_ids_equal(&member.peer_id, peer_id))
         {
             return Ok(Some(false));
         }
@@ -464,7 +465,7 @@ impl PodStore {
                 if let Some(member) = stored
                     .members
                     .iter_mut()
-                    .find(|member| member.peer_id == peer_id)
+                    .find(|member| peer_ids_equal(&member.peer_id, peer_id))
                 {
                     member.is_banned = true;
                 }
@@ -603,7 +604,7 @@ fn public_pod(stored: &StoredPod, include_members: bool) -> PodRecord {
 fn removal_would_orphan_pod(stored: &StoredPod, peer_id: &str) -> bool {
     let removes_moderator = stored.members.iter().any(|member| {
         !member.is_banned
-            && member.peer_id == peer_id
+            && peer_ids_equal(&member.peer_id, peer_id)
             && matches!(member.role.as_str(), "owner" | "mod")
     });
     removes_moderator
@@ -721,6 +722,10 @@ fn validate_peer_id(peer_id: &str) -> Result<(), String> {
     validate_text("PeerId", peer_id, MAX_PEER_ID_BYTES, false)
 }
 
+fn peer_ids_equal(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
+}
+
 fn validate_text(name: &str, value: &str, maximum: usize, allow_empty: bool) -> Result<(), String> {
     if !allow_empty && value.trim().is_empty() {
         return Err(format!("{name} is required"));
@@ -812,7 +817,7 @@ fn validate_pod_members(pod: &PodRecord, members: &[PodMember]) -> Result<(), St
         let gateway = gateway_peer_id(pod).unwrap_or_default();
         if !active_members
             .iter()
-            .any(|member| member.peer_id == gateway)
+            .any(|member| peer_ids_equal(&member.peer_id, gateway))
         {
             return Err("GatewayPeerId must be a pod member".to_owned());
         }
@@ -1036,7 +1041,7 @@ fn load_state(path: &Path) -> Result<BTreeMap<String, StoredPod>, String> {
                     .last_seen
                     .as_ref()
                     .is_none_or(|timestamp| timestamp.len() <= 128)
-                && peers.insert(member.peer_id.clone())
+                && peers.insert(member.peer_id.to_ascii_lowercase())
         });
         stored.members.truncate(MAX_MEMBERS);
         if validate_pod_members(&stored.pod, &stored.members).is_err() {
@@ -1353,6 +1358,40 @@ mod tests {
             "Cannot remove the last Pod moderator"
         );
         assert!(store.is_member("pod:test", "owner"));
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn peer_identity_checks_and_bans_are_case_insensitive() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-peer-case-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodStore::empty(&state_dir);
+        let mut pod = fixture();
+        pod.is_public = false;
+        store.create(pod, "Owner".to_owned()).unwrap();
+
+        assert!(store.is_member("pod:test", "owner"));
+        assert!(store.can_moderate("pod:test", "OWNER"));
+        assert_eq!(store.list_visible(Some("oWnEr")).len(), 1);
+
+        store.pods.get_mut("pod:test").unwrap().pod.is_public = true;
+        assert!(store
+            .join("pod:test", "Member".to_owned())
+            .unwrap()
+            .unwrap());
+        assert_eq!(
+            store.join("pod:test", "MEMBER".to_owned()).unwrap(),
+            Some(false)
+        );
+        assert_eq!(store.ban("pod:test", "member").unwrap(), Some(true));
+        assert!(!store.is_member("pod:test", "MEMBER"));
+        assert_eq!(
+            store.join("pod:test", "mEmBeR".to_owned()).unwrap_err(),
+            "Peer is banned from this pod"
+        );
         std::fs::remove_dir_all(state_dir).unwrap();
     }
 }
