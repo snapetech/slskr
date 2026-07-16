@@ -10,6 +10,7 @@ use tokio::io::AsyncWriteExt;
 use crate::config::TrustedMeshPeer;
 
 const CONTENT_CHUNK_BYTES: u64 = 32 * 1024;
+const MAX_CONTENT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CONTENT_ID_BYTES: usize = 512;
 
 struct StagingFileGuard {
@@ -165,6 +166,7 @@ fn validate_request(
         || content_id.len() > MAX_CONTENT_ID_BYTES
         || content_id.chars().any(char::is_control)
         || size == 0
+        || size > MAX_CONTENT_BYTES
         || expected_sha256.len() != 64
         || !expected_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
@@ -205,6 +207,40 @@ mod tests {
             std::fs::read(&output).unwrap(),
             b"owned by another operation"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_content_is_rejected_before_staging_file_creation() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-mesh-oversized-output-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let output = root.join("oversized.bin");
+        let peer = TrustedMeshPeer {
+            peer_id: "peer".to_owned(),
+            username: "remote".to_owned(),
+            overlay_endpoint: "127.0.0.1:9".parse().unwrap(),
+            certificate_sha256: [1_u8; 32],
+            range_endpoint: None,
+        };
+        let key = SigningKey::from_bytes(&[2_u8; 32]);
+
+        let error = fetch_content(
+            &peer,
+            "local",
+            &key,
+            "content",
+            MAX_CONTENT_BYTES + 1,
+            &"a".repeat(64),
+            &output,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "mesh content request is invalid");
+        assert!(!output.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
