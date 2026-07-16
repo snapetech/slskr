@@ -34,6 +34,7 @@ const MAX_TUNNELS: usize = 128;
 const MAX_TUNNELS_PER_PEER: usize = 10;
 const MAX_REPLAY_NONCES: usize = 4_096;
 const REQUEST_FRESHNESS_SECONDS: u64 = 300;
+const DESTINATION_RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 const DESTINATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
@@ -498,8 +499,9 @@ fn parse_payload<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<T, (i
 }
 
 async fn resolve_destination(host: &str, port: u16) -> Result<SocketAddr, String> {
-    let mut addresses = lookup_host((host, port))
+    let mut addresses = timeout(DESTINATION_RESOLVE_TIMEOUT, lookup_host((host, port)))
         .await
+        .map_err(|_| "Destination resolution timed out".to_owned())?
         .map_err(|_| "Destination resolution failed".to_owned())?;
     addresses
         .find(|address| valid_destination_ip(address.ip()))

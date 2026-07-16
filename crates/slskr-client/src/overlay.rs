@@ -832,6 +832,13 @@ mod tests {
             "unique_nonce",
         )
         .unwrap();
+        assert!(matches!(
+            hello.verify_authentication(
+                &signing_key.verifying_key().to_bytes(),
+                &gateway_certificate_sha256,
+            ),
+            Err(OverlayError::InvalidPeerAuthentication)
+        ));
         hello
             .authenticate(&signing_key, &gateway_certificate_sha256)
             .unwrap();
