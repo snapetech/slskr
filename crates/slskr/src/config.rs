@@ -16,6 +16,9 @@ use slskr_client::{
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_BYTES: usize = 4 * 1024;
 const MAX_COMPLETED_PATH_TEMPLATE_BYTES: usize = 4 * 1024;
+const MAX_TRUSTED_MESH_PEERS: usize = 256;
+const MAX_MESH_IDENTITY_BYTES: usize = 256;
+const MAX_MESH_RANGE_ENDPOINT_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -40,6 +43,7 @@ pub struct AppConfig {
     pub overlay_bind: Option<SocketAddr>,
     pub dht_enabled: bool,
     pub dht_port: u16,
+    pub trusted_mesh_peers: Vec<TrustedMeshPeer>,
     pub obfuscation_enabled: bool,
     pub obfuscation_mode: SoulseekObfuscationMode,
     pub obfuscation_prefer_outbound: bool,
@@ -178,6 +182,10 @@ impl AppConfig {
             file_config.dht.enabled.unwrap_or(overlay_bind.is_some()),
         )?;
         let dht_port = env_parse_layer(env, "SLSKR_DHT_PORT", file_config.dht.port, 0_u16)?;
+        let trusted_mesh_peers = trusted_mesh_peers_from_layers(
+            env.var("SLSKR_TRUSTED_MESH_PEERS"),
+            file_config.mesh.trusted_peers,
+        )?;
         let obfuscation_enabled = env_bool_layer(
             env,
             "SLSK_OBFUSCATION",
@@ -345,6 +353,7 @@ impl AppConfig {
             overlay_bind,
             dht_enabled,
             dht_port,
+            trusted_mesh_peers,
             obfuscation_enabled,
             obfuscation_mode,
             obfuscation_prefer_outbound,
@@ -382,7 +391,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"trusted_mesh_peers\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -400,6 +409,7 @@ impl AppConfig {
             json_option(self.overlay_bind.map(|bind| bind.to_string()).as_deref()),
             self.dht_enabled,
             self.dht_port,
+            self.trusted_mesh_peers.len(),
             format_args!(
                 "{{\"enabled\":{},\"mode\":\"{}\",\"prefer_outbound\":{},\"effective_prefer_outbound\":{}}}",
                 self.obfuscation_enabled,
@@ -446,6 +456,43 @@ impl AppConfig {
         self.obfuscation_enabled
             && self.obfuscation_mode == SoulseekObfuscationMode::Prefer
             && self.obfuscation_prefer_outbound
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrustedMeshPeer {
+    pub peer_id: String,
+    pub username: String,
+    pub overlay_endpoint: SocketAddr,
+    pub certificate_sha256: [u8; 32],
+    pub range_endpoint: Option<String>,
+}
+
+impl TrustedMeshPeer {
+    pub fn matches(&self, identity: &str) -> bool {
+        self.peer_id.eq_ignore_ascii_case(identity) || self.username.eq_ignore_ascii_case(identity)
+    }
+
+    pub fn range_url(
+        &self,
+        expected_hash: &str,
+        size: u64,
+        recording_id: Option<&str>,
+    ) -> Option<String> {
+        if expected_hash.len() != 64 || !expected_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        let endpoint = self.range_endpoint.as_deref()?;
+        Some(
+            endpoint
+                .replace("{sha256}", expected_hash)
+                .replace("{size}", &size.to_string())
+                .replace(
+                    "{recordingId}",
+                    &crate::url_encode(recording_id.unwrap_or_default()),
+                ),
+        )
     }
 }
 
@@ -1251,6 +1298,7 @@ pub struct FileConfig {
     network: NetworkFileConfig,
     listeners: ListenerFileConfig,
     dht: DhtFileConfig,
+    mesh: MeshFileConfig,
     profile: ProfileFileConfig,
     timeouts: TimeoutFileConfig,
     shares: ShareFileConfig,
@@ -1266,6 +1314,26 @@ pub struct FileConfig {
 pub struct DhtFileConfig {
     enabled: Option<bool>,
     port: Option<u16>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MeshFileConfig {
+    trusted_peers: Vec<TrustedMeshPeerInput>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrustedMeshPeerInput {
+    #[serde(alias = "peerId")]
+    peer_id: String,
+    username: String,
+    #[serde(alias = "overlayEndpoint")]
+    overlay_endpoint: String,
+    #[serde(alias = "certificateSha256")]
+    certificate_sha256: String,
+    #[serde(default, alias = "rangeEndpoint")]
+    range_endpoint: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1607,6 +1675,149 @@ fn trusted_proxy_cidrs_from_layers(
         .into_iter()
         .map(|value| TrustedProxyCidr::parse(&value))
         .collect()
+}
+
+fn trusted_mesh_peers_from_layers(
+    env_value: Option<String>,
+    file_value: Vec<TrustedMeshPeerInput>,
+) -> Result<Vec<TrustedMeshPeer>, String> {
+    let values = match env_value {
+        Some(value) => serde_json::from_str::<Vec<TrustedMeshPeerInput>>(&value)
+            .map_err(|error| format!("invalid SLSKR_TRUSTED_MESH_PEERS JSON: {error}"))?,
+        None => file_value,
+    };
+    if values.len() > MAX_TRUSTED_MESH_PEERS {
+        return Err(format!(
+            "trusted mesh peer count exceeds {MAX_TRUSTED_MESH_PEERS}"
+        ));
+    }
+
+    let mut peers = Vec::with_capacity(values.len());
+    for value in values {
+        let peer_id = bounded_mesh_identity(&value.peer_id, "peer_id")?;
+        let username = bounded_mesh_identity(&value.username, "username")?;
+        if peers.iter().any(|peer: &TrustedMeshPeer| {
+            peer.peer_id.eq_ignore_ascii_case(&peer_id)
+                || peer.username.eq_ignore_ascii_case(&username)
+                || peer.peer_id.eq_ignore_ascii_case(&username)
+                || peer.username.eq_ignore_ascii_case(&peer_id)
+        }) {
+            return Err(format!(
+                "trusted mesh peer identity {peer_id:?}/{username:?} is duplicated"
+            ));
+        }
+        let overlay_endpoint = value
+            .overlay_endpoint
+            .trim()
+            .parse::<SocketAddr>()
+            .map_err(|error| format!("trusted mesh overlay endpoint is invalid: {error}"))?;
+        if overlay_endpoint.port() == 0 {
+            return Err("trusted mesh overlay endpoint port must be non-zero".to_owned());
+        }
+        if overlay_endpoint.ip().is_unspecified() || overlay_endpoint.ip().is_multicast() {
+            return Err(
+                "trusted mesh overlay endpoint must be a unicast destination address".to_owned(),
+            );
+        }
+        let certificate_sha256 = decode_mesh_certificate_pin(&value.certificate_sha256)?;
+        let range_endpoint = value
+            .range_endpoint
+            .as_deref()
+            .map(validate_mesh_range_endpoint)
+            .transpose()?;
+        peers.push(TrustedMeshPeer {
+            peer_id,
+            username,
+            overlay_endpoint,
+            certificate_sha256,
+            range_endpoint,
+        });
+    }
+    Ok(peers)
+}
+
+fn bounded_mesh_identity(value: &str, field: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(format!("trusted mesh peer {field} is required"));
+    }
+    if value.len() > MAX_MESH_IDENTITY_BYTES {
+        return Err(format!(
+            "trusted mesh peer {field} exceeds {MAX_MESH_IDENTITY_BYTES} bytes"
+        ));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(format!(
+            "trusted mesh peer {field} contains a control character"
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn decode_mesh_certificate_pin(value: &str) -> Result<[u8; 32], String> {
+    let value = value.trim();
+    if value.len() != 64 {
+        return Err(
+            "trusted mesh certificate_sha256 must contain exactly 64 hex digits".to_owned(),
+        );
+    }
+    let bytes = hex::decode(value)
+        .map_err(|_| "trusted mesh certificate_sha256 must be hexadecimal".to_owned())?;
+    let pin: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| "trusted mesh certificate_sha256 must contain 32 bytes".to_owned())?;
+    if pin.iter().all(|byte| *byte == 0) {
+        return Err("trusted mesh certificate_sha256 must not be all zeroes".to_owned());
+    }
+    Ok(pin)
+}
+
+fn validate_mesh_range_endpoint(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("trusted mesh range_endpoint must not be blank".to_owned());
+    }
+    if value.len() > MAX_MESH_RANGE_ENDPOINT_BYTES {
+        return Err(format!(
+            "trusted mesh range_endpoint exceeds {MAX_MESH_RANGE_ENDPOINT_BYTES} bytes"
+        ));
+    }
+    if value.chars().any(char::is_control) {
+        return Err("trusted mesh range_endpoint contains a control character".to_owned());
+    }
+    let scheme_end = value
+        .find("://")
+        .ok_or_else(|| "trusted mesh range_endpoint is missing an authority".to_owned())?;
+    let path_start = value[scheme_end + 3..]
+        .find('/')
+        .map_or(value.len(), |offset| scheme_end + 3 + offset);
+    if value[..path_start].contains(['{', '}']) {
+        return Err(
+            "trusted mesh range_endpoint placeholders are allowed only in the path".to_owned(),
+        );
+    }
+    let parseable = value
+        .replace("{sha256}", &"0".repeat(64))
+        .replace("{size}", "1")
+        .replace("{recordingId}", "recording-id");
+    if parseable.contains(['{', '}']) {
+        return Err("trusted mesh range_endpoint contains an unknown placeholder".to_owned());
+    }
+    let url = reqwest::Url::parse(&parseable)
+        .map_err(|error| format!("trusted mesh range_endpoint is invalid: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("trusted mesh range_endpoint must use http or https".to_owned());
+    }
+    if url.host_str().is_none() {
+        return Err("trusted mesh range_endpoint must include a host".to_owned());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("trusted mesh range_endpoint must not contain embedded credentials".to_owned());
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err("trusted mesh range_endpoint must not contain a query or fragment".to_owned());
+    }
+    Ok(value.to_owned())
 }
 
 fn parse_user_endpoint_overrides(
@@ -2288,5 +2499,115 @@ mod tests {
         )
         .expect_err("invalid pod signature mode must fail");
         assert!(error.contains("off, warn, or enforce"), "{error}");
+    }
+
+    #[test]
+    fn trusted_mesh_peers_are_bounded_pinned_and_redacted() {
+        let value = serde_json::json!([{
+            "peerId": "peer-a",
+            "username": "mesh-user",
+            "overlayEndpoint": "127.0.0.1:50305",
+            "certificateSha256": "11".repeat(32),
+            "rangeEndpoint": "https://mesh.example/content/{sha256}?ignored"
+        }]);
+        let error = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_TRUSTED_MESH_PEERS", &value.to_string()),
+        )
+        .expect_err("query-bearing endpoint must fail");
+        assert!(error.contains("query or fragment"), "{error}");
+
+        let value = serde_json::json!([{
+            "peerId": "peer-a",
+            "username": "mesh-user",
+            "overlayEndpoint": "127.0.0.1:50305",
+            "certificateSha256": "11".repeat(32),
+            "rangeEndpoint": "https://{recordingId}.example/content/{sha256}"
+        }]);
+        let error = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_TRUSTED_MESH_PEERS", &value.to_string()),
+        )
+        .expect_err("authority placeholder must fail");
+        assert!(error.contains("only in the path"), "{error}");
+
+        let value = serde_json::json!([{
+            "peerId": "peer-a",
+            "username": "mesh-user",
+            "overlayEndpoint": "127.0.0.1:50305",
+            "certificateSha256": "11".repeat(32),
+            "rangeEndpoint": "https://mesh.example/content/{sha256}/{size}/{recordingId}"
+        }]);
+        let config = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_TRUSTED_MESH_PEERS", &value.to_string()),
+        )
+        .expect("trusted mesh config");
+        let peer = &config.trusted_mesh_peers[0];
+        assert!(peer.matches("PEER-A"));
+        assert!(peer.matches("MESH-USER"));
+        assert_eq!(peer.certificate_sha256, [0x11; 32]);
+        assert_eq!(
+            peer.range_url(&"a".repeat(64), 42, Some("recording-1")),
+            Some(format!(
+                "https://mesh.example/content/{}/42/recording-1",
+                "a".repeat(64)
+            ))
+        );
+        assert_eq!(
+            peer.range_url(&"a".repeat(64), 42, Some("recording/../?next=1")),
+            Some(format!(
+                "https://mesh.example/content/{}/42/recording%2F..%2F%3Fnext%3D1",
+                "a".repeat(64)
+            ))
+        );
+        assert!(peer.range_url("not-a-sha256", 42, None).is_none());
+        let sanitized = config.sanitized_json();
+        assert!(sanitized.contains("\"trusted_mesh_peers\":1"));
+        assert!(!sanitized.contains("mesh.example"));
+        assert!(!sanitized.contains("mesh-user"));
+        assert!(!sanitized.contains(&"11".repeat(32)));
+    }
+
+    #[test]
+    fn trusted_mesh_peer_config_rejects_ambiguous_or_unpinned_identities() {
+        for value in [
+            serde_json::json!([{
+                "peerId": "peer-a",
+                "username": "mesh-user",
+                "overlayEndpoint": "127.0.0.1:0",
+                "certificateSha256": "11".repeat(32)
+            }]),
+            serde_json::json!([{
+                "peerId": "peer-a",
+                "username": "mesh-user",
+                "overlayEndpoint": "127.0.0.1:50305",
+                "certificateSha256": "00".repeat(32)
+            }]),
+            serde_json::json!([
+                {
+                    "peerId": "peer-a",
+                    "username": "mesh-user",
+                    "overlayEndpoint": "127.0.0.1:50305",
+                    "certificateSha256": "11".repeat(32)
+                },
+                {
+                    "peerId": "MESH-USER",
+                    "username": "other-user",
+                    "overlayEndpoint": "127.0.0.1:50306",
+                    "certificateSha256": "22".repeat(32)
+                }
+            ]),
+        ] {
+            super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default().with("SLSKR_TRUSTED_MESH_PEERS", &value.to_string()),
+            )
+            .expect_err("invalid trusted mesh peer must fail");
+        }
     }
 }

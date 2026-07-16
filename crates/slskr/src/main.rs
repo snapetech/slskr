@@ -4494,10 +4494,11 @@ async fn discover_mesh_range_sources(
     expected_hash: &str,
     file_size: u64,
 ) -> Vec<multisource::RangeSource> {
-    let peer_ids = {
+    let (recording_ids, peer_ids) = {
         let discovery = state.content_discovery.read().await;
         let recording_ids = discovery.recording_ids_for_hash(expected_hash, file_size);
-        discovery.peer_ids_for_recordings(&recording_ids)
+        let peer_ids = discovery.peer_ids_for_recordings(&recording_ids);
+        (recording_ids, peer_ids)
     };
     if peer_ids.is_empty() {
         return Vec::new();
@@ -4506,27 +4507,49 @@ async fn discover_mesh_range_sources(
         .into_iter()
         .map(|peer_id| peer_id.to_ascii_lowercase())
         .collect::<HashSet<_>>();
-    let mesh = state.mesh.read().await;
     let mut usernames = HashSet::new();
-    mesh.capability_records
+    let mut sources = state
+        .config
+        .trusted_mesh_peers
         .iter()
-        .filter(|descriptor| {
-            peer_ids.contains(&descriptor.peer_id.to_ascii_lowercase())
-                && MeshRendezvous::accepts_descriptor(descriptor)
-        })
-        .filter_map(|descriptor| {
-            let endpoint = descriptor.endpoints.iter().find(|endpoint| {
-                endpoint.starts_with("https://") || endpoint.starts_with("http://")
-            })?;
+        .filter(|peer| peer_ids.contains(&peer.peer_id.to_ascii_lowercase()))
+        .filter_map(|peer| {
+            let endpoint = peer.range_url(
+                expected_hash,
+                file_size,
+                recording_ids.first().map(String::as_str),
+            )?;
             usernames
-                .insert(descriptor.username.to_ascii_lowercase())
+                .insert(peer.username.to_ascii_lowercase())
                 .then_some(multisource::RangeSource {
-                    username: descriptor.username.clone(),
-                    url: endpoint.clone(),
+                    username: peer.username.clone(),
+                    url: endpoint,
                     authorization: None,
                 })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let mesh = state.mesh.read().await;
+    sources.extend(
+        mesh.capability_records
+            .iter()
+            .filter(|descriptor| {
+                peer_ids.contains(&descriptor.peer_id.to_ascii_lowercase())
+                    && MeshRendezvous::accepts_descriptor(descriptor)
+            })
+            .filter_map(|descriptor| {
+                let endpoint = descriptor.endpoints.iter().find(|endpoint| {
+                    endpoint.starts_with("https://") || endpoint.starts_with("http://")
+                })?;
+                usernames
+                    .insert(descriptor.username.to_ascii_lowercase())
+                    .then_some(multisource::RangeSource {
+                        username: descriptor.username.clone(),
+                        url: endpoint.clone(),
+                        authorization: None,
+                    })
+            }),
+    );
+    sources
 }
 
 fn swarm_analytics_dashboard(
@@ -4795,7 +4818,25 @@ fn load_or_create_capability_signing_key(state_dir: &Path) -> Result<SigningKey,
             if metadata.file_type().is_symlink() || !metadata.is_file() {
                 return Err("peer capability key must be a regular file".to_owned());
             }
-            let bytes = fs::read(&path)
+            let mut options = fs::OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
+            }
+            let mut file = options
+                .open(&path)
+                .map_err(|error| format!("peer capability key read failed: {error}"))?;
+            let opened_metadata = file
+                .metadata()
+                .map_err(|error| format!("peer capability key metadata failed: {error}"))?;
+            if !opened_metadata.is_file() {
+                return Err("peer capability key must be a regular file".to_owned());
+            }
+            let mut bytes = Vec::with_capacity(33);
+            let mut limited = std::io::Read::take(&mut file, 33);
+            std::io::Read::read_to_end(&mut limited, &mut bytes)
                 .map_err(|error| format!("peer capability key read failed: {error}"))?;
             let secret: [u8; 32] = bytes
                 .try_into()
@@ -4803,7 +4844,7 @@ fn load_or_create_capability_signing_key(state_dir: &Path) -> Result<SigningKey,
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                file.set_permissions(fs::Permissions::from_mode(0o600))
                     .map_err(|error| format!("peer capability key permissions failed: {error}"))?;
             }
             Ok(SigningKey::from_bytes(&secret))
@@ -22170,7 +22211,7 @@ async fn route_http_request_with_headers(
                     "Authenticated peer identity is required",
                 ));
             };
-            let (pod, gateway_certificate_sha256) = {
+            let (pod, pod_gateway_certificate_sha256) = {
                 let pods = state.pods.read().await;
                 if !pods.is_member(pod_id, &local_username) {
                     return Ok(routing::forbidden_response(
@@ -22190,11 +22231,6 @@ async fn route_http_request_with_headers(
             let Some(pod) = pod else {
                 return Ok(routing::not_found_response());
             };
-            let Some(gateway_certificate_sha256) = gateway_certificate_sha256 else {
-                return Ok(routing::service_unavailable_response(
-                    "Pod private-gateway policy has no authenticated TLS certificate pin",
-                ));
-            };
             let gateway_peer_id = pod
                 .private_service_policy
                 .as_ref()
@@ -22208,6 +22244,27 @@ async fn route_http_request_with_headers(
                     "Pod private-gateway policy has no designated gateway",
                 ));
             };
+            let trusted_gateway = state
+                .config
+                .trusted_mesh_peers
+                .iter()
+                .find(|peer| peer.matches(gateway_peer_id));
+            if let (Some(pod_pin), Some(trusted)) =
+                (pod_gateway_certificate_sha256, trusted_gateway)
+            {
+                if pod_pin != trusted.certificate_sha256 {
+                    return Ok(routing::service_unavailable_response(
+                        "Pod and operator gateway certificate pins conflict",
+                    ));
+                }
+            }
+            let gateway_certificate_sha256 = pod_gateway_certificate_sha256
+                .or_else(|| trusted_gateway.map(|peer| peer.certificate_sha256));
+            let Some(gateway_certificate_sha256) = gateway_certificate_sha256 else {
+                return Ok(routing::service_unavailable_response(
+                    "Gateway has no authenticated TLS certificate pin",
+                ));
+            };
             let descriptor = state
                 .mesh
                 .read()
@@ -22219,22 +22276,34 @@ async fn route_http_request_with_headers(
                         || descriptor.username.eq_ignore_ascii_case(gateway_peer_id)
                 })
                 .cloned();
-            let Some(descriptor) = descriptor else {
+            if descriptor.is_none() && trusted_gateway.is_none() {
                 return Ok(routing::service_unavailable_response(
-                    "Gateway peer capability record is unavailable",
+                    "Gateway peer capability record and operator trust entry are unavailable",
                 ));
-            };
-            let Some(overlay_port) = descriptor.overlay_port else {
-                return Ok(routing::service_unavailable_response(
-                    "Gateway peer did not advertise an overlay port",
-                ));
-            };
+            }
+            let gateway_username = descriptor
+                .as_ref()
+                .map(|descriptor| descriptor.username.clone())
+                .or_else(|| trusted_gateway.map(|peer| peer.username.clone()))
+                .expect("a descriptor or trusted gateway exists");
             let mut gateway_endpoints = Vec::new();
-            if let Some(peer_address) = cached_peer_endpoint(state, &descriptor.username).await {
-                gateway_endpoints.push(SocketAddr::V4(SocketAddrV4::new(
-                    peer_connect_ip(state, &peer_address),
-                    overlay_port,
-                )));
+            if let Some(trusted) = trusted_gateway {
+                gateway_endpoints.push(trusted.overlay_endpoint);
+            }
+            if let Some(descriptor) = descriptor.as_ref() {
+                if let Some(overlay_port) = descriptor.overlay_port {
+                    if let Some(peer_address) =
+                        cached_peer_endpoint(state, &descriptor.username).await
+                    {
+                        let endpoint = SocketAddr::V4(SocketAddrV4::new(
+                            peer_connect_ip(state, &peer_address),
+                            overlay_port,
+                        ));
+                        if !gateway_endpoints.contains(&endpoint) {
+                            gateway_endpoints.push(endpoint);
+                        }
+                    }
+                }
             }
             if let Some(dht) = state.dht.as_ref() {
                 for endpoint in dht.peers().await {
@@ -22247,14 +22316,26 @@ async fn route_http_request_with_headers(
                 }
             }
             if gateway_endpoints.is_empty() {
-                let peer_address = match request_peer_endpoint(state, &descriptor.username).await {
-                    Ok(address) => address,
-                    Err(error) => return Ok(routing::service_unavailable_response(&error)),
-                };
-                gateway_endpoints.push(SocketAddr::V4(SocketAddrV4::new(
-                    peer_connect_ip(state, &peer_address),
-                    overlay_port,
-                )));
+                if let Some(descriptor) = descriptor.as_ref() {
+                    if let Some(overlay_port) = descriptor.overlay_port {
+                        let peer_address =
+                            match request_peer_endpoint(state, &descriptor.username).await {
+                                Ok(address) => address,
+                                Err(error) => {
+                                    return Ok(routing::service_unavailable_response(&error));
+                                }
+                            };
+                        gateway_endpoints.push(SocketAddr::V4(SocketAddrV4::new(
+                            peer_connect_ip(state, &peer_address),
+                            overlay_port,
+                        )));
+                    }
+                }
+            }
+            if gateway_endpoints.is_empty() {
+                return Ok(routing::service_unavailable_response(
+                    "Gateway has no reachable overlay endpoint",
+                ));
             }
             match state
                 .port_forwarding
@@ -22264,7 +22345,7 @@ async fn route_http_request_with_headers(
                     destination_host: destination_host.to_owned(),
                     destination_port,
                     service_name: service_name.map(str::to_owned),
-                    gateway_username: descriptor.username,
+                    gateway_username,
                     gateway_endpoints,
                     gateway_certificate_sha256,
                     local_username,
@@ -38223,7 +38304,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn port_forwarding_uses_operator_pinned_gateway_when_frozen_pod_omits_pin() {
+        let trusted_peers = serde_json::json!([{
+            "peerId": "tester",
+            "username": "gateway",
+            "overlayEndpoint": "127.0.0.1:50305",
+            "certificateSha256": "07".repeat(32)
+        }]);
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_TRUSTED_MESH_PEERS", &trusted_peers.to_string()),
+        );
+        let create = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            r#"{"pod":{"podId":"pod-trusted-forward","name":"Trusted Forward","capabilities":[0],"privateServicePolicy":{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","registeredServices":[],"allowedDestinations":[{"hostPattern":"service","port":80,"protocol":"tcp","allowPublic":false}]}}}"#,
+            &state,
+        )
+        .await
+        .expect("create frozen gateway pod without a certificate field");
+        assert_eq!(create.status, "201 Created", "{}", create.body);
+
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("port probe");
+        let local_port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let start = super::route_http_request(
+            "POST",
+            "/api/v0/port-forwarding/start",
+            None,
+            &format!(
+                r#"{{"localPort":{local_port},"podId":"pod-trusted-forward","destinationHost":"service","destinationPort":80}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("start operator-pinned port forwarding");
+        assert_eq!(start.status, "200 OK", "{}", start.body);
+
+        let stop = super::route_http_request(
+            "POST",
+            &format!("/api/port-forwarding/stop/{local_port}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("stop operator-pinned port forwarding");
+        assert_eq!(stop.status, "200 OK");
+    }
+
+    #[tokio::test]
     async fn private_gateway_accepts_authenticated_pod_tunnel_and_round_trips_bytes() {
+        use sha2::Digest as _;
         use slskr_client::overlay::{
             CloseTunnelRequest, GetTunnelDataRequest, MeshHello, MeshServiceCall,
             OpenTunnelRequest, OpenTunnelResponse, TunnelDataRequest, TunnelDataResponse,
@@ -38249,6 +38383,36 @@ mod tests {
         Arc::get_mut(&mut state)
             .expect("unshared state")
             .private_gateway = Some(gateway.clone());
+        let mesh_content = b"frozen mesh content bytes";
+        let mesh_content_path = root.join("mesh-content.flac");
+        std::fs::write(&mesh_content_path, mesh_content).expect("write mesh content fixture");
+        add_test_share(
+            &state,
+            "Virtual/MeshContent.flac",
+            &mesh_content_path,
+            mesh_content.len() as u64,
+        )
+        .await;
+        let mesh_content_hash = hex::encode(sha2::Sha256::digest(mesh_content));
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
+                    flac_key: "mesh-content-key".to_owned(),
+                    file_sha256: mesh_content_hash,
+                    size: mesh_content.len() as u64,
+                    music_brainz_id: "recording-1".to_owned(),
+                    ..Default::default()
+                }])
+                .expect("merge mesh content hash");
+            discovery
+                .merge_shadow_records(vec![super::content_discovery::ShadowIndexRecord {
+                    recording_id: "recording-1".to_owned(),
+                    peer_ids: vec!["peer-hint".to_owned()],
+                    updated_at: 0,
+                }])
+                .expect("merge shadow index fixture");
+        }
 
         let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -38370,6 +38534,51 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&messages_reply.payload).unwrap();
         assert_eq!(messages[0]["senderPeerId"], "member");
         assert_eq!(messages[0]["body"], "mesh hello");
+
+        let shadow_reply = client
+            .call(
+                &MeshServiceCall::new(
+                    "shadow-query",
+                    "shadow-index",
+                    "QueryByMbid",
+                    br#"{"MBID":"recording-1"}"#.to_vec(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("shadow-index reply");
+        assert_eq!(
+            shadow_reply.status_code, 0,
+            "{:?}",
+            shadow_reply.error_message
+        );
+        let shadow = serde_json::from_slice::<serde_json::Value>(&shadow_reply.payload).unwrap();
+        assert_eq!(shadow["MBID"], "recording-1");
+        assert_eq!(shadow["PeerCount"], 1);
+        assert_eq!(
+            shadow["CanonicalVariants"][0]["SizeBytes"],
+            mesh_content.len()
+        );
+
+        let content_reply = client
+            .call(
+                &MeshServiceCall::new(
+                    "content-range",
+                    "MeshContent",
+                    "GetByContentId",
+                    br#"{"contentId":"Virtual/MeshContent.flac","range":{"offset":7,"length":4}}"#
+                        .to_vec(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("mesh content reply");
+        assert_eq!(
+            content_reply.status_code, 0,
+            "{:?}",
+            content_reply.error_message
+        );
+        assert_eq!(content_reply.payload, b"mesh");
 
         let open = OpenTunnelRequest::new(
             "pod-gateway",
@@ -39126,14 +39335,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hashdb_mbid_shadow_index_discovers_and_executes_mesh_swarm_sources() {
+    async fn hashdb_shadow_index_uses_operator_trusted_frozen_peer_for_mesh_swarm() {
         use sha2::{Digest, Sha256};
 
         let content = Arc::new(b"verified mesh source discovery".to_vec());
         let expected_hash = hex::encode(Sha256::digest(content.as_slice()));
         let (source_a, task_a) = spawn_mesh_range_source(Arc::clone(&content)).await;
         let (source_b, task_b) = spawn_mesh_range_source(Arc::clone(&content)).await;
-        let (state, _receiver) = test_state();
+        let trusted_peers = serde_json::json!([{
+            "peerId": "peer-a",
+            "username": "source-a",
+            "overlayEndpoint": "127.0.0.1:50305",
+            "certificateSha256": "11".repeat(32),
+            "rangeEndpoint": format!("http://{source_a}/content")
+        }]);
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_TRUSTED_MESH_PEERS", &trusted_peers.to_string()),
+        );
 
         let hash_merge = super::route_http_request(
             "POST",
@@ -39163,18 +39381,13 @@ mod tests {
 
         {
             let mut mesh = state.mesh.write().await;
-            for (username, peer_id, address) in [
-                ("source-a", "peer-a", source_a),
-                ("source-b", "peer-b", source_b),
-            ] {
-                let mut descriptor = test_capability_descriptor(
-                    username,
-                    vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
-                );
-                descriptor.peer_id = peer_id.to_owned();
-                descriptor.endpoints = vec![format!("http://{address}/content")];
-                mesh.capability_records.push(descriptor);
-            }
+            let mut descriptor = test_capability_descriptor(
+                "source-b",
+                vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            );
+            descriptor.peer_id = "peer-b".to_owned();
+            descriptor.endpoints = vec![format!("http://{source_b}/content")];
+            mesh.capability_records.push(descriptor);
         }
 
         let by_size = super::route_http_request(
@@ -57241,6 +57454,25 @@ mod tests {
             first.verifying_key().to_bytes(),
             second.verifying_key().to_bytes()
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capability_identity_rejects_symlinked_key() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-capability-symlink-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("target-key.bin");
+        std::fs::write(&target, [7_u8; 32]).unwrap();
+        symlink(&target, root.join("peer-capability-key.bin")).unwrap();
+        let error = super::load_or_create_capability_signing_key(&root).unwrap_err();
+        assert!(error.contains("must be a regular file"), "{error}");
         std::fs::remove_dir_all(root).unwrap();
     }
 

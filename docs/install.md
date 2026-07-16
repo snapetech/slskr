@@ -53,6 +53,8 @@ Set `SLSKR_OVERLAY_BIND=0.0.0.0:50305` or `[listeners].overlay_bind = "0.0.0.0:5
 
 Mainline-DHT rendezvous defaults on with the overlay listener. Override it with `SLSKR_DHT_ENABLED` / `[dht].enabled` and choose the UDP bind port with `SLSKR_DHT_PORT` / `[dht].port`; port `0` uses an ephemeral port. A fixed, publicly forwarded UDP port improves long-running DHT participation, but the advertised private-gateway TCP endpoint remains the overlay port. Outbound-only Pod members can enable DHT without an overlay listener to discover pinned gateway candidates.
 
+Frozen slskdN capability messages do not contain an overlay certificate hash or HTTP range URL. Configure verified peers with `[[mesh.trusted_peers]]`, or supply the same array as JSON in `SLSKR_TRUSTED_MESH_PEERS`. Each entry requires `peer_id`, Soulseek `username`, an IP-literal `overlay_endpoint`, and a 64-hex-digit `certificate_sha256`; `range_endpoint` is optional and may use `{sha256}`, `{size}`, and `{recordingId}` placeholders. slskr rejects duplicate identities, zero or non-unicast overlay destinations, credential-bearing URLs, query/fragment URLs, all-zero pins, and more than 256 entries. These values are counted but never emitted by the sanitized configuration endpoint.
+
 Start from [slskr.config.example.toml](./slskr.config.example.toml). Configure
 API tokens through your service manager, deployment config, or secret manager.
 For Soulseek credentials, prefer first-run Web UI entry with the OS credential

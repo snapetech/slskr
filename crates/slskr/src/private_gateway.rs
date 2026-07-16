@@ -1,13 +1,14 @@
 use std::{
     collections::BTreeMap,
     fmt, fs,
-    io::Read as _,
+    io::{Read as _, Seek as _, SeekFrom},
     net::{IpAddr, SocketAddr},
     path::Path,
     sync::Arc,
     time::Duration,
 };
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rcgen::generate_simple_self_signed;
 use sha2::{Digest, Sha256};
 use slskr_client::overlay::{
@@ -49,6 +50,10 @@ const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_POD_MESSAGE_BODY_BYTES: usize = 4 * 1024;
+const MAX_MESH_CONTENT_BYTES: usize = 32 * 1024;
+const MAX_CONTENT_ID_BYTES: usize = 512;
+const MAX_SHADOW_MBID_BYTES: usize = 100;
+const MAX_SHADOW_BATCH: usize = 20;
 
 pub struct Gateway {
     bind: SocketAddr,
@@ -268,6 +273,14 @@ impl Gateway {
                     self.handle_pods_call(&call.method, &call.payload, remote_username, state)
                         .await
                 }
+                "shadow-index" => {
+                    self.handle_shadow_index_call(&call.method, &call.payload, state)
+                        .await
+                }
+                "MeshContent" => {
+                    self.handle_mesh_content_call(&call.method, &call.payload, state)
+                        .await
+                }
                 _ => Err((2, "Unknown service".to_owned())),
             }
         };
@@ -277,6 +290,103 @@ impl Gateway {
                 service_reply(call.correlation_id, status, Vec::new(), Some(error))
             }
         }
+    }
+
+    async fn handle_shadow_index_call(
+        &self,
+        method: &str,
+        payload: &[u8],
+        state: &super::AppState,
+    ) -> Result<Vec<u8>, (i32, String)> {
+        match method {
+            "QueryByMbid" => {
+                let request: ShadowQueryRequest = parse_payload(payload)?;
+                let mbid = valid_shadow_mbid(&request.mbid)?;
+                let result = shadow_index_result(state, mbid)
+                    .await
+                    .ok_or_else(|| (2, "No data found for MBID".to_owned()))?;
+                serde_json::to_vec(&result)
+                    .map_err(|_| (1, "Shadow-index response failed".to_owned()))
+            }
+            "QueryBatch" => {
+                let request: ShadowBatchRequest = parse_payload(payload)?;
+                if request.mbids.is_empty() || request.mbids.len() > MAX_SHADOW_BATCH {
+                    return Err((
+                        if request.mbids.len() > MAX_SHADOW_BATCH {
+                            9
+                        } else {
+                            4
+                        },
+                        "MBIDs list is invalid".to_owned(),
+                    ));
+                }
+                let mut results = serde_json::Map::new();
+                let mut seen = std::collections::HashSet::new();
+                for mbid in request.mbids {
+                    let mbid = valid_shadow_mbid(&mbid)?;
+                    if !seen.insert(mbid.to_owned()) {
+                        continue;
+                    }
+                    if let Some(result) = shadow_index_result(state, mbid).await {
+                        results.insert(mbid.to_owned(), result);
+                    }
+                }
+                serde_json::to_vec(&results)
+                    .map_err(|_| (1, "Shadow-index response failed".to_owned()))
+            }
+            _ => Err((3, "Unknown method".to_owned())),
+        }
+    }
+
+    async fn handle_mesh_content_call(
+        &self,
+        method: &str,
+        payload: &[u8],
+        state: &super::AppState,
+    ) -> Result<Vec<u8>, (i32, String)> {
+        if method != "GetByContentId" {
+            return Err((3, "Unknown method".to_owned()));
+        }
+        let request: MeshContentRequest = parse_payload(payload)?;
+        let content_id = bounded_required(&request.content_id, MAX_CONTENT_ID_BYTES, "ContentId")?;
+        let (local_path, indexed_size) = {
+            let shares = state.shares.read().await;
+            let entry = shares
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.filename == content_id
+                        || super::stable_content_hash(&entry.filename, entry.size).to_string()
+                            == content_id
+                })
+                .ok_or_else(|| (2, "Content not found or not advertisable".to_owned()))?;
+            let local_path = shares
+                .local_paths
+                .get(&entry.filename)
+                .cloned()
+                .ok_or_else(|| (2, "Content not found or not advertisable".to_owned()))?;
+            (local_path, entry.size)
+        };
+        let mut file = super::open_shared_local_file(state, &local_path)
+            .map_err(|_| (2, "Content not found or not advertisable".to_owned()))?;
+        let actual_size = file
+            .metadata()
+            .map_err(|_| (10, "Content metadata failed".to_owned()))?
+            .len();
+        if actual_size != indexed_size || actual_size == 0 {
+            return Err((2, "Content not found or not advertisable".to_owned()));
+        }
+        let (offset, length) = mesh_content_range(request.range.as_ref(), actual_size)?;
+        let bytes = tokio::task::spawn_blocking(move || {
+            file.seek(SeekFrom::Start(offset))?;
+            let mut bytes = vec![0_u8; length];
+            file.read_exact(&mut bytes)?;
+            Ok::<_, std::io::Error>(bytes)
+        })
+        .await
+        .map_err(|_| (10, "Content read task failed".to_owned()))?
+        .map_err(|_| (10, "Content read failed".to_owned()))?;
+        Ok(bytes)
     }
 
     async fn handle_pods_call(
@@ -646,6 +756,110 @@ fn service_reply(
 
 fn parse_payload<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<T, (i32, String)> {
     serde_json::from_slice(payload).map_err(|_| (4, "Invalid request payload".to_owned()))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ShadowQueryRequest {
+    #[serde(alias = "MBID", alias = "mbid")]
+    mbid: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ShadowBatchRequest {
+    #[serde(alias = "MBIDs", alias = "mbids")]
+    mbids: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MeshContentRequest {
+    #[serde(alias = "ContentId", alias = "contentId")]
+    content_id: String,
+    #[serde(default, alias = "Range", alias = "range")]
+    range: Option<MeshContentRange>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MeshContentRange {
+    #[serde(alias = "Offset", alias = "offset")]
+    offset: i64,
+    #[serde(alias = "Length", alias = "length")]
+    length: i64,
+}
+
+fn valid_shadow_mbid(value: &str) -> Result<&str, (i32, String)> {
+    let value = value.trim();
+    if !(8..=MAX_SHADOW_MBID_BYTES).contains(&value.len())
+        || value.contains("..")
+        || value.contains(['/', '\\'])
+        || value.chars().any(char::is_control)
+    {
+        return Err((4, "Invalid MBID".to_owned()));
+    }
+    Ok(value)
+}
+
+async fn shadow_index_result(state: &super::AppState, mbid: &str) -> Option<serde_json::Value> {
+    let discovery = state.content_discovery.read().await;
+    let shadow = discovery
+        .shadow_records()
+        .iter()
+        .find(|record| record.recording_id.eq_ignore_ascii_case(mbid))?;
+    let canonical_variants = discovery
+        .hash_entries()
+        .iter()
+        .filter(|entry| entry.music_brainz_id.eq_ignore_ascii_case(mbid))
+        .take(10)
+        .filter_map(|entry| {
+            let hash = [&entry.file_sha256, &entry.full_file_hash, &entry.byte_hash]
+                .into_iter()
+                .find(|hash| !hash.is_empty())?;
+            let hash = hex::decode(hash).ok()?;
+            Some(serde_json::json!({
+                "Codec": "FLAC",
+                "BitrateKbps": 0,
+                "SizeBytes": entry.size,
+                "HashPrefix": BASE64.encode(&hash[..hash.len().min(16)]),
+                "QualityScore": 1.0,
+            }))
+        })
+        .collect::<Vec<_>>();
+    let last_updated = chrono::DateTime::from_timestamp(shadow.updated_at as i64, 0)
+        .map(|timestamp| timestamp.to_rfc3339());
+    Some(serde_json::json!({
+        "MBID": shadow.recording_id,
+        "PeerCount": shadow.peer_ids.len(),
+        "CanonicalVariants": canonical_variants,
+        "LastUpdated": last_updated,
+    }))
+}
+
+fn mesh_content_range(
+    requested: Option<&MeshContentRange>,
+    size: u64,
+) -> Result<(u64, usize), (i32, String)> {
+    let (offset, requested_length) = match requested {
+        Some(range) if range.offset >= 0 && range.length >= 0 => {
+            (range.offset as u64, range.length as u64)
+        }
+        Some(_) => return Err((4, "Invalid range request".to_owned())),
+        None => (0, size),
+    };
+    if offset >= size {
+        return Err((4, "Invalid range request".to_owned()));
+    }
+    let remaining = size - offset;
+    let length = if requested_length == 0 {
+        remaining
+    } else {
+        requested_length.min(remaining)
+    };
+    if length == 0 {
+        return Err((4, "Invalid range request".to_owned()));
+    }
+    if length > MAX_MESH_CONTENT_BYTES as u64 {
+        return Err((9, "Range too large; request a smaller range".to_owned()));
+    }
+    Ok((offset, length as usize))
 }
 
 #[derive(Debug, serde::Deserialize)]

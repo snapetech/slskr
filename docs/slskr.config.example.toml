@@ -44,6 +44,19 @@ advertised_port = 2234
 # enabled = true
 # port = 0
 
+[mesh]
+# Frozen slskdN capability messages advertise an overlay port but not the TLS
+# certificate hash or HTTP range URL. Pin those values explicitly for peers you
+# operate or have verified out of band. Environment equivalent:
+# SLSKR_TRUSTED_MESH_PEERS='[{"peerId":"...","username":"...","overlayEndpoint":"203.0.113.10:50305","certificateSha256":"...","rangeEndpoint":"https://mesh.example/content/{sha256}/{size}/{recordingId}"}]'
+# [[mesh.trusted_peers]]
+# peer_id = "lower-case-peer-id"
+# username = "soulseek-user"
+# overlay_endpoint = "203.0.113.10:50305"
+# certificate_sha256 = "64-hex-digit-sha256-certificate-fingerprint"
+# Optional URL templates support {sha256}, {size}, and {recordingId}.
+# range_endpoint = "https://mesh.example/content/{sha256}/{size}/{recordingId}"
+
 [profile]
 user_info_description = "slskr daemon"
 
