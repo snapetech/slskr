@@ -231,7 +231,7 @@ pub fn handle_peer_capability_message(
         return Ok(None);
     };
 
-    envelope.descriptor.username = non_blank(remote_username.to_owned(), "username")?;
+    envelope.descriptor.username = bounded_non_blank(remote_username.to_owned(), "username")?;
     registry.update(envelope.descriptor, now)?;
     if envelope.message_type == PeerCapabilityMessageType::Hello {
         let acknowledgement = PeerCapabilityEnvelope::new(
@@ -381,6 +381,7 @@ impl PeerCapabilityRegistry {
         descriptor: PeerCapabilityDescriptor,
         now: SystemTime,
     ) -> Result<Option<PeerCapabilityDescriptor>, CapabilityError> {
+        bounded_non_blank(descriptor.username.clone(), "username")?;
         descriptor.verify(now)?;
         let key = descriptor.username.to_ascii_lowercase();
         self.prune_expired(now)?;
@@ -593,6 +594,17 @@ fn non_blank(value: String, field: &'static str) -> Result<String, CapabilityErr
     } else {
         Ok(value)
     }
+}
+
+fn bounded_non_blank(value: String, field: &'static str) -> Result<String, CapabilityError> {
+    if value.len() > MAX_CAPABILITY_STRING_BYTES {
+        return Err(CapabilityError::FieldTooLong {
+            field,
+            length: value.len(),
+            max: MAX_CAPABILITY_STRING_BYTES,
+        });
+    }
+    non_blank(value, field)
 }
 
 fn normalize_values(
@@ -1062,5 +1074,48 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, CapabilityError::BlankField("username"));
+    }
+
+    #[test]
+    fn capability_exchange_rejects_oversized_remote_username() {
+        let hello =
+            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, "nonce", descriptor());
+        let message = peer_capability_message(&hello).unwrap();
+        let oversized = "x".repeat(MAX_CAPABILITY_STRING_BYTES + 1);
+        let mut registry = PeerCapabilityRegistry::new();
+
+        assert_eq!(
+            handle_peer_capability_message(
+                &mut registry,
+                &message,
+                &oversized,
+                &local_descriptor(),
+                now(),
+            )
+            .unwrap_err(),
+            CapabilityError::FieldTooLong {
+                field: "username",
+                length: MAX_CAPABILITY_STRING_BYTES + 1,
+                max: MAX_CAPABILITY_STRING_BYTES,
+            }
+        );
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn capability_registry_rejects_oversized_username_directly() {
+        let mut oversized = descriptor();
+        oversized.username = "x".repeat(MAX_CAPABILITY_STRING_BYTES + 1);
+        let mut registry = PeerCapabilityRegistry::new();
+
+        assert!(matches!(
+            registry.update(oversized, now()),
+            Err(CapabilityError::FieldTooLong {
+                field: "username",
+                length,
+                max: MAX_CAPABILITY_STRING_BYTES,
+            }) if length == MAX_CAPABILITY_STRING_BYTES + 1
+        ));
+        assert!(registry.is_empty());
     }
 }
