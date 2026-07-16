@@ -4140,14 +4140,30 @@ impl DatabaseManager {
     /// Delete webhook
     pub async fn delete_webhook(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        query("DELETE FROM webhook_logs WHERE webhook_id = ?")
+        let log_delete = query("DELETE FROM webhook_logs WHERE webhook_id = ?")
             .bind(id)
             .execute(&mut *transaction)
-            .await?;
-        query("DELETE FROM webhooks WHERE id = ?")
+            .await;
+        if let Err(delete_error) = log_delete {
+            transaction.rollback().await.map_err(|rollback_error| {
+                format!(
+                    "webhook log deletion failed ({delete_error}); transaction rollback failed: {rollback_error}"
+                )
+            })?;
+            return Err(delete_error.into());
+        }
+        let webhook_delete = query("DELETE FROM webhooks WHERE id = ?")
             .bind(id)
             .execute(&mut *transaction)
-            .await?;
+            .await;
+        if let Err(delete_error) = webhook_delete {
+            transaction.rollback().await.map_err(|rollback_error| {
+                format!(
+                    "webhook deletion failed ({delete_error}); transaction rollback failed: {rollback_error}"
+                )
+            })?;
+            return Err(delete_error.into());
+        }
         transaction.commit().await?;
         Ok(())
     }
