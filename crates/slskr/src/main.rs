@@ -38244,6 +38244,21 @@ mod tests {
             .expect("close reply");
         assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
         echo.await.expect("echo task");
+
+        let legacy_hello = MeshHello::new(
+            "member",
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            None,
+            None,
+            "legacy-gateway-test-nonce",
+        )
+        .expect("legacy hello");
+        let legacy_error =
+            slskr_client::overlay::connect_tls_overlay(endpoint, certificate_pin, legacy_hello)
+                .await
+                .expect_err("unsigned legacy gateway hello must be rejected");
+        assert!(legacy_error.to_string().contains("overlay"));
+
         gateway_server.abort();
         let _ = std::fs::remove_dir_all(root);
     }
