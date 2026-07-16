@@ -276,7 +276,7 @@ fn validate_close_payload(payload: &[u8]) -> Result<(), String> {
     }
     if payload.len() >= 2 {
         let code = u16::from_be_bytes([payload[0], payload[1]]);
-        if !(1000..5000).contains(&code) || matches!(code, 1004 | 1005 | 1006 | 1015) {
+        if !matches!(code, 1000..=1003 | 1007..=1014 | 3000..=4999) {
             return Err("client websocket close frame used an invalid status code".to_owned());
         }
         std::str::from_utf8(&payload[2..])
@@ -554,6 +554,10 @@ mod tests {
             ),
             (
                 1005_u16.to_be_bytes().to_vec(),
+                "client websocket close frame used an invalid status code",
+            ),
+            (
+                2000_u16.to_be_bytes().to_vec(),
                 "client websocket close frame used an invalid status code",
             ),
             (
