@@ -11,6 +11,7 @@ pub const PEER_CAPABILITY_MESSAGE_CODE: u32 = 0x534C_534B;
 pub const PEER_CAPABILITY_ENVELOPE_VERSION: u16 = 1;
 pub const MAX_CAPABILITY_ENVELOPE_BYTES: usize = 64 * 1024;
 pub const MAX_PEER_CAPABILITY_RECORDS: usize = 1_024;
+pub const PEER_CAPABILITY_RECEIPT_LEASE: Duration = Duration::from_secs(24 * 60 * 60);
 const PEER_CAPABILITY_MAGIC: i32 = 0x4E44_534B;
 const MAX_CAPABILITY_FEATURES: usize = 256;
 const MAX_CAPABILITY_STRING_BYTES: usize = 4_096;
@@ -235,6 +236,11 @@ pub fn handle_peer_capability_message(
     };
 
     envelope.descriptor.username = bounded_non_blank(remote_username.to_owned(), "username")?;
+    let received_at = unix_seconds(now)?;
+    envelope.descriptor.issued_at_unix = received_at;
+    envelope.descriptor.expires_at_unix = received_at
+        .checked_add(PEER_CAPABILITY_RECEIPT_LEASE.as_secs())
+        .ok_or(CapabilityError::InvalidTime)?;
     registry.update(envelope.descriptor, now)?;
     if envelope.message_type == PeerCapabilityMessageType::Hello {
         let acknowledgement = PeerCapabilityEnvelope::new(
@@ -883,6 +889,12 @@ mod tests {
         .expect("acknowledgement");
 
         assert!(registry.get("alice").is_some());
+        let registered = registry.get("alice").unwrap();
+        assert_eq!(registered.issued_at_unix, unix_seconds(now()).unwrap());
+        assert_eq!(
+            registered.expires_at_unix,
+            unix_seconds(now()).unwrap() + PEER_CAPABILITY_RECEIPT_LEASE.as_secs()
+        );
         let acknowledgement = decode_peer_capability_message(&response)
             .unwrap()
             .expect("capability ack");
