@@ -13,6 +13,26 @@ section() {
   printf '\n==> %s\n' "$1"
 }
 
+ensure_docker_image() {
+  local image="$1"
+  local attempt
+
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  for attempt in 1 2 3; do
+    if docker pull "$image"; then
+      return 0
+    fi
+    if [[ "$attempt" -lt 3 ]]; then
+      printf 'docker pull failed for %s (attempt %s/3); retrying\n' "$image" "$attempt" >&2
+      sleep "$((attempt * 2))"
+    fi
+  done
+  return 1
+}
+
 run_or_record() {
   local label="$1"
   shift
@@ -38,6 +58,10 @@ run_semgrep() {
   fi
 
   if command -v docker >/dev/null 2>&1; then
+    if ! ensure_docker_image "$semgrep_image"; then
+      run_or_record "Semgrep image pull" false
+      return
+    fi
     run_or_record "Semgrep security scan" docker run --rm \
       --user "$(id -u):$(id -g)" \
       -e HOME=/tmp \
@@ -64,6 +88,10 @@ run_trivy() {
   fi
 
   if command -v docker >/dev/null 2>&1; then
+    if ! ensure_docker_image "$trivy_image"; then
+      run_or_record "Trivy image pull" false
+      return
+    fi
     run_or_record "Trivy filesystem scan" docker run --rm \
       --user "$(id -u):$(id -g)" \
       -e HOME=/tmp \
