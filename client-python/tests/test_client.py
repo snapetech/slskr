@@ -200,7 +200,26 @@ async def test_websocket_subscription_tasks_report_errors_and_deduplicate_transi
     assert ws.send_json.await_args_list[1].args[0]["data"]["topics"] == ["searches"]
     assert len(errors) == 1
     assert str(errors[0]) == "send failed"
+    assert client.get_subscribed_topics() == ["searches"]
     assert not client._outbound_tasks
+
+
+@pytest.mark.asyncio
+async def test_websocket_failed_subscribe_task_rolls_back_topics():
+    ws = MagicMock()
+    ws.closed = False
+    ws.send_json = AsyncMock(side_effect=OSError("send failed"))
+    client = WebSocketClient("https://example.test", "token")
+    client.ws = ws
+    errors = []
+    client.on_error(errors.append)
+
+    client.subscribe("searches")
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert client.get_subscribed_topics() == []
+    assert [str(error) for error in errors] == ["send failed"]
 
 
 @pytest.mark.asyncio

@@ -173,7 +173,7 @@ class WebSocketClient:
 
         if self.ws and not self.ws.closed:
             message = {"type": "subscribe", "data": {"topics": list(new_topics)}}
-            self._schedule_send(message)
+            self._schedule_send(message, "subscribe", new_topics)
 
     def unsubscribe(self, *topics: str):
         """Unsubscribe from event types"""
@@ -184,9 +184,9 @@ class WebSocketClient:
 
         if self.ws and not self.ws.closed:
             message = {"type": "unsubscribe", "data": {"topics": list(removed_topics)}}
-            self._schedule_send(message)
+            self._schedule_send(message, "unsubscribe", removed_topics)
 
-    def _schedule_send(self, message: Dict):
+    def _schedule_send(self, message: Dict, transition: str, topics: Set[str]):
         task = asyncio.create_task(self.ws.send_json(message))
         self._outbound_tasks.add(task)
 
@@ -196,6 +196,10 @@ class WebSocketClient:
                 return
             error = completed.exception()
             if error is not None and not self._intentional_disconnect:
+                if transition == "subscribe":
+                    self.subscribed_topics.difference_update(topics)
+                else:
+                    self.subscribed_topics.update(topics)
                 self._notify_error_listeners(error)
 
         task.add_done_callback(finished)
