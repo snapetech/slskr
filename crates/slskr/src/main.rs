@@ -19140,7 +19140,7 @@ async fn route_http_request_with_headers(
                   }
               };
               let peer_id = pod_request_peer_id(state).await;
-              let pods = state.pods.read().await;
+              let mut pods = state.pods.write().await;
               if pods.get(&pod_id).is_some()
                   && peer_id
                       .as_deref()
@@ -19157,20 +19157,63 @@ async fn route_http_request_with_headers(
                       ));
                   }
               }
-              drop(pods);
-              match state.pods.write().await.update(&pod_id, pod) {
+              let proposed_channel_ids = pod
+                  .channels
+                  .iter()
+                  .map(|channel| channel.channel_id.trim().to_owned())
+                  .collect::<HashSet<_>>();
+              let removed_channel_ids = pods
+                  .get(&pod_id)
+                  .map(|existing| {
+                      existing
+                          .channels
+                          .into_iter()
+                          .map(|channel| channel.channel_id)
+                          .filter(|channel_id| !proposed_channel_ids.contains(channel_id))
+                          .collect::<HashSet<_>>()
+                  })
+                  .unwrap_or_default();
+              let mut channels = state.pod_channels.write().await;
+              let removed_messages = match channels.delete_channels(&pod_id, &removed_channel_ids) {
+                  Ok(messages) => messages,
+                  Err(error) => {
+                      eprintln!("pod channel cleanup failed: {error}");
+                      return Ok(routing::service_unavailable_response(
+                          "pod storage is unavailable",
+                      ));
+                  }
+              };
+              let update_result = pods.update(&pod_id, pod);
+              match update_result {
                   Ok(Some(pod)) => Ok(routing::ok_response(
                       serde_json::to_string(&pod)
                           .map_err(|error| format!("pod serialization failed: {error}"))?,
                   )),
-                  Ok(None) => Ok(routing::not_found_response()),
-                  Err(error) if error.starts_with("pod state write failed") => {
-                      eprintln!("pod persistence failed: {error}");
-                      Ok(routing::service_unavailable_response(
-                          "pod storage is unavailable",
-                      ))
+                  Ok(None) => {
+                      if let Err(error) = channels.restore(removed_messages) {
+                          eprintln!("pod channel cleanup rollback failed: {error}");
+                          return Ok(routing::service_unavailable_response(
+                              "pod storage is unavailable",
+                          ));
+                      }
+                      Ok(routing::not_found_response())
                   }
-                  Err(error) => Ok(routing::bad_request_response(&error)),
+                  Err(error) => {
+                      if let Err(rollback_error) = channels.restore(removed_messages) {
+                          eprintln!("pod channel cleanup rollback failed: {rollback_error}");
+                          return Ok(routing::service_unavailable_response(
+                              "pod storage is unavailable",
+                          ));
+                      }
+                      if error.starts_with("pod state write failed") {
+                          eprintln!("pod persistence failed: {error}");
+                          Ok(routing::service_unavailable_response(
+                              "pod storage is unavailable",
+                          ))
+                      } else {
+                          Ok(routing::bad_request_response(&error))
+                      }
+                  }
               }
           }
 
@@ -38005,6 +38048,65 @@ mod tests {
             .await
             .expect("private pod history");
         assert_eq!(forbidden.status, "403 Forbidden");
+    }
+
+    #[tokio::test]
+    async fn removing_a_pod_channel_permanently_removes_its_message_history() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/pods",
+            None,
+            r#"{"pod":{"podId":"pod-cleanup","name":"Cleanup","isPublic":true,"channels":[{"channelId":"general","kind":0,"name":"General"},{"channelId":"private","kind":0,"name":"Private"}]}}"#,
+            &state,
+        )
+        .await
+        .expect("create pod");
+        assert_eq!(created.status, "201 Created");
+        let message_path = "/api/pods/pod-cleanup/channels/private/messages";
+        let sent = super::route_http_request(
+            "POST",
+            message_path,
+            None,
+            r#"{"body":"must not resurface","senderPeerId":"tester"}"#,
+            &state,
+        )
+        .await
+        .expect("send channel message");
+        assert_eq!(sent.status, "200 OK");
+
+        let removed = super::route_http_request(
+            "PUT",
+            "/api/pods/pod-cleanup",
+            None,
+            r#"{"pod":{"podId":"pod-cleanup","name":"Cleanup","isPublic":true,"channels":[{"channelId":"general","kind":0,"name":"General"}]}}"#,
+            &state,
+        )
+        .await
+        .expect("remove channel");
+        assert_eq!(removed.status, "200 OK");
+        assert!(state
+            .pod_channels
+            .read()
+            .await
+            .list("pod-cleanup", "private", None)
+            .is_empty());
+
+        let recreated = super::route_http_request(
+            "PUT",
+            "/api/pods/pod-cleanup",
+            None,
+            r#"{"pod":{"podId":"pod-cleanup","name":"Cleanup","isPublic":true,"channels":[{"channelId":"general","kind":0,"name":"General"},{"channelId":"private","kind":0,"name":"Private"}]}}"#,
+            &state,
+        )
+        .await
+        .expect("recreate channel");
+        assert_eq!(recreated.status, "200 OK");
+        let history = super::route_http_request("GET", message_path, None, "", &state)
+            .await
+            .expect("read recreated channel history");
+        assert_eq!(history.status, "200 OK");
+        assert_eq!(history.body, "[]");
     }
 
     #[tokio::test]

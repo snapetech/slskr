@@ -148,10 +148,27 @@ impl PodChannelStore {
     }
 
     pub fn delete_pod(&mut self, pod_id: &str) -> Result<Vec<PodChannelMessage>, String> {
+        self.delete_matching(|message| message.pod_id == pod_id)
+    }
+
+    pub fn delete_channels(
+        &mut self,
+        pod_id: &str,
+        channel_ids: &HashSet<String>,
+    ) -> Result<Vec<PodChannelMessage>, String> {
+        self.delete_matching(|message| {
+            message.pod_id == pod_id && channel_ids.contains(&message.channel_id)
+        })
+    }
+
+    fn delete_matching(
+        &mut self,
+        matches: impl Fn(&PodChannelMessage) -> bool,
+    ) -> Result<Vec<PodChannelMessage>, String> {
         let mut messages = self.messages.clone();
         let mut removed = Vec::new();
         messages.retain(|message| {
-            if message.pod_id == pod_id {
+            if matches(message) {
                 removed.push(message.clone());
                 false
             } else {
@@ -386,6 +403,39 @@ mod tests {
         let loaded = PodChannelStore::load(&state_dir).unwrap();
         assert_eq!(loaded.list("pod-1", "chat", None).len(), 1);
         assert_eq!(loaded.list("pod-2", "chat", None).len(), 1);
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn channel_deletion_removes_only_selected_channel_messages() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-channel-selection-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodChannelStore::empty(&state_dir);
+        for channel_id in ["general", "private"] {
+            store
+                .append(
+                    "pod-1".to_owned(),
+                    channel_id.to_owned(),
+                    "peer-1".to_owned(),
+                    format!("message-{channel_id}"),
+                    String::new(),
+                    1,
+                )
+                .unwrap();
+        }
+
+        let removed = store
+            .delete_channels("pod-1", &["private".to_owned()].into_iter().collect())
+            .unwrap();
+        assert_eq!(removed.len(), 1);
+        assert!(store.list("pod-1", "private", None).is_empty());
+        assert_eq!(store.list("pod-1", "general", None).len(), 1);
+        let loaded = PodChannelStore::load(&state_dir).unwrap();
+        assert!(loaded.list("pod-1", "private", None).is_empty());
+        assert_eq!(loaded.list("pod-1", "general", None).len(), 1);
         std::fs::remove_dir_all(state_dir).unwrap();
     }
 }
