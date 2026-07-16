@@ -46,6 +46,15 @@ pub struct ExternalBinding {
     pub identifier: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SoulseekBinding {
+    pub pod_id: String,
+    pub channel_id: String,
+    pub identifier: String,
+    pub mode: String,
+    pub kind: &'static str,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PodMember {
@@ -171,6 +180,63 @@ impl PodStore {
                 .iter()
                 .any(|channel| channel.channel_id == channel_id)
         })
+    }
+
+    pub fn soulseek_binding(&self, pod_id: &str, channel_id: &str) -> Option<SoulseekBinding> {
+        let stored = self.pods.get(pod_id)?;
+        let binding_info = stored
+            .pod
+            .channels
+            .iter()
+            .find(|channel| channel.channel_id == channel_id)?
+            .binding_info
+            .as_deref()?;
+        if let Some(identifier) = binding_info.strip_prefix("soulseek-dm:") {
+            return (!identifier.trim().is_empty()).then(|| SoulseekBinding {
+                pod_id: pod_id.to_owned(),
+                channel_id: channel_id.to_owned(),
+                identifier: identifier.trim().to_owned(),
+                mode: "mirror".to_owned(),
+                kind: "dm",
+            });
+        }
+        let identifier = binding_info.strip_prefix("soulseek-room:")?.trim();
+        if identifier.is_empty() {
+            return None;
+        }
+        let mode = stored
+            .pod
+            .external_bindings
+            .iter()
+            .find(|binding| {
+                binding.kind == "soulseek-room"
+                    && binding.identifier.eq_ignore_ascii_case(identifier)
+            })
+            .map(|binding| binding.mode.clone())
+            .unwrap_or_else(default_readonly);
+        Some(SoulseekBinding {
+            pod_id: pod_id.to_owned(),
+            channel_id: channel_id.to_owned(),
+            identifier: identifier.to_owned(),
+            mode,
+            kind: "room",
+        })
+    }
+
+    pub fn room_bindings(&self, room_name: &str) -> Vec<SoulseekBinding> {
+        self.pods
+            .iter()
+            .flat_map(|(pod_id, stored)| {
+                stored
+                    .pod
+                    .channels
+                    .iter()
+                    .filter_map(move |channel| self.soulseek_binding(pod_id, &channel.channel_id))
+            })
+            .filter(|binding| {
+                binding.kind == "room" && binding.identifier.eq_ignore_ascii_case(room_name.trim())
+            })
+            .collect()
     }
 
     pub fn is_public(&self, pod_id: &str) -> bool {

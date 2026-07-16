@@ -19050,7 +19050,38 @@ async fn route_http_request_with_headers(
               {
                   return Ok(routing::forbidden_response("Pod membership is required"));
               }
+              let binding = pods.soulseek_binding(&pod_id, &channel_id);
               drop(pods);
+              if let Some(binding) = binding.filter(|binding| binding.kind == "dm") {
+                  let local_peer_id = peer_id.unwrap_or_default();
+                  let messages = state.messages.read().await;
+                  let projected = messages
+                      .records
+                      .iter()
+                      .filter(|message| {
+                          message.username.eq_ignore_ascii_case(&binding.identifier)
+                              && since.is_none_or(|since| message.created_at_ms > since)
+                      })
+                      .map(|message| pod_channels::PodChannelMessage {
+                          message_id: message.id.to_string(),
+                          pod_id: pod_id.clone(),
+                          channel_id: channel_id.clone(),
+                          sender_peer_id: if message.direction == "inbound" {
+                              format!("bridge:{}", message.username)
+                          } else {
+                              local_peer_id.clone()
+                          },
+                          body: message.body.clone(),
+                          timestamp_unix_ms: message.created_at_ms,
+                          signature: String::new(),
+                          sig_version: 1,
+                      })
+                      .collect::<Vec<_>>();
+                  return Ok(routing::ok_response(
+                      serde_json::to_string(&projected)
+                          .map_err(|error| format!("pod message serialization failed: {error}"))?,
+                  ));
+              }
               let channels = state.pod_channels.read().await;
               let messages = channels.list(&pod_id, &channel_id, since);
               drop(channels);
@@ -19098,7 +19129,42 @@ async fn route_http_request_with_headers(
               if !pods.is_member(&pod_id, &authenticated_peer_id) {
                   return Ok(routing::forbidden_response("Pod membership is required"));
               }
+              let binding = pods.soulseek_binding(&pod_id, &channel_id);
               drop(pods);
+              if let Some(binding) = binding.as_ref().filter(|binding| binding.kind == "dm") {
+                  let session_command_permit = match state.session_commands.reserve().await {
+                      Ok(permit) => permit,
+                      Err(_) => {
+                          return Ok(routing::service_unavailable_response(
+                              "session manager is not running",
+                          ));
+                      }
+                  };
+                  let mut messages = state.messages.write().await;
+                  let previous = messages.clone();
+                  let record = messages.add(
+                      binding.identifier.clone(),
+                      "outbound",
+                      body_text.clone(),
+                  );
+                  let mutated = messages.clone();
+                  drop(messages);
+                  if let Err(error) = persist_message_record_checked(state, &record).await {
+                      rollback_messages_if_unchanged(state, previous, &mutated).await;
+                      return Ok(routing::service_unavailable_response(&error));
+                  }
+                  session_command_permit.send(SessionCommand::MessageUser {
+                      username: binding.identifier.clone(),
+                      body: body_text,
+                  });
+                  return Ok(routing::ok_response(
+                      serde_json::json!({
+                          "messageId": record.id.to_string(),
+                          "sent": true,
+                      })
+                      .to_string(),
+                  ));
+              }
               let result = state.pod_channels.write().await.append(
                   pod_id,
                   channel_id,
@@ -19108,13 +19174,29 @@ async fn route_http_request_with_headers(
                   unix_timestamp_millis(),
               );
               match result {
-                  Ok(message) => Ok(routing::ok_response(
-                      serde_json::json!({
-                          "messageId": message.message_id,
-                          "sent": true,
-                      })
-                      .to_string(),
-                  )),
+                  Ok(message) => {
+                      if let Some(binding) = binding.filter(|binding| {
+                          binding.kind == "room" && binding.mode == "mirror"
+                      }) {
+                          let _ = try_send_session_command(
+                              state,
+                              SessionCommand::SayRoom {
+                                  room: binding.identifier,
+                                  body: format!(
+                                      "[Pod:{}] {}",
+                                      message.sender_peer_id, message.body
+                                  ),
+                              },
+                          );
+                      }
+                      Ok(routing::ok_response(
+                          serde_json::json!({
+                              "messageId": message.message_id,
+                              "sent": true,
+                          })
+                          .to_string(),
+                      ))
+                  }
                   Err(error)
                       if error.contains("required") || error.contains("must be at most") =>
                   {
@@ -19487,6 +19569,19 @@ async fn route_http_request_with_headers(
               };
               match result {
                   Ok(Some(true)) => {
+                      if action == "bind" {
+                          if let Some(binding) = state
+                              .pods
+                              .read()
+                              .await
+                              .soulseek_binding(pod_id, channel_id)
+                          {
+                              let _ = try_send_session_command(
+                                  state,
+                                  SessionCommand::JoinRoom(binding.identifier),
+                              );
+                          }
+                      }
                       let response_key = if action == "bind" { "bound" } else { "unbound" };
                       Ok(routing::ok_response(
                           serde_json::json!({ (response_key): true }).to_string(),
@@ -30474,6 +30569,7 @@ async fn project_server_message(
                 rooms.add_message(room, username.clone(), message.clone());
             }
             drop(rooms);
+            bridge_soulseek_room_message_to_pods(state, room, username, message).await;
             record_event(
                 state,
                 "room.message",
@@ -30489,6 +30585,38 @@ async fn project_server_message(
             record_event(state, "room.left", room.clone(), None).await;
         }
         _ => {}
+    }
+}
+
+async fn bridge_soulseek_room_message_to_pods(
+    state: &AppState,
+    room: &str,
+    username: &str,
+    message: &str,
+) {
+    let bindings = state.pods.read().await.room_bindings(room);
+    for binding in bindings {
+        if let Err(error) = state.pod_channels.write().await.append(
+            binding.pod_id.clone(),
+            binding.channel_id.clone(),
+            format!("bridge:{username}"),
+            format!("[Soulseek:{username}] {message}"),
+            String::new(),
+            unix_timestamp_millis(),
+        ) {
+            update_session(state, |snapshot| {
+                snapshot.last_error = Some(format!("pod room bridge persistence failed: {error}"));
+            })
+            .await;
+        } else {
+            record_event(
+                state,
+                "pod.message.bridged",
+                binding.pod_id,
+                Some(format!("channel={}", binding.channel_id)),
+            )
+            .await;
+        }
     }
 }
 
@@ -38144,7 +38272,7 @@ mod tests {
             "/api/pods",
             None,
             &format!(
-                r#"{{"pod":{{"podId":"pod-gateway","name":"Gateway","isPublic":true,"requireApproval":false,"capabilities":[0],"privateServicePolicy":{{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","gatewayCertificateSha256":"{}","registeredServices":[],"allowedDestinations":[{{"hostPattern":"127.0.0.1","port":{},"protocol":"tcp","allowPublic":false}}]}}}}}}"#,
+                r#"{{"pod":{{"podId":"pod-gateway","name":"Gateway","isPublic":true,"requireApproval":false,"channels":[{{"channelId":"general","kind":0,"name":"General"}}],"capabilities":[0],"privateServicePolicy":{{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","gatewayCertificateSha256":"{}","registeredServices":[],"allowedDestinations":[{{"hostPattern":"127.0.0.1","port":{},"protocol":"tcp","allowPublic":false}}]}}}}}}"#,
                 hex::encode(certificate_pin),
                 echo_port
             ),
@@ -38198,6 +38326,50 @@ mod tests {
                 .await
                 .expect("connect gateway");
         assert_eq!(client.remote_username, "tester");
+
+        let pods_reply = client
+            .call(&MeshServiceCall::new("pods-list", "pods", "List", Vec::new()).unwrap())
+            .await
+            .expect("pods list reply");
+        assert_eq!(pods_reply.status_code, 0, "{:?}", pods_reply.error_message);
+        let pod_list = serde_json::from_slice::<serde_json::Value>(&pods_reply.payload).unwrap();
+        assert_eq!(pod_list[0]["podId"], "pod-gateway");
+
+        let post_reply = client
+            .call(
+                &MeshServiceCall::new(
+                    "pods-post",
+                    "pods",
+                    "PostMessage",
+                    br#"{"PodId":"pod-gateway","ChannelId":"general","Body":"mesh hello"}"#
+                        .to_vec(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("pods post reply");
+        assert_eq!(post_reply.status_code, 0, "{:?}", post_reply.error_message);
+        let messages_reply = client
+            .call(
+                &MeshServiceCall::new(
+                    "pods-messages",
+                    "pods",
+                    "GetMessages",
+                    br#"{"PodId":"pod-gateway","ChannelId":"general"}"#.to_vec(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("pods messages reply");
+        assert_eq!(
+            messages_reply.status_code, 0,
+            "{:?}",
+            messages_reply.error_message
+        );
+        let messages =
+            serde_json::from_slice::<serde_json::Value>(&messages_reply.payload).unwrap();
+        assert_eq!(messages[0]["senderPeerId"], "member");
+        assert_eq!(messages[0]["body"], "mesh hello");
 
         let open = OpenTunnelRequest::new(
             "pod-gateway",
@@ -38593,6 +38765,111 @@ mod tests {
         .await
         .expect("invalid pod message");
         assert_eq!(invalid.status, "400 Bad Request");
+    }
+
+    #[tokio::test]
+    async fn pod_channel_bindings_bridge_room_and_private_messages() {
+        let (state, mut receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/pods",
+            None,
+            r#"{"pod":{"podId":"pod-bridge","name":"Bridge","isPublic":true,"channels":[{"channelId":"room","kind":0,"name":"Room"},{"channelId":"dm","kind":1,"name":"DM","bindingInfo":"soulseek-dm:bob"}]}}"#,
+            &state,
+        )
+        .await
+        .expect("create bridge pod");
+        assert_eq!(created.status, "201 Created");
+
+        let bound = super::route_http_request(
+            "POST",
+            "/api/pods/pod-bridge/channels/room/bind",
+            None,
+            r#"{"roomName":"ambient","mode":"mirror"}"#,
+            &state,
+        )
+        .await
+        .expect("bind bridge room");
+        assert_eq!(bound.status, "200 OK");
+        assert_eq!(
+            receiver.recv().await,
+            Some(super::SessionCommand::JoinRoom("ambient".to_owned()))
+        );
+
+        let sent = super::route_http_request(
+            "POST",
+            "/api/pods/pod-bridge/channels/room/messages",
+            None,
+            r#"{"body":"from pod","senderPeerId":"tester"}"#,
+            &state,
+        )
+        .await
+        .expect("send mirrored pod message");
+        assert_eq!(sent.status, "200 OK");
+        assert_eq!(
+            receiver.recv().await,
+            Some(super::SessionCommand::SayRoom {
+                room: "ambient".to_owned(),
+                body: "[Pod:tester] from pod".to_owned(),
+            })
+        );
+
+        super::bridge_soulseek_room_message_to_pods(&state, "AMBIENT", "alice", "from room").await;
+        let room_history = super::route_http_request(
+            "GET",
+            "/api/pods/pod-bridge/channels/room/messages",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("read bridged room history");
+        let room_history = serde_json::from_str::<serde_json::Value>(&room_history.body).unwrap();
+        assert!(room_history.as_array().unwrap().iter().any(|message| {
+            message["senderPeerId"] == "bridge:alice"
+                && message["body"] == "[Soulseek:alice] from room"
+        }));
+
+        let inbound = super::route_http_request(
+            "POST",
+            "/api/messages/inbound",
+            None,
+            r#"{"username":"bob","body":"from dm"}"#,
+            &state,
+        )
+        .await
+        .expect("record inbound private message");
+        assert_eq!(inbound.status, "201 Created");
+        let dm_history = super::route_http_request(
+            "GET",
+            "/api/pods/pod-bridge/channels/dm/messages",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("read bridged dm history");
+        let dm_history = serde_json::from_str::<serde_json::Value>(&dm_history.body).unwrap();
+        assert_eq!(dm_history[0]["senderPeerId"], "bridge:bob");
+        assert_eq!(dm_history[0]["body"], "from dm");
+
+        let dm_sent = super::route_http_request(
+            "POST",
+            "/api/pods/pod-bridge/channels/dm/messages",
+            None,
+            r#"{"body":"to dm","senderPeerId":"tester"}"#,
+            &state,
+        )
+        .await
+        .expect("send bridged dm");
+        assert_eq!(dm_sent.status, "200 OK");
+        assert_eq!(
+            receiver.recv().await,
+            Some(super::SessionCommand::MessageUser {
+                username: "bob".to_owned(),
+                body: "to dm".to_owned(),
+            })
+        );
     }
 
     #[tokio::test]

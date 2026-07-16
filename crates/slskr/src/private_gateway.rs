@@ -48,6 +48,7 @@ const DESTINATION_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
+const MAX_POD_MESSAGE_BODY_BYTES: usize = 4 * 1024;
 
 pub struct Gateway {
     bind: SocketAddr,
@@ -238,30 +239,36 @@ impl Gateway {
         let result = if call.magic != OVERLAY_MAGIC
             || call.message_type != "mesh_service_call"
             || call.version != OVERLAY_VERSION
-            || call.service_name != "private-gateway"
             || call.correlation_id.trim().is_empty()
             || call.payload.len() > MAX_OVERLAY_MESSAGE_BYTES
         {
             Err((4, "Invalid service call".to_owned()))
         } else {
-            match call.method.as_str() {
-                "OpenTunnel" => {
-                    self.open_tunnel(&call.payload, remote_username, connection_id, state)
+            match call.service_name.as_str() {
+                "private-gateway" => match call.method.as_str() {
+                    "OpenTunnel" => {
+                        self.open_tunnel(&call.payload, remote_username, connection_id, state)
+                            .await
+                    }
+                    "TunnelData" => {
+                        self.tunnel_data(&call.payload, remote_username, connection_id)
+                            .await
+                    }
+                    "GetTunnelData" => {
+                        self.get_tunnel_data(&call.payload, remote_username, connection_id)
+                            .await
+                    }
+                    "CloseTunnel" => {
+                        self.close_tunnel(&call.payload, remote_username, connection_id)
+                            .await
+                    }
+                    _ => Err((3, "Unknown method".to_owned())),
+                },
+                "pods" => {
+                    self.handle_pods_call(&call.method, &call.payload, remote_username, state)
                         .await
                 }
-                "TunnelData" => {
-                    self.tunnel_data(&call.payload, remote_username, connection_id)
-                        .await
-                }
-                "GetTunnelData" => {
-                    self.get_tunnel_data(&call.payload, remote_username, connection_id)
-                        .await
-                }
-                "CloseTunnel" => {
-                    self.close_tunnel(&call.payload, remote_username, connection_id)
-                        .await
-                }
-                _ => Err((3, "Unknown method".to_owned())),
+                _ => Err((2, "Unknown service".to_owned())),
             }
         };
         match result {
@@ -269,6 +276,132 @@ impl Gateway {
             Err((status, error)) => {
                 service_reply(call.correlation_id, status, Vec::new(), Some(error))
             }
+        }
+    }
+
+    async fn handle_pods_call(
+        &self,
+        method: &str,
+        payload: &[u8],
+        remote_username: &str,
+        state: &super::AppState,
+    ) -> Result<Vec<u8>, (i32, String)> {
+        match method {
+            "List" => serde_json::to_vec(&state.pods.read().await.list_visible(None))
+                .map_err(|_| (1, "Pod response failed".to_owned())),
+            "Get" => {
+                let request: PodIdRequest = parse_payload(payload)?;
+                let pod_id = bounded_required(&request.pod_id, MAX_POD_ID_BYTES, "PodId")?;
+                let pods = state.pods.read().await;
+                let pod = pods
+                    .get(pod_id)
+                    .filter(|_| pods.is_public(pod_id) || pods.is_member(pod_id, remote_username))
+                    .ok_or_else(|| (2, "Pod not found".to_owned()))?;
+                serde_json::to_vec(&pod).map_err(|_| (1, "Pod response failed".to_owned()))
+            }
+            "Join" => {
+                let request: PodIdRequest = parse_payload(payload)?;
+                let pod_id = bounded_required(&request.pod_id, MAX_POD_ID_BYTES, "PodId")?;
+                let joined = state
+                    .pods
+                    .write()
+                    .await
+                    .join(pod_id, remote_username.to_owned())
+                    .map_err(|error| (8, error))?
+                    .ok_or_else(|| (2, "Pod not found".to_owned()))?;
+                serde_json::to_vec(&serde_json::json!({"Success": joined}))
+                    .map_err(|_| (1, "Pod response failed".to_owned()))
+            }
+            "Leave" => {
+                let request: PodIdRequest = parse_payload(payload)?;
+                let pod_id = bounded_required(&request.pod_id, MAX_POD_ID_BYTES, "PodId")?;
+                let left = state
+                    .pods
+                    .write()
+                    .await
+                    .leave(pod_id, remote_username)
+                    .map_err(|error| (8, error))?
+                    .ok_or_else(|| (2, "Pod not found".to_owned()))?;
+                serde_json::to_vec(&serde_json::json!({"Success": left}))
+                    .map_err(|_| (1, "Pod response failed".to_owned()))
+            }
+            "PostMessage" => {
+                let request: PodMessageRequest = parse_payload(payload)?;
+                let pod_id = bounded_required(&request.pod_id, MAX_POD_ID_BYTES, "PodId")?;
+                let channel_id =
+                    bounded_required(&request.channel_id, MAX_POD_ID_BYTES, "ChannelId")?;
+                if request.body.trim().is_empty() || request.body.len() > MAX_POD_MESSAGE_BODY_BYTES
+                {
+                    return Err((9, "Message body is invalid".to_owned()));
+                }
+                let binding = {
+                    let pods = state.pods.read().await;
+                    if !pods.channel_exists(pod_id, channel_id) {
+                        return Err((2, "Pod channel not found".to_owned()));
+                    }
+                    if !pods.is_member(pod_id, remote_username) {
+                        return Err((8, "Pod membership is required".to_owned()));
+                    }
+                    pods.soulseek_binding(pod_id, channel_id)
+                };
+                let message = state
+                    .pod_channels
+                    .write()
+                    .await
+                    .append(
+                        pod_id.to_owned(),
+                        channel_id.to_owned(),
+                        remote_username.to_owned(),
+                        request.body,
+                        request.signature.unwrap_or_default(),
+                        super::unix_timestamp_millis(),
+                    )
+                    .map_err(|error| (1, error))?;
+                if let Some(binding) =
+                    binding.filter(|binding| binding.kind == "room" && binding.mode == "mirror")
+                {
+                    let _ = super::try_send_session_command(
+                        state,
+                        super::SessionCommand::SayRoom {
+                            room: binding.identifier,
+                            body: format!("[Pod:{}] {}", message.sender_peer_id, message.body),
+                        },
+                    );
+                }
+                serde_json::to_vec(&serde_json::json!({
+                    "Success": true,
+                    "MessageId": message.message_id,
+                }))
+                .map_err(|_| (1, "Pod response failed".to_owned()))
+            }
+            "GetMessages" => {
+                let request: PodMessagesRequest = parse_payload(payload)?;
+                let pod_id = bounded_required(&request.pod_id, MAX_POD_ID_BYTES, "PodId")?;
+                let channel_id =
+                    bounded_required(&request.channel_id, MAX_POD_ID_BYTES, "ChannelId")?;
+                let pods = state.pods.read().await;
+                if !pods.channel_exists(pod_id, channel_id) {
+                    return Err((2, "Pod channel not found".to_owned()));
+                }
+                if !pods.is_member(pod_id, remote_username) {
+                    return Err((8, "Pod membership is required".to_owned()));
+                }
+                drop(pods);
+                let since = match request.since_timestamp {
+                    Some(value) => Some(
+                        u64::try_from(value)
+                            .map_err(|_| (4, "SinceTimestamp is invalid".to_owned()))?,
+                    ),
+                    None => None,
+                };
+                let messages = state
+                    .pod_channels
+                    .read()
+                    .await
+                    .list(pod_id, channel_id, since);
+                serde_json::to_vec(&messages).map_err(|_| (1, "Pod response failed".to_owned()))
+            }
+            _ => Err((3, "Unknown method".to_owned())),
         }
     }
 
@@ -515,6 +648,46 @@ fn parse_payload<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<T, (i
     serde_json::from_slice(payload).map_err(|_| (4, "Invalid request payload".to_owned()))
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct PodIdRequest {
+    #[serde(alias = "PodId")]
+    pod_id: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PodMessageRequest {
+    #[serde(alias = "PodId")]
+    pod_id: String,
+    #[serde(alias = "ChannelId")]
+    channel_id: String,
+    #[serde(alias = "Body")]
+    body: String,
+    #[serde(default, alias = "Signature")]
+    signature: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PodMessagesRequest {
+    #[serde(alias = "PodId")]
+    pod_id: String,
+    #[serde(alias = "ChannelId")]
+    channel_id: String,
+    #[serde(default, alias = "SinceTimestamp")]
+    since_timestamp: Option<i64>,
+}
+
+fn bounded_required<'a>(
+    value: &'a str,
+    maximum: usize,
+    name: &str,
+) -> Result<&'a str, (i32, String)> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > maximum {
+        return Err((4, format!("{name} is invalid")));
+    }
+    Ok(value)
+}
+
 fn valid_open_tunnel_request(request: &OpenTunnelRequest) -> bool {
     !request.pod_id.trim().is_empty()
         && request.pod_id.len() <= MAX_POD_ID_BYTES
@@ -636,8 +809,25 @@ fn read_identity_file(path: &Path, label: &str, max_bytes: u64) -> Result<Option
     if metadata.len() > max_bytes {
         return Err(format!("overlay {label} is too large"));
     }
-    let mut file =
-        fs::File::open(path).map_err(|error| format!("overlay {label} read failed: {error}"))?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("overlay {label} read failed: {error}"))?;
+    let opened_metadata = file
+        .metadata()
+        .map_err(|error| format!("overlay {label} metadata failed: {error}"))?;
+    if !opened_metadata.is_file() {
+        return Err(format!("overlay {label} must be a regular file"));
+    }
+    if opened_metadata.len() > max_bytes {
+        return Err(format!("overlay {label} is too large"));
+    }
     let mut bytes = Vec::new();
     std::io::Read::take(&mut file, max_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
@@ -653,14 +843,22 @@ fn read_identity_file(path: &Path, label: &str, max_bytes: u64) -> Result<Option
 
 fn write_secret(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4().simple()));
-    fs::write(&temporary, bytes)
-        .map_err(|error| format!("overlay identity write failed: {error}"))?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("overlay identity permissions failed: {error}"))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_CLOEXEC);
     }
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| format!("overlay identity creation failed: {error}"))?;
+    if let Err(error) = std::io::Write::write_all(&mut file, bytes).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("overlay identity write failed: {error}"));
+    }
+    drop(file);
     fs::rename(&temporary, path)
         .map_err(|error| format!("overlay identity publish failed: {error}"))
 }
@@ -748,6 +946,21 @@ mod tests {
         fs::write(root.join("overlay-private-key.der"), [1_u8]).unwrap();
         let error = load_or_create_certificate(&root).unwrap_err();
         assert!(error.contains("certificate is too large"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_gateway_identity_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let root = temporary_directory("gateway-symlinked-identity");
+        let certificate_target = root.join("certificate-target.der");
+        fs::write(&certificate_target, [1_u8]).unwrap();
+        symlink(&certificate_target, root.join("overlay-certificate.der")).unwrap();
+        fs::write(root.join("overlay-private-key.der"), [1_u8]).unwrap();
+        let error = load_or_create_certificate(&root).unwrap_err();
+        assert!(error.contains("certificate must be a regular file"));
         fs::remove_dir_all(root).unwrap();
     }
 }
