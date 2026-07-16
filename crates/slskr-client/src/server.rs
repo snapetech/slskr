@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::{fmt, net::Ipv4Addr};
 
 use slskr_protocol::server::{
     LoginRequest, LoginResponse, ObfuscatedPort, ServerMessage, WaitPort,
@@ -14,12 +14,24 @@ use crate::{
     ClientError,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LoginCredentials {
     pub username: String,
     pub password: String,
     pub major_version: u32,
     pub minor_version: u32,
+}
+
+impl fmt::Debug for LoginCredentials {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LoginCredentials")
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .field("major_version", &self.major_version)
+            .field("minor_version", &self.minor_version)
+            .finish()
+    }
 }
 
 impl LoginCredentials {
@@ -71,12 +83,24 @@ impl LoginCredentials {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SessionInfo {
     pub greeting: String,
     pub ip: Ipv4Addr,
     pub password_hash: String,
     pub is_supporter: bool,
+}
+
+impl fmt::Debug for SessionInfo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SessionInfo")
+            .field("greeting", &self.greeting)
+            .field("ip", &self.ip)
+            .field("password_hash", &"[REDACTED]")
+            .field("is_supporter", &self.is_supporter)
+            .finish()
+    }
 }
 
 #[derive(Debug)]

@@ -26,6 +26,33 @@ async fn credentials_build_protocol_login_request() {
     assert_eq!(request.hash, "d51c9a7e9353746a6020f9602d452929");
 }
 
+#[test]
+fn credential_debug_output_redacts_plaintext_password() {
+    let credentials = LoginCredentials::new("username", "unique-secret", 175, 1);
+
+    let output = format!("{credentials:?}");
+
+    assert!(output.contains("username"));
+    assert!(output.contains("[REDACTED]"));
+    assert!(!output.contains("unique-secret"));
+}
+
+#[test]
+fn session_debug_output_redacts_password_hash() {
+    let session = SessionInfo {
+        greeting: "motd".to_owned(),
+        ip: Ipv4Addr::LOCALHOST,
+        password_hash: "unique-password-hash".to_owned(),
+        is_supporter: true,
+    };
+
+    let output = format!("{session:?}");
+
+    assert!(output.contains("motd"));
+    assert!(output.contains("[REDACTED]"));
+    assert!(!output.contains("unique-password-hash"));
+}
+
 #[tokio::test]
 async fn default_client_credentials_use_reserved_version_band() {
     let credentials = LoginCredentials::default_client("username", "password");
