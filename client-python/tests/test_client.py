@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -112,6 +113,57 @@ async def test_websocket_client_cleans_up_after_remote_close():
     assert client.ws is None
     assert client.session is None
     assert connection_changes == [True, False]
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_websocket_subscription_tasks_report_errors_and_deduplicate_transitions():
+    ws = MagicMock()
+    ws.closed = False
+    ws.send_json = AsyncMock(side_effect=[None, OSError("send failed")])
+    client = WebSocketClient("https://example.test", "token")
+    client.ws = ws
+    errors = []
+    client.on_error(errors.append)
+
+    client.subscribe("searches", "searches")
+    await asyncio.sleep(0)
+    client.unsubscribe("missing", "searches", "searches")
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert ws.send_json.await_count == 2
+    assert ws.send_json.await_args_list[0].args[0]["data"]["topics"] == ["searches"]
+    assert ws.send_json.await_args_list[1].args[0]["data"]["topics"] == ["searches"]
+    assert len(errors) == 1
+    assert str(errors[0]) == "send failed"
+    assert not client._outbound_tasks
+
+
+@pytest.mark.asyncio
+async def test_websocket_disconnect_cancels_pending_subscription_writes():
+    send_started = asyncio.Event()
+
+    async def blocked_send(_message):
+        send_started.set()
+        await asyncio.Event().wait()
+
+    ws = MagicMock()
+    ws.closed = False
+    ws.send_json = AsyncMock(side_effect=blocked_send)
+    ws.close = AsyncMock()
+    session = MagicMock()
+    session.close = AsyncMock()
+    client = WebSocketClient("https://example.test", "token")
+    client.ws = ws
+    client.session = session
+
+    client.subscribe("searches")
+    await send_started.wait()
+    await client.disconnect()
+
+    assert not client._outbound_tasks
+    ws.close.assert_awaited_once()
     session.close.assert_awaited_once()
 
 

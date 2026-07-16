@@ -22,6 +22,7 @@ class WebSocketClient:
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._connect_lock = asyncio.Lock()
         self._message_task: Optional[asyncio.Task] = None
+        self._outbound_tasks: Set[asyncio.Task] = set()
         self._intentional_disconnect = False
         self.subscribed_topics: Set[str] = set()
 
@@ -98,6 +99,12 @@ class WebSocketClient:
                     self._notify_connection_listeners(False)
 
     async def _close_resources(self):
+        outbound_tasks = list(self._outbound_tasks)
+        self._outbound_tasks.clear()
+        for outbound in outbound_tasks:
+            outbound.cancel()
+        if outbound_tasks:
+            await asyncio.gather(*outbound_tasks, return_exceptions=True)
         task = self._message_task
         self._message_task = None
         if task and task is not asyncio.current_task():
@@ -140,16 +147,32 @@ class WebSocketClient:
 
         if self.ws and not self.ws.closed:
             message = {"type": "subscribe", "data": {"topics": list(new_topics)}}
-            asyncio.create_task(self.ws.send_json(message))
+            self._schedule_send(message)
 
     def unsubscribe(self, *topics: str):
         """Unsubscribe from event types"""
-        for topic in topics:
-            self.subscribed_topics.discard(topic)
+        removed_topics = set(topics) & self.subscribed_topics
+        if not removed_topics:
+            return
+        self.subscribed_topics.difference_update(removed_topics)
 
         if self.ws and not self.ws.closed:
-            message = {"type": "unsubscribe", "data": {"topics": list(topics)}}
-            asyncio.create_task(self.ws.send_json(message))
+            message = {"type": "unsubscribe", "data": {"topics": list(removed_topics)}}
+            self._schedule_send(message)
+
+    def _schedule_send(self, message: Dict):
+        task = asyncio.create_task(self.ws.send_json(message))
+        self._outbound_tasks.add(task)
+
+        def finished(completed: asyncio.Task):
+            self._outbound_tasks.discard(completed)
+            if completed.cancelled():
+                return
+            error = completed.exception()
+            if error is not None and not self._intentional_disconnect:
+                self._notify_error_listeners(error)
+
+        task.add_done_callback(finished)
 
     def on(self, event_type: str, listener: Callable) -> Callable:
         """Listen to event type"""
