@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashSet},
     fs,
+    future::Future,
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
@@ -16,6 +17,7 @@ use sha2::{Digest, Sha256};
 use tokio::{
     io::AsyncWriteExt,
     sync::{RwLock, Semaphore},
+    time::timeout,
 };
 
 pub const DEFAULT_CHUNK_SIZE: u64 = 512 * 1024;
@@ -569,10 +571,15 @@ async fn prepare_source(source: &RangeSource) -> Result<PreparedSource, String> 
     let port = url
         .port_or_known_default()
         .ok_or_else(|| "source URL has no usable port".to_owned())?;
-    let addresses = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|_| "source host could not be resolved".to_owned())?
-        .collect::<Vec<_>>();
+    let addresses = resolve_source_addrs(
+        async move {
+            tokio::net::lookup_host((host, port))
+                .await
+                .map(|addresses| addresses.collect())
+        },
+        SOURCE_TIMEOUT,
+    )
+    .await?;
     if addresses.is_empty()
         || addresses
             .iter()
@@ -595,6 +602,19 @@ async fn prepare_source(source: &RangeSource) -> Result<PreparedSource, String> 
         authorization: source.authorization.clone(),
         client,
     })
+}
+
+async fn resolve_source_addrs<F>(
+    resolution: F,
+    deadline: Duration,
+) -> Result<Vec<SocketAddr>, String>
+where
+    F: Future<Output = std::io::Result<Vec<SocketAddr>>>,
+{
+    timeout(deadline, resolution)
+        .await
+        .map_err(|_| "source host resolution timed out".to_owned())?
+        .map_err(|_| "source host could not be resolved".to_owned())
 }
 
 async fn fetch_range(
@@ -766,6 +786,17 @@ fn unix_timestamp() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn source_dns_resolution_is_bounded() {
+        let error = resolve_source_addrs(
+            std::future::pending::<std::io::Result<Vec<SocketAddr>>>(),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "source host resolution timed out");
+    }
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn spawn_range_source(
