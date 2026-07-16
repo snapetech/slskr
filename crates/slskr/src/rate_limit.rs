@@ -50,7 +50,8 @@ const MAX_IP_WINDOWS: usize = 16_384;
 
 impl RateLimiter {
     /// Create new rate limiter
-    pub fn new(config: RateLimitConfig) -> Self {
+    pub fn new(mut config: RateLimitConfig) -> Self {
+        config.window_seconds = config.window_seconds.max(1);
         Self {
             config,
             ip_windows: Arc::new(RwLock::new(HashMap::new())),
@@ -394,6 +395,20 @@ mod tests {
             !limiter.check_rate_limit(addr, None).await,
             "6th request should fail"
         );
+    }
+
+    #[tokio::test]
+    async fn zero_window_does_not_disable_rate_limiting() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            max_requests_anonymous: 1,
+            window_seconds: 0,
+            enabled: true,
+            ..Default::default()
+        });
+
+        assert_eq!(limiter.config.window_seconds, 1);
+        assert!(limiter.check_rate_limit(None, None).await);
+        assert!(!limiter.check_rate_limit(None, None).await);
     }
 
     #[tokio::test]
