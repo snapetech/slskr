@@ -16,6 +16,7 @@ use crate::{
 
 pub const MAX_SEARCH_RESPONSES_PER_TOKEN: usize = 1_000;
 pub const MAX_SEARCH_RESULT_FILES_PER_TOKEN: usize = 10_000;
+pub const MAX_SEARCH_RESULT_FILES_PER_RESPONSE: usize = 21;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -500,7 +501,7 @@ where
 
         let results = self
             .index
-            .search_limited(query, MAX_SEARCH_RESULT_FILES_PER_TOKEN);
+            .search_limited(query, MAX_SEARCH_RESULT_FILES_PER_RESPONSE);
         if results.is_empty() {
             return None;
         }

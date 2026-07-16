@@ -3,7 +3,7 @@ use slskr_client::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
         WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN,
-        MAX_SEARCH_RESULT_FILES_PER_TOKEN,
+        MAX_SEARCH_RESULT_FILES_PER_RESPONSE, MAX_SEARCH_RESULT_FILES_PER_TOKEN,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -431,7 +431,7 @@ fn responder_suppresses_excluded_search_phrases() {
 
 #[test]
 fn responder_bounds_files_in_a_single_search_response() {
-    let entries = (0..(MAX_SEARCH_RESULT_FILES_PER_TOKEN + 1))
+    let entries = (0..(MAX_SEARCH_RESULT_FILES_PER_RESPONSE + 1))
         .map(|index| entry(&format!("Music/match-{index}.flac")))
         .collect();
     let responder = SearchResponder::new("local", InMemoryShareIndex::new(entries));
@@ -447,7 +447,13 @@ fn responder_bounds_files_in_a_single_search_response() {
     let PeerMessage::FileSearchResponse(response) = message else {
         panic!("expected search response");
     };
-    assert_eq!(response.results.len(), MAX_SEARCH_RESULT_FILES_PER_TOKEN);
+    assert_eq!(response.results.len(), MAX_SEARCH_RESULT_FILES_PER_RESPONSE);
+
+    let encoded = PeerMessage::FileSearchResponse(response).encode().unwrap();
+    assert!(matches!(
+        PeerMessage::decode(encoded).unwrap(),
+        PeerMessage::FileSearchResponse(_)
+    ));
 }
 
 fn response(username: &str, token: u32) -> FileSearchResponse {
