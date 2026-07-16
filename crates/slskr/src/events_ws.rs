@@ -120,7 +120,7 @@ where
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = read_client_frame(&mut reader).await;
-            let done = matches!(frame, Ok(ClientFrame::Close) | Err(_));
+            let done = matches!(frame, Ok(ClientFrame::Close(_)) | Err(_));
             if frame_tx.send(frame).await.is_err() || done {
                 break;
             }
@@ -133,7 +133,11 @@ where
         loop {
             tokio::select! {
                 frame = frame_rx.recv() => match frame {
-                    Some(Ok(ClientFrame::Close)) | None => return Ok(()),
+                    Some(Ok(ClientFrame::Close(payload))) => {
+                        write_frame(writer, 0x88, &payload).await?;
+                        return Ok(());
+                    }
+                    None => return Ok(()),
                     Some(Ok(ClientFrame::Ping(payload))) => write_frame(writer, 0x8a, &payload).await?,
                     Some(Ok(ClientFrame::Pong)) => awaiting_pong = false,
                     Some(Err(error)) => return Err(error),
@@ -179,7 +183,7 @@ where
 
 #[derive(Debug)]
 enum ClientFrame {
-    Close,
+    Close(Vec<u8>),
     Ping(Vec<u8>),
     Pong,
 }
@@ -262,7 +266,7 @@ where
     match opcode {
         0x8 => {
             validate_close_payload(&payload)?;
-            Ok(ClientFrame::Close)
+            Ok(ClientFrame::Close(payload))
         }
         0x9 => Ok(ClientFrame::Ping(payload)),
         0xa => Ok(ClientFrame::Pong),
@@ -577,8 +581,32 @@ mod tests {
         let frame = masked_client_frame(0x88, &payload);
         assert!(matches!(
             read_client_frame(&mut &frame[..]).await,
-            Ok(ClientFrame::Close)
+            Ok(ClientFrame::Close(received)) if received == payload
         ));
+    }
+
+    #[tokio::test]
+    async fn websocket_close_frame_is_acknowledged_before_shutdown() {
+        let payload = 1000_u16.to_be_bytes();
+        let frame = masked_client_frame(0x88, &payload);
+        let (mut client, reader) = tokio::io::duplex(64);
+        client.write_all(&frame).await.expect("write close frame");
+        drop(client);
+        let events = RwLock::new(EventStore::new(10));
+        let (_event_tx, receiver) = broadcast::channel(1);
+        let mut writer = Vec::new();
+
+        stream_events_with_heartbeat(
+            reader,
+            &mut writer,
+            &events,
+            receiver,
+            Duration::from_secs(60),
+        )
+        .await
+        .expect("valid close handshake");
+
+        assert_eq!(writer, [vec![0x88, 2], payload.to_vec()].concat());
     }
 
     #[tokio::test]
