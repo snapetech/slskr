@@ -2,6 +2,8 @@
 
 use std::time::Instant;
 
+const MAX_LOG_FIELD_CHARS: usize = 2_048;
+
 /// HTTP request log entry
 #[derive(Debug, Clone)]
 pub struct HttpRequestLog {
@@ -130,13 +132,12 @@ pub fn log_request(config: &LogConfig, log: &HttpRequestLog) {
 
     let query_str = redacted_query_suffix(log.query.as_deref());
     let path = redacted_path(&log.path);
+    let timestamp = sanitize_log_field(&log.timestamp);
+    let method = sanitize_log_field(&log.method);
+    let remote_addr = sanitize_log_field(log.remote_addr.as_deref().unwrap_or("unknown"));
     eprintln!(
         "[{}] {} {} {} (from {})",
-        log.timestamp,
-        log.method,
-        path,
-        query_str,
-        log.remote_addr.as_deref().unwrap_or("unknown")
+        timestamp, method, path, query_str, remote_addr
     );
 }
 
@@ -166,7 +167,7 @@ pub fn log_response(config: &LogConfig, log: &HttpResponseLog) {
     let error_str = log
         .error
         .as_ref()
-        .map(|e| format!(" - {}", e))
+        .map(|error| format!(" - {}", sanitize_log_field(error)))
         .unwrap_or_default();
 
     let level_str = LogConfig::level_name(status_level);
@@ -207,19 +208,21 @@ pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
 
     let query_str = redacted_query_suffix(log.request.query.as_deref());
     let path = redacted_path(&log.request.path);
+    let timestamp = sanitize_log_field(&log.request.timestamp);
+    let method = sanitize_log_field(&log.request.method);
 
     let error_str = log
         .response
         .error
         .as_ref()
-        .map(|e| format!(" - {}", e))
+        .map(|error| format!(" - {}", sanitize_log_field(error)))
         .unwrap_or_default();
 
     eprintln!(
         "[{}] \x1b[{}m{} {}{}\x1b[0m \x1b[{}m{}\x1b[0m {} bytes in {}ms{}",
-        log.request.timestamp,
+        timestamp,
         method_color,
-        log.request.method,
+        method,
         path,
         query_str,
         status_color,
@@ -241,15 +244,16 @@ pub fn response_level(status_code: u16) -> LogLevel {
 pub fn transaction_summary(log: &HttpTransactionLog) -> String {
     let query_str = redacted_query_suffix(log.request.query.as_deref());
     let path = redacted_path(&log.request.path);
+    let method = sanitize_log_field(&log.request.method);
     let error_str = log
         .response
         .error
         .as_ref()
-        .map(|e| format!(" - {}", e))
+        .map(|error| format!(" - {}", sanitize_log_field(error)))
         .unwrap_or_default();
     format!(
         "{} {}{} {} {} bytes in {}ms{}",
-        log.request.method,
+        method,
         path,
         query_str,
         log.response.status_code,
@@ -269,7 +273,23 @@ pub fn redacted_path(path: &str) -> String {
             segments[index + 1] = "<redacted>";
         }
     }
-    segments.join("/")
+    sanitize_log_field(&segments.join("/"))
+}
+
+fn sanitize_log_field(value: &str) -> String {
+    let mut sanitized = String::new();
+    let mut chars = value.chars();
+    for character in chars.by_ref().take(MAX_LOG_FIELD_CHARS) {
+        if character.is_control() {
+            sanitized.extend(character.escape_default());
+        } else {
+            sanitized.push(character);
+        }
+    }
+    if chars.next().is_some() {
+        sanitized.push_str("...");
+    }
+    sanitized
 }
 
 fn redacted_query_suffix(query: Option<&str>) -> &'static str {
@@ -367,6 +387,35 @@ mod tests {
             redacted_path("/api/v0/peer-streams/tickets"),
             "/api/v0/peer-streams/tickets"
         );
+    }
+
+    #[test]
+    fn transaction_summary_escapes_and_bounds_untrusted_log_fields() {
+        let summary = transaction_summary(&HttpTransactionLog {
+            request: HttpRequestLog {
+                method: "GET\r\nFORGED".to_owned(),
+                path: format!("/api/{}\x1b[2J", "x".repeat(MAX_LOG_FIELD_CHARS + 100)),
+                query: None,
+                remote_addr: None,
+                timestamp: "fixture".to_owned(),
+            },
+            response: HttpResponseLog {
+                status_code: 500,
+                content_length: 0,
+                duration_ms: 1,
+                error: Some("failed\n[Information] forged\tentry".to_owned()),
+            },
+        });
+
+        assert!(summary
+            .chars()
+            .all(|character| !matches!(character, '\r' | '\n' | '\t' | '\x1b')));
+        assert!(summary.contains(r"GET\r\nFORGED"), "{summary}");
+        assert!(
+            summary.contains(r"failed\n[Information] forged\tentry"),
+            "{summary}"
+        );
+        assert!(summary.contains("..."), "{summary}");
     }
 
     #[test]
