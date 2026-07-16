@@ -17,6 +17,7 @@ use crate::{
 pub const MAX_SEARCH_RESPONSES_PER_TOKEN: usize = 1_000;
 pub const MAX_SEARCH_RESULT_FILES_PER_TOKEN: usize = 10_000;
 pub const MAX_TRACKED_SEARCH_RESULT_TOKENS: usize = 1_024;
+pub const MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -248,6 +249,7 @@ where
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SearchResults {
     by_token: HashMap<u32, Vec<FileSearchResponse>>,
+    text_bytes_by_token: HashMap<u32, usize>,
 }
 
 impl SearchResults {
@@ -279,6 +281,21 @@ impl SearchResults {
                 response.results.truncate(remaining);
                 remaining = remaining.saturating_sub(response.results.len());
                 response.private_results.truncate(remaining);
+                let response_text_bytes = search_response_text_bytes(&response);
+                let stored_text_bytes = self
+                    .text_bytes_by_token
+                    .get(&response.token)
+                    .copied()
+                    .unwrap_or(0);
+                let Some(total_text_bytes) = stored_text_bytes.checked_add(response_text_bytes)
+                else {
+                    return Ok(true);
+                };
+                if total_text_bytes > MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN {
+                    return Ok(true);
+                }
+                self.text_bytes_by_token
+                    .insert(response.token, total_text_bytes);
                 responses.push(response);
                 Ok(true)
             }
@@ -295,6 +312,7 @@ impl SearchResults {
 
     #[must_use]
     pub fn take(&mut self, token: u32) -> Vec<FileSearchResponse> {
+        self.text_bytes_by_token.remove(&token);
         self.by_token.remove(&token).unwrap_or_default()
     }
 
@@ -307,6 +325,18 @@ impl SearchResults {
     pub fn tracked_tokens_len(&self) -> usize {
         self.by_token.len()
     }
+}
+
+fn search_response_text_bytes(response: &FileSearchResponse) -> usize {
+    response
+        .results
+        .iter()
+        .chain(&response.private_results)
+        .fold(response.username.len(), |total, entry| {
+            total
+                .saturating_add(entry.filename.len())
+                .saturating_add(entry.extension.len())
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

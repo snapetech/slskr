@@ -3,7 +3,8 @@ use slskr_client::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
         WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN,
-        MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
+        MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN,
+        MAX_TRACKED_SEARCH_RESULT_TOKENS,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -211,6 +212,27 @@ fn search_results_bound_attacker_controlled_token_keys() {
         .accept_peer_message(PeerMessage::FileSearchResponse(response("second", 0)))
         .unwrap();
     assert_eq!(results.len_for(0), 2);
+}
+
+#[test]
+fn search_results_bound_retained_text_bytes_per_token() {
+    let mut results = SearchResults::new();
+    let oversized = FileSearchResponse {
+        username: "x".repeat(MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN + 1),
+        ..response("peer", 10)
+    };
+
+    assert!(results
+        .accept_peer_message(PeerMessage::FileSearchResponse(oversized))
+        .unwrap());
+    assert!(results.responses_for(10).is_empty());
+
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(response("peer", 10)))
+        .unwrap();
+    assert_eq!(results.len_for(10), 1);
+    assert_eq!(results.take(10).len(), 1);
+    assert!(results.responses_for(10).is_empty());
 }
 
 #[test]
