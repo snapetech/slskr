@@ -24,13 +24,18 @@ verify_sha256_file() {
   local file="$1"
   local checksum_file="$file.sha256"
   if [[ ! -f "$checksum_file" ]]; then
-    printf '%s  %s\n' "$(sha256_digest "$file")" "$file"
-    return
+    echo "missing checksum file: $checksum_file" >&2
+    return 1
   fi
 
   local expected
   local actual
   expected="$(awk 'NR == 1 { print $1 }' "$checksum_file")"
+  if [[ ! "$expected" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+    echo "$checksum_file: invalid SHA-256 digest" >&2
+    return 1
+  fi
+  expected="$(printf '%s' "$expected" | tr 'A-F' 'a-f')"
   actual="$(sha256_digest "$file")"
   if [[ "$expected" != "$actual" ]]; then
     echo "$file: FAILED" >&2
