@@ -130,3 +130,34 @@ async fn cache_treats_username_casing_as_one_peer() {
     assert!(cache.remove("ALICE").await.is_some());
     assert!(cache.is_empty().await);
 }
+
+#[tokio::test]
+async fn cache_evicts_peer_after_receive_failure() {
+    let cache = PeerConnectionCache::new();
+    let (cached, peer) = duplex(64);
+    cache
+        .insert("peer", PeerMessageConnection::new(cached))
+        .await
+        .unwrap();
+    drop(peer);
+
+    assert!(cache.receive_from("peer").await.is_err());
+    assert!(!cache.contains("peer").await);
+}
+
+#[tokio::test]
+async fn cache_evicts_peer_after_send_failure() {
+    let cache = PeerConnectionCache::new();
+    let (cached, peer) = duplex(64);
+    cache
+        .insert("peer", PeerMessageConnection::new(cached))
+        .await
+        .unwrap();
+    drop(peer);
+
+    let message = PeerMessage::QueueUpload {
+        filename: "Music/file.flac".to_owned(),
+    };
+    assert!(cache.send_to("peer", &message).await.is_err());
+    assert!(!cache.contains("peer").await);
+}

@@ -90,22 +90,33 @@ where
         username: &str,
         message: &PeerMessage,
     ) -> Result<bool, ClientError> {
+        let key = username_key(username);
         let mut connections = self.connections.lock().await;
-        let Some(connection) = connections.get_mut(&username_key(username)) else {
+        let Some(connection) = connections.get_mut(&key) else {
             return Ok(false);
         };
 
-        connection.send(message).await?;
+        if let Err(error) = connection.send(message).await {
+            connections.remove(&key);
+            return Err(error);
+        }
         Ok(true)
     }
 
     pub async fn receive_from(&self, username: &str) -> Result<Option<PeerMessage>, ClientError> {
+        let key = username_key(username);
         let mut connections = self.connections.lock().await;
-        let Some(connection) = connections.get_mut(&username_key(username)) else {
+        let Some(connection) = connections.get_mut(&key) else {
             return Ok(None);
         };
 
-        Ok(Some(connection.receive().await?))
+        match connection.receive().await {
+            Ok(message) => Ok(Some(message)),
+            Err(error) => {
+                connections.remove(&key);
+                Err(error)
+            }
+        }
     }
 }
 
