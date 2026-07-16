@@ -165,6 +165,34 @@ fn user_watch_state_rejects_new_users_at_limit_but_updates_existing_users() {
 }
 
 #[test]
+fn user_watch_state_treats_username_casing_as_one_identity() {
+    let mut state = UserWatchState::with_max_records(1);
+    assert!(
+        state.apply_server_message(&ServerMessage::GetUserStatusResponse(UserStatus {
+            username: "Alice".to_owned(),
+            status: 1,
+            privileged: false,
+        }))
+    );
+    assert!(
+        state.apply_server_message(&ServerMessage::WatchUserResponse(WatchedUser {
+            username: "ALICE".to_owned(),
+            exists: true,
+            status: Some(2),
+            stats: None,
+            country_code: None,
+        }))
+    );
+    assert_eq!(state.status("alice").unwrap().username, "Alice");
+    assert_eq!(state.watched("aLiCe").unwrap().username, "ALICE");
+    assert!(state.apply_server_message(&ServerMessage::UnwatchUser {
+        username: "alice".to_owned(),
+    }));
+    assert!(state.status("ALICE").is_none());
+    assert!(state.watched("Alice").is_none());
+}
+
+#[test]
 fn room_state_tracks_global_messages_and_leave_requests() {
     let mut state = RoomState::new();
 

@@ -82,8 +82,9 @@ impl UserWatchState {
     }
 
     fn can_insert(&self, username: &str) -> bool {
-        self.watched.contains_key(username)
-            || self.statuses.contains_key(username)
+        let key = username_key(username);
+        self.watched.contains_key(&key)
+            || self.statuses.contains_key(&key)
             || self
                 .watched
                 .keys()
@@ -113,7 +114,8 @@ impl UserWatchState {
                 if !self.can_insert(&user.username) {
                     return false;
                 }
-                self.watched.insert(user.username.clone(), user.clone());
+                self.watched
+                    .insert(username_key(&user.username), user.clone());
                 true
             }
             ServerMessage::GetUserStatusResponse(status) => {
@@ -121,12 +123,13 @@ impl UserWatchState {
                     return false;
                 }
                 self.statuses
-                    .insert(status.username.clone(), status.clone());
+                    .insert(username_key(&status.username), status.clone());
                 true
             }
             ServerMessage::UnwatchUser { username } => {
-                self.watched.remove(username);
-                self.statuses.remove(username);
+                let key = username_key(username);
+                self.watched.remove(&key);
+                self.statuses.remove(&key);
                 true
             }
             _ => false,
@@ -135,13 +138,17 @@ impl UserWatchState {
 
     #[must_use]
     pub fn watched(&self, username: &str) -> Option<&WatchedUser> {
-        self.watched.get(username)
+        self.watched.get(&username_key(username))
     }
 
     #[must_use]
     pub fn status(&self, username: &str) -> Option<&UserStatus> {
-        self.statuses.get(username)
+        self.statuses.get(&username_key(username))
     }
+}
+
+fn username_key(username: &str) -> String {
+    username.to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
