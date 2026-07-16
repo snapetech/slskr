@@ -288,12 +288,22 @@ where
 {
     pub async fn send_branch_info_to_parent(&mut self) -> Result<bool, ClientError> {
         let messages = self.parent_branch_messages();
-        let Some(parent) = self.parent.as_mut() else {
+        if self.parent.is_none() {
             return Ok(false);
-        };
+        }
 
         for message in messages {
-            parent.connection.send(&message).await?;
+            let result = self
+                .parent
+                .as_mut()
+                .expect("parent presence checked above")
+                .connection
+                .send(&message)
+                .await;
+            if let Err(error) = result {
+                self.disconnect_parent();
+                return Err(error);
+            }
         }
         Ok(true)
     }

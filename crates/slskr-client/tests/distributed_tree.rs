@@ -169,6 +169,26 @@ async fn branch_info_is_sent_to_parent_as_distributed_messages() {
 }
 
 #[tokio::test]
+async fn failed_parent_write_disconnects_and_resets_branch_state() {
+    let (tree_side, parent_side) = duplex(64);
+    let mut tree = DistributedTree::new("local");
+    tree.connect_parent(
+        parent_info("parent", [10, 0, 0, 2], 2234),
+        DistributedConnection::new(tree_side),
+    );
+    drop(parent_side);
+
+    assert!(tree.send_branch_info_to_parent().await.is_err());
+    assert!(tree.parent().is_none());
+    assert_eq!(tree.branch_level(), 0);
+    assert_eq!(tree.branch_root(), "local");
+    assert_eq!(
+        tree.have_no_parent_message(),
+        ServerMessage::HaveNoParent { no_parent: true }
+    );
+}
+
+#[tokio::test]
 async fn distributed_searches_forward_to_children_except_source() {
     let (tree_a, peer_a) = duplex(1024);
     let (tree_b, peer_b) = duplex(1024);
