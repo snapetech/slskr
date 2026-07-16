@@ -16,6 +16,11 @@ import (
 
 var sensitiveErrorFieldPattern = regexp.MustCompile(`(?i)("?(api[-_]?key|authorization|credential|pass(word)?|secret|session|token)"?\s*[:=]\s*)("[^"]*"|[^,\s}\]]+)`)
 
+const (
+	maxHTTPResponseBytes = 8 * 1024 * 1024
+	maxHTTPErrorBytes    = 64 * 1024
+)
+
 // Client is the main HTTP client for slskr API
 type Client struct {
 	BaseURL    string
@@ -366,16 +371,37 @@ func (c *Client) do(req *http.Request, auth bool) (map[string]interface{}, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, err := readBoundedBody(resp, maxHTTPErrorBytes)
+		if err != nil {
+			return nil, fmt.Errorf("API error: %d - %w", resp.StatusCode, err)
+		}
 		return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, redactErrorBody(bodyBytes))
 	}
 
+	bodyBytes, err := readBoundedBody(resp, maxHTTPResponseBytes)
+	if err != nil {
+		return nil, err
+	}
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return nil, err
 	}
 
 	return result, nil
+}
+
+func readBoundedBody(resp *http.Response, maximum int64) ([]byte, error) {
+	if resp.ContentLength > maximum {
+		return nil, fmt.Errorf("HTTP response body exceeds %d bytes", maximum)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maximum+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maximum {
+		return nil, fmt.Errorf("HTTP response body exceeds %d bytes", maximum)
+	}
+	return body, nil
 }
 
 func pathSegment(value string) string {
