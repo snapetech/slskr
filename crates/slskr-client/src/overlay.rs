@@ -38,6 +38,7 @@ const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROTOCOL_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const SERVICE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+const CONTROL_TIMESTAMP_SKEW_MILLIS: u64 = 24 * 60 * 60 * 1_000;
 
 pub type TlsOverlayClient = OverlayClient<TlsStream<TcpStream>>;
 
@@ -389,6 +390,16 @@ pub struct Ping {
     pub timestamp: i64,
 }
 
+impl Ping {
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        validate_overlay_base(&self.magic, &self.message_type, self.version)?;
+        if self.message_type != "ping" {
+            return Err(OverlayError::InvalidMessageType);
+        }
+        validate_control_timestamp(self.timestamp)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pong {
     pub magic: String,
@@ -396,6 +407,16 @@ pub struct Pong {
     pub message_type: String,
     pub version: i32,
     pub timestamp: i64,
+}
+
+impl Pong {
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        validate_overlay_base(&self.magic, &self.message_type, self.version)?;
+        if self.message_type != "pong" {
+            return Err(OverlayError::InvalidMessageType);
+        }
+        validate_control_timestamp(self.timestamp)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -518,7 +539,7 @@ where
                 }
                 "ping" => {
                     let ping: Ping = serde_json::from_slice(&payload)?;
-                    validate_overlay_base(&ping.magic, &ping.message_type, ping.version)?;
+                    ping.validate()?;
                     self.framer
                         .write(&Pong {
                             magic: OVERLAY_MAGIC.to_owned(),
@@ -654,6 +675,8 @@ pub enum OverlayError {
     InvalidPrivateGatewayRequest,
     #[error("system clock is before the Unix epoch")]
     InvalidTime,
+    #[error("overlay control timestamp is invalid")]
+    InvalidControlTimestamp,
     #[error("overlay base64 payload is invalid")]
     InvalidBase64,
     #[error("overlay {0} timed out")]
@@ -747,6 +770,19 @@ fn unix_seconds() -> Result<i64, OverlayError> {
         .ok_or(OverlayError::InvalidTime)
 }
 
+fn validate_control_timestamp(timestamp: i64) -> Result<(), OverlayError> {
+    let timestamp = u64::try_from(timestamp).map_err(|_| OverlayError::InvalidControlTimestamp)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+        .ok_or(OverlayError::InvalidTime)?;
+    if now.abs_diff(timestamp) > CONTROL_TIMESTAMP_SKEW_MILLIS {
+        return Err(OverlayError::InvalidControlTimestamp);
+    }
+    Ok(())
+}
+
 mod base64_bytes {
     use super::*;
     use serde::{Deserializer, Serializer};
@@ -818,6 +854,42 @@ mod tests {
         wire.read_exact(&mut payload).await.unwrap();
         assert_eq!(payload, br#"{"type":"ping"}"#);
         task.await.unwrap();
+    }
+
+    #[test]
+    fn ping_and_pong_validation_bounds_frozen_control_timestamps() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let ping = Ping {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "ping".to_owned(),
+            version: OVERLAY_VERSION,
+            timestamp: now,
+        };
+        assert!(ping.validate().is_ok());
+        assert!(Pong {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "pong".to_owned(),
+            version: OVERLAY_VERSION,
+            timestamp: now,
+        }
+        .validate()
+        .is_ok());
+
+        let mut invalid = ping.clone();
+        invalid.timestamp -= i64::try_from(CONTROL_TIMESTAMP_SKEW_MILLIS).unwrap() + 1;
+        assert!(matches!(
+            invalid.validate(),
+            Err(OverlayError::InvalidControlTimestamp)
+        ));
+        invalid = ping;
+        invalid.message_type = "pong".to_owned();
+        assert!(matches!(
+            invalid.validate(),
+            Err(OverlayError::InvalidMessageType)
+        ));
     }
 
     #[test]

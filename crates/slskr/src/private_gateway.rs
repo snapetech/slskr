@@ -5,7 +5,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::Path,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -46,7 +46,9 @@ const REQUEST_FRESHNESS_SECONDS: u64 = 300;
 const DESTINATION_RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 const DESTINATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DESTINATION_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
-const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const OVERLAY_MESSAGE_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const OVERLAY_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(2 * 60);
+const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_POD_MESSAGE_BODY_BYTES: usize = 4 * 1024;
@@ -185,11 +187,39 @@ impl Gateway {
             .map_err(|error| format!("overlay acknowledgement failed: {error}"))?;
 
         let result = async {
+            let mut last_activity = Instant::now();
+            let mut last_ping = Instant::now();
             loop {
-                let raw = timeout(OVERLAY_IDLE_TIMEOUT, framer.read_raw())
-                    .await
-                    .map_err(|_| "overlay connection was idle too long".to_owned())?
-                    .map_err(|error| format!("overlay read failed: {error}"))?;
+                if last_activity.elapsed() >= OVERLAY_IDLE_TIMEOUT {
+                    return Err("overlay connection was idle too long".to_owned());
+                }
+                let keepalive_wait = OVERLAY_KEEPALIVE_INTERVAL
+                    .checked_sub(last_ping.elapsed())
+                    .unwrap_or(Duration::ZERO);
+                let read_wait = OVERLAY_MESSAGE_READ_TIMEOUT.min(keepalive_wait);
+                let raw = match timeout(read_wait, framer.read_raw()).await {
+                    Ok(result) => {
+                        last_activity = Instant::now();
+                        result.map_err(|error| format!("overlay read failed: {error}"))?
+                    }
+                    Err(_) if last_ping.elapsed() >= OVERLAY_KEEPALIVE_INTERVAL => {
+                        let timestamp = i64::try_from(super::unix_timestamp_millis())
+                            .map_err(|_| "overlay clock is out of range".to_owned())?;
+                        framer
+                            .write(&Ping {
+                                magic: OVERLAY_MAGIC.to_owned(),
+                                message_type: "ping".to_owned(),
+                                version: OVERLAY_VERSION,
+                                timestamp,
+                            })
+                            .await
+                            .map_err(|error| format!("overlay keepalive failed: {error}"))?;
+                        last_ping = Instant::now();
+                        last_activity = last_ping;
+                        continue;
+                    }
+                    Err(_) => continue,
+                };
                 let message_type = serde_json::from_slice::<serde_json::Value>(&raw)
                     .ok()
                     .and_then(|value| {
@@ -214,6 +244,8 @@ impl Gateway {
                     "ping" => {
                         let ping: Ping = serde_json::from_slice(&raw)
                             .map_err(|error| format!("overlay ping is invalid: {error}"))?;
+                        ping.validate()
+                            .map_err(|_| "overlay ping is invalid".to_owned())?;
                         framer
                             .write(&Pong {
                                 magic: OVERLAY_MAGIC.to_owned(),
@@ -223,6 +255,12 @@ impl Gateway {
                             })
                             .await
                             .map_err(|error| format!("overlay pong failed: {error}"))?;
+                    }
+                    "pong" => {
+                        let pong: Pong = serde_json::from_slice(&raw)
+                            .map_err(|error| format!("overlay pong is invalid: {error}"))?;
+                        pong.validate()
+                            .map_err(|_| "overlay pong is invalid".to_owned())?;
                     }
                     "disconnect" => return Ok(()),
                     _ => return Err("unsupported overlay message type".to_owned()),
@@ -1101,6 +1139,23 @@ mod tests {
             "2001:4860:4860::8888".parse().unwrap()
         ));
         assert!(!valid_destination_ip("0.0.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn overlay_keepalive_and_control_validation_match_the_frozen_lifecycle() {
+        assert_eq!(OVERLAY_MESSAGE_READ_TIMEOUT, Duration::from_secs(30));
+        assert_eq!(OVERLAY_KEEPALIVE_INTERVAL, Duration::from_secs(120));
+        assert_eq!(OVERLAY_IDLE_TIMEOUT, Duration::from_secs(300));
+
+        let now = i64::try_from(super::super::unix_timestamp_millis()).unwrap();
+        assert!(Ping {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "ping".to_owned(),
+            version: OVERLAY_VERSION,
+            timestamp: now,
+        }
+        .validate()
+        .is_ok());
     }
 
     #[test]
