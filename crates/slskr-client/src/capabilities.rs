@@ -66,6 +66,7 @@ impl PeerCapabilityEnvelope {
         if self.nonce.trim().is_empty() {
             return Err(CapabilityError::BlankField("nonce"));
         }
+        validate_overlay_port(self.descriptor.overlay_port)?;
         if self.descriptor.features.len() > MAX_CAPABILITY_FEATURES {
             return Err(CapabilityError::FieldTooLong {
                 field: "features",
@@ -147,7 +148,7 @@ impl PeerCapabilityEnvelope {
         let peer_id = read_bounded_string(&mut reader, "peer_id")?;
         let overlay_port = match read_i32(&mut reader)? {
             -1 => None,
-            value @ 0..=65_535 => Some(value as u16),
+            value @ 1..=65_535 => Some(value as u16),
             value => return Err(CapabilityError::InvalidOverlayPort(value)),
         };
         let max_payload_length = read_i32(&mut reader)?;
@@ -323,6 +324,7 @@ impl PeerCapabilityDescriptor {
     }
 
     pub fn canonical_payload(&self) -> Result<Vec<u8>, CapabilityError> {
+        validate_overlay_port(self.overlay_port)?;
         if self.features.len() > MAX_CAPABILITY_FEATURES {
             return Err(CapabilityError::FieldTooLong {
                 field: "features",
@@ -464,6 +466,14 @@ fn write_bounded_string(
     value: &str,
 ) -> Result<(), CapabilityError> {
     write_bounded_bytes(payload, field, value.as_bytes())
+}
+
+fn validate_overlay_port(overlay_port: Option<u16>) -> Result<(), CapabilityError> {
+    if overlay_port == Some(0) {
+        Err(CapabilityError::InvalidOverlayPort(0))
+    } else {
+        Ok(())
+    }
 }
 
 fn write_bounded_bytes(
@@ -755,6 +765,36 @@ mod tests {
         assert_eq!(
             PeerCapabilityEnvelope::decode(&payload).unwrap_err(),
             CapabilityError::InvalidMessageType(99)
+        );
+    }
+
+    #[test]
+    fn zero_overlay_port_is_rejected_on_encode_sign_and_decode() {
+        let invalid = descriptor().with_overlay_port(Some(0));
+        assert_eq!(
+            invalid.clone().sign(&signing_key()).unwrap_err(),
+            CapabilityError::InvalidOverlayPort(0)
+        );
+        let envelope =
+            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, "nonce", invalid);
+        assert_eq!(
+            envelope.encode().unwrap_err(),
+            CapabilityError::InvalidOverlayPort(0)
+        );
+
+        let mut payload = PeerCapabilityEnvelope::new(
+            PeerCapabilityMessageType::Hello,
+            "nonce",
+            descriptor().with_overlay_port(Some(50_305)),
+        )
+        .encode()
+        .unwrap();
+        let peer_id_offset = 12 + 4 + "nonce".len();
+        let overlay_port_offset = peer_id_offset + 4 + descriptor().peer_id.len();
+        payload[overlay_port_offset..overlay_port_offset + 4].copy_from_slice(&0_i32.to_le_bytes());
+        assert_eq!(
+            PeerCapabilityEnvelope::decode(&payload).unwrap_err(),
+            CapabilityError::InvalidOverlayPort(0)
         );
     }
 
