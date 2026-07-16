@@ -268,6 +268,32 @@ async fn distributed_search_source_exclusion_is_case_insensitive() {
 }
 
 #[tokio::test]
+async fn distributed_forwarding_evicts_failed_children_without_blocking_healthy_children() {
+    let (failed_tree, failed_peer) = duplex(1024);
+    let (healthy_tree, healthy_peer) = duplex(1024);
+    let mut tree = DistributedTree::new("local");
+    let mut healthy_peer = DistributedConnection::new(healthy_peer);
+    let search = distributed_search(5, "origin", 44, "album");
+    tree.add_child("failed", DistributedConnection::new(failed_tree))
+        .unwrap();
+    tree.add_child("healthy", DistributedConnection::new(healthy_tree))
+        .unwrap();
+    drop(failed_peer);
+
+    assert!(tree
+        .forward_search_to_children(&search, None)
+        .await
+        .is_err());
+    assert_eq!(
+        healthy_peer.receive().await.unwrap(),
+        DistributedMessage::Search(search)
+    );
+    assert!(tree.child_info("failed").is_none());
+    assert!(tree.child_info("healthy").is_some());
+    assert_eq!(tree.children_len(), 1);
+}
+
+#[tokio::test]
 async fn branch_info_reporter_schedules_server_updates() {
     let now = Instant::now();
     let mut reporter = BranchInfoReporter::new(Duration::from_secs(5), now).unwrap();

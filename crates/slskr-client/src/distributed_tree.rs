@@ -305,15 +305,31 @@ where
     ) -> Result<usize, ClientError> {
         let mut sent = 0;
         let except_key = except_username.map(username_key);
+        let mut failed = Vec::new();
+        let mut first_error = None;
         for (username, child) in &mut self.children {
             if except_key.as_deref() == Some(username.as_str()) {
                 continue;
             }
-            child
+            match child
                 .connection
                 .send(&DistributedMessage::Search(search.clone()))
-                .await?;
-            sent += 1;
+                .await
+            {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    failed.push(username.clone());
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        for username in failed {
+            self.children.remove(&username);
+        }
+        if let Some(error) = first_error {
+            return Err(error);
         }
         Ok(sent)
     }
