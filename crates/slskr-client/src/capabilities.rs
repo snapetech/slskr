@@ -384,6 +384,13 @@ impl PeerCapabilityRegistry {
         descriptor.verify(now)?;
         let key = descriptor.username.to_ascii_lowercase();
         self.prune_expired(now)?;
+        if self
+            .records
+            .get(&key)
+            .is_some_and(|existing| !existing.peer_id.eq_ignore_ascii_case(&descriptor.peer_id))
+        {
+            return Err(CapabilityError::PeerIdentityChanged);
+        }
         if self.records.len() >= MAX_PEER_CAPABILITY_RECORDS && !self.records.contains_key(&key) {
             return Err(CapabilityError::RegistryFull {
                 max: MAX_PEER_CAPABILITY_RECORDS,
@@ -436,6 +443,8 @@ pub enum CapabilityError {
     InvalidSignature,
     #[error("descriptor peer id does not match its public key")]
     PeerIdMismatch,
+    #[error("peer capability identity changed before the existing record expired")]
+    PeerIdentityChanged,
     #[error("signing key does not match descriptor public key")]
     SigningKeyMismatch,
     #[error("capability envelope magic mismatch: {0:#x}")]
@@ -999,6 +1008,45 @@ mod tests {
         assert!(registry.update(refreshed_bob, later).is_ok());
         assert_eq!(registry.len(), 1);
         assert!(registry.get("bob").is_some());
+    }
+
+    #[test]
+    fn registry_pins_peer_identity_until_record_expiry() {
+        let mut registry = PeerCapabilityRegistry::new();
+        registry.update(descriptor(), now()).unwrap();
+
+        let replacement_key = SigningKey::from_bytes(&[9; 32]);
+        let replacement = PeerCapabilityDescriptor::unsigned(
+            "Alice",
+            vec![FEATURE_CAPABILITIES_V1.to_owned()],
+            Vec::new(),
+            Duration::from_secs(60),
+            &replacement_key,
+            now(),
+        )
+        .unwrap()
+        .sign(&replacement_key)
+        .unwrap();
+        assert_eq!(
+            registry.update(replacement.clone(), now()).unwrap_err(),
+            CapabilityError::PeerIdentityChanged
+        );
+        assert_eq!(registry.get("alice").unwrap().peer_id, descriptor().peer_id);
+
+        let later = now() + Duration::from_secs(61);
+        let rotated = PeerCapabilityDescriptor::unsigned(
+            "Alice",
+            vec![FEATURE_CAPABILITIES_V1.to_owned()],
+            Vec::new(),
+            Duration::from_secs(60),
+            &replacement_key,
+            later,
+        )
+        .unwrap()
+        .sign(&replacement_key)
+        .unwrap();
+        assert!(registry.update(rotated.clone(), later).is_ok());
+        assert_eq!(registry.get("ALICE").unwrap().peer_id, rotated.peer_id);
     }
 
     #[test]
