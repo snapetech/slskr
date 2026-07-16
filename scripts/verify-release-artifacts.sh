@@ -78,11 +78,20 @@ with tarfile.open(sys.argv[1], "r:gz") as tf:
     expanded_bytes = 0
     for member in members:
         member_path = pathlib.PurePosixPath(member.name)
-        if member_path.is_absolute() or ".." in member_path.parts:
+        windows_path = pathlib.PureWindowsPath(member.name)
+        if (
+            member_path.is_absolute()
+            or ".." in member_path.parts
+            or windows_path.is_absolute()
+            or windows_path.drive
+            or ".." in windows_path.parts
+            or "\\" in member.name
+        ):
             raise SystemExit(f"unsafe tar entry path: {member.name}")
-        if member.name in names:
+        normalized_name = member_path.as_posix()
+        if normalized_name in names:
             raise SystemExit(f"duplicate tar entry path: {member.name}")
-        names.add(member.name)
+        names.add(normalized_name)
         if member.issym() or member.islnk():
             raise SystemExit(f"tar links are not allowed: {member.name}")
         if not (member.isfile() or member.isdir()):
@@ -116,11 +125,20 @@ with zipfile.ZipFile(sys.argv[1]) as zf:
     expanded_bytes = 0
     for member in members:
         member_path = pathlib.PurePosixPath(member.filename)
-        if member_path.is_absolute() or ".." in member_path.parts:
+        windows_path = pathlib.PureWindowsPath(member.filename)
+        if (
+            member_path.is_absolute()
+            or ".." in member_path.parts
+            or windows_path.is_absolute()
+            or windows_path.drive
+            or ".." in windows_path.parts
+            or "\\" in member.filename
+        ):
             raise SystemExit(f"unsafe zip entry path: {member.filename}")
-        if member.filename in names:
+        normalized_name = member_path.as_posix()
+        if normalized_name in names:
             raise SystemExit(f"duplicate zip entry path: {member.filename}")
-        names.add(member.filename)
+        names.add(normalized_name)
         if member.flag_bits & 0x1:
             raise SystemExit(f"encrypted zip entry is not allowed: {member.filename}")
         if member.file_size > max_member_bytes:
