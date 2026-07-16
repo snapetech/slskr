@@ -753,7 +753,7 @@ fn validate_overlay_base(
     if magic.as_bytes() != OVERLAY_MAGIC.as_bytes() {
         return Err(OverlayError::InvalidMagic);
     }
-    if !(1..=100).contains(&version) {
+    if version != OVERLAY_VERSION {
         return Err(OverlayError::InvalidVersion(version));
     }
     if message_type.trim().is_empty() {
@@ -898,6 +898,30 @@ mod tests {
             invalid.validate(),
             Err(OverlayError::InvalidMessageType)
         ));
+    }
+
+    #[test]
+    fn overlay_messages_reject_non_contract_protocol_versions() {
+        for version in [OVERLAY_VERSION - 1, OVERLAY_VERSION + 1, 100] {
+            assert!(matches!(
+                validate_overlay_base(OVERLAY_MAGIC, "mesh_service_reply", version),
+                Err(OverlayError::InvalidVersion(rejected)) if rejected == version
+            ));
+            assert!(matches!(
+                MeshHelloAck {
+                    magic: OVERLAY_MAGIC.to_owned(),
+                    message_type: "mesh_hello_ack".to_owned(),
+                    version,
+                    username: "peer".to_owned(),
+                    features: vec![FEATURE_MESH_SERVICE.to_owned()],
+                    soulseek_ports: None,
+                    overlay_port: None,
+                    nonce_echo: Some("nonce".to_owned()),
+                }
+                .validate(),
+                Err(OverlayError::InvalidVersion(rejected)) if rejected == version
+            ));
+        }
     }
 
     #[test]
