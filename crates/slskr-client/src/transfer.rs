@@ -232,6 +232,14 @@ impl UploadTransfer {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        let actual = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if actual != self.size {
+            return Err(ClientError::TransferSizeMismatch {
+                expected: self.size,
+                actual,
+            });
+        }
+
         connection.send_token(self.token).await?;
         let offset = connection.receive_offset().await?;
         let start = usize::try_from(offset).map_err(|_| ClientError::TransferOffsetOutOfRange {

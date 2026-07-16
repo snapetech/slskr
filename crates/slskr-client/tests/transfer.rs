@@ -261,3 +261,24 @@ async fn send_file_rejects_offset_past_end() {
     ));
     downloader_task.await.unwrap();
 }
+
+#[tokio::test]
+async fn send_file_rejects_payload_that_differs_from_advertised_size() {
+    let (uploader, _downloader) = duplex(64);
+    let mut uploader = FileTransferConnection::new(uploader);
+    let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 3);
+
+    let error = transfer
+        .send_file_to(&mut uploader, &[1, 2, 3, 4, 5])
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::TransferSizeMismatch {
+            expected: 3,
+            actual: 5
+        }
+    ));
+    assert_eq!(transfer.state, UploadState::New);
+}
