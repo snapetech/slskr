@@ -80,9 +80,11 @@ impl RateLimiter {
         let max_requests = self.config.max_requests_authenticated;
         let now = Instant::now();
         let mut windows = self.user_windows.write().await;
-        windows.retain(|_, window| now < window.reset_at);
         if !windows.contains_key(username) && windows.len() >= MAX_USER_WINDOWS {
-            return false;
+            windows.retain(|_, window| now < window.reset_at);
+            if windows.len() >= MAX_USER_WINDOWS {
+                return false;
+            }
         }
 
         let window = windows
@@ -114,9 +116,11 @@ impl RateLimiter {
 
         let now = Instant::now();
         let mut windows = self.ip_windows.write().await;
-        windows.retain(|_, window| now < window.reset_at);
         if !windows.contains_key(&key) && windows.len() >= MAX_IP_WINDOWS {
-            return false;
+            windows.retain(|_, window| now < window.reset_at);
+            if windows.len() >= MAX_IP_WINDOWS {
+                return false;
+            }
         }
 
         let window = windows.entry(key).or_insert_with(|| RequestWindow {
@@ -467,6 +471,27 @@ mod tests {
             8080,
         ));
         assert!(!limiter.check_rate_limit(over_cap, None).await);
+    }
+
+    #[tokio::test]
+    async fn full_ip_window_table_reclaims_expired_entries() {
+        let limiter = RateLimiter::new(RateLimitConfig::default());
+        let reset_at = Instant::now();
+        let mut windows = limiter.ip_windows.write().await;
+        for index in 0..MAX_IP_WINDOWS {
+            windows.insert(
+                format!("expired-{index}"),
+                RequestWindow { count: 1, reset_at },
+            );
+        }
+        drop(windows);
+
+        let addr = Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            8080,
+        ));
+        assert!(limiter.check_rate_limit(addr, None).await);
+        assert_eq!(limiter.ip_windows.read().await.len(), 1);
     }
 
     #[tokio::test]
