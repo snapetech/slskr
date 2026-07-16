@@ -398,9 +398,23 @@ impl BranchInfoReporter {
             return None;
         }
 
-        while self.next_due <= now {
-            self.next_due += self.interval;
-        }
+        self.next_due = now
+            .checked_add(self.interval)
+            .unwrap_or_else(|| farthest_deadline(now));
         Some(tree.branch_server_messages())
     }
+}
+
+fn farthest_deadline(now: Instant) -> Instant {
+    let mut low = Duration::ZERO;
+    let mut high = Duration::MAX;
+    while low < high {
+        let midpoint = low + (high - low) / 2 + Duration::from_nanos(1);
+        if now.checked_add(midpoint).is_some() {
+            low = midpoint;
+        } else {
+            high = midpoint - Duration::from_nanos(1);
+        }
+    }
+    now.checked_add(low).unwrap_or(now)
 }

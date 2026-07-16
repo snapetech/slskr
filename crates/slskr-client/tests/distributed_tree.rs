@@ -378,6 +378,24 @@ fn branch_info_reporter_rejects_interval_that_overflows_deadline() {
     ));
 }
 
+#[test]
+fn branch_info_reporter_catch_up_does_not_overflow_deadline() {
+    let now = Instant::now();
+    let interval = Duration::from_nanos(1);
+    let mut reporter = BranchInfoReporter::new(interval, now).unwrap();
+    let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+    let far_future = now.checked_add(Duration::MAX).unwrap_or_else(|| {
+        let mut candidate = Duration::from_secs(u64::MAX / 2);
+        while now.checked_add(candidate).is_none() {
+            candidate /= 2;
+        }
+        now + candidate
+    });
+
+    assert!(reporter.due_messages(far_future, &tree).is_some());
+    assert!(reporter.next_due() > far_future || reporter.next_due() == far_future);
+}
+
 fn possible_parent(username: &str, ip: [u8; 4], port: u32) -> PossibleParent {
     PossibleParent {
         username: username.to_owned(),

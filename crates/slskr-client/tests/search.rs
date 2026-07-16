@@ -344,6 +344,16 @@ fn timed_search_results_drain_expired() {
 }
 
 #[test]
+fn timed_search_window_overflow_saturates_instead_of_panicking() {
+    let now = Instant::now();
+    let mut results = TimedSearchResults::new(Duration::MAX);
+
+    assert!(results.track(handle(10), now).is_none());
+    assert!(results.is_active(10));
+    assert!(results.drain_expired(now).is_empty());
+}
+
+#[test]
 fn in_memory_share_index_matches_all_terms_case_insensitively() {
     let index = InMemoryShareIndex::new(vec![
         entry("Music/Artist - Rare Track.flac"),
