@@ -154,7 +154,8 @@ impl Rendezvous {
             "lanOnly": false,
             "isBeaconCapable": self.overlay_port.is_some(),
             "isDhtRunning": true,
-            "verifiedBeaconCount": peer_count,
+            "verifiedBeaconCount": 0,
+            "discoveredBeaconCount": peer_count,
             "bootstrapped": status.bootstrapped,
             "dhtSizeEstimate": status.dht_size_estimate,
             "publicAddress": status.public_address,
@@ -177,7 +178,10 @@ fn rendezvous_keys() -> [Id; 3] {
 }
 
 fn valid_peer(peer: SocketAddrV4) -> bool {
-    peer.port() != 0 && !peer.ip().is_unspecified() && !peer.ip().is_multicast()
+    peer.port() != 0
+        && !peer.ip().is_unspecified()
+        && !peer.ip().is_multicast()
+        && !peer.ip().is_broadcast()
 }
 
 #[cfg(test)]
@@ -195,6 +199,15 @@ mod tests {
                 "facbc54b5dd43f5109fe17514aa171ee2fd6a2f3",
             ]
         );
+    }
+
+    #[test]
+    fn unusable_dht_peer_endpoints_are_rejected() {
+        assert!(valid_peer("127.0.0.1:50305".parse().unwrap()));
+        assert!(!valid_peer("0.0.0.0:50305".parse().unwrap()));
+        assert!(!valid_peer("224.0.0.1:50305".parse().unwrap()));
+        assert!(!valid_peer("255.255.255.255:50305".parse().unwrap()));
+        assert!(!valid_peer("127.0.0.1:0".parse().unwrap()));
     }
 
     #[tokio::test]

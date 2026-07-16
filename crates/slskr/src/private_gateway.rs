@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     fmt, fs,
+    io::Read as _,
     net::{IpAddr, SocketAddr},
     path::Path,
     sync::Arc,
@@ -38,6 +39,8 @@ const MAX_POD_ID_BYTES: usize = 512;
 const MAX_DESTINATION_HOST_BYTES: usize = 255;
 const MAX_SERVICE_NAME_BYTES: usize = 128;
 const MAX_REQUEST_NONCE_BYTES: usize = 64;
+const MAX_CERTIFICATE_BYTES: u64 = 64 * 1024;
+const MAX_PRIVATE_KEY_BYTES: u64 = 16 * 1024;
 const REQUEST_FRESHNESS_SECONDS: u64 = 300;
 const DESTINATION_RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 const DESTINATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -590,8 +593,8 @@ fn load_or_create_certificate(
 ) -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), String> {
     let certificate_path = state_dir.join("overlay-certificate.der");
     let private_key_path = state_dir.join("overlay-private-key.der");
-    let certificate = read_identity_file(&certificate_path, "certificate")?;
-    let private_key = read_identity_file(&private_key_path, "private key")?;
+    let certificate = read_identity_file(&certificate_path, "certificate", MAX_CERTIFICATE_BYTES)?;
+    let private_key = read_identity_file(&private_key_path, "private key", MAX_PRIVATE_KEY_BYTES)?;
     match (certificate, private_key) {
         (Some(certificate), Some(private_key)) => {
             return Ok((
@@ -621,7 +624,7 @@ fn load_or_create_certificate(
     ))
 }
 
-fn read_identity_file(path: &Path, label: &str) -> Result<Option<Vec<u8>>, String> {
+fn read_identity_file(path: &Path, label: &str, max_bytes: u64) -> Result<Option<Vec<u8>>, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -630,7 +633,18 @@ fn read_identity_file(path: &Path, label: &str) -> Result<Option<Vec<u8>>, Strin
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(format!("overlay {label} must be a regular file"));
     }
-    let bytes = fs::read(path).map_err(|error| format!("overlay {label} read failed: {error}"))?;
+    if metadata.len() > max_bytes {
+        return Err(format!("overlay {label} is too large"));
+    }
+    let mut file =
+        fs::File::open(path).map_err(|error| format!("overlay {label} read failed: {error}"))?;
+    let mut bytes = Vec::new();
+    std::io::Read::take(&mut file, max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("overlay {label} read failed: {error}"))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("overlay {label} is too large"));
+    }
     if bytes.is_empty() {
         return Err(format!("overlay {label} is empty"));
     }
@@ -720,6 +734,20 @@ mod tests {
         fs::write(root.join("overlay-certificate.der"), [1_u8]).unwrap();
         let error = load_or_create_certificate(&root).unwrap_err();
         assert!(error.contains("identity is incomplete"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn oversized_gateway_identity_is_rejected_before_parsing() {
+        let root = temporary_directory("gateway-oversized-identity");
+        fs::write(
+            root.join("overlay-certificate.der"),
+            vec![1_u8; MAX_CERTIFICATE_BYTES as usize + 1],
+        )
+        .unwrap();
+        fs::write(root.join("overlay-private-key.der"), [1_u8]).unwrap();
+        let error = load_or_create_certificate(&root).unwrap_err();
+        assert!(error.contains("certificate is too large"));
         fs::remove_dir_all(root).unwrap();
     }
 }
