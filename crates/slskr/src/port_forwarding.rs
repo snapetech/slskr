@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use ed25519_dalek::SigningKey;
 use serde::Serialize;
 use slskr_client::overlay::{
     connect_tls_overlay, CloseTunnelRequest, GetTunnelDataRequest, MeshHello, MeshServiceCall,
@@ -39,6 +40,7 @@ pub struct StartRequest {
     pub gateway_endpoint: SocketAddr,
     pub gateway_certificate_sha256: [u8; 32],
     pub local_username: String,
+    pub authentication_key: Arc<SigningKey>,
 }
 
 #[derive(Debug)]
@@ -202,7 +204,7 @@ impl Rule {
         local: TcpStream,
         mut cancel: watch::Receiver<bool>,
     ) -> Result<(), String> {
-        let hello = MeshHello::new(
+        let mut hello = MeshHello::new(
             &self.request.local_username,
             vec![FEATURE_MESH_SERVICE.to_owned()],
             None,
@@ -210,6 +212,12 @@ impl Rule {
             uuid::Uuid::new_v4().simple().to_string(),
         )
         .map_err(|error| format!("Overlay hello failed: {error}"))?;
+        hello
+            .authenticate(
+                &self.request.authentication_key,
+                &self.request.gateway_certificate_sha256,
+            )
+            .map_err(|error| format!("Overlay hello authentication failed: {error}"))?;
         let client = connect_tls_overlay(
             self.request.gateway_endpoint,
             self.request.gateway_certificate_sha256,
@@ -460,6 +468,7 @@ mod tests {
             gateway_endpoint: "127.0.0.1:50305".parse().unwrap(),
             gateway_certificate_sha256: [7; 32],
             local_username: "local".to_owned(),
+            authentication_key: Arc::new(SigningKey::from_bytes(&[9; 32])),
         }
     }
 

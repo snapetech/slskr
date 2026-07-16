@@ -37,6 +37,7 @@ pub struct AppConfig {
     pub advertised_port: u32,
     pub obfuscated_listener_bind: Option<String>,
     pub obfuscated_advertised_port: Option<u32>,
+    pub overlay_bind: Option<SocketAddr>,
     pub obfuscation_enabled: bool,
     pub obfuscation_mode: SoulseekObfuscationMode,
     pub obfuscation_prefer_outbound: bool,
@@ -156,6 +157,19 @@ impl AppConfig {
             "SLSKR_OBFUSCATED_ADVERTISED_PORT",
             file_config.listeners.obfuscated_advertised_port,
         )?;
+        let overlay_bind = env
+            .var("SLSKR_OVERLAY_BIND")
+            .or(file_config.listeners.overlay_bind)
+            .map(|value| {
+                let address = value
+                    .parse::<SocketAddr>()
+                    .map_err(|error| format!("invalid SLSKR_OVERLAY_BIND: {error}"))?;
+                if address.port() == 0 {
+                    return Err("SLSKR_OVERLAY_BIND port must be non-zero".to_owned());
+                }
+                Ok(address)
+            })
+            .transpose()?;
         let obfuscation_enabled = env_bool_layer(
             env,
             "SLSK_OBFUSCATION",
@@ -320,6 +334,7 @@ impl AppConfig {
             advertised_port,
             obfuscated_listener_bind,
             obfuscated_advertised_port,
+            overlay_bind,
             obfuscation_enabled,
             obfuscation_mode,
             obfuscation_prefer_outbound,
@@ -357,7 +372,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -372,6 +387,7 @@ impl AppConfig {
             json_option(self.listener_bind.as_deref()),
             json_option(self.obfuscated_listener_bind.as_deref()),
             json_u32_option(self.obfuscated_advertised_port),
+            json_option(self.overlay_bind.map(|bind| bind.to_string()).as_deref()),
             format_args!(
                 "{{\"enabled\":{},\"mode\":\"{}\",\"prefer_outbound\":{},\"effective_prefer_outbound\":{}}}",
                 self.obfuscation_enabled,
@@ -1292,6 +1308,7 @@ pub struct ListenerFileConfig {
     advertised_port: Option<u32>,
     obfuscated_bind: Option<String>,
     obfuscated_advertised_port: Option<u32>,
+    overlay_bind: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

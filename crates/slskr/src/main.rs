@@ -28,6 +28,7 @@ mod persistence;
 mod pod_channels;
 mod pods;
 mod port_forwarding;
+mod private_gateway;
 #[allow(
     dead_code,
     reason = "probe metadata builders are shared by optional live probes"
@@ -4786,19 +4787,74 @@ fn new_capability_signing_key() -> Result<SigningKey, String> {
     Ok(SigningKey::from_bytes(&secret))
 }
 
-fn local_capability_descriptor(state: &AppState) -> Result<PeerCapabilityDescriptor, String> {
+fn load_or_create_capability_signing_key(state_dir: &Path) -> Result<SigningKey, String> {
+    let path = state_dir.join("peer-capability-key.bin");
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err("peer capability key must be a regular file".to_owned());
+            }
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("peer capability key read failed: {error}"))?;
+            let secret: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| "peer capability key must contain exactly 32 bytes".to_owned())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                    .map_err(|error| format!("peer capability key permissions failed: {error}"))?;
+            }
+            Ok(SigningKey::from_bytes(&secret))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let signing_key = new_capability_signing_key()?;
+            let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4().simple()));
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options
+                .open(&temporary)
+                .map_err(|error| format!("peer capability key creation failed: {error}"))?;
+            std::io::Write::write_all(&mut file, &signing_key.to_bytes())
+                .map_err(|error| format!("peer capability key write failed: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("peer capability key sync failed: {error}"))?;
+            fs::rename(&temporary, &path)
+                .map_err(|error| format!("peer capability key publish failed: {error}"))?;
+            Ok(signing_key)
+        }
+        Err(error) => Err(format!("peer capability key metadata failed: {error}")),
+    }
+}
+
+async fn local_capability_descriptor(state: &AppState) -> Result<PeerCapabilityDescriptor, String> {
+    let mut features = vec![FEATURE_CAPABILITIES_V1.to_owned()];
+    if state.private_gateway.is_some() {
+        features.push("mesh_sync".to_owned());
+    }
     PeerCapabilityDescriptor::unsigned(
-        state
-            .config
-            .username
-            .clone()
+        pod_request_peer_id(state)
+            .await
             .unwrap_or_else(|| "slskr".to_owned()),
-        vec![FEATURE_CAPABILITIES_V1.to_owned()],
+        features,
         Vec::new(),
         std::time::Duration::from_secs(24 * 60 * 60),
         &state.capability_signing_key,
         std::time::SystemTime::now(),
     )
+    .map(|descriptor| {
+        descriptor.with_overlay_port(
+            state
+                .private_gateway
+                .as_ref()
+                .map(|gateway| gateway.bind().port()),
+        )
+    })
     .and_then(|descriptor| descriptor.sign(&state.capability_signing_key))
     .map_err(|error| format!("local peer capability descriptor failed: {error}"))
 }
@@ -10488,6 +10544,7 @@ struct AppState {
     pod_channels: RwLock<pod_channels::PodChannelStore>,
     pods: RwLock<pods::PodStore>,
     port_forwarding: port_forwarding::Manager,
+    private_gateway: Option<Arc<private_gateway::Gateway>>,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
@@ -19624,11 +19681,20 @@ async fn route_http_request_with_headers(
           }
 
           ("GET", "/api/mesh/transport") => {
+              let gateway = state.private_gateway.as_ref();
+              let enabled = gateway.is_some();
               Ok(routing::ok_response(serde_json::json!({
-                  "status": "Healthy",
-                  "health": "Healthy",
-                  "description": "Mesh transport unavailable in this runtime",
+                  "status": if enabled { "Healthy" } else { "Disabled" },
+                  "health": if enabled { "Healthy" } else { "Disabled" },
+                  "description": if enabled {
+                      "TLS mesh service transport is listening"
+                  } else {
+                      "Mesh service transport is disabled"
+                  },
                   "transportPreference": "Auto",
+                  "overlayBind": gateway.map(|gateway| gateway.bind()),
+                  "overlayPort": gateway.map(|gateway| gateway.bind().port()),
+                  "certificateSha256": gateway.map(|gateway| hex::encode(gateway.certificate_sha256())),
                   "connectedPeers": 0,
                   "totalPeers": 0,
                   "activeCircuits": 0,
@@ -22081,6 +22147,7 @@ async fn route_http_request_with_headers(
                     gateway_endpoint,
                     gateway_certificate_sha256,
                     local_username,
+                    authentication_key: Arc::new(state.capability_signing_key.clone()),
                 })
                 .await
             {
@@ -26499,7 +26566,14 @@ async fn serve(once: bool) -> Result<(), String> {
         content_discovery::ContentDiscoveryStore::load(&config.state_dir)?;
     let pod_channel_store = pod_channels::PodChannelStore::load(&config.state_dir)?;
     let pod_store = pods::PodStore::load(&config.state_dir)?;
-    let capability_signing_key = new_capability_signing_key()?;
+    let private_gateway = if let Some(bind) = config.overlay_bind {
+        Some(Arc::new(
+            private_gateway::Gateway::load_or_create(bind, &config.state_dir).await?,
+        ))
+    } else {
+        None
+    };
+    let capability_signing_key = load_or_create_capability_signing_key(&config.state_dir)?;
     let state = Arc::new(AppState {
         log_level: RwLock::new(
             logging::LogConfig::parse_level(&config.log_level).unwrap_or(logging::LogLevel::Info),
@@ -26526,6 +26600,7 @@ async fn serve(once: bool) -> Result<(), String> {
         pod_channels: RwLock::new(pod_channel_store),
         pods: RwLock::new(pod_store),
         port_forwarding: port_forwarding::Manager::new(),
+        private_gateway,
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
         event_tx,
@@ -26593,6 +26668,14 @@ async fn serve(once: bool) -> Result<(), String> {
     spawn_transfer_rescue(Arc::clone(&state));
     spawn_configured_listeners(Arc::clone(&state));
     spawn_rate_limit_cleanup(Arc::clone(&state));
+    if let Some(gateway) = state.private_gateway.clone() {
+        let gateway_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            if let Err(error) = gateway.run(gateway_state).await {
+                ::tracing::error!(%error, "overlay gateway listener stopped");
+            }
+        });
+    }
     record_daemon_log(
         &state,
         logging::LogLevel::Info,
@@ -29321,7 +29404,7 @@ where
             let acknowledgement = PeerCapabilityEnvelope::new(
                 PeerCapabilityMessageType::Acknowledge,
                 nonce,
-                local_capability_descriptor(state)?,
+                local_capability_descriptor(state).await?,
             );
             let response = peer_capability_message(&acknowledgement)
                 .map_err(|error| format!("peer capability acknowledgement failed: {error}"))?;
@@ -36834,6 +36917,7 @@ mod tests {
             )),
             pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
             port_forwarding: super::port_forwarding::Manager::new(),
+            private_gateway: None,
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -37967,6 +38051,201 @@ mod tests {
         .await
         .expect("port forwarding stop");
         assert_eq!(stop.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn private_gateway_accepts_authenticated_pod_tunnel_and_round_trips_bytes() {
+        use slskr_client::overlay::{
+            CloseTunnelRequest, GetTunnelDataRequest, MeshHello, MeshServiceCall,
+            OpenTunnelRequest, OpenTunnelResponse, TunnelDataRequest, TunnelDataResponse,
+            FEATURE_MESH_SERVICE,
+        };
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-private-gateway-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("gateway state directory");
+        let (mut state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "member=127.0.0.1:1"),
+        );
+        let gateway = Arc::new(
+            super::private_gateway::Gateway::load_or_create("127.0.0.1:0".parse().unwrap(), &root)
+                .await
+                .expect("gateway"),
+        );
+        let endpoint = gateway.bind();
+        let certificate_pin = gateway.certificate_sha256();
+        Arc::get_mut(&mut state)
+            .expect("unshared state")
+            .private_gateway = Some(gateway.clone());
+
+        let echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("echo listener");
+        let echo_port = echo_listener.local_addr().unwrap().port();
+        let echo = tokio::spawn(async move {
+            let (mut stream, _) = echo_listener.accept().await.expect("echo accept");
+            let mut request = [0_u8; 4];
+            tokio::io::AsyncReadExt::read_exact(&mut stream, &mut request)
+                .await
+                .expect("echo read");
+            assert_eq!(&request, b"ping");
+            tokio::io::AsyncWriteExt::write_all(&mut stream, b"pong")
+                .await
+                .expect("echo write");
+        });
+
+        let create = super::route_http_request(
+            "POST",
+            "/api/pods",
+            None,
+            &format!(
+                r#"{{"pod":{{"podId":"pod-gateway","name":"Gateway","isPublic":true,"requireApproval":false,"capabilities":[0],"privateServicePolicy":{{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","gatewayCertificateSha256":"{}","registeredServices":[],"allowedDestinations":[{{"hostPattern":"127.0.0.1","port":{},"protocol":"tcp","allowPublic":false}}]}}}}}}"#,
+                hex::encode(certificate_pin),
+                echo_port
+            ),
+            &state,
+        )
+        .await
+        .expect("create gateway pod");
+        assert_eq!(create.status, "201 Created", "{}", create.body);
+        *state.runtime_credentials.write().await =
+            Some(super::LoginCredentials::default_client("member", "secret"));
+        let join =
+            super::route_http_request("POST", "/api/pods/pod-gateway/join", None, "{}", &state)
+                .await
+                .expect("join gateway pod");
+        assert_eq!(join.status, "200 OK", "{}", join.body);
+        *state.runtime_credentials.write().await = None;
+
+        let remote_key = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        let descriptor = slskr_client::capabilities::PeerCapabilityDescriptor::unsigned(
+            "member",
+            vec!["mesh_sync".to_owned()],
+            Vec::new(),
+            std::time::Duration::from_secs(300),
+            &remote_key,
+            std::time::SystemTime::now(),
+        )
+        .map(|descriptor| descriptor.with_overlay_port(Some(endpoint.port())))
+        .and_then(|descriptor| descriptor.sign(&remote_key))
+        .expect("member capability");
+        state
+            .mesh
+            .write()
+            .await
+            .update_capability(descriptor)
+            .expect("register member capability");
+
+        let gateway_server = tokio::spawn(gateway.run(Arc::clone(&state)));
+        let mut hello = MeshHello::new(
+            "member",
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            None,
+            None,
+            "gateway-test-nonce",
+        )
+        .expect("hello");
+        hello
+            .authenticate(&remote_key, &certificate_pin)
+            .expect("authenticate hello");
+        let mut client =
+            slskr_client::overlay::connect_tls_overlay(endpoint, certificate_pin, hello)
+                .await
+                .expect("connect gateway");
+        assert_eq!(client.remote_username, "tester");
+
+        let open = OpenTunnelRequest::new(
+            "pod-gateway",
+            "127.0.0.1",
+            echo_port,
+            None,
+            "open-tunnel-nonce",
+        )
+        .expect("open request");
+        let reply = client
+            .call(
+                &MeshServiceCall::new(
+                    "open",
+                    "private-gateway",
+                    "OpenTunnel",
+                    serde_json::to_vec(&open).unwrap(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("open reply");
+        assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
+        let opened: OpenTunnelResponse = serde_json::from_slice(&reply.payload).unwrap();
+
+        let reply = client
+            .call(
+                &MeshServiceCall::new(
+                    "send",
+                    "private-gateway",
+                    "TunnelData",
+                    serde_json::to_vec(&TunnelDataRequest {
+                        tunnel_id: opened.tunnel_id.clone(),
+                        data: b"ping".to_vec(),
+                    })
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("send reply");
+        assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
+
+        let received = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let reply = client
+                    .call(
+                        &MeshServiceCall::new(
+                            uuid::Uuid::new_v4().to_string(),
+                            "private-gateway",
+                            "GetTunnelData",
+                            serde_json::to_vec(&GetTunnelDataRequest {
+                                tunnel_id: opened.tunnel_id.clone(),
+                            })
+                            .unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                    .await
+                    .expect("receive reply");
+                assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
+                let response: TunnelDataResponse = serde_json::from_slice(&reply.payload).unwrap();
+                if !response.data.is_empty() {
+                    break response.data;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("receive timeout");
+        assert_eq!(received, b"pong");
+
+        let reply = client
+            .call(
+                &MeshServiceCall::new(
+                    "close",
+                    "private-gateway",
+                    "CloseTunnel",
+                    serde_json::to_vec(&CloseTunnelRequest {
+                        tunnel_id: opened.tunnel_id,
+                    })
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("close reply");
+        assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
+        echo.await.expect("echo task");
+        gateway_server.abort();
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -55832,6 +56111,7 @@ mod tests {
                 advertised_port = 4444
                 obfuscated_bind = "0.0.0.0:3334"
                 obfuscated_advertised_port = 4445
+                overlay_bind = "0.0.0.0:50305"
 
                 [profile]
                 user_info_description = "custom daemon"
@@ -55877,6 +56157,10 @@ mod tests {
         assert_eq!(config.listen_port, 3333);
         assert_eq!(config.advertised_port, 4444);
         assert_eq!(config.obfuscated_advertised_port, Some(4445));
+        assert_eq!(
+            config.overlay_bind.map(|bind| bind.to_string()),
+            Some("0.0.0.0:50305".to_owned())
+        );
         assert_eq!(config.obfuscation_mode.as_str(), "prefer");
         assert!(config.prefer_obfuscated_outbound());
         assert!(config.auto_connect);
@@ -55906,6 +56190,7 @@ mod tests {
 
         let sanitized = config.sanitized_json();
         assert!(sanitized.contains("\"credentials_configured\":true"));
+        assert!(sanitized.contains("\"overlay_bind\":\"0.0.0.0:50305\""));
         assert!(sanitized.contains("\"transfer_max_active\":2"));
         assert!(sanitized.contains("\"transfer_allow_inbound\":false"));
         assert!(sanitized.contains("\"transfer_allow_outbound\":false"));
@@ -56270,6 +56555,7 @@ mod tests {
             )),
             pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
             port_forwarding: super::port_forwarding::Manager::new(),
+            private_gateway: None,
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -56444,6 +56730,7 @@ mod tests {
                 &cookie_enabled_config.state_dir,
             )),
             port_forwarding: super::port_forwarding::Manager::new(),
+            private_gateway: None,
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -56558,6 +56845,34 @@ mod tests {
         assert_eq!(config.transfer_max_active, 1);
         assert!(!config.transfer_allow_inbound);
         assert!(!config.transfer_allow_outbound);
+    }
+
+    #[test]
+    fn overlay_bind_rejects_zero_port() {
+        let error = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default().with("SLSKR_OVERLAY_BIND", "127.0.0.1:0"),
+        )
+        .unwrap_err();
+        assert_eq!(error, "SLSKR_OVERLAY_BIND port must be non-zero");
+    }
+
+    #[test]
+    fn capability_identity_is_stable_across_reloads() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-capability-identity-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let first = super::load_or_create_capability_signing_key(&root).unwrap();
+        let second = super::load_or_create_capability_signing_key(&root).unwrap();
+        assert_eq!(
+            first.verifying_key().to_bytes(),
+            second.verifying_key().to_bytes()
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

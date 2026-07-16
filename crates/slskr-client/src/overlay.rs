@@ -4,6 +4,7 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -243,6 +244,14 @@ pub struct MeshHello {
     pub soulseek_ports: Option<SoulseekPorts>,
     pub overlay_port: Option<u16>,
     pub nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_public_key: Option<[u8; 32]>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_base64_bytes"
+    )]
+    pub auth_signature: Option<Vec<u8>>,
 }
 
 impl MeshHello {
@@ -262,6 +271,8 @@ impl MeshHello {
             soulseek_ports,
             overlay_port,
             nonce: Some(nonce.into()),
+            auth_public_key: None,
+            auth_signature: None,
         };
         message.validate()?;
         Ok(message)
@@ -276,7 +287,69 @@ impl MeshHello {
             &self.username,
             &self.features,
             self.nonce.as_deref(),
-        )
+        )?;
+        if self.auth_public_key.is_some() != self.auth_signature.is_some()
+            || self
+                .auth_signature
+                .as_ref()
+                .is_some_and(|signature| signature.len() != 64)
+        {
+            return Err(OverlayError::InvalidPeerAuthentication);
+        }
+        Ok(())
+    }
+
+    pub fn authenticate(
+        &mut self,
+        signing_key: &SigningKey,
+        gateway_certificate_sha256: &[u8; 32],
+    ) -> Result<(), OverlayError> {
+        self.validate()?;
+        let signature = signing_key.sign(&self.authentication_payload(gateway_certificate_sha256)?);
+        self.auth_public_key = Some(signing_key.verifying_key().to_bytes());
+        self.auth_signature = Some(signature.to_bytes().to_vec());
+        Ok(())
+    }
+
+    pub fn verify_authentication(
+        &self,
+        expected_public_key: &[u8; 32],
+        gateway_certificate_sha256: &[u8; 32],
+    ) -> Result<(), OverlayError> {
+        self.validate()?;
+        if self.auth_public_key.as_ref() != Some(expected_public_key) {
+            return Err(OverlayError::InvalidPeerAuthentication);
+        }
+        let signature = self
+            .auth_signature
+            .as_deref()
+            .and_then(|signature| <&[u8; 64]>::try_from(signature).ok())
+            .ok_or(OverlayError::InvalidPeerAuthentication)?;
+        let verifying_key = VerifyingKey::from_bytes(expected_public_key)
+            .map_err(|_| OverlayError::InvalidPeerAuthentication)?;
+        verifying_key
+            .verify(
+                &self.authentication_payload(gateway_certificate_sha256)?,
+                &Signature::from_bytes(signature),
+            )
+            .map_err(|_| OverlayError::InvalidPeerAuthentication)
+    }
+
+    fn authentication_payload(
+        &self,
+        gateway_certificate_sha256: &[u8; 32],
+    ) -> Result<Vec<u8>, OverlayError> {
+        let nonce = self.nonce.as_deref().ok_or(OverlayError::InvalidNonce)?;
+        let mut payload = b"slskr-overlay-auth-v1\0".to_vec();
+        for value in [&self.magic, &self.message_type, &self.username, nonce] {
+            let length =
+                u32::try_from(value.len()).map_err(|_| OverlayError::InvalidPeerAuthentication)?;
+            payload.extend_from_slice(&length.to_be_bytes());
+            payload.extend_from_slice(value.as_bytes());
+        }
+        payload.extend_from_slice(&self.version.to_be_bytes());
+        payload.extend_from_slice(gateway_certificate_sha256);
+        Ok(payload)
     }
 }
 
@@ -565,6 +638,8 @@ pub enum OverlayError {
     InvalidFeatures,
     #[error("overlay nonce is invalid")]
     InvalidNonce,
+    #[error("overlay peer authentication is invalid")]
+    InvalidPeerAuthentication,
     #[error("overlay handshake nonce does not match")]
     NonceMismatch,
     #[error("overlay service field {0} is invalid")]
@@ -692,6 +767,30 @@ mod base64_bytes {
     }
 }
 
+mod optional_base64_bytes {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        bytes
+            .as_ref()
+            .map(|bytes| STANDARD.encode(bytes))
+            .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<String>::deserialize(deserializer)?
+            .map(|encoded| STANDARD.decode(encoded).map_err(serde::de::Error::custom))
+            .transpose()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -719,6 +818,57 @@ mod tests {
         wire.read_exact(&mut payload).await.unwrap();
         assert_eq!(payload, br#"{"type":"ping"}"#);
         task.await.unwrap();
+    }
+
+    #[test]
+    fn mesh_hello_authentication_binds_username_nonce_and_capability_key() {
+        let signing_key = SigningKey::from_bytes(&[7; 32]);
+        let gateway_certificate_sha256 = [3; 32];
+        let mut hello = MeshHello::new(
+            "member",
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            None,
+            None,
+            "unique_nonce",
+        )
+        .unwrap();
+        hello
+            .authenticate(&signing_key, &gateway_certificate_sha256)
+            .unwrap();
+        hello
+            .verify_authentication(
+                &signing_key.verifying_key().to_bytes(),
+                &gateway_certificate_sha256,
+            )
+            .unwrap();
+
+        let encoded = serde_json::to_vec(&hello).unwrap();
+        let mut decoded: MeshHello = serde_json::from_slice(&encoded).unwrap();
+        decoded
+            .verify_authentication(
+                &signing_key.verifying_key().to_bytes(),
+                &gateway_certificate_sha256,
+            )
+            .unwrap();
+        decoded.username = "impostor".to_owned();
+        assert!(matches!(
+            decoded.verify_authentication(
+                &signing_key.verifying_key().to_bytes(),
+                &gateway_certificate_sha256,
+            ),
+            Err(OverlayError::InvalidPeerAuthentication)
+        ));
+        assert!(matches!(
+            hello.verify_authentication(
+                &SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes(),
+                &gateway_certificate_sha256,
+            ),
+            Err(OverlayError::InvalidPeerAuthentication)
+        ));
+        assert!(matches!(
+            hello.verify_authentication(&signing_key.verifying_key().to_bytes(), &[4; 32],),
+            Err(OverlayError::InvalidPeerAuthentication)
+        ));
     }
 
     #[tokio::test]
