@@ -148,6 +148,9 @@ impl PeerCapabilityEnvelope {
         }
         let message_type = PeerCapabilityMessageType::try_from(read_i32(&mut reader)?)?;
         let nonce = read_bounded_string(&mut reader, "nonce")?;
+        if nonce.trim().is_empty() {
+            return Err(CapabilityError::BlankField("nonce"));
+        }
         let peer_id = read_bounded_string(&mut reader, "peer_id")?;
         let overlay_port = match read_i32(&mut reader)? {
             -1 => None,
@@ -798,6 +801,19 @@ mod tests {
         assert_eq!(
             PeerCapabilityEnvelope::decode(&payload).unwrap_err(),
             CapabilityError::InvalidMessageType(99)
+        );
+    }
+
+    #[test]
+    fn envelope_decoder_rejects_blank_nonce() {
+        let envelope =
+            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, "n", descriptor());
+        let mut payload = envelope.encode().unwrap();
+        payload[16] = b' ';
+
+        assert_eq!(
+            PeerCapabilityEnvelope::decode(&payload).unwrap_err(),
+            CapabilityError::BlankField("nonce")
         );
     }
 
