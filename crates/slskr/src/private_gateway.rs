@@ -1081,12 +1081,34 @@ fn load_or_create_certificate(
         .map_err(|error| format!("overlay certificate generation failed: {error}"))?;
     let certificate = certified.cert.der().to_vec();
     let private_key = certified.signing_key.serialize_der();
-    write_secret(&certificate_path, &certificate)?;
-    write_secret(&private_key_path, &private_key)?;
+    write_new_identity(
+        &certificate_path,
+        &private_key_path,
+        &certificate,
+        &private_key,
+    )?;
     Ok((
         CertificateDer::from(certificate),
         PrivatePkcs8KeyDer::from(private_key),
     ))
+}
+
+fn write_new_identity(
+    certificate_path: &Path,
+    private_key_path: &Path,
+    certificate: &[u8],
+    private_key: &[u8],
+) -> Result<(), String> {
+    write_secret(certificate_path, certificate)?;
+    if let Err(error) = write_secret(private_key_path, private_key) {
+        return match fs::remove_file(certificate_path) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(format!(
+                "{error}; overlay certificate rollback failed: {cleanup_error}"
+            )),
+        };
+    }
+    Ok(())
 }
 
 fn read_identity_file(
@@ -1167,8 +1189,11 @@ fn write_secret(path: &Path, bytes: &[u8]) -> Result<(), String> {
         return Err(format!("overlay identity write failed: {error}"));
     }
     drop(file);
-    fs::rename(&temporary, path)
-        .map_err(|error| format!("overlay identity publish failed: {error}"))
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("overlay identity publish failed: {error}"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1312,6 +1337,36 @@ mod tests {
         let error = read_identity_file(&path, "private key", MAX_PRIVATE_KEY_BYTES, true)
             .expect_err("reject exposed private key");
         assert!(error.contains("must not be accessible by group or other users"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_identity_publish_removes_temporary_secret() {
+        let root = temporary_directory("gateway-failed-secret-publish");
+        let destination = root.join("overlay-private-key.der");
+        fs::create_dir(&destination).unwrap();
+
+        let error = write_secret(&destination, b"private-key").unwrap_err();
+        assert!(error.contains("publish failed"));
+        let names = fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec![destination.file_name().unwrap()]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_private_key_publish_rolls_back_new_certificate() {
+        let root = temporary_directory("gateway-identity-rollback");
+        let certificate = root.join("overlay-certificate.der");
+        let private_key = root.join("overlay-private-key.der");
+        fs::create_dir(&private_key).unwrap();
+
+        let error = write_new_identity(&certificate, &private_key, b"certificate", b"private-key")
+            .unwrap_err();
+        assert!(error.contains("publish failed"));
+        assert!(!certificate.exists());
         fs::remove_dir_all(root).unwrap();
     }
 }
