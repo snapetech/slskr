@@ -5,6 +5,7 @@ use slskr_client::{
         WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN, MAX_SEARCH_RESPONSES_TOTAL,
         MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_FILES_TOTAL,
         MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
+        MAX_WISHLIST_SEARCH_TERMS, MAX_WISHLIST_SEARCH_TERM_BYTES,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -370,6 +371,45 @@ fn wishlist_scheduler_replaces_terms_without_losing_server_interval() {
         Some(ServerMessage::WishlistSearch(SearchRequest {
             token: 2,
             query: "third".to_owned(),
+        }))
+    );
+}
+
+#[test]
+fn wishlist_scheduler_bounds_deduplicates_and_truncates_terms() {
+    let options = WishlistSearchSchedulerOptions::new(Duration::from_secs(30), None).unwrap();
+    let oversized = "é".repeat(MAX_WISHLIST_SEARCH_TERM_BYTES);
+    let terms = std::iter::once(oversized)
+        .chain([" Rare ".to_owned(), "rare".to_owned()])
+        .chain((0..MAX_WISHLIST_SEARCH_TERMS + 5).map(|index| format!("term-{index}")));
+    let mut scheduler = WishlistSearchScheduler::new(terms, options).unwrap();
+
+    let ServerMessage::WishlistSearch(first) = scheduler.next_search_message(1).unwrap() else {
+        panic!("expected wishlist search");
+    };
+    assert!(first.query.len() <= MAX_WISHLIST_SEARCH_TERM_BYTES);
+    let mut emitted = vec![first.query];
+    for token in 2..=u32::try_from(MAX_WISHLIST_SEARCH_TERMS).unwrap() {
+        let ServerMessage::WishlistSearch(search) = scheduler.next_search_message(token).unwrap()
+        else {
+            panic!("expected wishlist search");
+        };
+        emitted.push(search.query);
+    }
+
+    assert_eq!(emitted.len(), MAX_WISHLIST_SEARCH_TERMS);
+    assert_eq!(
+        emitted
+            .iter()
+            .filter(|term| term.eq_ignore_ascii_case("rare"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        scheduler.next_search_message(u32::MAX),
+        Some(ServerMessage::WishlistSearch(SearchRequest {
+            token: u32::MAX,
+            query: emitted[0].clone(),
         }))
     );
 }

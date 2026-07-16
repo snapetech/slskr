@@ -21,6 +21,8 @@ pub const MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN: usize = 4 * 1024 * 1024;
 pub const MAX_SEARCH_RESULT_FILES_TOTAL: usize = 100_000;
 pub const MAX_SEARCH_RESULT_TEXT_BYTES_TOTAL: usize = 64 * 1024 * 1024;
 pub const MAX_SEARCH_RESPONSES_TOTAL: usize = 10_000;
+pub const MAX_WISHLIST_SEARCH_TERMS: usize = 1_024;
+pub const MAX_WISHLIST_SEARCH_TERM_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -86,13 +88,7 @@ impl WishlistSearchScheduler {
         terms: impl IntoIterator<Item = String>,
         options: WishlistSearchSchedulerOptions,
     ) -> Result<Self, ClientError> {
-        let mut normalized = Vec::new();
-        for term in terms {
-            let term = term.trim().to_owned();
-            if !term.is_empty() {
-                normalized.push(term);
-            }
-        }
+        let normalized = normalize_wishlist_terms(terms);
         Ok(Self {
             terms: normalized,
             options,
@@ -102,14 +98,7 @@ impl WishlistSearchScheduler {
     }
 
     pub fn replace_terms(&mut self, terms: impl IntoIterator<Item = String>) {
-        let mut normalized = Vec::new();
-        for term in terms {
-            let term = term.trim().to_owned();
-            if !term.is_empty() {
-                normalized.push(term);
-            }
-        }
-        self.terms = normalized;
+        self.terms = normalize_wishlist_terms(terms);
         if self.next_index >= self.terms.len() {
             self.next_index = 0;
         }
@@ -137,6 +126,33 @@ impl WishlistSearchScheduler {
             query,
         }))
     }
+}
+
+fn normalize_wishlist_terms(terms: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    let mut seen = HashSet::new();
+    for term in terms {
+        let term = truncate_utf8_bytes(term.trim(), MAX_WISHLIST_SEARCH_TERM_BYTES);
+        if term.is_empty() || !seen.insert(term.to_ascii_lowercase()) {
+            continue;
+        }
+        normalized.push(term);
+        if normalized.len() == MAX_WISHLIST_SEARCH_TERMS {
+            break;
+        }
+    }
+    normalized
+}
+
+fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+    let mut boundary = max_bytes;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value[..boundary].to_owned()
 }
 
 #[derive(Debug)]
