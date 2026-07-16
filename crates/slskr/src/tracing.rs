@@ -7,6 +7,10 @@ use std::cell::RefCell;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::logging::sanitize_log_field;
+
+const MAX_CORRELATION_ID_CHARS: usize = 128;
+
 thread_local! {
     static CORRELATION_ID: RefCell<Option<String>> = const { RefCell::new(None) };
     static REQUEST_SPAN: RefCell<Option<RequestSpan>> = const { RefCell::new(None) };
@@ -27,7 +31,11 @@ impl CorrelationId {
 
     /// Create from existing string
     pub fn from_string(id: String) -> Self {
-        CorrelationId(id)
+        let id = id
+            .chars()
+            .take(MAX_CORRELATION_ID_CHARS)
+            .collect::<String>();
+        CorrelationId(sanitize_log_field(&id))
     }
 
     /// Get as string reference
@@ -138,37 +146,26 @@ impl RequestSpan {
         if !trace_logging_enabled() {
             return;
         }
-        if self.timing.is_very_slow() {
-            eprintln!(
-                "[TRACE] {} {} {} {} - VERY SLOW {}ms ({})",
-                self.correlation_id,
-                self.timing.method,
-                self.timing.path,
-                self.timing.status,
-                self.timing.duration_ms,
-                self.client_ip.as_deref().unwrap_or("unknown")
-            );
+        eprintln!("{}", self.formatted_trace());
+    }
+
+    fn formatted_trace(&self) -> String {
+        let speed = if self.timing.is_very_slow() {
+            "VERY SLOW "
         } else if self.timing.is_slow() {
-            eprintln!(
-                "[TRACE] {} {} {} {} - SLOW {}ms ({})",
-                self.correlation_id,
-                self.timing.method,
-                self.timing.path,
-                self.timing.status,
-                self.timing.duration_ms,
-                self.client_ip.as_deref().unwrap_or("unknown")
-            );
+            "SLOW "
         } else {
-            eprintln!(
-                "[TRACE] {} {} {} {} - {}ms ({})",
-                self.correlation_id,
-                self.timing.method,
-                self.timing.path,
-                self.timing.status,
-                self.timing.duration_ms,
-                self.client_ip.as_deref().unwrap_or("unknown")
-            );
-        }
+            ""
+        };
+        format!(
+            "[TRACE] {} {} {} {} - {speed}{}ms ({})",
+            sanitize_log_field(self.correlation_id.as_str()),
+            sanitize_log_field(&self.timing.method),
+            sanitize_log_field(&self.timing.path),
+            self.timing.status,
+            self.timing.duration_ms,
+            sanitize_log_field(self.client_ip.as_deref().unwrap_or("unknown"))
+        )
     }
 }
 
@@ -246,6 +243,37 @@ mod tests {
     fn test_correlation_id_from_string() {
         let id = CorrelationId::from_string("custom-id".to_string());
         assert_eq!(id.as_str(), "custom-id");
+    }
+
+    #[test]
+    fn external_correlation_ids_are_bounded_and_control_safe() {
+        let id = CorrelationId::from_string(format!(
+            "request\r\nFORGED\x1b[2J{}",
+            "x".repeat(MAX_CORRELATION_ID_CHARS * 2)
+        ));
+        assert!(!id.as_str().chars().any(char::is_control));
+        assert!(id.as_str().contains(r"request\r\nFORGED\u{1b}[2J"));
+        assert!(id.as_str().chars().count() <= MAX_CORRELATION_ID_CHARS + 20);
+    }
+
+    #[test]
+    fn formatted_trace_escapes_untrusted_fields() {
+        let mut span = RequestSpan::with_correlation(
+            CorrelationId::from_string("corr\nforged".to_owned()),
+            "GET\r\nFORGED".to_owned(),
+            "/api/test\x1b[2J".to_owned(),
+            None,
+            Some("peer\tname".to_owned()),
+        );
+        span.timing.complete(500);
+        let trace = span.formatted_trace();
+        assert!(trace
+            .chars()
+            .all(|character| !matches!(character, '\r' | '\n' | '\t' | '\x1b')));
+        assert!(trace.contains(r"corr\nforged"), "{trace}");
+        assert!(trace.contains(r"GET\r\nFORGED"), "{trace}");
+        assert!(trace.contains(r"/api/test\u{1b}[2J"), "{trace}");
+        assert!(trace.contains(r"peer\tname"), "{trace}");
     }
 
     #[test]

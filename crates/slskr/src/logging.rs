@@ -276,7 +276,7 @@ pub fn redacted_path(path: &str) -> String {
     sanitize_log_field(&segments.join("/"))
 }
 
-fn sanitize_log_field(value: &str) -> String {
+pub(crate) fn sanitize_log_field(value: &str) -> String {
     let mut sanitized = String::new();
     let mut chars = value.chars();
     for character in chars.by_ref().take(MAX_LOG_FIELD_CHARS) {
