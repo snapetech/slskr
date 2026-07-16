@@ -53,6 +53,42 @@ async fn ensure_peer_messages_calls_connector_once_for_cached_peer() {
 }
 
 #[tokio::test]
+async fn blank_peer_identity_is_rejected_before_connector_or_server_io() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_connector = Arc::clone(&calls);
+    let (client, server) = duplex(512);
+    let manager = ConnectionManager::new(
+        ServerSession::new(ServerConnection::new(client)),
+        PeerConnectionCache::new(),
+        connector(move |_| {
+            calls_for_connector.fetch_add(1, Ordering::SeqCst);
+            let (stream, _) = duplex(64);
+            PeerMessageConnection::new(stream)
+        }),
+    );
+    let mut server = ServerConnection::new(server);
+
+    assert!(matches!(
+        manager.ensure_peer_messages("  ").await.unwrap_err(),
+        slskr_client::ClientError::BlankPeerUsername
+    ));
+    assert!(matches!(
+        manager
+            .request_indirect_peer_messages("  ")
+            .await
+            .unwrap_err(),
+        slskr_client::ClientError::BlankPeerUsername
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_millis(25),
+        server.receive_with_direction(Direction::ClientToServer)
+    )
+    .await
+    .is_err());
+}
+
+#[tokio::test]
 async fn concurrent_ensure_peer_messages_connects_once_per_peer() {
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_for_connector = Arc::clone(&calls);

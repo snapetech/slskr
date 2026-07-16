@@ -50,7 +50,9 @@ impl<S> PeerConnectionCache<S> {
         username: impl Into<String>,
         connection: PeerMessageConnection<S>,
     ) -> Result<Option<PeerMessageConnection<S>>, ClientError> {
-        let username = username_key(&username.into());
+        let username = username.into();
+        validate_peer_username(&username)?;
+        let username = username_key(&username);
         let mut connections = self.connections.lock().await;
         if connections.len() >= self.max_connections && !connections.contains_key(&username) {
             return Err(ClientError::PeerConnectionCacheFull {
@@ -154,4 +156,12 @@ where
 
 fn username_key(username: &str) -> String {
     username.to_ascii_lowercase()
+}
+
+pub(crate) fn validate_peer_username(username: &str) -> Result<(), ClientError> {
+    if username.trim().is_empty() {
+        Err(ClientError::BlankPeerUsername)
+    } else {
+        Ok(())
+    }
 }

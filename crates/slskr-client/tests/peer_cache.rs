@@ -31,6 +31,23 @@ async fn cache_tracks_insert_replace_remove() {
 }
 
 #[tokio::test]
+async fn cache_rejects_blank_peer_identity_without_storing_it() {
+    let cache = PeerConnectionCache::new();
+    let (stream, _) = duplex(64);
+
+    let error = cache
+        .insert("  ", PeerMessageConnection::new(stream))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::BlankPeerUsername
+    ));
+    assert!(cache.is_empty().await);
+}
+
+#[tokio::test]
 async fn cache_sends_to_existing_peer() {
     let cache = PeerConnectionCache::new();
     let (a, b) = duplex(256);
