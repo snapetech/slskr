@@ -85,7 +85,7 @@ impl Manager {
         let rule = Arc::new(Rule {
             request,
             active_connections: AtomicUsize::new(0),
-            bytes_forwarded: AtomicU64::new(0),
+            bytes_forwarded: Arc::new(AtomicU64::new(0)),
             cancel_tx,
             connection_permits: Arc::clone(&self.connection_permits),
             listener_task: Mutex::new(None),
@@ -139,7 +139,7 @@ impl Manager {
 struct Rule {
     request: StartRequest,
     active_connections: AtomicUsize,
-    bytes_forwarded: AtomicU64,
+    bytes_forwarded: Arc<AtomicU64>,
     cancel_tx: watch::Sender<bool>,
     connection_permits: Arc<Semaphore>,
     listener_task: Mutex<Option<JoinHandle<()>>>,
@@ -262,10 +262,9 @@ impl Rule {
             result = open_tunnel(&client, &self.request) => result?,
         };
         let (mut local_read, mut local_write) = local.into_split();
-        let connection_bytes = Arc::new(AtomicU64::new(0));
         let send_client = Arc::clone(&client);
         let send_tunnel = tunnel_id.clone();
-        let send_bytes = Arc::clone(&connection_bytes);
+        let send_bytes = Arc::clone(&self.bytes_forwarded);
         let mut send = tokio::spawn(async move {
             let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
             loop {
@@ -282,7 +281,7 @@ impl Rule {
         });
         let receive_client = Arc::clone(&client);
         let receive_tunnel = tunnel_id.clone();
-        let receive_bytes = Arc::clone(&connection_bytes);
+        let receive_bytes = Arc::clone(&self.bytes_forwarded);
         let mut receive = tokio::spawn(async move {
             loop {
                 let data = receive_tunnel_data(&receive_client, &receive_tunnel).await?;
@@ -311,8 +310,6 @@ impl Rule {
         receive.abort();
         let _ = close_tunnel(&client, &tunnel_id).await;
         result?;
-        self.bytes_forwarded
-            .fetch_add(connection_bytes.load(Ordering::Relaxed), Ordering::Relaxed);
         Ok(())
     }
 
@@ -687,6 +684,17 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(&echoed, b"hello");
+        timeout(Duration::from_secs(2), async {
+            loop {
+                let status = manager.status(local_port).await.unwrap();
+                if status.bytes_forwarded == 10 {
+                    break;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("forwarding totals should update while the connection remains active");
         assert!(manager.stop(local_port).await);
         timeout(Duration::from_secs(5), gateway)
             .await
