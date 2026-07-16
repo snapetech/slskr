@@ -86,7 +86,7 @@ impl IndirectPeerRequest {
     }
 
     fn validate_username(&self, received: String) -> Result<(), ClientError> {
-        if received == self.username {
+        if received.eq_ignore_ascii_case(&self.username) {
             Ok(())
         } else {
             Err(ClientError::IndirectUsernameMismatch {

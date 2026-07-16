@@ -79,6 +79,21 @@ fn indirect_request_accepts_matching_peer_init() {
 }
 
 #[test]
+fn indirect_request_accepts_matching_peer_init_with_different_username_casing() {
+    let request = IndirectPeerRequest::new(42, "Alice", ConnectionKind::PeerMessages);
+    let (stream, _) = duplex(64);
+
+    let completed = request.complete(IncomingConnection::PeerInit {
+        username: "ALICE".to_owned(),
+        kind: ConnectionKind::PeerMessages,
+        token: 42,
+        stream,
+    });
+
+    assert!(completed.is_ok());
+}
+
+#[test]
 fn indirect_request_accepts_matching_pierce_firewall() {
     let request = IndirectPeerRequest::new(42, "peer", ConnectionKind::PeerMessages);
     let (stream, _) = duplex(64);
