@@ -72,6 +72,10 @@ async fn fetch_content_inner(
 ) -> Result<(), String> {
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
     let mut file = options
         .open(output)
         .await
@@ -207,6 +211,61 @@ mod tests {
             std::fs::read(&output).unwrap(),
             b"owned by another operation"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mesh_staging_file_is_private_before_network_io() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-mesh-private-output-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let output = root.join("partial.bin");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = listener.local_addr().unwrap();
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            accepted_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let peer = TrustedMeshPeer {
+            peer_id: "peer".to_owned(),
+            username: "remote".to_owned(),
+            overlay_endpoint: endpoint,
+            certificate_sha256: [1_u8; 32],
+            range_endpoint: None,
+        };
+        let key = SigningKey::from_bytes(&[2_u8; 32]);
+        let output_for_fetch = output.clone();
+        let fetch = tokio::spawn(async move {
+            fetch_content(
+                &peer,
+                "local",
+                &key,
+                "content",
+                1,
+                &"a".repeat(64),
+                &output_for_fetch,
+            )
+            .await
+        });
+
+        accepted_rx.await.unwrap();
+        assert_eq!(
+            std::fs::metadata(&output).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        fetch.abort();
+        let _ = fetch.await;
+        server.abort();
+        let _ = server.await;
         std::fs::remove_dir_all(root).unwrap();
     }
 
