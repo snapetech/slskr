@@ -76,7 +76,7 @@ func (b *BatchBuilder) Post(path string, body map[string]interface{}, opID *stri
 		ID:     id,
 		Method: "POST",
 		Path:   path,
-		Body:   body,
+		Body:   cloneJSONMap(body),
 	})
 	b.opCounter++
 	return b
@@ -92,7 +92,7 @@ func (b *BatchBuilder) Put(path string, body map[string]interface{}, opID *strin
 		ID:     id,
 		Method: "PUT",
 		Path:   path,
-		Body:   body,
+		Body:   cloneJSONMap(body),
 	})
 	b.opCounter++
 	return b
@@ -128,8 +128,37 @@ func (b *BatchBuilder) Clear() *BatchBuilder {
 // GetOperations returns copy of operations
 func (b *BatchBuilder) GetOperations() []BatchOperation {
 	ops := make([]BatchOperation, len(b.operations))
-	copy(ops, b.operations)
+	for index, operation := range b.operations {
+		operation.Body = cloneJSONMap(operation.Body)
+		ops[index] = operation
+	}
 	return ops
+}
+
+func cloneJSONMap(value map[string]interface{}) map[string]interface{} {
+	if value == nil {
+		return nil
+	}
+	cloned := make(map[string]interface{}, len(value))
+	for key, item := range value {
+		cloned[key] = cloneJSONValue(item)
+	}
+	return cloned
+}
+
+func cloneJSONValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return cloneJSONMap(typed)
+	case []interface{}:
+		cloned := make([]interface{}, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneJSONValue(item)
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 // Execute executes the batch operations
