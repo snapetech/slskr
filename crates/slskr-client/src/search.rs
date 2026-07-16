@@ -20,6 +20,7 @@ pub const MAX_TRACKED_SEARCH_RESULT_TOKENS: usize = 1_024;
 pub const MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN: usize = 4 * 1024 * 1024;
 pub const MAX_SEARCH_RESULT_FILES_TOTAL: usize = 100_000;
 pub const MAX_SEARCH_RESULT_TEXT_BYTES_TOTAL: usize = 64 * 1024 * 1024;
+pub const MAX_SEARCH_RESPONSES_TOTAL: usize = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -254,6 +255,7 @@ pub struct SearchResults {
     text_bytes_by_token: HashMap<u32, usize>,
     stored_files: usize,
     stored_text_bytes: usize,
+    stored_responses: usize,
 }
 
 impl SearchResults {
@@ -275,6 +277,9 @@ impl SearchResults {
                     return Ok(true);
                 }
                 if responses.len() >= MAX_SEARCH_RESPONSES_PER_TOKEN {
+                    return Ok(true);
+                }
+                if self.stored_responses >= MAX_SEARCH_RESPONSES_TOTAL {
                     return Ok(true);
                 }
                 let stored_files = responses
@@ -313,6 +318,7 @@ impl SearchResults {
                     .insert(response.token, total_text_bytes);
                 self.stored_files += response_files;
                 self.stored_text_bytes = total_stored_text_bytes;
+                self.stored_responses += 1;
                 responses.push(response);
                 Ok(true)
             }
@@ -337,6 +343,7 @@ impl SearchResults {
         let removed_text_bytes = self.text_bytes_by_token.remove(&token).unwrap_or(0);
         self.stored_files = self.stored_files.saturating_sub(removed_files);
         self.stored_text_bytes = self.stored_text_bytes.saturating_sub(removed_text_bytes);
+        self.stored_responses = self.stored_responses.saturating_sub(responses.len());
         responses
     }
 
@@ -353,6 +360,11 @@ impl SearchResults {
     #[must_use]
     pub const fn stored_files_len(&self) -> usize {
         self.stored_files
+    }
+
+    #[must_use]
+    pub const fn stored_responses_len(&self) -> usize {
+        self.stored_responses
     }
 }
 

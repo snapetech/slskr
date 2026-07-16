@@ -2,7 +2,7 @@ use slskr_client::{
     search::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
-        WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN,
+        WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN, MAX_SEARCH_RESPONSES_TOTAL,
         MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_FILES_TOTAL,
         MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
     },
@@ -262,6 +262,36 @@ fn search_results_bound_aggregate_files_across_tokens_and_release_budget() {
     assert_eq!(
         results.stored_files_len(),
         MAX_SEARCH_RESULT_FILES_TOTAL - 1_000
+    );
+}
+
+#[test]
+fn search_results_bound_aggregate_responses_and_release_budget() {
+    let mut results = SearchResults::new();
+    for index in 0..MAX_SEARCH_RESPONSES_TOTAL {
+        let token = u32::try_from(index / 100).unwrap();
+        results
+            .accept_peer_message(PeerMessage::FileSearchResponse(response(
+                &format!("peer-{index}"),
+                token,
+            )))
+            .unwrap();
+    }
+    assert_eq!(results.stored_responses_len(), MAX_SEARCH_RESPONSES_TOTAL);
+
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(response(
+            "rejected",
+            u32::MAX,
+        )))
+        .unwrap();
+    assert_eq!(results.stored_responses_len(), MAX_SEARCH_RESPONSES_TOTAL);
+    assert!(results.responses_for(u32::MAX).is_empty());
+
+    assert_eq!(results.take(0).len(), 100);
+    assert_eq!(
+        results.stored_responses_len(),
+        MAX_SEARCH_RESPONSES_TOTAL - 100
     );
 }
 
