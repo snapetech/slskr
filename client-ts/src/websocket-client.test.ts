@@ -28,6 +28,10 @@ class MockWebSocket {
     this.onclose?.();
   }
 
+  error(): void {
+    this.onerror?.();
+  }
+
   send(data: string): void {
     if (this.sendError) throw this.sendError;
     this.sent.push(data);
@@ -80,6 +84,20 @@ describe('WebSocketClient reconnect lifecycle', () => {
     MockWebSocket.instances[0].close();
 
     await expect(connected).rejects.toThrow('WebSocket closed before opening');
+  });
+
+  it('cleans up a handshake error so callers can retry immediately', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const firstConnection = client.connect();
+
+    MockWebSocket.instances[0].error();
+    await expect(firstConnection).rejects.toThrow('WebSocket connection error');
+
+    const secondConnection = client.connect();
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].open();
+    await secondConnection;
+    client.disconnect();
   });
 
   it('rejects concurrent connection attempts without replacing the active socket', async () => {

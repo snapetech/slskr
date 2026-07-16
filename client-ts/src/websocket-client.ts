@@ -86,9 +86,13 @@ export class WebSocketClient {
 
         socket.onerror = () => {
           if (this.ws !== socket) return;
-          this.notifyErrorListeners(new Error('WebSocket error'));
-          settled = true;
-          reject(new Error('WebSocket connection error'));
+          const error = new Error('WebSocket error');
+          this.notifyErrorListeners(error);
+          if (!settled) {
+            settled = true;
+            reject(new Error('WebSocket connection error'));
+            socket.close();
+          }
         };
 
         socket.onclose = () => {
