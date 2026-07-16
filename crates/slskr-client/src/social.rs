@@ -208,10 +208,11 @@ impl RoomState {
                 username,
                 message,
             } => {
-                if self.joined.len() >= self.max_joined_rooms && !self.joined.contains(room) {
+                let key = room_key(room);
+                if self.joined.len() >= self.max_joined_rooms && !self.joined.contains(&key) {
                     return false;
                 }
-                self.joined.insert(room.clone());
+                self.joined.insert(key);
                 self.messages.push(RoomMessage {
                     room: room.clone(),
                     username: username.clone(),
@@ -221,7 +222,7 @@ impl RoomState {
                 true
             }
             ServerMessage::LeaveRoom { room } => {
-                self.joined.remove(room);
+                self.joined.remove(&room_key(room));
                 true
             }
             _ => false,
@@ -230,13 +231,17 @@ impl RoomState {
 
     #[must_use]
     pub fn is_joined(&self, room: &str) -> bool {
-        self.joined.contains(room)
+        self.joined.contains(&room_key(room))
     }
 
     #[must_use]
     pub fn messages(&self) -> &[RoomMessage] {
         &self.messages
     }
+}
+
+fn room_key(room: &str) -> String {
+    room.to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

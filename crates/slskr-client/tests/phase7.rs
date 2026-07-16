@@ -263,6 +263,27 @@ fn room_state_rejects_new_rooms_at_limit_but_keeps_existing_room_messages() {
 }
 
 #[test]
+fn room_state_treats_room_casing_as_one_identity() {
+    let mut state = RoomState::with_max_joined_rooms(1);
+    let message = |room: &str, body: &str| ServerMessage::GlobalRoomMessage {
+        room: room.to_owned(),
+        username: "alice".to_owned(),
+        message: body.to_owned(),
+    };
+
+    assert!(state.apply_server_message(&message("Lobby", "first")));
+    assert!(state.apply_server_message(&message("LOBBY", "second")));
+    assert!(state.is_joined("lObBy"));
+    assert_eq!(state.messages().len(), 2);
+
+    assert!(state.apply_server_message(&ServerMessage::LeaveRoom {
+        room: "lobby".to_owned(),
+    }));
+    assert!(!state.is_joined("LOBBY"));
+    assert!(state.apply_server_message(&message("replacement", "accepted")));
+}
+
+#[test]
 fn private_message_inbox_returns_ack_messages() {
     let mut inbox = PrivateMessageInbox::new();
 
