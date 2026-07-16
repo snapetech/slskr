@@ -11,6 +11,7 @@ pub mod io;
 pub mod listener;
 pub mod manager;
 pub mod mesh;
+pub mod overlay;
 pub mod peer_cache;
 pub mod peer_connect;
 pub mod search;
