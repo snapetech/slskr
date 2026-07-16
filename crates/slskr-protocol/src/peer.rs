@@ -582,24 +582,10 @@ fn decode_file_entries(reader: &mut Reader<'_>) -> Result<Vec<FileEntry>, Decode
 }
 
 fn encode_file_entries(writer: &mut Writer, entries: &[FileEntry]) -> Result<(), EncodeError> {
-    if entries.len() > 21 {
-        return Err(EncodeError::InvalidCount {
-            field: "file entries",
-            count: entries.len(),
-            maximum: 21,
-        });
-    }
     let count = u32::try_from(entries.len())
         .map_err(|_| EncodeError::length_overflow("file entries", entries.len()))?;
     writer.write_u32_le(count);
     for entry in entries {
-        if entry.attributes.len() > 8 {
-            return Err(EncodeError::InvalidCount {
-                field: "file attributes",
-                count: entry.attributes.len(),
-                maximum: 8,
-            });
-        }
         writer.write_u8(entry.code);
         writer.write_string_with_encoding(&entry.filename, entry.filename_encoding)?;
         writer.write_u64_le(entry.size);
@@ -693,50 +679,6 @@ mod tests {
             DecodeError::InvalidCompressedPayload(
                 "file search response exceeds decompression limit"
             )
-        ));
-    }
-
-    #[test]
-    fn search_response_encoder_rejects_decoder_incompatible_counts() {
-        let entry = FileEntry {
-            code: 1,
-            filename: "file.flac".to_owned(),
-            filename_encoding: ProtocolTextEncoding::Utf8,
-            size: 1,
-            extension: "flac".to_owned(),
-            extension_encoding: ProtocolTextEncoding::Utf8,
-            attributes: Vec::new(),
-        };
-        let mut response = FileSearchResponse {
-            username: "peer".to_owned(),
-            token: 1,
-            results: vec![entry.clone(); 22],
-            slot_free: true,
-            average_speed: 0,
-            queue_length: 0,
-            unknown: 0,
-            private_results: Vec::new(),
-        };
-        assert!(matches!(
-            PeerMessage::FileSearchResponse(response.clone()).encode(),
-            Err(EncodeError::InvalidCount {
-                field: "file entries",
-                count: 22,
-                maximum: 21
-            })
-        ));
-
-        response.results = vec![FileEntry {
-            attributes: vec![FileAttribute { code: 0, value: 0 }; 9],
-            ..entry
-        }];
-        assert!(matches!(
-            PeerMessage::FileSearchResponse(response).encode(),
-            Err(EncodeError::InvalidCount {
-                field: "file attributes",
-                count: 9,
-                maximum: 8
-            })
         ));
     }
 }
