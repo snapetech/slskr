@@ -29005,6 +29005,13 @@ async fn write_remote_preview_head_response<W: tokio::io::AsyncWrite + Unpin>(
     })
 }
 
+fn remote_preview_head_ticket(
+    ticket: Option<PreviewStreamTicket>,
+    family: &str,
+) -> Option<PreviewStreamTicket> {
+    ticket.filter(|ticket| ticket.family == family && ticket.size > 0)
+}
+
 async fn open_primary_stream_file(
     state: &AppState,
     stream_id: &str,
@@ -34373,7 +34380,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                                     let mut tickets = state.stream_tickets.write().await;
                                     tickets.get(ticket)
                                 };
-                                match ticket_record.filter(|record| record.family == *family) {
+                                match remote_preview_head_ticket(ticket_record, family) {
                                     Some(record) => remote_preview_head = Some(record),
                                     None => response = routing::not_found_response(),
                                 }
@@ -52132,6 +52139,25 @@ mod tests {
         assert!(response.contains("Content-Length: 1234\r\n"));
         assert!(response.contains("Content-Type: audio/flac\r\n"));
         assert!(response.ends_with("X-Request-ID: test\r\n\r\n"));
+
+        let mut unknown_length = super::PreviewStreamTicket {
+            family: "peer".to_owned(),
+            source: "peer-unresolved".to_owned(),
+            content_id: "content".to_owned(),
+            filename: "Remote.flac".to_owned(),
+            peer_username: Some("remote".to_owned()),
+            size: 0,
+            content_type: "audio/flac".to_owned(),
+            source_url: None,
+            source_authorization: None,
+            overlay_peer_identity: None,
+            expected_hash: None,
+            created_at: 1,
+            expires_at: u64::MAX,
+        };
+        assert!(super::remote_preview_head_ticket(Some(unknown_length.clone()), "peer").is_none());
+        unknown_length.size = 1;
+        assert!(super::remote_preview_head_ticket(Some(unknown_length), "peer").is_some());
     }
 
     #[test]
