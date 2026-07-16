@@ -125,6 +125,22 @@ fn search_results_take_removes_token() {
 }
 
 #[test]
+fn search_results_ignore_exact_response_replays() {
+    let mut results = SearchResults::new();
+    let mut original = response("alice", 10);
+    original.results.push(entry("file.flac"));
+
+    for _ in 0..3 {
+        assert!(results
+            .accept_peer_message(PeerMessage::FileSearchResponse(original.clone()))
+            .unwrap());
+    }
+
+    assert_eq!(results.responses_for(10), &[original]);
+    assert_eq!(results.len_for(10), 1);
+}
+
+#[test]
 fn search_results_reject_non_search_message() {
     let mut results = SearchResults::new();
 

@@ -259,6 +259,9 @@ impl SearchResults {
         match message {
             PeerMessage::FileSearchResponse(mut response) => {
                 let responses = self.by_token.entry(response.token).or_default();
+                if responses.contains(&response) {
+                    return Ok(true);
+                }
                 if responses.len() >= MAX_SEARCH_RESPONSES_PER_TOKEN {
                     return Ok(true);
                 }
