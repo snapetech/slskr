@@ -66,16 +66,32 @@ import sys
 import tarfile
 
 destination = pathlib.Path(sys.argv[2]).resolve()
+max_entries = 20_000
+max_member_bytes = 1 << 30
+max_expanded_bytes = 2 << 30
 
 with tarfile.open(sys.argv[1], "r:gz") as tf:
-    for member in tf.getmembers():
+    members = tf.getmembers()
+    if len(members) > max_entries:
+        raise SystemExit(f"tar contains too many entries: {len(members)}")
+    names = set()
+    expanded_bytes = 0
+    for member in members:
         member_path = pathlib.PurePosixPath(member.name)
         if member_path.is_absolute() or ".." in member_path.parts:
             raise SystemExit(f"unsafe tar entry path: {member.name}")
+        if member.name in names:
+            raise SystemExit(f"duplicate tar entry path: {member.name}")
+        names.add(member.name)
         if member.issym() or member.islnk():
             raise SystemExit(f"tar links are not allowed: {member.name}")
         if not (member.isfile() or member.isdir()):
             raise SystemExit(f"tar special files are not allowed: {member.name}")
+        if member.size > max_member_bytes:
+            raise SystemExit(f"tar entry is too large: {member.name}")
+        expanded_bytes += member.size
+        if expanded_bytes > max_expanded_bytes:
+            raise SystemExit("tar expanded size exceeds limit")
         target = (destination / pathlib.Path(*member_path.parts)).resolve()
         if target != destination and destination not in target.parents:
             raise SystemExit(f"tar entry escapes destination: {member.name}")
@@ -88,12 +104,30 @@ import sys
 import zipfile
 
 destination = pathlib.Path(sys.argv[2]).resolve()
+max_entries = 20_000
+max_member_bytes = 1 << 30
+max_expanded_bytes = 2 << 30
 
 with zipfile.ZipFile(sys.argv[1]) as zf:
-    for member in zf.infolist():
+    members = zf.infolist()
+    if len(members) > max_entries:
+        raise SystemExit(f"zip contains too many entries: {len(members)}")
+    names = set()
+    expanded_bytes = 0
+    for member in members:
         member_path = pathlib.PurePosixPath(member.filename)
         if member_path.is_absolute() or ".." in member_path.parts:
             raise SystemExit(f"unsafe zip entry path: {member.filename}")
+        if member.filename in names:
+            raise SystemExit(f"duplicate zip entry path: {member.filename}")
+        names.add(member.filename)
+        if member.flag_bits & 0x1:
+            raise SystemExit(f"encrypted zip entry is not allowed: {member.filename}")
+        if member.file_size > max_member_bytes:
+            raise SystemExit(f"zip entry is too large: {member.filename}")
+        expanded_bytes += member.file_size
+        if expanded_bytes > max_expanded_bytes:
+            raise SystemExit("zip expanded size exceeds limit")
         target = (destination / pathlib.Path(*member_path.parts)).resolve()
         if target != destination and destination not in target.parents:
             raise SystemExit(f"zip entry escapes destination: {member.filename}")
