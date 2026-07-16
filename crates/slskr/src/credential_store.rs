@@ -117,12 +117,19 @@ fn load_systemd_json(credentials_dir: &Path) -> Result<Option<StoredCredentials>
 }
 
 fn read_secret_text(path: &Path, label: &str) -> Result<String, String> {
-    read_bounded_secret_file(path, label)
+    read_bounded_secret_file(path, label, false)
         .map(|value| value.trim_end_matches(['\r', '\n']).to_owned())
 }
 
-fn read_bounded_secret_file(path: &Path, label: &str) -> Result<String, String> {
+fn read_bounded_secret_file(
+    path: &Path,
+    label: &str,
+    require_private_permissions: bool,
+) -> Result<String, String> {
     use std::io::Read;
+
+    #[cfg(not(unix))]
+    let _ = require_private_permissions;
 
     #[cfg(not(unix))]
     {
@@ -147,6 +154,16 @@ fn read_bounded_secret_file(path: &Path, label: &str) -> Result<String, String> 
         .map_err(|error| format!("failed to inspect {label} {}: {error}", path.display()))?;
     if !metadata.is_file() {
         return Err(format!("{label} {} must be a regular file", path.display()));
+    }
+    #[cfg(unix)]
+    if require_private_permissions {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(format!(
+                "{label} {} must not be accessible by group or other users",
+                path.display()
+            ));
+        }
     }
     if metadata.len() > MAX_CREDENTIAL_FILE_BYTES {
         return Err(format!(
@@ -222,7 +239,7 @@ fn load_file(path: &Path) -> Result<Option<StoredCredentials>, String> {
             ));
         }
     }
-    let content = read_bounded_secret_file(path, "Soulseek credential file")?;
+    let content = read_bounded_secret_file(path, "Soulseek credential file", true)?;
     let parsed = serde_json::from_str::<FileCredentials>(&content).map_err(|error| {
         format!(
             "failed to parse Soulseek credential file {}: {error}",
@@ -399,7 +416,7 @@ mod tests {
         file.set_len(MAX_CREDENTIAL_FILE_BYTES + 1)
             .expect("grow fixture file");
 
-        let error = read_bounded_secret_file(&path, "credential fixture")
+        let error = read_bounded_secret_file(&path, "credential fixture", false)
             .expect_err("reject oversized credential file");
         assert!(error.contains("exceeds"));
         let _ = fs::remove_dir_all(root);
@@ -418,7 +435,7 @@ mod tests {
         fs::write(&target, "outside-secret").expect("write fixture target");
         symlink(&target, &linked).expect("create fixture symlink");
 
-        let error = read_bounded_secret_file(&linked, "credential fixture")
+        let error = read_bounded_secret_file(&linked, "credential fixture", false)
             .expect_err("reject symlinked credential file");
         assert!(error.contains("failed to open"));
         assert!(!error.contains("outside-secret"));
@@ -459,6 +476,25 @@ mod tests {
         let error = ensure_secure_credential_parent(&root)
             .expect_err("reject shared-writable credential parent");
         assert!(error.contains("writable by group or other"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_file_load_rejects_group_or_other_access() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_dir("readable-file");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create fixture directory");
+        let path = root.join("credentials.json");
+        fs::write(&path, r#"{"username":"user","password":"secret"}"#)
+            .expect("write credential fixture");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640))
+            .expect("make credential fixture group-readable");
+
+        let error = load_file(&path).expect_err("reject exposed credential file");
+        assert!(error.contains("must not be accessible by group or other users"));
         let _ = fs::remove_dir_all(root);
     }
 }
