@@ -2,9 +2,11 @@ package slskr
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,6 +116,60 @@ func TestWebSocketURLPreservesBasePathAndDropsHTTPQuery(t *testing.T) {
 	}
 	if got != "wss://example.test/slskr/api/events/ws" {
 		t.Fatalf("unexpected WebSocket URL: %q", got)
+	}
+}
+
+func TestWebSocketSerializesConcurrentSubscriptionWrites(t *testing.T) {
+	const topicCount = 64
+	frames := make(chan struct{}, topicCount)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := upgrader.Upgrade(writer, request, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		for index := 0; index < topicCount; index++ {
+			var frame map[string]interface{}
+			if err := connection.ReadJSON(&frame); err != nil {
+				return
+			}
+			frames <- struct{}{}
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token").NewWebSocketClient(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	defer client.Disconnect(context.Background())
+
+	errors := make(chan error, topicCount)
+	var writers sync.WaitGroup
+	for index := 0; index < topicCount; index++ {
+		writers.Add(1)
+		go func(topic string) {
+			defer writers.Done()
+			if err := client.Subscribe(topic); err != nil {
+				errors <- err
+			}
+		}(fmt.Sprintf("topic-%d", index))
+	}
+	writers.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatalf("concurrent subscribe failed: %v", err)
+	}
+
+	for index := 0; index < topicCount; index++ {
+		select {
+		case <-frames:
+		case <-ctx.Done():
+			t.Fatalf("received only %d of %d subscription frames", index, topicCount)
+		}
 	}
 }
 

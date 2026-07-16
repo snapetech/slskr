@@ -24,6 +24,7 @@ type WebSocketClient struct {
 	connected         bool
 	connecting        bool
 	disconnectPending bool
+	writeMu           sync.Mutex
 	subscriptionMu    sync.RWMutex
 	subscribedTopics  map[string]bool
 	conn              *websocket.Conn
@@ -92,7 +93,10 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 			"type": "subscribe",
 			"data": map[string]interface{}{"topics": retainedTopics},
 		}
-		if err := conn.WriteJSON(msg); err != nil {
+		w.writeMu.Lock()
+		err := conn.WriteJSON(msg)
+		w.writeMu.Unlock()
+		if err != nil {
 			w.subscriptionMu.Unlock()
 			w.mu.Lock()
 			w.connecting = false
@@ -164,8 +168,10 @@ func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 	w.mu.Unlock()
 
 	if conn != nil {
+		w.writeMu.Lock()
 		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		_ = conn.Close()
+		w.writeMu.Unlock()
 	}
 
 	if w.debug {
@@ -328,6 +334,9 @@ func (w *WebSocketClient) clearConnectionIfCurrent(conn *websocket.Conn) bool {
 }
 
 func (w *WebSocketClient) writeJSON(msg map[string]interface{}) error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+
 	w.mu.RLock()
 	conn := w.conn
 	w.mu.RUnlock()
