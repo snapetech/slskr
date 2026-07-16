@@ -386,6 +386,39 @@ fn social_histories_reject_oversized_peer_controlled_fields() {
 }
 
 #[test]
+fn user_watch_state_rejects_oversized_server_controlled_fields() {
+    let oversized = "x".repeat(MAX_STORED_SOCIAL_FIELD_BYTES + 1);
+    let mut state = UserWatchState::new();
+
+    assert!(
+        !state.apply_server_message(&ServerMessage::WatchUserResponse(WatchedUser {
+            username: oversized.clone(),
+            exists: true,
+            status: Some(1),
+            stats: None,
+            country_code: Some("CA".to_owned()),
+        }))
+    );
+    assert!(
+        !state.apply_server_message(&ServerMessage::WatchUserResponse(WatchedUser {
+            username: "alice".to_owned(),
+            exists: true,
+            status: Some(1),
+            stats: None,
+            country_code: Some(oversized.clone()),
+        }))
+    );
+    assert!(
+        !state.apply_server_message(&ServerMessage::GetUserStatusResponse(UserStatus {
+            username: oversized,
+            status: 1,
+            privileged: false,
+        }))
+    );
+    assert!(state.watched("alice").is_none());
+}
+
+#[test]
 fn multi_user_private_message_command_dedupes_and_validates_recipients() {
     let command = private_message_users_command(["Alice", "alice", " Bob "], "hello").unwrap();
 

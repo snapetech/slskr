@@ -112,6 +112,14 @@ impl UserWatchState {
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
         match message {
             ServerMessage::WatchUserResponse(user) => {
+                if user.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES
+                    || user
+                        .country_code
+                        .as_ref()
+                        .is_some_and(|country| country.len() > MAX_STORED_SOCIAL_FIELD_BYTES)
+                {
+                    return false;
+                }
                 if !self.can_insert(&user.username) {
                     return false;
                 }
@@ -120,6 +128,9 @@ impl UserWatchState {
                 true
             }
             ServerMessage::GetUserStatusResponse(status) => {
+                if status.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
+                    return false;
+                }
                 if !self.can_insert(&status.username) {
                     return false;
                 }
