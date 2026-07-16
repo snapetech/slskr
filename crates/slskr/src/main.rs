@@ -10374,7 +10374,7 @@ impl LibraryStore {
             .into_iter()
             .filter(|missing| *missing)
             .count();
-            if count > 0 {
+            if count > 0 && !item.title.trim().is_empty() {
                 *grouped
                     .entry((item.artist.clone(), item.title.clone()))
                     .or_default() += count;
@@ -50733,6 +50733,9 @@ mod tests {
             .create("Artist B".to_owned(), "Release B".to_owned(), String::new())
             .unwrap();
         library
+            .create("Artist C".to_owned(), String::new(), "Audio".to_owned())
+            .unwrap();
+        library
             .create("Artist B".to_owned(), "Release B".to_owned(), String::new())
             .unwrap();
 
@@ -50748,6 +50751,15 @@ mod tests {
         assert_eq!(releases["groups"].as_array().unwrap().len(), 1);
         assert_eq!(releases["totalReleases"], 1);
         assert_eq!(releases["groups"][0]["count"], 2);
+        assert!(releases["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|group| !group["album"].as_str().unwrap().is_empty()));
+        let all_releases =
+            serde_json::from_str::<serde_json::Value>(&library.health_issues_by_release_json(100))
+                .unwrap();
+        assert_eq!(all_releases["groups"].as_array().unwrap().len(), 2);
     }
 
     #[test]
