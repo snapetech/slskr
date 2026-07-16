@@ -1,6 +1,7 @@
 use slskr_client::{peer_cache::PeerConnectionCache, stream::PeerMessageConnection};
 use slskr_protocol::peer::PeerMessage;
 use tokio::io::duplex;
+use tokio::time::{timeout, Duration};
 
 #[tokio::test]
 async fn cache_tracks_insert_replace_remove() {
@@ -160,4 +161,31 @@ async fn cache_evicts_peer_after_send_failure() {
     };
     assert!(cache.send_to("peer", &message).await.is_err());
     assert!(!cache.contains("peer").await);
+}
+
+#[tokio::test]
+async fn stalled_peer_receive_does_not_block_other_cache_entries() {
+    let cache = PeerConnectionCache::new();
+    let (stalled, _silent_peer) = duplex(64);
+    let (responsive, _responsive_peer) = duplex(64);
+    cache
+        .insert("stalled", PeerMessageConnection::new(stalled))
+        .await
+        .unwrap();
+    cache
+        .insert("responsive", PeerMessageConnection::new(responsive))
+        .await
+        .unwrap();
+
+    let receiving_cache = cache.clone();
+    let receive = tokio::spawn(async move { receiving_cache.receive_from("stalled").await });
+    tokio::task::yield_now().await;
+
+    assert!(
+        timeout(Duration::from_millis(50), cache.contains("responsive"))
+            .await
+            .expect("unrelated cache lookup must not block")
+    );
+
+    receive.abort();
 }

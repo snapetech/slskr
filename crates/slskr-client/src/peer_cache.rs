@@ -8,9 +8,11 @@ use crate::{stream::PeerMessageConnection, ClientError};
 
 pub const DEFAULT_MAX_PEER_CONNECTIONS: usize = 1_024;
 
+type SharedPeerConnection<S> = Arc<Mutex<Option<PeerMessageConnection<S>>>>;
+
 #[derive(Debug)]
 pub struct PeerConnectionCache<S> {
-    connections: Arc<Mutex<HashMap<String, PeerMessageConnection<S>>>>,
+    connections: Arc<Mutex<HashMap<String, SharedPeerConnection<S>>>>,
     max_connections: usize,
 }
 
@@ -55,14 +57,24 @@ impl<S> PeerConnectionCache<S> {
                 max: self.max_connections,
             });
         }
-        Ok(connections.insert(username, connection))
+        let replaced = connections.insert(username, Arc::new(Mutex::new(Some(connection))));
+        drop(connections);
+        match replaced {
+            Some(replaced) => Ok(replaced.lock().await.take()),
+            None => Ok(None),
+        }
     }
 
     pub async fn remove(&self, username: &str) -> Option<PeerMessageConnection<S>> {
-        self.connections
+        let removed = self
+            .connections
             .lock()
             .await
-            .remove(&username_key(username))
+            .remove(&username_key(username));
+        match removed {
+            Some(removed) => removed.lock().await.take(),
+            None => None,
+        }
     }
 
     pub async fn contains(&self, username: &str) -> bool {
@@ -91,13 +103,18 @@ where
         message: &PeerMessage,
     ) -> Result<bool, ClientError> {
         let key = username_key(username);
-        let mut connections = self.connections.lock().await;
-        let Some(connection) = connections.get_mut(&key) else {
+        let Some(connection) = self.connections.lock().await.get(&key).cloned() else {
             return Ok(false);
         };
 
-        if let Err(error) = connection.send(message).await {
-            connections.remove(&key);
+        let mut connection_guard = connection.lock().await;
+        let Some(active) = connection_guard.as_mut() else {
+            return Ok(false);
+        };
+        if let Err(error) = active.send(message).await {
+            *connection_guard = None;
+            drop(connection_guard);
+            self.remove_if_current(&key, &connection).await;
             return Err(error);
         }
         Ok(true)
@@ -105,17 +122,32 @@ where
 
     pub async fn receive_from(&self, username: &str) -> Result<Option<PeerMessage>, ClientError> {
         let key = username_key(username);
-        let mut connections = self.connections.lock().await;
-        let Some(connection) = connections.get_mut(&key) else {
+        let Some(connection) = self.connections.lock().await.get(&key).cloned() else {
             return Ok(None);
         };
 
-        match connection.receive().await {
+        let mut connection_guard = connection.lock().await;
+        let Some(active) = connection_guard.as_mut() else {
+            return Ok(None);
+        };
+        match active.receive().await {
             Ok(message) => Ok(Some(message)),
             Err(error) => {
-                connections.remove(&key);
+                *connection_guard = None;
+                drop(connection_guard);
+                self.remove_if_current(&key, &connection).await;
                 Err(error)
             }
+        }
+    }
+
+    async fn remove_if_current(&self, key: &str, connection: &SharedPeerConnection<S>) {
+        let mut connections = self.connections.lock().await;
+        if connections
+            .get(key)
+            .is_some_and(|current| Arc::ptr_eq(current, connection))
+        {
+            connections.remove(key);
         }
     }
 }
