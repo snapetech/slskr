@@ -33,6 +33,8 @@ const MAX_FEATURE_BYTES: usize = 32;
 const MAX_USERNAME_BYTES: usize = 64;
 const MAX_NONCE_BYTES: usize = 64;
 const MAX_SERVICE_FIELD_BYTES: usize = 128;
+const MAX_POD_ID_BYTES: usize = 512;
+const MAX_DESTINATION_HOST_BYTES: usize = 255;
 const MAX_UNMATCHED_SERVICE_FRAMES: usize = 32;
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -590,9 +592,15 @@ impl OpenTunnelRequest {
             request_timestamp: unix_seconds()?,
         };
         if request.pod_id.trim().is_empty()
+            || request.pod_id.len() > MAX_POD_ID_BYTES
             || request.destination_host.trim().is_empty()
+            || request.destination_host.len() > MAX_DESTINATION_HOST_BYTES
             || request.destination_port == 0
+            || request.service_name.as_ref().is_some_and(|service| {
+                service.trim().is_empty() || service.len() > MAX_SERVICE_FIELD_BYTES
+            })
             || request.request_nonce.trim().is_empty()
+            || request.request_nonce.len() > MAX_NONCE_BYTES
         {
             return Err(OverlayError::InvalidPrivateGatewayRequest);
         }
@@ -1028,6 +1036,43 @@ mod tests {
         .unwrap();
         assert_eq!(nested["TunnelId"], "t");
         assert_eq!(nested["Data"], "AAEC/w==");
+    }
+
+    #[test]
+    fn private_gateway_request_constructor_enforces_gateway_field_limits() {
+        let valid = || {
+            OpenTunnelRequest::new(
+                "p".repeat(MAX_POD_ID_BYTES),
+                "h".repeat(MAX_DESTINATION_HOST_BYTES),
+                80,
+                Some("s".repeat(MAX_SERVICE_FIELD_BYTES)),
+                "n".repeat(MAX_NONCE_BYTES),
+            )
+        };
+        assert!(valid().is_ok());
+
+        let invalid = [
+            OpenTunnelRequest::new("p".repeat(MAX_POD_ID_BYTES + 1), "host", 80, None, "nonce"),
+            OpenTunnelRequest::new(
+                "pod",
+                "h".repeat(MAX_DESTINATION_HOST_BYTES + 1),
+                80,
+                None,
+                "nonce",
+            ),
+            OpenTunnelRequest::new(
+                "pod",
+                "host",
+                80,
+                Some("s".repeat(MAX_SERVICE_FIELD_BYTES + 1)),
+                "nonce",
+            ),
+            OpenTunnelRequest::new("pod", "host", 80, Some(" ".to_owned()), "nonce"),
+            OpenTunnelRequest::new("pod", "host", 80, None, "n".repeat(MAX_NONCE_BYTES + 1)),
+        ];
+        assert!(invalid
+            .into_iter()
+            .all(|request| matches!(request, Err(OverlayError::InvalidPrivateGatewayRequest))));
     }
 
     #[tokio::test]
