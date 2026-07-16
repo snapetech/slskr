@@ -132,6 +132,7 @@ const MAX_PREVIEW_STREAMS: usize = 4;
 const MAX_PREVIEW_STREAM_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_PEER_ENDPOINT_RECORDS: usize = 1_024;
 const PEER_ENDPOINT_TTL_SECONDS: u64 = 300;
+const PEER_CAPABILITY_LEASE_SECONDS: u64 = 24 * 60 * 60;
 const MAX_POD_JOIN_REPLAY_RECORDS: usize = 4_096;
 const MAX_POD_PENDING_MEMBERSHIP_RECORDS: usize = 4_096;
 const POD_JOIN_REPLAY_TTL_SECONDS: u64 = 300;
@@ -4343,13 +4344,29 @@ impl MeshState {
             .collect()
     }
 
-    fn update_capability(&mut self, descriptor: PeerCapabilityDescriptor) -> Result<(), String> {
+    fn update_capability(
+        &mut self,
+        mut descriptor: PeerCapabilityDescriptor,
+    ) -> Result<(), String> {
         descriptor
             .verify(std::time::SystemTime::now())
             .map_err(|error| format!("peer capability descriptor rejected: {error}"))?;
         let now = unix_timestamp();
         self.capability_records
             .retain(|record| record.expires_at_unix > now);
+        if self.capability_records.iter().any(|record| {
+            record.peer_id.eq_ignore_ascii_case(&descriptor.peer_id)
+                && !record.username.eq_ignore_ascii_case(&descriptor.username)
+        }) {
+            return Err(
+                "peer capability descriptor peer ID is already registered to another username"
+                    .to_owned(),
+            );
+        }
+        descriptor.issued_at_unix = now;
+        descriptor.expires_at_unix = descriptor
+            .expires_at_unix
+            .min(now.saturating_add(PEER_CAPABILITY_LEASE_SECONDS));
         if let Some(existing) = self
             .capability_records
             .iter_mut()
@@ -47655,7 +47672,25 @@ mod tests {
         assert_eq!(mesh.capability_records[0].username, "mesh-source");
         assert_eq!(mesh.capability_records[0].peer_id, descriptor.peer_id);
         assert_eq!(mesh.capability_records[0].features, descriptor.features);
+        assert!(
+            mesh.capability_records[0].expires_at_unix
+                <= super::unix_timestamp() + super::PEER_CAPABILITY_LEASE_SECONDS
+        );
         drop(mesh);
+
+        let replay = slskr_client::capabilities::peer_capability_message(
+            &slskr_client::capabilities::PeerCapabilityEnvelope::new(
+                slskr_client::capabilities::PeerCapabilityMessageType::Acknowledge,
+                "replayed-under-another-user",
+                descriptor.clone(),
+            ),
+        )
+        .expect("replayed capability message");
+        let replay_error =
+            super::handle_peer_message(&state, replay, Some("attacker"), |_| async { Ok(()) })
+                .await
+                .expect_err("reject capability peer ID alias");
+        assert!(replay_error.contains("already registered to another username"));
 
         let mut tampered = descriptor;
         tampered.signature = Some([0_u8; 64]);
