@@ -34,13 +34,11 @@ type Client struct {
 func NewClient(baseURL, token string) *Client {
 	normalizedBaseURL, err := normalizeHTTPBaseURL(baseURL)
 	return &Client{
-		BaseURL: normalizedBaseURL,
-		initErr: err,
-		Token:   token,
-		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		Timeout: 30 * time.Second,
+		BaseURL:    normalizedBaseURL,
+		initErr:    err,
+		Token:      token,
+		HTTPClient: &http.Client{},
+		Timeout:    30 * time.Second,
 	}
 }
 
@@ -380,11 +378,32 @@ func (c *Client) post(ctx context.Context, path string, body interface{}, auth b
 }
 
 func (c *Client) do(req *http.Request, auth bool) (map[string]interface{}, error) {
+	if c.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(req.Context(), c.Timeout)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
 	if auth {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 	}
 
-	resp, err := c.HTTPClient.Do(req)
+	httpClient := *c.HTTPClient
+	configuredRedirect := httpClient.CheckRedirect
+	baseURL, _ := url.Parse(c.BaseURL)
+	httpClient.CheckRedirect = func(redirected *http.Request, via []*http.Request) error {
+		if redirected.URL.Scheme != baseURL.Scheme || redirected.URL.Host != baseURL.Host {
+			return fmt.Errorf("refusing redirect outside configured API origin")
+		}
+		if configuredRedirect != nil {
+			return configuredRedirect(redirected, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
