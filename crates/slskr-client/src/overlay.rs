@@ -42,7 +42,7 @@ pub type TlsOverlayClient = OverlayClient<TlsStream<TcpStream>>;
 
 pub async fn connect_tls_overlay(
     endpoint: impl ToSocketAddrs,
-    expected_certificate_sha256: Option<[u8; 32]>,
+    expected_certificate_sha256: [u8; 32],
     hello: MeshHello,
 ) -> Result<TlsOverlayClient, OverlayError> {
     let tcp = timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(endpoint))
@@ -86,7 +86,7 @@ pub async fn connect_tls_overlay(
 #[derive(Debug)]
 struct SelfSignedOverlayVerifier {
     signature_algorithms: WebPkiSupportedAlgorithms,
-    expected_certificate_sha256: Option<[u8; 32]>,
+    expected_certificate_sha256: [u8; 32],
 }
 
 impl ServerCertVerifier for SelfSignedOverlayVerifier {
@@ -99,10 +99,7 @@ impl ServerCertVerifier for SelfSignedOverlayVerifier {
         now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         let actual_certificate_sha256: [u8; 32] = Sha256::digest(end_entity.as_ref()).into();
-        if self
-            .expected_certificate_sha256
-            .is_some_and(|expected| actual_certificate_sha256 != expected)
-        {
+        if actual_certificate_sha256 != self.expected_certificate_sha256 {
             return Err(rustls::Error::General(
                 "overlay server certificate fingerprint mismatch".to_owned(),
             ));
