@@ -185,6 +185,24 @@ fn search_results_bound_responses_and_files_per_token() {
 }
 
 #[test]
+fn search_results_deduplicate_replayed_responses_after_per_response_truncation() {
+    let mut results = SearchResults::new();
+    let mut oversized = response("alice", 10);
+    oversized.results = (0..(MAX_SEARCH_RESULT_FILES_PER_TOKEN + 5))
+        .map(|index| entry(&format!("file-{index}")))
+        .collect();
+
+    for _ in 0..3 {
+        results
+            .accept_peer_message(PeerMessage::FileSearchResponse(oversized.clone()))
+            .unwrap();
+    }
+
+    assert_eq!(results.len_for(10), 1);
+    assert_eq!(results.stored_responses_len(), 1);
+}
+
+#[test]
 fn search_results_bound_attacker_controlled_token_keys() {
     let mut results = SearchResults::new();
     for token in 0..u32::try_from(MAX_TRACKED_SEARCH_RESULT_TOKENS).unwrap() {
@@ -227,6 +245,7 @@ fn search_results_bound_retained_text_bytes_per_token() {
         .accept_peer_message(PeerMessage::FileSearchResponse(oversized))
         .unwrap());
     assert!(results.responses_for(10).is_empty());
+    assert_eq!(results.tracked_tokens_len(), 0);
 
     results
         .accept_peer_message(PeerMessage::FileSearchResponse(response("peer", 10)))

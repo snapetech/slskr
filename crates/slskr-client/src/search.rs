@@ -288,18 +288,25 @@ impl SearchResults {
                 {
                     return Ok(true);
                 }
-                let responses = self.by_token.entry(response.token).or_default();
-                if responses.contains(&response) {
-                    return Ok(true);
-                }
-                if responses.len() >= MAX_SEARCH_RESPONSES_PER_TOKEN {
+                let responses = self.by_token.get(&response.token);
+                if responses
+                    .is_some_and(|responses| responses.len() >= MAX_SEARCH_RESPONSES_PER_TOKEN)
+                {
                     return Ok(true);
                 }
                 if self.stored_responses >= MAX_SEARCH_RESPONSES_TOTAL {
                     return Ok(true);
                 }
+                response.results.truncate(MAX_SEARCH_RESULT_FILES_PER_TOKEN);
+                let remaining_per_response =
+                    MAX_SEARCH_RESULT_FILES_PER_TOKEN.saturating_sub(response.results.len());
+                response.private_results.truncate(remaining_per_response);
+                if responses.is_some_and(|responses| responses.contains(&response)) {
+                    return Ok(true);
+                }
                 let stored_files = responses
-                    .iter()
+                    .into_iter()
+                    .flatten()
                     .map(|response| response.results.len() + response.private_results.len())
                     .sum::<usize>();
                 let mut remaining = MAX_SEARCH_RESULT_FILES_PER_TOKEN
@@ -335,7 +342,10 @@ impl SearchResults {
                 self.stored_files += response_files;
                 self.stored_text_bytes = total_stored_text_bytes;
                 self.stored_responses += 1;
-                responses.push(response);
+                self.by_token
+                    .entry(response.token)
+                    .or_default()
+                    .push(response);
                 Ok(true)
             }
             message => Err(ClientError::UnexpectedSearchMessage(Box::new(message))),
