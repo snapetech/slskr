@@ -18,6 +18,8 @@ pub const MAX_SEARCH_RESPONSES_PER_TOKEN: usize = 1_000;
 pub const MAX_SEARCH_RESULT_FILES_PER_TOKEN: usize = 10_000;
 pub const MAX_TRACKED_SEARCH_RESULT_TOKENS: usize = 1_024;
 pub const MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN: usize = 4 * 1024 * 1024;
+pub const MAX_SEARCH_RESULT_FILES_TOTAL: usize = 100_000;
+pub const MAX_SEARCH_RESULT_TEXT_BYTES_TOTAL: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -250,6 +252,8 @@ where
 pub struct SearchResults {
     by_token: HashMap<u32, Vec<FileSearchResponse>>,
     text_bytes_by_token: HashMap<u32, usize>,
+    stored_files: usize,
+    stored_text_bytes: usize,
 }
 
 impl SearchResults {
@@ -277,10 +281,13 @@ impl SearchResults {
                     .iter()
                     .map(|response| response.results.len() + response.private_results.len())
                     .sum::<usize>();
-                let mut remaining = MAX_SEARCH_RESULT_FILES_PER_TOKEN.saturating_sub(stored_files);
+                let mut remaining = MAX_SEARCH_RESULT_FILES_PER_TOKEN
+                    .saturating_sub(stored_files)
+                    .min(MAX_SEARCH_RESULT_FILES_TOTAL.saturating_sub(self.stored_files));
                 response.results.truncate(remaining);
                 remaining = remaining.saturating_sub(response.results.len());
                 response.private_results.truncate(remaining);
+                let response_files = response.results.len() + response.private_results.len();
                 let response_text_bytes = search_response_text_bytes(&response);
                 let stored_text_bytes = self
                     .text_bytes_by_token
@@ -294,8 +301,18 @@ impl SearchResults {
                 if total_text_bytes > MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN {
                     return Ok(true);
                 }
+                let Some(total_stored_text_bytes) =
+                    self.stored_text_bytes.checked_add(response_text_bytes)
+                else {
+                    return Ok(true);
+                };
+                if total_stored_text_bytes > MAX_SEARCH_RESULT_TEXT_BYTES_TOTAL {
+                    return Ok(true);
+                }
                 self.text_bytes_by_token
                     .insert(response.token, total_text_bytes);
+                self.stored_files += response_files;
+                self.stored_text_bytes = total_stored_text_bytes;
                 responses.push(response);
                 Ok(true)
             }
@@ -312,8 +329,15 @@ impl SearchResults {
 
     #[must_use]
     pub fn take(&mut self, token: u32) -> Vec<FileSearchResponse> {
-        self.text_bytes_by_token.remove(&token);
-        self.by_token.remove(&token).unwrap_or_default()
+        let responses = self.by_token.remove(&token).unwrap_or_default();
+        let removed_files = responses
+            .iter()
+            .map(|response| response.results.len() + response.private_results.len())
+            .sum::<usize>();
+        let removed_text_bytes = self.text_bytes_by_token.remove(&token).unwrap_or(0);
+        self.stored_files = self.stored_files.saturating_sub(removed_files);
+        self.stored_text_bytes = self.stored_text_bytes.saturating_sub(removed_text_bytes);
+        responses
     }
 
     #[must_use]
@@ -324,6 +348,11 @@ impl SearchResults {
     #[must_use]
     pub fn tracked_tokens_len(&self) -> usize {
         self.by_token.len()
+    }
+
+    #[must_use]
+    pub const fn stored_files_len(&self) -> usize {
+        self.stored_files
     }
 }
 

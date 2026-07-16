@@ -3,8 +3,8 @@ use slskr_client::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
         WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN,
-        MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN,
-        MAX_TRACKED_SEARCH_RESULT_TOKENS,
+        MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_FILES_TOTAL,
+        MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -233,6 +233,36 @@ fn search_results_bound_retained_text_bytes_per_token() {
     assert_eq!(results.len_for(10), 1);
     assert_eq!(results.take(10).len(), 1);
     assert!(results.responses_for(10).is_empty());
+}
+
+#[test]
+fn search_results_bound_aggregate_files_across_tokens_and_release_budget() {
+    let mut results = SearchResults::new();
+    for token in 0..u32::try_from(MAX_SEARCH_RESULT_FILES_TOTAL / 1_000).unwrap() {
+        let mut batch = response("peer", token);
+        batch.results = (0..1_000)
+            .map(|index| entry(&format!("file-{token}-{index}")))
+            .collect();
+        results
+            .accept_peer_message(PeerMessage::FileSearchResponse(batch))
+            .unwrap();
+    }
+    assert_eq!(results.stored_files_len(), MAX_SEARCH_RESULT_FILES_TOTAL);
+
+    let mut rejected = response("peer", u32::MAX);
+    rejected.results.push(entry("over-budget"));
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(rejected))
+        .unwrap();
+    assert_eq!(results.stored_files_len(), MAX_SEARCH_RESULT_FILES_TOTAL);
+    assert_eq!(results.len_for(u32::MAX), 1);
+    assert!(results.responses_for(u32::MAX)[0].results.is_empty());
+
+    let _ = results.take(0);
+    assert_eq!(
+        results.stored_files_len(),
+        MAX_SEARCH_RESULT_FILES_TOTAL - 1_000
+    );
 }
 
 #[test]
