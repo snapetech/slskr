@@ -24,6 +24,7 @@ const (
 // Client is the main HTTP client for slskr API
 type Client struct {
 	BaseURL    string
+	initErr    error
 	Token      string
 	HTTPClient *http.Client
 	Timeout    time.Duration
@@ -31,14 +32,27 @@ type Client struct {
 
 // NewClient creates a new slskr client
 func NewClient(baseURL, token string) *Client {
+	normalizedBaseURL, err := normalizeHTTPBaseURL(baseURL)
 	return &Client{
-		BaseURL: baseURL,
+		BaseURL: normalizedBaseURL,
+		initErr: err,
 		Token:   token,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		Timeout: 30 * time.Second,
 	}
+}
+
+func normalizeHTTPBaseURL(baseURL string) (string, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
+		return "", fmt.Errorf("base URL must be an absolute HTTP or HTTPS URL without credentials")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
 // Health checks server health
@@ -329,6 +343,9 @@ func (c *Client) get(ctx context.Context, path string, auth bool) (map[string]in
 }
 
 func (c *Client) getWithParams(ctx context.Context, path string, params url.Values, auth bool) (map[string]interface{}, error) {
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
 	fullURL := c.BaseURL + path
 	if params != nil && len(params) > 0 {
 		fullURL += "?" + params.Encode()
@@ -343,6 +360,9 @@ func (c *Client) getWithParams(ctx context.Context, path string, params url.Valu
 }
 
 func (c *Client) post(ctx context.Context, path string, body interface{}, auth bool) (map[string]interface{}, error) {
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
 	fullURL := c.BaseURL + path
 
 	bodyBytes, err := json.Marshal(body)

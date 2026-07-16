@@ -2,6 +2,20 @@ import { SlskrClient } from './client';
 import { NetworkError } from './errors';
 
 describe('SlskrClient request lifecycle', () => {
+  it('validates and normalizes the REST base URL', () => {
+    expect(() => new SlskrClient({ baseUrl: 'ftp://example.test', token: 'token' })).toThrow(
+      'absolute HTTP or HTTPS'
+    );
+    expect(
+      () => new SlskrClient({ baseUrl: 'https://user:pass@example.test', token: 'token' })
+    ).toThrow('without credentials');
+
+    const client = new SlskrClient({
+      baseUrl: 'https://example.test/slskr/?debug=true#fragment',
+      token: 'token',
+    });
+    expect((client as any).baseUrl).toBe('https://example.test/slskr');
+  });
   const originalFetch = global.fetch;
 
   afterEach(() => {

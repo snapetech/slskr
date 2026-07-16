@@ -9,6 +9,20 @@ import (
 	"testing"
 )
 
+func TestClientValidatesAndNormalizesRESTBaseURL(t *testing.T) {
+	for _, baseURL := range []string{"ftp://example.test", "example.test", "https://user:pass@example.test"} {
+		_, err := NewClient(baseURL, "token").Health(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "absolute HTTP or HTTPS") {
+			t.Fatalf("expected URL validation error for %q, got %v", baseURL, err)
+		}
+	}
+
+	client := NewClient("https://example.test/slskr/?debug=true#fragment", "token")
+	if client.BaseURL != "https://example.test/slskr" {
+		t.Fatalf("unexpected normalized base URL: %q", client.BaseURL)
+	}
+}
+
 func TestClientRejectsOversizedSuccessResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Length", fmt.Sprint(maxHTTPResponseBytes+1))

@@ -39,7 +39,14 @@ export class SlskrClient {
   private debug: boolean;
 
   constructor(config: ClientConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/$/, '');
+    const parsedUrl = new URL(config.baseUrl);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password) {
+      throw new Error('baseUrl must be an absolute HTTP or HTTPS URL without credentials');
+    }
+    parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '');
+    parsedUrl.search = '';
+    parsedUrl.hash = '';
+    this.baseUrl = parsedUrl.toString().replace(/\/$/, '');
     this.token = config.token;
     this.timeout = config.timeout ?? 30000;
     this.retries = config.retries ?? 3;

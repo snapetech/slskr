@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 import aiohttp
 
 from .exceptions import ApiError, NetworkError, TimeoutError
@@ -32,7 +32,19 @@ class SlskrClient:
         debug: bool = False,
     ):
         """Initialize client"""
-        self.base_url = base_url.rstrip("/")
+        parsed_url = urlsplit(base_url)
+        if (
+            parsed_url.scheme not in ("http", "https")
+            or not parsed_url.netloc
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+        ):
+            raise ValueError(
+                "base_url must be an absolute HTTP or HTTPS URL without credentials"
+            )
+        self.base_url = urlunsplit(
+            (parsed_url.scheme, parsed_url.netloc, parsed_url.path.rstrip("/"), "", "")
+        )
         self.token = token
         self.timeout = timeout
         self.retries = retries

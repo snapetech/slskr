@@ -18,6 +18,16 @@ def test_client_url_and_path_segments_are_safe():
     assert client._path_segment("../peer name/track") == "..%2Fpeer%20name%2Ftrack"
 
 
+def test_client_validates_and_normalizes_rest_base_url():
+    with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
+        SlskrClient("ftp://example.test", "token")
+    with pytest.raises(ValueError, match="without credentials"):
+        SlskrClient("https://user:password@example.test", "token")
+
+    client = SlskrClient("https://example.test/slskr/?debug=true#fragment", "token")
+    assert client.base_url == "https://example.test/slskr"
+
+
 def test_batch_builder_serializes_and_limits_operations():
     client = SlskrClient("http://localhost:8080", "token")
     builder = BatchBuilder(client)

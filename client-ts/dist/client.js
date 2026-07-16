@@ -9,7 +9,14 @@ const MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_HTTP_ERROR_BYTES = 64 * 1024;
 class SlskrClient {
     constructor(config) {
-        this.baseUrl = config.baseUrl.replace(/\/$/, '');
+        const parsedUrl = new URL(config.baseUrl);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password) {
+            throw new Error('baseUrl must be an absolute HTTP or HTTPS URL without credentials');
+        }
+        parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '');
+        parsedUrl.search = '';
+        parsedUrl.hash = '';
+        this.baseUrl = parsedUrl.toString().replace(/\/$/, '');
         this.token = config.token;
         this.timeout = config.timeout ?? 30000;
         this.retries = config.retries ?? 3;
