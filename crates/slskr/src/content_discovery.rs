@@ -223,6 +223,7 @@ impl ContentDiscoveryStore {
         for mut incoming in entries {
             let existing = self.hash_entries.iter().position(|entry| {
                 (!incoming.flac_key.is_empty()
+                    && entry.size == incoming.size
                     && entry.flac_key.eq_ignore_ascii_case(&incoming.flac_key))
                     || same_hash_identity(entry, &incoming)
             });
@@ -443,7 +444,9 @@ fn dedupe_hash_entries(entries: &mut Vec<HashDbEntry>) {
     let mut deduped: Vec<HashDbEntry> = Vec::with_capacity(entries.len());
     for entry in entries.drain(..) {
         if let Some(index) = deduped.iter().position(|current| {
-            (!entry.flac_key.is_empty() && current.flac_key.eq_ignore_ascii_case(&entry.flac_key))
+            (!entry.flac_key.is_empty()
+                && current.size == entry.size
+                && current.flac_key.eq_ignore_ascii_case(&entry.flac_key))
                 || same_hash_identity(current, &entry)
         }) {
             deduped[index] = entry;
@@ -599,6 +602,33 @@ mod tests {
         assert!(error.contains("64-character SHA-256"));
         assert!(store.hash_entries().is_empty());
         assert_eq!(store.latest_seq(), 0);
+    }
+
+    #[test]
+    fn mismatched_size_cannot_replace_verified_flac_key() {
+        let mut store = ContentDiscoveryStore::in_memory();
+        let flac_key = generate_flac_key("Track.flac", 123);
+        let mut legitimate = hash_entry(HASH, "recording-1");
+        legitimate.flac_key.clone_from(&flac_key);
+        legitimate.full_file_hash = HASH.to_owned();
+        store
+            .merge_hash_entries(vec![legitimate])
+            .expect("merge legitimate hash");
+
+        let attacker_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mut mismatched = hash_entry(attacker_hash, "recording-2");
+        mismatched.flac_key = flac_key;
+        mismatched.size = 999;
+        store
+            .merge_hash_entries(vec![mismatched])
+            .expect("retain distinct mismatched-size hash");
+
+        assert_eq!(store.hash_entries().len(), 2);
+        assert_eq!(
+            store.verified_file_hash("track.flac", 123),
+            Some(HASH.to_owned())
+        );
+        assert_eq!(store.hashes_by_size(999)[0].file_sha256, attacker_hash);
     }
 
     #[test]
