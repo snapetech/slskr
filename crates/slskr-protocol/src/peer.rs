@@ -535,6 +535,11 @@ fn decompress_zlib_with_limit(payload: &[u8], max_len: usize) -> Result<Vec<u8>,
             "file search response exceeds decompression limit",
         ));
     }
+    if usize::try_from(decoder.total_in()).unwrap_or(usize::MAX) != payload.len() {
+        return Err(DecodeError::InvalidCompressedPayload(
+            "file search response has trailing compressed data",
+        ));
+    }
     Ok(output)
 }
 
@@ -679,6 +684,19 @@ mod tests {
             DecodeError::InvalidCompressedPayload(
                 "file search response exceeds decompression limit"
             )
+        ));
+    }
+
+    #[test]
+    fn compressed_search_response_rejects_trailing_compressed_data() {
+        let mut compressed = compress_zlib(b"payload").expect("compress fixture");
+        compressed.extend_from_slice(b"hidden");
+
+        assert!(matches!(
+            decompress_zlib_with_limit(&compressed, 128),
+            Err(DecodeError::InvalidCompressedPayload(
+                "file search response has trailing compressed data"
+            ))
         ));
     }
 }
