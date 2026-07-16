@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
+	"net/url"
+	"path"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -16,6 +17,7 @@ const maxWebSocketMessageBytes = 64 * 1024
 // WebSocketClient represents a WebSocket connection to the API
 type WebSocketClient struct {
 	url               string
+	initErr           error
 	token             string
 	debug             bool
 	mu                sync.RWMutex
@@ -34,11 +36,11 @@ type WebSocketClient struct {
 
 // NewWebSocketClient creates a new WebSocket client
 func (c *Client) NewWebSocketClient(debug bool) *WebSocketClient {
-	wsURL := strings.Replace(c.BaseURL, "http", "ws", 1)
-	wsURL = strings.TrimRight(wsURL, "/") + "/api/events/ws"
+	wsURL, err := websocketURL(c.BaseURL)
 
 	return &WebSocketClient{
 		url:              wsURL,
+		initErr:          err,
 		token:            c.Token,
 		debug:            debug,
 		subscribedTopics: make(map[string]bool),
@@ -49,6 +51,11 @@ func (c *Client) NewWebSocketClient(debug bool) *WebSocketClient {
 // Connect connects to the WebSocket
 func (w *WebSocketClient) Connect(ctx context.Context) error {
 	w.mu.Lock()
+	if w.initErr != nil {
+		err := w.initErr
+		w.mu.Unlock()
+		return err
+	}
 	if w.connected {
 		w.mu.Unlock()
 		return fmt.Errorf("already connected")
@@ -75,17 +82,39 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 	}
 	conn.SetReadLimit(maxWebSocketMessageBytes)
 
+	w.subscriptionMu.Lock()
+	retainedTopics := make([]string, 0, len(w.subscribedTopics))
+	for topic := range w.subscribedTopics {
+		retainedTopics = append(retainedTopics, topic)
+	}
+	if len(retainedTopics) > 0 {
+		msg := map[string]interface{}{
+			"type": "subscribe",
+			"data": map[string]interface{}{"topics": retainedTopics},
+		}
+		if err := conn.WriteJSON(msg); err != nil {
+			w.subscriptionMu.Unlock()
+			w.mu.Lock()
+			w.connecting = false
+			w.mu.Unlock()
+			_ = conn.Close()
+			return fmt.Errorf("restore subscriptions: %w", err)
+		}
+	}
+
 	w.mu.Lock()
 	w.connecting = false
 	if w.disconnectPending {
 		w.disconnectPending = false
 		w.mu.Unlock()
+		w.subscriptionMu.Unlock()
 		_ = conn.Close()
 		return fmt.Errorf("connection canceled by disconnect")
 	}
 	w.conn = conn
 	w.connected = true
 	w.mu.Unlock()
+	w.subscriptionMu.Unlock()
 
 	if w.debug {
 		fmt.Printf("[WebSocket] Connected to %s\n", w.url)
@@ -98,6 +127,22 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 	go w.handleMessages(conn)
 
 	return nil
+}
+
+func websocketURL(baseURL string) (string, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("base URL must be an absolute HTTP or HTTPS URL")
+	}
+	if parsed.Scheme == "https" {
+		parsed.Scheme = "wss"
+	} else {
+		parsed.Scheme = "ws"
+	}
+	parsed.Path = path.Join(parsed.Path, "/api/events/ws")
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 // Disconnect closes the WebSocket connection

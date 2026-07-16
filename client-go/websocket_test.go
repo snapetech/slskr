@@ -60,6 +60,63 @@ func TestWebSocketSubscriptionFramesTrackLocalState(t *testing.T) {
 	}
 }
 
+func TestWebSocketRestoresSubscriptionsOnConnect(t *testing.T) {
+	frames := make(chan map[string]interface{}, 1)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := upgrader.Upgrade(writer, request, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		var frame map[string]interface{}
+		if err := connection.ReadJSON(&frame); err == nil {
+			frames <- frame
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token").NewWebSocketClient(false)
+	if err := client.Subscribe("searches"); err != nil {
+		t.Fatalf("subscribe before connect failed: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	defer client.Disconnect(context.Background())
+
+	frame := <-frames
+	if frame["type"] != "subscribe" {
+		t.Fatalf("unexpected frame: %#v", frame)
+	}
+	topics := frame["data"].(map[string]interface{})["topics"].([]interface{})
+	if len(topics) != 1 || topics[0] != "searches" {
+		t.Fatalf("unexpected restored topics: %#v", topics)
+	}
+}
+
+func TestWebSocketRejectsInvalidBaseURLBeforeDial(t *testing.T) {
+	for _, baseURL := range []string{"ftp://example.test", "example.test"} {
+		client := NewClient(baseURL, "token").NewWebSocketClient(false)
+		err := client.Connect(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "absolute HTTP or HTTPS") {
+			t.Fatalf("expected URL validation error for %q, got %v", baseURL, err)
+		}
+	}
+}
+
+func TestWebSocketURLPreservesBasePathAndDropsHTTPQuery(t *testing.T) {
+	got, err := websocketURL("https://example.test/slskr/?debug=true#fragment")
+	if err != nil {
+		t.Fatalf("build WebSocket URL: %v", err)
+	}
+	if got != "wss://example.test/slskr/api/events/ws" {
+		t.Fatalf("unexpected WebSocket URL: %q", got)
+	}
+}
+
 func TestWebSocketConnectRejectsConcurrentDial(t *testing.T) {
 	requestStarted := make(chan struct{})
 	releaseUpgrade := make(chan struct{})
