@@ -1,0 +1,144 @@
+use std::path::Path;
+
+use ed25519_dalek::SigningKey;
+use sha2::{Digest, Sha256};
+use slskr_client::overlay::{
+    connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE,
+};
+use tokio::io::AsyncWriteExt;
+
+use crate::config::TrustedMeshPeer;
+
+const CONTENT_CHUNK_BYTES: u64 = 32 * 1024;
+const MAX_CONTENT_ID_BYTES: usize = 512;
+
+pub async fn fetch_content(
+    peer: &TrustedMeshPeer,
+    local_username: &str,
+    authentication_key: &SigningKey,
+    content_id: &str,
+    size: u64,
+    expected_sha256: &str,
+    output: &Path,
+) -> Result<(), String> {
+    validate_request(local_username, content_id, size, expected_sha256)?;
+    let result = fetch_content_inner(
+        peer,
+        local_username,
+        authentication_key,
+        content_id,
+        size,
+        expected_sha256,
+        output,
+    )
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(output).await;
+    }
+    result
+}
+
+async fn fetch_content_inner(
+    peer: &TrustedMeshPeer,
+    local_username: &str,
+    authentication_key: &SigningKey,
+    content_id: &str,
+    size: u64,
+    expected_sha256: &str,
+    output: &Path,
+) -> Result<(), String> {
+    let mut hello = MeshHello::new(
+        local_username,
+        vec![FEATURE_MESH_SERVICE.to_owned()],
+        None,
+        None,
+        uuid::Uuid::new_v4().simple().to_string(),
+    )
+    .map_err(|error| format!("mesh content hello failed: {error}"))?;
+    hello
+        .authenticate(authentication_key, &peer.certificate_sha256)
+        .map_err(|error| format!("mesh content hello authentication failed: {error}"))?;
+    let mut client = connect_tls_overlay(peer.overlay_endpoint, peer.certificate_sha256, hello)
+        .await
+        .map_err(|error| format!("mesh content connection failed: {error}"))?;
+    if !client.remote_username.eq_ignore_ascii_case(&peer.username) {
+        return Err("mesh content overlay identity did not match the trusted peer".to_owned());
+    }
+
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut file = options
+        .open(output)
+        .await
+        .map_err(|error| format!("mesh content staging create failed: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut offset = 0_u64;
+    while offset < size {
+        let length = (size - offset).min(CONTENT_CHUNK_BYTES);
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "contentId": content_id,
+            "range": {
+                "offset": offset,
+                "length": length,
+            }
+        }))
+        .map_err(|error| format!("mesh content request encode failed: {error}"))?;
+        let call = MeshServiceCall::new(
+            uuid::Uuid::new_v4().to_string(),
+            "MeshContent",
+            "GetByContentId",
+            payload,
+        )
+        .map_err(|error| format!("mesh content request failed: {error}"))?;
+        let reply = client
+            .call(&call)
+            .await
+            .map_err(|error| format!("mesh content call failed: {error}"))?;
+        if reply.status_code != 0 {
+            return Err(format!(
+                "mesh content peer rejected range with status {}: {}",
+                reply.status_code,
+                reply.error_message.as_deref().unwrap_or("remote error")
+            ));
+        }
+        if reply.payload.len() as u64 != length {
+            return Err(format!(
+                "mesh content range length mismatch: expected {length}, received {}",
+                reply.payload.len()
+            ));
+        }
+        file.write_all(&reply.payload)
+            .await
+            .map_err(|error| format!("mesh content staging write failed: {error}"))?;
+        hasher.update(&reply.payload);
+        offset += length;
+    }
+    file.sync_all()
+        .await
+        .map_err(|error| format!("mesh content staging sync failed: {error}"))?;
+    drop(file);
+    let actual = hex::encode(hasher.finalize());
+    if !actual.eq_ignore_ascii_case(expected_sha256) {
+        return Err("mesh content SHA-256 verification failed".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_request(
+    local_username: &str,
+    content_id: &str,
+    size: u64,
+    expected_sha256: &str,
+) -> Result<(), String> {
+    if local_username.trim().is_empty()
+        || content_id.trim().is_empty()
+        || content_id.len() > MAX_CONTENT_ID_BYTES
+        || content_id.chars().any(char::is_control)
+        || size == 0
+        || expected_sha256.len() != 64
+        || !expected_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("mesh content request is invalid".to_owned());
+    }
+    Ok(())
+}

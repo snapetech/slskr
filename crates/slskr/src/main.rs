@@ -15,6 +15,7 @@ mod http_server;
     reason = "structured logging helpers are retained for optional runtime instrumentation"
 )]
 mod logging;
+mod mesh_services;
 mod multisource;
 #[allow(
     dead_code,
@@ -10466,6 +10467,7 @@ struct PreviewStreamTicket {
     content_type: String,
     source_url: Option<String>,
     source_authorization: Option<String>,
+    overlay_peer_identity: Option<String>,
     expected_hash: Option<String>,
     created_at: u64,
     expires_at: u64,
@@ -10522,6 +10524,7 @@ impl PreviewStreamTicketStore {
             content_type,
             source_url: None,
             source_authorization: None,
+            overlay_peer_identity: None,
             expected_hash: None,
             created_at: now,
             expires_at: now.saturating_add(ttl_seconds),
@@ -10548,6 +10551,20 @@ impl PreviewStreamTicketStore {
         };
         record.source_url = Some(source_url);
         record.source_authorization = source_authorization;
+        record.expected_hash = Some(expected_hash);
+        true
+    }
+
+    fn configure_remote_overlay(
+        &mut self,
+        token: &str,
+        peer_identity: String,
+        expected_hash: String,
+    ) -> bool {
+        let Some(record) = self.records.get_mut(token) else {
+            return false;
+        };
+        record.overlay_peer_identity = Some(peer_identity);
         record.expected_hash = Some(expected_hash);
         true
     }
@@ -24288,6 +24305,40 @@ async fn create_preview_stream_ticket(
     drop(transfers);
     drop(shares);
 
+    let remote_overlay = if family == "mesh"
+        && remote_mesh.is_none()
+        && !matches!(source, "local-share" | "transfer")
+    {
+        let identity = resolved_peer_username
+            .as_deref()
+            .ok_or_else(|| "peerId is required for a trusted mesh preview".to_owned())?;
+        let trusted = state
+            .config
+            .trusted_mesh_peers
+            .iter()
+            .find(|peer| peer.matches(identity));
+        trusted
+            .map(|peer| {
+                if resolved_size == 0 {
+                    return Err("size is required for a trusted mesh preview".to_owned());
+                }
+                let expected_hash = expected_hash
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|hash| {
+                        hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    })
+                    .ok_or_else(|| {
+                        "expectedHash must be a SHA-256 digest for a trusted mesh preview"
+                            .to_owned()
+                    })?;
+                Ok((peer.peer_id.clone(), expected_hash.to_ascii_lowercase()))
+            })
+            .transpose()?
+    } else {
+        None
+    };
+
     let mut tickets = state.stream_tickets.write().await;
     let Some((token, ticket)) = tickets.issue(
         family,
@@ -24303,6 +24354,10 @@ async fn create_preview_stream_ticket(
     };
     if let Some((source_url, source_authorization, expected_hash)) = remote_mesh {
         if !tickets.configure_remote_mesh(&token, source_url, source_authorization, expected_hash) {
+            return Err("preview stream ticket could not be configured".to_owned());
+        }
+    } else if let Some((peer_identity, expected_hash)) = remote_overlay {
+        if !tickets.configure_remote_overlay(&token, peer_identity, expected_hash) {
             return Err("preview stream ticket could not be configured".to_owned());
         }
     }
@@ -28793,10 +28848,6 @@ async fn open_remote_mesh_preview_file(
     if matches!(ticket.source.as_str(), "local-share" | "transfer") {
         return Ok(None);
     }
-    let source_url = ticket
-        .source_url
-        .clone()
-        .ok_or_else(|| "mesh preview ticket has no executable source endpoint".to_owned())?;
     let expected_hash = ticket
         .expected_hash
         .as_deref()
@@ -28805,20 +28856,44 @@ async fn open_remote_mesh_preview_file(
     let path = safe_download_path(&state.config.state_dir, &relative).and_then(|path| {
         ensure_scoped_download_path(&state.config.state_dir, path.to_string_lossy().as_ref())
     })?;
-    multisource::fetch_single_verified_source(
-        multisource::RangeSource {
-            username: ticket
-                .peer_username
-                .clone()
-                .unwrap_or_else(|| "mesh-peer".to_owned()),
-            url: source_url,
-            authorization: ticket.source_authorization.clone(),
-        },
-        ticket.size,
-        expected_hash,
-        &path,
-    )
-    .await?;
+    if let Some(source_url) = ticket.source_url.clone() {
+        multisource::fetch_single_verified_source(
+            multisource::RangeSource {
+                username: ticket
+                    .peer_username
+                    .clone()
+                    .unwrap_or_else(|| "mesh-peer".to_owned()),
+                url: source_url,
+                authorization: ticket.source_authorization.clone(),
+            },
+            ticket.size,
+            expected_hash,
+            &path,
+        )
+        .await?;
+    } else if let Some(peer_identity) = ticket.overlay_peer_identity.as_deref() {
+        let peer = state
+            .config
+            .trusted_mesh_peers
+            .iter()
+            .find(|peer| peer.matches(peer_identity))
+            .ok_or_else(|| "trusted mesh preview peer is no longer configured".to_owned())?;
+        let local_username = pod_request_peer_id(state)
+            .await
+            .ok_or_else(|| "local mesh identity is unavailable".to_owned())?;
+        mesh_services::fetch_content(
+            peer,
+            &local_username,
+            &state.capability_signing_key,
+            &ticket.content_id,
+            ticket.size,
+            expected_hash,
+            &path,
+        )
+        .await?;
+    } else {
+        return Err("mesh preview ticket has no executable source endpoint".to_owned());
+    }
     let file = match open_download_file_for_read(&download_root(&state.config.state_dir), &path) {
         Ok(file) => file,
         Err(error) => {
@@ -51824,6 +51899,108 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn trusted_mesh_preview_fetches_frozen_overlay_content_ranges() {
+        use sha2::{Digest, Sha256};
+        use std::io::Read as _;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-trusted-mesh-preview-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("trusted mesh preview root");
+        let content = b"trusted frozen overlay mesh preview";
+        let content_path = root.join("trusted.flac");
+        std::fs::write(&content_path, content).expect("write trusted mesh content");
+
+        let (remote_state, _remote_receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "member=127.0.0.1:1"),
+        );
+        add_test_share(
+            &remote_state,
+            "Virtual/Trusted.flac",
+            &content_path,
+            content.len() as u64,
+        )
+        .await;
+        let gateway = Arc::new(
+            super::private_gateway::Gateway::load_or_create("127.0.0.1:0".parse().unwrap(), &root)
+                .await
+                .expect("trusted mesh gateway"),
+        );
+        let endpoint = gateway.bind();
+        let certificate_pin = gateway.certificate_sha256();
+        let trusted_peers = serde_json::json!([{
+            "peerId": "remote-peer",
+            "username": "tester",
+            "overlayEndpoint": endpoint.to_string(),
+            "certificateSha256": hex::encode(certificate_pin)
+        }]);
+        let (local_state, _local_receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSK_USERNAME", "member")
+                .with("SLSK_PASSWORD", "secret")
+                .with("SLSKR_TRUSTED_MESH_PEERS", &trusted_peers.to_string()),
+        );
+        let descriptor = slskr_client::capabilities::PeerCapabilityDescriptor::unsigned(
+            "member",
+            vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            Vec::new(),
+            std::time::Duration::from_secs(300),
+            &local_state.capability_signing_key,
+            std::time::SystemTime::now(),
+        )
+        .and_then(|descriptor| descriptor.sign(&local_state.capability_signing_key))
+        .expect("local trusted mesh capability");
+        remote_state
+            .mesh
+            .write()
+            .await
+            .update_capability(descriptor)
+            .expect("register trusted mesh caller capability");
+        let gateway_server = tokio::spawn(gateway.run(Arc::clone(&remote_state)));
+
+        let expected_hash = hex::encode(Sha256::digest(content));
+        let ticket_response = super::route_http_request(
+            "POST",
+            "/api/v0/mesh-streams/tickets",
+            None,
+            &format!(
+                r#"{{"contentId":"Virtual/Trusted.flac","filename":"Remote/Trusted.flac","peerId":"remote-peer","size":{},"expectedHash":"{expected_hash}"}}"#,
+                content.len()
+            ),
+            &local_state,
+        )
+        .await
+        .expect("create trusted overlay mesh ticket");
+        assert_eq!(ticket_response.status, "200 OK", "{}", ticket_response.body);
+        let ticket = serde_json::from_str::<serde_json::Value>(&ticket_response.body).unwrap()
+            ["ticket"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut preview = super::open_remote_mesh_preview_file(&local_state, "mesh", &ticket)
+            .await
+            .expect("fetch trusted overlay mesh content")
+            .expect("trusted overlay preview file");
+        let mut received = Vec::new();
+        preview
+            .file
+            .read_to_end(&mut received)
+            .expect("read trusted overlay preview");
+        assert_eq!(received, content);
+        assert_eq!(preview.length, content.len() as u64);
+        let cleanup = preview.cleanup_path.take().expect("preview cleanup path");
+        drop(preview);
+        std::fs::remove_file(cleanup).expect("remove trusted preview staging file");
+
+        gateway_server.abort();
+        let _ = std::fs::remove_dir_all(&remote_state.config.state_dir);
+        let _ = std::fs::remove_dir_all(&local_state.config.state_dir);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
