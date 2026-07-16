@@ -1,4 +1,7 @@
 import inspect
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from slskr import BatchClient, BatchBuilder, SlskrClient, WebSocketClient
 from slskr.batch import BatchOperation, BatchResponse, BatchResult
@@ -63,6 +66,52 @@ def test_websocket_client_uses_event_endpoint_and_tracks_topics():
     assert sorted(client.get_subscribed_topics()) == ["searches", "transfers"]
     client.unsubscribe("searches")
     assert client.get_subscribed_topics() == ["transfers"]
+
+
+@pytest.mark.asyncio
+async def test_websocket_client_rejects_duplicate_connect_and_bounds_messages():
+    ws = MagicMock()
+    ws.closed = False
+    ws.close = AsyncMock()
+    ws.__aiter__.return_value = iter(())
+    session = MagicMock()
+    session.ws_connect = AsyncMock(return_value=ws)
+    session.close = AsyncMock()
+
+    with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
+        client = WebSocketClient("https://example.test", "token")
+        await client.connect()
+        with pytest.raises(RuntimeError, match="already connected"):
+            await client.connect()
+
+        assert session.ws_connect.await_args.kwargs["max_msg_size"] == 64 * 1024
+        await client.disconnect()
+
+    ws.close.assert_awaited_once()
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_websocket_client_cleans_up_after_remote_close():
+    ws = MagicMock()
+    ws.closed = False
+    ws.close = AsyncMock()
+    ws.__aiter__.return_value = iter(())
+    session = MagicMock()
+    session.ws_connect = AsyncMock(return_value=ws)
+    session.close = AsyncMock()
+    connection_changes = []
+
+    with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
+        client = WebSocketClient("https://example.test", "token")
+        client.on_connection_change(connection_changes.append)
+        await client.connect()
+        await client._message_task
+
+    assert client.ws is None
+    assert client.session is None
+    assert connection_changes == [True, False]
+    session.close.assert_awaited_once()
 
 
 def test_api_error_helpers():

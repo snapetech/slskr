@@ -3,9 +3,12 @@ WebSocket client for real-time events
 """
 
 import asyncio
+import inspect
 import json
 from typing import Callable, Dict, Set, Optional
 import aiohttp
+
+MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024
 
 
 class WebSocketClient:
@@ -17,6 +20,9 @@ class WebSocketClient:
         self.debug = debug
         self.session: Optional[aiohttp.ClientSession] = None
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
+        self._connect_lock = asyncio.Lock()
+        self._message_task: Optional[asyncio.Task] = None
+        self._intentional_disconnect = False
         self.subscribed_topics: Set[str] = set()
 
         # Listeners
@@ -30,43 +36,47 @@ class WebSocketClient:
 
     async def connect(self):
         """Connect to WebSocket"""
-        try:
-            headers = {"Authorization": f"Bearer {self.token}"}
-            self.session = aiohttp.ClientSession()
+        async with self._connect_lock:
+            if self.is_connected():
+                raise RuntimeError("WebSocket is already connected")
+            await self._close_resources()
+            self._intentional_disconnect = False
+            try:
+                headers = {"Authorization": f"Bearer {self.token}"}
+                session = aiohttp.ClientSession()
+                self.session = session
 
-            self.ws = await self.session.ws_connect(
-                self.url,
-                headers=headers,
-                autoclose=False,
-            )
+                self.ws = await session.ws_connect(
+                    self.url,
+                    headers=headers,
+                    autoclose=False,
+                    max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+                )
 
-            self.reconnect_attempts = 0
-            self._notify_connection_listeners(True)
+                self.reconnect_attempts = 0
+                self._notify_connection_listeners(True)
 
-            # Start message handler
-            asyncio.create_task(self._handle_messages())
+                # Start message handler
+                self._message_task = asyncio.create_task(self._handle_messages(self.ws))
 
-        except Exception as e:
-            if self.session:
-                await self.session.close()
-                self.session = None
-            self._notify_error_listeners(e)
-            raise
+            except Exception as e:
+                await self._close_resources()
+                self._notify_error_listeners(e)
+                raise
 
     async def disconnect(self):
         """Disconnect from WebSocket"""
-        if self.ws:
-            await self.ws.close()
-            self.ws = None
-        if self.session:
-            await self.session.close()
-            self.session = None
-        self._notify_connection_listeners(False)
+        async with self._connect_lock:
+            was_connected = self.is_connected()
+            self._intentional_disconnect = True
+            await self._close_resources()
+            if was_connected:
+                self._notify_connection_listeners(False)
 
-    async def _handle_messages(self):
+    async def _handle_messages(self, ws: aiohttp.ClientWebSocketResponse):
         """Handle incoming messages"""
         try:
-            async for msg in self.ws:
+            async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     await self._process_message(msg.data)
                 elif msg.type in (
@@ -75,7 +85,33 @@ class WebSocketClient:
                 ):
                     break
         except Exception as e:
-            self._notify_error_listeners(e)
+            if not self._intentional_disconnect:
+                self._notify_error_listeners(e)
+        finally:
+            if self.ws is ws:
+                self.ws = None
+                if self.session:
+                    await self.session.close()
+                    self.session = None
+                self._message_task = None
+                if not self._intentional_disconnect:
+                    self._notify_connection_listeners(False)
+
+    async def _close_resources(self):
+        task = self._message_task
+        self._message_task = None
+        if task and task is not asyncio.current_task():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        if self.ws:
+            await self.ws.close()
+            self.ws = None
+        if self.session:
+            await self.session.close()
+            self.session = None
 
     async def _process_message(self, data: str):
         """Process incoming message"""
@@ -182,7 +218,7 @@ class WebSocketClient:
 
     async def _call_listener(self, listener: Callable, *args):
         """Call listener function"""
-        if asyncio.iscoroutinefunction(listener):
+        if inspect.iscoroutinefunction(listener):
             await listener(*args)
         else:
             listener(*args)
