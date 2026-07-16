@@ -15,14 +15,16 @@ const maxWebSocketMessageBytes = 64 * 1024
 
 // WebSocketClient represents a WebSocket connection to the API
 type WebSocketClient struct {
-	url              string
-	token            string
-	debug            bool
-	mu               sync.RWMutex
-	connected        bool
-	subscriptionMu   sync.RWMutex
-	subscribedTopics map[string]bool
-	conn             *websocket.Conn
+	url               string
+	token             string
+	debug             bool
+	mu                sync.RWMutex
+	connected         bool
+	connecting        bool
+	disconnectPending bool
+	subscriptionMu    sync.RWMutex
+	subscribedTopics  map[string]bool
+	conn              *websocket.Conn
 
 	// Channels for events
 	eventChannels map[string][]chan interface{}
@@ -51,6 +53,12 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 		w.mu.Unlock()
 		return fmt.Errorf("already connected")
 	}
+	if w.connecting {
+		w.mu.Unlock()
+		return fmt.Errorf("connection already in progress")
+	}
+	w.connecting = true
+	w.disconnectPending = false
 	w.mu.Unlock()
 
 	headers := http.Header{}
@@ -60,11 +68,21 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, w.url, headers)
 	if err != nil {
+		w.mu.Lock()
+		w.connecting = false
+		w.mu.Unlock()
 		return err
 	}
 	conn.SetReadLimit(maxWebSocketMessageBytes)
 
 	w.mu.Lock()
+	w.connecting = false
+	if w.disconnectPending {
+		w.disconnectPending = false
+		w.mu.Unlock()
+		_ = conn.Close()
+		return fmt.Errorf("connection canceled by disconnect")
+	}
 	w.conn = conn
 	w.connected = true
 	w.mu.Unlock()
@@ -77,7 +95,7 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 	w.notifyConnectionListeners(true)
 
 	// Start message handler
-	go w.handleMessages()
+	go w.handleMessages(conn)
 
 	return nil
 }
@@ -86,6 +104,11 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 	w.mu.Lock()
 	if !w.connected {
+		if w.connecting {
+			w.disconnectPending = true
+			w.mu.Unlock()
+			return nil
+		}
 		w.mu.Unlock()
 		return fmt.Errorf("not connected")
 	}
@@ -202,24 +225,11 @@ func (w *WebSocketClient) OnError(ch chan error) {
 // Private Methods
 // ============================================================================
 
-func (w *WebSocketClient) handleMessages() {
+func (w *WebSocketClient) handleMessages(conn *websocket.Conn) {
 	for {
-		w.mu.RLock()
-		conn := w.conn
-		w.mu.RUnlock()
-		if conn == nil {
-			return
-		}
-
 		_, data, err := conn.ReadMessage()
 		if err != nil {
-			w.mu.Lock()
-			wasConnected := w.connected
-			w.connected = false
-			w.conn = nil
-			w.mu.Unlock()
-
-			if wasConnected {
+			if w.clearConnectionIfCurrent(conn) {
 				w.notifyConnectionListeners(false)
 				w.notifyErrorListeners(err)
 			}
@@ -233,6 +243,17 @@ func (w *WebSocketClient) handleMessages() {
 		}
 		w.processMessage(msg)
 	}
+}
+
+func (w *WebSocketClient) clearConnectionIfCurrent(conn *websocket.Conn) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.connected || w.conn != conn {
+		return false
+	}
+	w.connected = false
+	w.conn = nil
+	return true
 }
 
 func (w *WebSocketClient) writeJSON(msg map[string]interface{}) error {
