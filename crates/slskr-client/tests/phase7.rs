@@ -272,6 +272,28 @@ fn private_message_inbox_returns_ack_messages() {
 }
 
 #[test]
+fn private_message_inbox_acknowledges_replays_without_storing_duplicates() {
+    let mut inbox = PrivateMessageInbox::new();
+    let original = PrivateMessage {
+        id: 42,
+        timestamp: 123,
+        username: "alice".to_owned(),
+        message: "original".to_owned(),
+        is_new: true,
+    };
+    let mut replay = original.clone();
+    replay.message = "replayed payload".to_owned();
+
+    for message in [original.clone(), replay] {
+        assert_eq!(
+            inbox.apply_server_message(&ServerMessage::MessageUserResponse(message)),
+            Some(ServerMessage::MessageAcked { id: 42 })
+        );
+    }
+    assert_eq!(inbox.messages(), &[original]);
+}
+
+#[test]
 fn social_message_histories_evict_oldest_entries_at_limits() {
     let mut rooms = RoomState::new();
     for index in 0..(MAX_STORED_ROOM_MESSAGES + 5) {

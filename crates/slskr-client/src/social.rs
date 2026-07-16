@@ -253,8 +253,10 @@ impl PrivateMessageInbox {
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> Option<ServerMessage> {
         match message {
             ServerMessage::MessageUserResponse(message) => {
-                self.messages.push(message.clone());
-                retain_newest(&mut self.messages, MAX_STORED_PRIVATE_MESSAGES);
+                if !self.messages.iter().any(|stored| stored.id == message.id) {
+                    self.messages.push(message.clone());
+                    retain_newest(&mut self.messages, MAX_STORED_PRIVATE_MESSAGES);
+                }
                 Some(ServerMessage::MessageAcked { id: message.id })
             }
             _ => None,
