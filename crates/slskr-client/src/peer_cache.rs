@@ -48,7 +48,7 @@ impl<S> PeerConnectionCache<S> {
         username: impl Into<String>,
         connection: PeerMessageConnection<S>,
     ) -> Result<Option<PeerMessageConnection<S>>, ClientError> {
-        let username = username.into();
+        let username = username_key(&username.into());
         let mut connections = self.connections.lock().await;
         if connections.len() >= self.max_connections && !connections.contains_key(&username) {
             return Err(ClientError::PeerConnectionCacheFull {
@@ -59,11 +59,17 @@ impl<S> PeerConnectionCache<S> {
     }
 
     pub async fn remove(&self, username: &str) -> Option<PeerMessageConnection<S>> {
-        self.connections.lock().await.remove(username)
+        self.connections
+            .lock()
+            .await
+            .remove(&username_key(username))
     }
 
     pub async fn contains(&self, username: &str) -> bool {
-        self.connections.lock().await.contains_key(username)
+        self.connections
+            .lock()
+            .await
+            .contains_key(&username_key(username))
     }
 
     pub async fn len(&self) -> usize {
@@ -85,7 +91,7 @@ where
         message: &PeerMessage,
     ) -> Result<bool, ClientError> {
         let mut connections = self.connections.lock().await;
-        let Some(connection) = connections.get_mut(username) else {
+        let Some(connection) = connections.get_mut(&username_key(username)) else {
             return Ok(false);
         };
 
@@ -95,10 +101,14 @@ where
 
     pub async fn receive_from(&self, username: &str) -> Result<Option<PeerMessage>, ClientError> {
         let mut connections = self.connections.lock().await;
-        let Some(connection) = connections.get_mut(username) else {
+        let Some(connection) = connections.get_mut(&username_key(username)) else {
             return Ok(None);
         };
 
         Ok(Some(connection.receive().await?))
     }
+}
+
+fn username_key(username: &str) -> String {
+    username.to_ascii_lowercase()
 }

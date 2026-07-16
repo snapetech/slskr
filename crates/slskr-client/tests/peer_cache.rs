@@ -102,3 +102,31 @@ async fn cache_rejects_new_peers_at_limit_but_allows_replacement() {
     assert_eq!(cache.len().await, 1);
     assert!(cache.contains("first").await);
 }
+
+#[tokio::test]
+async fn cache_treats_username_casing_as_one_peer() {
+    let cache = PeerConnectionCache::with_max_connections(1);
+    let (first, _) = duplex(64);
+    cache
+        .insert("Alice", PeerMessageConnection::new(first))
+        .await
+        .unwrap();
+    assert!(cache.contains("ALICE").await);
+
+    let (replacement, wire) = duplex(256);
+    assert!(cache
+        .insert("alice", PeerMessageConnection::new(replacement))
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(cache.len().await, 1);
+
+    let mut receiver = PeerMessageConnection::new(wire);
+    let message = PeerMessage::QueueUpload {
+        filename: "Music/file.flac".to_owned(),
+    };
+    assert!(cache.send_to("aLiCe", &message).await.unwrap());
+    assert_eq!(receiver.receive().await.unwrap(), message);
+    assert!(cache.remove("ALICE").await.is_some());
+    assert!(cache.is_empty().await);
+}
