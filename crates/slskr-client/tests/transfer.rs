@@ -172,6 +172,33 @@ async fn receive_file_rejects_oversized_remaining_before_allocation() {
     uploader_task.await.unwrap();
 }
 
+#[tokio::test]
+async fn receive_file_rejects_range_that_does_not_complete_negotiated_size() {
+    let (downloader, _uploader) = duplex(64);
+    let mut downloader = FileTransferConnection::new(downloader);
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(5),
+        }))
+        .unwrap();
+
+    let error = transfer
+        .receive_file_from(&mut downloader, 2, 2)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::TransferSizeMismatch {
+            expected: 5,
+            actual: 4
+        }
+    ));
+    assert_eq!(transfer.state, DownloadState::Accepted { size: Some(5) });
+}
+
 #[test]
 fn upload_transfer_request_marks_requested() {
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 100);

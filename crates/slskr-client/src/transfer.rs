@@ -120,6 +120,14 @@ impl DownloadTransfer {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        if let Some(expected) = self.expected_size() {
+            let remaining = u64::try_from(remaining).unwrap_or(u64::MAX);
+            let actual = offset.saturating_add(remaining);
+            if actual != expected {
+                return Err(ClientError::TransferSizeMismatch { expected, actual });
+            }
+        }
+
         let token = connection.receive_token().await?;
         self.validate_token(token)?;
         connection.send_offset(offset).await?;
@@ -158,6 +166,13 @@ impl DownloadTransfer {
                 expected: self.token,
                 received,
             })
+        }
+    }
+
+    fn expected_size(&self) -> Option<u64> {
+        match &self.state {
+            DownloadState::Requested { size } | DownloadState::Accepted { size } => *size,
+            _ => None,
         }
     }
 
