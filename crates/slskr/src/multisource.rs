@@ -20,6 +20,8 @@ use tokio::{
     time::timeout,
 };
 
+use crate::utils::{is_blocked_outbound_ipv4, is_non_global_special_use_ipv6, nat64_embedded_ipv4};
+
 pub const DEFAULT_CHUNK_SIZE: u64 = 512 * 1024;
 const MIN_CHUNK_SIZE: u64 = 64 * 1024;
 const MAX_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
@@ -744,33 +746,27 @@ fn blocked_source_ip(ip: IpAddr) -> bool {
 }
 
 fn blocked_source_ipv4(ip: Ipv4Addr) -> bool {
-    let octets = ip.octets();
-    ip.is_private()
-        || ip.is_loopback()
-        || ip.is_link_local()
-        || ip.is_broadcast()
-        || ip.is_documentation()
-        || ip.is_unspecified()
-        || ip.is_multicast()
-        || octets[0] == 0
-        || octets[0] >= 224
-        || (octets[0] == 100 && (64..=127).contains(&octets[1]))
-        || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
-        || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
+    is_blocked_outbound_ipv4(ip)
 }
 
 fn blocked_source_ipv6(ip: Ipv6Addr) -> bool {
     if let Some(ipv4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
         return blocked_source_ipv4(ipv4);
     }
+    if let Some(ipv4) = nat64_embedded_ipv4(ip) {
+        return blocked_source_ipv4(ipv4);
+    }
     let segments = ip.segments();
     ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
+        || segments[0] == 0x2002
+        || (segments[0] == 0x2001 && segments[1] == 0)
         || (segments[0] & 0xfe00) == 0xfc00
         || (segments[0] & 0xffc0) == 0xfe80
         || (segments[0] & 0xffc0) == 0xfec0
         || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+        || is_non_global_special_use_ipv6(ip)
 }
 
 fn millis(duration: Duration) -> u64 {
@@ -796,6 +792,23 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(error, "source host resolution timed out");
+    }
+
+    #[test]
+    fn source_filter_blocks_ipv4_transition_and_special_use_ipv6() {
+        for address in [
+            "::ffff:127.0.0.1",
+            "2002:c0a8:0101::1",
+            "2001:0000:4136:e378::1",
+            "64:ff9b::7f00:1",
+            "64:ff9b:1::1",
+            "100::1",
+            "2001:2::1",
+            "2001:10::1",
+            "2001:20::1",
+        ] {
+            assert!(blocked_source_ip(address.parse().unwrap()), "{address}");
+        }
     }
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
