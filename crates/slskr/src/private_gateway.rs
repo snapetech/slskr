@@ -1048,8 +1048,18 @@ fn load_or_create_certificate(
 ) -> Result<(CertificateDer<'static>, PrivatePkcs8KeyDer<'static>), String> {
     let certificate_path = state_dir.join("overlay-certificate.der");
     let private_key_path = state_dir.join("overlay-private-key.der");
-    let certificate = read_identity_file(&certificate_path, "certificate", MAX_CERTIFICATE_BYTES)?;
-    let private_key = read_identity_file(&private_key_path, "private key", MAX_PRIVATE_KEY_BYTES)?;
+    let certificate = read_identity_file(
+        &certificate_path,
+        "certificate",
+        MAX_CERTIFICATE_BYTES,
+        false,
+    )?;
+    let private_key = read_identity_file(
+        &private_key_path,
+        "private key",
+        MAX_PRIVATE_KEY_BYTES,
+        true,
+    )?;
     match (certificate, private_key) {
         (Some(certificate), Some(private_key)) => {
             return Ok((
@@ -1079,7 +1089,14 @@ fn load_or_create_certificate(
     ))
 }
 
-fn read_identity_file(path: &Path, label: &str, max_bytes: u64) -> Result<Option<Vec<u8>>, String> {
+fn read_identity_file(
+    path: &Path,
+    label: &str,
+    max_bytes: u64,
+    require_private_permissions: bool,
+) -> Result<Option<Vec<u8>>, String> {
+    #[cfg(not(unix))]
+    let _ = require_private_permissions;
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1106,6 +1123,15 @@ fn read_identity_file(path: &Path, label: &str, max_bytes: u64) -> Result<Option
         .map_err(|error| format!("overlay {label} metadata failed: {error}"))?;
     if !opened_metadata.is_file() {
         return Err(format!("overlay {label} must be a regular file"));
+    }
+    #[cfg(unix)]
+    if require_private_permissions {
+        use std::os::unix::fs::PermissionsExt;
+        if opened_metadata.permissions().mode() & 0o077 != 0 {
+            return Err(format!(
+                "overlay {label} must not be accessible by group or other users"
+            ));
+        }
     }
     if opened_metadata.len() > max_bytes {
         return Err(format!("overlay {label} is too large"));
@@ -1270,6 +1296,22 @@ mod tests {
         fs::write(root.join("overlay-private-key.der"), [1_u8]).unwrap();
         let error = load_or_create_certificate(&root).unwrap_err();
         assert!(error.contains("certificate must be a regular file"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exposed_gateway_private_key_is_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temporary_directory("gateway-exposed-private-key");
+        let path = root.join("overlay-private-key.der");
+        fs::write(&path, [1_u8]).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        let error = read_identity_file(&path, "private key", MAX_PRIVATE_KEY_BYTES, true)
+            .expect_err("reject exposed private key");
+        assert!(error.contains("must not be accessible by group or other users"));
         fs::remove_dir_all(root).unwrap();
     }
 }
