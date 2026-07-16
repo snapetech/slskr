@@ -173,6 +173,27 @@ func TestWebSocketSerializesConcurrentSubscriptionWrites(t *testing.T) {
 	}
 }
 
+func TestWebSocketRollsBackFailedSubscriptionTransitions(t *testing.T) {
+	client := NewClient("http://example.test", "token").NewWebSocketClient(false)
+	client.connected = true
+
+	if err := client.Subscribe("searches"); err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("expected failed subscribe write, got %v", err)
+	}
+	if topics := client.GetSubscribedTopics(); len(topics) != 0 {
+		t.Fatalf("failed subscribe changed local topics: %v", topics)
+	}
+
+	client.subscribedTopics["transfers"] = true
+	if err := client.Unsubscribe("transfers"); err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("expected failed unsubscribe write, got %v", err)
+	}
+	topics := client.GetSubscribedTopics()
+	if len(topics) != 1 || topics[0] != "transfers" {
+		t.Fatalf("failed unsubscribe changed local topics: %v", topics)
+	}
+}
+
 func TestWebSocketConnectRejectsConcurrentDial(t *testing.T) {
 	requestStarted := make(chan struct{})
 	releaseUpgrade := make(chan struct{})

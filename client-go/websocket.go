@@ -192,6 +192,7 @@ func (w *WebSocketClient) IsConnected() bool {
 // Subscribe subscribes to event topics
 func (w *WebSocketClient) Subscribe(topics ...string) error {
 	w.subscriptionMu.Lock()
+	defer w.subscriptionMu.Unlock()
 	newTopics := make([]string, 0, len(topics))
 	for _, topic := range topics {
 		if w.subscribedTopics[topic] {
@@ -200,7 +201,6 @@ func (w *WebSocketClient) Subscribe(topics ...string) error {
 		w.subscribedTopics[topic] = true
 		newTopics = append(newTopics, topic)
 	}
-	w.subscriptionMu.Unlock()
 	if len(newTopics) == 0 {
 		return nil
 	}
@@ -219,6 +219,9 @@ func (w *WebSocketClient) Subscribe(topics ...string) error {
 
 	if w.IsConnected() {
 		if err := w.writeJSON(msg); err != nil {
+			for _, topic := range newTopics {
+				delete(w.subscribedTopics, topic)
+			}
 			return err
 		}
 	}
@@ -229,6 +232,7 @@ func (w *WebSocketClient) Subscribe(topics ...string) error {
 // Unsubscribe unsubscribes from event topics
 func (w *WebSocketClient) Unsubscribe(topics ...string) error {
 	w.subscriptionMu.Lock()
+	defer w.subscriptionMu.Unlock()
 	removedTopics := make([]string, 0, len(topics))
 	for _, topic := range topics {
 		if !w.subscribedTopics[topic] {
@@ -237,7 +241,6 @@ func (w *WebSocketClient) Unsubscribe(topics ...string) error {
 		delete(w.subscribedTopics, topic)
 		removedTopics = append(removedTopics, topic)
 	}
-	w.subscriptionMu.Unlock()
 	if len(removedTopics) == 0 {
 		return nil
 	}
@@ -254,6 +257,9 @@ func (w *WebSocketClient) Unsubscribe(topics ...string) error {
 	}
 	if w.IsConnected() {
 		if err := w.writeJSON(msg); err != nil {
+			for _, topic := range removedTopics {
+				w.subscribedTopics[topic] = true
+			}
 			return err
 		}
 	}
