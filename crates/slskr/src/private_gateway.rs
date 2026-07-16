@@ -52,6 +52,41 @@ const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_POD_MESSAGE_BODY_BYTES: usize = 4 * 1024;
+
+struct OverlayLiveness {
+    last_inbound: Instant,
+    last_ping: Instant,
+}
+
+impl OverlayLiveness {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            last_inbound: now,
+            last_ping: now,
+        }
+    }
+
+    fn record_inbound(&mut self) {
+        self.last_inbound = Instant::now();
+    }
+
+    fn record_ping(&mut self) {
+        self.last_ping = Instant::now();
+    }
+
+    fn is_idle(&self) -> bool {
+        self.last_inbound.elapsed() >= OVERLAY_IDLE_TIMEOUT
+    }
+
+    fn read_wait(&self) -> Duration {
+        OVERLAY_MESSAGE_READ_TIMEOUT.min(
+            OVERLAY_KEEPALIVE_INTERVAL
+                .checked_sub(self.last_ping.elapsed())
+                .unwrap_or(Duration::ZERO),
+        )
+    }
+}
 const MAX_MESH_CONTENT_BYTES: usize = 32 * 1024;
 const MAX_CONTENT_ID_BYTES: usize = 512;
 const MAX_SHADOW_MBID_BYTES: usize = 100;
@@ -187,22 +222,17 @@ impl Gateway {
             .map_err(|error| format!("overlay acknowledgement failed: {error}"))?;
 
         let result = async {
-            let mut last_activity = Instant::now();
-            let mut last_ping = Instant::now();
+            let mut liveness = OverlayLiveness::new();
             loop {
-                if last_activity.elapsed() >= OVERLAY_IDLE_TIMEOUT {
+                if liveness.is_idle() {
                     return Err("overlay connection was idle too long".to_owned());
                 }
-                let keepalive_wait = OVERLAY_KEEPALIVE_INTERVAL
-                    .checked_sub(last_ping.elapsed())
-                    .unwrap_or(Duration::ZERO);
-                let read_wait = OVERLAY_MESSAGE_READ_TIMEOUT.min(keepalive_wait);
-                let raw = match timeout(read_wait, framer.read_raw()).await {
+                let raw = match timeout(liveness.read_wait(), framer.read_raw()).await {
                     Ok(result) => {
-                        last_activity = Instant::now();
+                        liveness.record_inbound();
                         result.map_err(|error| format!("overlay read failed: {error}"))?
                     }
-                    Err(_) if last_ping.elapsed() >= OVERLAY_KEEPALIVE_INTERVAL => {
+                    Err(_) if liveness.last_ping.elapsed() >= OVERLAY_KEEPALIVE_INTERVAL => {
                         let timestamp = i64::try_from(super::unix_timestamp_millis())
                             .map_err(|_| "overlay clock is out of range".to_owned())?;
                         framer
@@ -214,8 +244,7 @@ impl Gateway {
                             })
                             .await
                             .map_err(|error| format!("overlay keepalive failed: {error}"))?;
-                        last_ping = Instant::now();
-                        last_activity = last_ping;
+                        liveness.record_ping();
                         continue;
                     }
                     Err(_) => continue,
@@ -1156,6 +1185,16 @@ mod tests {
         }
         .validate()
         .is_ok());
+
+        let mut liveness = OverlayLiveness {
+            last_inbound: Instant::now() - OVERLAY_IDLE_TIMEOUT,
+            last_ping: Instant::now() - OVERLAY_KEEPALIVE_INTERVAL,
+        };
+        assert!(liveness.is_idle());
+        liveness.record_ping();
+        assert!(liveness.is_idle(), "outbound pings are not peer activity");
+        liveness.record_inbound();
+        assert!(!liveness.is_idle());
     }
 
     #[test]
