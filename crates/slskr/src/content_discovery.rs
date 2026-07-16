@@ -107,7 +107,7 @@ impl ContentDiscoveryStore {
             }
             normalized_shadow.push(record);
         }
-        dedupe_hash_entries(&mut normalized_hashes);
+        dedupe_hash_entries(&mut normalized_hashes)?;
         dedupe_shadow_records(&mut normalized_shadow);
         let latest_seq = state.latest_seq.max(
             normalized_hashes
@@ -221,11 +221,22 @@ impl ContentDiscoveryStore {
             .ok_or_else(|| "hash database sequence is exhausted".to_owned())?;
         let mut merged = 0;
         for mut incoming in entries {
-            let existing = self.hash_entries.iter().position(|entry| {
-                (!incoming.flac_key.is_empty()
+            let same_key = self.hash_entries.iter().position(|entry| {
+                !incoming.flac_key.is_empty()
                     && entry.size == incoming.size
-                    && entry.flac_key.eq_ignore_ascii_case(&incoming.flac_key))
-                    || same_hash_identity(entry, &incoming)
+                    && entry.flac_key.eq_ignore_ascii_case(&incoming.flac_key)
+            });
+            if same_key
+                .is_some_and(|index| !same_hash_identity(&self.hash_entries[index], &incoming))
+            {
+                self.hash_entries = previous_entries;
+                self.latest_seq = previous_seq;
+                return Err("flacKey and size conflict with existing SHA-256 metadata".to_owned());
+            }
+            let existing = same_key.or_else(|| {
+                self.hash_entries
+                    .iter()
+                    .position(|entry| same_hash_identity(entry, &incoming))
             });
             self.latest_seq += 1;
             incoming.seq_id = self.latest_seq;
@@ -440,14 +451,21 @@ fn merge_missing_hash_metadata(incoming: &mut HashDbEntry, existing: &HashDbEntr
     }
 }
 
-fn dedupe_hash_entries(entries: &mut Vec<HashDbEntry>) {
+fn dedupe_hash_entries(entries: &mut Vec<HashDbEntry>) -> Result<(), String> {
     let mut deduped: Vec<HashDbEntry> = Vec::with_capacity(entries.len());
     for entry in entries.drain(..) {
-        if let Some(index) = deduped.iter().position(|current| {
-            (!entry.flac_key.is_empty()
+        let same_key = deduped.iter().position(|current| {
+            !entry.flac_key.is_empty()
                 && current.size == entry.size
-                && current.flac_key.eq_ignore_ascii_case(&entry.flac_key))
-                || same_hash_identity(current, &entry)
+                && current.flac_key.eq_ignore_ascii_case(&entry.flac_key)
+        });
+        if same_key.is_some_and(|index| !same_hash_identity(&deduped[index], &entry)) {
+            return Err("flacKey and size conflict with persisted SHA-256 metadata".to_owned());
+        }
+        if let Some(index) = same_key.or_else(|| {
+            deduped
+                .iter()
+                .position(|current| same_hash_identity(current, &entry))
         }) {
             deduped[index] = entry;
         } else {
@@ -455,6 +473,7 @@ fn dedupe_hash_entries(entries: &mut Vec<HashDbEntry>) {
         }
     }
     *entries = deduped;
+    Ok(())
 }
 
 fn dedupe_shadow_records(records: &mut Vec<ShadowIndexRecord>) {
@@ -629,6 +648,52 @@ mod tests {
             Some(HASH.to_owned())
         );
         assert_eq!(store.hashes_by_size(999)[0].file_sha256, attacker_hash);
+    }
+
+    #[test]
+    fn conflicting_hash_cannot_replace_matching_flac_key_and_size() {
+        let mut store = ContentDiscoveryStore::in_memory();
+        let legitimate = hash_entry(HASH, "recording-1");
+        store
+            .merge_hash_entries(vec![legitimate])
+            .expect("merge legitimate hash");
+        let latest_seq = store.latest_seq();
+        let stored_legitimate = store.hash_entries().to_vec();
+
+        let attacker_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let poisoned = hash_entry(attacker_hash, "recording-2");
+        let mut unrelated = hash_entry(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "unrelated",
+        );
+        unrelated.flac_key = "unrelated-key".to_owned();
+        let error = store
+            .merge_hash_entries(vec![unrelated, poisoned])
+            .expect_err("reject conflicting hash metadata atomically");
+
+        assert_eq!(
+            error,
+            "flacKey and size conflict with existing SHA-256 metadata"
+        );
+        assert_eq!(store.hash_entries(), stored_legitimate);
+        assert_eq!(store.latest_seq(), latest_seq);
+    }
+
+    #[test]
+    fn persisted_conflicting_flac_key_metadata_is_rejected() {
+        let mut entries = vec![
+            hash_entry(HASH, "recording-1"),
+            hash_entry(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "recording-2",
+            ),
+        ];
+        let error = dedupe_hash_entries(&mut entries)
+            .expect_err("persisted collision must not select the last record");
+        assert_eq!(
+            error,
+            "flacKey and size conflict with persisted SHA-256 metadata"
+        );
     }
 
     #[test]
