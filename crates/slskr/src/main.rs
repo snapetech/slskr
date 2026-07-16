@@ -9810,6 +9810,85 @@ struct LibraryHealthScanRecord {
     updated_at: u64,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct LibraryHealthIssueQuery {
+    library_path: String,
+    types: Vec<String>,
+    severities: Vec<String>,
+    statuses: Vec<String>,
+    musicbrainz_release_id: String,
+    limit: usize,
+    offset: usize,
+}
+
+impl LibraryHealthIssueQuery {
+    fn from_query(query: Option<&str>) -> Result<Self, String> {
+        let params = query_params(query.unwrap_or_default());
+        let values = |name: &str| {
+            params
+                .iter()
+                .filter(|(key, _)| key.eq_ignore_ascii_case(name))
+                .flat_map(|(_, value)| value.split(','))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let canonicalize = |name: &str, allowed: &[&str]| -> Result<Vec<String>, String> {
+            values(name)
+                .into_iter()
+                .map(|value| {
+                    allowed
+                        .iter()
+                        .find(|candidate| candidate.eq_ignore_ascii_case(&value))
+                        .map(|candidate| (*candidate).to_owned())
+                        .ok_or_else(|| format!("invalid {name} value: {value}"))
+                })
+                .collect()
+        };
+        let limit = query_bounded_usize(query, "limit", 1, 250)
+            .map_err(|()| "limit must be between 1 and 250".to_owned())?
+            .unwrap_or(100);
+        let offset = query_bounded_usize(query, "offset", 0, usize::MAX)
+            .map_err(|()| "offset must be non-negative".to_owned())?
+            .unwrap_or(0);
+        Ok(Self {
+            library_path: values("libraryPath").into_iter().next().unwrap_or_default(),
+            types: canonicalize(
+                "types",
+                &[
+                    "SuspectedTranscode",
+                    "NonCanonicalVariant",
+                    "TrackNotInTaggedRelease",
+                    "MissingTrackInRelease",
+                    "CorruptedFile",
+                    "MissingMetadata",
+                    "MultipleVariants",
+                    "WrongDuration",
+                ],
+            )?,
+            severities: canonicalize("severities", &["Info", "Low", "Medium", "High", "Critical"])?,
+            statuses: canonicalize(
+                "statuses",
+                &[
+                    "Detected",
+                    "Acknowledged",
+                    "Ignored",
+                    "Fixing",
+                    "Resolved",
+                    "Failed",
+                ],
+            )?,
+            musicbrainz_release_id: values("musicBrainzReleaseId")
+                .into_iter()
+                .next()
+                .unwrap_or_default(),
+            limit,
+            offset,
+        })
+    }
+}
+
 impl LibraryHealthScanRecord {
     fn json(&self) -> String {
         serde_json::json!({
@@ -10126,7 +10205,8 @@ impl LibraryStore {
     }
 
     fn health_api_issues(&self) -> Vec<serde_json::Value> {
-        self.health_issues()
+        let mut issues = self
+            .health_issues()
             .into_iter()
             .map(|issue| {
                 let issue_id = issue
@@ -10171,28 +10251,57 @@ impl LibraryStore {
                     "resolvedBy": "",
                 })
             })
-            .collect()
+            .collect::<Vec<_>>();
+        issues.sort_by(|left, right| {
+            right["detectedAt"]
+                .as_str()
+                .cmp(&left["detectedAt"].as_str())
+                .then_with(|| left["issueId"].as_str().cmp(&right["issueId"].as_str()))
+        });
+        issues
     }
 
-    fn health_issues_json(&self, limit: usize, offset: usize) -> String {
-        let issues = self.health_api_issues();
+    fn health_issues_json(&self, filter: &LibraryHealthIssueQuery) -> String {
+        let issues =
+            self.health_api_issues()
+                .into_iter()
+                .filter(|issue| {
+                    (filter.types.is_empty()
+                        || filter
+                            .types
+                            .iter()
+                            .any(|value| value == issue["type"].as_str().unwrap_or_default()))
+                        && (filter.severities.is_empty()
+                            || filter.severities.iter().any(|value| {
+                                value == issue["severity"].as_str().unwrap_or_default()
+                            }))
+                        && (filter.statuses.is_empty()
+                            || filter
+                                .statuses
+                                .iter()
+                                .any(|value| value == issue["status"].as_str().unwrap_or_default()))
+                        && (filter.musicbrainz_release_id.is_empty()
+                            || filter.musicbrainz_release_id
+                                == issue["musicBrainzReleaseId"].as_str().unwrap_or_default())
+                })
+                .collect::<Vec<_>>();
         let total_count = issues.len();
         let issues = issues
             .into_iter()
-            .skip(offset)
-            .take(limit)
+            .skip(filter.offset)
+            .take(filter.limit)
             .collect::<Vec<_>>();
         serde_json::json!({
             "issues": issues,
             "totalCount": total_count,
             "filter": {
-                "libraryPath": "",
-                "types": [],
-                "severities": [],
-                "statuses": [],
-                "musicBrainzReleaseId": "",
-                "limit": limit,
-                "offset": offset,
+                "libraryPath": filter.library_path,
+                "types": filter.types,
+                "severities": filter.severities,
+                "statuses": filter.statuses,
+                "musicBrainzReleaseId": filter.musicbrainz_release_id,
+                "limit": filter.limit,
+                "offset": filter.offset,
             },
         })
         .to_string()
@@ -10214,12 +10323,14 @@ impl LibraryStore {
     fn health_issue_artist_summaries(&self, limit: usize) -> Vec<serde_json::Value> {
         let mut grouped = std::collections::BTreeMap::<String, usize>::new();
         for issue in self.health_issues() {
-            let artist = issue
+            let Some(artist) = issue
                 .get("artist")
                 .and_then(serde_json::Value::as_str)
                 .filter(|artist| !artist.trim().is_empty())
-                .unwrap_or("(unknown)")
-                .to_owned();
+            else {
+                continue;
+            };
+            let artist = artist.to_owned();
             *grouped.entry(artist).or_default() += 1;
         }
         let mut rows = grouped
@@ -10243,8 +10354,8 @@ impl LibraryStore {
     }
 
     fn health_issues_by_artist_json(&self, limit: usize) -> String {
-        let total_artists = self.health_issue_artist_summaries(usize::MAX).len();
         let rows = self.health_issue_artist_summaries(limit);
+        let total_artists = rows.len();
         serde_json::json!({
             "groups": rows,
             "totalArtists": total_artists,
@@ -10253,26 +10364,28 @@ impl LibraryStore {
     }
 
     fn health_issues_by_release_json(&self, limit: usize) -> String {
-        let mut rows = self
-            .records
-            .iter()
-            .filter(|item| {
-                item.artist.trim().is_empty()
-                    || item.title.trim().is_empty()
-                    || item.kind.trim().is_empty()
-            })
-            .map(|item| {
-                let count = [
-                    item.artist.trim().is_empty(),
-                    item.title.trim().is_empty(),
-                    item.kind.trim().is_empty(),
-                ]
-                .into_iter()
-                .filter(|missing| *missing)
-                .count();
+        let mut grouped = BTreeMap::<(String, String), usize>::new();
+        for item in &self.records {
+            let count = [
+                item.artist.trim().is_empty(),
+                item.title.trim().is_empty(),
+                item.kind.trim().is_empty(),
+            ]
+            .into_iter()
+            .filter(|missing| *missing)
+            .count();
+            if count > 0 {
+                *grouped
+                    .entry((item.artist.clone(), item.title.clone()))
+                    .or_default() += count;
+            }
+        }
+        let mut rows = grouped
+            .into_iter()
+            .map(|((artist, album), count)| {
                 serde_json::json!({
-                    "artist": item.artist,
-                    "album": item.title,
+                    "artist": artist,
+                    "album": album,
                     "musicBrainzReleaseId": "",
                     "count": count,
                     "byType": { "MissingMetadata": count },
@@ -10286,8 +10399,8 @@ impl LibraryStore {
                 .then_with(|| left["artist"].as_str().cmp(&right["artist"].as_str()))
                 .then_with(|| left["album"].as_str().cmp(&right["album"].as_str()))
         });
-        let total_releases = rows.len();
         rows.truncate(limit);
+        let total_releases = rows.len();
         serde_json::json!({
             "groups": rows,
             "totalReleases": total_releases,
@@ -10333,11 +10446,17 @@ impl LibraryStore {
     }
 
     fn health_issues_by_codec_json(&self) -> String {
-        serde_json::json!({
-            "groups": [],
-            "totalIssues": 0,
-        })
-        .to_string()
+        let total_issues = self.health_issues().len();
+        let groups = if total_issues == 0 {
+            Vec::new()
+        } else {
+            vec![serde_json::json!({
+                "codec": "UNKNOWN",
+                "count": total_issues,
+                "transcodeSuspect": 0,
+            })]
+        };
+        serde_json::json!({ "groups": groups, "totalIssues": total_issues }).to_string()
     }
 
     fn musicbrainz_completion_json(&self) -> String {
@@ -17913,24 +18032,14 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/health/issues") => {
-            let limit = match query_bounded_usize(route.query, "limit", 1, 250) {
-                Ok(value) => value.unwrap_or(100),
-                Err(()) => {
-                    return Ok(routing::bad_request_response(
-                        "limit must be between 1 and 250",
-                    ));
-                }
-            };
-            let offset = match query_bounded_usize(route.query, "offset", 0, MAX_LIBRARY_ITEMS) {
-                Ok(value) => value.unwrap_or(0),
-                Err(()) => {
-                    return Ok(routing::bad_request_response(
-                        "offset must be non-negative and bounded",
-                    ));
+            let filter = match LibraryHealthIssueQuery::from_query(route.query) {
+                Ok(filter) => filter,
+                Err(error) => {
+                    return Ok(routing::bad_request_response(&error));
                 }
             };
             let library = state.library.read().await;
-            let json = library.health_issues_json(limit, offset);
+            let json = library.health_issues_json(&filter);
             drop(library);
             Ok(routing::ok_response(json))
         }
@@ -50615,10 +50724,13 @@ mod tests {
     }
 
     #[test]
-    fn library_health_group_totals_are_not_truncated_by_page_limits() {
+    fn library_health_group_totals_match_the_bounded_groups() {
         let mut library = super::LibraryStore::new();
         library
             .create("Artist A".to_owned(), "Release A".to_owned(), String::new())
+            .unwrap();
+        library
+            .create("Artist B".to_owned(), "Release B".to_owned(), String::new())
             .unwrap();
         library
             .create("Artist B".to_owned(), "Release B".to_owned(), String::new())
@@ -50628,13 +50740,14 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&library.health_issues_by_artist_json(1))
                 .unwrap();
         assert_eq!(artists["groups"].as_array().unwrap().len(), 1);
-        assert_eq!(artists["totalArtists"], 2);
+        assert_eq!(artists["totalArtists"], 1);
 
         let releases =
             serde_json::from_str::<serde_json::Value>(&library.health_issues_by_release_json(1))
                 .unwrap();
         assert_eq!(releases["groups"].as_array().unwrap().len(), 1);
-        assert_eq!(releases["totalReleases"], 2);
+        assert_eq!(releases["totalReleases"], 1);
+        assert_eq!(releases["groups"][0]["count"], 2);
     }
 
     #[test]
@@ -53061,9 +53174,8 @@ mod tests {
         .await
         .expect("issues by artist");
         let by_artist_json = serde_json::from_str::<serde_json::Value>(&by_artist.body).unwrap();
-        assert_eq!(by_artist_json["groups"][0]["artist"], "(unknown)");
-        assert_eq!(by_artist_json["groups"][0]["byType"]["MissingMetadata"], 1);
-        assert_eq!(by_artist_json["totalArtists"], 1);
+        assert!(by_artist_json["groups"].as_array().unwrap().is_empty());
+        assert_eq!(by_artist_json["totalArtists"], 0);
 
         let summary = super::route_http_request(
             "GET",
@@ -53093,7 +53205,10 @@ mod tests {
         let dashboard_json = serde_json::from_str::<serde_json::Value>(&dashboard.body).unwrap();
         assert_eq!(dashboard_json["summary"]["libraryPath"], "/music");
         assert_eq!(dashboard_json["issuesByType"][0]["type"], "MissingMetadata");
-        assert_eq!(dashboard_json["issuesByArtist"][0]["artist"], "(unknown)");
+        assert!(dashboard_json["issuesByArtist"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert_eq!(dashboard_json["issues"].as_array().unwrap().len(), 1);
         assert_eq!(dashboard_json["totalIssues"], 1);
 
@@ -53107,8 +53222,30 @@ mod tests {
         .await
         .expect("issues by codec");
         let by_codec_json = serde_json::from_str::<serde_json::Value>(&by_codec.body).unwrap();
-        assert_eq!(by_codec_json["groups"].as_array().unwrap().len(), 0);
-        assert_eq!(by_codec_json["totalIssues"], 0);
+        assert_eq!(by_codec_json["groups"].as_array().unwrap().len(), 1);
+        assert_eq!(by_codec_json["groups"][0]["codec"], "UNKNOWN");
+        assert_eq!(by_codec_json["groups"][0]["count"], 1);
+        assert_eq!(by_codec_json["groups"][0]["transcodeSuspect"], 0);
+        assert_eq!(by_codec_json["totalIssues"], 1);
+
+        let filtered = super::route_http_request(
+            "GET",
+            "/api/library/health/issues?libraryPath=%2Fmusic&types=CorruptedFile&severities=Medium&statuses=Detected&limit=2&offset=999999",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered library issues");
+        assert_eq!(filtered.status, "200 OK");
+        let filtered_json = serde_json::from_str::<serde_json::Value>(&filtered.body).unwrap();
+        assert_eq!(filtered_json["totalCount"], 0);
+        assert_eq!(filtered_json["filter"]["libraryPath"], "/music");
+        assert_eq!(filtered_json["filter"]["types"][0], "CorruptedFile");
+        assert_eq!(filtered_json["filter"]["severities"][0], "Medium");
+        assert_eq!(filtered_json["filter"]["statuses"][0], "Detected");
+        assert_eq!(filtered_json["filter"]["limit"], 2);
+        assert_eq!(filtered_json["filter"]["offset"], 999999);
 
         let by_type = super::route_http_request(
             "GET",
@@ -53131,6 +53268,9 @@ mod tests {
             "/api/library/health/issues?limit=0",
             "/api/library/health/issues?limit=251",
             "/api/library/health/issues?offset=-1",
+            "/api/library/health/issues?types=NotAnIssueType",
+            "/api/library/health/issues?severities=Urgent",
+            "/api/library/health/issues?statuses=Open",
             "/api/library/health/issues/by-artist?limit=101",
             "/api/library/health/issues/by-release?limit=0",
         ] {
