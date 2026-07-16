@@ -11,6 +11,25 @@ type BatchCapableClient = {
 
 export const maxBatchOperations = 100;
 
+function cloneJson<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneJson(item)) as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, cloneJson(item)])
+    ) as T;
+  }
+  return value;
+}
+
+function cloneOperation(operation: BatchOperation): BatchOperation {
+  return {
+    ...operation,
+    ...(operation.body === undefined ? {} : { body: cloneJson(operation.body) }),
+  };
+}
+
 export class BatchClient {
   constructor(private client: SlskrClient) {}
 
@@ -33,7 +52,7 @@ export class BatchClient {
       throw new Error(`Batch cannot contain more than ${maxBatchOperations} operations`);
     }
 
-    const request: BatchRequest = { operations };
+    const request: BatchRequest = { operations: operations.map(cloneOperation) };
     
     // Use internal client method to make the request
     return (this.client as unknown as BatchCapableClient).postAuth<BatchResponse>('/api/batch', request);
@@ -87,7 +106,7 @@ export class BatchBuilder {
       id: id || `op-${++this.idCounter}`,
       method: 'POST',
       path,
-      body,
+      body: cloneJson(body),
     });
     return this;
   }
@@ -100,7 +119,7 @@ export class BatchBuilder {
       id: id || `op-${++this.idCounter}`,
       method: 'PUT',
       path,
-      body,
+      body: cloneJson(body),
     });
     return this;
   }
@@ -121,7 +140,7 @@ export class BatchBuilder {
    * Add multiple operations at once
    */
   addOperations(ops: BatchOperation[]): this {
-    this.operations.push(...ops);
+    this.operations.push(...ops.map(cloneOperation));
     return this;
   }
 
@@ -129,7 +148,7 @@ export class BatchBuilder {
    * Get current operations
    */
   getOperations(): BatchOperation[] {
-    return [...this.operations];
+    return this.operations.map(cloneOperation);
   }
 
   /**
@@ -159,7 +178,7 @@ export class BatchBuilder {
       throw new Error(`Batch cannot contain more than ${maxBatchOperations} operations`);
     }
 
-    const request: BatchRequest = { operations: this.operations };
+    const request: BatchRequest = { operations: this.operations.map(cloneOperation) };
     return (this.client as unknown as BatchCapableClient).postAuth<BatchResponse>('/api/batch', request);
   }
 

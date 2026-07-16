@@ -31,4 +31,41 @@ describe('Batch operation limits', () => {
     await expect(builder.execute()).rejects.toThrow('more than 100 operations');
     expect(postAuth).not.toHaveBeenCalled();
   });
+
+  it('owns nested bodies added directly and returned in snapshots', () => {
+    const { client } = mockClient();
+    const filters = ['lossless'];
+    const body = { query: 'ambient', options: { filters } };
+    const builder = new BatchBuilder(client).post('/api/searches', body);
+
+    filters[0] = 'mutated input';
+    body.query = 'mutated input';
+    const snapshot = builder.getOperations();
+    snapshot[0].body.query = 'mutated snapshot';
+    snapshot[0].body.options.filters[0] = 'mutated snapshot';
+
+    expect(builder.getOperations()[0].body).toEqual({
+      query: 'ambient',
+      options: { filters: ['lossless'] },
+    });
+  });
+
+  it('owns nested bodies from bulk additions and direct execution', async () => {
+    const { client, postAuth } = mockClient();
+    postAuth.mockResolvedValue({ results: [], total_time_ms: 0 });
+    const directBody = { filters: ['direct'] };
+    const bulkBody = { filters: ['bulk'] };
+    const direct = [{ id: 'direct', method: 'POST', path: '/api/searches', body: directBody }] as BatchOperation[];
+    const builder = new BatchBuilder(client).addOperations([
+      { id: 'bulk', method: 'POST', path: '/api/searches', body: bulkBody },
+    ]);
+
+    await new BatchClient(client).execute(direct);
+    await builder.execute();
+    directBody.filters[0] = 'mutated';
+    bulkBody.filters[0] = 'mutated';
+
+    expect(postAuth.mock.calls[0][1].operations[0].body.filters).toEqual(['direct']);
+    expect(postAuth.mock.calls[1][1].operations[0].body.filters).toEqual(['bulk']);
+  });
 });

@@ -5,6 +5,21 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BatchBuilder = exports.BatchClient = exports.maxBatchOperations = void 0;
 exports.maxBatchOperations = 100;
+function cloneJson(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => cloneJson(item));
+    }
+    if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneJson(item)]));
+    }
+    return value;
+}
+function cloneOperation(operation) {
+    return {
+        ...operation,
+        ...(operation.body === undefined ? {} : { body: cloneJson(operation.body) }),
+    };
+}
 class BatchClient {
     constructor(client) {
         this.client = client;
@@ -25,7 +40,7 @@ class BatchClient {
         if (operations.length > exports.maxBatchOperations) {
             throw new Error(`Batch cannot contain more than ${exports.maxBatchOperations} operations`);
         }
-        const request = { operations };
+        const request = { operations: operations.map(cloneOperation) };
         // Use internal client method to make the request
         return this.client.postAuth('/api/batch', request);
     }
@@ -74,7 +89,7 @@ class BatchBuilder {
             id: id || `op-${++this.idCounter}`,
             method: 'POST',
             path,
-            body,
+            body: cloneJson(body),
         });
         return this;
     }
@@ -86,7 +101,7 @@ class BatchBuilder {
             id: id || `op-${++this.idCounter}`,
             method: 'PUT',
             path,
-            body,
+            body: cloneJson(body),
         });
         return this;
     }
@@ -105,14 +120,14 @@ class BatchBuilder {
      * Add multiple operations at once
      */
     addOperations(ops) {
-        this.operations.push(...ops);
+        this.operations.push(...ops.map(cloneOperation));
         return this;
     }
     /**
      * Get current operations
      */
     getOperations() {
-        return [...this.operations];
+        return this.operations.map(cloneOperation);
     }
     /**
      * Clear all operations
@@ -138,7 +153,7 @@ class BatchBuilder {
         if (this.operations.length > exports.maxBatchOperations) {
             throw new Error(`Batch cannot contain more than ${exports.maxBatchOperations} operations`);
         }
-        const request = { operations: this.operations };
+        const request = { operations: this.operations.map(cloneOperation) };
         return this.client.postAuth('/api/batch', request);
     }
     /**
