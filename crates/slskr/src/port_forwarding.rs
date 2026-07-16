@@ -220,36 +220,47 @@ impl Rule {
                 &self.request.gateway_certificate_sha256,
             )
             .map_err(|error| format!("Overlay hello authentication failed: {error}"))?;
-        let mut connected = None;
-        let mut last_error = "No gateway overlay endpoints are available".to_owned();
-        let mut attempts = FuturesUnordered::new();
-        for endpoint in &self.request.gateway_endpoints {
-            attempts.push(connect_tls_overlay(
-                *endpoint,
-                self.request.gateway_certificate_sha256,
-                hello.clone(),
-            ));
-        }
-        while let Some(result) = attempts.next().await {
-            match result {
-                Ok(client)
-                    if client
-                        .remote_username
-                        .eq_ignore_ascii_case(&self.request.gateway_username) =>
-                {
-                    connected = Some(client);
-                    break;
-                }
-                Ok(_) => {
-                    last_error =
-                        "Gateway overlay identity did not match the discovered peer".to_owned();
-                }
-                Err(error) => last_error = format!("Gateway overlay connection failed: {error}"),
+        let connect = async {
+            let mut connected = None;
+            let mut last_error = "No gateway overlay endpoints are available".to_owned();
+            let mut attempts = FuturesUnordered::new();
+            for endpoint in &self.request.gateway_endpoints {
+                attempts.push(connect_tls_overlay(
+                    *endpoint,
+                    self.request.gateway_certificate_sha256,
+                    hello.clone(),
+                ));
             }
-        }
-        let client = connected.ok_or(last_error)?;
+            while let Some(result) = attempts.next().await {
+                match result {
+                    Ok(client)
+                        if client
+                            .remote_username
+                            .eq_ignore_ascii_case(&self.request.gateway_username) =>
+                    {
+                        connected = Some(client);
+                        break;
+                    }
+                    Ok(_) => {
+                        last_error =
+                            "Gateway overlay identity did not match the discovered peer".to_owned();
+                    }
+                    Err(error) => {
+                        last_error = format!("Gateway overlay connection failed: {error}");
+                    }
+                }
+            }
+            connected.ok_or(last_error)
+        };
+        let client = tokio::select! {
+            _ = cancel.changed() => return Ok(()),
+            result = connect => result?,
+        };
         let client = Arc::new(Mutex::new(client));
-        let tunnel_id = open_tunnel(&client, &self.request).await?;
+        let tunnel_id = tokio::select! {
+            _ = cancel.changed() => return Ok(()),
+            result = open_tunnel(&client, &self.request) => result?,
+        };
         let (mut local_read, mut local_write) = local.into_split();
         let connection_bytes = Arc::new(AtomicU64::new(0));
         let send_client = Arc::clone(&client);
@@ -520,6 +531,52 @@ mod tests {
         manager.start(request(port)).await.unwrap();
         assert!(manager.start(request(port)).await.is_err());
         assert!(manager.stop(port).await);
+    }
+
+    #[tokio::test]
+    async fn stopping_rule_cancels_stalled_gateway_handshake_and_releases_permit() {
+        let gateway_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gateway_endpoint = gateway_listener.local_addr().unwrap();
+        let stalled_gateway = tokio::spawn(async move {
+            let (_stream, _) = gateway_listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let local_probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_port = local_probe.local_addr().unwrap().port();
+        drop(local_probe);
+        let manager = Manager::new();
+        let mut request = request(local_port);
+        request.gateway_endpoints = vec![gateway_endpoint];
+        manager.start(request).await.unwrap();
+        let rule = Arc::clone(manager.rules.read().await.get(&local_port).unwrap());
+        let local = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();
+
+        timeout(Duration::from_secs(2), async {
+            while rule.active_connections.load(Ordering::Relaxed) == 0 {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            manager.connection_permits.available_permits(),
+            MAX_FORWARDING_CONNECTIONS - 1
+        );
+
+        assert!(manager.stop(local_port).await);
+        timeout(Duration::from_secs(2), async {
+            while rule.active_connections.load(Ordering::Relaxed) != 0 {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stalled gateway setup should be cancelled promptly");
+        assert_eq!(
+            manager.connection_permits.available_permits(),
+            MAX_FORWARDING_CONNECTIONS
+        );
+        drop(local);
+        stalled_gateway.abort();
     }
 
     #[tokio::test]
