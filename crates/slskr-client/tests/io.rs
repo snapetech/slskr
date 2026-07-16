@@ -2,13 +2,15 @@ use slskr_client::{
     connection::ConnectionKind,
     io::{
         read_connection_kind, read_init_frame, read_message_frame_with_max, read_raw_frame,
-        read_raw_frame_with_max, write_connection_kind, write_init_frame, write_message_frame,
-        write_raw_frame,
+        read_raw_frame_with_max, write_connection_kind, write_init_frame,
+        write_init_frame_with_max, write_message_frame, write_message_frame_with_max,
+        write_obfuscated_init_frame_with_key_and_max,
+        write_obfuscated_message_frame_with_key_and_max, write_raw_frame, write_raw_frame_with_max,
     },
     ClientError,
 };
 use slskr_protocol::{InitFrame, MessageFrame, RawFrame};
-use tokio::io::duplex;
+use tokio::io::{duplex, AsyncReadExt};
 
 #[tokio::test]
 async fn connection_kind_round_trips() {
@@ -85,4 +87,45 @@ async fn oversized_message_frame_is_rejected_before_payload_read() {
         error,
         ClientError::FrameTooLarge { length: 7, max: 2 }
     ));
+}
+
+#[tokio::test]
+async fn oversized_outbound_frames_are_rejected_before_write() {
+    let (mut writer, mut reader) = duplex(64);
+
+    for error in [
+        write_message_frame_with_max(&mut writer, &MessageFrame::new(1, [1, 2, 3]), 6)
+            .await
+            .unwrap_err(),
+        write_init_frame_with_max(&mut writer, &InitFrame::new(1, [1, 2, 3]), 3)
+            .await
+            .unwrap_err(),
+        write_raw_frame_with_max(&mut writer, &RawFrame::new([1, 2, 3]), 2)
+            .await
+            .unwrap_err(),
+        write_obfuscated_message_frame_with_key_and_max(
+            &mut writer,
+            &MessageFrame::new(1, [1, 2, 3]),
+            7,
+            6,
+        )
+        .await
+        .unwrap_err(),
+        write_obfuscated_init_frame_with_key_and_max(
+            &mut writer,
+            &InitFrame::new(1, [1, 2, 3]),
+            7,
+            3,
+        )
+        .await
+        .unwrap_err(),
+    ] {
+        assert!(matches!(error, ClientError::FrameTooLarge { .. }));
+    }
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), reader.read_u8())
+            .await
+            .is_err()
+    );
 }

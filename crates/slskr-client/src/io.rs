@@ -51,6 +51,18 @@ pub async fn write_message_frame<W>(writer: &mut W, frame: &MessageFrame) -> Res
 where
     W: AsyncWrite + Unpin,
 {
+    write_message_frame_with_max(writer, frame, DEFAULT_MAX_FRAME_LEN).await
+}
+
+pub async fn write_message_frame_with_max<W>(
+    writer: &mut W,
+    frame: &MessageFrame,
+    max_len: usize,
+) -> Result<(), ClientError>
+where
+    W: AsyncWrite + Unpin,
+{
+    validate_frame_len(frame.payload.len().saturating_add(4), max_len)?;
     writer.write_all(&frame.encode()?).await?;
     writer.flush().await?;
     Ok(())
@@ -82,6 +94,19 @@ pub async fn write_obfuscated_message_frame_with_key<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    write_obfuscated_message_frame_with_key_and_max(writer, frame, key, DEFAULT_MAX_FRAME_LEN).await
+}
+
+pub async fn write_obfuscated_message_frame_with_key_and_max<W>(
+    writer: &mut W,
+    frame: &MessageFrame,
+    key: u32,
+    max_len: usize,
+) -> Result<(), ClientError>
+where
+    W: AsyncWrite + Unpin,
+{
+    validate_frame_len(frame.payload.len().saturating_add(4), max_len)?;
     writer
         .write_all(&encode_rotated(&frame.encode()?, key))
         .await?;
@@ -146,6 +171,18 @@ pub async fn write_init_frame<W>(writer: &mut W, frame: &InitFrame) -> Result<()
 where
     W: AsyncWrite + Unpin,
 {
+    write_init_frame_with_max(writer, frame, DEFAULT_MAX_FRAME_LEN).await
+}
+
+pub async fn write_init_frame_with_max<W>(
+    writer: &mut W,
+    frame: &InitFrame,
+    max_len: usize,
+) -> Result<(), ClientError>
+where
+    W: AsyncWrite + Unpin,
+{
+    validate_frame_len(frame.payload.len().saturating_add(1), max_len)?;
     writer.write_all(&frame.encode()?).await?;
     writer.flush().await?;
     Ok(())
@@ -177,6 +214,19 @@ pub async fn write_obfuscated_init_frame_with_key<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    write_obfuscated_init_frame_with_key_and_max(writer, frame, key, DEFAULT_MAX_FRAME_LEN).await
+}
+
+pub async fn write_obfuscated_init_frame_with_key_and_max<W>(
+    writer: &mut W,
+    frame: &InitFrame,
+    key: u32,
+    max_len: usize,
+) -> Result<(), ClientError>
+where
+    W: AsyncWrite + Unpin,
+{
+    validate_frame_len(frame.payload.len().saturating_add(1), max_len)?;
     writer
         .write_all(&encode_rotated(&frame.encode()?, key))
         .await?;
@@ -214,9 +264,29 @@ pub async fn write_raw_frame<W>(writer: &mut W, frame: &RawFrame) -> Result<(), 
 where
     W: AsyncWrite + Unpin,
 {
+    write_raw_frame_with_max(writer, frame, DEFAULT_MAX_FRAME_LEN).await
+}
+
+pub async fn write_raw_frame_with_max<W>(
+    writer: &mut W,
+    frame: &RawFrame,
+    max_len: usize,
+) -> Result<(), ClientError>
+where
+    W: AsyncWrite + Unpin,
+{
+    validate_frame_len(frame.payload.len(), max_len)?;
     writer.write_all(&frame.encode()).await?;
     writer.flush().await?;
     Ok(())
+}
+
+fn validate_frame_len(length: usize, max: usize) -> Result<(), ClientError> {
+    if length > max {
+        Err(ClientError::FrameTooLarge { length, max })
+    } else {
+        Ok(())
+    }
 }
 
 async fn read_len_prefixed_frame<R>(reader: &mut R, max_len: usize) -> Result<Vec<u8>, ClientError>
