@@ -1839,12 +1839,16 @@ impl DatabaseManager {
         records: &[SearchResultRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        query("DELETE FROM search_results WHERE search_id = ?")
+        let delete = query("DELETE FROM search_results WHERE search_id = ?")
             .bind(search_id)
             .execute(&mut *transaction)
-            .await?;
+            .await;
+        if let Err(error) = delete {
+            let _ = transaction.rollback().await;
+            return Err(error.into());
+        }
         for record in records {
-            query(
+            let insert = query(
                 r#"
                 INSERT INTO search_results
                 (search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at)
@@ -1862,7 +1866,11 @@ impl DatabaseManager {
             .bind(record.queue_length)
             .bind(record.created_at)
             .execute(&mut *transaction)
-            .await?;
+            .await;
+            if let Err(error) = insert {
+                let _ = transaction.rollback().await;
+                return Err(error.into());
+            }
         }
         transaction.commit().await?;
         Ok(())
