@@ -5,7 +5,29 @@
 use serde::{Deserialize, Serialize};
 use sqlx_core::{from_row::FromRow, query::query, query_as::query_as, row::Row, Error};
 use sqlx_sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow};
+#[cfg(unix)]
+use std::fs::OpenOptions;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(unix)]
+fn prepare_private_database_file(db_path: &str) -> std::io::Result<()> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(db_path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "database path must be a regular file",
+        ));
+    }
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+}
 
 /// Search record for persistence
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -873,6 +895,9 @@ impl DatabaseManager {
 
     /// Create new database manager with SQLite backend
     pub async fn new(db_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        #[cfg(unix)]
+        prepare_private_database_file(db_path)?;
+
         let connect_options = SqliteConnectOptions::new()
             .filename(db_path)
             .create_if_missing(true);
@@ -4316,6 +4341,41 @@ mod tests {
         assert_eq!(stats.message_count, 0);
         assert_eq!(stats.user_count, 0);
         assert_eq!(stats.room_count, 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn database_file_is_private_and_rejects_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-private-db-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let db_path = root.join("slskr.db");
+        std::fs::write(&db_path, []).unwrap();
+        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o666)).unwrap();
+
+        let db = DatabaseManager::new(db_path.to_str().unwrap())
+            .await
+            .unwrap();
+        db.close_for_test().await;
+        assert_eq!(
+            std::fs::metadata(&db_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let linked_path = root.join("linked.db");
+        symlink(&db_path, &linked_path).unwrap();
+        assert!(DatabaseManager::new(linked_path.to_str().unwrap())
+            .await
+            .is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
