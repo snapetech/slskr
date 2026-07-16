@@ -85,7 +85,7 @@ impl MeshRendezvous {
         cache: &PeerConnectionCache<S>,
         username: &str,
         local_descriptor: &PeerCapabilityDescriptor,
-        nonce: [u8; 16],
+        nonce: impl Into<String>,
     ) -> Result<bool, ClientError>
     where
         S: AsyncRead + AsyncWrite + Unpin,
@@ -106,10 +106,11 @@ impl MeshRendezvous {
 
     #[must_use]
     pub fn accepts_descriptor(descriptor: &PeerCapabilityDescriptor) -> bool {
-        descriptor
-            .features
-            .iter()
-            .any(|feature| feature == FEATURE_MESH_V1)
+        descriptor.features.iter().any(|feature| {
+            feature.eq_ignore_ascii_case(FEATURE_MESH_V1)
+                || feature.eq_ignore_ascii_case("mesh")
+                || feature.eq_ignore_ascii_case("mesh_sync")
+        })
     }
 }
 

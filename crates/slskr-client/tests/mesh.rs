@@ -63,7 +63,7 @@ async fn mesh_probe_is_noop_when_active_probe_disabled() {
     ]);
 
     assert!(!MeshRendezvous::disabled()
-        .probe_peer(&cache, "peer", &local, [1; 16])
+        .probe_peer(&cache, "peer", &local, "01010101010101010101010101010101")
         .await
         .unwrap());
     assert!(cache.contains("peer").await);
@@ -78,6 +78,9 @@ fn mesh_accepts_only_mesh_capable_descriptors() {
     let capabilities_only = descriptor(vec![FEATURE_CAPABILITIES_V1.to_owned()]);
 
     assert!(MeshRendezvous::accepts_descriptor(&mesh));
+    assert!(MeshRendezvous::accepts_descriptor(&descriptor(vec![
+        "mesh_sync".to_owned()
+    ])));
     assert!(!MeshRendezvous::accepts_descriptor(&capabilities_only));
 }
 
@@ -100,7 +103,7 @@ async fn mesh_probe_sends_capability_hello_when_enabled() {
     });
 
     assert!(mesh
-        .probe_peer(&cache, "peer", &local, [4; 16])
+        .probe_peer(&cache, "peer", &local, "04040404040404040404040404040404")
         .await
         .unwrap());
 
@@ -108,8 +111,8 @@ async fn mesh_probe_sends_capability_hello_when_enabled() {
     assert!(is_capability_probe(&message));
     let envelope = decode_peer_capability_message(&message).unwrap().unwrap();
     assert_eq!(envelope.message_type, PeerCapabilityMessageType::Hello);
-    assert_eq!(envelope.nonce, [4; 16]);
-    assert_eq!(envelope.descriptor.username, "local");
+    assert_eq!(envelope.nonce, "04040404040404040404040404040404");
+    assert!(envelope.descriptor.username.is_empty());
     envelope.descriptor.verify(fixed_now()).unwrap();
 }
 
@@ -126,7 +129,12 @@ async fn mesh_probe_reports_missing_peer_without_connecting() {
     });
 
     assert!(!mesh
-        .probe_peer(&cache, "missing", &local, [9; 16])
+        .probe_peer(
+            &cache,
+            "missing",
+            &local,
+            "09090909090909090909090909090909"
+        )
         .await
         .unwrap());
 }

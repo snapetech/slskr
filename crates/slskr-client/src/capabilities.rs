@@ -5,28 +5,32 @@ use std::{
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
-use slskr_protocol::{peer::PeerMessage, DecodeError, Reader, Writer};
+use slskr_protocol::{peer::PeerMessage, DecodeError, Reader};
 
 pub const PEER_CAPABILITY_MESSAGE_CODE: u32 = 0x534C_534B;
 pub const PEER_CAPABILITY_ENVELOPE_VERSION: u16 = 1;
 pub const MAX_CAPABILITY_ENVELOPE_BYTES: usize = 64 * 1024;
 pub const MAX_PEER_CAPABILITY_RECORDS: usize = 1_024;
+const PEER_CAPABILITY_MAGIC: i32 = 0x4E44_534B;
+const MAX_CAPABILITY_FEATURES: usize = 256;
+const MAX_CAPABILITY_STRING_BYTES: usize = 4_096;
+const MAX_CAPABILITY_SIGNATURE_BYTES: usize = 4_096;
 pub const FEATURE_CAPABILITIES_V1: &str = "slskdn-capabilities-v1";
 pub const FEATURE_MESH_V1: &str = "slskdn-mesh-v1";
 pub const FEATURE_SHARED_UDP_V1: &str = "slskdn-shared-udp-v1";
 pub const FEATURE_WISHLIST_V1: &str = "slskdn-wishlist-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
+#[repr(i32)]
 pub enum PeerCapabilityMessageType {
     Hello = 1,
     Acknowledge = 2,
 }
 
-impl TryFrom<u8> for PeerCapabilityMessageType {
+impl TryFrom<i32> for PeerCapabilityMessageType {
     type Error = CapabilityError;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Self::Hello),
             2 => Ok(Self::Acknowledge),
@@ -39,44 +43,77 @@ impl TryFrom<u8> for PeerCapabilityMessageType {
 pub struct PeerCapabilityEnvelope {
     pub version: u16,
     pub message_type: PeerCapabilityMessageType,
-    pub nonce: [u8; 16],
+    pub nonce: String,
     pub descriptor: PeerCapabilityDescriptor,
 }
 
 impl PeerCapabilityEnvelope {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         message_type: PeerCapabilityMessageType,
-        nonce: [u8; 16],
+        nonce: impl Into<String>,
         descriptor: PeerCapabilityDescriptor,
     ) -> Self {
         Self {
             version: PEER_CAPABILITY_ENVELOPE_VERSION,
             message_type,
-            nonce,
+            nonce: nonce.into(),
             descriptor,
         }
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, CapabilityError> {
-        let mut writer = Writer::new();
-        writer.write_u16_le(self.version);
-        writer.write_u8(self.message_type as u8);
-        writer.write_bytes(&self.nonce);
-        write_protocol_string(&mut writer, "peer_id", &self.descriptor.peer_id)?;
-        write_protocol_string(&mut writer, "username", &self.descriptor.username)?;
-        write_protocol_string_list(&mut writer, "features", &self.descriptor.features)?;
-        write_protocol_string_list(&mut writer, "endpoints", &self.descriptor.endpoints)?;
-        writer.write_u64_le(self.descriptor.issued_at_unix);
-        writer.write_u64_le(self.descriptor.expires_at_unix);
-        writer.write_bytes(&self.descriptor.public_key);
-        writer.write_bytes(
-            &self
-                .descriptor
-                .signature
-                .ok_or(CapabilityError::MissingSignature)?,
+        if self.nonce.trim().is_empty() {
+            return Err(CapabilityError::BlankField("nonce"));
+        }
+        if self.descriptor.features.len() > MAX_CAPABILITY_FEATURES {
+            return Err(CapabilityError::FieldTooLong {
+                field: "features",
+                length: self.descriptor.features.len(),
+                max: MAX_CAPABILITY_FEATURES,
+            });
+        }
+        let mut payload = Vec::new();
+        write_i32(&mut payload, PEER_CAPABILITY_MAGIC);
+        write_i32(&mut payload, i32::from(self.version));
+        write_i32(&mut payload, self.message_type as i32);
+        write_bounded_string(&mut payload, "nonce", &self.nonce)?;
+        write_bounded_string(&mut payload, "peer_id", &self.descriptor.peer_id)?;
+        write_i32(
+            &mut payload,
+            self.descriptor.overlay_port.map_or(-1, i32::from),
         );
-        let payload = writer.into_inner();
+        write_i32(
+            &mut payload,
+            i32::try_from(self.descriptor.max_payload_length).map_err(|_| {
+                CapabilityError::FieldTooLong {
+                    field: "max_payload_length",
+                    length: self.descriptor.max_payload_length as usize,
+                    max: i32::MAX as usize,
+                }
+            })?,
+        );
+        write_i32(
+            &mut payload,
+            i32::try_from(self.descriptor.features.len()).map_err(|_| {
+                CapabilityError::FieldTooLong {
+                    field: "features",
+                    length: self.descriptor.features.len(),
+                    max: MAX_CAPABILITY_FEATURES,
+                }
+            })?,
+        );
+        for feature in &self.descriptor.features {
+            write_bounded_string(&mut payload, "feature", feature)?;
+        }
+        if let Some(signature) = self.descriptor.signature {
+            payload.push(1);
+            write_bounded_string(&mut payload, "signature_algorithm", "Ed25519")?;
+            write_bounded_bytes(&mut payload, "public_key", &self.descriptor.public_key)?;
+            write_bounded_bytes(&mut payload, "signature", &signature)?;
+        } else {
+            payload.push(0);
+        }
         if payload.len() > MAX_CAPABILITY_ENVELOPE_BYTES {
             return Err(CapabilityError::EnvelopeTooLarge {
                 length: payload.len(),
@@ -95,21 +132,58 @@ impl PeerCapabilityEnvelope {
         }
 
         let mut reader = Reader::new(payload);
-        let version = reader.read_u16_le()?;
-        if version != PEER_CAPABILITY_ENVELOPE_VERSION {
-            return Err(CapabilityError::UnsupportedVersion(version));
+        let magic = read_i32(&mut reader)?;
+        if magic != PEER_CAPABILITY_MAGIC {
+            return Err(CapabilityError::MagicMismatch(magic));
         }
-        let message_type = PeerCapabilityMessageType::try_from(reader.read_u8()?)?;
-        let nonce = read_array::<16>(&mut reader, "nonce")?;
+        let version_i32 = read_i32(&mut reader)?;
+        let version = u16::try_from(version_i32)
+            .map_err(|_| CapabilityError::UnsupportedVersion(version_i32))?;
+        if version != PEER_CAPABILITY_ENVELOPE_VERSION {
+            return Err(CapabilityError::UnsupportedVersion(version_i32));
+        }
+        let message_type = PeerCapabilityMessageType::try_from(read_i32(&mut reader)?)?;
+        let nonce = read_bounded_string(&mut reader, "nonce")?;
+        let peer_id = read_bounded_string(&mut reader, "peer_id")?;
+        let overlay_port = match read_i32(&mut reader)? {
+            -1 => None,
+            value @ 0..=65_535 => Some(value as u16),
+            value => return Err(CapabilityError::InvalidOverlayPort(value)),
+        };
+        let max_payload_length = read_i32(&mut reader)?;
+        if max_payload_length < 0 {
+            return Err(CapabilityError::InvalidMaxPayloadLength(max_payload_length));
+        }
+        let feature_count = read_bounded_count(&mut reader, "features", MAX_CAPABILITY_FEATURES)?;
+        let mut features = Vec::with_capacity(feature_count);
+        for _ in 0..feature_count {
+            features.push(read_bounded_string(&mut reader, "feature")?);
+        }
+        let has_signature = reader.read_u8()?;
+        let (public_key, signature) = match has_signature {
+            0 => ([0; 32], None),
+            1 => {
+                let algorithm = read_bounded_string(&mut reader, "signature_algorithm")?;
+                if !algorithm.eq_ignore_ascii_case("Ed25519") {
+                    return Err(CapabilityError::InvalidSignatureAlgorithm(algorithm));
+                }
+                let public_key = read_bounded_array::<32>(&mut reader, "public_key")?;
+                let signature = read_bounded_array::<64>(&mut reader, "signature")?;
+                (public_key, Some(signature))
+            }
+            value => return Err(CapabilityError::InvalidSignaturePresence(value)),
+        };
         let descriptor = PeerCapabilityDescriptor {
-            peer_id: reader.read_string()?,
-            username: reader.read_string()?,
-            features: read_protocol_string_list(&mut reader, "features")?,
-            endpoints: read_protocol_string_list(&mut reader, "endpoints")?,
-            issued_at_unix: reader.read_u64_le()?,
-            expires_at_unix: reader.read_u64_le()?,
-            public_key: read_array::<32>(&mut reader, "public key")?,
-            signature: Some(read_array::<64>(&mut reader, "signature")?),
+            peer_id,
+            username: String::new(),
+            features: normalize_values(features, "feature")?,
+            endpoints: Vec::new(),
+            overlay_port,
+            max_payload_length: max_payload_length as u32,
+            issued_at_unix: 0,
+            expires_at_unix: u64::MAX,
+            public_key,
+            signature,
         };
         reader.finish()?;
         Ok(Self {
@@ -145,13 +219,15 @@ pub fn decode_peer_capability_message(
 pub fn handle_peer_capability_message(
     registry: &mut PeerCapabilityRegistry,
     message: &PeerMessage,
+    remote_username: &str,
     local_descriptor: &PeerCapabilityDescriptor,
     now: SystemTime,
 ) -> Result<Option<PeerMessage>, CapabilityError> {
-    let Some(envelope) = decode_peer_capability_message(message)? else {
+    let Some(mut envelope) = decode_peer_capability_message(message)? else {
         return Ok(None);
     };
 
+    envelope.descriptor.username = non_blank(remote_username.to_owned(), "username")?;
     registry.update(envelope.descriptor, now)?;
     if envelope.message_type == PeerCapabilityMessageType::Hello {
         let acknowledgement = PeerCapabilityEnvelope::new(
@@ -171,6 +247,8 @@ pub struct PeerCapabilityDescriptor {
     pub username: String,
     pub features: Vec<String>,
     pub endpoints: Vec<String>,
+    pub overlay_port: Option<u16>,
+    pub max_payload_length: u32,
     pub issued_at_unix: u64,
     pub expires_at_unix: u64,
     pub public_key: [u8; 32],
@@ -201,6 +279,8 @@ impl PeerCapabilityDescriptor {
             username,
             features: normalize_values(features, "feature")?,
             endpoints: normalize_values(endpoints, "endpoint")?,
+            overlay_port: None,
+            max_payload_length: MAX_CAPABILITY_ENVELOPE_BYTES as u32,
             issued_at_unix,
             expires_at_unix,
             public_key,
@@ -217,11 +297,20 @@ impl PeerCapabilityDescriptor {
         Ok(self)
     }
 
+    #[must_use]
+    pub const fn with_overlay_port(mut self, overlay_port: Option<u16>) -> Self {
+        self.overlay_port = overlay_port;
+        self
+    }
+
     pub fn verify(&self, now: SystemTime) -> Result<(), CapabilityError> {
         if unix_seconds(now)? >= self.expires_at_unix {
             return Err(CapabilityError::Expired);
         }
-        if self.peer_id != peer_id_for_public_key(&self.public_key) {
+        if !self
+            .peer_id
+            .eq_ignore_ascii_case(&peer_id_for_public_key(&self.public_key))
+        {
             return Err(CapabilityError::PeerIdMismatch);
         }
         let signature = self.signature.ok_or(CapabilityError::MissingSignature)?;
@@ -234,14 +323,32 @@ impl PeerCapabilityDescriptor {
     }
 
     pub fn canonical_payload(&self) -> Result<Vec<u8>, CapabilityError> {
+        if self.features.len() > MAX_CAPABILITY_FEATURES {
+            return Err(CapabilityError::FieldTooLong {
+                field: "features",
+                length: self.features.len(),
+                max: MAX_CAPABILITY_FEATURES,
+            });
+        }
         let mut payload = Vec::new();
-        write_field(&mut payload, "peerId", &self.peer_id)?;
-        write_field(&mut payload, "username", &self.username)?;
-        write_list(&mut payload, "features", &self.features)?;
-        write_list(&mut payload, "endpoints", &self.endpoints)?;
-        write_field(&mut payload, "issuedAt", &self.issued_at_unix.to_string())?;
-        write_field(&mut payload, "expiresAt", &self.expires_at_unix.to_string())?;
-        write_field(&mut payload, "publicKey", &hex_lower(&self.public_key))?;
+        write_bounded_string(&mut payload, "peer_id", &self.peer_id)?;
+        write_i32(&mut payload, self.overlay_port.map_or(-1, i32::from));
+        write_i32(
+            &mut payload,
+            i32::try_from(self.max_payload_length)
+                .map_err(|_| CapabilityError::InvalidMaxPayloadLength(i32::MAX))?,
+        );
+        write_i32(
+            &mut payload,
+            i32::try_from(self.features.len()).map_err(|_| CapabilityError::FieldTooLong {
+                field: "features",
+                length: self.features.len(),
+                max: MAX_CAPABILITY_FEATURES,
+            })?,
+        );
+        for feature in &self.features {
+            write_bounded_string(&mut payload, "feature", feature)?;
+        }
         Ok(payload)
     }
 }
@@ -317,10 +424,20 @@ pub enum CapabilityError {
     PeerIdMismatch,
     #[error("signing key does not match descriptor public key")]
     SigningKeyMismatch,
+    #[error("capability envelope magic mismatch: {0:#x}")]
+    MagicMismatch(i32),
     #[error("unsupported capability envelope version {0}")]
-    UnsupportedVersion(u16),
+    UnsupportedVersion(i32),
     #[error("invalid capability envelope message type {0}")]
-    InvalidMessageType(u8),
+    InvalidMessageType(i32),
+    #[error("invalid overlay port {0}")]
+    InvalidOverlayPort(i32),
+    #[error("invalid maximum payload length {0}")]
+    InvalidMaxPayloadLength(i32),
+    #[error("unsupported descriptor signature algorithm {0}")]
+    InvalidSignatureAlgorithm(String),
+    #[error("invalid descriptor signature-presence byte {0}")]
+    InvalidSignaturePresence(u8),
     #[error("capability envelope length {length} exceeds maximum {max}")]
     EnvelopeTooLarge { length: usize, max: usize },
     #[error("capability envelope decode error: {0}")]
@@ -341,47 +458,85 @@ impl From<DecodeError> for CapabilityError {
     }
 }
 
-fn write_protocol_string(
-    writer: &mut Writer,
+fn write_bounded_string(
+    payload: &mut Vec<u8>,
     field: &'static str,
     value: &str,
 ) -> Result<(), CapabilityError> {
-    writer
-        .write_string(value)
-        .map_err(|_| CapabilityError::FieldTooLong {
-            field,
-            length: value.len(),
-            max: u32::MAX as usize,
-        })
+    write_bounded_bytes(payload, field, value.as_bytes())
 }
 
-fn write_protocol_string_list(
-    writer: &mut Writer,
+fn write_bounded_bytes(
+    payload: &mut Vec<u8>,
     field: &'static str,
-    values: &[String],
+    value: &[u8],
 ) -> Result<(), CapabilityError> {
-    let len = u32::try_from(values.len()).map_err(|_| CapabilityError::FieldTooLong {
-        field,
-        length: values.len(),
-        max: u32::MAX as usize,
-    })?;
-    writer.write_u32_le(len);
-    for value in values {
-        write_protocol_string(writer, field, value)?;
+    let max = if field == "signature" || field == "public_key" {
+        MAX_CAPABILITY_SIGNATURE_BYTES
+    } else {
+        MAX_CAPABILITY_STRING_BYTES
+    };
+    if value.len() > max {
+        return Err(CapabilityError::FieldTooLong {
+            field,
+            length: value.len(),
+            max,
+        });
     }
+    write_i32(
+        payload,
+        i32::try_from(value.len()).map_err(|_| CapabilityError::FieldTooLong {
+            field,
+            length: value.len(),
+            max,
+        })?,
+    );
+    payload.extend_from_slice(value);
     Ok(())
 }
 
-fn read_protocol_string_list(
+fn write_i32(payload: &mut Vec<u8>, value: i32) {
+    payload.extend_from_slice(&value.to_le_bytes());
+}
+
+fn read_i32(reader: &mut Reader<'_>) -> Result<i32, CapabilityError> {
+    Ok(i32::from_le_bytes(read_array::<4>(reader, "i32")?))
+}
+
+fn read_bounded_count(
     reader: &mut Reader<'_>,
     field: &'static str,
-) -> Result<Vec<String>, CapabilityError> {
-    let count = reader.read_bounded_count(field, 4)?;
-    let mut values = Vec::with_capacity(count);
-    for _ in 0..count {
-        values.push(reader.read_string()?);
+    maximum: usize,
+) -> Result<usize, CapabilityError> {
+    let count = read_i32(reader)?;
+    if count < 0 || usize::try_from(count).map_or(true, |count| count > maximum) {
+        return Err(CapabilityError::Decode(format!(
+            "invalid {field} count: {count}"
+        )));
     }
-    Ok(values)
+    Ok(count as usize)
+}
+
+fn read_bounded_string(
+    reader: &mut Reader<'_>,
+    field: &'static str,
+) -> Result<String, CapabilityError> {
+    let length = read_bounded_count(reader, field, MAX_CAPABILITY_STRING_BYTES)?;
+    String::from_utf8(reader.read_bytes(length)?.to_vec())
+        .map_err(|error| CapabilityError::Decode(format!("invalid {field} UTF-8: {error}")))
+}
+
+fn read_bounded_array<const N: usize>(
+    reader: &mut Reader<'_>,
+    field: &'static str,
+) -> Result<[u8; N], CapabilityError> {
+    let length = read_bounded_count(reader, field, MAX_CAPABILITY_SIGNATURE_BYTES)?;
+    if length != N {
+        return Err(CapabilityError::Decode(format!(
+            "invalid {field} length: expected {N}, received {length}"
+        )));
+    }
+    read_array::<N>(reader, field)
 }
 
 fn read_array<const N: usize>(
@@ -417,51 +572,38 @@ fn normalize_values(
     for value in values {
         output.push(non_blank(value, field)?);
     }
-    output.sort();
-    output.dedup();
-    Ok(output)
-}
-
-fn write_list(
-    payload: &mut Vec<u8>,
-    field: &'static str,
-    values: &[String],
-) -> Result<(), CapabilityError> {
-    write_field(payload, field, &values.join(","))?;
-    Ok(())
-}
-
-fn write_field(
-    payload: &mut Vec<u8>,
-    field: &'static str,
-    value: &str,
-) -> Result<(), CapabilityError> {
-    const MAX_FIELD_LEN: usize = 16 * 1024;
-    if value.len() > MAX_FIELD_LEN {
+    if output.len() > MAX_CAPABILITY_FEATURES && field == "feature" {
         return Err(CapabilityError::FieldTooLong {
-            field,
-            length: value.len(),
-            max: MAX_FIELD_LEN,
+            field: "features",
+            length: output.len(),
+            max: MAX_CAPABILITY_FEATURES,
         });
     }
-    payload.extend_from_slice(field.as_bytes());
-    payload.push(b'=');
-    payload.extend_from_slice(value.as_bytes());
-    payload.push(b'\n');
-    Ok(())
+    output.sort_by_key(|value| value.to_ascii_lowercase());
+    output.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    Ok(output)
 }
 
 fn peer_id_for_public_key(public_key: &[u8; 32]) -> String {
     let digest = Sha256::digest(public_key);
-    format!("slskdn-{}", hex_lower(&digest[..16]))
+    base32_lower(&digest[..20])
 }
 
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
+fn base32_lower(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let mut output = String::with_capacity(bytes.len().div_ceil(5) * 8);
+    let mut bits = 0_u16;
+    let mut bit_count = 0_u8;
     for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
+        bits = (bits << 8) | u16::from(*byte);
+        bit_count += 8;
+        while bit_count >= 5 {
+            bit_count -= 5;
+            output.push(ALPHABET[((bits >> bit_count) & 31) as usize] as char);
+        }
+    }
+    if bit_count > 0 {
+        output.push(ALPHABET[((bits << (5 - bit_count)) & 31) as usize] as char);
     }
     output
 }
@@ -523,17 +665,41 @@ mod tests {
             descriptor.features,
             vec![FEATURE_CAPABILITIES_V1, FEATURE_MESH_V1]
         );
-        assert!(descriptor.peer_id.starts_with("slskdn-"));
+        assert_eq!(descriptor.peer_id.len(), 32);
+        assert!(descriptor
+            .peer_id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte)));
     }
 
     #[test]
     fn envelope_round_trips_and_rejects_trailing_bytes() {
-        let envelope =
-            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, [9; 16], descriptor());
+        let envelope = PeerCapabilityEnvelope::new(
+            PeerCapabilityMessageType::Hello,
+            "09090909090909090909090909090909",
+            descriptor(),
+        );
         let mut payload = envelope.encode().unwrap();
         let decoded = PeerCapabilityEnvelope::decode(&payload).unwrap();
 
-        assert_eq!(decoded, envelope);
+        assert_eq!(decoded.version, envelope.version);
+        assert_eq!(decoded.message_type, envelope.message_type);
+        assert_eq!(decoded.nonce, envelope.nonce);
+        assert_eq!(decoded.descriptor.peer_id, envelope.descriptor.peer_id);
+        assert_eq!(decoded.descriptor.features, envelope.descriptor.features);
+        assert_eq!(
+            decoded.descriptor.overlay_port,
+            envelope.descriptor.overlay_port
+        );
+        assert_eq!(
+            decoded.descriptor.max_payload_length,
+            envelope.descriptor.max_payload_length
+        );
+        assert_eq!(
+            decoded.descriptor.public_key,
+            envelope.descriptor.public_key
+        );
+        assert_eq!(decoded.descriptor.signature, envelope.descriptor.signature);
         decoded.descriptor.verify(now()).unwrap();
 
         payload.push(1);
@@ -544,11 +710,47 @@ mod tests {
     }
 
     #[test]
-    fn envelope_rejects_unknown_message_type() {
+    fn envelope_matches_frozen_runtime_unsigned_wire_fixture() {
+        let descriptor = PeerCapabilityDescriptor {
+            peer_id: "p".to_owned(),
+            username: "observation-only".to_owned(),
+            features: vec!["mesh".to_owned()],
+            endpoints: vec!["not-on-wire".to_owned()],
+            overlay_port: Some(50_305),
+            max_payload_length: 65_536,
+            issued_at_unix: 123,
+            expires_at_unix: 456,
+            public_key: [0; 32],
+            signature: None,
+        };
         let envelope =
-            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, [9; 16], descriptor());
+            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, "n", descriptor);
+        let expected = vec![
+            0x4b, 0x53, 0x44, 0x4e, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
+            0x00, 0x00, b'n', 0x01, 0x00, 0x00, 0x00, b'p', 0x81, 0xc4, 0x00, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, b'm', b'e', b's', b'h',
+            0x00,
+        ];
+
+        assert_eq!(envelope.encode().unwrap(), expected);
+        let decoded = PeerCapabilityEnvelope::decode(&expected).unwrap();
+        assert_eq!(decoded.nonce, "n");
+        assert_eq!(decoded.descriptor.peer_id, "p");
+        assert_eq!(decoded.descriptor.overlay_port, Some(50_305));
+        assert_eq!(decoded.descriptor.max_payload_length, 65_536);
+        assert_eq!(decoded.descriptor.features, vec!["mesh"]);
+        assert!(decoded.descriptor.signature.is_none());
+    }
+
+    #[test]
+    fn envelope_rejects_unknown_message_type() {
+        let envelope = PeerCapabilityEnvelope::new(
+            PeerCapabilityMessageType::Hello,
+            "09090909090909090909090909090909",
+            descriptor(),
+        );
         let mut payload = envelope.encode().unwrap();
-        payload[2] = 99;
+        payload[8] = 99;
 
         assert_eq!(
             PeerCapabilityEnvelope::decode(&payload).unwrap_err(),
@@ -558,17 +760,26 @@ mod tests {
 
     #[test]
     fn peer_message_exchange_updates_registry_and_acknowledges_hello() {
-        let hello =
-            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, [3; 16], descriptor());
+        let hello = PeerCapabilityEnvelope::new(
+            PeerCapabilityMessageType::Hello,
+            "03030303030303030303030303030303",
+            descriptor(),
+        );
         let message = peer_capability_message(&hello).unwrap();
         let decoded = decode_peer_capability_message(&message).unwrap().unwrap();
-        assert_eq!(decoded, hello);
+        assert_eq!(decoded.nonce, hello.nonce);
+        assert!(decoded.descriptor.username.is_empty());
 
         let mut registry = PeerCapabilityRegistry::new();
-        let response =
-            handle_peer_capability_message(&mut registry, &message, &local_descriptor(), now())
-                .unwrap()
-                .expect("acknowledgement");
+        let response = handle_peer_capability_message(
+            &mut registry,
+            &message,
+            "Alice",
+            &local_descriptor(),
+            now(),
+        )
+        .unwrap()
+        .expect("acknowledgement");
 
         assert!(registry.get("alice").is_some());
         let acknowledgement = decode_peer_capability_message(&response)
@@ -578,8 +789,8 @@ mod tests {
             acknowledgement.message_type,
             PeerCapabilityMessageType::Acknowledge
         );
-        assert_eq!(acknowledgement.nonce, [3; 16]);
-        assert_eq!(acknowledgement.descriptor.username, "Local");
+        assert_eq!(acknowledgement.nonce, "03030303030303030303030303030303");
+        assert!(acknowledgement.descriptor.username.is_empty());
         acknowledgement.descriptor.verify(now()).unwrap();
     }
 
@@ -596,6 +807,7 @@ mod tests {
         assert!(handle_peer_capability_message(
             &mut registry,
             &unrelated,
+            "Alice",
             &local_descriptor(),
             now()
         )

@@ -85,7 +85,7 @@ use slskr_client::{
     capabilities::{
         decode_peer_capability_message, peer_capability_message, PeerCapabilityDescriptor,
         PeerCapabilityEnvelope, PeerCapabilityMessageType, FEATURE_CAPABILITIES_V1,
-        FEATURE_MESH_V1, MAX_PEER_CAPABILITY_RECORDS,
+        MAX_PEER_CAPABILITY_RECORDS,
     },
     connection::ConnectionKind,
     listener::{IncomingConnection, Listener},
@@ -4426,6 +4426,8 @@ impl MeshState {
                     "username": descriptor.username,
                     "features": descriptor.features,
                     "endpoints": descriptor.endpoints,
+                    "overlayPort": descriptor.overlay_port,
+                    "maxPayloadLength": descriptor.max_payload_length,
                     "issuedAt": descriptor.issued_at_unix,
                     "expiresAt": descriptor.expires_at_unix,
                     "meshCapable": MeshRendezvous::accepts_descriptor(descriptor),
@@ -4773,10 +4775,7 @@ fn local_capability_descriptor(state: &AppState) -> Result<PeerCapabilityDescrip
             .username
             .clone()
             .unwrap_or_else(|| "slskr".to_owned()),
-        vec![
-            FEATURE_CAPABILITIES_V1.to_owned(),
-            FEATURE_MESH_V1.to_owned(),
-        ],
+        vec![FEATURE_CAPABILITIES_V1.to_owned()],
         Vec::new(),
         std::time::Duration::from_secs(24 * 60 * 60),
         &state.capability_signing_key,
@@ -27883,11 +27882,16 @@ async fn handle_plain_peer_messages(
         time::sleep(Duration::from_secs(2)).await;
         return Ok(());
     }
-    handle_peer_message(state, message, |response| async move {
-        peer.send(&response)
-            .await
-            .map_err(|error| format!("peer response send failed: {error}"))
-    })
+    handle_peer_message(
+        state,
+        message,
+        peer_username.as_deref(),
+        |response| async move {
+            peer.send(&response)
+                .await
+                .map_err(|error| format!("peer response send failed: {error}"))
+        },
+    )
     .await
 }
 
@@ -28048,7 +28052,7 @@ async fn handle_obfuscated_peer_messages(
     mut peer: ObfuscatedPeerMessageConnection<TcpStream>,
 ) -> Result<(), String> {
     let message = receive_obfuscated_peer_message(state, &mut peer).await?;
-    handle_peer_message(state, message, |response| async move {
+    handle_peer_message(state, message, None, |response| async move {
         peer.send(&response)
             .await
             .map_err(|error| format!("obfuscated peer response send failed: {error}"))
@@ -29148,15 +29152,24 @@ async fn transfer_capacity_available(state: &AppState, excluding_id: Option<u64>
 async fn handle_peer_message<F, Fut>(
     state: &AppState,
     message: PeerMessage,
+    peer_username: Option<&str>,
     send_response: F,
 ) -> Result<(), String>
 where
     F: FnOnce(PeerMessage) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
-    if let Some(envelope) = decode_peer_capability_message(&message)
+    if let Some(mut envelope) = decode_peer_capability_message(&message)
         .map_err(|error| format!("peer capability message rejected: {error}"))?
     {
+        let peer_username = peer_username
+            .map(str::trim)
+            .filter(|username| !username.is_empty())
+            .ok_or_else(|| {
+                "peer capability message rejected: authenticated peer username is unavailable"
+                    .to_owned()
+            })?;
+        envelope.descriptor.username = peer_username.to_owned();
         let message_type = envelope.message_type;
         let nonce = envelope.nonce;
         let username = envelope.descriptor.username.clone();
@@ -38137,6 +38150,8 @@ mod tests {
             username: username.to_owned(),
             features,
             endpoints: vec!["tcp:127.0.0.1:2234".to_owned()],
+            overlay_port: Some(50_305),
+            max_payload_length: 65_536,
             issued_at_unix: 1_700_000_000,
             expires_at_unix: 1_800_000_000,
             public_key: [7; 32],
@@ -47540,6 +47555,7 @@ mod tests {
                 filename: "Virtual/Inbound.flac".to_owned(),
                 size: None,
             }),
+            None,
             |response| async move {
                 assert_eq!(
                     response,
@@ -47602,7 +47618,7 @@ mod tests {
         )
         .and_then(|descriptor| descriptor.sign(&signing_key))
         .expect("signed capability descriptor");
-        let nonce = [3_u8; 16];
+        let nonce = "03030303030303030303030303030303";
         let hello = slskr_client::capabilities::peer_capability_message(
             &slskr_client::capabilities::PeerCapabilityEnvelope::new(
                 slskr_client::capabilities::PeerCapabilityMessageType::Hello,
@@ -47613,7 +47629,7 @@ mod tests {
         .expect("capability hello");
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-        super::handle_peer_message(&state, hello, |response| async move {
+        super::handle_peer_message(&state, hello, Some("mesh-source"), |response| async move {
             response_tx
                 .send(response)
                 .map_err(|_| "capability response receiver closed".to_owned())
@@ -47635,7 +47651,10 @@ mod tests {
             .verify(std::time::SystemTime::now())
             .expect("verify local acknowledgement descriptor");
         let mesh = state.mesh.read().await;
-        assert_eq!(mesh.capability_records, vec![descriptor.clone()]);
+        assert_eq!(mesh.capability_records.len(), 1);
+        assert_eq!(mesh.capability_records[0].username, "mesh-source");
+        assert_eq!(mesh.capability_records[0].peer_id, descriptor.peer_id);
+        assert_eq!(mesh.capability_records[0].features, descriptor.features);
         drop(mesh);
 
         let mut tampered = descriptor;
@@ -47643,14 +47662,15 @@ mod tests {
         let invalid = slskr_client::capabilities::peer_capability_message(
             &slskr_client::capabilities::PeerCapabilityEnvelope::new(
                 slskr_client::capabilities::PeerCapabilityMessageType::Acknowledge,
-                [4_u8; 16],
+                "04040404040404040404040404040404",
                 tampered,
             ),
         )
         .expect("tampered capability message");
-        let error = super::handle_peer_message(&state, invalid, |_| async { Ok(()) })
-            .await
-            .expect_err("reject invalid descriptor");
+        let error =
+            super::handle_peer_message(&state, invalid, Some("mesh-source"), |_| async { Ok(()) })
+                .await
+                .expect_err("reject invalid descriptor");
         assert!(error.contains("signature is invalid"));
         assert_eq!(state.mesh.read().await.capability_records.len(), 1);
     }
@@ -47674,6 +47694,7 @@ mod tests {
                 filename: "Virtual/Test.flac".to_owned(),
                 size: None,
             }),
+            None,
             |response| async move {
                 assert_eq!(
                     response,
@@ -47709,6 +47730,7 @@ mod tests {
                 filename: "Virtual/Test.flac".to_owned(),
                 size: None,
             }),
+            None,
             |response| async move {
                 assert_eq!(
                     response,
