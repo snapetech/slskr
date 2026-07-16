@@ -501,7 +501,9 @@ fn decode_search_response(reader: &mut Reader<'_>) -> Result<FileSearchResponse,
 fn decode_search_response_payload(payload: &[u8]) -> Result<FileSearchResponse, DecodeError> {
     let decompressed = decompress_zlib(payload)?;
     let mut reader = Reader::new(&decompressed);
-    decode_search_response(&mut reader)
+    let response = decode_search_response(&mut reader)?;
+    reader.finish()?;
+    Ok(response)
 }
 
 fn encode_search_response(
@@ -697,6 +699,29 @@ mod tests {
             Err(DecodeError::InvalidCompressedPayload(
                 "file search response has trailing compressed data"
             ))
+        ));
+    }
+
+    #[test]
+    fn compressed_search_response_rejects_trailing_decompressed_data() {
+        let response = FileSearchResponse {
+            username: "user".to_owned(),
+            token: 7,
+            results: Vec::new(),
+            slot_free: true,
+            average_speed: 1,
+            queue_length: 0,
+            unknown: 0,
+            private_results: Vec::new(),
+        };
+        let mut writer = Writer::new();
+        encode_search_response(&mut writer, &response).expect("encode response");
+        writer.write_u8(0xff);
+        let compressed = compress_zlib(&writer.into_inner()).expect("compress fixture");
+
+        assert!(matches!(
+            decode_search_response_payload(&compressed),
+            Err(DecodeError::TrailingBytes(1))
         ));
     }
 }
