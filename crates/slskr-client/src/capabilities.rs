@@ -63,6 +63,9 @@ impl PeerCapabilityEnvelope {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, CapabilityError> {
+        if self.version != PEER_CAPABILITY_ENVELOPE_VERSION {
+            return Err(CapabilityError::UnsupportedVersion(i32::from(self.version)));
+        }
         if self.nonce.trim().is_empty() {
             return Err(CapabilityError::BlankField("nonce"));
         }
@@ -305,7 +308,14 @@ impl PeerCapabilityDescriptor {
     }
 
     pub fn verify(&self, now: SystemTime) -> Result<(), CapabilityError> {
-        if unix_seconds(now)? >= self.expires_at_unix {
+        let now = unix_seconds(now)?;
+        if self.expires_at_unix <= self.issued_at_unix {
+            return Err(CapabilityError::InvalidValidity);
+        }
+        if now < self.issued_at_unix {
+            return Err(CapabilityError::NotYetValid);
+        }
+        if now >= self.expires_at_unix {
             return Err(CapabilityError::Expired);
         }
         if !self
@@ -416,6 +426,8 @@ pub enum CapabilityError {
     InvalidTime,
     #[error("descriptor is expired")]
     Expired,
+    #[error("descriptor is not yet valid")]
+    NotYetValid,
     #[error("descriptor is missing a signature")]
     MissingSignature,
     #[error("descriptor public key is invalid")]
@@ -769,6 +781,18 @@ mod tests {
     }
 
     #[test]
+    fn envelope_encoder_rejects_unsupported_version() {
+        let mut envelope =
+            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, "nonce", descriptor());
+        envelope.version = PEER_CAPABILITY_ENVELOPE_VERSION + 1;
+
+        assert_eq!(
+            envelope.encode().unwrap_err(),
+            CapabilityError::UnsupportedVersion(i32::from(PEER_CAPABILITY_ENVELOPE_VERSION + 1))
+        );
+    }
+
+    #[test]
     fn zero_overlay_port_is_rejected_on_encode_sign_and_decode() {
         let invalid = descriptor().with_overlay_port(Some(0));
         assert_eq!(
@@ -884,6 +908,33 @@ mod tests {
         assert_eq!(
             descriptor.verify(expired_at).unwrap_err(),
             CapabilityError::Expired
+        );
+    }
+
+    #[test]
+    fn future_and_inverted_descriptor_validity_fail_closed() {
+        let future = now() + Duration::from_secs(60);
+        let descriptor = PeerCapabilityDescriptor::unsigned(
+            "Alice",
+            vec![FEATURE_CAPABILITIES_V1.to_owned()],
+            Vec::new(),
+            Duration::from_secs(60),
+            &signing_key(),
+            future,
+        )
+        .unwrap()
+        .sign(&signing_key())
+        .unwrap();
+        assert_eq!(
+            descriptor.verify(now()).unwrap_err(),
+            CapabilityError::NotYetValid
+        );
+
+        let mut inverted = descriptor;
+        inverted.expires_at_unix = inverted.issued_at_unix;
+        assert_eq!(
+            inverted.verify(future).unwrap_err(),
+            CapabilityError::InvalidValidity
         );
     }
 
