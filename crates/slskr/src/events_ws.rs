@@ -260,11 +260,29 @@ where
         }
     }
     match opcode {
-        0x8 => Ok(ClientFrame::Close),
+        0x8 => {
+            validate_close_payload(&payload)?;
+            Ok(ClientFrame::Close)
+        }
         0x9 => Ok(ClientFrame::Ping(payload)),
         0xa => Ok(ClientFrame::Pong),
         _ => unreachable!("validated websocket control opcode"),
     }
+}
+
+fn validate_close_payload(payload: &[u8]) -> Result<(), String> {
+    if payload.len() == 1 {
+        return Err("client websocket close frame used a one-byte payload".to_owned());
+    }
+    if payload.len() >= 2 {
+        let code = u16::from_be_bytes([payload[0], payload[1]]);
+        if !(1000..5000).contains(&code) || matches!(code, 1004 | 1005 | 1006 | 1015) {
+            return Err("client websocket close frame used an invalid status code".to_owned());
+        }
+        std::str::from_utf8(&payload[2..])
+            .map_err(|_| "client websocket close reason was not valid UTF-8".to_owned())?;
+    }
+    Ok(())
 }
 
 fn event_frame_json(record: &EventRecord) -> String {
@@ -525,6 +543,38 @@ mod tests {
             error,
             "client websocket frame length used reserved high bit"
         );
+    }
+
+    #[tokio::test]
+    async fn websocket_client_frame_rejects_malformed_close_payloads() {
+        for (payload, expected) in [
+            (
+                vec![0],
+                "client websocket close frame used a one-byte payload",
+            ),
+            (
+                1005_u16.to_be_bytes().to_vec(),
+                "client websocket close frame used an invalid status code",
+            ),
+            (
+                [1000_u16.to_be_bytes().as_slice(), &[0xff]].concat(),
+                "client websocket close reason was not valid UTF-8",
+            ),
+        ] {
+            let frame = masked_client_frame(0x88, &payload);
+            let error = read_client_frame(&mut &frame[..]).await.unwrap_err();
+            assert_eq!(error, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn websocket_client_frame_accepts_valid_close_payload() {
+        let payload = [1000_u16.to_be_bytes().as_slice(), b"finished"].concat();
+        let frame = masked_client_frame(0x88, &payload);
+        assert!(matches!(
+            read_client_frame(&mut &frame[..]).await,
+            Ok(ClientFrame::Close)
+        ));
     }
 
     #[tokio::test]
