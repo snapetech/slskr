@@ -52,6 +52,30 @@ fn transfer_request_updates_state() {
 }
 
 #[test]
+fn download_rejects_wrong_transfer_direction_without_changing_state() {
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+
+    let error = transfer
+        .handle_peer_message(PeerMessage::TransferRequest(TransferRequest {
+            direction: 0,
+            token: 7,
+            filename: "Music/file.flac".to_owned(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
+            size: Some(100),
+        }))
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::TransferDirectionMismatch {
+            expected: 1,
+            received: 0
+        }
+    ));
+    assert_eq!(transfer.state, DownloadState::New);
+}
+
+#[test]
 fn transfer_response_updates_state() {
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
 

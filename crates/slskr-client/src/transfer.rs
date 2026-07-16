@@ -4,6 +4,8 @@ use slskr_protocol::ProtocolTextEncoding;
 use crate::{file_transfer::FileTransferConnection, ClientError};
 use tokio::io::{AsyncRead, AsyncWrite};
 
+const UPLOAD_DIRECTION: u32 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadTransfer {
     pub username: String,
@@ -137,6 +139,12 @@ impl DownloadTransfer {
     }
 
     fn handle_transfer_request(&mut self, request: TransferRequest) -> Result<(), ClientError> {
+        if request.direction != UPLOAD_DIRECTION {
+            return Err(ClientError::TransferDirectionMismatch {
+                expected: UPLOAD_DIRECTION,
+                received: request.direction,
+            });
+        }
         self.validate_token(request.token)?;
         self.validate_filename(request.filename)?;
         self.state = DownloadState::Requested { size: request.size };
@@ -208,7 +216,7 @@ impl UploadTransfer {
     pub fn transfer_request_message(&mut self) -> PeerMessage {
         self.state = UploadState::Requested;
         PeerMessage::TransferRequest(TransferRequest {
-            direction: 1,
+            direction: UPLOAD_DIRECTION,
             token: self.token,
             filename: self.filename.clone(),
             filename_encoding: ProtocolTextEncoding::Utf8,

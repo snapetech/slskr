@@ -27,6 +27,8 @@ pub enum ClientError {
     IndirectInitRequired,
     #[error("transfer token mismatch: expected {expected}, received {received}")]
     TransferTokenMismatch { expected: u32, received: u32 },
+    #[error("invalid transfer direction: expected {expected}, received {received}")]
+    TransferDirectionMismatch { expected: u32, received: u32 },
     #[error("transfer filename mismatch: expected {expected}, received {received}")]
     TransferFilenameMismatch { expected: String, received: String },
     #[error("transfer offset {offset} exceeds file size {size}")]
