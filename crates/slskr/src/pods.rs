@@ -200,15 +200,15 @@ impl PodStore {
 
     pub fn gateway_peer_for_update(&self, pod_id: &str, proposed: &PodRecord) -> Option<String> {
         let existing = self.pods.get(pod_id)?;
-        let requires_gateway = private_gateway_enabled(proposed)
-            || (private_gateway_enabled(&existing.pod)
-                && proposed.private_service_policy.is_some());
-        requires_gateway.then(|| {
-            gateway_peer_id(proposed)
-                .or_else(|| gateway_peer_id(&existing.pod))
-                .unwrap_or_default()
-                .to_owned()
-        })
+        if private_gateway_enabled(&existing.pod) && proposed.private_service_policy.is_some() {
+            return Some(
+                gateway_peer_id(&existing.pod)
+                    .unwrap_or_default()
+                    .to_owned(),
+            );
+        }
+        private_gateway_enabled(proposed)
+            .then(|| gateway_peer_id(proposed).unwrap_or_default().to_owned())
     }
 
     pub fn create(&mut self, mut pod: PodRecord, creator: String) -> Result<PodRecord, String> {
@@ -469,9 +469,15 @@ impl PodStore {
                 {
                     channel.binding_info = None;
                 }
-                stored.pod.external_bindings.retain(|candidate| {
-                    !(candidate.kind == "soulseek-room" && candidate.identifier == binding)
+                let is_still_referenced = stored.pod.channels.iter().any(|channel| {
+                    channel.binding_info.as_deref()
+                        == Some(format!("soulseek-room:{binding}").as_str())
                 });
+                if !is_still_referenced {
+                    stored.pod.external_bindings.retain(|candidate| {
+                        !(candidate.kind == "soulseek-room" && candidate.identifier == binding)
+                    });
+                }
                 stored.pod.updated_at = current_timestamp();
             }
         })?;
@@ -1064,6 +1070,47 @@ mod tests {
     }
 
     #[test]
+    fn unbinding_one_channel_preserves_a_shared_external_binding() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-shared-binding-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodStore::empty(&state_dir);
+        let mut pod = fixture();
+        pod.channels.push(super::PodChannel {
+            channel_id: "secondary".to_owned(),
+            kind: serde_json::json!(0),
+            name: "Secondary".to_owned(),
+            binding_info: None,
+            description: None,
+        });
+        store.create(pod, "owner".to_owned()).unwrap();
+        for channel_id in ["general", "secondary"] {
+            assert!(store
+                .bind_room(
+                    "pod:test",
+                    channel_id,
+                    "music".to_owned(),
+                    "mirror".to_owned(),
+                )
+                .unwrap()
+                .unwrap());
+        }
+
+        assert!(store.unbind_room("pod:test", "general").unwrap().unwrap());
+        let loaded = PodStore::load(&state_dir).unwrap();
+        let pod = loaded.get("pod:test").unwrap();
+        assert_eq!(pod.external_bindings.len(), 1);
+        assert_eq!(pod.external_bindings[0].identifier, "music");
+        assert_eq!(
+            pod.channels[1].binding_info.as_deref(),
+            Some("soulseek-room:music")
+        );
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
     fn private_gateway_update_authorization_matches_the_controller_contract() {
         let state_dir = std::env::temp_dir().join(format!(
             "slskr-pod-gateway-update-{}",
@@ -1079,6 +1126,14 @@ mod tests {
         unrelated_update.name = "Renamed Gateway Pod".to_owned();
         assert_eq!(
             store.gateway_peer_for_update("pod:gateway", &unrelated_update),
+            Some("owner".to_owned())
+        );
+
+        let mut gateway_transfer = store.get("pod:gateway").unwrap();
+        gateway_transfer.private_service_policy.as_mut().unwrap()["gatewayPeerId"] =
+            serde_json::json!("replacement");
+        assert_eq!(
+            store.gateway_peer_for_update("pod:gateway", &gateway_transfer),
             Some("owner".to_owned())
         );
 
