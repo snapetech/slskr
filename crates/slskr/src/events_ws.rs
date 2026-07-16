@@ -30,6 +30,12 @@ pub async fn write_upgrade_response<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    if !valid_sec_websocket_key(sec_websocket_key) {
+        return Err("invalid Sec-WebSocket-Key".to_owned());
+    }
+    if sec_websocket_protocol.is_some_and(|protocol| !is_http_token(protocol)) {
+        return Err("invalid Sec-WebSocket-Protocol".to_owned());
+    }
     let accept_key = derive_accept_key(sec_websocket_key.as_bytes());
     let protocol_header = sec_websocket_protocol
         .map(|protocol| format!("Sec-WebSocket-Protocol: {protocol}\r\n"))
@@ -47,6 +53,32 @@ where
         .await
         .map_err(|error| error.to_string())?;
     writer.flush().await.map_err(|error| error.to_string())
+}
+
+fn is_http_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+                    | b'0'..=b'9'
+                    | b'A'..=b'Z'
+                    | b'a'..=b'z'
+            )
+        })
 }
 
 pub async fn stream_events<R, W>(
@@ -361,6 +393,26 @@ mod tests {
         let response = String::from_utf8(writer).unwrap();
         assert!(response.contains("HTTP/1.1 101 Switching Protocols\r\n"));
         assert!(response.contains("Sec-WebSocket-Protocol: slskr.api-token.route%2Dtoken\r\n"));
+    }
+
+    #[tokio::test]
+    async fn upgrade_response_rejects_header_injection() {
+        let key = "dGhlIHNhbXBsZSBub25jZQ==";
+        for protocol in ["", "two protocols", "evil\r\nSet-Cookie: injected=true"] {
+            let mut writer = Vec::new();
+            let error = write_upgrade_response(&mut writer, key, Some(protocol))
+                .await
+                .unwrap_err();
+            assert_eq!(error, "invalid Sec-WebSocket-Protocol");
+            assert!(writer.is_empty());
+        }
+
+        let mut writer = Vec::new();
+        let error = write_upgrade_response(&mut writer, "invalid", None)
+            .await
+            .unwrap_err();
+        assert_eq!(error, "invalid Sec-WebSocket-Key");
+        assert!(writer.is_empty());
     }
 
     #[tokio::test]
