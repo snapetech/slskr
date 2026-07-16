@@ -145,6 +145,7 @@ impl<S> DistributedTree<S> {
                     .eq_ignore_ascii_case(&self.local_username)
             })
             .filter(|candidate| candidate.port != 0)
+            .filter(|candidate| candidate.username.len() <= MAX_DISTRIBUTED_USERNAME_BYTES)
             .map(ParentInfo::from_possible_parent)
             .min_by(|left, right| {
                 left.username
@@ -254,6 +255,9 @@ impl<S> DistributedTree<S> {
                 DistributedEvent::BranchChanged
             }
             DistributedMessage::BranchRoot { username } => {
+                if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+                    return DistributedEvent::Ignored;
+                }
                 self.branch_root = username;
                 DistributedEvent::BranchChanged
             }
