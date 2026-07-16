@@ -3,7 +3,8 @@
  * Batch operations client for efficient bulk requests
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.BatchBuilder = exports.BatchClient = void 0;
+exports.BatchBuilder = exports.BatchClient = exports.maxBatchOperations = void 0;
+exports.maxBatchOperations = 100;
 class BatchClient {
     constructor(client) {
         this.client = client;
@@ -21,8 +22,8 @@ class BatchClient {
         if (operations.length === 0) {
             throw new Error('Batch must contain at least one operation');
         }
-        if (operations.length > 100) {
-            throw new Error('Batch cannot contain more than 100 operations');
+        if (operations.length > exports.maxBatchOperations) {
+            throw new Error(`Batch cannot contain more than ${exports.maxBatchOperations} operations`);
         }
         const request = { operations };
         // Use internal client method to make the request
@@ -133,6 +134,9 @@ class BatchBuilder {
     async execute() {
         if (this.operations.length === 0) {
             throw new Error('Batch is empty');
+        }
+        if (this.operations.length > exports.maxBatchOperations) {
+            throw new Error(`Batch cannot contain more than ${exports.maxBatchOperations} operations`);
         }
         const request = { operations: this.operations };
         return this.client.postAuth('/api/batch', request);

@@ -9,6 +9,8 @@ type BatchCapableClient = {
   postAuth<T>(path: string, body: unknown): Promise<T>;
 };
 
+export const maxBatchOperations = 100;
+
 export class BatchClient {
   constructor(private client: SlskrClient) {}
 
@@ -27,8 +29,8 @@ export class BatchClient {
       throw new Error('Batch must contain at least one operation');
     }
 
-    if (operations.length > 100) {
-      throw new Error('Batch cannot contain more than 100 operations');
+    if (operations.length > maxBatchOperations) {
+      throw new Error(`Batch cannot contain more than ${maxBatchOperations} operations`);
     }
 
     const request: BatchRequest = { operations };
@@ -152,6 +154,9 @@ export class BatchBuilder {
   async execute(): Promise<BatchResponse> {
     if (this.operations.length === 0) {
       throw new Error('Batch is empty');
+    }
+    if (this.operations.length > maxBatchOperations) {
+      throw new Error(`Batch cannot contain more than ${maxBatchOperations} operations`);
     }
 
     const request: BatchRequest = { operations: this.operations };

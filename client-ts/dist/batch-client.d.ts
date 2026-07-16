@@ -3,6 +3,7 @@
  */
 import { BatchOperation, BatchResponse, BatchResult } from './types';
 import { SlskrClient } from './client';
+export declare const maxBatchOperations = 100;
 export declare class BatchClient {
     private client;
     constructor(client: SlskrClient);
