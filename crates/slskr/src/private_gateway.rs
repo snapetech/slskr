@@ -668,14 +668,6 @@ impl Gateway {
             .map_err(|_| (10, "Destination connection failed".to_owned()))?;
         let (mut reader, writer) = stream.into_split();
         let (incoming_tx, incoming_rx) = mpsc::channel(INBOUND_BUFFER_CHUNKS);
-        tokio::spawn(async move {
-            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
-            while let Ok(read) = reader.read(&mut buffer).await {
-                if read == 0 || incoming_tx.send(buffer[..read].to_vec()).await.is_err() {
-                    break;
-                }
-            }
-        });
         let tunnel_id = uuid::Uuid::new_v4().simple().to_string();
         let mut tunnels = self.tunnels.write().await;
         if tunnels.len() >= MAX_TUNNELS
@@ -697,6 +689,15 @@ impl Gateway {
                 incoming: Mutex::new(incoming_rx),
             }),
         );
+        drop(tunnels);
+        tokio::spawn(async move {
+            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
+            while let Ok(read) = reader.read(&mut buffer).await {
+                if read == 0 || incoming_tx.send(buffer[..read].to_vec()).await.is_err() {
+                    break;
+                }
+            }
+        });
         serde_json::to_vec(&OpenTunnelResponse {
             tunnel_id,
             accepted: true,
