@@ -75,6 +75,7 @@ with tarfile.open(sys.argv[1], "r:gz") as tf:
     if len(members) > max_entries:
         raise SystemExit(f"tar contains too many entries: {len(members)}")
     names = set()
+    roots = set()
     expanded_bytes = 0
     for member in members:
         member_path = pathlib.PurePosixPath(member.name)
@@ -88,6 +89,9 @@ with tarfile.open(sys.argv[1], "r:gz") as tf:
             or "\\" in member.name
         ):
             raise SystemExit(f"unsafe tar entry path: {member.name}")
+        if not member_path.parts:
+            raise SystemExit(f"empty tar entry path: {member.name}")
+        roots.add(member_path.parts[0])
         normalized_name = member_path.as_posix()
         if normalized_name in names:
             raise SystemExit(f"duplicate tar entry path: {member.name}")
@@ -104,6 +108,8 @@ with tarfile.open(sys.argv[1], "r:gz") as tf:
         target = (destination / pathlib.Path(*member_path.parts)).resolve()
         if target != destination and destination not in target.parents:
             raise SystemExit(f"tar entry escapes destination: {member.name}")
+    if len(roots) != 1:
+        raise SystemExit(f"tar must contain exactly one top-level directory: {sorted(roots)}")
     tf.extractall(destination)
 PY
       ;;
@@ -122,6 +128,7 @@ with zipfile.ZipFile(sys.argv[1]) as zf:
     if len(members) > max_entries:
         raise SystemExit(f"zip contains too many entries: {len(members)}")
     names = set()
+    roots = set()
     expanded_bytes = 0
     for member in members:
         member_path = pathlib.PurePosixPath(member.filename)
@@ -135,6 +142,9 @@ with zipfile.ZipFile(sys.argv[1]) as zf:
             or "\\" in member.filename
         ):
             raise SystemExit(f"unsafe zip entry path: {member.filename}")
+        if not member_path.parts:
+            raise SystemExit(f"empty zip entry path: {member.filename}")
+        roots.add(member_path.parts[0])
         normalized_name = member_path.as_posix()
         if normalized_name in names:
             raise SystemExit(f"duplicate zip entry path: {member.filename}")
@@ -149,6 +159,8 @@ with zipfile.ZipFile(sys.argv[1]) as zf:
         target = (destination / pathlib.Path(*member_path.parts)).resolve()
         if target != destination and destination not in target.parents:
             raise SystemExit(f"zip entry escapes destination: {member.filename}")
+    if len(roots) != 1:
+        raise SystemExit(f"zip must contain exactly one top-level directory: {sorted(roots)}")
     zf.extractall(destination)
 PY
       ;;
