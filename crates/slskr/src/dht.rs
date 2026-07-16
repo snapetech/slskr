@@ -10,6 +10,8 @@ use mainline::{async_dht::AsyncDht, Dht, Id};
 use sha1::{Digest, Sha1};
 use tokio::{sync::RwLock, time::timeout};
 
+use crate::utils::is_blocked_outbound_ipv4;
+
 const RENDEZVOUS_NAMES: [&str; 3] = [
     "slskdn-mesh-v1",
     "slskdn-mesh-v1-backup-1",
@@ -23,6 +25,7 @@ const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Rendezvous {
     client: AsyncDht,
     overlay_port: Option<u16>,
+    allow_special_use_peers: bool,
     peers: RwLock<BTreeSet<SocketAddrV4>>,
     status: RwLock<Status>,
 }
@@ -62,6 +65,7 @@ impl Rendezvous {
         Ok(Self {
             client,
             overlay_port,
+            allow_special_use_peers: bootstrap.is_some(),
             peers: RwLock::new(BTreeSet::new()),
             status: RwLock::new(Status::default()),
         })
@@ -124,7 +128,9 @@ impl Rendezvous {
             let mut peers = BTreeSet::new();
             while let Some(batch) = stream.next().await {
                 for peer in batch {
-                    if valid_peer(peer) && peers.len() < MAX_DISCOVERED_PEERS {
+                    if valid_peer(peer, self.allow_special_use_peers)
+                        && peers.len() < MAX_DISCOVERED_PEERS
+                    {
                         peers.insert(peer);
                     }
                 }
@@ -177,11 +183,12 @@ fn rendezvous_keys() -> [Id; 3] {
     })
 }
 
-fn valid_peer(peer: SocketAddrV4) -> bool {
+fn valid_peer(peer: SocketAddrV4, allow_special_use: bool) -> bool {
     peer.port() != 0
         && !peer.ip().is_unspecified()
         && !peer.ip().is_multicast()
         && !peer.ip().is_broadcast()
+        && (allow_special_use || !is_blocked_outbound_ipv4(*peer.ip()))
 }
 
 #[cfg(test)]
@@ -203,11 +210,21 @@ mod tests {
 
     #[test]
     fn unusable_dht_peer_endpoints_are_rejected() {
-        assert!(valid_peer("127.0.0.1:50305".parse().unwrap()));
-        assert!(!valid_peer("0.0.0.0:50305".parse().unwrap()));
-        assert!(!valid_peer("224.0.0.1:50305".parse().unwrap()));
-        assert!(!valid_peer("255.255.255.255:50305".parse().unwrap()));
-        assert!(!valid_peer("127.0.0.1:0".parse().unwrap()));
+        assert!(valid_peer("8.8.8.8:50305".parse().unwrap(), false));
+        for address in [
+            "0.0.0.0:50305",
+            "10.0.0.1:50305",
+            "100.64.0.1:50305",
+            "127.0.0.1:50305",
+            "169.254.1.1:50305",
+            "192.0.2.1:50305",
+            "224.0.0.1:50305",
+            "255.255.255.255:50305",
+            "8.8.8.8:0",
+        ] {
+            assert!(!valid_peer(address.parse().unwrap(), false), "{address}");
+        }
+        assert!(valid_peer("127.0.0.1:50305".parse().unwrap(), true));
     }
 
     #[tokio::test]
