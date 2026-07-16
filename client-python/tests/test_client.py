@@ -77,6 +77,36 @@ def test_websocket_client_rejects_non_http_base_urls():
     with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
         WebSocketClient("example.test", "token")
 
+    with pytest.raises(ValueError, match="without credentials"):
+        WebSocketClient("https://user:password@example.test", "token")
+
+
+@pytest.mark.asyncio
+async def test_websocket_client_cleans_up_when_connect_is_cancelled():
+    dial_started = asyncio.Event()
+
+    async def blocked_connect(*_args, **_kwargs):
+        dial_started.set()
+        await asyncio.Event().wait()
+
+    session = MagicMock()
+    session.ws_connect = AsyncMock(side_effect=blocked_connect)
+    session.close = AsyncMock()
+
+    with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
+        client = WebSocketClient("https://example.test", "token")
+        connecting = asyncio.create_task(client.connect())
+        await dial_started.wait()
+        connecting.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await connecting
+
+    session.close.assert_awaited_once()
+    assert client.session is None
+    assert client.ws is None
+    assert not client.is_connected()
+
 
 @pytest.mark.asyncio
 async def test_websocket_client_restores_subscriptions_on_connect():

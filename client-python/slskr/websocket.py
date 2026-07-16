@@ -17,8 +17,15 @@ class WebSocketClient:
 
     def __init__(self, base_url: str, token: str, debug: bool = False):
         parsed_url = urlsplit(base_url)
-        if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
-            raise ValueError("base_url must be an absolute HTTP or HTTPS URL")
+        if (
+            parsed_url.scheme not in ("http", "https")
+            or not parsed_url.netloc
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+        ):
+            raise ValueError(
+                "base_url must be an absolute HTTP or HTTPS URL without credentials"
+            )
         websocket_scheme = "wss" if parsed_url.scheme == "https" else "ws"
         websocket_path = parsed_url.path.rstrip("/") + "/api/events/ws"
         self.url = urlunsplit(
@@ -76,6 +83,9 @@ class WebSocketClient:
                 # Start message handler
                 self._message_task = asyncio.create_task(self._handle_messages(self.ws))
 
+            except asyncio.CancelledError:
+                await self._close_resources()
+                raise
             except Exception as e:
                 await self._close_resources()
                 self._notify_error_listeners(e)
