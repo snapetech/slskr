@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 from typing import Callable, Dict, Set, Optional
+from urllib.parse import urlsplit, urlunsplit
 import aiohttp
 
 MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024
@@ -15,7 +16,14 @@ class WebSocketClient:
     """WebSocket client for real-time events"""
 
     def __init__(self, base_url: str, token: str, debug: bool = False):
-        self.url = base_url.replace("http", "ws").rstrip("/") + "/api/events/ws"
+        parsed_url = urlsplit(base_url)
+        if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
+            raise ValueError("base_url must be an absolute HTTP or HTTPS URL")
+        websocket_scheme = "wss" if parsed_url.scheme == "https" else "ws"
+        websocket_path = parsed_url.path.rstrip("/") + "/api/events/ws"
+        self.url = urlunsplit(
+            (websocket_scheme, parsed_url.netloc, websocket_path, "", "")
+        )
         self.token = token
         self.debug = debug
         self.session: Optional[aiohttp.ClientSession] = None
@@ -53,6 +61,14 @@ class WebSocketClient:
                     autoclose=False,
                     max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
                 )
+
+                if self.subscribed_topics:
+                    await self.ws.send_json(
+                        {
+                            "type": "subscribe",
+                            "data": {"topics": sorted(self.subscribed_topics)},
+                        }
+                    )
 
                 self.reconnect_attempts = 0
                 self._notify_connection_listeners(True)

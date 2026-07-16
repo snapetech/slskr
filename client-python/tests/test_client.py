@@ -70,6 +70,39 @@ def test_websocket_client_uses_event_endpoint_and_tracks_topics():
     assert client.get_subscribed_topics() == ["transfers"]
 
 
+def test_websocket_client_rejects_non_http_base_urls():
+    with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
+        WebSocketClient("ftp://example.test", "token")
+
+    with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
+        WebSocketClient("example.test", "token")
+
+
+@pytest.mark.asyncio
+async def test_websocket_client_restores_subscriptions_on_connect():
+    ws = MagicMock()
+    ws.closed = False
+    ws.send_json = AsyncMock()
+    ws.close = AsyncMock()
+    ws.__aiter__.return_value = iter(())
+    session = MagicMock()
+    session.ws_connect = AsyncMock(return_value=ws)
+    session.close = AsyncMock()
+
+    with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
+        client = WebSocketClient("https://example.test", "token")
+        client.subscribe("transfers", "searches")
+        await client.connect()
+
+        ws.send_json.assert_awaited_once_with(
+            {
+                "type": "subscribe",
+                "data": {"topics": ["searches", "transfers"]},
+            }
+        )
+        await client.disconnect()
+
+
 @pytest.mark.asyncio
 async def test_websocket_client_rejects_duplicate_connect_and_bounds_messages():
     ws = MagicMock()
