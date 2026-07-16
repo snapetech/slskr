@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
@@ -49,6 +49,7 @@ pub struct ConnectionManager<ServerStream, PeerStream> {
     peer_cache: PeerConnectionCache<PeerStream>,
     connector: PeerConnector<PeerStream>,
     tokens: Arc<Mutex<TokenGenerator>>,
+    peer_connects: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl<ServerStream, PeerStream> ConnectionManager<ServerStream, PeerStream>
@@ -67,6 +68,7 @@ where
             peer_cache,
             connector,
             tokens: Arc::new(Mutex::new(TokenGenerator::default())),
+            peer_connects: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -86,11 +88,36 @@ where
             return Ok(false);
         }
 
-        let connection = (self.connector)(username.to_owned()).await?;
-        self.peer_cache
-            .insert(username.to_owned(), connection)
-            .await?;
-        Ok(true)
+        let key = username.to_ascii_lowercase();
+        let connect_gate = {
+            let mut peer_connects = self.peer_connects.lock().await;
+            Arc::clone(
+                peer_connects
+                    .entry(key.clone())
+                    .or_insert_with(|| Arc::new(Mutex::new(()))),
+            )
+        };
+        let gate = connect_gate.lock().await;
+        let result = async {
+            if self.peer_cache.contains(username).await {
+                return Ok(false);
+            }
+            let connection = (self.connector)(username.to_owned()).await?;
+            self.peer_cache
+                .insert(username.to_owned(), connection)
+                .await?;
+            Ok(true)
+        }
+        .await;
+        drop(gate);
+        let mut peer_connects = self.peer_connects.lock().await;
+        if peer_connects
+            .get(&key)
+            .is_some_and(|current| Arc::ptr_eq(current, &connect_gate))
+        {
+            peer_connects.remove(&key);
+        }
+        result
     }
 
     pub async fn request_indirect_peer_messages(

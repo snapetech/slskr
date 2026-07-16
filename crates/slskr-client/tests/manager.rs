@@ -14,6 +14,7 @@ use slskr_client::{
 };
 use slskr_protocol::server::Direction;
 use tokio::io::{duplex, DuplexStream};
+use tokio::sync::Barrier;
 
 #[test]
 fn token_generator_wraps() {
@@ -49,6 +50,43 @@ async fn ensure_peer_messages_calls_connector_once_for_cached_peer() {
     manager.ensure_peer_messages("peer").await.unwrap();
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn concurrent_ensure_peer_messages_connects_once_per_peer() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_connector = Arc::clone(&calls);
+    let release = Arc::new(Barrier::new(2));
+    let release_for_connector = Arc::clone(&release);
+    let (client, _) = duplex(512);
+    let manager = Arc::new(ConnectionManager::new(
+        ServerSession::new(ServerConnection::new(client)),
+        PeerConnectionCache::new(),
+        Arc::new(move |_| {
+            calls_for_connector.fetch_add(1, Ordering::SeqCst);
+            let release = Arc::clone(&release_for_connector);
+            Box::pin(async move {
+                release.wait().await;
+                let (stream, _) = duplex(64);
+                Ok(PeerMessageConnection::new(stream))
+            })
+        }),
+    ));
+
+    let first_manager = Arc::clone(&manager);
+    let first = tokio::spawn(async move { first_manager.ensure_peer_messages("peer").await });
+    while calls.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    let second_manager = Arc::clone(&manager);
+    let second = tokio::spawn(async move { second_manager.ensure_peer_messages("PEER").await });
+    tokio::task::yield_now().await;
+    release.wait().await;
+
+    assert!(first.await.unwrap().unwrap());
+    assert!(!second.await.unwrap().unwrap());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(manager.peer_cache().len().await, 1);
 }
 
 #[tokio::test]
