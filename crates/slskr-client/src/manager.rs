@@ -29,26 +29,41 @@ const PEER_CONNECT_STRIPES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenGenerator {
-    next: u32,
+    source: TokenSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenSource {
+    Random,
+    Sequential(u32),
 }
 
 impl TokenGenerator {
     #[must_use]
     pub const fn new(seed: u32) -> Self {
-        Self { next: seed }
+        Self {
+            source: TokenSource::Sequential(seed),
+        }
     }
 
     #[must_use]
     pub fn next_token(&mut self) -> u32 {
-        let token = self.next;
-        self.next = self.next.wrapping_add(1);
-        token
+        match &mut self.source {
+            TokenSource::Random => rand::random(),
+            TokenSource::Sequential(next) => {
+                let token = *next;
+                *next = next.wrapping_add(1);
+                token
+            }
+        }
     }
 }
 
 impl Default for TokenGenerator {
     fn default() -> Self {
-        Self::new(1)
+        Self {
+            source: TokenSource::Random,
+        }
     }
 }
 
@@ -183,4 +198,15 @@ fn peer_connect_stripe(username: &str) -> usize {
     let mut hasher = DefaultHasher::new();
     username.to_ascii_lowercase().hash(&mut hasher);
     usize::try_from(hasher.finish() % PEER_CONNECT_STRIPES as u64).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_authentication_tokens_are_not_sequential() {
+        let tokens = TokenGenerator::default();
+        assert_eq!(tokens.source, TokenSource::Random);
+    }
 }
