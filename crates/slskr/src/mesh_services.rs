@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
@@ -11,6 +11,32 @@ use crate::config::TrustedMeshPeer;
 
 const CONTENT_CHUNK_BYTES: u64 = 32 * 1024;
 const MAX_CONTENT_ID_BYTES: usize = 512;
+
+struct StagingFileGuard {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl StagingFileGuard {
+    fn new(path: &Path) -> Self {
+        Self {
+            path: path.to_owned(),
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for StagingFileGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
 
 pub async fn fetch_content(
     peer: &TrustedMeshPeer,
@@ -49,6 +75,7 @@ async fn fetch_content_inner(
         .open(output)
         .await
         .map_err(|error| format!("mesh content staging create failed: {error}"))?;
+    let mut staging = StagingFileGuard::new(output);
     let result = async {
         let mut hello = MeshHello::new(
             local_username,
@@ -121,8 +148,8 @@ async fn fetch_content_inner(
     }
     .await;
     drop(file);
-    if result.is_err() {
-        let _ = tokio::fs::remove_file(output).await;
+    if result.is_ok() {
+        staging.commit();
     }
     result
 }
@@ -149,6 +176,7 @@ fn validate_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener;
 
     #[tokio::test]
     async fn existing_output_is_never_deleted_when_creation_fails() {
@@ -177,6 +205,56 @@ mod tests {
             std::fs::read(&output).unwrap(),
             b"owned by another operation"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_fetch_removes_owned_staging_file() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-mesh-cancelled-output-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let output = root.join("partial.bin");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = listener.local_addr().unwrap();
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            accepted_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let peer = TrustedMeshPeer {
+            peer_id: "peer".to_owned(),
+            username: "remote".to_owned(),
+            overlay_endpoint: endpoint,
+            certificate_sha256: [1_u8; 32],
+            range_endpoint: None,
+        };
+        let key = SigningKey::from_bytes(&[2_u8; 32]);
+        let output_for_fetch = output.clone();
+        let fetch = tokio::spawn(async move {
+            fetch_content(
+                &peer,
+                "local",
+                &key,
+                "content",
+                1,
+                &"a".repeat(64),
+                &output_for_fetch,
+            )
+            .await
+        });
+
+        accepted_rx.await.unwrap();
+        assert!(output.exists());
+        fetch.abort();
+        assert!(fetch.await.unwrap_err().is_cancelled());
+        assert!(!output.exists());
+
+        server.abort();
+        let _ = server.await;
         std::fs::remove_dir_all(root).unwrap();
     }
 }
