@@ -38253,11 +38253,37 @@ mod tests {
             "legacy-gateway-test-nonce",
         )
         .expect("legacy hello");
-        let legacy_error =
+        let mut legacy_client =
             slskr_client::overlay::connect_tls_overlay(endpoint, certificate_pin, legacy_hello)
                 .await
-                .expect_err("unsigned legacy gateway hello must be rejected");
-        assert!(legacy_error.to_string().contains("overlay"));
+                .expect("connect frozen legacy gateway client");
+        let legacy_reply = legacy_client
+            .call(
+                &MeshServiceCall::new(
+                    "legacy-open",
+                    "private-gateway",
+                    "OpenTunnel",
+                    serde_json::to_vec(
+                        &OpenTunnelRequest::new(
+                            "pod-gateway",
+                            "127.0.0.1",
+                            echo_port,
+                            None,
+                            "legacy-open-nonce",
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("legacy gateway rejection reply");
+        assert_eq!(legacy_reply.status_code, 8);
+        assert_eq!(
+            legacy_reply.error_message.as_deref(),
+            Some("Authenticated hello required for private-gateway calls")
+        );
 
         gateway_server.abort();
         let _ = std::fs::remove_dir_all(root);

@@ -36,6 +36,7 @@ const MAX_REPLAY_NONCES: usize = 4_096;
 const REQUEST_FRESHNESS_SECONDS: u64 = 300;
 const DESTINATION_RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 const DESTINATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const DESTINATION_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
@@ -149,8 +150,9 @@ impl Gateway {
         {
             return Err("overlay peer does not advertise mesh_service".to_owned());
         }
-        authenticate_overlay_peer(state, &hello, remote_address.ip(), &self.certificate_sha256)
-            .await?;
+        let service_authenticated =
+            authenticate_overlay_peer(state, &hello, remote_address.ip(), &self.certificate_sha256)
+                .await?;
         let connection_id = uuid::Uuid::new_v4().simple().to_string();
         let local_username = super::pod_request_peer_id(state)
             .await
@@ -189,7 +191,13 @@ impl Gateway {
                         let call: MeshServiceCall = serde_json::from_slice(&raw)
                             .map_err(|error| format!("overlay service call is invalid: {error}"))?;
                         let reply = self
-                            .handle_call(call, &hello.username, &connection_id, state)
+                            .handle_call(
+                                call,
+                                &hello.username,
+                                &connection_id,
+                                service_authenticated,
+                                state,
+                            )
                             .await;
                         framer
                             .write(&reply)
@@ -224,6 +232,7 @@ impl Gateway {
         call: MeshServiceCall,
         remote_username: &str,
         connection_id: &str,
+        service_authenticated: bool,
         state: &super::AppState,
     ) -> MeshServiceReply {
         let result = if call.magic != OVERLAY_MAGIC
@@ -234,6 +243,11 @@ impl Gateway {
             || call.payload.len() > MAX_OVERLAY_MESSAGE_BYTES
         {
             Err((4, "Invalid service call".to_owned()))
+        } else if !service_authenticated {
+            Err((
+                8,
+                "Authenticated hello required for private-gateway calls".to_owned(),
+            ))
         } else {
             match call.method.as_str() {
                 "OpenTunnel" => {
@@ -391,9 +405,9 @@ impl Gateway {
             .owned_tunnel(&request.tunnel_id, remote_username, connection_id)
             .await?;
         let mut writer = tunnel.writer.lock().await;
-        writer
-            .write_all(&request.data)
+        timeout(DESTINATION_WRITE_TIMEOUT, writer.write_all(&request.data))
             .await
+            .map_err(|_| (10, "Tunnel write timed out".to_owned()))?
             .map_err(|_| (10, "Tunnel write failed".to_owned()))?;
         serde_json::to_vec(&serde_json::json!({"Sent": request.data.len()}))
             .map_err(|_| (1, "Tunnel response failed".to_owned()))
@@ -513,7 +527,7 @@ async fn authenticate_overlay_peer(
     hello: &MeshHello,
     remote_ip: IpAddr,
     gateway_certificate_sha256: &[u8; 32],
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let public_key = state
         .mesh
         .read()
@@ -526,7 +540,8 @@ async fn authenticate_overlay_peer(
         })
         .map(|record| record.public_key)
         .ok_or_else(|| "overlay peer has no fresh authenticated capability record".to_owned())?;
-    if hello.auth_public_key.is_some() || hello.auth_signature.is_some() {
+    let service_authenticated = hello.auth_public_key.is_some() || hello.auth_signature.is_some();
+    if service_authenticated {
         hello
             .verify_authentication(&public_key, gateway_certificate_sha256)
             .map_err(|_| "overlay peer failed capability-key authentication".to_owned())?;
@@ -537,7 +552,7 @@ async fn authenticate_overlay_peer(
     if remote_ip != IpAddr::V4(expected.ip) {
         return Err("overlay peer IP does not match its Soulseek endpoint".to_owned());
     }
-    Ok(())
+    Ok(service_authenticated)
 }
 
 fn valid_destination_ip(ip: IpAddr) -> bool {
