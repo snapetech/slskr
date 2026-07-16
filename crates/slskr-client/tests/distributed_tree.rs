@@ -7,6 +7,7 @@ use slskr_client::{
     distributed_tree::{BranchInfoReporter, DistributedEvent, DistributedTree, ParentInfo},
     server::ServerSession,
     stream::{DistributedConnection, ServerConnection},
+    ClientError,
 };
 use slskr_protocol::{
     distributed::{DistributedMessage, DistributedSearch},
@@ -269,7 +270,7 @@ async fn distributed_search_source_exclusion_is_case_insensitive() {
 #[tokio::test]
 async fn branch_info_reporter_schedules_server_updates() {
     let now = Instant::now();
-    let mut reporter = BranchInfoReporter::new(Duration::from_secs(5), now);
+    let mut reporter = BranchInfoReporter::new(Duration::from_secs(5), now).unwrap();
     let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
     let (client, server) = duplex(1024);
     let mut session = ServerSession::new(ServerConnection::new(client));
@@ -309,6 +310,16 @@ async fn branch_info_reporter_schedules_server_updates() {
             username: "local".to_owned(),
         }
     );
+}
+
+#[test]
+fn branch_info_reporter_rejects_zero_interval() {
+    assert!(matches!(
+        BranchInfoReporter::new(Duration::ZERO, Instant::now()),
+        Err(ClientError::InvalidInterval {
+            field: "branch info"
+        })
+    ));
 }
 
 fn possible_parent(username: &str, ip: [u8; 4], port: u32) -> PossibleParent {

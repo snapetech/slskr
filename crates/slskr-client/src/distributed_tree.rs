@@ -343,12 +343,16 @@ pub struct BranchInfoReporter {
 }
 
 impl BranchInfoReporter {
-    #[must_use]
-    pub fn new(interval: Duration, now: Instant) -> Self {
-        Self {
+    pub fn new(interval: Duration, now: Instant) -> Result<Self, ClientError> {
+        if interval.is_zero() {
+            return Err(ClientError::InvalidInterval {
+                field: "branch info",
+            });
+        }
+        Ok(Self {
             interval,
             next_due: now + interval,
-        }
+        })
     }
 
     #[must_use]
