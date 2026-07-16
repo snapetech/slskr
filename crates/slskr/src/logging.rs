@@ -104,15 +104,7 @@ impl LogConfig {
 
 /// Format timestamp in ISO8601 with milliseconds
 pub fn format_timestamp() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-    let millis = now.subsec_millis();
-    let datetime = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
-
-    // Simple ISO8601 formatting
-    format!("{:?}Z+{:03}", datetime, millis)
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 /// Extract status code from HTTP response status string
@@ -321,6 +313,16 @@ mod tests {
         assert_eq!(status_code_from_string("200 OK"), 200);
         assert_eq!(status_code_from_string("404 Not Found"), 404);
         assert_eq!(status_code_from_string("500 Internal Server Error"), 500);
+    }
+
+    #[test]
+    fn timestamp_is_rfc3339_utc_with_milliseconds() {
+        let timestamp = format_timestamp();
+
+        assert!(timestamp.ends_with('Z'));
+        assert_eq!(timestamp.len(), "2026-07-16T19:02:07.123Z".len());
+        assert_eq!(timestamp.as_bytes()[19], b'.');
+        assert!(chrono::DateTime::parse_from_rfc3339(&timestamp).is_ok());
     }
 
     #[test]
