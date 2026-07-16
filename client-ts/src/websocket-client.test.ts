@@ -10,8 +10,10 @@ class MockWebSocket {
   onerror: (() => void) | null = null;
   onclose: (() => void) | null = null;
   sent: string[] = [];
+  url: string;
 
-  constructor(_url: string, _protocols?: string | string[]) {
+  constructor(url: string, _protocols?: string | string[]) {
+    this.url = url;
     MockWebSocket.instances.push(this);
   }
 
@@ -76,6 +78,49 @@ describe('WebSocketClient reconnect lifecycle', () => {
     MockWebSocket.instances[0].close();
 
     await expect(connected).rejects.toThrow('WebSocket closed before opening');
+  });
+
+  it('rejects concurrent connection attempts without replacing the active socket', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const firstConnection = client.connect();
+
+    await expect(client.connect()).rejects.toThrow('already in progress');
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    MockWebSocket.instances[0].open();
+    await firstConnection;
+    await expect(client.connect()).rejects.toThrow('already connected');
+    client.disconnect();
+  });
+
+  it('settles an in-flight connection when intentionally disconnected', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const connected = client.connect();
+
+    client.disconnect();
+
+    await expect(connected).rejects.toThrow('closed before opening');
+    jest.runOnlyPendingTimers();
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('validates and normalizes the WebSocket endpoint URL', async () => {
+    expect(() => new WebSocketClient('ftp://example.test', 'token')).toThrow(
+      'absolute HTTP or HTTPS'
+    );
+    expect(() => new WebSocketClient('https://user:pass@example.test', 'token')).toThrow(
+      'without credentials'
+    );
+
+    const client = new WebSocketClient(
+      'https://example.test/slskr/?debug=true#fragment',
+      'token'
+    );
+    const connected = client.connect();
+    expect(MockWebSocket.instances[0].url).toBe('wss://example.test/slskr/api/events/ws');
+    MockWebSocket.instances[0].open();
+    await connected;
+    client.disconnect();
   });
 
   it('restores subscriptions after reconnecting', async () => {

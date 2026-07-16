@@ -32,9 +32,15 @@ export class WebSocketClient {
   private errorListeners: Set<ErrorListener> = new Set();
 
   constructor(baseUrl: string, token: string) {
-    this.url = baseUrl
-      .replace(/^http/, 'ws')
-      .replace(/\/$/, '') + '/api/events/ws';
+    const parsedUrl = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password) {
+      throw new Error('baseUrl must be an absolute HTTP or HTTPS URL without credentials');
+    }
+    parsedUrl.protocol = parsedUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    parsedUrl.pathname = `${parsedUrl.pathname.replace(/\/+$/, '')}/api/events/ws`;
+    parsedUrl.search = '';
+    parsedUrl.hash = '';
+    this.url = parsedUrl.toString();
     this.token = token;
   }
 
@@ -42,6 +48,13 @@ export class WebSocketClient {
    * Connect to WebSocket
    */
   async connect(): Promise<void> {
+    if (this.ws !== null) {
+      throw new Error(
+        this.ws.readyState === WebSocket.OPEN
+          ? 'WebSocket is already connected'
+          : 'WebSocket connection already in progress'
+      );
+    }
     this.intentionallyDisconnected = false;
     this.clearReconnectTimer();
     return new Promise((resolve, reject) => {
@@ -100,7 +113,6 @@ export class WebSocketClient {
     this.clearPingInterval();
     if (this.ws) {
       this.ws.close();
-      this.ws = null;
     }
   }
 
