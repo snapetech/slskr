@@ -25,7 +25,7 @@ export class WebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyDisconnected = false;
   private pingInterval: number | null = null;
-  private subscribedTopics: Set<string> = new Set();
+  private subscribedTopics: Set<EventType> = new Set();
 
   private listeners: Map<EventType, Set<EventListener>> = new Map();
   private connectionListeners: Set<ConnectionListener> = new Set();
@@ -55,6 +55,7 @@ export class WebSocketClient {
           this.reconnectAttempts = 0;
           this.notifyConnectionListeners(true);
           this.setupPingInterval();
+          this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
           settled = true;
           resolve();
         };
@@ -113,11 +114,7 @@ export class WebSocketClient {
     newTopics.forEach((t) => this.subscribedTopics.add(t));
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const message: WebSocketMessage = {
-        type: 'subscribe',
-        data: { topics: newTopics },
-      };
-      this.ws.send(JSON.stringify(message));
+      this.sendSubscription('subscribe', newTopics);
     }
   }
 
@@ -125,14 +122,13 @@ export class WebSocketClient {
    * Unsubscribe from event types
    */
   unsubscribe(...topics: EventType[]): void {
-    topics.forEach((t) => this.subscribedTopics.delete(t));
+    const removedTopics = topics.filter((topic, index) =>
+      topics.indexOf(topic) === index && this.subscribedTopics.delete(topic)
+    );
+    if (removedTopics.length === 0) return;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const message: WebSocketMessage = {
-        type: 'unsubscribe',
-        data: { topics },
-      };
-      this.ws.send(JSON.stringify(message));
+      this.sendSubscription('unsubscribe', removedTopics);
     }
   }
 
@@ -211,6 +207,12 @@ export class WebSocketClient {
     } catch (error) {
       this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
     }
+  }
+
+  private sendSubscription(type: 'subscribe' | 'unsubscribe', topics: EventType[]): void {
+    if (topics.length === 0 || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const message: WebSocketMessage = { type, data: { topics } };
+    this.ws.send(JSON.stringify(message));
   }
 
   private notifyConnectionListeners(connected: boolean): void {

@@ -9,6 +9,7 @@ class MockWebSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   onclose: (() => void) | null = null;
+  sent: string[] = [];
 
   constructor(_url: string, _protocols?: string | string[]) {
     MockWebSocket.instances.push(this);
@@ -24,7 +25,9 @@ class MockWebSocket {
     this.onclose?.();
   }
 
-  send(_data: string): void {}
+  send(data: string): void {
+    this.sent.push(data);
+  }
 }
 
 describe('WebSocketClient reconnect lifecycle', () => {
@@ -73,5 +76,42 @@ describe('WebSocketClient reconnect lifecycle', () => {
     MockWebSocket.instances[0].close();
 
     await expect(connected).rejects.toThrow('WebSocket closed before opening');
+  });
+
+  it('restores subscriptions after reconnecting', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    client.subscribe('search.completed', 'transfer.completed');
+    const connected = client.connect();
+    MockWebSocket.instances[0].open();
+    await connected;
+
+    expect(JSON.parse(MockWebSocket.instances[0].sent[0])).toEqual({
+      type: 'subscribe',
+      data: { topics: ['search.completed', 'transfer.completed'] },
+    });
+    MockWebSocket.instances[0].close();
+    jest.advanceTimersByTime(1000);
+    MockWebSocket.instances[1].open();
+
+    expect(JSON.parse(MockWebSocket.instances[1].sent[0])).toEqual({
+      type: 'subscribe',
+      data: { topics: ['search.completed', 'transfer.completed'] },
+    });
+  });
+
+  it('sends only actual unsubscribe transitions', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const connected = client.connect();
+    MockWebSocket.instances[0].open();
+    await connected;
+
+    client.subscribe('search.completed');
+    client.unsubscribe('transfer.completed', 'search.completed', 'search.completed');
+
+    const frames = MockWebSocket.instances[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toEqual([
+      { type: 'subscribe', data: { topics: ['search.completed'] } },
+      { type: 'unsubscribe', data: { topics: ['search.completed'] } },
+    ]);
   });
 });

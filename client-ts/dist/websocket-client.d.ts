@@ -63,6 +63,7 @@ export declare class WebSocketClient {
      */
     removeAllListeners(): void;
     private handleMessage;
+    private sendSubscription;
     private notifyConnectionListeners;
     private notifyErrorListeners;
     private setupPingInterval;

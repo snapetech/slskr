@@ -45,6 +45,7 @@ class WebSocketClient {
                     this.reconnectAttempts = 0;
                     this.notifyConnectionListeners(true);
                     this.setupPingInterval();
+                    this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
                     settled = true;
                     resolve();
                 };
@@ -101,24 +102,18 @@ class WebSocketClient {
             return;
         newTopics.forEach((t) => this.subscribedTopics.add(t));
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            const message = {
-                type: 'subscribe',
-                data: { topics: newTopics },
-            };
-            this.ws.send(JSON.stringify(message));
+            this.sendSubscription('subscribe', newTopics);
         }
     }
     /**
      * Unsubscribe from event types
      */
     unsubscribe(...topics) {
-        topics.forEach((t) => this.subscribedTopics.delete(t));
+        const removedTopics = topics.filter((topic, index) => topics.indexOf(topic) === index && this.subscribedTopics.delete(topic));
+        if (removedTopics.length === 0)
+            return;
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            const message = {
-                type: 'unsubscribe',
-                data: { topics },
-            };
-            this.ws.send(JSON.stringify(message));
+            this.sendSubscription('unsubscribe', removedTopics);
         }
     }
     /**
@@ -189,6 +184,12 @@ class WebSocketClient {
         catch (error) {
             this.notifyErrorListeners(error instanceof Error ? error : new Error(String(error)));
         }
+    }
+    sendSubscription(type, topics) {
+        if (topics.length === 0 || !this.ws || this.ws.readyState !== WebSocket.OPEN)
+            return;
+        const message = { type, data: { topics } };
+        this.ws.send(JSON.stringify(message));
     }
     notifyConnectionListeners(connected) {
         this.connectionListeners.forEach((listener) => {
