@@ -78,21 +78,20 @@ impl RateLimiter {
     /// Check rate limit for authenticated user
     async fn check_user_limit(&self, username: &str) -> bool {
         let max_requests = self.config.max_requests_authenticated;
+        let key = user_key(username);
         let now = Instant::now();
         let mut windows = self.user_windows.write().await;
-        if !windows.contains_key(username) && windows.len() >= MAX_USER_WINDOWS {
+        if !windows.contains_key(&key) && windows.len() >= MAX_USER_WINDOWS {
             windows.retain(|_, window| now < window.reset_at);
             if windows.len() >= MAX_USER_WINDOWS {
                 return false;
             }
         }
 
-        let window = windows
-            .entry(username.to_string())
-            .or_insert_with(|| RequestWindow {
-                count: 0,
-                reset_at: now + Duration::from_secs(self.config.window_seconds),
-            });
+        let window = windows.entry(key).or_insert_with(|| RequestWindow {
+            count: 0,
+            reset_at: now + Duration::from_secs(self.config.window_seconds),
+        });
 
         // Reset window if expired
         if now >= window.reset_at {
@@ -162,10 +161,11 @@ impl RateLimiter {
 
     async fn get_user_remaining(&self, username: &str) -> u32 {
         let max_requests = self.config.max_requests_authenticated;
+        let key = user_key(username);
         let now = Instant::now();
         let windows = self.user_windows.read().await;
 
-        if let Some(window) = windows.get(username) {
+        if let Some(window) = windows.get(&key) {
             if now < window.reset_at {
                 return max_requests.saturating_sub(window.count);
             }
@@ -204,10 +204,11 @@ impl RateLimiter {
     }
 
     async fn get_user_reset_time(&self, username: &str) -> u64 {
+        let key = user_key(username);
         let now = Instant::now();
         let windows = self.user_windows.read().await;
 
-        if let Some(window) = windows.get(username) {
+        if let Some(window) = windows.get(&key) {
             if now < window.reset_at {
                 return duration_ceiling_seconds(window.reset_at.duration_since(now));
             }
@@ -284,6 +285,10 @@ fn ip_key(remote_addr: Option<SocketAddr>) -> Option<String> {
         IpAddr::V4(ip) => ip.to_string(),
         IpAddr::V6(ip) => ip.to_string(),
     })
+}
+
+fn user_key(username: &str) -> String {
+    username.to_ascii_lowercase()
 }
 
 fn duration_ceiling_seconds(duration: Duration) -> u64 {
@@ -413,6 +418,24 @@ mod tests {
             !limiter.check_rate_limit(None, Some("testuser")).await,
             "6th request should fail"
         );
+    }
+
+    #[tokio::test]
+    async fn authenticated_user_limit_is_case_insensitive() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            max_requests_authenticated: 2,
+            window_seconds: 60,
+            enabled: true,
+            ..Default::default()
+        });
+
+        assert!(limiter.check_rate_limit(None, Some("Alice")).await);
+        assert_eq!(limiter.get_remaining(None, Some("ALICE")).await, 1);
+        assert!(limiter.check_rate_limit(None, Some("alice")).await);
+        assert_eq!(limiter.get_remaining(None, Some("aLiCe")).await, 0);
+        assert!(!limiter.check_rate_limit(None, Some("ALICE")).await);
+        assert!(limiter.get_reset_time(None, Some("alice")).await > 0);
+        assert_eq!(limiter.user_windows.read().await.len(), 1);
     }
 
     #[tokio::test]
