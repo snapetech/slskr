@@ -245,7 +245,7 @@ class SlskrClient {
             if (error instanceof Error && error.name === 'AbortError') {
                 throw new errors_1.TimeoutError(`Request timeout after ${this.timeout}ms`);
             }
-            if (attempt < this.retries) {
+            if (method === 'GET' && attempt < this.retries) {
                 await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
                 return this.request(method, url, body, authenticated, attempt + 1);
             }

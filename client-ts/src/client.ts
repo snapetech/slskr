@@ -358,7 +358,7 @@ export class SlskrClient {
         throw new TimeoutError(`Request timeout after ${this.timeout}ms`);
       }
 
-      if (attempt < this.retries) {
+      if (method === 'GET' && attempt < this.retries) {
         await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
         return this.request<T>(method, url, body, authenticated, attempt + 1);
       }

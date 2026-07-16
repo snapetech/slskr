@@ -83,4 +83,33 @@ describe('SlskrClient request lifecycle', () => {
 
     await expect(client.health()).rejects.toBeInstanceOf(NetworkError);
   });
+
+  it('does not replay mutations after a transport failure', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('response lost'));
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 3,
+      retryDelay: 0,
+    });
+
+    await expect(client.createSearch({ query: 'rare' })).rejects.toBeInstanceOf(NetworkError);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains retries for idempotent reads', async () => {
+    global.fetch = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(new Response('{"status":"ok"}', { status: 200 }));
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 1,
+      retryDelay: 0,
+    });
+
+    await expect(client.health()).resolves.toMatchObject({ status: 'ok' });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
 });

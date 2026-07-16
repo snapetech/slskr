@@ -312,7 +312,7 @@ class SlskrClient:
         except (ApiError, NetworkError):
             raise
         except Exception as e:
-            if attempt < self.retries:
+            if method == "GET" and attempt < self.retries:
                 await asyncio.sleep(self.retry_delay)
                 return await self._request(
                     method,

@@ -188,3 +188,37 @@ async def test_python_client_does_not_retry_oversized_response():
         await client._request("GET", "/api/health")
 
     session.request.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_python_client_does_not_replay_mutations_after_transport_failure():
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(side_effect=OSError("response lost"))
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.request.return_value = context
+    client = SlskrClient("https://example.test", "token", retries=3, retry_delay=0)
+    client.session = session
+
+    with pytest.raises(NetworkError):
+        await client._request("POST", "/api/searches", body={"query": "rare"})
+
+    session.request.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_python_client_retains_retries_for_reads():
+    failed = MagicMock()
+    failed.__aenter__ = AsyncMock(side_effect=OSError("network down"))
+    failed.__aexit__ = AsyncMock(return_value=False)
+    response = MagicMock(status=204)
+    succeeded = MagicMock()
+    succeeded.__aenter__ = AsyncMock(return_value=response)
+    succeeded.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.request.side_effect = [failed, succeeded]
+    client = SlskrClient("https://example.test", "token", retries=1, retry_delay=0)
+    client.session = session
+
+    assert await client._request("GET", "/api/health") is None
+    assert session.request.call_count == 2
