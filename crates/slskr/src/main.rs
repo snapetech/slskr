@@ -28975,6 +28975,36 @@ async fn write_peer_preview_response<W: tokio::io::AsyncWrite + Unpin>(
     })
 }
 
+async fn write_remote_preview_head_response<W: tokio::io::AsyncWrite + Unpin>(
+    writer: &mut W,
+    ticket: &PreviewStreamTicket,
+    keep_alive: bool,
+    extra_headers: &str,
+    io_timeout: Duration,
+) -> Result<http_server::FileResponseResult, String> {
+    let connection = if keep_alive { "keep-alive" } else { "close" };
+    let headers = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccept-Ranges: none\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nStrict-Transport-Security: max-age=31536000; includeSubDomains\r\nConnection: {connection}\r\n{extra_headers}\r\n",
+        ticket.content_type, ticket.size
+    );
+    time::timeout(io_timeout, async {
+        writer
+            .write_all(headers.as_bytes())
+            .await
+            .map_err(|error| format!("remote preview HEAD response failed: {error}"))?;
+        writer
+            .flush()
+            .await
+            .map_err(|error| format!("remote preview HEAD flush failed: {error}"))
+    })
+    .await
+    .map_err(|_| "remote preview HEAD response timed out".to_owned())??;
+    Ok(http_server::FileResponseResult {
+        status_code: 200,
+        content_length: ticket.size,
+    })
+}
+
 async fn open_primary_stream_file(
     state: &AppState,
     stream_id: &str,
@@ -34301,6 +34331,7 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
         let preview_ticket = preview_stream_ticket_path(path);
         let preview_stream = preview_ticket.is_some();
         let mut remote_preview = None;
+        let mut remote_preview_head = None;
         let mut preview_permit = None;
         if preview_stream
             && allowed
@@ -34337,7 +34368,17 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                     match open_local_preview_stream_file(&state, family, ticket).await {
                         Ok(Some(stream)) => Some(stream),
                         Ok(None) => {
-                            if *family == "mesh" {
+                            if method == "HEAD" {
+                                let ticket_record = {
+                                    let mut tickets = state.stream_tickets.write().await;
+                                    tickets.get(ticket)
+                                };
+                                match ticket_record.filter(|record| record.family == *family) {
+                                    Some(record) => remote_preview_head = Some(record),
+                                    None => response = routing::not_found_response(),
+                                }
+                                None
+                            } else if *family == "mesh" {
                                 match open_remote_mesh_preview_file(&state, family, ticket).await {
                                     Ok(stream) => stream,
                                     Err(error) => {
@@ -34421,6 +34462,54 @@ async fn handle_http_connection(stream: TcpStream, state: Arc<AppState>) -> Resu
                 let _ = fs::remove_file(path);
             }
             let written = written?;
+            let resp_log = logging::HttpResponseLog {
+                status_code: written.status_code,
+                content_length: usize::try_from(written.content_length).unwrap_or(usize::MAX),
+                duration_ms: logging::elapsed_ms(request_timer),
+                error: None,
+            };
+            let log_config = logging::LogConfig {
+                level: *state.log_level.read().await,
+                log_requests: true,
+                log_responses: true,
+                log_errors_only: false,
+            };
+            logging::log_transaction(
+                &log_config,
+                &logging::HttpTransactionLog {
+                    request: req_log.clone(),
+                    response: resp_log.clone(),
+                },
+            );
+            record_http_log(
+                &state,
+                &request_id,
+                &logging::HttpTransactionLog {
+                    request: req_log,
+                    response: resp_log,
+                },
+            )
+            .await;
+            drop(preview_permit);
+            if !keep_alive {
+                break;
+            }
+            continue;
+        }
+
+        if let Some(ticket) = remote_preview_head {
+            let stream_extra = format!(
+                "RateLimit-Limit: {}\r\nRateLimit-Remaining: {}\r\nRateLimit-Reset: {}\r\n{}X-Request-ID: {}\r\n",
+                max_requests, remaining, reset_secs, cors_str, request_id
+            );
+            let written = write_remote_preview_head_response(
+                &mut writer,
+                &ticket,
+                keep_alive,
+                &stream_extra,
+                state.config.peer_response_timeout,
+            )
+            .await?;
             let resp_log = logging::HttpResponseLog {
                 status_code: written.status_code,
                 content_length: usize::try_from(written.content_length).unwrap_or(usize::MAX),
@@ -52001,6 +52090,48 @@ mod tests {
         let _ = std::fs::remove_dir_all(&remote_state.config.state_dir);
         let _ = std::fs::remove_dir_all(&local_state.config.state_dir);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn remote_preview_head_uses_ticket_metadata_without_a_source_connection() {
+        use tokio::io::AsyncReadExt as _;
+
+        let ticket = super::PreviewStreamTicket {
+            family: "mesh".to_owned(),
+            source: "mesh-unresolved".to_owned(),
+            content_id: "content".to_owned(),
+            filename: "Remote.flac".to_owned(),
+            peer_username: Some("remote".to_owned()),
+            size: 1_234,
+            content_type: "audio/flac".to_owned(),
+            source_url: Some("https://127.0.0.1:9/content".to_owned()),
+            source_authorization: None,
+            overlay_peer_identity: None,
+            expected_hash: Some("a".repeat(64)),
+            created_at: 1,
+            expires_at: u64::MAX,
+        };
+        let (mut client, mut server) = tokio::io::duplex(4 * 1024);
+        let write = tokio::spawn(async move {
+            super::write_remote_preview_head_response(
+                &mut server,
+                &ticket,
+                false,
+                "X-Request-ID: test\r\n",
+                std::time::Duration::from_secs(1),
+            )
+            .await
+        });
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        let written = write.await.unwrap().unwrap();
+        let response = String::from_utf8(response).unwrap();
+
+        assert_eq!(written.content_length, 1_234);
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(response.contains("Content-Length: 1234\r\n"));
+        assert!(response.contains("Content-Type: audio/flac\r\n"));
+        assert!(response.ends_with("X-Request-ID: test\r\n\r\n"));
     }
 
     #[test]
