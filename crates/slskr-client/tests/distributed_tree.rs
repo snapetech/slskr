@@ -51,6 +51,17 @@ fn choose_parent_ignores_oversized_identity() {
 }
 
 #[test]
+fn choose_parent_ignores_blank_identity() {
+    let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+    let candidates = vec![
+        possible_parent("   ", [10, 0, 0, 1], 2234),
+        possible_parent("valid", [10, 0, 0, 2], 2234),
+    ];
+
+    assert_eq!(tree.choose_parent(&candidates).unwrap().username, "valid");
+}
+
+#[test]
 fn parent_state_tracks_connect_disconnect_reset_and_server_reports() {
     let (tree_side, _peer_side) = duplex(512);
     let mut tree = DistributedTree::new("local");
@@ -136,6 +147,19 @@ fn parent_oversized_branch_root_is_ignored_without_mutating_state() {
     assert_eq!(
         tree.handle_parent_message(DistributedMessage::BranchRoot {
             username: oversized,
+        }),
+        DistributedEvent::Ignored
+    );
+    assert_eq!(tree.branch_root(), "local");
+}
+
+#[test]
+fn parent_blank_branch_root_is_ignored_without_mutating_state() {
+    let mut tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+
+    assert_eq!(
+        tree.handle_parent_message(DistributedMessage::BranchRoot {
+            username: "  ".to_owned(),
         }),
         DistributedEvent::Ignored
     );
@@ -310,6 +334,19 @@ fn distributed_tree_rejects_oversized_child_username_without_storing_it() {
             if length == MAX_DISTRIBUTED_USERNAME_BYTES + 1
                 && max == MAX_DISTRIBUTED_USERNAME_BYTES
     ));
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[test]
+fn distributed_tree_rejects_blank_child_username_without_storing_it() {
+    let mut tree = DistributedTree::new("local");
+    let (child, _) = duplex(64);
+
+    let error = tree
+        .add_child("  ", DistributedConnection::new(child))
+        .unwrap_err();
+
+    assert!(matches!(error, ClientError::BlankDistributedUsername));
     assert_eq!(tree.children_len(), 0);
 }
 

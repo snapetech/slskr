@@ -71,6 +71,8 @@ pub enum ClientError {
     PeerConnectionCacheFull { max: usize },
     #[error("distributed child capacity is full (maximum {max} connections)")]
     DistributedChildCapacityFull { max: usize },
+    #[error("distributed username must not be blank")]
+    BlankDistributedUsername,
     #[error("distributed username length {length} exceeds maximum {max}")]
     DistributedUsernameTooLong { length: usize, max: usize },
 }

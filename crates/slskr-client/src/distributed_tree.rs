@@ -145,6 +145,7 @@ impl<S> DistributedTree<S> {
                     .eq_ignore_ascii_case(&self.local_username)
             })
             .filter(|candidate| candidate.port != 0)
+            .filter(|candidate| !candidate.username.trim().is_empty())
             .filter(|candidate| candidate.username.len() <= MAX_DISTRIBUTED_USERNAME_BYTES)
             .map(ParentInfo::from_possible_parent)
             .min_by(|left, right| {
@@ -218,6 +219,9 @@ impl<S> DistributedTree<S> {
         connection: DistributedConnection<S>,
     ) -> Result<bool, ClientError> {
         let username = username.into();
+        if username.trim().is_empty() {
+            return Err(ClientError::BlankDistributedUsername);
+        }
         if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
             return Err(ClientError::DistributedUsernameTooLong {
                 length: username.len(),
@@ -255,7 +259,7 @@ impl<S> DistributedTree<S> {
                 DistributedEvent::BranchChanged
             }
             DistributedMessage::BranchRoot { username } => {
-                if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+                if username.trim().is_empty() || username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
                     return DistributedEvent::Ignored;
                 }
                 self.branch_root = username;
