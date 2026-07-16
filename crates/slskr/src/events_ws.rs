@@ -236,15 +236,14 @@ where
 }
 
 fn event_frame_json(record: &EventRecord) -> String {
-    let data = record.json();
-    format!(
-        "{{\"topic\":\"{}\",\"id\":{},\"type\":\"{}\",\"data\":{},\"timestamp\":{}}}",
-        record.topic(),
-        record.id,
-        record.kind,
-        data,
-        record.created_at,
-    )
+    serde_json::json!({
+        "topic": record.topic(),
+        "id": record.id,
+        "type": &record.kind,
+        "data": record.data_json(),
+        "timestamp": record.created_at,
+    })
+    .to_string()
 }
 
 async fn write_ping_frame<W>(writer: &mut W) -> Result<(), String>
@@ -332,6 +331,24 @@ mod tests {
         assert!(valid_sec_websocket_key("dGhlIHNhbXBsZSBub25jZQ=="));
         assert!(!valid_sec_websocket_key("not-a-websocket-key"));
         assert!(!valid_sec_websocket_key("c2hvcnQ="));
+    }
+
+    #[test]
+    fn websocket_event_frame_escapes_untrusted_record_fields() {
+        let record = EventRecord {
+            id: 7,
+            kind: "custom\",\"injected\":true,\"ignored\":\"".to_owned(),
+            resource: "resource\"\\\n".to_owned(),
+            detail: Some("detail\"\\\n".to_owned()),
+            created_at: 11,
+        };
+
+        let frame = event_frame_json(&record);
+        let parsed: serde_json::Value = serde_json::from_str(&frame).expect("valid event JSON");
+        assert_eq!(parsed["type"], record.kind);
+        assert_eq!(parsed["data"]["resource"], record.resource);
+        assert_eq!(parsed["data"]["detail"], record.detail.unwrap());
+        assert!(parsed.get("injected").is_none());
     }
 
     #[tokio::test]
