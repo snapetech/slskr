@@ -38,6 +38,8 @@ pub struct AppConfig {
     pub obfuscated_listener_bind: Option<String>,
     pub obfuscated_advertised_port: Option<u32>,
     pub overlay_bind: Option<SocketAddr>,
+    pub dht_enabled: bool,
+    pub dht_port: u16,
     pub obfuscation_enabled: bool,
     pub obfuscation_mode: SoulseekObfuscationMode,
     pub obfuscation_prefer_outbound: bool,
@@ -170,6 +172,12 @@ impl AppConfig {
                 Ok(address)
             })
             .transpose()?;
+        let dht_enabled = env_bool_layer(
+            env,
+            "SLSKR_DHT_ENABLED",
+            file_config.dht.enabled.unwrap_or(overlay_bind.is_some()),
+        )?;
+        let dht_port = env_parse_layer(env, "SLSKR_DHT_PORT", file_config.dht.port, 0_u16)?;
         let obfuscation_enabled = env_bool_layer(
             env,
             "SLSK_OBFUSCATION",
@@ -335,6 +343,8 @@ impl AppConfig {
             obfuscated_listener_bind,
             obfuscated_advertised_port,
             overlay_bind,
+            dht_enabled,
+            dht_port,
             obfuscation_enabled,
             obfuscation_mode,
             obfuscation_prefer_outbound,
@@ -372,7 +382,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"auth_required\":{},\"api_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -388,6 +398,8 @@ impl AppConfig {
             json_option(self.obfuscated_listener_bind.as_deref()),
             json_u32_option(self.obfuscated_advertised_port),
             json_option(self.overlay_bind.map(|bind| bind.to_string()).as_deref()),
+            self.dht_enabled,
+            self.dht_port,
             format_args!(
                 "{{\"enabled\":{},\"mode\":\"{}\",\"prefer_outbound\":{},\"effective_prefer_outbound\":{}}}",
                 self.obfuscation_enabled,
@@ -1238,6 +1250,7 @@ pub struct FileConfig {
     app: AppFileConfig,
     network: NetworkFileConfig,
     listeners: ListenerFileConfig,
+    dht: DhtFileConfig,
     profile: ProfileFileConfig,
     timeouts: TimeoutFileConfig,
     shares: ShareFileConfig,
@@ -1246,6 +1259,13 @@ pub struct FileConfig {
     persistence: PersistenceFileConfig,
     podcore: PodCoreFileConfig,
     integrations: IntegrationsFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DhtFileConfig {
+    enabled: Option<bool>,
+    port: Option<u16>,
 }
 
 #[derive(Debug, Default, Deserialize)]

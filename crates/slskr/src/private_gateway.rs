@@ -33,6 +33,11 @@ const MAX_GATEWAY_CONNECTIONS: usize = 128;
 const MAX_TUNNELS: usize = 128;
 const MAX_TUNNELS_PER_PEER: usize = 10;
 const MAX_REPLAY_NONCES: usize = 4_096;
+const MAX_REPLAY_NONCES_PER_PEER: usize = 128;
+const MAX_POD_ID_BYTES: usize = 512;
+const MAX_DESTINATION_HOST_BYTES: usize = 255;
+const MAX_SERVICE_NAME_BYTES: usize = 128;
+const MAX_REQUEST_NONCE_BYTES: usize = 64;
 const REQUEST_FRESHNESS_SECONDS: u64 = 300;
 const DESTINATION_RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 const DESTINATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -150,9 +155,8 @@ impl Gateway {
         {
             return Err("overlay peer does not advertise mesh_service".to_owned());
         }
-        let service_authenticated =
-            authenticate_overlay_peer(state, &hello, remote_address.ip(), &self.certificate_sha256)
-                .await?;
+        authenticate_overlay_peer(state, &hello, remote_address.ip(), &self.certificate_sha256)
+            .await?;
         let connection_id = uuid::Uuid::new_v4().simple().to_string();
         let local_username = super::pod_request_peer_id(state)
             .await
@@ -191,13 +195,7 @@ impl Gateway {
                         let call: MeshServiceCall = serde_json::from_slice(&raw)
                             .map_err(|error| format!("overlay service call is invalid: {error}"))?;
                         let reply = self
-                            .handle_call(
-                                call,
-                                &hello.username,
-                                &connection_id,
-                                service_authenticated,
-                                state,
-                            )
+                            .handle_call(call, &hello.username, &connection_id, state)
                             .await;
                         framer
                             .write(&reply)
@@ -232,7 +230,6 @@ impl Gateway {
         call: MeshServiceCall,
         remote_username: &str,
         connection_id: &str,
-        service_authenticated: bool,
         state: &super::AppState,
     ) -> MeshServiceReply {
         let result = if call.magic != OVERLAY_MAGIC
@@ -243,11 +240,6 @@ impl Gateway {
             || call.payload.len() > MAX_OVERLAY_MESSAGE_BYTES
         {
             Err((4, "Invalid service call".to_owned()))
-        } else if !service_authenticated {
-            Err((
-                8,
-                "Authenticated hello required for private-gateway calls".to_owned(),
-            ))
         } else {
             match call.method.as_str() {
                 "OpenTunnel" => {
@@ -286,10 +278,7 @@ impl Gateway {
     ) -> Result<Vec<u8>, (i32, String)> {
         let request: OpenTunnelRequest = parse_payload(payload)?;
         let now = super::unix_timestamp();
-        if request.pod_id.trim().is_empty()
-            || request.destination_host.trim().is_empty()
-            || request.destination_port == 0
-            || request.request_nonce.trim().is_empty()
+        if !valid_open_tunnel_request(&request)
             || request.request_timestamp < 0
             || now.abs_diff(request.request_timestamp as u64) > REQUEST_FRESHNESS_SECONDS
         {
@@ -329,6 +318,17 @@ impl Gateway {
             let key = (remote_username.to_owned(), request.request_nonce.clone());
             if nonces.contains_key(&key) {
                 return Err((8, "Tunnel request nonce was replayed".to_owned()));
+            }
+            if nonces
+                .keys()
+                .filter(|(username, _)| username.eq_ignore_ascii_case(remote_username))
+                .count()
+                >= MAX_REPLAY_NONCES_PER_PEER
+            {
+                return Err((
+                    6,
+                    "Tunnel request replay quota is full for this peer".to_owned(),
+                ));
             }
             if nonces.len() >= MAX_REPLAY_NONCES {
                 return Err((6, "Tunnel request replay cache is full".to_owned()));
@@ -512,6 +512,19 @@ fn parse_payload<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<T, (i
     serde_json::from_slice(payload).map_err(|_| (4, "Invalid request payload".to_owned()))
 }
 
+fn valid_open_tunnel_request(request: &OpenTunnelRequest) -> bool {
+    !request.pod_id.trim().is_empty()
+        && request.pod_id.len() <= MAX_POD_ID_BYTES
+        && !request.destination_host.trim().is_empty()
+        && request.destination_host.len() <= MAX_DESTINATION_HOST_BYTES
+        && request.destination_port != 0
+        && request.service_name.as_ref().is_none_or(|service| {
+            !service.trim().is_empty() && service.len() <= MAX_SERVICE_NAME_BYTES
+        })
+        && !request.request_nonce.trim().is_empty()
+        && request.request_nonce.len() <= MAX_REQUEST_NONCE_BYTES
+}
+
 async fn resolve_destination(host: &str, port: u16) -> Result<SocketAddr, String> {
     let mut addresses = timeout(DESTINATION_RESOLVE_TIMEOUT, lookup_host((host, port)))
         .await
@@ -527,7 +540,7 @@ async fn authenticate_overlay_peer(
     hello: &MeshHello,
     remote_ip: IpAddr,
     gateway_certificate_sha256: &[u8; 32],
-) -> Result<bool, String> {
+) -> Result<(), String> {
     let public_key = state
         .mesh
         .read()
@@ -540,8 +553,7 @@ async fn authenticate_overlay_peer(
         })
         .map(|record| record.public_key)
         .ok_or_else(|| "overlay peer has no fresh authenticated capability record".to_owned())?;
-    let service_authenticated = hello.auth_public_key.is_some() || hello.auth_signature.is_some();
-    if service_authenticated {
+    if hello.auth_public_key.is_some() || hello.auth_signature.is_some() {
         hello
             .verify_authentication(&public_key, gateway_certificate_sha256)
             .map_err(|_| "overlay peer failed capability-key authentication".to_owned())?;
@@ -552,7 +564,7 @@ async fn authenticate_overlay_peer(
     if remote_ip != IpAddr::V4(expected.ip) {
         return Err("overlay peer IP does not match its Soulseek endpoint".to_owned());
     }
-    Ok(service_authenticated)
+    Ok(())
 }
 
 fn valid_destination_ip(ip: IpAddr) -> bool {
@@ -663,6 +675,29 @@ mod tests {
             "2001:4860:4860::8888".parse().unwrap()
         ));
         assert!(!valid_destination_ip("0.0.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn gateway_tunnel_request_fields_are_bounded_before_replay_caching() {
+        let request = OpenTunnelRequest {
+            pod_id: "pod".to_owned(),
+            destination_host: "service.local".to_owned(),
+            destination_port: 80,
+            service_name: None,
+            request_nonce: "n".repeat(MAX_REQUEST_NONCE_BYTES),
+            request_timestamp: 1,
+        };
+        assert!(valid_open_tunnel_request(&request));
+
+        let mut oversized = request.clone();
+        oversized.request_nonce.push('n');
+        assert!(!valid_open_tunnel_request(&oversized));
+        oversized = request.clone();
+        oversized.destination_host = "h".repeat(MAX_DESTINATION_HOST_BYTES + 1);
+        assert!(!valid_open_tunnel_request(&oversized));
+        oversized = request;
+        oversized.service_name = Some(String::new());
+        assert!(!valid_open_tunnel_request(&oversized));
     }
 
     #[tokio::test]

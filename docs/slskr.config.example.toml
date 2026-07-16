@@ -39,6 +39,11 @@ advertised_port = 2234
 # Enables the TLS 1.3 mesh-service/private-gateway listener.
 # overlay_bind = "0.0.0.0:50305"
 
+[dht]
+# Defaults to enabled when overlay_bind is configured. Port 0 selects an ephemeral UDP port.
+# enabled = true
+# port = 0
+
 [profile]
 user_info_description = "slskr daemon"
 

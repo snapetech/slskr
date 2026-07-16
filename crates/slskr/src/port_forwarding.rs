@@ -9,6 +9,7 @@ use std::{
 };
 
 use ed25519_dalek::SigningKey;
+use futures_util::{stream::FuturesUnordered, StreamExt};
 use serde::Serialize;
 use slskr_client::overlay::{
     connect_tls_overlay, CloseTunnelRequest, GetTunnelDataRequest, MeshHello, MeshServiceCall,
@@ -25,6 +26,7 @@ use tokio::{
 
 const MAX_FORWARDING_RULES: usize = 128;
 const MAX_FORWARDING_CONNECTIONS: usize = 128;
+pub(crate) const MAX_GATEWAY_ENDPOINTS: usize = 4;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const SERVICE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const EMPTY_POLL_DELAY: Duration = Duration::from_millis(10);
@@ -37,7 +39,7 @@ pub struct StartRequest {
     pub destination_port: u16,
     pub service_name: Option<String>,
     pub gateway_username: String,
-    pub gateway_endpoint: SocketAddr,
+    pub gateway_endpoints: Vec<SocketAddr>,
     pub gateway_certificate_sha256: [u8; 32],
     pub local_username: String,
     pub authentication_key: Arc<SigningKey>,
@@ -218,19 +220,34 @@ impl Rule {
                 &self.request.gateway_certificate_sha256,
             )
             .map_err(|error| format!("Overlay hello authentication failed: {error}"))?;
-        let client = connect_tls_overlay(
-            self.request.gateway_endpoint,
-            self.request.gateway_certificate_sha256,
-            hello,
-        )
-        .await
-        .map_err(|error| format!("Gateway overlay connection failed: {error}"))?;
-        if !client
-            .remote_username
-            .eq_ignore_ascii_case(&self.request.gateway_username)
-        {
-            return Err("Gateway overlay identity did not match the discovered peer".to_owned());
+        let mut connected = None;
+        let mut last_error = "No gateway overlay endpoints are available".to_owned();
+        let mut attempts = FuturesUnordered::new();
+        for endpoint in &self.request.gateway_endpoints {
+            attempts.push(connect_tls_overlay(
+                *endpoint,
+                self.request.gateway_certificate_sha256,
+                hello.clone(),
+            ));
         }
+        while let Some(result) = attempts.next().await {
+            match result {
+                Ok(client)
+                    if client
+                        .remote_username
+                        .eq_ignore_ascii_case(&self.request.gateway_username) =>
+                {
+                    connected = Some(client);
+                    break;
+                }
+                Ok(_) => {
+                    last_error =
+                        "Gateway overlay identity did not match the discovered peer".to_owned();
+                }
+                Err(error) => last_error = format!("Gateway overlay connection failed: {error}"),
+            }
+        }
+        let client = connected.ok_or(last_error)?;
         let client = Arc::new(Mutex::new(client));
         let tunnel_id = open_tunnel(&client, &self.request).await?;
         let (mut local_read, mut local_write) = local.into_split();
@@ -411,10 +428,14 @@ fn validate_start_request(request: &StartRequest) -> Result<(), String> {
         || request.destination_host.trim().is_empty()
         || request.gateway_username.trim().is_empty()
         || request.local_username.trim().is_empty()
-        || request.gateway_endpoint.port() == 0
-        || request.gateway_endpoint.ip().is_unspecified()
-        || request.gateway_endpoint.ip().is_multicast()
-        || matches!(request.gateway_endpoint.ip(), IpAddr::V4(ip) if ip.is_broadcast())
+        || request.gateway_endpoints.is_empty()
+        || request.gateway_endpoints.len() > MAX_GATEWAY_ENDPOINTS
+        || request.gateway_endpoints.iter().any(|endpoint| {
+            endpoint.port() == 0
+                || endpoint.ip().is_unspecified()
+                || endpoint.ip().is_multicast()
+                || matches!(endpoint.ip(), IpAddr::V4(ip) if ip.is_broadcast())
+        })
     {
         return Err("Port forwarding request is invalid".to_owned());
     }
@@ -465,7 +486,7 @@ mod tests {
             destination_port: 80,
             service_name: None,
             gateway_username: "gateway".to_owned(),
-            gateway_endpoint: "127.0.0.1:50305".parse().unwrap(),
+            gateway_endpoints: vec!["127.0.0.1:50305".parse().unwrap()],
             gateway_certificate_sha256: [7; 32],
             local_username: "local".to_owned(),
             authentication_key: Arc::new(SigningKey::from_bytes(&[9; 32])),
@@ -593,9 +614,12 @@ mod tests {
         let local_probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_port = local_probe.local_addr().unwrap().port();
         drop(local_probe);
+        let unavailable_probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let unavailable_endpoint = unavailable_probe.local_addr().unwrap();
+        drop(unavailable_probe);
         let manager = Manager::new();
         let mut request = request(local_port);
-        request.gateway_endpoint = gateway_endpoint;
+        request.gateway_endpoints = vec![unavailable_endpoint, gateway_endpoint];
         request.gateway_certificate_sha256 = certificate_sha256;
         manager.start(request).await.unwrap();
         let mut local = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();

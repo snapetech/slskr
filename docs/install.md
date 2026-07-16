@@ -51,6 +51,8 @@ On Unix, `SLSKR_STATE_DIR` must be a real directory rather than a symlink. slskr
 
 Set `SLSKR_OVERLAY_BIND=0.0.0.0:50305` or `[listeners].overlay_bind = "0.0.0.0:50305"` to run the TLS 1.3 mesh-service/private-gateway listener. Startup fails if the port cannot bind or the durable certificate/key pair is missing, malformed, or inconsistent. Read `certificateSha256` from authenticated `GET /api/mesh/transport` and place that 64-character hexadecimal digest in the Pod's `gatewayCertificateSha256` policy. The overlay port must be reachable by Pod members; the normal HTTP API port does not carry overlay traffic.
 
+Mainline-DHT rendezvous defaults on with the overlay listener. Override it with `SLSKR_DHT_ENABLED` / `[dht].enabled` and choose the UDP bind port with `SLSKR_DHT_PORT` / `[dht].port`; port `0` uses an ephemeral port. A fixed, publicly forwarded UDP port improves long-running DHT participation, but the advertised private-gateway TCP endpoint remains the overlay port. Outbound-only Pod members can enable DHT without an overlay listener to discover pinned gateway candidates.
+
 Start from [slskr.config.example.toml](./slskr.config.example.toml). Configure
 API tokens through your service manager, deployment config, or secret manager.
 For Soulseek credentials, prefer first-run Web UI entry with the OS credential

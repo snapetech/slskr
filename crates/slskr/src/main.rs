@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod content_discovery;
 mod credential_store;
+mod dht;
 mod events_ws;
 mod http_server;
 #[allow(
@@ -10545,6 +10546,7 @@ struct AppState {
     pods: RwLock<pods::PodStore>,
     port_forwarding: port_forwarding::Manager,
     private_gateway: Option<Arc<private_gateway::Gateway>>,
+    dht: Option<Arc<dht::Rendezvous>>,
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
@@ -11390,7 +11392,11 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("GET", "/api/dht/status") => {
-            Ok(routing::ok_response("{\"dhtNodeCount\":0,\"isLanOnly\":false,\"lanOnly\":false,\"isBeaconCapable\":false,\"isDhtRunning\":false,\"verifiedBeaconCount\":0}".to_owned()))
+            if let Some(dht) = state.dht.as_ref() {
+                Ok(routing::ok_response(dht.status_json().await))
+            } else {
+                Ok(routing::ok_response("{\"dhtNodeCount\":0,\"isLanOnly\":false,\"lanOnly\":false,\"isBeaconCapable\":false,\"isDhtRunning\":false,\"verifiedBeaconCount\":0}".to_owned()))
+            }
         }
         ("POST", "/api/capabilities/negotiate") => Ok(capabilities_negotiate_response(body)),
         // Documentation endpoints
@@ -19695,6 +19701,7 @@ async fn route_http_request_with_headers(
                   "overlayBind": gateway.map(|gateway| gateway.bind()),
                   "overlayPort": gateway.map(|gateway| gateway.bind().port()),
                   "certificateSha256": gateway.map(|gateway| hex::encode(gateway.certificate_sha256())),
+                  "dhtEnabled": state.dht.is_some(),
                   "connectedPeers": 0,
                   "totalPeers": 0,
                   "activeCircuits": 0,
@@ -22127,14 +22134,33 @@ async fn route_http_request_with_headers(
                     "Gateway peer did not advertise an overlay port",
                 ));
             };
-            let peer_address = match request_peer_endpoint(state, &descriptor.username).await {
-                Ok(address) => address,
-                Err(error) => return Ok(routing::service_unavailable_response(&error)),
-            };
-            let gateway_endpoint = SocketAddr::V4(SocketAddrV4::new(
-                peer_connect_ip(state, &peer_address),
-                overlay_port,
-            ));
+            let mut gateway_endpoints = Vec::new();
+            if let Some(peer_address) = cached_peer_endpoint(state, &descriptor.username).await {
+                gateway_endpoints.push(SocketAddr::V4(SocketAddrV4::new(
+                    peer_connect_ip(state, &peer_address),
+                    overlay_port,
+                )));
+            }
+            if let Some(dht) = state.dht.as_ref() {
+                for endpoint in dht.peers().await {
+                    if gateway_endpoints.len() >= port_forwarding::MAX_GATEWAY_ENDPOINTS {
+                        break;
+                    }
+                    if !gateway_endpoints.contains(&endpoint) {
+                        gateway_endpoints.push(endpoint);
+                    }
+                }
+            }
+            if gateway_endpoints.is_empty() {
+                let peer_address = match request_peer_endpoint(state, &descriptor.username).await {
+                    Ok(address) => address,
+                    Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                };
+                gateway_endpoints.push(SocketAddr::V4(SocketAddrV4::new(
+                    peer_connect_ip(state, &peer_address),
+                    overlay_port,
+                )));
+            }
             match state
                 .port_forwarding
                 .start(port_forwarding::StartRequest {
@@ -22144,7 +22170,7 @@ async fn route_http_request_with_headers(
                     destination_port,
                     service_name: service_name.map(str::to_owned),
                     gateway_username: descriptor.username,
-                    gateway_endpoint,
+                    gateway_endpoints,
                     gateway_certificate_sha256,
                     local_username,
                     authentication_key: Arc::new(state.capability_signing_key.clone()),
@@ -26573,6 +26599,16 @@ async fn serve(once: bool) -> Result<(), String> {
     } else {
         None
     };
+    let dht = if config.dht_enabled {
+        Some(Arc::new(dht::Rendezvous::new(
+            config.dht_port,
+            private_gateway
+                .as_ref()
+                .map(|gateway| gateway.bind().port()),
+        )?))
+    } else {
+        None
+    };
     let capability_signing_key = load_or_create_capability_signing_key(&config.state_dir)?;
     let state = Arc::new(AppState {
         log_level: RwLock::new(
@@ -26601,6 +26637,7 @@ async fn serve(once: bool) -> Result<(), String> {
         pods: RwLock::new(pod_store),
         port_forwarding: port_forwarding::Manager::new(),
         private_gateway,
+        dht,
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
         event_tx,
@@ -26675,6 +26712,9 @@ async fn serve(once: bool) -> Result<(), String> {
                 ::tracing::error!(%error, "overlay gateway listener stopped");
             }
         });
+    }
+    if let Some(dht) = state.dht.clone() {
+        tokio::spawn(dht.run());
     }
     record_daemon_log(
         &state,
@@ -36918,6 +36958,7 @@ mod tests {
             pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
             port_forwarding: super::port_forwarding::Manager::new(),
             private_gateway: None,
+            dht: None,
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -38095,6 +38136,7 @@ mod tests {
             tokio::io::AsyncWriteExt::write_all(&mut stream, b"pong")
                 .await
                 .expect("echo write");
+            let _ = echo_listener.accept().await.expect("legacy echo accept");
         });
 
         let create = super::route_http_request(
@@ -38243,8 +38285,6 @@ mod tests {
             .await
             .expect("close reply");
         assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
-        echo.await.expect("echo task");
-
         let legacy_hello = MeshHello::new(
             "member",
             vec![FEATURE_MESH_SERVICE.to_owned()],
@@ -38278,12 +38318,13 @@ mod tests {
                 .unwrap(),
             )
             .await
-            .expect("legacy gateway rejection reply");
-        assert_eq!(legacy_reply.status_code, 8);
+            .expect("legacy gateway reply");
         assert_eq!(
-            legacy_reply.error_message.as_deref(),
-            Some("Authenticated hello required for private-gateway calls")
+            legacy_reply.status_code, 0,
+            "{:?}",
+            legacy_reply.error_message
         );
+        echo.await.expect("echo task");
 
         gateway_server.abort();
         let _ = std::fs::remove_dir_all(root);
@@ -56154,6 +56195,10 @@ mod tests {
                 obfuscated_advertised_port = 4445
                 overlay_bind = "0.0.0.0:50305"
 
+                [dht]
+                enabled = true
+                port = 6881
+
                 [profile]
                 user_info_description = "custom daemon"
 
@@ -56202,6 +56247,8 @@ mod tests {
             config.overlay_bind.map(|bind| bind.to_string()),
             Some("0.0.0.0:50305".to_owned())
         );
+        assert!(config.dht_enabled);
+        assert_eq!(config.dht_port, 6881);
         assert_eq!(config.obfuscation_mode.as_str(), "prefer");
         assert!(config.prefer_obfuscated_outbound());
         assert!(config.auto_connect);
@@ -56232,6 +56279,8 @@ mod tests {
         let sanitized = config.sanitized_json();
         assert!(sanitized.contains("\"credentials_configured\":true"));
         assert!(sanitized.contains("\"overlay_bind\":\"0.0.0.0:50305\""));
+        assert!(sanitized.contains("\"dht_enabled\":true"));
+        assert!(sanitized.contains("\"dht_port\":6881"));
         assert!(sanitized.contains("\"transfer_max_active\":2"));
         assert!(sanitized.contains("\"transfer_allow_inbound\":false"));
         assert!(sanitized.contains("\"transfer_allow_outbound\":false"));
@@ -56597,6 +56646,7 @@ mod tests {
             pods: RwLock::new(super::pods::PodStore::empty(&config.state_dir)),
             port_forwarding: super::port_forwarding::Manager::new(),
             private_gateway: None,
+            dht: None,
             transfers: RwLock::new(super::TransferQueue::new(&config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
@@ -56772,6 +56822,7 @@ mod tests {
             )),
             port_forwarding: super::port_forwarding::Manager::new(),
             private_gateway: None,
+            dht: None,
             transfers: RwLock::new(super::TransferQueue::new(&cookie_enabled_config)),
             events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
             event_tx: event_tx.clone(),
