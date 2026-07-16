@@ -2111,7 +2111,7 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
         for (transfer, event) in records {
-            query(
+            let transfer_insert = query(
                 r#"
                 INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2142,8 +2142,12 @@ impl DatabaseManager {
             .bind(transfer.track_number)
             .bind(transfer.year)
             .execute(&mut *transaction)
-            .await?;
-            query(
+            .await;
+            if let Err(error) = transfer_insert {
+                let _ = transaction.rollback().await;
+                return Err(error.into());
+            }
+            let event_insert = query(
                 r#"
                 INSERT INTO transfer_events
                     (transfer_id, direction, token, filename, peer_username, filesize, progress, status, reason, created_at)
@@ -2161,7 +2165,11 @@ impl DatabaseManager {
             .bind(&event.reason)
             .bind(event.created_at)
             .execute(&mut *transaction)
-            .await?;
+            .await;
+            if let Err(error) = event_insert {
+                let _ = transaction.rollback().await;
+                return Err(error.into());
+            }
         }
         transaction.commit().await?;
         Ok(())
