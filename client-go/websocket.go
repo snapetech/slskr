@@ -141,21 +141,28 @@ func (w *WebSocketClient) IsConnected() bool {
 // Subscribe subscribes to event topics
 func (w *WebSocketClient) Subscribe(topics ...string) error {
 	w.subscriptionMu.Lock()
-	defer w.subscriptionMu.Unlock()
-
+	newTopics := make([]string, 0, len(topics))
 	for _, topic := range topics {
+		if w.subscribedTopics[topic] {
+			continue
+		}
 		w.subscribedTopics[topic] = true
+		newTopics = append(newTopics, topic)
+	}
+	w.subscriptionMu.Unlock()
+	if len(newTopics) == 0 {
+		return nil
 	}
 
 	if w.debug {
-		fmt.Printf("[WebSocket] Subscribed to: %v\n", topics)
+		fmt.Printf("[WebSocket] Subscribed to: %v\n", newTopics)
 	}
 
 	// Send subscription message
 	msg := map[string]interface{}{
 		"type": "subscribe",
 		"data": map[string]interface{}{
-			"topics": topics,
+			"topics": newTopics,
 		},
 	}
 
@@ -171,14 +178,33 @@ func (w *WebSocketClient) Subscribe(topics ...string) error {
 // Unsubscribe unsubscribes from event topics
 func (w *WebSocketClient) Unsubscribe(topics ...string) error {
 	w.subscriptionMu.Lock()
-	defer w.subscriptionMu.Unlock()
-
+	removedTopics := make([]string, 0, len(topics))
 	for _, topic := range topics {
+		if !w.subscribedTopics[topic] {
+			continue
+		}
 		delete(w.subscribedTopics, topic)
+		removedTopics = append(removedTopics, topic)
+	}
+	w.subscriptionMu.Unlock()
+	if len(removedTopics) == 0 {
+		return nil
 	}
 
 	if w.debug {
-		fmt.Printf("[WebSocket] Unsubscribed from: %v\n", topics)
+		fmt.Printf("[WebSocket] Unsubscribed from: %v\n", removedTopics)
+	}
+
+	msg := map[string]interface{}{
+		"type": "unsubscribe",
+		"data": map[string]interface{}{
+			"topics": removedTopics,
+		},
+	}
+	if w.IsConnected() {
+		if err := w.writeJSON(msg); err != nil {
+			return err
+		}
 	}
 
 	return nil

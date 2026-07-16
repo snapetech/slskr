@@ -11,6 +11,55 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestWebSocketSubscriptionFramesTrackLocalState(t *testing.T) {
+	frames := make(chan map[string]interface{}, 2)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := upgrader.Upgrade(writer, request, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		for index := 0; index < 2; index++ {
+			var frame map[string]interface{}
+			if err := connection.ReadJSON(&frame); err != nil {
+				return
+			}
+			frames <- frame
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token").NewWebSocketClient(false)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	defer client.Disconnect(context.Background())
+	if err := client.Subscribe("searches", "searches"); err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+	if err := client.Unsubscribe("missing", "searches", "searches"); err != nil {
+		t.Fatalf("unsubscribe failed: %v", err)
+	}
+
+	subscribe := <-frames
+	unsubscribe := <-frames
+	if subscribe["type"] != "subscribe" || unsubscribe["type"] != "unsubscribe" {
+		t.Fatalf("unexpected frames: %#v %#v", subscribe, unsubscribe)
+	}
+	for _, frame := range []map[string]interface{}{subscribe, unsubscribe} {
+		topics := frame["data"].(map[string]interface{})["topics"].([]interface{})
+		if len(topics) != 1 || topics[0] != "searches" {
+			t.Fatalf("unexpected topics: %#v", topics)
+		}
+	}
+	if len(client.GetSubscribedTopics()) != 0 {
+		t.Fatalf("local topics were not removed: %v", client.GetSubscribedTopics())
+	}
+}
+
 func TestWebSocketConnectRejectsConcurrentDial(t *testing.T) {
 	requestStarted := make(chan struct{})
 	releaseUpgrade := make(chan struct{})
