@@ -128,9 +128,17 @@ impl PodStore {
         }
     }
 
-    pub fn list(&self) -> Vec<PodRecord> {
+    pub fn list_visible(&self, peer_id: Option<&str>) -> Vec<PodRecord> {
         self.pods
             .values()
+            .filter(|stored| {
+                stored.pod.is_public
+                    || peer_id.is_some_and(|peer_id| {
+                        stored.members.iter().any(|member| {
+                            !member.is_banned && member.peer_id.eq_ignore_ascii_case(peer_id)
+                        })
+                    })
+            })
             .map(|stored| public_pod(stored, false))
             .collect()
     }
@@ -162,12 +170,28 @@ impl PodStore {
         })
     }
 
+    pub fn is_public(&self, pod_id: &str) -> bool {
+        self.pods
+            .get(pod_id)
+            .is_some_and(|stored| stored.pod.is_public)
+    }
+
     pub fn is_member(&self, pod_id: &str, peer_id: &str) -> bool {
         self.pods.get(pod_id).is_some_and(|stored| {
             stored
                 .members
                 .iter()
                 .any(|member| !member.is_banned && member.peer_id.eq_ignore_ascii_case(peer_id))
+        })
+    }
+
+    pub fn can_moderate(&self, pod_id: &str, peer_id: &str) -> bool {
+        self.pods.get(pod_id).is_some_and(|stored| {
+            stored.members.iter().any(|member| {
+                !member.is_banned
+                    && member.peer_id.eq_ignore_ascii_case(peer_id)
+                    && matches!(member.role.as_str(), "owner" | "mod")
+            })
         })
     }
 
@@ -731,7 +755,7 @@ mod tests {
             .unwrap());
 
         let loaded = PodStore::load(&state_dir).unwrap();
-        assert_eq!(loaded.list().len(), 1);
+        assert_eq!(loaded.list_visible(None).len(), 1);
         assert_eq!(loaded.members("pod:test").unwrap().len(), 1);
         assert_eq!(
             loaded.get("pod:test").unwrap().channels[0]

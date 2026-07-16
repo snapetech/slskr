@@ -18958,9 +18958,17 @@ async fn route_http_request_with_headers(
                   Ok(value) => value,
                   Err(error) => return Ok(routing::bad_request_response(&error)),
               };
+              let peer_id = pod_request_peer_id(state).await;
               let pods = state.pods.read().await;
               if pods.get(&pod_id).is_none() || !pods.channel_exists(&pod_id, &channel_id) {
                   return Ok(routing::not_found_response());
+              }
+              if !pods.is_public(&pod_id)
+                  && peer_id
+                      .as_deref()
+                      .is_none_or(|peer_id| !pods.is_member(&pod_id, peer_id))
+              {
+                  return Ok(routing::forbidden_response("Pod membership is required"));
               }
               drop(pods);
               let channels = state.pod_channels.read().await;
@@ -18982,6 +18990,17 @@ async fn route_http_request_with_headers(
                   .unwrap_or_default()
                   .trim()
                   .to_owned();
+              let authenticated_peer_id = pod_request_peer_id(state).await;
+              let Some(authenticated_peer_id) = authenticated_peer_id else {
+                  return Ok(routing::forbidden_response(
+                      "Authenticated peer identity is required",
+                  ));
+              };
+              if !sender_peer_id.eq_ignore_ascii_case(&authenticated_peer_id) {
+                  return Ok(routing::forbidden_response(
+                      "SenderPeerId must match the authenticated peer identity",
+                  ));
+              }
               let signature = extract_json_string_field(body, "signature")
                   .unwrap_or_default()
                   .trim()
@@ -18990,14 +19009,14 @@ async fn route_http_request_with_headers(
               if pods.get(&pod_id).is_none() || !pods.channel_exists(&pod_id, &channel_id) {
                   return Ok(routing::not_found_response());
               }
-              if !pods.is_member(&pod_id, &sender_peer_id) {
+              if !pods.is_member(&pod_id, &authenticated_peer_id) {
                   return Ok(routing::forbidden_response("Pod membership is required"));
               }
               drop(pods);
               let result = state.pod_channels.write().await.append(
                   pod_id,
                   channel_id,
-                  sender_peer_id,
+                  authenticated_peer_id,
                   body_text,
                   signature,
                   unix_timestamp_millis(),
@@ -19050,20 +19069,7 @@ async fn route_http_request_with_headers(
                   .map(str::trim)
                   .filter(|value| !value.is_empty())
                   .map(str::to_owned);
-              let runtime_peer = state
-                  .runtime_credentials
-                  .read()
-                  .await
-                  .as_ref()
-                  .map(|credentials| credentials.username.trim().to_owned())
-                  .filter(|value| !value.is_empty());
-              let configured_peer = state
-                  .config
-                  .credentials()
-                  .map(|credentials| credentials.username.trim().to_owned())
-                  .filter(|value| !value.is_empty());
-              let session_peer = runtime_peer.or(configured_peer);
-              let Some(creator) = session_peer.or(requested_peer) else {
+              let Some(creator) = pod_request_peer_id(state).await.or(requested_peer) else {
                   return Ok(routing::forbidden_response("Authenticated peer identity is required"));
               };
               match state.pods.write().await.create(pod, creator) {
@@ -19091,7 +19097,16 @@ async fn route_http_request_with_headers(
               if pod_resource_segments(path).is_some_and(|segments| segments.len() == 1) =>
           {
               let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              let peer_id = pod_request_peer_id(state).await;
               let pods = state.pods.read().await;
+              if pods.get(&pod_id).is_some()
+                  && !pods.is_public(&pod_id)
+                  && peer_id
+                      .as_deref()
+                      .is_none_or(|peer_id| !pods.is_member(&pod_id, peer_id))
+              {
+                  return Ok(routing::forbidden_response("Pod membership is required"));
+              }
               Ok(pods
                   .get(&pod_id)
                   .map(|pod| {
@@ -19106,6 +19121,18 @@ async fn route_http_request_with_headers(
               if pod_resource_segments(path).is_some_and(|segments| segments.len() == 1) =>
           {
               let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              let peer_id = pod_request_peer_id(state).await;
+              let pods = state.pods.read().await;
+              if pods.get(&pod_id).is_some()
+                  && peer_id
+                      .as_deref()
+                      .is_none_or(|peer_id| !pods.can_moderate(&pod_id, peer_id))
+              {
+                  return Ok(routing::forbidden_response(
+                      "Pod moderator membership is required",
+                  ));
+              }
+              drop(pods);
               let value = match serde_json::from_str::<serde_json::Value>(body) {
                   Ok(value) => value,
                   Err(error) => {
@@ -19145,6 +19172,18 @@ async fn route_http_request_with_headers(
               if pod_resource_segments(path).is_some_and(|segments| segments.len() == 1) =>
           {
               let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              let peer_id = pod_request_peer_id(state).await;
+              let pods = state.pods.read().await;
+              if pods.get(&pod_id).is_some()
+                  && peer_id
+                      .as_deref()
+                      .is_none_or(|peer_id| !pods.can_moderate(&pod_id, peer_id))
+              {
+                  return Ok(routing::forbidden_response(
+                      "Pod moderator membership is required",
+                  ));
+              }
+              drop(pods);
               match state.pods.write().await.delete(&pod_id) {
                   Ok(true) => Ok(routing::no_content_response()),
                   Ok(false) => Ok(routing::not_found_response()),
@@ -19162,7 +19201,16 @@ async fn route_http_request_with_headers(
                   .is_some_and(|segments| segments.len() == 2 && segments[1] == "members") =>
           {
               let pod_id = pod_resource_segments(path).unwrap_or_default().remove(0);
+              let peer_id = pod_request_peer_id(state).await;
               let pods = state.pods.read().await;
+              if pods.get(&pod_id).is_some()
+                  && !pods.is_public(&pod_id)
+                  && peer_id
+                      .as_deref()
+                      .is_none_or(|peer_id| !pods.is_member(&pod_id, peer_id))
+              {
+                  return Ok(routing::forbidden_response("Pod membership is required"));
+              }
               Ok(pods
                   .members(&pod_id)
                   .map(|members| {
@@ -19181,23 +19229,48 @@ async fn route_http_request_with_headers(
               let segments = pod_resource_segments(path).unwrap_or_default();
               let pod_id = &segments[0];
               let action = &segments[1];
-              let peer_id = extract_json_string_field(body, "peerId")
-                  .unwrap_or_default()
-                  .trim()
-                  .to_owned();
+              let peer_id = if action == "ban" {
+                  extract_json_string_field(body, "peerId")
+                      .unwrap_or_default()
+                      .trim()
+                      .to_owned()
+              } else {
+                  pod_request_peer_id(state).await.unwrap_or_default()
+              };
               if peer_id.is_empty() {
                   return Ok(routing::bad_request_response("PeerId is required"));
               }
+              let moderator = if action == "ban" {
+                  pod_request_peer_id(state).await
+              } else {
+                  None
+              };
               let mut pods = state.pods.write().await;
+              if action == "ban"
+                  && moderator
+                      .as_deref()
+                      .is_none_or(|moderator| !pods.can_moderate(pod_id, moderator))
+              {
+                  return Ok(routing::forbidden_response(
+                      "Pod moderator membership is required",
+                  ));
+              }
               let result = match action.as_str() {
                   "join" => pods.join(pod_id, peer_id),
                   "leave" => pods.leave(pod_id, &peer_id),
                   _ => pods.ban(pod_id, &peer_id),
               };
               match result {
-                  Ok(Some(true)) => Ok(routing::ok_response(
-                      serde_json::json!({ (action): true }).to_string(),
-                  )),
+                  Ok(Some(true)) => {
+                      let response_key = match action.as_str() {
+                          "join" => "joined",
+                          "leave" => "left",
+                          _ => "banned",
+                      };
+                      Ok(routing::ok_response(
+                          serde_json::json!({ (response_key): true }).to_string(),
+                      ))
+                  }
                   Ok(Some(false)) if action == "join" => Ok(routing::bad_request_response(
                       "Failed to join pod (may already be a member)",
                   )),
@@ -19233,6 +19306,17 @@ async fn route_http_request_with_headers(
               let pod_id = &segments[0];
               let channel_id = &segments[2];
               let action = &segments[3];
+              let peer_id = pod_request_peer_id(state).await;
+              let pods = state.pods.read().await;
+              let can_moderate = peer_id
+                  .as_deref()
+                  .is_some_and(|peer_id| pods.can_moderate(pod_id, peer_id));
+              drop(pods);
+              if !can_moderate {
+                  return Ok(routing::forbidden_response(
+                      "Pod moderator membership is required",
+                  ));
+              }
               let result = if action == "bind" {
                   let room_name = extract_json_string_field(body, "roomName")
                       .unwrap_or_default()
@@ -19251,9 +19335,12 @@ async fn route_http_request_with_headers(
                   state.pods.write().await.unbind_room(pod_id, channel_id)
               };
               match result {
-                  Ok(Some(true)) => Ok(routing::ok_response(
-                      serde_json::json!({ (action): true }).to_string(),
-                  )),
+                  Ok(Some(true)) => {
+                      let response_key = if action == "bind" { "bound" } else { "unbound" };
+                      Ok(routing::ok_response(
+                          serde_json::json!({ (response_key): true }).to_string(),
+                      ))
+                  }
                   Ok(Some(false)) | Ok(None) => Ok(routing::not_found_response()),
                   Err(error) if error.contains("required") || error.starts_with("Mode must") => {
                       Ok(routing::bad_request_response(&error))
@@ -19268,9 +19355,10 @@ async fn route_http_request_with_headers(
           }
 
           ("GET", "/api/pods") => {
+              let peer_id = pod_request_peer_id(state).await;
               let pods = state.pods.read().await;
               Ok(routing::ok_response(
-                  serde_json::to_string(&pods.list())
+                  serde_json::to_string(&pods.list_visible(peer_id.as_deref()))
                       .map_err(|error| format!("pod serialization failed: {error}"))?,
               ))
           }
@@ -23574,6 +23662,23 @@ fn pod_resource_segments(path: &str) -> Option<Vec<String>> {
         segments.push(decoded);
     }
     (!segments.is_empty()).then_some(segments)
+}
+
+async fn pod_request_peer_id(state: &AppState) -> Option<String> {
+    let runtime_peer = state
+        .runtime_credentials
+        .read()
+        .await
+        .as_ref()
+        .map(|credentials| credentials.username.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    runtime_peer.or_else(|| {
+        state
+            .config
+            .credentials()
+            .map(|credentials| credentials.username.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 fn decoded_path_segment(segment: &str) -> String {
@@ -37625,6 +37730,8 @@ mod tests {
         assert_eq!(members[0]["peerId"], "tester");
         assert_eq!(members[0]["role"], "owner");
 
+        *state.runtime_credentials.write().await =
+            Some(super::LoginCredentials::default_client("member", "secret"));
         let joined = super::route_http_request(
             "POST",
             "/api/pods/pod%3Aapi/join",
@@ -37636,9 +37743,10 @@ mod tests {
         .expect("join pod");
         assert_eq!(joined.status, "200 OK");
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&joined.body).unwrap()["join"],
+            serde_json::from_str::<serde_json::Value>(&joined.body).unwrap()["joined"],
             true
         );
+        *state.runtime_credentials.write().await = None;
 
         let bound = super::route_http_request(
             "POST",
@@ -37722,6 +37830,23 @@ mod tests {
         .expect("create pod for messages");
         assert_eq!(created.status, "201 Created");
 
+        state
+            .pods
+            .write()
+            .await
+            .join("pod-1", "peer-1".to_owned())
+            .unwrap();
+        let spoofed = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"spoofed","senderPeerId":"peer-1"}"#,
+            &state,
+        )
+        .await
+        .expect("spoofed pod message");
+        assert_eq!(spoofed.status, "403 Forbidden");
+
         let first = super::route_http_request(
             "POST",
             path,
@@ -37802,6 +37927,30 @@ mod tests {
         .await
         .expect("invalid pod message");
         assert_eq!(invalid.status, "400 Bad Request");
+    }
+
+    #[tokio::test]
+    async fn private_pod_message_history_requires_membership() {
+        let (state, _receiver) = test_state();
+        let path = "/api/v0/pods/private-pod/channels/general/messages";
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            r#"{"pod":{"podId":"private-pod","name":"Private","isPublic":false,"channels":[{"channelId":"general","kind":0,"name":"General"}]}}"#,
+            &state,
+        )
+        .await
+        .expect("create private pod");
+        assert_eq!(created.status, "201 Created");
+
+        *state.runtime_credentials.write().await = Some(super::LoginCredentials::default_client(
+            "intruder", "secret",
+        ));
+        let forbidden = super::route_http_request("GET", path, None, "", &state)
+            .await
+            .expect("private pod history");
+        assert_eq!(forbidden.status, "403 Forbidden");
     }
 
     fn test_capability_descriptor(
