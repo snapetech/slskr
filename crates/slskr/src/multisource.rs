@@ -355,10 +355,7 @@ pub async fn fetch_single_verified_source(
     }
     let prepared = prepare_source(&source).await?;
     fetch_range(&prepared, 0, 0, file_size).await?;
-    let output = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output_path)
+    let output = open_private_file(output_path)
         .map_err(|_| "mesh preview staging file could not be created".to_owned())?;
     let mut output = tokio::fs::File::from_std(output);
     let operation = async {
@@ -408,7 +405,8 @@ async fn execute_inner(
         .ok_or_else(|| "output path has no parent directory".to_owned())?;
     fs::create_dir_all(parent).map_err(|_| "output directory could not be created".to_owned())?;
     let temp_dir = parent.join(format!(".slskr-swarm-{}", uuid::Uuid::new_v4()));
-    fs::create_dir(&temp_dir).map_err(|_| "swarm workspace could not be created".to_owned())?;
+    create_private_directory(&temp_dir)
+        .map_err(|_| "swarm workspace could not be created".to_owned())?;
 
     let operation = async {
         let mut sources = Vec::with_capacity(request.sources.len());
@@ -650,10 +648,7 @@ fn assemble_and_publish(
     file_size: u64,
     expected_hash: &str,
 ) -> Result<String, String> {
-    let mut output = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(assembly_path)
+    let mut output = open_private_file(assembly_path)
         .map_err(|_| "assembly file could not be created".to_owned())?;
     let mut hasher = Sha256::new();
     let mut written = 0_u64;
@@ -695,6 +690,27 @@ fn assemble_and_publish(
         let _ = parent.sync_all();
     }
     Ok(final_hash)
+}
+
+fn create_private_directory(path: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
+fn open_private_file(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 fn blocked_source_ip(ip: IpAddr) -> bool {
@@ -873,6 +889,40 @@ mod tests {
         assert_eq!(store.records.len(), MAX_RETAINED_JOBS);
         assert!(store.get("job-0000").is_none());
         assert_eq!(store.list()[0].id, format!("job-{MAX_RETAINED_JOBS:04}"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_swarm_artifacts_have_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-swarm-permissions-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir(&root).expect("create permissions test root");
+        let workspace = root.join("workspace");
+        super::create_private_directory(&workspace).expect("create private workspace");
+        let staging = root.join("staging.part");
+        drop(super::open_private_file(&staging).expect("create private staging file"));
+
+        assert_eq!(
+            fs::metadata(&workspace)
+                .expect("workspace metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&staging)
+                .expect("staging metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(root).expect("remove permissions test root");
     }
 
     #[tokio::test]
