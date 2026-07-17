@@ -28,6 +28,11 @@ const MAX_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
 const MAX_SOURCES: usize = 16;
 const MAX_CHUNKS: u64 = 65_536;
 const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_FILENAME_BYTES: usize = 4 * 1024;
+const MAX_OUTPUT_PATH_BYTES: usize = 8 * 1024;
+const MAX_SOURCE_USERNAME_BYTES: usize = 64;
+const MAX_SOURCE_URL_BYTES: usize = 2 * 1024;
+const MAX_SOURCE_AUTHORIZATION_BYTES: usize = 8 * 1024;
 const MAX_RETAINED_JOBS: usize = 256;
 const MAX_CONCURRENT_EXECUTIONS: usize = 4;
 const SOURCE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -246,6 +251,16 @@ pub fn validate_request(request: &mut SwarmRequest) -> Result<String, String> {
     if request.filename.is_empty() {
         return Err("filename is required".to_owned());
     }
+    if request.filename.len() > MAX_FILENAME_BYTES {
+        return Err("filename is too long".to_owned());
+    }
+    if request
+        .output_path
+        .as_ref()
+        .is_some_and(|path| path.len() > MAX_OUTPUT_PATH_BYTES)
+    {
+        return Err("outputPath is too long".to_owned());
+    }
     if request.file_size == 0 {
         return Err("size is required (exact file size in bytes)".to_owned());
     }
@@ -275,18 +290,9 @@ pub fn validate_request(request: &mut SwarmRequest) -> Result<String, String> {
     let mut usernames = HashSet::new();
     for source in &mut request.sources {
         source.username = source.username.trim().to_owned();
-        if source.username.is_empty() {
-            return Err("every source requires a username".to_owned());
-        }
+        validate_source_fields(source)?;
         if !usernames.insert(source.username.to_ascii_lowercase()) {
             return Err("source usernames must be unique".to_owned());
-        }
-        if source
-            .authorization
-            .as_ref()
-            .is_some_and(|value| value.contains(['\r', '\n']) || value.len() > 8 * 1024)
-        {
-            return Err("source authorization is invalid".to_owned());
         }
     }
     let expected = request
@@ -619,6 +625,7 @@ async fn execute_inner(
 }
 
 async fn prepare_source(source: &RangeSource) -> Result<PreparedSource, String> {
+    validate_source_fields(source)?;
     let url = Url::parse(&source.url).map_err(|_| "source URL is invalid".to_owned())?;
     if !matches!(url.scheme(), "http" | "https") || url.username() != "" || url.password().is_some()
     {
@@ -662,6 +669,24 @@ async fn prepare_source(source: &RangeSource) -> Result<PreparedSource, String> 
         authorization: source.authorization.clone(),
         client,
     })
+}
+
+fn validate_source_fields(source: &RangeSource) -> Result<(), String> {
+    if source.username.trim().is_empty() {
+        return Err("every source requires a username".to_owned());
+    }
+    if source.username.len() > MAX_SOURCE_USERNAME_BYTES {
+        return Err("source username is too long".to_owned());
+    }
+    if source.url.len() > MAX_SOURCE_URL_BYTES {
+        return Err("source URL is too long".to_owned());
+    }
+    if source.authorization.as_ref().is_some_and(|value| {
+        value.contains(['\r', '\n']) || value.len() > MAX_SOURCE_AUTHORIZATION_BYTES
+    }) {
+        return Err("source authorization is invalid".to_owned());
+    }
+    Ok(())
 }
 
 async fn resolve_source_addrs<F>(
@@ -995,6 +1020,64 @@ mod tests {
         assert_eq!(
             validate_request(&mut request).unwrap_err(),
             "at least two range sources are required"
+        );
+    }
+
+    #[test]
+    fn request_validation_bounds_retained_string_fields() {
+        let baseline = SwarmRequest {
+            filename: "Album/Track.flac".to_owned(),
+            file_size: 128 * 1024,
+            expected_hash: Some("ab".repeat(32)),
+            output_path: Some("downloads/Track.flac".to_owned()),
+            chunk_size: DEFAULT_CHUNK_SIZE,
+            sources: vec![
+                RangeSource {
+                    username: "one".to_owned(),
+                    url: "https://one.example/file".to_owned(),
+                    authorization: None,
+                },
+                RangeSource {
+                    username: "two".to_owned(),
+                    url: "https://two.example/file".to_owned(),
+                    authorization: None,
+                },
+            ],
+        };
+
+        let mut request = baseline.clone();
+        request.filename = "x".repeat(MAX_FILENAME_BYTES + 1);
+        assert_eq!(
+            validate_request(&mut request).unwrap_err(),
+            "filename is too long"
+        );
+
+        let mut request = baseline.clone();
+        request.output_path = Some("x".repeat(MAX_OUTPUT_PATH_BYTES + 1));
+        assert_eq!(
+            validate_request(&mut request).unwrap_err(),
+            "outputPath is too long"
+        );
+
+        let mut request = baseline.clone();
+        request.sources[0].username = "x".repeat(MAX_SOURCE_USERNAME_BYTES + 1);
+        assert_eq!(
+            validate_request(&mut request).unwrap_err(),
+            "source username is too long"
+        );
+
+        let mut request = baseline.clone();
+        request.sources[0].url = "x".repeat(MAX_SOURCE_URL_BYTES + 1);
+        assert_eq!(
+            validate_request(&mut request).unwrap_err(),
+            "source URL is too long"
+        );
+
+        let mut request = baseline;
+        request.sources[0].authorization = Some("x".repeat(MAX_SOURCE_AUTHORIZATION_BYTES + 1));
+        assert_eq!(
+            validate_request(&mut request).unwrap_err(),
+            "source authorization is invalid"
         );
     }
 
