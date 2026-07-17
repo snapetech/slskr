@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use slskr_client::{
     file_transfer::FileTransferConnection,
     transfer::{DownloadState, DownloadTransfer, UploadState, UploadTransfer},
@@ -175,9 +177,8 @@ async fn receive_file_validates_token_sends_offset_and_reads_bytes() {
 }
 
 #[tokio::test]
-async fn receive_file_rejects_oversized_remaining_before_allocation() {
-    let (uploader, downloader) = duplex(64);
-    let mut uploader = FileTransferConnection::new(uploader);
+async fn receive_file_rejects_oversized_remaining_before_io() {
+    let (mut uploader, downloader) = duplex(64);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
     request_download(&mut transfer, None);
@@ -188,15 +189,13 @@ async fn receive_file_rejects_oversized_remaining_before_allocation() {
         }))
         .unwrap();
 
-    let uploader_task = tokio::spawn(async move {
-        uploader.send_token(7).await.unwrap();
-        assert_eq!(uploader.receive_offset().await.unwrap(), 5);
-    });
-
-    let error = transfer
-        .receive_file_from(&mut downloader, 5, usize::MAX)
-        .await
-        .unwrap_err();
+    let error = tokio::time::timeout(
+        Duration::from_millis(10),
+        transfer.receive_file_from(&mut downloader, 5, usize::MAX),
+    )
+    .await
+    .expect("local validation must not wait for the peer")
+    .unwrap_err();
 
     assert!(matches!(
         error,
@@ -205,7 +204,13 @@ async fn receive_file_rejects_oversized_remaining_before_allocation() {
             ..
         }
     ));
-    uploader_task.await.unwrap();
+    use tokio::io::AsyncReadExt as _;
+    let mut byte = [0];
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), uploader.read(&mut byte))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

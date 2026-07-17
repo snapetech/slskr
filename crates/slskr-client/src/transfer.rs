@@ -1,7 +1,10 @@
 use slskr_protocol::peer::{PeerMessage, TransferRequest, TransferResponse};
 use slskr_protocol::ProtocolTextEncoding;
 
-use crate::{file_transfer::FileTransferConnection, ClientError};
+use crate::{
+    file_transfer::{FileTransferConnection, DEFAULT_MAX_TRANSFER_CHUNK_LEN},
+    ClientError,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 const UPLOAD_DIRECTION: u32 = 1;
@@ -148,6 +151,12 @@ impl DownloadTransfer {
             return Err(ClientError::InvalidTransferState {
                 operation: "receive file",
                 state: self.state.name(),
+            });
+        }
+        if remaining > DEFAULT_MAX_TRANSFER_CHUNK_LEN {
+            return Err(ClientError::FrameTooLarge {
+                length: remaining,
+                max: DEFAULT_MAX_TRANSFER_CHUNK_LEN,
             });
         }
         if let Some(expected) = self.expected_size() {
