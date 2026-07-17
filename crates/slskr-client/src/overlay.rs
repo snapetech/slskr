@@ -660,14 +660,19 @@ impl OpenTunnelRequest {
         };
         if request.pod_id.trim().is_empty()
             || request.pod_id.len() > MAX_POD_ID_BYTES
+            || request.pod_id.chars().any(char::is_control)
             || request.destination_host.trim().is_empty()
             || request.destination_host.len() > MAX_DESTINATION_HOST_BYTES
+            || request.destination_host.chars().any(char::is_control)
             || request.destination_port == 0
             || request.service_name.as_ref().is_some_and(|service| {
-                service.trim().is_empty() || service.len() > MAX_SERVICE_FIELD_BYTES
+                service.trim().is_empty()
+                    || service.len() > MAX_SERVICE_FIELD_BYTES
+                    || service.chars().any(char::is_control)
             })
             || request.request_nonce.trim().is_empty()
             || request.request_nonce.len() > MAX_NONCE_BYTES
+            || request.request_nonce.chars().any(char::is_control)
         {
             return Err(OverlayError::InvalidPrivateGatewayRequest);
         }
@@ -848,7 +853,10 @@ fn validate_advertised_ports(
 }
 
 fn validate_service_field(field: &'static str, value: &str) -> Result<(), OverlayError> {
-    if value.trim().is_empty() || value.len() > MAX_SERVICE_FIELD_BYTES {
+    if value.trim().is_empty()
+        || value.len() > MAX_SERVICE_FIELD_BYTES
+        || value.chars().any(char::is_control)
+    {
         Err(OverlayError::InvalidServiceField(field))
     } else {
         Ok(())
@@ -1232,6 +1240,41 @@ mod tests {
         assert!(timeout(Duration::from_millis(10), wire.read_u8())
             .await
             .is_err());
+
+        for (field, call) in [
+            (
+                "correlation_id",
+                MeshServiceCall::new(
+                    "correlation\nforged",
+                    "private-gateway",
+                    "OpenTunnel",
+                    Vec::new(),
+                ),
+            ),
+            (
+                "service_name",
+                MeshServiceCall::new(
+                    "correlation",
+                    "private-gateway\rforged",
+                    "OpenTunnel",
+                    Vec::new(),
+                ),
+            ),
+            (
+                "method",
+                MeshServiceCall::new(
+                    "correlation",
+                    "private-gateway",
+                    "OpenTunnel\0forged",
+                    Vec::new(),
+                ),
+            ),
+        ] {
+            assert!(matches!(
+                call,
+                Err(OverlayError::InvalidServiceField(rejected)) if rejected == field
+            ));
+        }
     }
 
     #[test]
@@ -1254,7 +1297,11 @@ mod tests {
             Err(OverlayError::InvalidMessageType)
         ));
 
-        for correlation_id in ["   ".to_owned(), "x".repeat(MAX_SERVICE_FIELD_BYTES + 1)] {
+        for correlation_id in [
+            "   ".to_owned(),
+            "forged\r\ncorrelation".to_owned(),
+            "x".repeat(MAX_SERVICE_FIELD_BYTES + 1),
+        ] {
             let mut invalid = valid.clone();
             invalid.correlation_id = correlation_id;
             assert!(matches!(
@@ -1388,6 +1435,16 @@ mod tests {
             ),
             OpenTunnelRequest::new("pod", "host", 80, Some(" ".to_owned()), "nonce"),
             OpenTunnelRequest::new("pod", "host", 80, None, "n".repeat(MAX_NONCE_BYTES + 1)),
+            OpenTunnelRequest::new("pod\nforged", "host", 80, None, "nonce"),
+            OpenTunnelRequest::new("pod", "host\r\nforged", 80, None, "nonce"),
+            OpenTunnelRequest::new(
+                "pod",
+                "host",
+                80,
+                Some("service\tforged".to_owned()),
+                "nonce",
+            ),
+            OpenTunnelRequest::new("pod", "host", 80, None, "nonce\0forged"),
         ];
         assert!(invalid
             .into_iter()
