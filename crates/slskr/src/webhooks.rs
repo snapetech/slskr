@@ -310,22 +310,25 @@ impl WebhookManager {
 
     pub fn from_webhooks(webhooks: Vec<Webhook>) -> Self {
         let mut manager = Self::new();
-        for webhook in webhooks
-            .into_iter()
-            .filter(webhook_definition_is_valid)
-            .take(MAX_WEBHOOKS)
-        {
-            manager.webhooks.insert(webhook.id.clone(), webhook);
+        for webhook in webhooks.into_iter().filter(webhook_definition_is_valid) {
+            let id = webhook.id.clone();
+            if manager.webhooks.len() >= MAX_WEBHOOKS && !manager.webhooks.contains_key(&id) {
+                continue;
+            }
+            manager.webhooks.insert(id, webhook);
         }
         manager
     }
 
     /// Register webhook
     pub fn register(&mut self, webhook: Webhook) -> Result<String, ()> {
-        if self.webhooks.len() >= MAX_WEBHOOKS || !webhook_definition_is_valid(&webhook) {
+        if !webhook_definition_is_valid(&webhook) {
             return Err(());
         }
         let id = webhook.id.clone();
+        if self.webhooks.len() >= MAX_WEBHOOKS && !self.webhooks.contains_key(&id) {
+            return Err(());
+        }
         self.webhooks.insert(id.clone(), webhook);
         Ok(id)
     }
@@ -941,6 +944,50 @@ mod tests {
         let manager = WebhookManager::from_webhooks(persisted);
         assert_eq!(manager.get_all().len(), 1);
         assert!(manager.get(&valid_id).is_some());
+    }
+
+    #[test]
+    fn webhook_capacity_counts_unique_ids_and_allows_rotation() {
+        let base = Webhook::new(
+            "https://example.com/hook".to_owned(),
+            vec![WebhookEvent::SearchCreated],
+            Webhook::generate_secret().expect("test randomness"),
+        );
+        let mut manager = WebhookManager::new();
+        for index in 0..MAX_WEBHOOKS {
+            let mut webhook = base.clone();
+            webhook.id = format!("hook-{index}");
+            manager.register(webhook).expect("fill webhook capacity");
+        }
+
+        let mut rotated = base.clone();
+        rotated.id = "hook-0".to_owned();
+        rotated.url = "https://example.com/rotated".to_owned();
+        manager
+            .register(rotated)
+            .expect("rotate an existing webhook at capacity");
+        assert_eq!(
+            manager.get("hook-0").unwrap().url,
+            "https://example.com/rotated"
+        );
+
+        let mut extra = base.clone();
+        extra.id = "hook-extra".to_owned();
+        assert!(manager.register(extra).is_err());
+
+        let mut persisted = Vec::new();
+        for _ in 0..MAX_WEBHOOKS {
+            let mut duplicate = base.clone();
+            duplicate.id = "hook-0".to_owned();
+            persisted.push(duplicate);
+        }
+        for index in 1..MAX_WEBHOOKS {
+            let mut unique = base.clone();
+            unique.id = format!("hook-{index}");
+            persisted.push(unique);
+        }
+        let restored = WebhookManager::from_webhooks(persisted);
+        assert_eq!(restored.get_all().len(), MAX_WEBHOOKS);
     }
 
     #[tokio::test]
