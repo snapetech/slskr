@@ -60,6 +60,9 @@ fn mesh_rendezvous_bounds_candidate_collection_and_identity_size() {
     assert!(mesh
         .candidate_usernames([oversized.as_str()], std::iter::empty())
         .is_empty());
+    assert!(mesh
+        .candidate_usernames(["peer\r\nforged"], std::iter::empty())
+        .is_empty());
 
     let consumed = Cell::new(0);
     let usernames = (0..MAX_MESH_RENDEZVOUS_CANDIDATES + 100)

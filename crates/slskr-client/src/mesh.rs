@@ -8,7 +8,7 @@ use crate::{
         peer_capability_message, PeerCapabilityDescriptor, PeerCapabilityEnvelope,
         PeerCapabilityMessageType, FEATURE_MESH_V1,
     },
-    peer_cache::{PeerConnectionCache, MAX_PEER_USERNAME_BYTES},
+    peer_cache::{normalize_peer_username, PeerConnectionCache},
     ClientError,
 };
 
@@ -70,10 +70,9 @@ impl MeshRendezvous {
         let mut seen = HashSet::new();
         let mut candidates = Vec::new();
         for username in similar_users.into_iter().chain(known_capability_users) {
-            let username = username.trim();
-            if username.is_empty() || username.len() > MAX_PEER_USERNAME_BYTES {
+            let Ok(username) = normalize_peer_username(username) else {
                 continue;
-            }
+            };
             if seen.insert(username.to_ascii_lowercase()) {
                 candidates.push(username.to_owned());
                 if candidates.len() == MAX_MESH_RENDEZVOUS_CANDIDATES {
