@@ -306,33 +306,65 @@ fn upload_transfer_response_updates_state() {
 }
 
 #[test]
-fn completed_transfers_reject_replayed_peer_control_messages() {
+fn terminal_transfers_reject_replayed_peer_control_messages() {
     let response = PeerMessage::TransferResponse(TransferResponse::Allowed {
         token: 7,
         size: Some(5),
     });
 
-    let mut download = DownloadTransfer::new("peer", "Music/file.flac", 7);
-    download.state = DownloadState::Completed;
-    assert!(matches!(
-        download.handle_peer_message(response.clone()),
-        Err(ClientError::InvalidTransferState {
-            operation: "handle peer message",
-            state: "completed",
-        })
-    ));
-    assert_eq!(download.state, DownloadState::Completed);
+    for (terminal, expected_name) in [
+        (
+            DownloadState::Rejected {
+                reason: "denied".to_owned(),
+            },
+            "rejected",
+        ),
+        (
+            DownloadState::Failed {
+                reason: "failed".to_owned(),
+            },
+            "failed",
+        ),
+        (DownloadState::Completed, "completed"),
+    ] {
+        let mut download = DownloadTransfer::new("peer", "Music/file.flac", 7);
+        download.state = terminal.clone();
+        assert!(matches!(
+            download.handle_peer_message(response.clone()),
+            Err(ClientError::InvalidTransferState {
+                operation: "handle peer message",
+                state,
+            }) if state == expected_name
+        ));
+        assert_eq!(download.state, terminal);
+    }
 
-    let mut upload = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
-    upload.state = UploadState::Completed;
-    assert!(matches!(
-        upload.handle_peer_message(response),
-        Err(ClientError::InvalidTransferState {
-            operation: "handle peer message",
-            state: "completed",
-        })
-    ));
-    assert_eq!(upload.state, UploadState::Completed);
+    for (terminal, expected_name) in [
+        (
+            UploadState::Rejected {
+                reason: "denied".to_owned(),
+            },
+            "rejected",
+        ),
+        (
+            UploadState::Failed {
+                reason: "failed".to_owned(),
+            },
+            "failed",
+        ),
+        (UploadState::Completed, "completed"),
+    ] {
+        let mut upload = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
+        upload.state = terminal.clone();
+        assert!(matches!(
+            upload.handle_peer_message(response.clone()),
+            Err(ClientError::InvalidTransferState {
+                operation: "handle peer message",
+                state,
+            }) if state == expected_name
+        ));
+        assert_eq!(upload.state, terminal);
+    }
 }
 
 #[tokio::test]

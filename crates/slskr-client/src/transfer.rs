@@ -70,7 +70,7 @@ impl DownloadTransfer {
     }
 
     pub fn handle_peer_message(&mut self, message: PeerMessage) -> Result<(), ClientError> {
-        if matches!(self.state, DownloadState::Completed) {
+        if self.state.is_terminal() {
             return Err(ClientError::InvalidTransferState {
                 operation: "handle peer message",
                 state: self.state.name(),
@@ -215,6 +215,13 @@ impl DownloadTransfer {
 }
 
 impl DownloadState {
+    const fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Rejected { .. } | Self::Failed { .. } | Self::Completed
+        )
+    }
+
     const fn name(&self) -> &'static str {
         match self {
             Self::New => "new",
@@ -258,7 +265,7 @@ impl UploadTransfer {
     }
 
     pub fn handle_peer_message(&mut self, message: PeerMessage) -> Result<(), ClientError> {
-        if matches!(self.state, UploadState::Completed) {
+        if self.state.is_terminal() {
             return Err(ClientError::InvalidTransferState {
                 operation: "handle peer message",
                 state: self.state.name(),
@@ -350,6 +357,13 @@ impl UploadTransfer {
 }
 
 impl UploadState {
+    const fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Rejected { .. } | Self::Failed { .. } | Self::Completed
+        )
+    }
+
     const fn name(&self) -> &'static str {
         match self {
             Self::New => "new",
