@@ -185,7 +185,7 @@ fn read_bounded_secret_file(
 }
 
 fn load_os() -> Result<Option<StoredCredentials>, String> {
-    let username = match keyring_entry(KEYRING_USERNAME_KEY).get_password() {
+    let username = match keyring_entry(KEYRING_USERNAME_KEY)?.get_password() {
         Ok(username) if !username.trim().is_empty() => username,
         Ok(_) | Err(keyring::Error::NoEntry) => return Ok(None),
         Err(error) => {
@@ -194,7 +194,7 @@ fn load_os() -> Result<Option<StoredCredentials>, String> {
             ))
         }
     };
-    let password = match keyring_entry(KEYRING_PASSWORD_KEY).get_password() {
+    let password = match keyring_entry(KEYRING_PASSWORD_KEY)?.get_password() {
         Ok(password) if !password.is_empty() => password,
         Ok(_) | Err(keyring::Error::NoEntry) => return Ok(None),
         Err(error) => {
@@ -213,18 +213,18 @@ fn load_os() -> Result<Option<StoredCredentials>, String> {
 fn store_os(credentials: &LoginCredentials) -> Result<&'static str, String> {
     store_os_with(
         credentials,
-        |user| match keyring_entry(user).get_password() {
+        |user| match keyring_entry(user)?.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(error.to_string()),
         },
         |user, value| {
-            keyring_entry(user)
+            keyring_entry(user)?
                 .set_password(value)
                 .map_err(|error| error.to_string())
         },
         |user| {
-            keyring_entry(user)
+            keyring_entry(user)?
                 .delete_credential()
                 .map_err(|error| error.to_string())
         },
@@ -261,8 +261,9 @@ fn store_os_with(
     Ok(())
 }
 
-fn keyring_entry(user: &str) -> Entry {
-    Entry::new(KEYRING_SERVICE, user).expect("static keyring service and user names are valid")
+fn keyring_entry(user: &str) -> Result<Entry, String> {
+    Entry::new(KEYRING_SERVICE, user)
+        .map_err(|error| format!("failed to create OS credential-store entry: {error}"))
 }
 
 fn load_file(path: &Path) -> Result<Option<StoredCredentials>, String> {
