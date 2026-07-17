@@ -62,6 +62,8 @@ pub enum ClientError {
     BlankMessageRecipient,
     #[error("private message recipient count {count} exceeds maximum {max}")]
     TooManyMessageRecipients { count: usize, max: usize },
+    #[error("private message recipient candidate count exceeds maximum {max}")]
+    TooManyMessageRecipientCandidates { max: usize },
     #[error("private message {field} length {length} exceeds maximum {max}")]
     PrivateMessageFieldTooLong {
         field: &'static str,

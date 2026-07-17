@@ -14,6 +14,7 @@ use crate::{
 
 pub const MESH_RENDEZVOUS_INTEREST_TAG: &str = "slskdn-mesh-v1";
 pub const MAX_MESH_RENDEZVOUS_CANDIDATES: usize = 1_024;
+const MAX_MESH_RENDEZVOUS_CANDIDATE_INPUTS: usize = MAX_MESH_RENDEZVOUS_CANDIDATES * 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeshRendezvousOptions {
@@ -69,7 +70,11 @@ impl MeshRendezvous {
     ) -> Vec<String> {
         let mut seen = HashSet::new();
         let mut candidates = Vec::new();
-        for username in similar_users.into_iter().chain(known_capability_users) {
+        for username in similar_users
+            .into_iter()
+            .chain(known_capability_users)
+            .take(MAX_MESH_RENDEZVOUS_CANDIDATE_INPUTS)
+        {
             let Ok(username) = normalize_peer_username(username) else {
                 continue;
             };
@@ -126,4 +131,26 @@ pub fn is_capability_probe(message: &PeerMessage) -> bool {
             ..
         }
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::{MeshRendezvous, MAX_MESH_RENDEZVOUS_CANDIDATE_INPUTS};
+
+    #[test]
+    fn mesh_rendezvous_bounds_rejected_candidate_scanning() {
+        let consumed = Cell::new(0);
+        let usernames = std::iter::repeat_with(|| {
+            consumed.set(consumed.get() + 1);
+            ""
+        });
+
+        let candidates =
+            MeshRendezvous::disabled().candidate_usernames(usernames, std::iter::empty());
+
+        assert!(candidates.is_empty());
+        assert_eq!(consumed.get(), MAX_MESH_RENDEZVOUS_CANDIDATE_INPUTS);
+    }
 }

@@ -5,6 +5,7 @@ use slskr_protocol::server::{PrivateMessage, ServerMessage, UserStatus, WatchedU
 use crate::ClientError;
 
 pub const MAX_PRIVATE_MESSAGE_RECIPIENTS: usize = 100;
+const MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES: usize = MAX_PRIVATE_MESSAGE_RECIPIENTS * 16;
 pub const MAX_STORED_ROOM_MESSAGES: usize = 1_000;
 pub const MAX_STORED_PRIVATE_MESSAGES: usize = 1_000;
 pub const MAX_STORED_SOCIAL_FIELD_BYTES: usize = 64 * 1024;
@@ -36,7 +37,12 @@ where
     let mut seen = HashSet::new();
     let mut recipients = Vec::new();
 
-    for username in usernames {
+    for (index, username) in usernames.into_iter().enumerate() {
+        if index == MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES {
+            return Err(ClientError::TooManyMessageRecipientCandidates {
+                max: MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES,
+            });
+        }
         let username = username.into().trim().to_owned();
         if username.is_empty() {
             return Err(ClientError::BlankMessageRecipient);
@@ -344,5 +350,29 @@ impl PrivateMessageInbox {
     #[must_use]
     pub fn messages(&self) -> &[PrivateMessage] {
         &self.messages
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::{private_message_users_command, MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES};
+    use crate::ClientError;
+
+    #[test]
+    fn private_message_recipients_bound_duplicate_candidate_scanning() {
+        let consumed = Cell::new(0);
+        let recipients = std::iter::repeat_with(|| {
+            consumed.set(consumed.get() + 1);
+            "alice"
+        });
+
+        assert!(matches!(
+            private_message_users_command(recipients, "hello"),
+            Err(ClientError::TooManyMessageRecipientCandidates { max })
+                if max == MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES
+        ));
+        assert_eq!(consumed.get(), MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES + 1);
     }
 }

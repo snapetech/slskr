@@ -24,6 +24,7 @@ pub const MAX_SEARCH_RESULT_TEXT_BYTES_TOTAL: usize = 64 * 1024 * 1024;
 pub const MAX_SEARCH_RESPONSES_TOTAL: usize = 10_000;
 pub const MAX_WISHLIST_SEARCH_TERMS: usize = 1_024;
 pub const MAX_WISHLIST_SEARCH_TERM_BYTES: usize = 4_096;
+const MAX_WISHLIST_SEARCH_TERM_CANDIDATES: usize = MAX_WISHLIST_SEARCH_TERMS * 16;
 pub const MAX_OUTBOUND_SEARCH_FIELD_BYTES: usize = 4_096;
 pub const MAX_INBOUND_SEARCH_QUERY_BYTES: usize = 4_096;
 
@@ -134,7 +135,7 @@ impl WishlistSearchScheduler {
 fn normalize_wishlist_terms(terms: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut normalized = Vec::new();
     let mut seen = HashSet::new();
-    for term in terms {
+    for term in terms.into_iter().take(MAX_WISHLIST_SEARCH_TERM_CANDIDATES) {
         let term = truncate_utf8_bytes(term.trim(), MAX_WISHLIST_SEARCH_TERM_BYTES);
         if term.is_empty()
             || term.chars().any(char::is_control)
@@ -696,4 +697,23 @@ fn normalize_terms(query: &str) -> Vec<String> {
         .split_whitespace()
         .map(str::to_ascii_lowercase)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::{normalize_wishlist_terms, MAX_WISHLIST_SEARCH_TERM_CANDIDATES};
+
+    #[test]
+    fn wishlist_terms_bound_rejected_candidate_scanning() {
+        let consumed = Cell::new(0);
+        let terms = std::iter::repeat_with(|| {
+            consumed.set(consumed.get() + 1);
+            String::new()
+        });
+
+        assert!(normalize_wishlist_terms(terms).is_empty());
+        assert_eq!(consumed.get(), MAX_WISHLIST_SEARCH_TERM_CANDIDATES);
+    }
 }
