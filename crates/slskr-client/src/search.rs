@@ -339,6 +339,8 @@ impl SearchResults {
                 response.results.truncate(remaining);
                 remaining = remaining.saturating_sub(response.results.len());
                 response.private_results.truncate(remaining);
+                response.results.shrink_to_fit();
+                response.private_results.shrink_to_fit();
                 let response_files = response.results.len() + response.private_results.len();
                 let response_text_bytes = search_response_text_bytes(&response);
                 let stored_text_bytes = self

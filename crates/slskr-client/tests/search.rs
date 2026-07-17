@@ -315,6 +315,39 @@ fn search_results_deduplicate_replayed_responses_after_per_response_truncation()
 }
 
 #[test]
+fn search_results_release_truncated_vector_capacity() {
+    let mut results = SearchResults::new();
+    let mut full = response("first", 10);
+    full.results = (0..MAX_SEARCH_RESULT_FILES_PER_TOKEN)
+        .map(|index| entry(&format!("first-{index}")))
+        .collect();
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(full))
+        .unwrap();
+
+    let mut overflow = response("second", 10);
+    overflow.results = (0..MAX_SEARCH_RESULT_FILES_PER_TOKEN / 2)
+        .map(|index| entry(&format!("overflow-public-{index}")))
+        .collect();
+    overflow.private_results = (0..MAX_SEARCH_RESULT_FILES_PER_TOKEN / 2)
+        .map(|index| entry(&format!("overflow-private-{index}")))
+        .collect();
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(overflow))
+        .unwrap();
+
+    let retained = &results.responses_for(10)[1];
+    assert!(retained.results.is_empty());
+    assert_eq!(retained.results.capacity(), 0);
+    assert!(retained.private_results.is_empty());
+    assert_eq!(retained.private_results.capacity(), 0);
+    assert_eq!(
+        results.stored_files_len(),
+        MAX_SEARCH_RESULT_FILES_PER_TOKEN
+    );
+}
+
+#[test]
 fn search_results_bound_attacker_controlled_token_keys() {
     let mut results = SearchResults::new();
     for token in 0..u32::try_from(MAX_TRACKED_SEARCH_RESULT_TOKENS).unwrap() {
