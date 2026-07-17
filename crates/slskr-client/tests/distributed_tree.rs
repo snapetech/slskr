@@ -62,6 +62,18 @@ fn choose_parent_ignores_blank_identity() {
 }
 
 #[test]
+fn choose_parent_canonicalizes_identities_before_rejecting_self() {
+    let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new(" local ");
+    let candidates = vec![
+        possible_parent(" LOCAL ", [10, 0, 0, 1], 2234),
+        possible_parent(" valid ", [10, 0, 0, 2], 2234),
+    ];
+
+    assert_eq!(tree.local_username(), "local");
+    assert_eq!(tree.choose_parent(&candidates).unwrap().username, "valid");
+}
+
+#[test]
 fn parent_state_tracks_connect_disconnect_reset_and_server_reports() {
     let (tree_side, _peer_side) = duplex(512);
     let mut tree = DistributedTree::new("local");
@@ -316,6 +328,22 @@ fn distributed_tree_treats_child_username_casing_as_one_identity() {
     assert_eq!(tree.child_info("alice").unwrap().depth, 3);
     assert_eq!(tree.remove_child("ALICE").unwrap().username, "alice");
     assert_eq!(tree.children_len(), 0);
+}
+
+#[test]
+fn distributed_tree_treats_surrounding_whitespace_as_one_child_identity() {
+    let mut tree = DistributedTree::with_max_children("local", 1);
+    let (first, _) = duplex(64);
+    tree.add_child(" Alice ", DistributedConnection::new(first))
+        .unwrap();
+
+    let (replacement, _) = duplex(64);
+    assert!(tree
+        .add_child("alice", DistributedConnection::new(replacement))
+        .unwrap());
+    assert_eq!(tree.children_len(), 1);
+    assert_eq!(tree.child_info(" ALICE ").unwrap().username, "alice");
+    assert_eq!(tree.remove_child(" alice ").unwrap().username, "alice");
 }
 
 #[test]

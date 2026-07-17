@@ -25,7 +25,7 @@ impl ParentInfo {
     #[must_use]
     pub fn from_possible_parent(parent: &PossibleParent) -> Self {
         Self {
-            username: parent.username.clone(),
+            username: parent.username.trim().to_owned(),
             ip: parent.ip,
             port: parent.port,
         }
@@ -77,7 +77,7 @@ impl<S> DistributedTree<S> {
 
     #[must_use]
     pub fn with_max_children(local_username: impl Into<String>, max_children: usize) -> Self {
-        let local_username = local_username.into();
+        let local_username = local_username.into().trim().to_owned();
         Self {
             branch_level: 0,
             branch_root: local_username.clone(),
@@ -139,6 +139,7 @@ impl<S> DistributedTree<S> {
     pub fn choose_parent(&self, candidates: &[PossibleParent]) -> Option<ParentInfo> {
         candidates
             .iter()
+            .map(ParentInfo::from_possible_parent)
             .filter(|candidate| {
                 !candidate
                     .username
@@ -147,7 +148,6 @@ impl<S> DistributedTree<S> {
             .filter(|candidate| candidate.port != 0)
             .filter(|candidate| !candidate.username.trim().is_empty())
             .filter(|candidate| candidate.username.len() <= MAX_DISTRIBUTED_USERNAME_BYTES)
-            .map(ParentInfo::from_possible_parent)
             .min_by(|left, right| {
                 left.username
                     .cmp(&right.username)
@@ -157,6 +157,10 @@ impl<S> DistributedTree<S> {
     }
 
     pub fn connect_parent(&mut self, info: ParentInfo, connection: DistributedConnection<S>) {
+        let info = ParentInfo {
+            username: info.username.trim().to_owned(),
+            ..info
+        };
         self.branch_level = 1;
         self.branch_root = info.username.clone();
         self.parent = Some(ParentConnection { info, connection });
@@ -218,8 +222,8 @@ impl<S> DistributedTree<S> {
         username: impl Into<String>,
         connection: DistributedConnection<S>,
     ) -> Result<bool, ClientError> {
-        let username = username.into();
-        if username.trim().is_empty() {
+        let username = username.into().trim().to_owned();
+        if username.is_empty() {
             return Err(ClientError::BlankDistributedUsername);
         }
         if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
@@ -259,7 +263,8 @@ impl<S> DistributedTree<S> {
                 DistributedEvent::BranchChanged
             }
             DistributedMessage::BranchRoot { username } => {
-                if username.trim().is_empty() || username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+                let username = username.trim().to_owned();
+                if username.is_empty() || username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
                     return DistributedEvent::Ignored;
                 }
                 self.branch_root = username;
@@ -374,7 +379,7 @@ where
 }
 
 fn username_key(username: &str) -> String {
-    username.to_ascii_lowercase()
+    username.trim().to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

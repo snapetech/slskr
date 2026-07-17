@@ -98,14 +98,14 @@ impl UserWatchState {
     #[must_use]
     pub fn watch_message(username: impl Into<String>) -> ServerMessage {
         ServerMessage::WatchUserRequest {
-            username: username.into(),
+            username: username.into().trim().to_owned(),
         }
     }
 
     #[must_use]
     pub fn unwatch_message(username: impl Into<String>) -> ServerMessage {
         ServerMessage::UnwatchUser {
-            username: username.into(),
+            username: username.into().trim().to_owned(),
         }
     }
 
@@ -120,22 +120,24 @@ impl UserWatchState {
                 {
                     return false;
                 }
-                if !self.can_insert(&user.username) {
+                let mut user = user.clone();
+                user.username = user.username.trim().to_owned();
+                if user.username.is_empty() || !self.can_insert(&user.username) {
                     return false;
                 }
-                self.watched
-                    .insert(username_key(&user.username), user.clone());
+                self.watched.insert(username_key(&user.username), user);
                 true
             }
             ServerMessage::GetUserStatusResponse(status) => {
                 if status.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
                     return false;
                 }
-                if !self.can_insert(&status.username) {
+                let mut status = status.clone();
+                status.username = status.username.trim().to_owned();
+                if status.username.is_empty() || !self.can_insert(&status.username) {
                     return false;
                 }
-                self.statuses
-                    .insert(username_key(&status.username), status.clone());
+                self.statuses.insert(username_key(&status.username), status);
                 true
             }
             ServerMessage::UnwatchUser { username } => {
@@ -160,7 +162,7 @@ impl UserWatchState {
 }
 
 fn username_key(username: &str) -> String {
-    username.to_ascii_lowercase()
+    username.trim().to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,7 +212,9 @@ impl RoomState {
 
     #[must_use]
     pub fn leave_room_message(room: impl Into<String>) -> ServerMessage {
-        ServerMessage::LeaveRoom { room: room.into() }
+        ServerMessage::LeaveRoom {
+            room: room.into().trim().to_owned(),
+        }
     }
 
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
@@ -226,14 +230,19 @@ impl RoomState {
                 {
                     return false;
                 }
+                let room = room.trim();
+                let username = username.trim();
+                if room.is_empty() || username.is_empty() {
+                    return false;
+                }
                 let key = room_key(room);
                 if self.joined.len() >= self.max_joined_rooms && !self.joined.contains(&key) {
                     return false;
                 }
                 self.joined.insert(key);
                 self.messages.push(RoomMessage {
-                    room: room.clone(),
-                    username: username.clone(),
+                    room: room.to_owned(),
+                    username: username.to_owned(),
                     message: message.clone(),
                 });
                 retain_newest(&mut self.messages, MAX_STORED_ROOM_MESSAGES);
@@ -259,7 +268,7 @@ impl RoomState {
 }
 
 fn room_key(room: &str) -> String {
-    room.to_ascii_lowercase()
+    room.trim().to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -206,6 +206,37 @@ fn user_watch_state_treats_username_casing_as_one_identity() {
 }
 
 #[test]
+fn user_watch_state_canonicalizes_whitespace_before_capacity_checks() {
+    let mut state = UserWatchState::with_max_records(1);
+    assert!(
+        state.apply_server_message(&ServerMessage::GetUserStatusResponse(UserStatus {
+            username: " Alice ".to_owned(),
+            status: 1,
+            privileged: false,
+        }))
+    );
+    assert!(
+        state.apply_server_message(&ServerMessage::WatchUserResponse(WatchedUser {
+            username: "alice".to_owned(),
+            exists: true,
+            status: Some(2),
+            stats: None,
+            country_code: None,
+        }))
+    );
+    assert_eq!(state.status(" ALICE ").unwrap().username, "Alice");
+    assert_eq!(state.watched("alice").unwrap().username, "alice");
+
+    assert!(
+        !state.apply_server_message(&ServerMessage::GetUserStatusResponse(UserStatus {
+            username: "   ".to_owned(),
+            status: 1,
+            privileged: false,
+        }))
+    );
+}
+
+#[test]
 fn room_state_tracks_global_messages_and_leave_requests() {
     let mut state = RoomState::new();
 
@@ -282,6 +313,24 @@ fn room_state_treats_room_casing_as_one_identity() {
     }));
     assert!(!state.is_joined("LOBBY"));
     assert!(state.apply_server_message(&message("replacement", "accepted")));
+}
+
+#[test]
+fn room_state_canonicalizes_whitespace_before_capacity_checks() {
+    let mut state = RoomState::with_max_joined_rooms(1);
+    let message = |room: &str, username: &str| ServerMessage::GlobalRoomMessage {
+        room: room.to_owned(),
+        username: username.to_owned(),
+        message: "hello".to_owned(),
+    };
+
+    assert!(state.apply_server_message(&message(" Lobby ", " Alice ")));
+    assert!(state.apply_server_message(&message("lobby", "alice")));
+    assert_eq!(state.messages()[0].room, "Lobby");
+    assert_eq!(state.messages()[0].username, "Alice");
+    assert!(state.is_joined(" LOBBY "));
+    assert!(!state.apply_server_message(&message("   ", "alice")));
+    assert!(!state.apply_server_message(&message("lobby", "   ")));
 }
 
 #[test]
