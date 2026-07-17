@@ -78,6 +78,7 @@ fn download_rejects_wrong_transfer_direction_without_changing_state() {
 #[test]
 fn transfer_response_updates_state() {
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, Some(100));
 
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
@@ -111,6 +112,7 @@ fn reject_response_message_updates_state_and_payload() {
 #[test]
 fn wrong_token_is_rejected() {
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, Some(100));
 
     let error = transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
@@ -176,6 +178,7 @@ async fn receive_file_rejects_oversized_remaining_before_allocation() {
     let mut uploader = FileTransferConnection::new(uploader);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, None);
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: 7,
@@ -208,6 +211,7 @@ async fn receive_file_rejects_range_that_does_not_complete_negotiated_size() {
     let (downloader, _uploader) = duplex(64);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, Some(5));
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: 7,
@@ -235,6 +239,7 @@ async fn receive_file_rejects_overflowing_range_before_io() {
     let (downloader, _uploader) = duplex(64);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, Some(u64::MAX));
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: 7,
@@ -334,6 +339,46 @@ fn upload_rejects_unsolicited_control_messages_before_request() {
         })
     ));
     assert_eq!(transfer.state, UploadState::New);
+}
+
+#[test]
+fn download_rejects_unsolicited_control_messages_before_request() {
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+
+    assert!(matches!(
+        transfer.handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(5),
+        })),
+        Err(ClientError::InvalidTransferState {
+            operation: "handle transfer response",
+            state: "new",
+        })
+    ));
+    assert_eq!(transfer.state, DownloadState::New);
+
+    for (message, operation) in [
+        (
+            PeerMessage::UploadFailed {
+                filename: "Music/file.flac".to_owned(),
+            },
+            "handle upload failure",
+        ),
+        (
+            PeerMessage::UploadDenied {
+                filename: "Music/file.flac".to_owned(),
+                reason: "denied".to_owned(),
+            },
+            "handle upload denial",
+        ),
+    ] {
+        assert!(matches!(
+            transfer.handle_peer_message(message),
+            Err(ClientError::InvalidTransferState { operation: actual, state: "new" })
+                if actual == operation
+        ));
+        assert_eq!(transfer.state, DownloadState::New);
+    }
 }
 
 #[test]
@@ -514,4 +559,16 @@ async fn file_io_rejects_unaccepted_transfer_states_before_network_io() {
         })
     ));
     assert_eq!(upload.state, UploadState::New);
+}
+
+fn request_download(transfer: &mut DownloadTransfer, size: Option<u64>) {
+    transfer
+        .handle_peer_message(PeerMessage::TransferRequest(TransferRequest {
+            direction: 1,
+            token: transfer.token,
+            filename: transfer.filename.clone(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
+            size,
+        }))
+        .unwrap();
 }

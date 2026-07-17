@@ -85,6 +85,7 @@ impl DownloadTransfer {
             PeerMessage::TransferRequest(request) => self.handle_transfer_request(request),
             PeerMessage::TransferResponse(response) => self.handle_transfer_response(response),
             PeerMessage::UploadFailed { filename } => {
+                self.require_started("handle upload failure")?;
                 self.validate_filename(filename)?;
                 self.state = DownloadState::Failed {
                     reason: "upload failed".to_owned(),
@@ -92,6 +93,7 @@ impl DownloadTransfer {
                 Ok(())
             }
             PeerMessage::UploadDenied { filename, reason } => {
+                self.require_started("handle upload denial")?;
                 self.validate_filename(filename)?;
                 self.state = DownloadState::Rejected { reason };
                 Ok(())
@@ -170,6 +172,7 @@ impl DownloadTransfer {
     }
 
     fn handle_transfer_response(&mut self, response: TransferResponse) -> Result<(), ClientError> {
+        self.require_requested("handle transfer response")?;
         match response {
             TransferResponse::Allowed { token, size } => {
                 self.validate_token(token)?;
@@ -191,6 +194,28 @@ impl DownloadTransfer {
             Err(ClientError::TransferTokenMismatch {
                 expected: self.token,
                 received,
+            })
+        }
+    }
+
+    fn require_started(&self, operation: &'static str) -> Result<(), ClientError> {
+        if matches!(self.state, DownloadState::New) {
+            Err(ClientError::InvalidTransferState {
+                operation,
+                state: self.state.name(),
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn require_requested(&self, operation: &'static str) -> Result<(), ClientError> {
+        if matches!(self.state, DownloadState::Requested { .. }) {
+            Ok(())
+        } else {
+            Err(ClientError::InvalidTransferState {
+                operation,
+                state: self.state.name(),
             })
         }
     }
