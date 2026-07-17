@@ -358,10 +358,20 @@ fn ensure_secure_credential_parent(parent: &Path) -> Result<(), String> {
 
 #[cfg(unix)]
 fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::{
-        fs::OpenOptions,
-        os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    };
+    write_secret_file_with(path, bytes, |temporary_path| {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(temporary_path, fs::Permissions::from_mode(0o600))
+    })
+}
+
+#[cfg(unix)]
+fn write_secret_file_with(
+    path: &Path,
+    bytes: &[u8],
+    restrict_permissions: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<(), String> {
+    use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt};
 
     if fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_symlink())
@@ -374,6 +384,12 @@ fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_directory = fs::File::open(parent).map_err(|error| {
+        format!(
+            "failed to open Soulseek credential directory {}: {error}",
+            parent.display()
+        )
+    })?;
     let file_name = path
         .file_name()
         .ok_or_else(|| "Soulseek credential file path has no file name".to_owned())?;
@@ -405,21 +421,20 @@ fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let write_result = (|| -> Result<(), String> {
         std::io::Write::write_all(&mut file, bytes)
             .map_err(|error| format!("failed to write Soulseek credential file: {error}"))?;
+        restrict_permissions(&temporary_path)
+            .map_err(|error| format!("failed to restrict Soulseek credential file: {error}"))?;
         file.sync_all()
             .map_err(|error| format!("failed to sync Soulseek credential file: {error}"))?;
         fs::rename(&temporary_path, path)
-            .map_err(|error| format!("failed to replace Soulseek credential file: {error}"))
+            .map_err(|error| format!("failed to replace Soulseek credential file: {error}"))?;
+        parent_directory
+            .sync_all()
+            .map_err(|error| format!("failed to sync Soulseek credential directory: {error}"))
     })();
     if write_result.is_err() {
         let _ = fs::remove_file(&temporary_path);
     }
-    write_result?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|error| {
-        format!(
-            "failed to restrict Soulseek credential file {}: {error}",
-            path.display()
-        )
-    })
+    write_result
 }
 
 #[cfg(test)]
@@ -446,6 +461,37 @@ mod tests {
         let error = write_secret_file(&linked, b"replace").expect_err("reject symlink");
         assert!(error.contains("must not be a symlink"));
         assert_eq!(fs::read_to_string(&target).expect("read target"), "keep");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_permission_failure_preserves_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_dir("permission-rollback");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create fixture directory");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+            .expect("restrict fixture directory");
+        let path = root.join("credentials.json");
+        fs::write(&path, b"existing credentials").expect("write existing credentials");
+
+        let error = write_secret_file_with(&path, b"replacement credentials", |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect_err("permission hardening failure must abort publication");
+
+        assert!(error.contains("failed to restrict"), "{error}");
+        assert_eq!(
+            fs::read(&path).expect("read preserved credentials"),
+            b"existing credentials"
+        );
+        assert_eq!(
+            fs::read_dir(&root).expect("read fixture directory").count(),
+            1,
+            "failed staging file must be removed"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
