@@ -352,6 +352,30 @@ impl MeshHello {
             payload.extend_from_slice(value.as_bytes());
         }
         payload.extend_from_slice(&self.version.to_be_bytes());
+        let feature_count = u32::try_from(self.features.len())
+            .map_err(|_| OverlayError::InvalidPeerAuthentication)?;
+        payload.extend_from_slice(&feature_count.to_be_bytes());
+        for feature in &self.features {
+            let length = u32::try_from(feature.len())
+                .map_err(|_| OverlayError::InvalidPeerAuthentication)?;
+            payload.extend_from_slice(&length.to_be_bytes());
+            payload.extend_from_slice(feature.as_bytes());
+        }
+        match &self.soulseek_ports {
+            Some(ports) => {
+                payload.push(1);
+                payload.extend_from_slice(&ports.peer.to_be_bytes());
+                payload.extend_from_slice(&ports.file.to_be_bytes());
+            }
+            None => payload.push(0),
+        }
+        match self.overlay_port {
+            Some(port) => {
+                payload.push(1);
+                payload.extend_from_slice(&port.to_be_bytes());
+            }
+            None => payload.push(0),
+        }
         payload.extend_from_slice(gateway_certificate_sha256);
         Ok(payload)
     }
@@ -994,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn mesh_hello_authentication_binds_username_nonce_and_capability_key() {
+    fn mesh_hello_authentication_binds_identity_capabilities_endpoints_and_key() {
         let signing_key = SigningKey::from_bytes(&[7; 32]);
         let gateway_certificate_sha256 = [3; 32];
         let mut hello = MeshHello::new(
@@ -1038,6 +1062,35 @@ mod tests {
             ),
             Err(OverlayError::InvalidPeerAuthentication)
         ));
+
+        for tampered in [
+            {
+                let mut tampered = hello.clone();
+                tampered.features.push("other".to_owned());
+                tampered
+            },
+            {
+                let mut tampered = hello.clone();
+                tampered.soulseek_ports = Some(SoulseekPorts {
+                    peer: 2234,
+                    file: 2235,
+                });
+                tampered
+            },
+            {
+                let mut tampered = hello.clone();
+                tampered.overlay_port = Some(8443);
+                tampered
+            },
+        ] {
+            assert!(matches!(
+                tampered.verify_authentication(
+                    &signing_key.verifying_key().to_bytes(),
+                    &gateway_certificate_sha256,
+                ),
+                Err(OverlayError::InvalidPeerAuthentication)
+            ));
+        }
         assert!(matches!(
             hello.verify_authentication(
                 &SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes(),
