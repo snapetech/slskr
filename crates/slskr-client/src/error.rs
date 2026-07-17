@@ -35,6 +35,11 @@ pub enum ClientError {
     TransferOffsetOutOfRange { offset: u64, size: u64 },
     #[error("transfer payload size {actual} does not match advertised file size {expected}")]
     TransferSizeMismatch { expected: u64, actual: u64 },
+    #[error("cannot {operation} while transfer is in {state} state")]
+    InvalidTransferState {
+        operation: &'static str,
+        state: &'static str,
+    },
     #[error("unexpected transfer message: {0:?}")]
     UnexpectedTransferMessage(Box<slskr_protocol::peer::PeerMessage>),
     #[error("unexpected search message: {0:?}")]

@@ -152,6 +152,7 @@ async fn receive_file_validates_token_sends_offset_and_reads_bytes() {
     let mut uploader = FileTransferConnection::new(uploader);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    transfer.accept_upload_response_message(8);
 
     let uploader_task = tokio::spawn(async move {
         uploader.send_token(7).await.unwrap();
@@ -175,6 +176,12 @@ async fn receive_file_rejects_oversized_remaining_before_allocation() {
     let mut uploader = FileTransferConnection::new(uploader);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        }))
+        .unwrap();
 
     let uploader_task = tokio::spawn(async move {
         uploader.send_token(7).await.unwrap();
@@ -304,6 +311,12 @@ async fn send_file_uses_requested_offset_and_marks_completed() {
     let mut uploader = FileTransferConnection::new(uploader);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        }))
+        .unwrap();
 
     let downloader_task = tokio::spawn(async move {
         assert_eq!(downloader.receive_token().await.unwrap(), 7);
@@ -327,6 +340,12 @@ async fn send_file_rejects_offset_past_end() {
     let mut uploader = FileTransferConnection::new(uploader);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        }))
+        .unwrap();
 
     let downloader_task = tokio::spawn(async move {
         assert_eq!(downloader.receive_token().await.unwrap(), 7);
@@ -350,6 +369,12 @@ async fn send_file_rejects_payload_that_differs_from_advertised_size() {
     let (uploader, _downloader) = duplex(64);
     let mut uploader = FileTransferConnection::new(uploader);
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 3);
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        }))
+        .unwrap();
 
     let error = transfer
         .send_file_to(&mut uploader, &[1, 2, 3, 4, 5])
@@ -363,5 +388,34 @@ async fn send_file_rejects_payload_that_differs_from_advertised_size() {
             actual: 5
         }
     ));
-    assert_eq!(transfer.state, UploadState::New);
+    assert_eq!(transfer.state, UploadState::Accepted);
+}
+
+#[tokio::test]
+async fn file_io_rejects_unaccepted_transfer_states_before_network_io() {
+    let (download_stream, _) = duplex(64);
+    let mut download_connection = FileTransferConnection::new(download_stream);
+    let mut download = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    assert!(matches!(
+        download
+            .receive_file_from(&mut download_connection, 0, 1)
+            .await,
+        Err(ClientError::InvalidTransferState {
+            operation: "receive file",
+            state: "new",
+        })
+    ));
+    assert_eq!(download.state, DownloadState::New);
+
+    let (upload_stream, _) = duplex(64);
+    let mut upload_connection = FileTransferConnection::new(upload_stream);
+    let mut upload = UploadTransfer::new("peer", "Music/file.flac", 7, 1);
+    assert!(matches!(
+        upload.send_file_to(&mut upload_connection, &[1]).await,
+        Err(ClientError::InvalidTransferState {
+            operation: "send file",
+            state: "new",
+        })
+    ));
+    assert_eq!(upload.state, UploadState::New);
 }

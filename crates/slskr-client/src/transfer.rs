@@ -122,6 +122,12 @@ impl DownloadTransfer {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        if !matches!(self.state, DownloadState::Accepted { .. }) {
+            return Err(ClientError::InvalidTransferState {
+                operation: "receive file",
+                state: self.state.name(),
+            });
+        }
         if let Some(expected) = self.expected_size() {
             let remaining = u64::try_from(remaining).unwrap_or(u64::MAX);
             let actual =
@@ -202,6 +208,21 @@ impl DownloadTransfer {
     }
 }
 
+impl DownloadState {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Queued => "queued",
+            Self::PlaceInQueue(_) => "queued",
+            Self::Requested { .. } => "requested",
+            Self::Accepted { .. } => "accepted",
+            Self::Rejected { .. } => "rejected",
+            Self::Failed { .. } => "failed",
+            Self::Completed => "completed",
+        }
+    }
+}
+
 impl UploadTransfer {
     #[must_use]
     pub fn new(
@@ -261,6 +282,12 @@ impl UploadTransfer {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        if !matches!(self.state, UploadState::Accepted) {
+            return Err(ClientError::InvalidTransferState {
+                operation: "send file",
+                state: self.state.name(),
+            });
+        }
         let actual = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if actual != self.size {
             return Err(ClientError::TransferSizeMismatch {
@@ -306,6 +333,19 @@ impl UploadTransfer {
                 expected: self.filename.clone(),
                 received,
             })
+        }
+    }
+}
+
+impl UploadState {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Requested => "requested",
+            Self::Accepted => "accepted",
+            Self::Rejected { .. } => "rejected",
+            Self::Failed { .. } => "failed",
+            Self::Completed => "completed",
         }
     }
 }
