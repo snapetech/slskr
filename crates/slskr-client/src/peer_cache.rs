@@ -57,6 +57,11 @@ impl<S> PeerConnectionCache<S> {
         let username = normalize_peer_username(&username)?;
         let username = username_key(username);
         let mut connections = self.connections.lock().await;
+        connections.retain(|_, connection| {
+            connection
+                .try_lock()
+                .map_or(true, |connection| connection.is_some())
+        });
         if connections.len() >= self.max_connections && !connections.contains_key(&username) {
             return Err(ClientError::PeerConnectionCacheFull {
                 max: self.max_connections,
@@ -259,5 +264,34 @@ mod tests {
             .await
             .unwrap();
         assert!(cache.contains("other").await);
+    }
+
+    #[tokio::test]
+    async fn insert_reclaims_unlocked_tombstones_before_capacity_check() {
+        let cache = PeerConnectionCache::with_max_connections(1);
+        let (stream, _) = duplex(64);
+        cache
+            .insert("stale", PeerMessageConnection::new(stream))
+            .await
+            .unwrap();
+
+        let connection = cache
+            .connections
+            .lock()
+            .await
+            .get("stale")
+            .cloned()
+            .unwrap();
+        *connection.lock().await = None;
+
+        let (replacement, _) = duplex(64);
+        cache
+            .insert("replacement", PeerMessageConnection::new(replacement))
+            .await
+            .unwrap();
+
+        assert_eq!(cache.len().await, 1);
+        assert!(!cache.contains("stale").await);
+        assert!(cache.contains("replacement").await);
     }
 }
