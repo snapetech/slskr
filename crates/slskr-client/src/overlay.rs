@@ -563,7 +563,8 @@ where
             return Err(OverlayError::MeshServiceUnsupported);
         }
         self.framer.write(call).await?;
-        for _ in 0..MAX_UNMATCHED_SERVICE_FRAMES {
+        let mut unmatched_frames = 0;
+        while unmatched_frames < MAX_UNMATCHED_SERVICE_FRAMES {
             let payload = self.framer.read_raw().await?;
             let message_type = message_type(&payload)?;
             match message_type.as_str() {
@@ -573,6 +574,7 @@ where
                     if reply.correlation_id == call.correlation_id {
                         return Ok(reply);
                     }
+                    unmatched_frames += 1;
                 }
                 "ping" => {
                     let ping: Ping = serde_json::from_slice(&payload)?;
@@ -587,7 +589,7 @@ where
                         .await?;
                 }
                 "disconnect" => return Err(OverlayError::Disconnected),
-                _ => {}
+                _ => unmatched_frames += 1,
             }
         }
         Err(OverlayError::ReplyNotFound)
@@ -1199,6 +1201,71 @@ mod tests {
         assert!(timeout(Duration::from_millis(10), wire.read_u8())
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn service_call_control_pings_do_not_exhaust_reply_budget() {
+        let (client, server) = duplex(64 * 1024);
+        let server = tokio::spawn(async move {
+            let mut framer = OverlayFramer::new(server);
+            let hello: MeshHello = framer.read().await.unwrap();
+            framer
+                .write(&MeshHelloAck {
+                    magic: OVERLAY_MAGIC.to_owned(),
+                    message_type: "mesh_hello_ack".to_owned(),
+                    version: OVERLAY_VERSION,
+                    username: "gateway".to_owned(),
+                    features: vec![FEATURE_MESH_SERVICE.to_owned()],
+                    soulseek_ports: None,
+                    overlay_port: None,
+                    nonce_echo: hello.nonce,
+                })
+                .await
+                .unwrap();
+            let call: MeshServiceCall = framer.read().await.unwrap();
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            for _ in 0..MAX_UNMATCHED_SERVICE_FRAMES {
+                framer
+                    .write(&Ping {
+                        magic: OVERLAY_MAGIC.to_owned(),
+                        message_type: "ping".to_owned(),
+                        version: OVERLAY_VERSION,
+                        timestamp,
+                    })
+                    .await
+                    .unwrap();
+                let pong: Pong = framer.read().await.unwrap();
+                assert_eq!(pong.timestamp, timestamp);
+            }
+            framer
+                .write(&MeshServiceReply {
+                    magic: OVERLAY_MAGIC.to_owned(),
+                    message_type: "mesh_service_reply".to_owned(),
+                    version: OVERLAY_VERSION,
+                    correlation_id: call.correlation_id,
+                    status_code: 0,
+                    payload: Vec::new(),
+                    error_message: None,
+                })
+                .await
+                .unwrap();
+        });
+        let hello = MeshHello::new(
+            "local",
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            None,
+            None,
+            "nonce",
+        )
+        .unwrap();
+        let mut client = OverlayClient::handshake(client, hello).await.unwrap();
+        let call = MeshServiceCall::new("c", "private-gateway", "OpenTunnel", Vec::new()).unwrap();
+
+        assert_eq!(client.call(&call).await.unwrap().status_code, 0);
+        server.await.unwrap();
     }
 
     #[test]
