@@ -87,6 +87,15 @@ impl<S> PeerConnectionCache<S> {
             return false;
         };
         let is_active = connection.lock().await.is_some();
+        if !is_active {
+            let mut connections = self.connections.lock().await;
+            if connections
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &connection))
+            {
+                connections.remove(&key);
+            }
+        }
         is_active
     }
 
@@ -231,7 +240,7 @@ mod tests {
 
     #[tokio::test]
     async fn contains_rejects_stale_connection_tombstones() {
-        let cache = PeerConnectionCache::new();
+        let cache = PeerConnectionCache::with_max_connections(1);
         let (stream, _) = duplex(64);
         cache
             .insert("peer", PeerMessageConnection::new(stream))
@@ -242,5 +251,13 @@ mod tests {
         *connection.lock().await = None;
 
         assert!(!cache.contains("peer").await);
+        assert!(cache.is_empty().await);
+
+        let (replacement, _) = duplex(64);
+        cache
+            .insert("other", PeerMessageConnection::new(replacement))
+            .await
+            .unwrap();
+        assert!(cache.contains("other").await);
     }
 }
