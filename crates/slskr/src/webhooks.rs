@@ -23,6 +23,10 @@ const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
 const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
 pub const MAX_WEBHOOKS: usize = 64;
 pub const MIN_WEBHOOK_SECRET_BYTES: usize = 32;
+pub const MAX_WEBHOOK_SECRET_BYTES: usize = 4 * 1024;
+const MAX_WEBHOOK_URL_BYTES: usize = 2_048;
+const MAX_WEBHOOK_ID_BYTES: usize = 128;
+const MAX_WEBHOOK_EVENTS: usize = 14;
 const WEBHOOK_ALLOW_CIDRS_ENV: &str = "SLSKR_WEBHOOK_ALLOW_CIDRS";
 const WEBHOOK_DENY_CIDRS_ENV: &str = "SLSKR_WEBHOOK_DENY_CIDRS";
 
@@ -148,6 +152,9 @@ impl Webhook {
 pub fn validate_webhook_secret(secret: &str) -> Result<(), &'static str> {
     if secret.len() < MIN_WEBHOOK_SECRET_BYTES {
         return Err("webhook secret must be at least 32 bytes");
+    }
+    if secret.len() > MAX_WEBHOOK_SECRET_BYTES {
+        return Err("webhook secret is too long");
     }
     if secret
         .bytes()
@@ -303,7 +310,11 @@ impl WebhookManager {
 
     pub fn from_webhooks(webhooks: Vec<Webhook>) -> Self {
         let mut manager = Self::new();
-        for webhook in webhooks.into_iter().take(MAX_WEBHOOKS) {
+        for webhook in webhooks
+            .into_iter()
+            .filter(webhook_definition_is_valid)
+            .take(MAX_WEBHOOKS)
+        {
             manager.webhooks.insert(webhook.id.clone(), webhook);
         }
         manager
@@ -311,7 +322,7 @@ impl WebhookManager {
 
     /// Register webhook
     pub fn register(&mut self, webhook: Webhook) -> Result<String, ()> {
-        if self.webhooks.len() >= MAX_WEBHOOKS {
+        if self.webhooks.len() >= MAX_WEBHOOKS || !webhook_definition_is_valid(&webhook) {
             return Err(());
         }
         let id = webhook.id.clone();
@@ -543,6 +554,9 @@ struct ResolvedWebhookTarget {
 pub(crate) fn validate_webhook_url_for_registration(
     url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if url.len() > MAX_WEBHOOK_URL_BYTES {
+        return Err("webhook URL is too long".into());
+    }
     let parsed = reqwest::Url::parse(url)?;
     match parsed.scheme() {
         "http" | "https" => {}
@@ -566,6 +580,15 @@ pub(crate) fn validate_webhook_url_for_registration(
         .port_or_known_default()
         .ok_or("webhook URL port is unknown")?;
     Ok(())
+}
+
+fn webhook_definition_is_valid(webhook: &Webhook) -> bool {
+    !webhook.id.trim().is_empty()
+        && webhook.id.len() <= MAX_WEBHOOK_ID_BYTES
+        && !webhook.events.is_empty()
+        && webhook.events.len() <= MAX_WEBHOOK_EVENTS
+        && validate_webhook_url_for_registration(&webhook.url).is_ok()
+        && validate_webhook_secret(&webhook.secret).is_ok()
 }
 
 async fn validate_and_resolve_webhook_url(
@@ -807,6 +830,12 @@ mod tests {
         assert!(validate_webhook_secret("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_err());
         assert!(validate_webhook_secret("abcdefghij0123456789ABCDEFGHIJ!!").is_ok());
         assert!(validate_webhook_secret("abcdefghij0123456789\nABCDEFGHIJ!!").is_err());
+        assert!(validate_webhook_secret(&"abcdefgh".repeat(MAX_WEBHOOK_SECRET_BYTES / 8)).is_ok());
+        assert!(validate_webhook_secret(&format!(
+            "{}x",
+            "abcdefgh".repeat(MAX_WEBHOOK_SECRET_BYTES / 8)
+        ))
+        .is_err());
     }
 
     #[test]
@@ -890,6 +919,28 @@ mod tests {
 
         manager.unregister(&id);
         assert!(manager.get(&id).is_none());
+    }
+
+    #[test]
+    fn webhook_manager_rejects_invalid_runtime_and_persisted_definitions() {
+        let valid = Webhook::new(
+            "https://example.com/hook".to_owned(),
+            vec![WebhookEvent::SearchCreated],
+            Webhook::generate_secret().expect("test randomness"),
+        );
+        let mut invalid = valid.clone();
+        invalid.secret = "x".repeat(MAX_WEBHOOK_SECRET_BYTES + 1);
+
+        let mut manager = WebhookManager::new();
+        assert!(manager.register(invalid.clone()).is_err());
+        assert!(manager.get_all().is_empty());
+
+        let mut persisted = vec![invalid; MAX_WEBHOOKS];
+        let valid_id = valid.id.clone();
+        persisted.push(valid);
+        let manager = WebhookManager::from_webhooks(persisted);
+        assert_eq!(manager.get_all().len(), 1);
+        assert!(manager.get(&valid_id).is_some());
     }
 
     #[tokio::test]
@@ -1029,6 +1080,11 @@ mod tests {
     #[test]
     fn test_webhook_registration_url_validation() {
         assert!(validate_webhook_url_for_registration("https://example.com/hook").is_ok());
+        assert!(validate_webhook_url_for_registration(&format!(
+            "https://example.com/{}",
+            "x".repeat(MAX_WEBHOOK_URL_BYTES)
+        ))
+        .is_err());
         assert!(
             validate_webhook_url_for_registration("https://operator:secret@example.com/hook")
                 .is_err()
