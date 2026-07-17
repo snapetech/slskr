@@ -5,6 +5,7 @@ use slskr_protocol::server::ServerMessage;
 pub const MAX_EXCLUDED_SEARCH_PHRASES: usize = 256;
 pub const MAX_EXCLUDED_SEARCH_PHRASE_BYTES: usize = 256;
 pub const MAX_FILTERED_SEARCH_QUERY_BYTES: usize = 4_096;
+const MAX_EXCLUDED_SEARCH_PHRASE_CANDIDATES: usize = MAX_EXCLUDED_SEARCH_PHRASES * 16;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExcludedPhraseFilter {
@@ -16,7 +17,10 @@ impl ExcludedPhraseFilter {
     pub fn new(phrases: impl IntoIterator<Item = String>) -> Self {
         let mut normalized = Vec::new();
         let mut seen = HashSet::new();
-        for phrase in phrases {
+        for phrase in phrases
+            .into_iter()
+            .take(MAX_EXCLUDED_SEARCH_PHRASE_CANDIDATES)
+        {
             let phrase = truncate_utf8_bytes(phrase.trim(), MAX_EXCLUDED_SEARCH_PHRASE_BYTES)
                 .to_ascii_lowercase();
             if phrase.is_empty() || !seen.insert(phrase.clone()) {
@@ -72,4 +76,25 @@ fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> &str {
         boundary -= 1;
     }
     &value[..boundary]
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::{ExcludedPhraseFilter, MAX_EXCLUDED_SEARCH_PHRASE_CANDIDATES};
+
+    #[test]
+    fn excluded_phrase_filter_bounds_rejected_candidate_scanning() {
+        let consumed = Cell::new(0);
+        let phrases = std::iter::repeat_with(|| {
+            consumed.set(consumed.get() + 1);
+            String::new()
+        });
+
+        let filter = ExcludedPhraseFilter::new(phrases);
+
+        assert!(filter.is_empty());
+        assert_eq!(consumed.get(), MAX_EXCLUDED_SEARCH_PHRASE_CANDIDATES);
+    }
 }
