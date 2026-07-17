@@ -6,7 +6,7 @@ use crate::{
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use std::io::{Read, Write};
 
-const MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_FILE_ATTRIBUTES: usize = 64;
 pub const MAX_FILE_SEARCH_RESULTS: usize = 10_000;
 
@@ -727,6 +727,20 @@ mod tests {
         let compressed = compress_zlib(&vec![b'x'; 1024]).expect("compress fixture");
         let error = decompress_zlib_with_limit(&compressed, 128)
             .expect_err("decompression limit must reject expansion");
+        assert!(matches!(
+            error,
+            DecodeError::InvalidCompressedPayload(
+                "file search response exceeds decompression limit"
+            )
+        ));
+    }
+
+    #[test]
+    fn compressed_search_response_rejects_transport_amplification() {
+        let compressed = compress_zlib(&vec![b'x'; MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES + 1])
+            .expect("compress fixture");
+        let error = decompress_zlib(&compressed)
+            .expect_err("search response must not inflate beyond one maximum peer frame");
         assert!(matches!(
             error,
             DecodeError::InvalidCompressedPayload(
