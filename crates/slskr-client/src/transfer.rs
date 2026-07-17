@@ -198,6 +198,9 @@ impl DownloadTransfer {
             }
         }
 
+        self.state = DownloadState::Failed {
+            reason: "transfer I/O cancelled".to_owned(),
+        };
         let result = time::timeout(timeout, async {
             let token = connection.receive_token().await?;
             self.validate_token(token)?;
@@ -472,6 +475,9 @@ impl UploadTransfer {
             });
         }
 
+        self.state = UploadState::Failed {
+            reason: "transfer I/O cancelled".to_owned(),
+        };
         let result = time::timeout(timeout, async {
             connection.send_token(self.token).await?;
             let offset = connection.receive_offset().await?;

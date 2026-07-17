@@ -811,6 +811,55 @@ async fn file_io_rejects_unaccepted_transfer_states_before_network_io() {
     assert_eq!(upload.state, UploadState::New);
 }
 
+#[tokio::test]
+async fn cancelled_download_io_fails_closed() {
+    let (download_stream, _silent_peer) = duplex(64);
+    let mut connection = FileTransferConnection::new(download_stream);
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, Some(1));
+    transfer.accept_upload_response_message(1).unwrap();
+
+    assert!(tokio::time::timeout(
+        Duration::from_millis(10),
+        transfer.receive_file_from_with_timeout(&mut connection, 0, 1, Duration::from_secs(60),),
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        transfer.state,
+        DownloadState::Failed {
+            reason: "transfer I/O cancelled".to_owned(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn cancelled_upload_io_fails_closed() {
+    let (upload_stream, _silent_peer) = duplex(64);
+    let mut connection = FileTransferConnection::new(upload_stream);
+    let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 1);
+    transfer.transfer_request_message().unwrap();
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(1),
+        }))
+        .unwrap();
+
+    assert!(tokio::time::timeout(
+        Duration::from_millis(10),
+        transfer.send_file_to_with_timeout(&mut connection, &[1], Duration::from_secs(60)),
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        transfer.state,
+        UploadState::Failed {
+            reason: "transfer I/O cancelled".to_owned(),
+        }
+    );
+}
+
 fn request_download(transfer: &mut DownloadTransfer, size: Option<u64>) {
     transfer
         .handle_peer_message(PeerMessage::TransferRequest(TransferRequest {
