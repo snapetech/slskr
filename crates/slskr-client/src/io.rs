@@ -159,10 +159,11 @@ where
             max: max_len,
         });
     }
+    let encoded_len = prefixed_frame_len(length, 4, max_len)?;
 
-    let mut encoded = Vec::with_capacity(4 + length);
+    let mut encoded = Vec::with_capacity(encoded_len);
     encoded.extend_from_slice(&length_bytes);
-    encoded.resize(4 + length, 0);
+    encoded.resize(encoded_len, 0);
     reader.read_exact(&mut encoded[4..]).await?;
     Ok(InitFrame::decode(&encoded)?)
 }
@@ -289,6 +290,19 @@ fn validate_frame_len(length: usize, max: usize) -> Result<(), ClientError> {
     }
 }
 
+fn prefixed_frame_len(
+    length: usize,
+    prefix_len: usize,
+    configured_max: usize,
+) -> Result<usize, ClientError> {
+    length
+        .checked_add(prefix_len)
+        .ok_or(ClientError::FrameTooLarge {
+            length,
+            max: configured_max.min(usize::MAX - prefix_len),
+        })
+}
+
 async fn read_len_prefixed_frame<R>(reader: &mut R, max_len: usize) -> Result<Vec<u8>, ClientError>
 where
     R: AsyncRead + Unpin,
@@ -301,9 +315,10 @@ where
         });
     }
 
-    let mut encoded = Vec::with_capacity(4 + length);
+    let encoded_len = prefixed_frame_len(length, 4, max_len)?;
+    let mut encoded = Vec::with_capacity(encoded_len);
     encoded.extend_from_slice(&(length as u32).to_le_bytes());
-    encoded.resize(4 + length, 0);
+    encoded.resize(encoded_len, 0);
     reader.read_exact(&mut encoded[4..]).await?;
     Ok(encoded)
 }
@@ -331,9 +346,26 @@ where
         });
     }
 
-    let mut obfuscated = Vec::with_capacity(8 + length);
+    let encoded_len = prefixed_frame_len(length, 8, max_len)?;
+    let mut obfuscated = Vec::with_capacity(encoded_len);
     obfuscated.extend_from_slice(&first_block);
-    obfuscated.resize(8 + length, 0);
+    obfuscated.resize(encoded_len, 0);
     reader.read_exact(&mut obfuscated[8..]).await?;
     Ok(decode_rotated(&obfuscated)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefixed_frame_len;
+    use crate::ClientError;
+
+    #[test]
+    fn framed_allocation_length_rejects_prefix_overflow() {
+        assert!(matches!(
+            prefixed_frame_len(usize::MAX, 4, usize::MAX),
+            Err(ClientError::FrameTooLarge { length, max })
+                if length == usize::MAX && max == usize::MAX - 4
+        ));
+        assert_eq!(prefixed_frame_len(16, 8, usize::MAX).unwrap(), 24);
+    }
 }
