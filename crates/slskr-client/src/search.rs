@@ -27,6 +27,7 @@ pub const MAX_WISHLIST_SEARCH_TERM_BYTES: usize = 4_096;
 const MAX_WISHLIST_SEARCH_TERM_CANDIDATES: usize = MAX_WISHLIST_SEARCH_TERMS * 16;
 pub const MAX_OUTBOUND_SEARCH_FIELD_BYTES: usize = 4_096;
 pub const MAX_INBOUND_SEARCH_QUERY_BYTES: usize = 4_096;
+pub const MAX_INBOUND_SEARCH_QUERY_TERMS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -587,7 +588,9 @@ impl InMemoryShareIndex {
 
 impl ShareIndex for InMemoryShareIndex {
     fn search_limited(&self, query: &str, limit: usize) -> Vec<FileEntry> {
-        let terms = normalize_terms(query);
+        let Some(terms) = normalize_terms(query) else {
+            return Vec::new();
+        };
         if terms.is_empty() || limit == 0 {
             return Vec::new();
         }
@@ -666,7 +669,10 @@ where
     }
 
     fn response_message(&self, token: u32, query: &str) -> Option<PeerMessage> {
-        if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES || query.chars().any(char::is_control) {
+        if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES
+            || query.chars().any(char::is_control)
+            || normalize_terms(query).is_none()
+        {
             return None;
         }
         if !self.excluded_filter.allows_query(query) {
@@ -693,11 +699,22 @@ where
     }
 }
 
-fn normalize_terms(query: &str) -> Vec<String> {
-    query
-        .split_whitespace()
-        .map(str::to_ascii_lowercase)
-        .collect()
+fn normalize_terms(query: &str) -> Option<Vec<String>> {
+    if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES {
+        return None;
+    }
+    let mut seen = HashSet::new();
+    let mut terms = Vec::new();
+    for term in query.split_whitespace() {
+        let term = term.to_ascii_lowercase();
+        if seen.insert(term.clone()) {
+            terms.push(term);
+            if terms.len() > MAX_INBOUND_SEARCH_QUERY_TERMS {
+                return None;
+            }
+        }
+    }
+    Some(terms)
 }
 
 #[cfg(test)]

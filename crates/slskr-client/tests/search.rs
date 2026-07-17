@@ -4,11 +4,11 @@ use slskr_client::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
         WishlistSearchSchedulerOptions, MAX_INBOUND_SEARCH_QUERY_BYTES,
-        MAX_OUTBOUND_SEARCH_FIELD_BYTES, MAX_SEARCH_RESPONSES_PER_TOKEN,
-        MAX_SEARCH_RESPONSES_TOTAL, MAX_SEARCH_RESULT_FILES_PER_TOKEN,
-        MAX_SEARCH_RESULT_FILES_TOTAL, MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN,
-        MAX_TRACKED_SEARCH_RESULT_TOKENS, MAX_WISHLIST_SEARCH_TERMS,
-        MAX_WISHLIST_SEARCH_TERM_BYTES,
+        MAX_INBOUND_SEARCH_QUERY_TERMS, MAX_OUTBOUND_SEARCH_FIELD_BYTES,
+        MAX_SEARCH_RESPONSES_PER_TOKEN, MAX_SEARCH_RESPONSES_TOTAL,
+        MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_FILES_TOTAL,
+        MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
+        MAX_WISHLIST_SEARCH_TERMS, MAX_WISHLIST_SEARCH_TERM_BYTES,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -709,6 +709,18 @@ fn in_memory_share_index_matches_all_terms_case_insensitively() {
 }
 
 #[test]
+fn in_memory_share_index_rejects_over_complex_queries() {
+    let index = InMemoryShareIndex::new(vec![entry("Music/track.flac")]);
+    let query = (0..=MAX_INBOUND_SEARCH_QUERY_TERMS)
+        .map(|index| format!("term-{index}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(query.len() <= MAX_INBOUND_SEARCH_QUERY_BYTES);
+    assert!(index.search(&query).is_empty());
+}
+
+#[test]
 fn responder_builds_file_search_response_for_server_search() {
     let responder = SearchResponder::new(
         "local",
@@ -828,6 +840,26 @@ fn responder_rejects_oversized_queries_before_searching_the_index() {
             username: "remote".to_owned(),
             token: 56,
             query: oversized,
+        })
+        .is_none());
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn responder_rejects_over_complex_queries_before_searching_the_index() {
+    let calls = Cell::new(0);
+    let responder = SearchResponder::new("local", CountingIndex(&calls)).unwrap();
+    let query = (0..=MAX_INBOUND_SEARCH_QUERY_TERMS)
+        .map(|index| format!("term-{index}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(query.len() <= MAX_INBOUND_SEARCH_QUERY_BYTES);
+    assert!(responder
+        .respond_to_server_search(&ServerMessage::FileSearchIncoming {
+            username: "remote".to_owned(),
+            token: 55,
+            query,
         })
         .is_none());
     assert_eq!(calls.get(), 0);
