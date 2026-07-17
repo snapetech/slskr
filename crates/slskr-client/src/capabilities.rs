@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 use slskr_protocol::{peer::PeerMessage, DecodeError, Reader};
 
@@ -345,7 +345,7 @@ impl PeerCapabilityDescriptor {
             .map_err(|_| CapabilityError::InvalidPublicKey)?;
         let signature = Signature::from_bytes(&signature);
         verifying_key
-            .verify(&self.canonical_payload()?, &signature)
+            .verify_strict(&self.canonical_payload()?, &signature)
             .map_err(|_| CapabilityError::InvalidSignature)
     }
 
@@ -1044,6 +1044,32 @@ mod tests {
         assert_eq!(
             inverted.verify(future).unwrap_err(),
             CapabilityError::InvalidValidity
+        );
+    }
+
+    #[test]
+    fn descriptor_rejects_weak_public_key_forgery() {
+        let mut public_key = [0_u8; 32];
+        public_key[0] = 1;
+        let mut signature = [0_u8; 64];
+        signature[0] = 1;
+        let issued_at_unix = unix_seconds(now()).unwrap();
+        let descriptor = PeerCapabilityDescriptor {
+            peer_id: peer_id_for_public_key(&public_key),
+            username: "Alice".to_owned(),
+            features: vec![FEATURE_CAPABILITIES_V1.to_owned()],
+            endpoints: Vec::new(),
+            overlay_port: None,
+            max_payload_length: MAX_CAPABILITY_ENVELOPE_BYTES as u32,
+            issued_at_unix,
+            expires_at_unix: issued_at_unix + 60,
+            public_key,
+            signature: Some(signature),
+        };
+
+        assert_eq!(
+            descriptor.verify(now()).unwrap_err(),
+            CapabilityError::InvalidSignature
         );
     }
 
