@@ -455,6 +455,18 @@ fn validate_start_request(request: &StartRequest) -> Result<(), String> {
     {
         return Err("Port forwarding request is invalid".to_owned());
     }
+    for username in [&request.local_username, &request.gateway_username] {
+        MeshHello::new(username, Vec::new(), None, None, "validation")
+            .map_err(|_| "Port forwarding username is invalid".to_owned())?;
+    }
+    OpenTunnelRequest::new(
+        &request.pod_id,
+        &request.destination_host,
+        request.destination_port,
+        request.service_name.clone(),
+        "validation",
+    )
+    .map_err(|_| "Port forwarding destination is invalid".to_owned())?;
     Ok(())
 }
 
@@ -546,6 +558,30 @@ mod tests {
         })
         .await
         .expect("dropping the manager must release its listeners");
+    }
+
+    #[tokio::test]
+    async fn invalid_overlay_fields_are_rejected_before_binding() {
+        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let manager = Manager::new();
+
+        for mutate in [
+            |request: &mut StartRequest| request.local_username = "bad username".to_owned(),
+            |request: &mut StartRequest| request.gateway_username = "x".repeat(65),
+            |request: &mut StartRequest| request.pod_id = "x".repeat(513),
+            |request: &mut StartRequest| request.destination_host = "x".repeat(256),
+            |request: &mut StartRequest| request.service_name = Some("x".repeat(129)),
+        ] {
+            let mut invalid = request(port);
+            mutate(&mut invalid);
+            assert!(manager.start(invalid).await.is_err());
+            let listener = TcpListener::bind(("127.0.0.1", port))
+                .await
+                .expect("invalid rule must not bind its local port");
+            drop(listener);
+        }
     }
 
     #[tokio::test]
