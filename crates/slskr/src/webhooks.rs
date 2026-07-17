@@ -484,8 +484,9 @@ impl WebhookDispatcher {
         let resolved = validate_and_resolve_webhook_url(url, request_timeout).await?;
 
         // Disable redirects so validation cannot be bypassed after the initial URL check.
-        let mut client_builder =
-            reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+        let mut client_builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy();
         for addr in &resolved.addrs {
             client_builder = client_builder.resolve(&resolved.host, *addr);
         }

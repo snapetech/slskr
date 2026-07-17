@@ -591,6 +591,7 @@ async fn prepare_source(source: &RangeSource) -> Result<PreparedSource, String> 
     }
     let mut builder = Client::builder()
         .redirect(Policy::none())
+        .no_proxy()
         .timeout(SOURCE_TIMEOUT);
     for address in addresses {
         builder = builder.resolve(host, SocketAddr::new(address.ip(), port));
