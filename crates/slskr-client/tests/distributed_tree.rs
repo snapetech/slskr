@@ -127,6 +127,26 @@ fn parent_state_tracks_connect_disconnect_reset_and_server_reports() {
 }
 
 #[test]
+fn connect_parent_rejects_invalid_identity_without_mutating_branch_state() {
+    let mut tree = DistributedTree::new("local");
+
+    for username in [
+        "   ".to_owned(),
+        "x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1),
+    ] {
+        let (tree_side, _peer_side) = duplex(64);
+        tree.connect_parent(
+            parent_info(&username, [10, 0, 0, 2], 2234),
+            DistributedConnection::new(tree_side),
+        );
+
+        assert!(tree.parent().is_none());
+        assert_eq!(tree.branch_level(), 0);
+        assert_eq!(tree.branch_root(), "local");
+    }
+}
+
+#[test]
 fn parent_messages_update_branch_state_and_surface_searches() {
     let mut tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
     let search = distributed_search(7, "remote", 99, "rare");

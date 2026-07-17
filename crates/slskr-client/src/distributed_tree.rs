@@ -161,6 +161,9 @@ impl<S> DistributedTree<S> {
             username: info.username.trim().to_owned(),
             ..info
         };
+        if info.username.is_empty() || info.username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+            return;
+        }
         self.branch_level = 1;
         self.branch_root = info.username.clone();
         self.parent = Some(ParentConnection { info, connection });
