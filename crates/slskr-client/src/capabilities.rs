@@ -278,7 +278,7 @@ impl PeerCapabilityDescriptor {
         signing_key: &SigningKey,
         now: SystemTime,
     ) -> Result<Self, CapabilityError> {
-        let username = non_blank(username.into(), "username")?;
+        let username = bounded_non_blank(username.into(), "username")?;
         let public_key = signing_key.verifying_key().to_bytes();
         let issued_at_unix = unix_seconds(now)?;
         let expires_at_unix = issued_at_unix
@@ -1139,6 +1139,24 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, CapabilityError::BlankField("username"));
+
+        let oversized = "x".repeat(MAX_CAPABILITY_STRING_BYTES + 1);
+        assert_eq!(
+            PeerCapabilityDescriptor::unsigned(
+                oversized,
+                vec![FEATURE_CAPABILITIES_V1.to_owned()],
+                Vec::new(),
+                Duration::from_secs(60),
+                &signing_key(),
+                now(),
+            )
+            .unwrap_err(),
+            CapabilityError::FieldTooLong {
+                field: "username",
+                length: MAX_CAPABILITY_STRING_BYTES + 1,
+                max: MAX_CAPABILITY_STRING_BYTES,
+            }
+        );
     }
 
     #[test]
