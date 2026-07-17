@@ -308,6 +308,7 @@ impl SearchResults {
     pub fn accept_peer_message(&mut self, message: PeerMessage) -> Result<bool, ClientError> {
         match message {
             PeerMessage::FileSearchResponse(mut response) => {
+                response.username = normalize_peer_username(&response.username)?.to_owned();
                 if self.by_token.len() >= MAX_TRACKED_SEARCH_RESULT_TOKENS
                     && !self.by_token.contains_key(&response.token)
                 {
@@ -703,7 +704,10 @@ fn normalize_terms(query: &str) -> Vec<String> {
 mod tests {
     use std::cell::Cell;
 
-    use super::{normalize_wishlist_terms, MAX_WISHLIST_SEARCH_TERM_CANDIDATES};
+    use slskr_protocol::peer::{FileSearchResponse, PeerMessage};
+
+    use super::{normalize_wishlist_terms, SearchResults, MAX_WISHLIST_SEARCH_TERM_CANDIDATES};
+    use crate::{peer_cache::MAX_PEER_USERNAME_BYTES, ClientError};
 
     #[test]
     fn wishlist_terms_bound_rejected_candidate_scanning() {
@@ -715,5 +719,41 @@ mod tests {
 
         assert!(normalize_wishlist_terms(terms).is_empty());
         assert_eq!(consumed.get(), MAX_WISHLIST_SEARCH_TERM_CANDIDATES);
+    }
+
+    #[test]
+    fn search_results_reject_malformed_claimed_usernames_before_storage() {
+        let mut results = SearchResults::new();
+        let response = |username: String| {
+            PeerMessage::FileSearchResponse(FileSearchResponse {
+                username,
+                token: 1,
+                results: Vec::new(),
+                slot_free: true,
+                average_speed: 0,
+                queue_length: 0,
+                unknown: 0,
+                private_results: Vec::new(),
+            })
+        };
+
+        assert!(matches!(
+            results.accept_peer_message(response(" ".to_owned())),
+            Err(ClientError::BlankPeerUsername)
+        ));
+        assert!(matches!(
+            results.accept_peer_message(response("peer\nforged".to_owned())),
+            Err(ClientError::InvalidPeerUsername)
+        ));
+        assert!(matches!(
+            results.accept_peer_message(response("x".repeat(MAX_PEER_USERNAME_BYTES + 1))),
+            Err(ClientError::PeerUsernameTooLong { .. })
+        ));
+        assert_eq!(results.tracked_tokens_len(), 0);
+
+        results
+            .accept_peer_message(response(" peer ".to_owned()))
+            .unwrap();
+        assert_eq!(results.responses_for(1)[0].username, "peer");
     }
 }

@@ -381,10 +381,10 @@ fn search_results_bound_attacker_controlled_token_keys() {
 #[test]
 fn search_results_bound_retained_text_bytes_per_token() {
     let mut results = SearchResults::new();
-    let oversized = FileSearchResponse {
-        username: "x".repeat(MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN + 1),
-        ..response("peer", 10)
-    };
+    let mut oversized = response("peer", 10);
+    oversized.results.push(entry(
+        &"x".repeat(MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN + 1),
+    ));
 
     assert!(results
         .accept_peer_message(PeerMessage::FileSearchResponse(oversized))
