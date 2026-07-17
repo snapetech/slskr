@@ -11,6 +11,7 @@ pub const PEER_CAPABILITY_MESSAGE_CODE: u32 = 0x534C_534B;
 pub const PEER_CAPABILITY_ENVELOPE_VERSION: u16 = 1;
 pub const MAX_CAPABILITY_ENVELOPE_BYTES: usize = 64 * 1024;
 pub const MAX_PEER_CAPABILITY_RECORDS: usize = 1_024;
+pub const MAX_CAPABILITY_ENDPOINTS: usize = 256;
 pub const PEER_CAPABILITY_RECEIPT_LEASE: Duration = Duration::from_secs(24 * 60 * 60);
 const PEER_CAPABILITY_MAGIC: i32 = 0x4E44_534B;
 const MAX_CAPABILITY_FEATURES: usize = 256;
@@ -624,16 +625,21 @@ fn normalize_values(
     values: Vec<String>,
     field: &'static str,
 ) -> Result<Vec<String>, CapabilityError> {
+    let (collection, maximum) = match field {
+        "feature" => ("features", MAX_CAPABILITY_FEATURES),
+        "endpoint" => ("endpoints", MAX_CAPABILITY_ENDPOINTS),
+        _ => (field, usize::MAX),
+    };
+    if values.len() > maximum {
+        return Err(CapabilityError::FieldTooLong {
+            field: collection,
+            length: values.len(),
+            max: maximum,
+        });
+    }
     let mut output = Vec::with_capacity(values.len());
     for value in values {
-        output.push(non_blank(value, field)?);
-    }
-    if output.len() > MAX_CAPABILITY_FEATURES && field == "feature" {
-        return Err(CapabilityError::FieldTooLong {
-            field: "features",
-            length: output.len(),
-            max: MAX_CAPABILITY_FEATURES,
-        });
+        output.push(bounded_non_blank(value, field)?);
     }
     output.sort_by_key(|value| value.to_ascii_lowercase());
     output.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
@@ -1176,5 +1182,49 @@ mod tests {
             }) if length == MAX_CAPABILITY_STRING_BYTES + 1
         ));
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn capability_builder_rejects_oversized_and_excessive_advertisements() {
+        for (features, endpoints, expected_field, expected_length, expected_max) in [
+            (
+                vec!["x".repeat(MAX_CAPABILITY_STRING_BYTES + 1)],
+                Vec::new(),
+                "feature",
+                MAX_CAPABILITY_STRING_BYTES + 1,
+                MAX_CAPABILITY_STRING_BYTES,
+            ),
+            (
+                Vec::new(),
+                vec!["x".repeat(MAX_CAPABILITY_STRING_BYTES + 1)],
+                "endpoint",
+                MAX_CAPABILITY_STRING_BYTES + 1,
+                MAX_CAPABILITY_STRING_BYTES,
+            ),
+            (
+                Vec::new(),
+                (0..=MAX_CAPABILITY_ENDPOINTS)
+                    .map(|index| format!("tcp:127.0.0.1:{index}"))
+                    .collect(),
+                "endpoints",
+                MAX_CAPABILITY_ENDPOINTS + 1,
+                MAX_CAPABILITY_ENDPOINTS,
+            ),
+        ] {
+            assert!(matches!(
+                PeerCapabilityDescriptor::unsigned(
+                    "alice",
+                    features,
+                    endpoints,
+                    Duration::from_secs(60),
+                    &signing_key(),
+                    now(),
+                ),
+                Err(CapabilityError::FieldTooLong { field, length, max })
+                    if field == expected_field
+                        && length == expected_length
+                        && max == expected_max
+            ));
+        }
     }
 }
