@@ -412,7 +412,11 @@ impl PeerCapabilityRegistry {
 
     #[must_use]
     pub fn get(&self, username: &str) -> Option<&PeerCapabilityDescriptor> {
-        self.records.get(&capability_username_key(username))
+        let username = username.trim();
+        if username.is_empty() || username.len() > MAX_CAPABILITY_STRING_BYTES {
+            return None;
+        }
+        self.records.get(&username.to_ascii_lowercase())
     }
 
     #[must_use]
@@ -1124,6 +1128,18 @@ mod tests {
         );
         assert_eq!(registry.len(), 1);
         assert_eq!(registry.get(" ALICE ").unwrap().username, "Alice");
+    }
+
+    #[test]
+    fn registry_rejects_malformed_lookups_before_canonicalization() {
+        let mut registry = PeerCapabilityRegistry::new();
+        registry.update(descriptor(), now()).unwrap();
+        let oversized = "x".repeat(MAX_CAPABILITY_STRING_BYTES + 1);
+
+        assert!(registry.get("   ").is_none());
+        assert!(registry.get(&oversized).is_none());
+        assert!(registry.get(" alice ").is_some());
+        assert_eq!(registry.len(), 1);
     }
 
     #[test]
