@@ -8,6 +8,7 @@ use slskr_protocol::{
     server::{PossibleParent, ServerMessage},
 };
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::{self, Duration as TokioDuration};
 
 use crate::{
     search::MAX_OUTBOUND_SEARCH_FIELD_BYTES, server::ServerSession, stream::DistributedConnection,
@@ -16,6 +17,7 @@ use crate::{
 
 pub const DEFAULT_MAX_DISTRIBUTED_CHILDREN: usize = 128;
 pub const MAX_DISTRIBUTED_USERNAME_BYTES: usize = 4_096;
+pub const DEFAULT_DISTRIBUTED_IO_TIMEOUT: TokioDuration = TokioDuration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParentInfo {
@@ -328,25 +330,40 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     pub async fn send_branch_info_to_parent(&mut self) -> Result<bool, ClientError> {
+        self.send_branch_info_to_parent_with_timeout(DEFAULT_DISTRIBUTED_IO_TIMEOUT)
+            .await
+    }
+
+    pub async fn send_branch_info_to_parent_with_timeout(
+        &mut self,
+        timeout: TokioDuration,
+    ) -> Result<bool, ClientError> {
         let messages = self.parent_branch_messages();
         if self.parent.is_none() {
             return Ok(false);
         }
 
-        for message in messages {
-            let result = self
-                .parent
-                .as_mut()
-                .expect("parent presence checked above")
-                .connection
-                .send(&message)
-                .await;
-            if let Err(error) = result {
+        let result = time::timeout(timeout, async {
+            let parent = self.parent.as_mut().expect("parent presence checked above");
+            for message in messages {
+                parent.connection.send(&message).await?;
+            }
+            Ok::<(), ClientError>(())
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => Ok(true),
+            Ok(Err(error)) => {
                 self.disconnect_parent();
-                return Err(error);
+                Err(error)
+            }
+            Err(_) => {
+                self.disconnect_parent();
+                Err(ClientError::TimedOut {
+                    operation: "distributed parent send",
+                })
             }
         }
-        Ok(true)
     }
 
     pub async fn forward_search_to_children(
@@ -354,29 +371,61 @@ where
         search: &DistributedSearch,
         except_username: Option<&str>,
     ) -> Result<usize, ClientError> {
+        self.forward_search_to_children_with_timeout(
+            search,
+            except_username,
+            DEFAULT_DISTRIBUTED_IO_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn forward_search_to_children_with_timeout(
+        &mut self,
+        search: &DistributedSearch,
+        except_username: Option<&str>,
+        timeout: TokioDuration,
+    ) -> Result<usize, ClientError> {
         validate_distributed_search(search)?;
-        let mut sent = 0;
         let except_key = except_username.map(username_key);
-        let mut failed = Vec::new();
-        let mut first_error = None;
-        for (username, child) in &mut self.children {
-            if except_key.as_deref() == Some(username.as_str()) {
-                continue;
-            }
-            match child
-                .connection
-                .send(&DistributedMessage::Search(search.clone()))
-                .await
-            {
-                Ok(()) => sent += 1,
-                Err(error) => {
-                    failed.push(username.clone());
-                    if first_error.is_none() {
-                        first_error = Some(error);
+        let mut current_child = None;
+        let result = time::timeout(timeout, async {
+            let mut sent = 0;
+            let mut failed = Vec::new();
+            let mut first_error = None;
+            for (username, child) in &mut self.children {
+                if except_key.as_deref() == Some(username.as_str()) {
+                    continue;
+                }
+                current_child = Some(username.clone());
+                match child
+                    .connection
+                    .send(&DistributedMessage::Search(search.clone()))
+                    .await
+                {
+                    Ok(()) => sent += 1,
+                    Err(error) => {
+                        failed.push(username.clone());
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
                     }
                 }
             }
-        }
+            (sent, failed, first_error)
+        })
+        .await;
+
+        let (sent, failed, first_error) = match result {
+            Ok(result) => result,
+            Err(_) => {
+                if let Some(username) = current_child {
+                    self.children.remove(&username);
+                }
+                return Err(ClientError::TimedOut {
+                    operation: "distributed search forwarding",
+                });
+            }
+        };
         for username in failed {
             self.children.remove(&username);
         }

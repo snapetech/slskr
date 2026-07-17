@@ -550,6 +550,43 @@ async fn distributed_forwarding_evicts_failed_children_without_blocking_healthy_
 }
 
 #[tokio::test]
+async fn distributed_forwarding_times_out_and_evicts_stalled_child() {
+    let (stalled_tree, _non_reading_child) = duplex(1);
+    let mut tree = DistributedTree::new("local");
+    let search = distributed_search(5, "origin", 44, &"x".repeat(4_096));
+    tree.add_child("stalled", DistributedConnection::new(stalled_tree))
+        .unwrap();
+
+    assert!(matches!(
+        tree.forward_search_to_children_with_timeout(&search, None, Duration::from_millis(10),)
+            .await,
+        Err(ClientError::TimedOut {
+            operation: "distributed search forwarding",
+        })
+    ));
+    assert!(tree.child_info("stalled").is_none());
+}
+
+#[tokio::test]
+async fn parent_reporting_times_out_and_disconnects_stalled_parent() {
+    let (parent_tree, _non_reading_parent) = duplex(1);
+    let mut tree = DistributedTree::new("local");
+    tree.connect_parent(
+        parent_info("parent", [10, 0, 0, 1], 2234),
+        DistributedConnection::new(parent_tree),
+    );
+
+    assert!(matches!(
+        tree.send_branch_info_to_parent_with_timeout(Duration::from_millis(10))
+            .await,
+        Err(ClientError::TimedOut {
+            operation: "distributed parent send",
+        })
+    ));
+    assert!(tree.parent().is_none());
+}
+
+#[tokio::test]
 async fn branch_info_reporter_schedules_server_updates() {
     let now = Instant::now();
     let mut reporter = BranchInfoReporter::new(Duration::from_secs(5), now).unwrap();
