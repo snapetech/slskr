@@ -9,7 +9,10 @@ use slskr_protocol::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::{server::ServerSession, stream::DistributedConnection, ClientError};
+use crate::{
+    search::MAX_OUTBOUND_SEARCH_FIELD_BYTES, server::ServerSession, stream::DistributedConnection,
+    ClientError,
+};
 
 pub const DEFAULT_MAX_DISTRIBUTED_CHILDREN: usize = 128;
 pub const MAX_DISTRIBUTED_USERNAME_BYTES: usize = 4_096;
@@ -264,7 +267,12 @@ impl<S> DistributedTree<S> {
     pub fn handle_parent_message(&mut self, message: DistributedMessage) -> DistributedEvent {
         match message {
             DistributedMessage::Ping => DistributedEvent::Ping,
-            DistributedMessage::Search(search) => DistributedEvent::Search(search),
+            DistributedMessage::Search(search) => {
+                if validate_distributed_search(&search).is_err() {
+                    return DistributedEvent::Ignored;
+                }
+                DistributedEvent::Search(search)
+            }
             DistributedMessage::BranchLevel { level } => {
                 self.branch_level = level.saturating_add(1);
                 DistributedEvent::BranchChanged
@@ -296,7 +304,12 @@ impl<S> DistributedTree<S> {
 
         match message {
             DistributedMessage::Ping => DistributedEvent::Ping,
-            DistributedMessage::Search(search) => DistributedEvent::Search(search),
+            DistributedMessage::Search(search) => {
+                if validate_distributed_search(&search).is_err() {
+                    return DistributedEvent::Ignored;
+                }
+                DistributedEvent::Search(search)
+            }
             DistributedMessage::ChildDepth { depth } => {
                 child.info.depth = depth;
                 DistributedEvent::BranchChanged
@@ -341,6 +354,7 @@ where
         search: &DistributedSearch,
         except_username: Option<&str>,
     ) -> Result<usize, ClientError> {
+        validate_distributed_search(search)?;
         let mut sent = 0;
         let except_key = except_username.map(username_key);
         let mut failed = Vec::new();
@@ -388,6 +402,25 @@ where
 
 fn username_key(username: &str) -> String {
     username.trim().to_ascii_lowercase()
+}
+
+fn validate_distributed_search(search: &DistributedSearch) -> Result<(), ClientError> {
+    validate_distributed_search_field("distributed search username", &search.username)?;
+    validate_distributed_search_field("distributed search query", &search.query)
+}
+
+fn validate_distributed_search_field(field: &'static str, value: &str) -> Result<(), ClientError> {
+    if value.trim().is_empty() {
+        return Err(ClientError::BlankSearchField { field });
+    }
+    if value.len() > MAX_OUTBOUND_SEARCH_FIELD_BYTES {
+        return Err(ClientError::SearchFieldTooLong {
+            field,
+            length: value.len(),
+            max: MAX_OUTBOUND_SEARCH_FIELD_BYTES,
+        });
+    }
+    Ok(())
 }
 
 const fn valid_tcp_port(port: u32) -> bool {

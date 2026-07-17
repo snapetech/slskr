@@ -8,6 +8,7 @@ use slskr_client::{
         BranchInfoReporter, DistributedEvent, DistributedTree, ParentInfo,
         MAX_DISTRIBUTED_USERNAME_BYTES,
     },
+    search::MAX_OUTBOUND_SEARCH_FIELD_BYTES,
     server::ServerSession,
     stream::{DistributedConnection, ServerConnection},
     ClientError,
@@ -254,6 +255,72 @@ fn messages_from_unknown_children_are_ignored() {
     assert_eq!(
         tree.handle_child_message(" ALICE ", DistributedMessage::Search(search.clone())),
         DistributedEvent::Search(search)
+    );
+}
+
+#[test]
+fn malformed_distributed_searches_are_ignored_at_ingress() {
+    let (child, _peer) = duplex(512);
+    let mut tree = DistributedTree::new("local");
+    tree.add_child("alice", DistributedConnection::new(child))
+        .unwrap();
+
+    for search in [
+        distributed_search(1, "   ", 2, "query"),
+        distributed_search(1, "remote", 2, "   "),
+        distributed_search(
+            1,
+            &"u".repeat(MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1),
+            2,
+            "query",
+        ),
+        distributed_search(
+            1,
+            "remote",
+            2,
+            &"q".repeat(MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1),
+        ),
+    ] {
+        assert_eq!(
+            tree.handle_parent_message(DistributedMessage::Search(search.clone())),
+            DistributedEvent::Ignored
+        );
+        assert_eq!(
+            tree.handle_child_message("alice", DistributedMessage::Search(search)),
+            DistributedEvent::Ignored
+        );
+    }
+}
+
+#[tokio::test]
+async fn malformed_distributed_searches_are_rejected_before_forwarding() {
+    let (child, mut peer) = duplex(16 * 1024);
+    let mut tree = DistributedTree::new("local");
+    tree.add_child("alice", DistributedConnection::new(child))
+        .unwrap();
+    let search = distributed_search(
+        1,
+        "remote",
+        2,
+        &"q".repeat(MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1),
+    );
+
+    assert!(matches!(
+        tree.forward_search_to_children(&search, None)
+            .await
+            .unwrap_err(),
+        ClientError::SearchFieldTooLong {
+            field: "distributed search query",
+            length,
+            max: MAX_OUTBOUND_SEARCH_FIELD_BYTES,
+        } if length == MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1
+    ));
+    use tokio::io::AsyncReadExt as _;
+    let mut byte = [0];
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), peer.read(&mut byte))
+            .await
+            .is_err()
     );
 }
 
