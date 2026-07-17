@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
@@ -6,12 +10,14 @@ use slskr_client::overlay::{
     connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE,
 };
 use tokio::io::AsyncWriteExt;
+use tokio::time::timeout;
 
 use crate::config::TrustedMeshPeer;
 
 const CONTENT_CHUNK_BYTES: u64 = 32 * 1024;
 const MAX_CONTENT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CONTENT_ID_BYTES: usize = 512;
+const CONTENT_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct StagingFileGuard {
     file: Option<tokio::fs::File>,
@@ -129,10 +135,12 @@ async fn fetch_content_inner(
                 payload,
             )
             .map_err(|error| format!("mesh content request failed: {error}"))?;
-            let reply = client
-                .call(&call)
-                .await
-                .map_err(|error| format!("mesh content call failed: {error}"))?;
+            let reply = bounded_mesh_operation(
+                client.call(&call),
+                "mesh content call",
+                CONTENT_CALL_TIMEOUT,
+            )
+            .await?;
             if reply.status_code != 0 {
                 return Err(format!(
                     "mesh content peer rejected range with status {}: {}",
@@ -170,6 +178,21 @@ async fn fetch_content_inner(
         staging.commit();
     }
     result
+}
+
+async fn bounded_mesh_operation<T, E, F>(
+    operation: F,
+    label: &'static str,
+    deadline: Duration,
+) -> Result<T, String>
+where
+    E: std::fmt::Display,
+    F: Future<Output = Result<T, E>>,
+{
+    timeout(deadline, operation)
+        .await
+        .map_err(|_| format!("{label} timed out"))?
+        .map_err(|error| format!("{label} failed: {error}"))
 }
 
 fn validate_request(
@@ -314,6 +337,19 @@ mod tests {
         assert_eq!(error, "mesh content request is invalid");
         assert!(!output.exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn mesh_operations_do_not_wait_forever_for_remote_peers() {
+        let error = bounded_mesh_operation(
+            std::future::pending::<Result<(), &'static str>>(),
+            "mesh content call",
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "mesh content call timed out");
     }
 
     #[tokio::test]
