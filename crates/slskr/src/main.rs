@@ -39179,19 +39179,22 @@ mod tests {
             .await
             .expect("close reply");
         assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
-        let legacy_hello = MeshHello::new(
+        let mut second_hello = MeshHello::new(
             "member",
             vec![FEATURE_MESH_SERVICE.to_owned()],
             None,
             None,
-            "legacy-gateway-test-nonce",
+            "second-gateway-test-nonce",
         )
-        .expect("legacy hello");
-        let mut legacy_client =
-            slskr_client::overlay::connect_tls_overlay(endpoint, certificate_pin, legacy_hello)
+        .expect("second hello");
+        second_hello
+            .authenticate(&remote_key, &certificate_pin)
+            .expect("authenticate second hello");
+        let mut second_client =
+            slskr_client::overlay::connect_tls_overlay(endpoint, certificate_pin, second_hello)
                 .await
-                .expect("connect frozen legacy gateway client");
-        let legacy_reply = legacy_client
+                .expect("connect second authenticated gateway client");
+        let second_reply = second_client
             .call(
                 &MeshServiceCall::new(
                     "legacy-open",
@@ -39212,11 +39215,11 @@ mod tests {
                 .unwrap(),
             )
             .await
-            .expect("legacy gateway reply");
+            .expect("second gateway reply");
         assert_eq!(
-            legacy_reply.status_code, 0,
+            second_reply.status_code, 0,
             "{:?}",
-            legacy_reply.error_message
+            second_reply.error_message
         );
         echo.await.expect("echo task");
 

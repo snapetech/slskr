@@ -1011,11 +1011,7 @@ async fn authenticate_overlay_peer(
         })
         .map(|record| record.public_key)
         .ok_or_else(|| "overlay peer has no fresh authenticated capability record".to_owned())?;
-    if hello.auth_public_key.is_some() || hello.auth_signature.is_some() {
-        hello
-            .verify_authentication(&public_key, gateway_certificate_sha256)
-            .map_err(|_| "overlay peer failed capability-key authentication".to_owned())?;
-    }
+    verify_overlay_peer_authentication(hello, &public_key, gateway_certificate_sha256)?;
     let expected = super::request_peer_endpoint(state, &hello.username)
         .await
         .map_err(|_| "overlay peer Soulseek endpoint is unavailable".to_owned())?;
@@ -1023,6 +1019,16 @@ async fn authenticate_overlay_peer(
         return Err("overlay peer IP does not match its Soulseek endpoint".to_owned());
     }
     Ok(())
+}
+
+fn verify_overlay_peer_authentication(
+    hello: &MeshHello,
+    expected_public_key: &[u8; 32],
+    gateway_certificate_sha256: &[u8; 32],
+) -> Result<(), String> {
+    hello
+        .verify_authentication(expected_public_key, gateway_certificate_sha256)
+        .map_err(|_| "overlay peer failed capability-key authentication".to_owned())
 }
 
 fn valid_destination_ip(ip: IpAddr) -> bool {
@@ -1275,6 +1281,32 @@ mod tests {
         oversized = request;
         oversized.service_name = Some(String::new());
         assert!(!valid_open_tunnel_request(&oversized));
+    }
+
+    #[test]
+    fn gateway_requires_capability_key_authentication() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[17; 32]);
+        let public_key = signing_key.verifying_key().to_bytes();
+        let certificate_sha256 = [23; 32];
+        let mut hello = MeshHello::new(
+            "peer",
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            None,
+            Some(443),
+            "nonce",
+        )
+        .unwrap();
+
+        assert!(
+            verify_overlay_peer_authentication(&hello, &public_key, &certificate_sha256).is_err()
+        );
+
+        hello
+            .authenticate(&signing_key, &certificate_sha256)
+            .unwrap();
+        assert!(
+            verify_overlay_peer_authentication(&hello, &public_key, &certificate_sha256).is_ok()
+        );
     }
 
     #[tokio::test]
