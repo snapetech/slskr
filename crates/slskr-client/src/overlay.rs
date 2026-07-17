@@ -4,7 +4,7 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -334,7 +334,7 @@ impl MeshHello {
         let verifying_key = VerifyingKey::from_bytes(expected_public_key)
             .map_err(|_| OverlayError::InvalidPeerAuthentication)?;
         verifying_key
-            .verify(
+            .verify_strict(
                 &self.authentication_payload(gateway_certificate_sha256)?,
                 &Signature::from_bytes(signature),
             )
@@ -1188,6 +1188,30 @@ mod tests {
         ));
         assert!(matches!(
             hello.verify_authentication(&signing_key.verifying_key().to_bytes(), &[4; 32],),
+            Err(OverlayError::InvalidPeerAuthentication)
+        ));
+    }
+
+    #[test]
+    fn mesh_hello_authentication_rejects_weak_public_key_forgery() {
+        let mut public_key = [0_u8; 32];
+        public_key[0] = 1;
+        let mut signature = vec![0_u8; 64];
+        signature[0] = 1;
+        let gateway_certificate_sha256 = [3; 32];
+        let mut hello = MeshHello::new(
+            "peer",
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            None,
+            Some(2234),
+            "nonce",
+        )
+        .unwrap();
+        hello.auth_public_key = Some(public_key);
+        hello.auth_signature = Some(signature);
+
+        assert!(matches!(
+            hello.verify_authentication(&public_key, &gateway_certificate_sha256),
             Err(OverlayError::InvalidPeerAuthentication)
         ));
     }
