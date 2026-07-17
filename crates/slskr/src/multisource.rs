@@ -33,6 +33,42 @@ const MAX_CONCURRENT_EXECUTIONS: usize = 4;
 const SOURCE_TIMEOUT: Duration = Duration::from_secs(30);
 static EXECUTION_PERMITS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_EXECUTIONS);
 
+struct PreviewStagingFile {
+    file: Option<tokio::fs::File>,
+    path: PathBuf,
+    committed: bool,
+}
+
+impl PreviewStagingFile {
+    fn new(path: &Path, file: fs::File) -> Self {
+        Self {
+            file: Some(tokio::fs::File::from_std(file)),
+            path: path.to_owned(),
+            committed: false,
+        }
+    }
+
+    fn file_mut(&mut self) -> Result<&mut tokio::fs::File, String> {
+        self.file
+            .as_mut()
+            .ok_or_else(|| "mesh preview staging file is closed".to_owned())
+    }
+
+    fn commit(&mut self) {
+        self.file.take();
+        self.committed = true;
+    }
+}
+
+impl Drop for PreviewStagingFile {
+    fn drop(&mut self) {
+        self.file.take();
+        if !self.committed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SwarmRequest {
@@ -361,21 +397,23 @@ pub async fn fetch_single_verified_source(
     fetch_range(&prepared, 0, 0, file_size).await?;
     let output = open_private_file(output_path)
         .map_err(|_| "mesh preview staging file could not be created".to_owned())?;
-    let mut output = tokio::fs::File::from_std(output);
+    let mut staging = PreviewStagingFile::new(output_path, output);
     let operation = async {
         let mut hasher = Sha256::new();
         let mut offset = 0_u64;
         while offset < file_size {
             let end = offset.saturating_add(DEFAULT_CHUNK_SIZE).min(file_size) - 1;
             let bytes = fetch_range(&prepared, offset, end, file_size).await?;
-            output
+            staging
+                .file_mut()?
                 .write_all(&bytes)
                 .await
                 .map_err(|_| "mesh preview staging write failed".to_owned())?;
             hasher.update(&bytes);
             offset = end + 1;
         }
-        output
+        staging
+            .file_mut()?
             .sync_all()
             .await
             .map_err(|_| "mesh preview staging sync failed".to_owned())?;
@@ -386,9 +424,8 @@ pub async fn fetch_single_verified_source(
         Ok(actual_hash)
     }
     .await;
-    drop(output);
-    if operation.is_err() {
-        let _ = fs::remove_file(output_path);
+    if operation.is_ok() {
+        staging.commit();
     }
     operation
 }
@@ -1068,6 +1105,67 @@ mod tests {
             "mesh preview failed SHA-256 verification"
         );
         assert!(!output.exists());
+        fs::remove_dir_all(root).expect("remove mesh preview test root");
+    }
+
+    #[tokio::test]
+    async fn cancelled_single_source_fetch_removes_staging_file() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind range source");
+        let address = listener.local_addr().expect("range source address");
+        let (stalled_tx, stalled_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut preflight, _) = listener.accept().await.expect("accept preflight");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = preflight.read(&mut buffer).await.expect("read preflight");
+                assert_ne!(count, 0, "preflight request ended before its headers");
+                request.extend_from_slice(&buffer[..count]);
+            }
+            preflight
+                .write_all(
+                    b"HTTP/1.1 206 Partial Content\r\nContent-Length: 1\r\nContent-Range: bytes 0-0/2\r\nConnection: close\r\n\r\na",
+                )
+                .await
+                .expect("write preflight");
+            let (_stalled, _) = listener.accept().await.expect("accept content request");
+            stalled_tx.send(()).expect("signal stalled request");
+            std::future::pending::<()>().await;
+        });
+        let root = std::env::temp_dir().join(format!(
+            "slskr-mesh-preview-cancel-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir(&root).expect("create mesh preview test root");
+        let output = root.join("preview.part");
+        let output_for_fetch = output.clone();
+        let fetch = tokio::spawn(async move {
+            fetch_single_verified_source(
+                RangeSource {
+                    username: "mesh-peer".to_owned(),
+                    url: format!("http://{address}/content"),
+                    authorization: None,
+                },
+                2,
+                &"00".repeat(32),
+                &output_for_fetch,
+            )
+            .await
+        });
+
+        stalled_rx.await.expect("content request must stall");
+        assert!(output.exists());
+        fetch.abort();
+        assert!(fetch
+            .await
+            .expect_err("fetch must be cancelled")
+            .is_cancelled());
+        assert!(!output.exists());
+
+        server.abort();
+        let _ = server.await;
         fs::remove_dir_all(root).expect("remove mesh preview test root");
     }
 }
