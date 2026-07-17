@@ -289,16 +289,17 @@ impl<S> DistributedTree<S> {
         username: &str,
         message: DistributedMessage,
     ) -> DistributedEvent {
+        let key = username_key(username);
+        let Some(child) = self.children.get_mut(&key) else {
+            return DistributedEvent::Ignored;
+        };
+
         match message {
             DistributedMessage::Ping => DistributedEvent::Ping,
             DistributedMessage::Search(search) => DistributedEvent::Search(search),
             DistributedMessage::ChildDepth { depth } => {
-                if let Some(child) = self.children.get_mut(&username_key(username)) {
-                    child.info.depth = depth;
-                    DistributedEvent::BranchChanged
-                } else {
-                    DistributedEvent::Ignored
-                }
+                child.info.depth = depth;
+                DistributedEvent::BranchChanged
             }
             DistributedMessage::BranchLevel { .. }
             | DistributedMessage::BranchRoot { .. }

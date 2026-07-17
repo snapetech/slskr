@@ -223,6 +223,28 @@ fn child_depth_updates_local_child_depth() {
     );
 }
 
+#[test]
+fn messages_from_unknown_children_are_ignored() {
+    let (child, _peer) = duplex(512);
+    let mut tree = DistributedTree::new("local");
+    tree.add_child("alice", DistributedConnection::new(child))
+        .unwrap();
+    let search = distributed_search(1, "mallory", 2, "spoofed");
+
+    assert_eq!(
+        tree.handle_child_message("missing", DistributedMessage::Ping),
+        DistributedEvent::Ignored
+    );
+    assert_eq!(
+        tree.handle_child_message("missing", DistributedMessage::Search(search.clone())),
+        DistributedEvent::Ignored
+    );
+    assert_eq!(
+        tree.handle_child_message(" ALICE ", DistributedMessage::Search(search.clone())),
+        DistributedEvent::Search(search)
+    );
+}
+
 #[tokio::test]
 async fn branch_info_is_sent_to_parent_as_distributed_messages() {
     let (tree_side, parent_side) = duplex(1024);
