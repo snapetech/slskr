@@ -390,6 +390,32 @@ fn upload_transfer_response_updates_state() {
 }
 
 #[test]
+fn upload_rejects_conflicting_acknowledgement_size() {
+    let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 100);
+    transfer.transfer_request_message().unwrap();
+
+    assert!(matches!(
+        transfer.handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(99),
+        })),
+        Err(ClientError::TransferSizeMismatch {
+            expected: 100,
+            actual: 99,
+        })
+    ));
+    assert_eq!(transfer.state, UploadState::Requested);
+
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(100),
+        }))
+        .unwrap();
+    assert_eq!(transfer.state, UploadState::Accepted);
+}
+
+#[test]
 fn upload_rejects_unsolicited_control_messages_before_request() {
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
 

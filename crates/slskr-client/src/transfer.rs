@@ -396,9 +396,17 @@ impl UploadTransfer {
             });
         }
         match message {
-            PeerMessage::TransferResponse(TransferResponse::Allowed { token, .. }) => {
+            PeerMessage::TransferResponse(TransferResponse::Allowed { token, size }) => {
                 self.require_state(UploadState::Requested, "handle transfer response")?;
                 self.validate_token(token)?;
+                if let Some(actual) = size {
+                    if actual != self.size {
+                        return Err(ClientError::TransferSizeMismatch {
+                            expected: self.size,
+                            actual,
+                        });
+                    }
+                }
                 self.state = UploadState::Accepted;
                 Ok(())
             }
