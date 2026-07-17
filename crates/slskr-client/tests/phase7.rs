@@ -172,6 +172,12 @@ fn social_command_builders_reject_malformed_targets() {
         }
     ));
     assert!(matches!(
+        UserWatchState::watch_message("alice\nforged").unwrap_err(),
+        ClientError::InvalidSocialField {
+            field: "watch username"
+        }
+    ));
+    assert!(matches!(
         UserWatchState::unwatch_message("x".repeat(MAX_STORED_SOCIAL_FIELD_BYTES + 1))
             .unwrap_err(),
         ClientError::SocialFieldTooLong {
@@ -474,6 +480,52 @@ fn social_histories_reject_oversized_peer_controlled_fields() {
 }
 
 #[test]
+fn social_state_rejects_control_characters_in_persistent_identities() {
+    let mut watched = UserWatchState::new();
+    assert!(
+        !watched.apply_server_message(&ServerMessage::WatchUserResponse(WatchedUser {
+            username: "alice".to_owned(),
+            exists: true,
+            status: Some(1),
+            stats: None,
+            country_code: Some("CA\nforged".to_owned()),
+        }))
+    );
+    assert!(
+        !watched.apply_server_message(&ServerMessage::GetUserStatusResponse(UserStatus {
+            username: "alice\nforged".to_owned(),
+            status: 1,
+            privileged: false,
+        }))
+    );
+    assert!(watched.watched("alice").is_none());
+    assert!(watched.status("alice\nforged").is_none());
+
+    let mut rooms = RoomState::new();
+    assert!(
+        !rooms.apply_server_message(&ServerMessage::GlobalRoomMessage {
+            room: "lobby\r\nforged".to_owned(),
+            username: "alice".to_owned(),
+            message: "hello".to_owned(),
+        })
+    );
+    assert!(rooms.messages().is_empty());
+
+    let mut inbox = PrivateMessageInbox::new();
+    assert_eq!(
+        inbox.apply_server_message(&ServerMessage::MessageUserResponse(PrivateMessage {
+            id: 100,
+            timestamp: 123,
+            username: "alice\nforged".to_owned(),
+            message: "hello".to_owned(),
+            is_new: true,
+        })),
+        Some(ServerMessage::MessageAcked { id: 100 })
+    );
+    assert!(inbox.messages().is_empty());
+}
+
+#[test]
 fn user_watch_state_rejects_oversized_server_controlled_fields() {
     let oversized = "x".repeat(MAX_STORED_SOCIAL_FIELD_BYTES + 1);
     let mut state = UserWatchState::new();
@@ -525,6 +577,10 @@ fn multi_user_private_message_command_dedupes_and_validates_recipients() {
     assert!(matches!(
         private_message_users_command(["alice", " "], "hello"),
         Err(ClientError::BlankMessageRecipient)
+    ));
+    assert!(matches!(
+        private_message_users_command(["alice\nforged"], "hello"),
+        Err(ClientError::InvalidSocialField { field: "recipient" })
     ));
 
     let too_many = (0..=MAX_PRIVATE_MESSAGE_RECIPIENTS)

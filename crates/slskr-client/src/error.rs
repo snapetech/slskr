@@ -68,6 +68,8 @@ pub enum ClientError {
     },
     #[error("social {field} must not be blank")]
     BlankSocialField { field: &'static str },
+    #[error("social {field} contains control characters")]
+    InvalidSocialField { field: &'static str },
     #[error("social {field} length {length} exceeds maximum {max}")]
     SocialFieldTooLong {
         field: &'static str,

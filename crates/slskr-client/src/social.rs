@@ -41,6 +41,9 @@ where
         if username.is_empty() {
             return Err(ClientError::BlankMessageRecipient);
         }
+        if username.chars().any(char::is_control) {
+            return Err(ClientError::InvalidSocialField { field: "recipient" });
+        }
         if username.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
             return Err(ClientError::PrivateMessageFieldTooLong {
                 field: "recipient",
@@ -125,10 +128,11 @@ impl UserWatchState {
         match message {
             ServerMessage::WatchUserResponse(user) => {
                 if user.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES
-                    || user
-                        .country_code
-                        .as_ref()
-                        .is_some_and(|country| country.len() > MAX_STORED_SOCIAL_FIELD_BYTES)
+                    || user.username.chars().any(char::is_control)
+                    || user.country_code.as_ref().is_some_and(|country| {
+                        country.len() > MAX_STORED_SOCIAL_FIELD_BYTES
+                            || country.chars().any(char::is_control)
+                    })
                 {
                     return false;
                 }
@@ -141,7 +145,9 @@ impl UserWatchState {
                 true
             }
             ServerMessage::GetUserStatusResponse(status) => {
-                if status.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
+                if status.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES
+                    || status.username.chars().any(char::is_control)
+                {
                     return false;
                 }
                 let mut status = status.clone();
@@ -243,7 +249,11 @@ impl RoomState {
                 }
                 let room = room.trim();
                 let username = username.trim();
-                if room.is_empty() || username.is_empty() {
+                if room.is_empty()
+                    || username.is_empty()
+                    || room.chars().any(char::is_control)
+                    || username.chars().any(char::is_control)
+                {
                     return false;
                 }
                 let key = room_key(room);
@@ -287,6 +297,9 @@ fn normalize_social_field(value: String, field: &'static str) -> Result<String, 
     if value.is_empty() {
         return Err(ClientError::BlankSocialField { field });
     }
+    if value.chars().any(char::is_control) {
+        return Err(ClientError::InvalidSocialField { field });
+    }
     if value.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
         return Err(ClientError::SocialFieldTooLong {
             field,
@@ -313,6 +326,8 @@ impl PrivateMessageInbox {
             ServerMessage::MessageUserResponse(message) => {
                 if message.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES
                     || message.message.len() > MAX_STORED_SOCIAL_FIELD_BYTES
+                    || message.username.trim().is_empty()
+                    || message.username.chars().any(char::is_control)
                 {
                     return Some(ServerMessage::MessageAcked { id: message.id });
                 }
