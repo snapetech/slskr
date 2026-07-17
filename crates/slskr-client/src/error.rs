@@ -35,6 +35,8 @@ pub enum ClientError {
     TransferOffsetOutOfRange { offset: u64, size: u64 },
     #[error("transfer payload size {actual} does not match advertised file size {expected}")]
     TransferSizeMismatch { expected: u64, actual: u64 },
+    #[error("transfer rejection reason is invalid or exceeds maximum {max} bytes")]
+    InvalidTransferReason { max: usize },
     #[error("cannot {operation} while transfer is in {state} state")]
     InvalidTransferState {
         operation: &'static str,

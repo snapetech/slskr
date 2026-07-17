@@ -9,6 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{self, Duration};
 
 const UPLOAD_DIRECTION: u32 = 1;
+pub const MAX_TRANSFER_REASON_BYTES: usize = 4 * 1024;
 pub const DEFAULT_TRANSFER_IO_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +108,7 @@ impl DownloadTransfer {
             PeerMessage::UploadDenied { filename, reason } => {
                 self.require_started("handle upload denial")?;
                 self.validate_filename(filename)?;
+                let reason = validate_transfer_reason(reason)?;
                 self.state = DownloadState::Rejected { reason };
                 Ok(())
             }
@@ -132,7 +134,7 @@ impl DownloadTransfer {
         reason: impl Into<String>,
     ) -> Result<PeerMessage, ClientError> {
         self.require_requested("reject download")?;
-        let reason = reason.into();
+        let reason = validate_transfer_reason(reason.into())?;
         self.state = DownloadState::Rejected {
             reason: reason.clone(),
         };
@@ -250,6 +252,7 @@ impl DownloadTransfer {
             }
             TransferResponse::Rejected { token, reason } => {
                 self.validate_token(token)?;
+                let reason = validate_transfer_reason(reason)?;
                 self.state = DownloadState::Rejected { reason };
                 Ok(())
             }
@@ -413,6 +416,7 @@ impl UploadTransfer {
             PeerMessage::TransferResponse(TransferResponse::Rejected { token, reason }) => {
                 self.require_state(UploadState::Requested, "handle transfer response")?;
                 self.validate_token(token)?;
+                let reason = validate_transfer_reason(reason)?;
                 self.state = UploadState::Rejected { reason };
                 Ok(())
             }
@@ -544,6 +548,16 @@ impl UploadTransfer {
                 received,
             })
         }
+    }
+}
+
+fn validate_transfer_reason(reason: String) -> Result<String, ClientError> {
+    if reason.len() > MAX_TRANSFER_REASON_BYTES || reason.chars().any(char::is_control) {
+        Err(ClientError::InvalidTransferReason {
+            max: MAX_TRANSFER_REASON_BYTES,
+        })
+    } else {
+        Ok(reason)
     }
 }
 

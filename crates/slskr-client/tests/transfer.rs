@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use slskr_client::{
     file_transfer::FileTransferConnection,
-    transfer::{DownloadState, DownloadTransfer, UploadState, UploadTransfer},
+    transfer::{
+        DownloadState, DownloadTransfer, UploadState, UploadTransfer, MAX_TRANSFER_REASON_BYTES,
+    },
     ClientError,
 };
 use slskr_protocol::peer::{PeerMessage, TransferRequest, TransferResponse};
@@ -155,6 +157,48 @@ fn reject_response_message_updates_state_and_payload() {
             reason: "Queued".to_owned()
         }
     );
+}
+
+#[test]
+fn transfer_rejection_reasons_are_bounded_and_control_safe() {
+    for reason in [
+        "forged\r\nlog entry".to_owned(),
+        "x".repeat(MAX_TRANSFER_REASON_BYTES + 1),
+    ] {
+        let mut download = DownloadTransfer::new("peer", "Music/file.flac", 7);
+        request_download(&mut download, Some(100));
+        assert!(matches!(
+            download.handle_peer_message(PeerMessage::TransferResponse(
+                TransferResponse::Rejected {
+                    token: 7,
+                    reason: reason.clone(),
+                },
+            )),
+            Err(ClientError::InvalidTransferReason {
+                max: MAX_TRANSFER_REASON_BYTES,
+            })
+        ));
+        assert_eq!(download.state, DownloadState::Requested { size: Some(100) });
+        assert!(matches!(
+            download.reject_upload_response_message(reason.clone()),
+            Err(ClientError::InvalidTransferReason {
+                max: MAX_TRANSFER_REASON_BYTES,
+            })
+        ));
+
+        let mut upload = UploadTransfer::new("peer", "Music/file.flac", 7, 100);
+        upload.transfer_request_message().unwrap();
+        assert!(matches!(
+            upload.handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Rejected {
+                token: 7,
+                reason
+            },)),
+            Err(ClientError::InvalidTransferReason {
+                max: MAX_TRANSFER_REASON_BYTES,
+            })
+        ));
+        assert_eq!(upload.state, UploadState::Requested);
+    }
 }
 
 #[test]
