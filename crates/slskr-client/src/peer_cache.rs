@@ -69,11 +69,8 @@ impl<S> PeerConnectionCache<S> {
     }
 
     pub async fn remove(&self, username: &str) -> Option<PeerMessageConnection<S>> {
-        let removed = self
-            .connections
-            .lock()
-            .await
-            .remove(&username_key(username));
+        let key = lookup_username_key(username)?;
+        let removed = self.connections.lock().await.remove(&key);
         match removed {
             Some(removed) => removed.lock().await.take(),
             None => None,
@@ -81,10 +78,10 @@ impl<S> PeerConnectionCache<S> {
     }
 
     pub async fn contains(&self, username: &str) -> bool {
-        self.connections
-            .lock()
-            .await
-            .contains_key(&username_key(username))
+        let Some(key) = lookup_username_key(username) else {
+            return false;
+        };
+        self.connections.lock().await.contains_key(&key)
     }
 
     pub async fn len(&self) -> usize {
@@ -105,7 +102,9 @@ where
         username: &str,
         message: &PeerMessage,
     ) -> Result<bool, ClientError> {
-        let key = username_key(username);
+        let Some(key) = lookup_username_key(username) else {
+            return Ok(false);
+        };
         let Some(connection) = self.connections.lock().await.get(&key).cloned() else {
             return Ok(false);
         };
@@ -124,7 +123,9 @@ where
     }
 
     pub async fn receive_from(&self, username: &str) -> Result<Option<PeerMessage>, ClientError> {
-        let key = username_key(username);
+        let Some(key) = lookup_username_key(username) else {
+            return Ok(None);
+        };
         let Some(connection) = self.connections.lock().await.get(&key).cloned() else {
             return Ok(None);
         };
@@ -157,6 +158,10 @@ where
 
 fn username_key(username: &str) -> String {
     username.trim().to_ascii_lowercase()
+}
+
+fn lookup_username_key(username: &str) -> Option<String> {
+    normalize_peer_username(username).ok().map(username_key)
 }
 
 pub(crate) fn normalize_peer_username(username: &str) -> Result<&str, ClientError> {

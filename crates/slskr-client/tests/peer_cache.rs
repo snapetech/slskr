@@ -90,6 +90,27 @@ async fn cache_canonicalizes_whitespace_before_capacity_checks() {
 }
 
 #[tokio::test]
+async fn cache_rejects_malformed_lookup_identities_before_canonicalization() {
+    let cache = PeerConnectionCache::new();
+    let (stream, _) = duplex(64);
+    cache
+        .insert("peer", PeerMessageConnection::new(stream))
+        .await
+        .unwrap();
+    let oversized = "x".repeat(MAX_PEER_USERNAME_BYTES + 1);
+    let message = PeerMessage::QueueUpload {
+        filename: "Music/file.flac".to_owned(),
+    };
+
+    assert!(!cache.contains("   ").await);
+    assert!(!cache.contains(&oversized).await);
+    assert!(cache.remove(&oversized).await.is_none());
+    assert!(!cache.send_to(&oversized, &message).await.unwrap());
+    assert!(cache.receive_from(&oversized).await.unwrap().is_none());
+    assert!(cache.contains("peer").await);
+}
+
+#[tokio::test]
 async fn cache_sends_to_existing_peer() {
     let cache = PeerConnectionCache::new();
     let (a, b) = duplex(256);
