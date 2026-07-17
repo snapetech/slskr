@@ -35,19 +35,18 @@ where
         }
         if seen.insert(username.to_ascii_lowercase()) {
             recipients.push(username);
+            if recipients.len() > MAX_PRIVATE_MESSAGE_RECIPIENTS {
+                return Err(ClientError::TooManyMessageRecipients {
+                    count: recipients.len(),
+                    max: MAX_PRIVATE_MESSAGE_RECIPIENTS,
+                });
+            }
         }
     }
 
     if recipients.is_empty() {
         return Err(ClientError::EmptyMessageRecipients);
     }
-    if recipients.len() > MAX_PRIVATE_MESSAGE_RECIPIENTS {
-        return Err(ClientError::TooManyMessageRecipients {
-            count: recipients.len(),
-            max: MAX_PRIVATE_MESSAGE_RECIPIENTS,
-        });
-    }
-
     Ok(ServerMessage::MessageUsers {
         usernames: recipients,
         message: message.into(),

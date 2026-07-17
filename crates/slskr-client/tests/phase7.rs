@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use slskr_client::{
     events::{trace_distributed_message, trace_peer_message, trace_server_message},
     filters::{
@@ -497,6 +499,23 @@ fn multi_user_private_message_command_dedupes_and_validates_recipients() {
             if count == MAX_PRIVATE_MESSAGE_RECIPIENTS + 1
                 && max == MAX_PRIVATE_MESSAGE_RECIPIENTS
     ));
+}
+
+#[test]
+fn multi_user_private_message_stops_consuming_at_recipient_limit() {
+    let consumed = Cell::new(0);
+    let recipients = (0..usize::MAX).map(|index| {
+        consumed.set(consumed.get() + 1);
+        format!("user-{index}")
+    });
+
+    assert!(matches!(
+        private_message_users_command(recipients, "hello"),
+        Err(ClientError::TooManyMessageRecipients { count, max })
+            if count == MAX_PRIVATE_MESSAGE_RECIPIENTS + 1
+                && max == MAX_PRIVATE_MESSAGE_RECIPIENTS
+    ));
+    assert_eq!(consumed.get(), MAX_PRIVATE_MESSAGE_RECIPIENTS + 1);
 }
 
 #[test]
