@@ -25,6 +25,7 @@ pub const MAX_SEARCH_RESPONSES_TOTAL: usize = 10_000;
 pub const MAX_WISHLIST_SEARCH_TERMS: usize = 1_024;
 pub const MAX_WISHLIST_SEARCH_TERM_BYTES: usize = 4_096;
 pub const MAX_OUTBOUND_SEARCH_FIELD_BYTES: usize = 4_096;
+pub const MAX_INBOUND_SEARCH_QUERY_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -655,6 +656,9 @@ where
     }
 
     fn response_message(&self, token: u32, query: &str) -> Option<PeerMessage> {
+        if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES {
+            return None;
+        }
         if !self.excluded_filter.allows_query(query) {
             return None;
         }

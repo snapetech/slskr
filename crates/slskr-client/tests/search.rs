@@ -3,11 +3,12 @@ use slskr_client::{
     search::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
-        WishlistSearchSchedulerOptions, MAX_OUTBOUND_SEARCH_FIELD_BYTES,
-        MAX_SEARCH_RESPONSES_PER_TOKEN, MAX_SEARCH_RESPONSES_TOTAL,
-        MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_FILES_TOTAL,
-        MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
-        MAX_WISHLIST_SEARCH_TERMS, MAX_WISHLIST_SEARCH_TERM_BYTES,
+        WishlistSearchSchedulerOptions, MAX_INBOUND_SEARCH_QUERY_BYTES,
+        MAX_OUTBOUND_SEARCH_FIELD_BYTES, MAX_SEARCH_RESPONSES_PER_TOKEN,
+        MAX_SEARCH_RESPONSES_TOTAL, MAX_SEARCH_RESULT_FILES_PER_TOKEN,
+        MAX_SEARCH_RESULT_FILES_TOTAL, MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN,
+        MAX_TRACKED_SEARCH_RESULT_TOKENS, MAX_WISHLIST_SEARCH_TERMS,
+        MAX_WISHLIST_SEARCH_TERM_BYTES,
     },
     server::ServerSession,
     stream::ServerConnection,
@@ -19,7 +20,10 @@ use slskr_protocol::{
     server::{Direction, SearchRequest, ServerMessage, TargetedSearchRequest},
     ProtocolTextEncoding,
 };
-use std::time::{Duration, Instant};
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 use tokio::io::duplex;
 
 #[tokio::test]
@@ -728,6 +732,39 @@ fn responder_suppresses_excluded_search_phrases() {
             query: "rare track".to_owned(),
         })
         .is_none());
+}
+
+struct CountingIndex<'a>(&'a Cell<usize>);
+
+impl ShareIndex for CountingIndex<'_> {
+    fn search_limited(&self, _query: &str, _limit: usize) -> Vec<FileEntry> {
+        self.0.set(self.0.get() + 1);
+        vec![entry("match")]
+    }
+}
+
+#[test]
+fn responder_rejects_oversized_queries_before_searching_the_index() {
+    let calls = Cell::new(0);
+    let responder = SearchResponder::new("local", CountingIndex(&calls)).unwrap();
+    let oversized = "x".repeat(MAX_INBOUND_SEARCH_QUERY_BYTES + 1);
+
+    assert!(responder
+        .respond_to_server_search(&ServerMessage::FileSearchIncoming {
+            username: "remote".to_owned(),
+            token: 55,
+            query: oversized.clone(),
+        })
+        .is_none());
+    assert!(responder
+        .respond_to_distributed_search(&DistributedSearch {
+            identifier: 49,
+            username: "remote".to_owned(),
+            token: 56,
+            query: oversized,
+        })
+        .is_none());
+    assert_eq!(calls.get(), 0);
 }
 
 #[test]
