@@ -476,11 +476,16 @@ mod tests {
         };
         event_tx.send(record).unwrap();
 
-        let message = time::timeout(Duration::from_secs(2), socket.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let message = time::timeout(Duration::from_secs(2), async {
+            loop {
+                let message = socket.next().await.unwrap().unwrap();
+                if message.is_text() {
+                    break message;
+                }
+            }
+        })
+        .await
+        .unwrap();
         let text = message.to_text().unwrap();
         assert!(text.contains(r#""topic":"searches""#), "{text}");
         assert!(text.contains(r#""type":"search.started""#), "{text}");
