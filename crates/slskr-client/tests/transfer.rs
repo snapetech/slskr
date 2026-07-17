@@ -177,6 +177,30 @@ async fn receive_file_validates_token_sends_offset_and_reads_bytes() {
 }
 
 #[tokio::test]
+async fn receive_file_timeout_marks_download_failed() {
+    let (_silent_uploader, downloader) = duplex(64);
+    let mut downloader = FileTransferConnection::new(downloader);
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, Some(1));
+    transfer.accept_upload_response_message(1).unwrap();
+
+    assert!(matches!(
+        transfer
+            .receive_file_from_with_timeout(&mut downloader, 0, 1, Duration::from_millis(10),)
+            .await,
+        Err(ClientError::TimedOut {
+            operation: "download transfer I/O",
+        })
+    ));
+    assert_eq!(
+        transfer.state,
+        DownloadState::Failed {
+            reason: "transfer I/O timed out".to_owned(),
+        }
+    );
+}
+
+#[tokio::test]
 async fn receive_file_rejects_oversized_remaining_before_io() {
     let (mut uploader, downloader) = duplex(64);
     let mut downloader = FileTransferConnection::new(downloader);
@@ -553,6 +577,35 @@ async fn send_file_uses_requested_offset_and_marks_completed() {
     assert_eq!(offset, 2);
     assert_eq!(transfer.state, UploadState::Completed);
     assert_eq!(downloader_task.await.unwrap(), vec![3, 4, 5]);
+}
+
+#[tokio::test]
+async fn send_file_timeout_marks_upload_failed() {
+    let (uploader, _silent_downloader) = duplex(64);
+    let mut uploader = FileTransferConnection::new(uploader);
+    let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 1);
+    transfer.transfer_request_message().unwrap();
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        }))
+        .unwrap();
+
+    assert!(matches!(
+        transfer
+            .send_file_to_with_timeout(&mut uploader, &[1], Duration::from_millis(10))
+            .await,
+        Err(ClientError::TimedOut {
+            operation: "upload transfer I/O",
+        })
+    ));
+    assert_eq!(
+        transfer.state,
+        UploadState::Failed {
+            reason: "transfer I/O timed out".to_owned(),
+        }
+    );
 }
 
 #[tokio::test]

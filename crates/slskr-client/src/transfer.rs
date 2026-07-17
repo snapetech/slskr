@@ -6,8 +6,10 @@ use crate::{
     ClientError,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::{self, Duration};
 
 const UPLOAD_DIRECTION: u32 = 1;
+pub const DEFAULT_TRANSFER_IO_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadTransfer {
@@ -148,6 +150,25 @@ impl DownloadTransfer {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        self.receive_file_from_with_timeout(
+            connection,
+            offset,
+            remaining,
+            DEFAULT_TRANSFER_IO_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn receive_file_from_with_timeout<S>(
+        &mut self,
+        connection: &mut FileTransferConnection<S>,
+        offset: u64,
+        remaining: usize,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, ClientError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
         if !matches!(self.state, DownloadState::Accepted { .. }) {
             return Err(ClientError::InvalidTransferState {
                 operation: "receive file",
@@ -174,12 +195,33 @@ impl DownloadTransfer {
             }
         }
 
-        let token = connection.receive_token().await?;
-        self.validate_token(token)?;
-        connection.send_offset(offset).await?;
-        let bytes = connection.read_chunk(remaining).await?;
-        self.state = DownloadState::Completed;
-        Ok(bytes)
+        let result = time::timeout(timeout, async {
+            let token = connection.receive_token().await?;
+            self.validate_token(token)?;
+            connection.send_offset(offset).await?;
+            connection.read_chunk(remaining).await
+        })
+        .await;
+        match result {
+            Ok(Ok(bytes)) => {
+                self.state = DownloadState::Completed;
+                Ok(bytes)
+            }
+            Ok(Err(error)) => {
+                self.state = DownloadState::Failed {
+                    reason: "transfer I/O failed".to_owned(),
+                };
+                Err(error)
+            }
+            Err(_) => {
+                self.state = DownloadState::Failed {
+                    reason: "transfer I/O timed out".to_owned(),
+                };
+                Err(ClientError::TimedOut {
+                    operation: "download transfer I/O",
+                })
+            }
+        }
     }
 
     fn handle_transfer_request(&mut self, request: TransferRequest) -> Result<(), ClientError> {
@@ -379,6 +421,19 @@ impl UploadTransfer {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        self.send_file_to_with_timeout(connection, bytes, DEFAULT_TRANSFER_IO_TIMEOUT)
+            .await
+    }
+
+    pub async fn send_file_to_with_timeout<S>(
+        &mut self,
+        connection: &mut FileTransferConnection<S>,
+        bytes: &[u8],
+        timeout: Duration,
+    ) -> Result<u64, ClientError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
         if !matches!(self.state, UploadState::Accepted) {
             return Err(ClientError::InvalidTransferState {
                 operation: "send file",
@@ -393,22 +448,45 @@ impl UploadTransfer {
             });
         }
 
-        connection.send_token(self.token).await?;
-        let offset = connection.receive_offset().await?;
-        let start = usize::try_from(offset).map_err(|_| ClientError::TransferOffsetOutOfRange {
-            offset,
-            size: bytes.len() as u64,
-        })?;
-        if start > bytes.len() {
-            return Err(ClientError::TransferOffsetOutOfRange {
-                offset,
-                size: bytes.len() as u64,
-            });
-        }
+        let result = time::timeout(timeout, async {
+            connection.send_token(self.token).await?;
+            let offset = connection.receive_offset().await?;
+            let start =
+                usize::try_from(offset).map_err(|_| ClientError::TransferOffsetOutOfRange {
+                    offset,
+                    size: bytes.len() as u64,
+                })?;
+            if start > bytes.len() {
+                return Err(ClientError::TransferOffsetOutOfRange {
+                    offset,
+                    size: bytes.len() as u64,
+                });
+            }
 
-        connection.write_chunk(&bytes[start..]).await?;
-        self.state = UploadState::Completed;
-        Ok(offset)
+            connection.write_chunk(&bytes[start..]).await?;
+            Ok::<u64, ClientError>(offset)
+        })
+        .await;
+        match result {
+            Ok(Ok(offset)) => {
+                self.state = UploadState::Completed;
+                Ok(offset)
+            }
+            Ok(Err(error)) => {
+                self.state = UploadState::Failed {
+                    reason: "transfer I/O failed".to_owned(),
+                };
+                Err(error)
+            }
+            Err(_) => {
+                self.state = UploadState::Failed {
+                    reason: "transfer I/O timed out".to_owned(),
+                };
+                Err(ClientError::TimedOut {
+                    operation: "upload transfer I/O",
+                })
+            }
+        }
     }
 
     fn validate_token(&self, received: u32) -> Result<(), ClientError> {
