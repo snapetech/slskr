@@ -476,10 +476,18 @@ impl MeshServiceCall {
             method: method.into(),
             payload,
         };
-        validate_service_field("correlation_id", &call.correlation_id)?;
-        validate_service_field("service_name", &call.service_name)?;
-        validate_service_field("method", &call.method)?;
+        call.validate()?;
         Ok(call)
+    }
+
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        validate_overlay_base(&self.magic, &self.message_type, self.version)?;
+        if self.message_type != "mesh_service_call" {
+            return Err(OverlayError::InvalidMessageType);
+        }
+        validate_service_field("correlation_id", &self.correlation_id)?;
+        validate_service_field("service_name", &self.service_name)?;
+        validate_service_field("method", &self.method)
     }
 }
 
@@ -546,6 +554,7 @@ where
         &mut self,
         call: &MeshServiceCall,
     ) -> Result<MeshServiceReply, OverlayError> {
+        call.validate()?;
         if !self
             .remote_features
             .iter()
@@ -1166,6 +1175,30 @@ mod tests {
         assert_eq!(reply.status_code, 0);
         assert_eq!(reply.payload, br#"{"Sent":4}"#);
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_call_revalidates_mutated_public_fields_before_write() {
+        let (client, mut wire) = duplex(1024);
+        let mut overlay = OverlayClient {
+            framer: OverlayFramer::new(client),
+            remote_username: "gateway".to_owned(),
+            remote_features: vec![FEATURE_MESH_SERVICE.to_owned()],
+            remote_overlay_port: None,
+            remote_certificate_sha256: None,
+        };
+        let mut call =
+            MeshServiceCall::new("correlation", "private-gateway", "OpenTunnel", Vec::new())
+                .unwrap();
+        call.correlation_id = "   ".to_owned();
+
+        assert!(matches!(
+            overlay.call(&call).await.unwrap_err(),
+            OverlayError::InvalidServiceField("correlation_id")
+        ));
+        assert!(timeout(Duration::from_millis(10), wire.read_u8())
+            .await
+            .is_err());
     }
 
     #[test]
