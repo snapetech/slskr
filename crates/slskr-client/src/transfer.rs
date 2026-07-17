@@ -70,6 +70,12 @@ impl DownloadTransfer {
     }
 
     pub fn handle_peer_message(&mut self, message: PeerMessage) -> Result<(), ClientError> {
+        if matches!(self.state, DownloadState::Completed) {
+            return Err(ClientError::InvalidTransferState {
+                operation: "handle peer message",
+                state: self.state.name(),
+            });
+        }
         match message {
             PeerMessage::PlaceInQueueResponse { filename, place } => {
                 self.validate_filename(filename)?;
@@ -252,6 +258,12 @@ impl UploadTransfer {
     }
 
     pub fn handle_peer_message(&mut self, message: PeerMessage) -> Result<(), ClientError> {
+        if matches!(self.state, UploadState::Completed) {
+            return Err(ClientError::InvalidTransferState {
+                operation: "handle peer message",
+                state: self.state.name(),
+            });
+        }
         match message {
             PeerMessage::TransferResponse(TransferResponse::Allowed { token, .. }) => {
                 self.validate_token(token)?;

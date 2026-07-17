@@ -305,6 +305,36 @@ fn upload_transfer_response_updates_state() {
     );
 }
 
+#[test]
+fn completed_transfers_reject_replayed_peer_control_messages() {
+    let response = PeerMessage::TransferResponse(TransferResponse::Allowed {
+        token: 7,
+        size: Some(5),
+    });
+
+    let mut download = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    download.state = DownloadState::Completed;
+    assert!(matches!(
+        download.handle_peer_message(response.clone()),
+        Err(ClientError::InvalidTransferState {
+            operation: "handle peer message",
+            state: "completed",
+        })
+    ));
+    assert_eq!(download.state, DownloadState::Completed);
+
+    let mut upload = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
+    upload.state = UploadState::Completed;
+    assert!(matches!(
+        upload.handle_peer_message(response),
+        Err(ClientError::InvalidTransferState {
+            operation: "handle peer message",
+            state: "completed",
+        })
+    ));
+    assert_eq!(upload.state, UploadState::Completed);
+}
+
 #[tokio::test]
 async fn send_file_uses_requested_offset_and_marks_completed() {
     let (uploader, downloader) = duplex(64);
