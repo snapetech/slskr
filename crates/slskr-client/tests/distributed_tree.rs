@@ -740,6 +740,44 @@ async fn parent_reporting_times_out_and_disconnects_stalled_parent() {
 }
 
 #[tokio::test]
+async fn cancelled_parent_reporting_disconnects_partial_connection() {
+    let (parent_tree, _non_reading_parent) = duplex(1);
+    let mut tree = DistributedTree::new("local");
+    tree.connect_parent(
+        parent_info("parent", [10, 0, 0, 1], 2234),
+        DistributedConnection::new(parent_tree),
+    );
+
+    assert!(tokio::time::timeout(
+        Duration::from_millis(10),
+        tree.send_branch_info_to_parent_with_timeout(Duration::from_secs(60)),
+    )
+    .await
+    .is_err());
+    assert!(tree.parent().is_none());
+    assert_eq!(tree.branch_level(), 0);
+    assert_eq!(tree.branch_root(), "local");
+}
+
+#[tokio::test]
+async fn cancelled_distributed_forwarding_evicts_partial_child() {
+    let (child_tree, _non_reading_child) = duplex(1);
+    let mut tree = DistributedTree::new("local");
+    let search = distributed_search(5, "origin", 44, &"x".repeat(4_096));
+    tree.add_child("child", DistributedConnection::new(child_tree))
+        .unwrap();
+
+    assert!(tokio::time::timeout(
+        Duration::from_millis(10),
+        tree.forward_search_to_children_with_timeout(&search, None, Duration::from_secs(60)),
+    )
+    .await
+    .is_err());
+    assert!(tree.child_info("child").is_none());
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[tokio::test]
 async fn branch_info_reporter_schedules_server_updates() {
     let now = Instant::now();
     let mut reporter = BranchInfoReporter::new(Duration::from_secs(5), now).unwrap();

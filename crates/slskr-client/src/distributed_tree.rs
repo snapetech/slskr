@@ -346,12 +346,14 @@ where
         timeout: TokioDuration,
     ) -> Result<bool, ClientError> {
         let messages = self.parent_branch_messages();
-        if self.parent.is_none() {
+        let Some(mut parent) = self.parent.take() else {
             return Ok(false);
-        }
+        };
+        let branch_level = self.branch_level;
+        let branch_root = self.branch_root.clone();
+        self.disconnect_parent();
 
         let result = time::timeout(timeout, async {
-            let parent = self.parent.as_mut().expect("parent presence checked above");
             for message in messages {
                 parent.connection.send(&message).await?;
             }
@@ -359,17 +361,16 @@ where
         })
         .await;
         match result {
-            Ok(Ok(())) => Ok(true),
-            Ok(Err(error)) => {
-                self.disconnect_parent();
-                Err(error)
+            Ok(Ok(())) => {
+                self.branch_level = branch_level;
+                self.branch_root = branch_root;
+                self.parent = Some(parent);
+                Ok(true)
             }
-            Err(_) => {
-                self.disconnect_parent();
-                Err(ClientError::TimedOut {
-                    operation: "distributed parent send",
-                })
-            }
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(ClientError::TimedOut {
+                operation: "distributed parent send",
+            }),
         }
     }
 
@@ -397,7 +398,6 @@ where
             .map(normalize_distributed_username)
             .transpose()?
             .map(username_key);
-        let mut current_child = None;
         let mut sent = 0;
         let mut first_error = None;
         let result = time::timeout(timeout, async {
@@ -407,18 +407,20 @@ where
                 if except_key.as_deref() == Some(username.as_str()) {
                     continue;
                 }
-                current_child = Some(username.clone());
-                let send_result = self
+                let mut child = self
                     .children
-                    .get_mut(&username)
-                    .expect("child key was collected from the same map")
+                    .remove(&username)
+                    .expect("child key was collected from the same map");
+                let send_result = child
                     .connection
                     .send(&DistributedMessage::Search(search.clone()))
                     .await;
                 match send_result {
-                    Ok(()) => sent += 1,
+                    Ok(()) => {
+                        self.children.insert(username, child);
+                        sent += 1;
+                    }
                     Err(error) => {
-                        self.children.remove(&username);
                         if first_error.is_none() {
                             first_error = Some(error);
                         }
@@ -431,9 +433,6 @@ where
         match result {
             Ok(()) => {}
             Err(_) => {
-                if let Some(username) = current_child {
-                    self.children.remove(&username);
-                }
                 return Err(ClientError::TimedOut {
                     operation: "distributed search forwarding",
                 });
