@@ -3,11 +3,13 @@ use std::{collections::HashMap, sync::Arc};
 use slskr_protocol::peer::PeerMessage;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
+use tokio::time::{self, Duration};
 
 use crate::{stream::PeerMessageConnection, ClientError};
 
 pub const DEFAULT_MAX_PEER_CONNECTIONS: usize = 1_024;
 pub const MAX_PEER_USERNAME_BYTES: usize = 4_096;
+pub const DEFAULT_PEER_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
 type SharedPeerConnection<S> = Arc<Mutex<Option<PeerMessageConnection<S>>>>;
 
@@ -102,6 +104,16 @@ where
         username: &str,
         message: &PeerMessage,
     ) -> Result<bool, ClientError> {
+        self.send_to_with_timeout(username, message, DEFAULT_PEER_IO_TIMEOUT)
+            .await
+    }
+
+    pub async fn send_to_with_timeout(
+        &self,
+        username: &str,
+        message: &PeerMessage,
+        timeout: Duration,
+    ) -> Result<bool, ClientError> {
         let Some(key) = lookup_username_key(username) else {
             return Ok(false);
         };
@@ -113,16 +125,35 @@ where
         let Some(active) = connection_guard.as_mut() else {
             return Ok(false);
         };
-        if let Err(error) = active.send(message).await {
-            *connection_guard = None;
-            drop(connection_guard);
-            self.remove_if_current(&key, &connection).await;
-            return Err(error);
+        match time::timeout(timeout, active.send(message)).await {
+            Ok(Ok(())) => Ok(true),
+            Ok(Err(error)) => {
+                *connection_guard = None;
+                drop(connection_guard);
+                self.remove_if_current(&key, &connection).await;
+                Err(error)
+            }
+            Err(_) => {
+                *connection_guard = None;
+                drop(connection_guard);
+                self.remove_if_current(&key, &connection).await;
+                Err(ClientError::TimedOut {
+                    operation: "cached peer send",
+                })
+            }
         }
-        Ok(true)
     }
 
     pub async fn receive_from(&self, username: &str) -> Result<Option<PeerMessage>, ClientError> {
+        self.receive_from_with_timeout(username, DEFAULT_PEER_IO_TIMEOUT)
+            .await
+    }
+
+    pub async fn receive_from_with_timeout(
+        &self,
+        username: &str,
+        timeout: Duration,
+    ) -> Result<Option<PeerMessage>, ClientError> {
         let Some(key) = lookup_username_key(username) else {
             return Ok(None);
         };
@@ -134,9 +165,17 @@ where
         let Some(active) = connection_guard.as_mut() else {
             return Ok(None);
         };
-        match active.receive().await {
-            Ok(message) => Ok(Some(message)),
-            Err(error) => {
+        match time::timeout(timeout, active.receive()).await {
+            Err(_) => {
+                *connection_guard = None;
+                drop(connection_guard);
+                self.remove_if_current(&key, &connection).await;
+                Err(ClientError::TimedOut {
+                    operation: "cached peer receive",
+                })
+            }
+            Ok(Ok(message)) => Ok(Some(message)),
+            Ok(Err(error)) => {
                 *connection_guard = None;
                 drop(connection_guard);
                 self.remove_if_current(&key, &connection).await;

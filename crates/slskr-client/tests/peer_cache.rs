@@ -269,3 +269,46 @@ async fn stalled_peer_receive_does_not_block_other_cache_entries() {
 
     receive.abort();
 }
+
+#[tokio::test]
+async fn cache_evicts_peer_after_receive_timeout() {
+    let cache = PeerConnectionCache::new();
+    let (cached, _silent_peer) = duplex(64);
+    cache
+        .insert("peer", PeerMessageConnection::new(cached))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        cache
+            .receive_from_with_timeout("peer", Duration::from_millis(10))
+            .await,
+        Err(slskr_client::ClientError::TimedOut {
+            operation: "cached peer receive",
+        })
+    ));
+    assert!(!cache.contains("peer").await);
+}
+
+#[tokio::test]
+async fn cache_evicts_peer_after_send_timeout() {
+    let cache = PeerConnectionCache::new();
+    let (cached, _non_reading_peer) = duplex(1);
+    cache
+        .insert("peer", PeerMessageConnection::new(cached))
+        .await
+        .unwrap();
+    let message = PeerMessage::QueueUpload {
+        filename: "x".repeat(4_096),
+    };
+
+    assert!(matches!(
+        cache
+            .send_to_with_timeout("peer", &message, Duration::from_millis(10))
+            .await,
+        Err(slskr_client::ClientError::TimedOut {
+            operation: "cached peer send",
+        })
+    ));
+    assert!(!cache.contains("peer").await);
+}
