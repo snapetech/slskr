@@ -95,10 +95,15 @@ impl DistributedMessage {
             DistributedCode::ChildDepth => Self::ChildDepth {
                 depth: reader.read_u32_le()?,
             },
-            DistributedCode::EmbeddedMessage => Self::EmbeddedMessage {
-                code: reader.read_u8()?,
-                payload: reader.read_len_prefixed_bytes()?,
-            },
+            DistributedCode::EmbeddedMessage => {
+                if let Ok(frame) = MessageFrame::decode(&frame.payload) {
+                    return Ok(Self::EmbeddedServerMessage(frame));
+                }
+                Self::EmbeddedMessage {
+                    code: reader.read_u8()?,
+                    payload: reader.read_len_prefixed_bytes()?,
+                }
+            }
         };
         reader.finish()?;
         Ok(message)

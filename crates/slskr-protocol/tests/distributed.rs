@@ -67,6 +67,10 @@ fn embedded_server_message_encodes_as_code_93_payload() {
     assert_eq!(frame.code, 93);
     assert_eq!(frame.payload, server_frame.encode().unwrap());
     assert_eq!(
+        DistributedMessage::decode(frame).unwrap(),
+        DistributedMessage::EmbeddedServerMessage(server_frame.clone())
+    );
+    assert_eq!(
         DistributedMessage::decode_embedded_server(server_frame.clone()),
         DistributedMessage::EmbeddedServerMessage(server_frame)
     );
