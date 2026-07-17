@@ -19,11 +19,12 @@ use slskr_protocol::{
 use tokio::io::duplex;
 
 #[test]
-fn choose_parent_ignores_self_and_zero_ports_then_picks_stable_candidate() {
+fn choose_parent_ignores_self_and_invalid_ports_then_picks_stable_candidate() {
     let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
     let candidates = vec![
         possible_parent("LOCAL", [10, 0, 0, 1], 2234),
         possible_parent("zero", [10, 0, 0, 2], 0),
+        possible_parent("overflow", [10, 0, 0, 5], u32::from(u16::MAX) + 1),
         possible_parent("zoe", [10, 0, 0, 4], 2234),
         possible_parent("alice", [10, 0, 0, 3], 2234),
     ];
@@ -135,6 +136,7 @@ fn connect_parent_rejects_invalid_identity_without_mutating_branch_state() {
         ("x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1), 2234),
         (" LOCAL ".to_owned(), 2234),
         ("parent".to_owned(), 0),
+        ("parent".to_owned(), u32::from(u16::MAX) + 1),
     ] {
         let (tree_side, _peer_side) = duplex(64);
         tree.connect_parent(
