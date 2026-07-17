@@ -17,8 +17,8 @@ impl ExcludedPhraseFilter {
         let mut normalized = Vec::new();
         let mut seen = HashSet::new();
         for phrase in phrases {
-            let phrase = phrase.trim().to_ascii_lowercase();
-            let phrase = truncate_utf8_bytes(phrase, MAX_EXCLUDED_SEARCH_PHRASE_BYTES);
+            let phrase = truncate_utf8_bytes(phrase.trim(), MAX_EXCLUDED_SEARCH_PHRASE_BYTES)
+                .to_ascii_lowercase();
             if phrase.is_empty() || !seen.insert(phrase.clone()) {
                 continue;
             }
@@ -34,7 +34,9 @@ impl ExcludedPhraseFilter {
     #[must_use]
     pub fn from_server_message(message: &ServerMessage) -> Option<Self> {
         match message {
-            ServerMessage::ExcludedSearchPhrases(phrases) => Some(Self::new(phrases.clone())),
+            ServerMessage::ExcludedSearchPhrases(phrases) => {
+                Some(Self::new(phrases.iter().cloned()))
+            }
             _ => None,
         }
     }
@@ -61,7 +63,7 @@ impl ExcludedPhraseFilter {
     }
 }
 
-fn truncate_utf8_bytes(mut value: String, max_bytes: usize) -> String {
+fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> &str {
     if value.len() <= max_bytes {
         return value;
     }
@@ -69,6 +71,5 @@ fn truncate_utf8_bytes(mut value: String, max_bytes: usize) -> String {
     while boundary > 0 && !value.is_char_boundary(boundary) {
         boundary -= 1;
     }
-    value.truncate(boundary);
-    value
+    &value[..boundary]
 }

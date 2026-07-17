@@ -101,6 +101,20 @@ fn excluded_phrase_filter_does_not_let_junk_crowd_out_denials() {
 }
 
 #[test]
+fn excluded_phrase_filter_stops_consuming_after_its_bounded_capacity() {
+    let consumed = Cell::new(0);
+    let phrases = (0..usize::MAX).map(|index| {
+        consumed.set(consumed.get() + 1);
+        format!("phrase-{index}")
+    });
+
+    let filter = ExcludedPhraseFilter::new(phrases);
+
+    assert_eq!(filter.phrases().len(), MAX_EXCLUDED_SEARCH_PHRASES);
+    assert_eq!(consumed.get(), MAX_EXCLUDED_SEARCH_PHRASES);
+}
+
+#[test]
 fn user_watch_state_builds_requests_and_applies_watch_and_status_updates() {
     let mut state = UserWatchState::new();
 
