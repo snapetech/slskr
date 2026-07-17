@@ -166,6 +166,9 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
             "timeoutMs must be between {MIN_BATCH_TIMEOUT_MS} and {MAX_BATCH_TIMEOUT_MS}"
         ));
     }
+    if config.atomic {
+        return Err("atomic batch execution is not supported".to_owned());
+    }
 
     Ok((operations, config))
 }
@@ -243,19 +246,8 @@ pub fn create_success_result(id: String, status: u16, body: String) -> BatchOper
 }
 
 /// Check if operation would cause side effects that shouldn't be atomic
-pub fn is_safe_operation(method: &str, path: &str) -> bool {
-    // GET and HEAD are always safe
-    if matches!(method, "GET" | "HEAD") {
-        return true;
-    }
-
-    // POST/PUT/PATCH/DELETE to test paths are safe
-    if path.contains("/test") || path.contains("/validate") {
-        return true;
-    }
-
-    // Most operations are safe - only prevent atomic execution if explicitly marked
-    !path.contains("/atomic-unsafe")
+pub fn is_safe_operation(method: &str, _path: &str) -> bool {
+    matches!(method, "GET" | "HEAD")
 }
 
 #[cfg(test)]
@@ -315,14 +307,14 @@ mod tests {
                 }
             ],
             "config": {
-                "atomic": true,
+                "atomic": false,
                 "timeoutMs": 60000,
                 "continueOnError": false
             }
         }"#;
 
         let (_ops, config) = parse_batch_request(body).unwrap();
-        assert!(config.atomic);
+        assert!(!config.atomic);
         assert_eq!(config.timeout_ms, 60000);
         assert!(!config.continue_on_error);
     }
@@ -370,6 +362,19 @@ mod tests {
             let (_, config) = parse_batch_request(&body).expect("boundary timeout must pass");
             assert_eq!(config.timeout_ms, timeout_ms);
         }
+    }
+
+    #[test]
+    fn test_batch_rejects_unsupported_atomic_execution() {
+        let body = r#"{
+            "operations": [{"id":"op1","method":"GET","path":"/api/health"}],
+            "config": {"atomic": true}
+        }"#;
+
+        assert_eq!(
+            parse_batch_request(body).expect_err("unsupported atomic batch must fail"),
+            "atomic batch execution is not supported"
+        );
     }
 
     #[test]
@@ -478,12 +483,9 @@ mod tests {
     fn test_is_safe_operation() {
         assert!(is_safe_operation("GET", "/api/health"));
         assert!(is_safe_operation("HEAD", "/api/health"));
-        assert!(is_safe_operation("POST", "/api/test"));
-        assert!(is_safe_operation("POST", "/api/validate"));
-        assert!(!is_safe_operation(
-            "POST",
-            "/api/transfers/123/atomic-unsafe"
-        ));
+        assert!(!is_safe_operation("POST", "/api/webhooks/1/test"));
+        assert!(!is_safe_operation("PUT", "/api/options/yaml/validate"));
+        assert!(!is_safe_operation("DELETE", "/api/transfers/123"));
     }
 
     #[test]
