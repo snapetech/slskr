@@ -1,11 +1,17 @@
 /// Batch operations API for Phase 12
 ///
 /// Allows clients to send multiple API requests in a single HTTP call with
-/// proper validation, error handling, and optional atomic execution.
+/// proper validation, error handling, and bounded execution options.
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
 pub const MAX_BATCH_OPERATIONS: usize = 100;
+pub const MAX_BATCH_OPERATION_ID_BYTES: usize = 256;
+pub const MAX_BATCH_PATH_BYTES: usize = 8 * 1024;
+pub const MAX_BATCH_OPERATION_BODY_BYTES: usize = 512 * 1024;
+pub const MAX_BATCH_HEADERS: usize = 64;
+pub const MAX_BATCH_HEADER_NAME_BYTES: usize = 256;
+pub const MAX_BATCH_HEADER_VALUE_BYTES: usize = 8 * 1024;
 pub const MIN_BATCH_TIMEOUT_MS: u64 = 1;
 pub const MAX_BATCH_TIMEOUT_MS: u64 = 5 * 60 * 1_000;
 
@@ -76,6 +82,7 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
                 .to_owned(),
             None => format!("op_{idx}"),
         };
+        validate_field_size(idx, "id", &id, MAX_BATCH_OPERATION_ID_BYTES)?;
 
         let method = op
             .get("method")
@@ -101,29 +108,47 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
         if !path.starts_with('/') {
             return Err(format!("Operation {} has invalid path: {}", idx, path));
         }
+        validate_field_size(idx, "path", &path, MAX_BATCH_PATH_BYTES)?;
 
         let body = match op.get("body") {
-            Some(value) => Some(
-                value
+            Some(value) => {
+                let value = value
                     .as_str()
-                    .ok_or_else(|| format!("Operation {idx} body must be a string"))?
-                    .to_owned(),
-            ),
+                    .ok_or_else(|| format!("Operation {idx} body must be a string"))?;
+                validate_field_size(idx, "body", value, MAX_BATCH_OPERATION_BODY_BYTES)?;
+                Some(value.to_owned())
+            }
             None => None,
         };
 
         let headers = match op.get("headers") {
-            Some(value) => value
-                .as_object()
-                .ok_or_else(|| format!("Operation {idx} headers must be an object"))?
-                .iter()
-                .map(|(name, value)| {
-                    value
-                        .as_str()
-                        .map(|value| (name.clone(), value.to_owned()))
-                        .ok_or_else(|| format!("Operation {idx} header {name} must be a string"))
-                })
-                .collect::<Result<HashMap<_, _>, _>>()?,
+            Some(value) => {
+                let headers = value
+                    .as_object()
+                    .ok_or_else(|| format!("Operation {idx} headers must be an object"))?;
+                if headers.len() > MAX_BATCH_HEADERS {
+                    return Err(format!(
+                        "Operation {idx} has too many headers: {}, max is {MAX_BATCH_HEADERS}",
+                        headers.len()
+                    ));
+                }
+                headers
+                    .iter()
+                    .map(|(name, value)| {
+                        validate_field_size(idx, "header name", name, MAX_BATCH_HEADER_NAME_BYTES)?;
+                        let value = value.as_str().ok_or_else(|| {
+                            format!("Operation {idx} header {name} must be a string")
+                        })?;
+                        validate_field_size(
+                            idx,
+                            "header value",
+                            value,
+                            MAX_BATCH_HEADER_VALUE_BYTES,
+                        )?;
+                        Ok((name.clone(), value.to_owned()))
+                    })
+                    .collect::<Result<HashMap<_, _>, String>>()?
+            }
             None => HashMap::new(),
         };
 
@@ -189,6 +214,20 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
     }
 
     Ok((operations, config))
+}
+
+fn validate_field_size(
+    operation_index: usize,
+    field: &str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<(), String> {
+    if value.len() > max_bytes {
+        return Err(format!(
+            "Operation {operation_index} {field} exceeds {max_bytes} bytes"
+        ));
+    }
+    Ok(())
 }
 
 /// Validate batch operations
@@ -436,6 +475,88 @@ mod tests {
             ),
         ] {
             assert_eq!(parse_batch_request(body).unwrap_err(), expected);
+        }
+    }
+
+    #[test]
+    fn test_batch_rejects_oversized_fields_and_header_maps() {
+        for (field, value, expected) in [
+            (
+                "id",
+                "i".repeat(MAX_BATCH_OPERATION_ID_BYTES + 1),
+                format!("Operation 0 id exceeds {MAX_BATCH_OPERATION_ID_BYTES} bytes"),
+            ),
+            (
+                "path",
+                format!("/{}", "p".repeat(MAX_BATCH_PATH_BYTES)),
+                format!("Operation 0 path exceeds {MAX_BATCH_PATH_BYTES} bytes"),
+            ),
+            (
+                "body",
+                "b".repeat(MAX_BATCH_OPERATION_BODY_BYTES + 1),
+                format!("Operation 0 body exceeds {MAX_BATCH_OPERATION_BODY_BYTES} bytes"),
+            ),
+        ] {
+            let mut operation = serde_json::json!({
+                "id": if field == "id" { value.as_str() } else { "op" },
+                "method": "GET",
+                "path": if field == "path" { value.as_str() } else { "/api/health" },
+            });
+            if field == "body" {
+                operation["body"] = serde_json::Value::String(value);
+            }
+            let body = serde_json::json!({"operations": [operation]}).to_string();
+            assert_eq!(parse_batch_request(&body).unwrap_err(), expected);
+        }
+
+        let headers = (0..=MAX_BATCH_HEADERS)
+            .map(|index| {
+                (
+                    format!("x-{index}"),
+                    serde_json::Value::String("v".to_owned()),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let body = serde_json::json!({
+            "operations": [{
+                "method": "GET",
+                "path": "/api/health",
+                "headers": headers,
+            }]
+        })
+        .to_string();
+        assert_eq!(
+            parse_batch_request(&body).unwrap_err(),
+            format!(
+                "Operation 0 has too many headers: {}, max is {MAX_BATCH_HEADERS}",
+                MAX_BATCH_HEADERS + 1
+            )
+        );
+
+        for (name, value, expected) in [
+            (
+                "n".repeat(MAX_BATCH_HEADER_NAME_BYTES + 1),
+                "v".to_owned(),
+                format!("Operation 0 header name exceeds {MAX_BATCH_HEADER_NAME_BYTES} bytes"),
+            ),
+            (
+                "x-test".to_owned(),
+                "v".repeat(MAX_BATCH_HEADER_VALUE_BYTES + 1),
+                format!("Operation 0 header value exceeds {MAX_BATCH_HEADER_VALUE_BYTES} bytes"),
+            ),
+        ] {
+            let headers = [(name, serde_json::Value::String(value))]
+                .into_iter()
+                .collect::<serde_json::Map<_, _>>();
+            let body = serde_json::json!({
+                "operations": [{
+                    "method": "GET",
+                    "path": "/api/health",
+                    "headers": headers,
+                }]
+            })
+            .to_string();
+            assert_eq!(parse_batch_request(&body).unwrap_err(), expected);
         }
     }
 
