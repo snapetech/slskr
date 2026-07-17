@@ -56,11 +56,17 @@ impl DownloadTransfer {
         }
     }
 
-    pub fn queue_upload_message(&mut self) -> PeerMessage {
-        self.state = DownloadState::Queued;
-        PeerMessage::QueueUpload {
-            filename: self.filename.clone(),
+    pub fn queue_upload_message(&mut self) -> Result<PeerMessage, ClientError> {
+        if !matches!(self.state, DownloadState::New | DownloadState::Queued) {
+            return Err(ClientError::InvalidTransferState {
+                operation: "queue download",
+                state: self.state.name(),
+            });
         }
+        self.state = DownloadState::Queued;
+        Ok(PeerMessage::QueueUpload {
+            filename: self.filename.clone(),
+        })
     }
 
     pub fn place_in_queue_request_message(&self) -> PeerMessage {
@@ -102,23 +108,31 @@ impl DownloadTransfer {
         }
     }
 
-    pub fn accept_upload_response_message(&mut self, size: u64) -> PeerMessage {
+    pub fn accept_upload_response_message(
+        &mut self,
+        size: u64,
+    ) -> Result<PeerMessage, ClientError> {
+        self.require_requested("accept download")?;
         self.state = DownloadState::Accepted { size: Some(size) };
-        PeerMessage::TransferResponse(TransferResponse::Allowed {
+        Ok(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: self.token,
             size: Some(size),
-        })
+        }))
     }
 
-    pub fn reject_upload_response_message(&mut self, reason: impl Into<String>) -> PeerMessage {
+    pub fn reject_upload_response_message(
+        &mut self,
+        reason: impl Into<String>,
+    ) -> Result<PeerMessage, ClientError> {
+        self.require_requested("reject download")?;
         let reason = reason.into();
         self.state = DownloadState::Rejected {
             reason: reason.clone(),
         };
-        PeerMessage::TransferResponse(TransferResponse::Rejected {
+        Ok(PeerMessage::TransferResponse(TransferResponse::Rejected {
             token: self.token,
             reason,
-        })
+        }))
     }
 
     pub async fn receive_file_from<S>(
@@ -278,15 +292,21 @@ impl UploadTransfer {
         }
     }
 
-    pub fn transfer_request_message(&mut self) -> PeerMessage {
+    pub fn transfer_request_message(&mut self) -> Result<PeerMessage, ClientError> {
+        if !matches!(self.state, UploadState::New | UploadState::Requested) {
+            return Err(ClientError::InvalidTransferState {
+                operation: "request upload",
+                state: self.state.name(),
+            });
+        }
         self.state = UploadState::Requested;
-        PeerMessage::TransferRequest(TransferRequest {
+        Ok(PeerMessage::TransferRequest(TransferRequest {
             direction: UPLOAD_DIRECTION,
             token: self.token,
             filename: self.filename.clone(),
             filename_encoding: ProtocolTextEncoding::Utf8,
             size: Some(self.size),
-        })
+        }))
     }
 
     pub fn handle_peer_message(&mut self, message: PeerMessage) -> Result<(), ClientError> {
