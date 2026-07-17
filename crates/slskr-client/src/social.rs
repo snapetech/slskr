@@ -346,15 +346,18 @@ impl PrivateMessageInbox {
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> Option<ServerMessage> {
         match message {
             ServerMessage::MessageUserResponse(message) => {
+                let username = message.username.trim();
                 if message.username.len() > MAX_STORED_SOCIAL_FIELD_BYTES
                     || message.message.len() > MAX_STORED_SOCIAL_FIELD_BYTES
-                    || message.username.trim().is_empty()
+                    || username.is_empty()
                     || message.username.chars().any(char::is_control)
                 {
                     return Some(ServerMessage::MessageAcked { id: message.id });
                 }
                 if !self.messages.iter().any(|stored| stored.id == message.id) {
-                    self.messages.push(message.clone());
+                    let mut message = message.clone();
+                    message.username = username.to_owned();
+                    self.messages.push(message);
                     retain_newest(&mut self.messages, MAX_STORED_PRIVATE_MESSAGES);
                 }
                 Some(ServerMessage::MessageAcked { id: message.id })
@@ -373,7 +376,7 @@ impl PrivateMessageInbox {
 mod tests {
     use std::cell::Cell;
 
-    use slskr_protocol::server::ServerMessage;
+    use slskr_protocol::server::{PrivateMessage, ServerMessage};
 
     use super::{
         private_message_users_command, RoomState, UserWatchState,
@@ -416,5 +419,22 @@ mod tests {
                 room: room.to_owned(),
             }));
         }
+    }
+
+    #[test]
+    fn private_message_inbox_canonicalizes_sender_identity() {
+        let mut inbox = super::PrivateMessageInbox::new();
+
+        assert_eq!(
+            inbox.apply_server_message(&ServerMessage::MessageUserResponse(PrivateMessage {
+                id: 1,
+                timestamp: 2,
+                username: "  alice  ".to_owned(),
+                message: "hello".to_owned(),
+                is_new: true,
+            })),
+            Some(ServerMessage::MessageAcked { id: 1 })
+        );
+        assert_eq!(inbox.messages()[0].username, "alice");
     }
 }
