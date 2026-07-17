@@ -25,6 +25,9 @@ fn choose_parent_ignores_self_and_invalid_ports_then_picks_stable_candidate() {
         possible_parent("LOCAL", [10, 0, 0, 1], 2234),
         possible_parent("zero", [10, 0, 0, 2], 0),
         possible_parent("overflow", [10, 0, 0, 5], u32::from(u16::MAX) + 1),
+        possible_parent("unspecified", [0, 0, 0, 0], 2234),
+        possible_parent("multicast", [224, 0, 0, 1], 2234),
+        possible_parent("broadcast", [255, 255, 255, 255], 2234),
         possible_parent("zoe", [10, 0, 0, 4], 2234),
         possible_parent("alice", [10, 0, 0, 3], 2234),
     ];
@@ -128,19 +131,26 @@ fn parent_state_tracks_connect_disconnect_reset_and_server_reports() {
 }
 
 #[test]
-fn connect_parent_rejects_invalid_identity_without_mutating_branch_state() {
+fn connect_parent_rejects_invalid_identity_or_endpoint_without_mutating_branch_state() {
     let mut tree = DistributedTree::new("local");
 
-    for (username, port) in [
-        ("   ".to_owned(), 2234),
-        ("x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1), 2234),
-        (" LOCAL ".to_owned(), 2234),
-        ("parent".to_owned(), 0),
-        ("parent".to_owned(), u32::from(u16::MAX) + 1),
+    for (username, ip, port) in [
+        ("   ".to_owned(), [10, 0, 0, 2], 2234),
+        (
+            "x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1),
+            [10, 0, 0, 2],
+            2234,
+        ),
+        (" LOCAL ".to_owned(), [10, 0, 0, 2], 2234),
+        ("parent".to_owned(), [10, 0, 0, 2], 0),
+        ("parent".to_owned(), [10, 0, 0, 2], u32::from(u16::MAX) + 1),
+        ("parent".to_owned(), [0, 0, 0, 0], 2234),
+        ("parent".to_owned(), [224, 0, 0, 1], 2234),
+        ("parent".to_owned(), [255, 255, 255, 255], 2234),
     ] {
         let (tree_side, _peer_side) = duplex(64);
         tree.connect_parent(
-            parent_info(&username, [10, 0, 0, 2], port),
+            parent_info(&username, ip, port),
             DistributedConnection::new(tree_side),
         );
 

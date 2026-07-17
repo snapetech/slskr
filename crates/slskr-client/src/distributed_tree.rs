@@ -145,7 +145,7 @@ impl<S> DistributedTree<S> {
                     .username
                     .eq_ignore_ascii_case(&self.local_username)
             })
-            .filter(|candidate| valid_tcp_port(candidate.port))
+            .filter(valid_parent_endpoint)
             .filter(|candidate| !candidate.username.trim().is_empty())
             .filter(|candidate| candidate.username.len() <= MAX_DISTRIBUTED_USERNAME_BYTES)
             .min_by(|left, right| {
@@ -164,7 +164,7 @@ impl<S> DistributedTree<S> {
         if info.username.is_empty()
             || info.username.len() > MAX_DISTRIBUTED_USERNAME_BYTES
             || info.username.eq_ignore_ascii_case(&self.local_username)
-            || !valid_tcp_port(info.port)
+            || !valid_parent_endpoint(&info)
         {
             return;
         }
@@ -392,6 +392,13 @@ fn username_key(username: &str) -> String {
 
 const fn valid_tcp_port(port: u32) -> bool {
     port > 0 && port <= u16::MAX as u32
+}
+
+fn valid_parent_endpoint(parent: &ParentInfo) -> bool {
+    valid_tcp_port(parent.port)
+        && !parent.ip.is_unspecified()
+        && !parent.ip.is_multicast()
+        && !parent.ip.is_broadcast()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
