@@ -136,7 +136,10 @@ fn normalize_wishlist_terms(terms: impl IntoIterator<Item = String>) -> Vec<Stri
     let mut seen = HashSet::new();
     for term in terms {
         let term = truncate_utf8_bytes(term.trim(), MAX_WISHLIST_SEARCH_TERM_BYTES);
-        if term.is_empty() || !seen.insert(term.to_ascii_lowercase()) {
+        if term.is_empty()
+            || term.chars().any(char::is_control)
+            || !seen.insert(term.to_ascii_lowercase())
+        {
             continue;
         }
         normalized.push(term);
@@ -272,6 +275,9 @@ fn bounded_search_field(value: String, field: &'static str) -> Result<String, Cl
     let value = value.trim();
     if value.is_empty() {
         return Err(ClientError::BlankSearchField { field });
+    }
+    if value.chars().any(char::is_control) {
+        return Err(ClientError::InvalidSearchField { field });
     }
     if value.len() > MAX_OUTBOUND_SEARCH_FIELD_BYTES {
         return Err(ClientError::SearchFieldTooLong {
@@ -656,7 +662,7 @@ where
     }
 
     fn response_message(&self, token: u32, query: &str) -> Option<PeerMessage> {
-        if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES {
+        if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES || query.chars().any(char::is_control) {
             return None;
         }
         if !self.excluded_filter.allows_query(query) {

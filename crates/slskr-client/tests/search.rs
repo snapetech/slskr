@@ -176,6 +176,34 @@ async fn outbound_searches_reject_blank_fields_before_consuming_a_token() {
     );
 }
 
+#[tokio::test]
+async fn outbound_searches_reject_control_characters_before_consuming_a_token() {
+    let (client, _server) = duplex(512);
+    let mut dispatcher =
+        SearchDispatcher::new(ServerSession::new(ServerConnection::new(client)), 450);
+
+    for (result, expected_field) in [
+        (dispatcher.search_global("rare\nforged").await, "query"),
+        (
+            dispatcher.search_user("alice\nforged", "query").await,
+            "username",
+        ),
+        (
+            dispatcher.search_room("room\tforged", "query").await,
+            "room",
+        ),
+        (dispatcher.search_wishlist("rare\rforged").await, "query"),
+    ] {
+        assert!(matches!(
+            result,
+            Err(ClientError::InvalidSearchField { field }) if field == expected_field
+        ));
+    }
+
+    let handle = dispatcher.search_global("valid").await.unwrap();
+    assert_eq!(handle.token, 450);
+}
+
 #[test]
 fn search_results_collect_by_token() {
     let mut results = SearchResults::new();
@@ -483,7 +511,11 @@ fn wishlist_scheduler_bounds_deduplicates_and_truncates_terms() {
     let options = WishlistSearchSchedulerOptions::new(Duration::from_secs(30), None).unwrap();
     let oversized = "é".repeat(MAX_WISHLIST_SEARCH_TERM_BYTES);
     let terms = std::iter::once(oversized)
-        .chain([" Rare ".to_owned(), "rare".to_owned()])
+        .chain([
+            "bad\nterm".to_owned(),
+            " Rare ".to_owned(),
+            "rare".to_owned(),
+        ])
         .chain((0..MAX_WISHLIST_SEARCH_TERMS + 5).map(|index| format!("term-{index}")));
     let mut scheduler = WishlistSearchScheduler::new(terms, options).unwrap();
 
@@ -501,6 +533,7 @@ fn wishlist_scheduler_bounds_deduplicates_and_truncates_terms() {
     }
 
     assert_eq!(emitted.len(), MAX_WISHLIST_SEARCH_TERMS);
+    assert!(!emitted.iter().any(|term| term.contains('\n')));
     assert_eq!(
         emitted
             .iter()
@@ -762,6 +795,29 @@ fn responder_rejects_oversized_queries_before_searching_the_index() {
             username: "remote".to_owned(),
             token: 56,
             query: oversized,
+        })
+        .is_none());
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn responder_rejects_control_characters_before_searching_the_index() {
+    let calls = Cell::new(0);
+    let responder = SearchResponder::new("local", CountingIndex(&calls)).unwrap();
+
+    assert!(responder
+        .respond_to_server_search(&ServerMessage::FileSearchIncoming {
+            username: "remote".to_owned(),
+            token: 55,
+            query: "rare\nforged".to_owned(),
+        })
+        .is_none());
+    assert!(responder
+        .respond_to_distributed_search(&DistributedSearch {
+            identifier: 49,
+            username: "remote".to_owned(),
+            token: 56,
+            query: "rare\rforged".to_owned(),
         })
         .is_none());
     assert_eq!(calls.get(), 0);
