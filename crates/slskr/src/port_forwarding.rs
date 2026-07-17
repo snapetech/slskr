@@ -10,7 +10,7 @@ use std::{
 
 use ed25519_dalek::SigningKey;
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use slskr_client::overlay::{
     connect_tls_overlay, CloseTunnelRequest, GetTunnelDataRequest, MeshHello, MeshServiceCall,
     OpenTunnelRequest, OpenTunnelResponse, TlsOverlayClient, TunnelDataRequest, TunnelDataResponse,
@@ -28,6 +28,7 @@ const MAX_FORWARDING_RULES: usize = 128;
 const MAX_FORWARDING_CONNECTIONS: usize = 128;
 pub(crate) const MAX_GATEWAY_ENDPOINTS: usize = 4;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
+const MAX_TUNNEL_ID_BYTES: usize = 128;
 const SERVICE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const EMPTY_POLL_DELAY: Duration = Duration::from_millis(10);
 
@@ -361,12 +362,25 @@ async fn open_tunnel(
     )
     .map_err(|error| format!("OpenTunnel payload failed: {error}"))?;
     let reply = service_call(client, "OpenTunnel", payload).await?;
-    let response: OpenTunnelResponse = serde_json::from_slice(&reply)
+    parse_open_tunnel_response(&reply)
+}
+
+fn parse_open_tunnel_response(reply: &[u8]) -> Result<String, String> {
+    let response: OpenTunnelResponse = serde_json::from_slice(reply)
         .map_err(|error| format!("OpenTunnel response failed: {error}"))?;
-    if !response.accepted || response.tunnel_id.trim().is_empty() {
+    if !response.accepted
+        || response.tunnel_id.trim().is_empty()
+        || response.tunnel_id.len() > MAX_TUNNEL_ID_BYTES
+    {
         return Err("Gateway rejected the tunnel".to_owned());
     }
     Ok(response.tunnel_id)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct TunnelDataAcknowledgement {
+    sent: usize,
 }
 
 async fn send_tunnel_data(
@@ -379,7 +393,16 @@ async fn send_tunnel_data(
         data: data.to_vec(),
     })
     .map_err(|error| format!("TunnelData payload failed: {error}"))?;
-    service_call(client, "TunnelData", payload).await?;
+    let reply = service_call(client, "TunnelData", payload).await?;
+    validate_tunnel_data_acknowledgement(&reply, data.len())
+}
+
+fn validate_tunnel_data_acknowledgement(reply: &[u8], expected: usize) -> Result<(), String> {
+    let acknowledgement: TunnelDataAcknowledgement = serde_json::from_slice(reply)
+        .map_err(|error| format!("TunnelData response failed: {error}"))?;
+    if acknowledgement.sent != expected {
+        return Err("TunnelData byte count did not match payload".to_owned());
+    }
     Ok(())
 }
 
@@ -392,10 +415,17 @@ async fn receive_tunnel_data(
     })
     .map_err(|error| format!("GetTunnelData payload failed: {error}"))?;
     let reply = service_call(client, "GetTunnelData", payload).await?;
-    let response: TunnelDataResponse = serde_json::from_slice(&reply)
+    parse_tunnel_data_response(&reply)
+}
+
+fn parse_tunnel_data_response(reply: &[u8]) -> Result<Vec<u8>, String> {
+    let response: TunnelDataResponse = serde_json::from_slice(reply)
         .map_err(|error| format!("GetTunnelData response failed: {error}"))?;
     if response.bytes_received != response.data.len() {
         return Err("GetTunnelData byte count did not match payload".to_owned());
+    }
+    if response.data.len() > TUNNEL_CHUNK_BYTES {
+        return Err("GetTunnelData payload is too large".to_owned());
     }
     Ok(response.data)
 }
@@ -640,6 +670,44 @@ mod tests {
         );
         drop(local);
         stalled_gateway.abort();
+    }
+
+    #[test]
+    fn gateway_tunnel_responses_enforce_integrity_and_size_contracts() {
+        let accepted = serde_json::to_vec(&OpenTunnelResponse {
+            tunnel_id: "tunnel-1".to_owned(),
+            accepted: true,
+        })
+        .unwrap();
+        assert_eq!(parse_open_tunnel_response(&accepted).unwrap(), "tunnel-1");
+
+        let oversized_id = serde_json::to_vec(&OpenTunnelResponse {
+            tunnel_id: "x".repeat(MAX_TUNNEL_ID_BYTES + 1),
+            accepted: true,
+        })
+        .unwrap();
+        assert!(parse_open_tunnel_response(&oversized_id).is_err());
+
+        validate_tunnel_data_acknowledgement(br#"{"Sent":5}"#, 5).unwrap();
+        assert!(validate_tunnel_data_acknowledgement(br#"{"Sent":4}"#, 5).is_err());
+        assert!(validate_tunnel_data_acknowledgement(br#"{}"#, 5).is_err());
+
+        let valid_data = serde_json::to_vec(&TunnelDataResponse {
+            data: vec![7; TUNNEL_CHUNK_BYTES],
+            bytes_received: TUNNEL_CHUNK_BYTES,
+        })
+        .unwrap();
+        assert_eq!(
+            parse_tunnel_data_response(&valid_data).unwrap().len(),
+            TUNNEL_CHUNK_BYTES
+        );
+
+        let oversized_data = serde_json::to_vec(&TunnelDataResponse {
+            data: vec![7; TUNNEL_CHUNK_BYTES + 1],
+            bytes_received: TUNNEL_CHUNK_BYTES + 1,
+        })
+        .unwrap();
+        assert!(parse_tunnel_data_response(&oversized_data).is_err());
     }
 
     #[tokio::test]
