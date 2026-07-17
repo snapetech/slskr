@@ -387,12 +387,12 @@ impl PeerCapabilityRegistry {
 
     pub fn update(
         &mut self,
-        descriptor: PeerCapabilityDescriptor,
+        mut descriptor: PeerCapabilityDescriptor,
         now: SystemTime,
     ) -> Result<Option<PeerCapabilityDescriptor>, CapabilityError> {
-        bounded_non_blank(descriptor.username.clone(), "username")?;
+        descriptor.username = bounded_non_blank(descriptor.username, "username")?;
         descriptor.verify(now)?;
-        let key = descriptor.username.to_ascii_lowercase();
+        let key = capability_username_key(&descriptor.username);
         self.prune_expired(now)?;
         if self
             .records
@@ -411,7 +411,7 @@ impl PeerCapabilityRegistry {
 
     #[must_use]
     pub fn get(&self, username: &str) -> Option<&PeerCapabilityDescriptor> {
-        self.records.get(&username.to_ascii_lowercase())
+        self.records.get(&capability_username_key(username))
     }
 
     #[must_use]
@@ -431,6 +431,10 @@ impl PeerCapabilityRegistry {
             .retain(|_, descriptor| descriptor.expires_at_unix > now);
         Ok(before - self.records.len())
     }
+}
+
+fn capability_username_key(username: &str) -> String {
+    username.trim().to_ascii_lowercase()
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -1087,6 +1091,33 @@ mod tests {
         .unwrap();
         assert!(registry.update(rotated.clone(), later).is_ok());
         assert_eq!(registry.get("ALICE").unwrap().peer_id, rotated.peer_id);
+    }
+
+    #[test]
+    fn registry_canonicalizes_username_before_identity_pinning() {
+        let mut registry = PeerCapabilityRegistry::new();
+        registry.update(descriptor(), now()).unwrap();
+
+        let replacement_key = SigningKey::from_bytes(&[9; 32]);
+        let mut replacement = PeerCapabilityDescriptor::unsigned(
+            "Alice",
+            vec![FEATURE_CAPABILITIES_V1.to_owned()],
+            Vec::new(),
+            Duration::from_secs(60),
+            &replacement_key,
+            now(),
+        )
+        .unwrap()
+        .sign(&replacement_key)
+        .unwrap();
+        replacement.username = " Alice ".to_owned();
+
+        assert_eq!(
+            registry.update(replacement, now()).unwrap_err(),
+            CapabilityError::PeerIdentityChanged
+        );
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.get(" ALICE ").unwrap().username, "Alice");
     }
 
     #[test]
