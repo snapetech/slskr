@@ -14,25 +14,35 @@ const MAX_CONTENT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CONTENT_ID_BYTES: usize = 512;
 
 struct StagingFileGuard {
+    file: Option<tokio::fs::File>,
     path: PathBuf,
     committed: bool,
 }
 
 impl StagingFileGuard {
-    fn new(path: &Path) -> Self {
+    fn new(path: &Path, file: tokio::fs::File) -> Self {
         Self {
+            file: Some(file),
             path: path.to_owned(),
             committed: false,
         }
     }
 
+    fn file_mut(&mut self) -> Result<&mut tokio::fs::File, String> {
+        self.file
+            .as_mut()
+            .ok_or_else(|| "mesh content staging file is closed".to_owned())
+    }
+
     fn commit(&mut self) {
+        self.file.take();
         self.committed = true;
     }
 }
 
 impl Drop for StagingFileGuard {
     fn drop(&mut self) {
+        self.file.take();
         if !self.committed {
             let _ = std::fs::remove_file(&self.path);
         }
@@ -76,11 +86,11 @@ async fn fetch_content_inner(
     {
         options.mode(0o600);
     }
-    let mut file = options
+    let file = options
         .open(output)
         .await
         .map_err(|error| format!("mesh content staging create failed: {error}"))?;
-    let mut staging = StagingFileGuard::new(output);
+    let mut staging = StagingFileGuard::new(output, file);
     let result = async {
         let mut hello = MeshHello::new(
             local_username,
@@ -136,13 +146,17 @@ async fn fetch_content_inner(
                     reply.payload.len()
                 ));
             }
-            file.write_all(&reply.payload)
+            staging
+                .file_mut()?
+                .write_all(&reply.payload)
                 .await
                 .map_err(|error| format!("mesh content staging write failed: {error}"))?;
             hasher.update(&reply.payload);
             offset += length;
         }
-        file.sync_all()
+        staging
+            .file_mut()?
+            .sync_all()
             .await
             .map_err(|error| format!("mesh content staging sync failed: {error}"))?;
         let actual = hex::encode(hasher.finalize());
@@ -152,7 +166,6 @@ async fn fetch_content_inner(
         Ok(())
     }
     .await;
-    drop(file);
     if result.is_ok() {
         staging.commit();
     }
