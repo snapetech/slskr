@@ -83,7 +83,11 @@ impl<S> PeerConnectionCache<S> {
         let Some(key) = lookup_username_key(username) else {
             return false;
         };
-        self.connections.lock().await.contains_key(&key)
+        let Some(connection) = self.connections.lock().await.get(&key).cloned() else {
+            return false;
+        };
+        let is_active = connection.lock().await.is_some();
+        is_active
     }
 
     pub async fn len(&self) -> usize {
@@ -216,5 +220,27 @@ pub(crate) fn normalize_peer_username(username: &str) -> Result<&str, ClientErro
         })
     } else {
         Ok(username)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stream::PeerMessageConnection;
+    use tokio::io::duplex;
+
+    #[tokio::test]
+    async fn contains_rejects_stale_connection_tombstones() {
+        let cache = PeerConnectionCache::new();
+        let (stream, _) = duplex(64);
+        cache
+            .insert("peer", PeerMessageConnection::new(stream))
+            .await
+            .unwrap();
+
+        let connection = cache.connections.lock().await.get("peer").cloned().unwrap();
+        *connection.lock().await = None;
+
+        assert!(!cache.contains("peer").await);
     }
 }
