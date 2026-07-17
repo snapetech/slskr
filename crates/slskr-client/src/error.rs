@@ -62,6 +62,14 @@ pub enum ClientError {
         length: usize,
         max: usize,
     },
+    #[error("social {field} must not be blank")]
+    BlankSocialField { field: &'static str },
+    #[error("social {field} length {length} exceeds maximum {max}")]
+    SocialFieldTooLong {
+        field: &'static str,
+        length: usize,
+        max: usize,
+    },
     #[error("{field} interval must be positive")]
     InvalidInterval { field: &'static str },
     #[error("capability exchange failed: {0}")]

@@ -109,18 +109,16 @@ impl UserWatchState {
                 < self.max_records
     }
 
-    #[must_use]
-    pub fn watch_message(username: impl Into<String>) -> ServerMessage {
-        ServerMessage::WatchUserRequest {
-            username: username.into().trim().to_owned(),
-        }
+    pub fn watch_message(username: impl Into<String>) -> Result<ServerMessage, ClientError> {
+        Ok(ServerMessage::WatchUserRequest {
+            username: normalize_social_field(username.into(), "watch username")?,
+        })
     }
 
-    #[must_use]
-    pub fn unwatch_message(username: impl Into<String>) -> ServerMessage {
-        ServerMessage::UnwatchUser {
-            username: username.into().trim().to_owned(),
-        }
+    pub fn unwatch_message(username: impl Into<String>) -> Result<ServerMessage, ClientError> {
+        Ok(ServerMessage::UnwatchUser {
+            username: normalize_social_field(username.into(), "unwatch username")?,
+        })
     }
 
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
@@ -224,11 +222,10 @@ impl RoomState {
         ServerMessage::LeaveGlobalRoom
     }
 
-    #[must_use]
-    pub fn leave_room_message(room: impl Into<String>) -> ServerMessage {
-        ServerMessage::LeaveRoom {
-            room: room.into().trim().to_owned(),
-        }
+    pub fn leave_room_message(room: impl Into<String>) -> Result<ServerMessage, ClientError> {
+        Ok(ServerMessage::LeaveRoom {
+            room: normalize_social_field(room.into(), "room")?,
+        })
     }
 
     pub fn apply_server_message(&mut self, message: &ServerMessage) -> bool {
@@ -283,6 +280,21 @@ impl RoomState {
 
 fn room_key(room: &str) -> String {
     room.trim().to_ascii_lowercase()
+}
+
+fn normalize_social_field(value: String, field: &'static str) -> Result<String, ClientError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ClientError::BlankSocialField { field });
+    }
+    if value.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
+        return Err(ClientError::SocialFieldTooLong {
+            field,
+            length: value.len(),
+            max: MAX_STORED_SOCIAL_FIELD_BYTES,
+        });
+    }
+    Ok(value.to_owned())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

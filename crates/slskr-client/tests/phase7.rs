@@ -119,13 +119,13 @@ fn user_watch_state_builds_requests_and_applies_watch_and_status_updates() {
     let mut state = UserWatchState::new();
 
     assert_eq!(
-        UserWatchState::watch_message("alice"),
+        UserWatchState::watch_message("alice").unwrap(),
         ServerMessage::WatchUserRequest {
             username: "alice".to_owned(),
         }
     );
     assert_eq!(
-        UserWatchState::unwatch_message("alice"),
+        UserWatchState::unwatch_message("alice").unwrap(),
         ServerMessage::UnwatchUser {
             username: "alice".to_owned(),
         }
@@ -161,6 +161,29 @@ fn user_watch_state_builds_requests_and_applies_watch_and_status_updates() {
     }));
     assert!(state.watched("alice").is_none());
     assert!(state.status("alice").is_none());
+}
+
+#[test]
+fn social_command_builders_reject_malformed_targets() {
+    assert!(matches!(
+        UserWatchState::watch_message("   ").unwrap_err(),
+        ClientError::BlankSocialField {
+            field: "watch username"
+        }
+    ));
+    assert!(matches!(
+        UserWatchState::unwatch_message("x".repeat(MAX_STORED_SOCIAL_FIELD_BYTES + 1))
+            .unwrap_err(),
+        ClientError::SocialFieldTooLong {
+            field: "unwatch username",
+            length,
+            max: MAX_STORED_SOCIAL_FIELD_BYTES,
+        } if length == MAX_STORED_SOCIAL_FIELD_BYTES + 1
+    ));
+    assert!(matches!(
+        RoomState::leave_room_message("\t").unwrap_err(),
+        ClientError::BlankSocialField { field: "room" }
+    ));
 }
 
 #[test]
@@ -265,7 +288,7 @@ fn room_state_tracks_global_messages_and_leave_requests() {
         ServerMessage::LeaveGlobalRoom
     );
     assert_eq!(
-        RoomState::leave_room_message("lobby"),
+        RoomState::leave_room_message("lobby").unwrap(),
         ServerMessage::LeaveRoom {
             room: "lobby".to_owned(),
         }
