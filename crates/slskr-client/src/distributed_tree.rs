@@ -161,7 +161,11 @@ impl<S> DistributedTree<S> {
             username: info.username.trim().to_owned(),
             ..info
         };
-        if info.username.is_empty() || info.username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+        if info.username.is_empty()
+            || info.username.len() > MAX_DISTRIBUTED_USERNAME_BYTES
+            || info.username.eq_ignore_ascii_case(&self.local_username)
+            || info.port == 0
+        {
             return;
         }
         self.branch_level = 1;

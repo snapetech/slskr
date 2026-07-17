@@ -130,13 +130,15 @@ fn parent_state_tracks_connect_disconnect_reset_and_server_reports() {
 fn connect_parent_rejects_invalid_identity_without_mutating_branch_state() {
     let mut tree = DistributedTree::new("local");
 
-    for username in [
-        "   ".to_owned(),
-        "x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1),
+    for (username, port) in [
+        ("   ".to_owned(), 2234),
+        ("x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1), 2234),
+        (" LOCAL ".to_owned(), 2234),
+        ("parent".to_owned(), 0),
     ] {
         let (tree_side, _peer_side) = duplex(64);
         tree.connect_parent(
-            parent_info(&username, [10, 0, 0, 2], 2234),
+            parent_info(&username, [10, 0, 0, 2], port),
             DistributedConnection::new(tree_side),
         );
 
