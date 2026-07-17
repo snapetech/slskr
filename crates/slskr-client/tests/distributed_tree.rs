@@ -214,6 +214,19 @@ fn parent_blank_branch_root_is_ignored_without_mutating_state() {
 }
 
 #[test]
+fn parent_local_branch_root_is_ignored_without_mutating_state() {
+    let mut tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+
+    assert_eq!(
+        tree.handle_parent_message(DistributedMessage::BranchRoot {
+            username: " LOCAL ".to_owned(),
+        }),
+        DistributedEvent::Ignored
+    );
+    assert_eq!(tree.branch_root(), "local");
+}
+
+#[test]
 fn child_depth_updates_local_child_depth() {
     let (child_a, _peer_a) = duplex(512);
     let (child_b, _peer_b) = duplex(512);
@@ -499,6 +512,54 @@ fn distributed_tree_rejects_blank_child_username_without_storing_it() {
 
     assert!(matches!(error, ClientError::BlankDistributedUsername));
     assert_eq!(tree.children_len(), 0);
+}
+
+#[test]
+fn distributed_tree_rejects_local_identity_as_child() {
+    let mut tree = DistributedTree::new("local");
+    let (child, _) = duplex(64);
+
+    assert!(matches!(
+        tree.add_child(" LOCAL ", DistributedConnection::new(child)),
+        Err(ClientError::DistributedIdentityLoop { username }) if username == "LOCAL"
+    ));
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[test]
+fn distributed_tree_rejects_parent_identity_as_child() {
+    let mut tree = DistributedTree::new("local");
+    let (parent, _) = duplex(64);
+    tree.connect_parent(
+        parent_info("parent", [10, 0, 0, 1], 2234),
+        DistributedConnection::new(parent),
+    );
+    let (child, _) = duplex(64);
+
+    assert!(matches!(
+        tree.add_child("PARENT", DistributedConnection::new(child)),
+        Err(ClientError::DistributedIdentityLoop { username }) if username == "PARENT"
+    ));
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[test]
+fn distributed_tree_rejects_existing_child_as_parent() {
+    let mut tree = DistributedTree::new("local");
+    let (child, _) = duplex(64);
+    tree.add_child("peer", DistributedConnection::new(child))
+        .unwrap();
+    let (parent, _) = duplex(64);
+
+    tree.connect_parent(
+        parent_info("PEER", [10, 0, 0, 1], 2234),
+        DistributedConnection::new(parent),
+    );
+
+    assert!(tree.parent().is_none());
+    assert_eq!(tree.branch_level(), 0);
+    assert_eq!(tree.branch_root(), "local");
+    assert!(tree.child_info("peer").is_some());
 }
 
 #[tokio::test]

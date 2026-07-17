@@ -106,6 +106,8 @@ pub enum ClientError {
     BlankDistributedUsername,
     #[error("distributed username length {length} exceeds maximum {max}")]
     DistributedUsernameTooLong { length: usize, max: usize },
+    #[error("distributed connection to {username} would create an identity loop")]
+    DistributedIdentityLoop { username: String },
 }
 
 impl ClientError {

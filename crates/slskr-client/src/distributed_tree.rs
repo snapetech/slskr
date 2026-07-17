@@ -169,6 +169,7 @@ impl<S> DistributedTree<S> {
         if info.username.is_empty()
             || info.username.len() > MAX_DISTRIBUTED_USERNAME_BYTES
             || info.username.eq_ignore_ascii_case(&self.local_username)
+            || self.children.contains_key(&username_key(&info.username))
             || !valid_parent_endpoint(&info)
         {
             return;
@@ -245,6 +246,14 @@ impl<S> DistributedTree<S> {
             });
         }
         let key = username_key(&username);
+        if key == username_key(&self.local_username)
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|parent| username_key(&parent.info.username) == key)
+        {
+            return Err(ClientError::DistributedIdentityLoop { username });
+        }
         if self.children.len() >= self.max_children && !self.children.contains_key(&key) {
             return Err(ClientError::DistributedChildCapacityFull {
                 max: self.max_children,
@@ -281,7 +290,10 @@ impl<S> DistributedTree<S> {
             }
             DistributedMessage::BranchRoot { username } => {
                 let username = username.trim().to_owned();
-                if username.is_empty() || username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+                if username.is_empty()
+                    || username.len() > MAX_DISTRIBUTED_USERNAME_BYTES
+                    || username.eq_ignore_ascii_case(&self.local_username)
+                {
                     return DistributedEvent::Ignored;
                 }
                 self.branch_root = username;
