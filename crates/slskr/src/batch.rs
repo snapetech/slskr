@@ -69,11 +69,13 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
     let mut operations = Vec::new();
 
     for (idx, op) in operations_arr.iter().enumerate() {
-        let id = op
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&format!("op_{}", idx))
-            .to_string();
+        let id = match op.get("id") {
+            Some(value) => value
+                .as_str()
+                .ok_or_else(|| format!("Operation {idx} id must be a string"))?
+                .to_owned(),
+            None => format!("op_{idx}"),
+        };
 
         let method = op
             .get("method")
@@ -100,20 +102,30 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
             return Err(format!("Operation {} has invalid path: {}", idx, path));
         }
 
-        let body = op
-            .get("body")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let body = match op.get("body") {
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .ok_or_else(|| format!("Operation {idx} body must be a string"))?
+                    .to_owned(),
+            ),
+            None => None,
+        };
 
-        let headers = op
-            .get("headers")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let headers = match op.get("headers") {
+            Some(value) => value
+                .as_object()
+                .ok_or_else(|| format!("Operation {idx} headers must be an object"))?
+                .iter()
+                .map(|(name, value)| {
+                    value
+                        .as_str()
+                        .map(|value| (name.clone(), value.to_owned()))
+                        .ok_or_else(|| format!("Operation {idx} header {name} must be a string"))
+                })
+                .collect::<Result<HashMap<_, _>, _>>()?,
+            None => HashMap::new(),
+        };
 
         operations.push(BatchOperation {
             id,
@@ -125,25 +137,31 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
     }
 
     // Parse batch config
-    let config = if let Some(batch_config) = json.get("config").and_then(|v| v.as_object()) {
+    let config = if let Some(batch_config) = json.get("config") {
+        let batch_config = batch_config.as_object().ok_or("config must be an object")?;
         BatchConfig {
-            max_operations: batch_config
-                .get("maxOperations")
-                .and_then(|v| v.as_u64())
-                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
-                .unwrap_or(MAX_BATCH_OPERATIONS),
-            timeout_ms: batch_config
-                .get("timeoutMs")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(30000),
-            atomic: batch_config
-                .get("atomic")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            continue_on_error: batch_config
-                .get("continueOnError")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true),
+            max_operations: match batch_config.get("maxOperations") {
+                Some(value) => value
+                    .as_u64()
+                    .ok_or("maxOperations must be an unsigned integer")?
+                    .try_into()
+                    .map_err(|_| "maxOperations exceeds the platform limit")?,
+                None => MAX_BATCH_OPERATIONS,
+            },
+            timeout_ms: match batch_config.get("timeoutMs") {
+                Some(value) => value
+                    .as_u64()
+                    .ok_or("timeoutMs must be an unsigned integer")?,
+                None => 30000,
+            },
+            atomic: match batch_config.get("atomic") {
+                Some(value) => value.as_bool().ok_or("atomic must be a boolean")?,
+                None => false,
+            },
+            continue_on_error: match batch_config.get("continueOnError") {
+                Some(value) => value.as_bool().ok_or("continueOnError must be a boolean")?,
+                None => true,
+            },
         }
     } else {
         BatchConfig::default()
@@ -375,6 +393,50 @@ mod tests {
             parse_batch_request(body).expect_err("unsupported atomic batch must fail"),
             "atomic batch execution is not supported"
         );
+    }
+
+    #[test]
+    fn test_batch_rejects_malformed_optional_fields() {
+        for (body, expected) in [
+            (
+                r#"{"operations":[{"id":7,"method":"GET","path":"/api/health"}]}"#,
+                "Operation 0 id must be a string",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health","body":{}}]}"#,
+                "Operation 0 body must be a string",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health","headers":[]}]}"#,
+                "Operation 0 headers must be an object",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health","headers":{"x-test":7}}]}"#,
+                "Operation 0 header x-test must be a string",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health"}],"config":[]}"#,
+                "config must be an object",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health"}],"config":{"maxOperations":-1}}"#,
+                "maxOperations must be an unsigned integer",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health"}],"config":{"timeoutMs":-1}}"#,
+                "timeoutMs must be an unsigned integer",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health"}],"config":{"atomic":"true"}}"#,
+                "atomic must be a boolean",
+            ),
+            (
+                r#"{"operations":[{"method":"GET","path":"/api/health"}],"config":{"continueOnError":"false"}}"#,
+                "continueOnError must be a boolean",
+            ),
+        ] {
+            assert_eq!(parse_batch_request(body).unwrap_err(), expected);
+        }
     }
 
     #[test]
