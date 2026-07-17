@@ -67,6 +67,11 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
+    ignore:
+      # Dependabot's GitHub Actions updater currently fails with unknown_error
+      # while resolving this SHA-pinned action. Keep it pinned and update it
+      # manually until the upstream updater handles it reliably.
+      - dependency-name: "dtolnay/rust-toolchain"
     groups:
       github-actions:
         patterns:
