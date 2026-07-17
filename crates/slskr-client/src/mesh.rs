@@ -8,11 +8,12 @@ use crate::{
         peer_capability_message, PeerCapabilityDescriptor, PeerCapabilityEnvelope,
         PeerCapabilityMessageType, FEATURE_MESH_V1,
     },
-    peer_cache::PeerConnectionCache,
+    peer_cache::{PeerConnectionCache, MAX_PEER_USERNAME_BYTES},
     ClientError,
 };
 
 pub const MESH_RENDEZVOUS_INTEREST_TAG: &str = "slskdn-mesh-v1";
+pub const MAX_MESH_RENDEZVOUS_CANDIDATES: usize = 1_024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeshRendezvousOptions {
@@ -70,11 +71,14 @@ impl MeshRendezvous {
         let mut candidates = Vec::new();
         for username in similar_users.into_iter().chain(known_capability_users) {
             let username = username.trim();
-            if username.is_empty() {
+            if username.is_empty() || username.len() > MAX_PEER_USERNAME_BYTES {
                 continue;
             }
             if seen.insert(username.to_ascii_lowercase()) {
                 candidates.push(username.to_owned());
+                if candidates.len() == MAX_MESH_RENDEZVOUS_CANDIDATES {
+                    break;
+                }
             }
         }
         candidates

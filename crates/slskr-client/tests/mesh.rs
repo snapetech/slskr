@@ -1,4 +1,7 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    cell::Cell,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use ed25519_dalek::SigningKey;
 use slskr_client::{
@@ -7,9 +10,10 @@ use slskr_client::{
         FEATURE_CAPABILITIES_V1, FEATURE_MESH_V1,
     },
     mesh::{
-        is_capability_probe, MeshRendezvous, MeshRendezvousOptions, MESH_RENDEZVOUS_INTEREST_TAG,
+        is_capability_probe, MeshRendezvous, MeshRendezvousOptions, MAX_MESH_RENDEZVOUS_CANDIDATES,
+        MESH_RENDEZVOUS_INTEREST_TAG,
     },
-    peer_cache::PeerConnectionCache,
+    peer_cache::{PeerConnectionCache, MAX_PEER_USERNAME_BYTES},
     stream::PeerMessageConnection,
 };
 use tokio::io::duplex;
@@ -47,6 +51,28 @@ fn mesh_rendezvous_defaults_to_passive_interest_tag_and_dedupes_candidates() {
         mesh.candidate_usernames([" alice ", "Bob", "", "ALICE"], ["bob", "carol"]),
         vec!["alice".to_owned(), "Bob".to_owned(), "carol".to_owned()]
     );
+}
+
+#[test]
+fn mesh_rendezvous_bounds_candidate_collection_and_identity_size() {
+    let mesh = MeshRendezvous::disabled();
+    let oversized = "x".repeat(MAX_PEER_USERNAME_BYTES + 1);
+    assert!(mesh
+        .candidate_usernames([oversized.as_str()], std::iter::empty())
+        .is_empty());
+
+    let consumed = Cell::new(0);
+    let usernames = (0..MAX_MESH_RENDEZVOUS_CANDIDATES + 100)
+        .map(|index| format!("peer-{index}"))
+        .collect::<Vec<_>>();
+    let similar_users = usernames.iter().map(|username| {
+        consumed.set(consumed.get() + 1);
+        username.as_str()
+    });
+    let candidates = mesh.candidate_usernames(similar_users, std::iter::empty());
+
+    assert_eq!(candidates.len(), MAX_MESH_RENDEZVOUS_CANDIDATES);
+    assert_eq!(consumed.get(), MAX_MESH_RENDEZVOUS_CANDIDATES);
 }
 
 #[tokio::test]
