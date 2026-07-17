@@ -199,6 +199,22 @@ fn parent_messages_update_branch_state_and_surface_searches() {
 }
 
 #[test]
+fn parent_branch_root_rejects_existing_child_identity() {
+    let (child_side, _peer_side) = duplex(64);
+    let mut tree = DistributedTree::new("local");
+    tree.add_child("child", DistributedConnection::new(child_side))
+        .unwrap();
+
+    assert_eq!(
+        tree.handle_parent_message(DistributedMessage::BranchRoot {
+            username: " CHILD ".to_owned(),
+        }),
+        DistributedEvent::Ignored
+    );
+    assert_eq!(tree.branch_root(), "local");
+}
+
+#[test]
 fn parent_oversized_branch_root_is_ignored_without_mutating_state() {
     let mut tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
     let oversized = "x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1);

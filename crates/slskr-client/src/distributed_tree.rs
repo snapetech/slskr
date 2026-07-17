@@ -280,6 +280,7 @@ impl<S> DistributedTree<S> {
                 let username = username.trim().to_owned();
                 if !valid_distributed_username(&username)
                     || username.eq_ignore_ascii_case(&self.local_username)
+                    || self.children.contains_key(&username_key(&username))
                 {
                     return DistributedEvent::Ignored;
                 }
