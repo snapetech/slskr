@@ -207,6 +207,8 @@ pub(crate) fn normalize_peer_username(username: &str) -> Result<&str, ClientErro
     let username = username.trim();
     if username.is_empty() {
         Err(ClientError::BlankPeerUsername)
+    } else if username.chars().any(char::is_control) {
+        Err(ClientError::InvalidPeerUsername)
     } else if username.len() > MAX_PEER_USERNAME_BYTES {
         Err(ClientError::PeerUsernameTooLong {
             length: username.len(),

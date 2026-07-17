@@ -801,6 +801,10 @@ fn responder_rejects_malformed_local_identity() {
         ClientError::BlankPeerUsername
     ));
     assert!(matches!(
+        SearchResponder::new("local\nforged", InMemoryShareIndex::new(Vec::new())).unwrap_err(),
+        ClientError::InvalidPeerUsername
+    ));
+    assert!(matches!(
         SearchResponder::new(
             "x".repeat(MAX_PEER_USERNAME_BYTES + 1),
             InMemoryShareIndex::new(Vec::new()),

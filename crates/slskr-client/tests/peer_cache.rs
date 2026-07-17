@@ -51,6 +51,25 @@ async fn cache_rejects_blank_peer_identity_without_storing_it() {
 }
 
 #[tokio::test]
+async fn cache_rejects_control_characters_in_peer_identity() {
+    let cache = PeerConnectionCache::new();
+    let (stream, _) = duplex(64);
+
+    let error = cache
+        .insert("peer\r\nforged", PeerMessageConnection::new(stream))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::InvalidPeerUsername
+    ));
+    assert!(cache.is_empty().await);
+    assert!(!cache.contains("peer\r\nforged").await);
+    assert!(cache.remove("peer\r\nforged").await.is_none());
+}
+
+#[tokio::test]
 async fn cache_rejects_oversized_peer_identity_without_storing_it() {
     let cache = PeerConnectionCache::new();
     let (stream, _) = duplex(64);
