@@ -68,6 +68,9 @@ impl PeerCapabilityEnvelope {
         if self.version != PEER_CAPABILITY_ENVELOPE_VERSION {
             return Err(CapabilityError::UnsupportedVersion(i32::from(self.version)));
         }
+        if self.nonce.chars().any(char::is_control) {
+            return Err(CapabilityError::InvalidField("nonce"));
+        }
         if self.nonce.trim().is_empty() {
             return Err(CapabilityError::BlankField("nonce"));
         }
@@ -150,6 +153,9 @@ impl PeerCapabilityEnvelope {
         }
         let message_type = PeerCapabilityMessageType::try_from(read_i32(&mut reader)?)?;
         let nonce = read_bounded_string(&mut reader, "nonce")?;
+        if nonce.chars().any(char::is_control) {
+            return Err(CapabilityError::InvalidField("nonce"));
+        }
         if nonce.trim().is_empty() {
             return Err(CapabilityError::BlankField("nonce"));
         }
@@ -421,7 +427,10 @@ impl PeerCapabilityRegistry {
     #[must_use]
     pub fn get(&self, username: &str) -> Option<&PeerCapabilityDescriptor> {
         let username = username.trim();
-        if username.is_empty() || username.len() > MAX_CAPABILITY_STRING_BYTES {
+        if username.is_empty()
+            || username.len() > MAX_CAPABILITY_STRING_BYTES
+            || username.chars().any(char::is_control)
+        {
             return None;
         }
         self.records.get(&username.to_ascii_lowercase())
@@ -454,6 +463,8 @@ fn capability_username_key(username: &str) -> String {
 pub enum CapabilityError {
     #[error("{0} must not be blank")]
     BlankField(&'static str),
+    #[error("{0} contains control characters")]
+    InvalidField(&'static str),
     #[error("descriptor validity must be positive")]
     InvalidValidity,
     #[error("descriptor time is invalid")]
@@ -631,6 +642,9 @@ fn bounded_non_blank(value: String, field: &'static str) -> Result<String, Capab
             length: value.len(),
             max: MAX_CAPABILITY_STRING_BYTES,
         });
+    }
+    if value.chars().any(char::is_control) {
+        return Err(CapabilityError::InvalidField(field));
     }
     non_blank(value, field)
 }
@@ -844,6 +858,28 @@ mod tests {
         assert_eq!(
             PeerCapabilityEnvelope::decode(&payload).unwrap_err(),
             CapabilityError::BlankField("nonce")
+        );
+    }
+
+    #[test]
+    fn envelope_rejects_control_characters_in_nonce() {
+        let envelope = PeerCapabilityEnvelope::new(
+            PeerCapabilityMessageType::Hello,
+            "nonce\nforged",
+            descriptor(),
+        );
+        assert_eq!(
+            envelope.encode().unwrap_err(),
+            CapabilityError::InvalidField("nonce")
+        );
+
+        let envelope =
+            PeerCapabilityEnvelope::new(PeerCapabilityMessageType::Hello, "n", descriptor());
+        let mut payload = envelope.encode().unwrap();
+        payload[16] = b'\n';
+        assert_eq!(
+            PeerCapabilityEnvelope::decode(&payload).unwrap_err(),
+            CapabilityError::InvalidField("nonce")
         );
     }
 
@@ -1223,6 +1259,43 @@ mod tests {
                 max: MAX_CAPABILITY_STRING_BYTES,
             }
         );
+    }
+
+    #[test]
+    fn capability_builder_rejects_control_characters_in_signed_fields() {
+        for (username, features, endpoints, expected_field) in [
+            (
+                "alice\nforged".to_owned(),
+                vec![FEATURE_CAPABILITIES_V1.to_owned()],
+                Vec::new(),
+                "username",
+            ),
+            (
+                "alice".to_owned(),
+                vec!["mesh\rforged".to_owned()],
+                Vec::new(),
+                "feature",
+            ),
+            (
+                "alice".to_owned(),
+                vec![FEATURE_CAPABILITIES_V1.to_owned()],
+                vec!["tcp:host:2234\nforged".to_owned()],
+                "endpoint",
+            ),
+        ] {
+            assert_eq!(
+                PeerCapabilityDescriptor::unsigned(
+                    username,
+                    features,
+                    endpoints,
+                    Duration::from_secs(60),
+                    &signing_key(),
+                    now(),
+                )
+                .unwrap_err(),
+                CapabilityError::InvalidField(expected_field)
+            );
+        }
     }
 
     #[test]
