@@ -293,7 +293,10 @@ impl RateLimiter {
 fn ip_key(remote_addr: Option<SocketAddr>) -> Option<String> {
     remote_addr.map(|addr| match addr.ip() {
         IpAddr::V4(ip) => ip.to_string(),
-        IpAddr::V6(ip) => ip.to_string(),
+        IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .or_else(|| ip.to_ipv4())
+            .map_or_else(|| ip.to_string(), |ip| ip.to_string()),
     })
 }
 
@@ -479,6 +482,23 @@ mod tests {
         assert!(!limiter.check_rate_limit(None, Some("ALICE")).await);
         assert!(limiter.get_reset_time(None, Some("alice")).await > 0);
         assert_eq!(limiter.user_windows.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ipv4_mapped_addresses_share_anonymous_rate_limit_bucket() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            max_requests_anonymous: 1,
+            max_requests_authenticated: 1,
+            window_seconds: 60,
+            enabled: true,
+        });
+        let ipv4 = Some(SocketAddr::new("192.0.2.10".parse().unwrap(), 1000));
+        let mapped = Some(SocketAddr::new("::ffff:192.0.2.10".parse().unwrap(), 2000));
+
+        assert!(limiter.check_rate_limit(ipv4, None).await);
+        assert!(!limiter.check_rate_limit(mapped, None).await);
+        assert_eq!(limiter.get_remaining(mapped, None).await, 0);
+        assert_eq!(limiter.ip_windows.read().await.len(), 1);
     }
 
     #[tokio::test]
