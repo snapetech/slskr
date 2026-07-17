@@ -69,6 +69,27 @@ impl Drop for PreviewStagingFile {
     }
 }
 
+struct SwarmWorkspace {
+    path: PathBuf,
+}
+
+impl SwarmWorkspace {
+    fn create(path: PathBuf) -> std::io::Result<Self> {
+        create_private_directory(&path)?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for SwarmWorkspace {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SwarmRequest {
@@ -445,9 +466,9 @@ async fn execute_inner(
         .parent()
         .ok_or_else(|| "output path has no parent directory".to_owned())?;
     fs::create_dir_all(parent).map_err(|_| "output directory could not be created".to_owned())?;
-    let temp_dir = parent.join(format!(".slskr-swarm-{}", uuid::Uuid::new_v4()));
-    create_private_directory(&temp_dir)
-        .map_err(|_| "swarm workspace could not be created".to_owned())?;
+    let temp_dir =
+        SwarmWorkspace::create(parent.join(format!(".slskr-swarm-{}", uuid::Uuid::new_v4())))
+            .map_err(|_| "swarm workspace could not be created".to_owned())?;
 
     let operation = async {
         let mut sources = Vec::with_capacity(request.sources.len());
@@ -535,7 +556,7 @@ async fn execute_inner(
             source_busy[source_index] = false;
             match fetched {
                 Ok(bytes) => {
-                    let path = temp_dir.join(format!("chunk-{chunk_index:08}.part"));
+                    let path = temp_dir.path().join(format!("chunk-{chunk_index:08}.part"));
                     fs::write(&path, &bytes)
                         .map_err(|_| "downloaded chunk could not be stored".to_owned())?;
                     chunks[chunk_index].state = ChunkState::Complete;
@@ -566,7 +587,7 @@ async fn execute_inner(
         results.sort_by_key(|result| result.index);
         let assembly_path = parent.join(format!(".slskr-swarm-{}.part", uuid::Uuid::new_v4()));
         let assembly_result = assemble_and_publish(
-            &temp_dir,
+            temp_dir.path(),
             &assembly_path,
             output_path,
             chunks.len(),
@@ -594,7 +615,6 @@ async fn execute_inner(
         })
     }
     .await;
-    let _ = fs::remove_dir_all(&temp_dir);
     operation
 }
 
@@ -903,6 +923,38 @@ mod tests {
         (address, task)
     }
 
+    async fn spawn_stalling_range_source() -> (
+        SocketAddr,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stalling range source");
+        let address = listener.local_addr().expect("stalling source address");
+        let (stalled_tx, stalled_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (mut preflight, _) = listener.accept().await.expect("accept preflight");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = preflight.read(&mut buffer).await.expect("read preflight");
+                assert_ne!(count, 0, "preflight request ended before its headers");
+                request.extend_from_slice(&buffer[..count]);
+            }
+            preflight
+                .write_all(
+                    b"HTTP/1.1 206 Partial Content\r\nContent-Length: 1\r\nContent-Range: bytes 0-0/4\r\nConnection: close\r\n\r\na",
+                )
+                .await
+                .expect("write preflight");
+            let (_stalled, _) = listener.accept().await.expect("accept chunk request");
+            stalled_tx.send(()).expect("signal stalled chunk");
+            std::future::pending::<()>().await;
+        });
+        (address, stalled_rx, task)
+    }
+
     #[test]
     fn request_validation_applies_default_and_hard_bounds() {
         let parsed = serde_json::from_str::<SwarmRequest>(
@@ -1077,6 +1129,75 @@ mod tests {
         assert_eq!(job.bytes_downloaded, content.len() as u64);
         drop(store);
         fs::remove_dir_all(root).expect("remove swarm test root");
+    }
+
+    #[tokio::test]
+    async fn cancelled_swarm_removes_temporary_workspace() {
+        let (first_address, first_stalled, first_server) = spawn_stalling_range_source().await;
+        let (second_address, second_stalled, second_server) = spawn_stalling_range_source().await;
+        let root =
+            std::env::temp_dir().join(format!("slskr-swarm-cancel-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).expect("create swarm cancellation test root");
+        let output_path = root.join("assembled.flac");
+        let request = SwarmRequest {
+            filename: "Remote/assembled.flac".to_owned(),
+            file_size: 4,
+            expected_hash: Some("00".repeat(32)),
+            output_path: None,
+            chunk_size: 2,
+            sources: vec![
+                RangeSource {
+                    username: "first".to_owned(),
+                    url: format!("http://{first_address}/file"),
+                    authorization: None,
+                },
+                RangeSource {
+                    username: "second".to_owned(),
+                    url: format!("http://{second_address}/file"),
+                    authorization: None,
+                },
+            ],
+        };
+        let id = uuid::Uuid::new_v4().to_string();
+        let store = Arc::new(RwLock::new(SwarmStore::default()));
+        let download = tokio::spawn(execute(
+            id,
+            request,
+            output_path,
+            "multisource/assembled.flac".to_owned(),
+            store,
+        ));
+
+        first_stalled.await.expect("first chunk request must stall");
+        second_stalled
+            .await
+            .expect("second chunk request must stall");
+        assert!(fs::read_dir(&root)
+            .expect("read cancellation test root")
+            .any(|entry| entry
+                .expect("read workspace entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".slskr-swarm-")));
+
+        download.abort();
+        assert!(download
+            .await
+            .expect_err("swarm must be cancelled")
+            .is_cancelled());
+        assert!(!fs::read_dir(&root)
+            .expect("read cancellation test root after abort")
+            .any(|entry| entry
+                .expect("read remaining entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".slskr-swarm-")));
+
+        first_server.abort();
+        second_server.abort();
+        let _ = first_server.await;
+        let _ = second_server.await;
+        fs::remove_dir_all(root).expect("remove swarm cancellation test root");
     }
 
     #[tokio::test]
