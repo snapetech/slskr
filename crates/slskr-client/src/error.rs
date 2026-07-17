@@ -108,6 +108,8 @@ pub enum ClientError {
     DistributedChildCapacityFull { max: usize },
     #[error("distributed username must not be blank")]
     BlankDistributedUsername,
+    #[error("distributed username contains control characters")]
+    InvalidDistributedUsername,
     #[error("distributed username length {length} exceeds maximum {max}")]
     DistributedUsernameTooLong { length: usize, max: usize },
     #[error("distributed connection to {username} would create an identity loop")]

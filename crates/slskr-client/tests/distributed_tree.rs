@@ -67,6 +67,17 @@ fn choose_parent_ignores_blank_identity() {
 }
 
 #[test]
+fn choose_parent_ignores_control_characters_in_identity() {
+    let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+    let candidates = vec![
+        possible_parent("forged\r\nparent", [10, 0, 0, 1], 2234),
+        possible_parent("valid", [10, 0, 0, 2], 2234),
+    ];
+
+    assert_eq!(tree.choose_parent(&candidates).unwrap().username, "valid");
+}
+
+#[test]
 fn choose_parent_canonicalizes_identities_before_rejecting_self() {
     let tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new(" local ");
     let candidates = vec![
@@ -137,6 +148,7 @@ fn connect_parent_rejects_invalid_identity_or_endpoint_without_mutating_branch_s
 
     for (username, ip, port) in [
         ("   ".to_owned(), [10, 0, 0, 2], 2234),
+        ("forged\r\nparent".to_owned(), [10, 0, 0, 2], 2234),
         (
             "x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1),
             [10, 0, 0, 2],
@@ -207,6 +219,19 @@ fn parent_blank_branch_root_is_ignored_without_mutating_state() {
     assert_eq!(
         tree.handle_parent_message(DistributedMessage::BranchRoot {
             username: "  ".to_owned(),
+        }),
+        DistributedEvent::Ignored
+    );
+    assert_eq!(tree.branch_root(), "local");
+}
+
+#[test]
+fn parent_control_character_branch_root_is_ignored_without_mutating_state() {
+    let mut tree: DistributedTree<tokio::io::DuplexStream> = DistributedTree::new("local");
+
+    assert_eq!(
+        tree.handle_parent_message(DistributedMessage::BranchRoot {
+            username: "forged\nroot".to_owned(),
         }),
         DistributedEvent::Ignored
     );
@@ -511,6 +536,19 @@ fn distributed_tree_rejects_blank_child_username_without_storing_it() {
         .unwrap_err();
 
     assert!(matches!(error, ClientError::BlankDistributedUsername));
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[test]
+fn distributed_tree_rejects_control_characters_in_child_username() {
+    let mut tree = DistributedTree::new("local");
+    let (child, _) = duplex(64);
+
+    let error = tree
+        .add_child("forged\nchild", DistributedConnection::new(child))
+        .unwrap_err();
+
+    assert!(matches!(error, ClientError::InvalidDistributedUsername));
     assert_eq!(tree.children_len(), 0);
 }
 

@@ -151,8 +151,7 @@ impl<S> DistributedTree<S> {
                     .eq_ignore_ascii_case(&self.local_username)
             })
             .filter(valid_parent_endpoint)
-            .filter(|candidate| !candidate.username.trim().is_empty())
-            .filter(|candidate| candidate.username.len() <= MAX_DISTRIBUTED_USERNAME_BYTES)
+            .filter(|candidate| valid_distributed_username(&candidate.username))
             .min_by(|left, right| {
                 left.username
                     .cmp(&right.username)
@@ -166,8 +165,7 @@ impl<S> DistributedTree<S> {
             username: info.username.trim().to_owned(),
             ..info
         };
-        if info.username.is_empty()
-            || info.username.len() > MAX_DISTRIBUTED_USERNAME_BYTES
+        if !valid_distributed_username(&info.username)
             || info.username.eq_ignore_ascii_case(&self.local_username)
             || self.children.contains_key(&username_key(&info.username))
             || !valid_parent_endpoint(&info)
@@ -239,6 +237,9 @@ impl<S> DistributedTree<S> {
         if username.is_empty() {
             return Err(ClientError::BlankDistributedUsername);
         }
+        if username.chars().any(char::is_control) {
+            return Err(ClientError::InvalidDistributedUsername);
+        }
         if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
             return Err(ClientError::DistributedUsernameTooLong {
                 length: username.len(),
@@ -290,8 +291,7 @@ impl<S> DistributedTree<S> {
             }
             DistributedMessage::BranchRoot { username } => {
                 let username = username.trim().to_owned();
-                if username.is_empty()
-                    || username.len() > MAX_DISTRIBUTED_USERNAME_BYTES
+                if !valid_distributed_username(&username)
                     || username.eq_ignore_ascii_case(&self.local_username)
                 {
                     return DistributedEvent::Ignored;
@@ -335,6 +335,12 @@ impl<S> DistributedTree<S> {
             | DistributedMessage::Unknown { .. } => DistributedEvent::Ignored,
         }
     }
+}
+
+fn valid_distributed_username(username: &str) -> bool {
+    !username.is_empty()
+        && username.len() <= MAX_DISTRIBUTED_USERNAME_BYTES
+        && !username.chars().any(char::is_control)
 }
 
 impl<S> DistributedTree<S>
