@@ -402,6 +402,14 @@ impl PeerCapabilityRegistry {
         {
             return Err(CapabilityError::PeerIdentityChanged);
         }
+        if let Some(existing) = self.records.get(&key) {
+            if existing == &descriptor {
+                return Ok(Some(existing.clone()));
+            }
+            if descriptor.issued_at_unix <= existing.issued_at_unix {
+                return Err(CapabilityError::StaleDescriptor);
+            }
+        }
         if self.records.len() >= MAX_PEER_CAPABILITY_RECORDS && !self.records.contains_key(&key) {
             return Err(CapabilityError::RegistryFull {
                 max: MAX_PEER_CAPABILITY_RECORDS,
@@ -464,6 +472,8 @@ pub enum CapabilityError {
     PeerIdMismatch,
     #[error("peer capability identity changed before the existing record expired")]
     PeerIdentityChanged,
+    #[error("peer capability descriptor does not advance the existing issuance time")]
+    StaleDescriptor,
     #[error("signing key does not match descriptor public key")]
     SigningKeyMismatch,
     #[error("capability envelope magic mismatch: {0:#x}")]
@@ -1101,6 +1111,46 @@ mod tests {
         .unwrap();
         assert!(registry.update(rotated.clone(), later).is_ok());
         assert_eq!(registry.get("ALICE").unwrap().peer_id, rotated.peer_id);
+    }
+
+    #[test]
+    fn registry_rejects_signed_descriptor_rollback() {
+        let mut registry = PeerCapabilityRegistry::new();
+        let later = now() + Duration::from_secs(30);
+        let newer = PeerCapabilityDescriptor::unsigned(
+            "Alice",
+            vec![
+                FEATURE_CAPABILITIES_V1.to_owned(),
+                FEATURE_MESH_V1.to_owned(),
+            ],
+            Vec::new(),
+            Duration::from_secs(60),
+            &signing_key(),
+            later,
+        )
+        .unwrap()
+        .sign(&signing_key())
+        .unwrap();
+        registry.update(newer.clone(), later).unwrap();
+
+        assert_eq!(
+            registry.update(descriptor(), later).unwrap_err(),
+            CapabilityError::StaleDescriptor
+        );
+        assert_eq!(registry.get("alice"), Some(&newer));
+    }
+
+    #[test]
+    fn registry_accepts_identical_descriptor_idempotently() {
+        let mut registry = PeerCapabilityRegistry::new();
+        let original = descriptor();
+        registry.update(original.clone(), now()).unwrap();
+
+        assert_eq!(
+            registry.update(original.clone(), now()).unwrap(),
+            Some(original.clone())
+        );
+        assert_eq!(registry.get("alice"), Some(&original));
     }
 
     #[test]
