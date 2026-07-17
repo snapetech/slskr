@@ -2,6 +2,7 @@ use slskr_client::{
     connection::ConnectionKind,
     file_transfer::FileTransferConnection,
     listener::{demux_incoming, IncomingConnection},
+    peer_cache::MAX_PEER_USERNAME_BYTES,
     peer_connect::{
         connect_peer_messages_with_timeout, send_obfuscated_peer_init, send_peer_init,
         send_pierce_firewall, IndirectPeerRequest,
@@ -60,6 +61,31 @@ async fn blank_peer_init_is_rejected_before_regular_or_obfuscated_io() {
             .await
             .unwrap_err(),
         ClientError::BlankPeerUsername
+    ));
+    assert_eq!(obfuscated_server.read(&mut byte).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn oversized_peer_init_is_rejected_before_regular_or_obfuscated_io() {
+    let username = "x".repeat(MAX_PEER_USERNAME_BYTES + 1);
+    let (regular_client, mut regular_server) = duplex(256);
+    assert!(matches!(
+        send_peer_init(regular_client, &username, ConnectionKind::PeerMessages)
+            .await
+            .unwrap_err(),
+        ClientError::PeerUsernameTooLong { length, max }
+            if length == MAX_PEER_USERNAME_BYTES + 1 && max == MAX_PEER_USERNAME_BYTES
+    ));
+    let mut byte = [0];
+    assert_eq!(regular_server.read(&mut byte).await.unwrap(), 0);
+
+    let (obfuscated_client, mut obfuscated_server) = duplex(256);
+    assert!(matches!(
+        send_obfuscated_peer_init(obfuscated_client, &username, ConnectionKind::PeerMessages)
+            .await
+            .unwrap_err(),
+        ClientError::PeerUsernameTooLong { length, max }
+            if length == MAX_PEER_USERNAME_BYTES + 1 && max == MAX_PEER_USERNAME_BYTES
     ));
     assert_eq!(obfuscated_server.read(&mut byte).await.unwrap(), 0);
 }

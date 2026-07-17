@@ -1,4 +1,7 @@
-use slskr_client::{peer_cache::PeerConnectionCache, stream::PeerMessageConnection};
+use slskr_client::{
+    peer_cache::{PeerConnectionCache, MAX_PEER_USERNAME_BYTES},
+    stream::PeerMessageConnection,
+};
 use slskr_protocol::peer::PeerMessage;
 use tokio::io::duplex;
 use tokio::time::{timeout, Duration};
@@ -43,6 +46,25 @@ async fn cache_rejects_blank_peer_identity_without_storing_it() {
     assert!(matches!(
         error,
         slskr_client::ClientError::BlankPeerUsername
+    ));
+    assert!(cache.is_empty().await);
+}
+
+#[tokio::test]
+async fn cache_rejects_oversized_peer_identity_without_storing_it() {
+    let cache = PeerConnectionCache::new();
+    let (stream, _) = duplex(64);
+    let username = "x".repeat(MAX_PEER_USERNAME_BYTES + 1);
+
+    let error = cache
+        .insert(username, PeerMessageConnection::new(stream))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        slskr_client::ClientError::PeerUsernameTooLong { length, max }
+            if length == MAX_PEER_USERNAME_BYTES + 1 && max == MAX_PEER_USERNAME_BYTES
     ));
     assert!(cache.is_empty().await);
 }

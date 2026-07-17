@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use crate::{stream::PeerMessageConnection, ClientError};
 
 pub const DEFAULT_MAX_PEER_CONNECTIONS: usize = 1_024;
+pub const MAX_PEER_USERNAME_BYTES: usize = 4_096;
 
 type SharedPeerConnection<S> = Arc<Mutex<Option<PeerMessageConnection<S>>>>;
 
@@ -162,6 +163,11 @@ pub(crate) fn normalize_peer_username(username: &str) -> Result<&str, ClientErro
     let username = username.trim();
     if username.is_empty() {
         Err(ClientError::BlankPeerUsername)
+    } else if username.len() > MAX_PEER_USERNAME_BYTES {
+        Err(ClientError::PeerUsernameTooLong {
+            length: username.len(),
+            max: MAX_PEER_USERNAME_BYTES,
+        })
     } else {
         Ok(username)
     }
