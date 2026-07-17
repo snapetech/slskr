@@ -2,18 +2,25 @@ use slskr_client::{
     connection::ConnectionKind,
     file_transfer::FileTransferConnection,
     listener::{demux_incoming, IncomingConnection},
-    peer_connect::{send_peer_init, send_pierce_firewall, IndirectPeerRequest},
+    peer_connect::{
+        connect_peer_messages_with_timeout, send_obfuscated_peer_init, send_peer_init,
+        send_pierce_firewall, IndirectPeerRequest,
+    },
     stream::{DistributedConnection, PeerMessageConnection},
     ClientError,
 };
 use slskr_protocol::server::{ConnectToPeerRequest, ServerMessage};
-use tokio::io::{duplex, DuplexStream};
+use tokio::{
+    io::{duplex, AsyncReadExt, DuplexStream},
+    net::TcpListener,
+    time::{timeout, Duration},
+};
 
 #[tokio::test]
 async fn send_peer_init_writes_requested_connection_type() {
     let (client, server) = duplex(256);
     let client_task = tokio::spawn(async move {
-        send_peer_init(client, "local", ConnectionKind::Distributed)
+        send_peer_init(client, " local ", ConnectionKind::Distributed)
             .await
             .unwrap()
     });
@@ -33,6 +40,45 @@ async fn send_peer_init_writes_requested_connection_type() {
     assert_eq!(token, 0);
 
     client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn blank_peer_init_is_rejected_before_regular_or_obfuscated_io() {
+    let (regular_client, mut regular_server) = duplex(256);
+    assert!(matches!(
+        send_peer_init(regular_client, "  ", ConnectionKind::PeerMessages)
+            .await
+            .unwrap_err(),
+        ClientError::BlankPeerUsername
+    ));
+    let mut byte = [0];
+    assert_eq!(regular_server.read(&mut byte).await.unwrap(), 0);
+
+    let (obfuscated_client, mut obfuscated_server) = duplex(256);
+    assert!(matches!(
+        send_obfuscated_peer_init(obfuscated_client, "  ", ConnectionKind::PeerMessages)
+            .await
+            .unwrap_err(),
+        ClientError::BlankPeerUsername
+    ));
+    assert_eq!(obfuscated_server.read(&mut byte).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn blank_peer_identity_is_rejected_before_tcp_connect() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let error = connect_peer_messages_with_timeout(
+        listener.local_addr().unwrap(),
+        "  ",
+        Duration::from_secs(1),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(error, ClientError::BlankPeerUsername));
+    assert!(timeout(Duration::from_millis(25), listener.accept())
+        .await
+        .is_err());
 }
 
 #[tokio::test]

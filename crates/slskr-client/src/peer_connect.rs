@@ -10,6 +10,7 @@ use crate::{
     connection::ConnectionKind,
     file_transfer::FileTransferConnection,
     listener::IncomingConnection,
+    peer_cache::normalize_peer_username,
     stream::{
         DistributedConnection, InitConnection, ObfuscatedInitConnection, PeerMessageConnection,
         DEFAULT_CONNECT_TIMEOUT,
@@ -128,10 +129,12 @@ pub async fn send_peer_init_with_token<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let username = username.into();
+    let username = normalize_peer_username(&username)?.to_owned();
     let mut connection = InitConnection::new(stream);
     connection
         .send(&InitMessage::PeerInit {
-            username: username.into(),
+            username,
             connection_type: kind.as_str().to_owned(),
             token,
         })
@@ -159,10 +162,12 @@ pub async fn send_obfuscated_peer_init_with_token<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let username = username.into();
+    let username = normalize_peer_username(&username)?.to_owned();
     let mut connection = ObfuscatedInitConnection::new(stream);
     connection
         .send(&InitMessage::PeerInit {
-            username: username.into(),
+            username,
             connection_type: kind.as_str().to_owned(),
             token,
         })
@@ -210,6 +215,8 @@ pub async fn connect_peer_messages_with_timeout<A>(
 where
     A: ToSocketAddrs,
 {
+    let username = username.into();
+    let username = normalize_peer_username(&username)?.to_owned();
     let stream = time::timeout(timeout, TcpStream::connect(address))
         .await
         .map_err(|_| ClientError::TimedOut {
@@ -237,6 +244,8 @@ pub async fn connect_distributed_with_timeout<A>(
 where
     A: ToSocketAddrs,
 {
+    let username = username.into();
+    let username = normalize_peer_username(&username)?.to_owned();
     let stream = time::timeout(timeout, TcpStream::connect(address))
         .await
         .map_err(|_| ClientError::TimedOut {
@@ -264,6 +273,8 @@ pub async fn connect_file_transfer_with_timeout<A>(
 where
     A: ToSocketAddrs,
 {
+    let username = username.into();
+    let username = normalize_peer_username(&username)?.to_owned();
     let stream = time::timeout(timeout, TcpStream::connect(address))
         .await
         .map_err(|_| ClientError::TimedOut {
