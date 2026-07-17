@@ -217,19 +217,58 @@ where
 
     async fn read_legacy_unframed(&mut self, header: [u8; 4]) -> Result<Vec<u8>, OverlayError> {
         let mut payload = header.to_vec();
+        let mut depth = 0_i32;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut complete = false;
+        for byte in header {
+            complete |=
+                advance_json_object_boundary(byte, &mut depth, &mut in_string, &mut escaped);
+        }
         loop {
-            match serde_json::from_slice::<Value>(&payload) {
-                Ok(Value::Object(_)) => return Ok(payload),
-                Ok(_) => return Err(OverlayError::InvalidJsonObject),
-                Err(error) if error.is_eof() => {}
-                Err(error) => return Err(OverlayError::Json(error)),
+            if complete {
+                return match serde_json::from_slice::<Value>(&payload)? {
+                    Value::Object(_) => Ok(payload),
+                    _ => Err(OverlayError::InvalidJsonObject),
+                };
             }
             if payload.len() >= MAX_OVERLAY_MESSAGE_BYTES {
                 return Err(OverlayError::FrameTooLarge(payload.len()));
             }
-            payload.push(self.stream.read_u8().await?);
+            let byte = self.stream.read_u8().await?;
+            payload.push(byte);
+            complete = advance_json_object_boundary(byte, &mut depth, &mut in_string, &mut escaped);
         }
     }
+}
+
+fn advance_json_object_boundary(
+    byte: u8,
+    depth: &mut i32,
+    in_string: &mut bool,
+    escaped: &mut bool,
+) -> bool {
+    if *in_string {
+        if *escaped {
+            *escaped = false;
+        } else if byte == b'\\' {
+            *escaped = true;
+        } else if byte == b'"' {
+            *in_string = false;
+        }
+        return false;
+    }
+
+    match byte {
+        b'"' => *in_string = true,
+        b'{' => *depth += 1,
+        b'}' => {
+            *depth -= 1;
+            return *depth == 0;
+        }
+        _ => {}
+    }
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -994,6 +1033,31 @@ mod tests {
         wire.read_exact(&mut payload).await.unwrap();
         assert_eq!(payload, br#"{"type":"ping"}"#);
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_framer_scans_large_json_once() {
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "payload": format!("{}{{escaped}}", "x".repeat(60_000)),
+        }))
+        .unwrap();
+        assert!(payload.len() < MAX_OVERLAY_MESSAGE_BYTES);
+        let (mut wire, client) = duplex(4_096);
+        let expected = payload.clone();
+        let writer = tokio::spawn(async move {
+            wire.write_all(&payload).await.unwrap();
+        });
+
+        let decoded = timeout(
+            Duration::from_secs(2),
+            OverlayFramer::new(client).read_raw(),
+        )
+        .await
+        .expect("legacy frame scan must remain linear")
+        .unwrap();
+
+        assert_eq!(decoded, expected);
+        writer.await.unwrap();
     }
 
     #[test]
