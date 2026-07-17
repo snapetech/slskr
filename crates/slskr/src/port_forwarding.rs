@@ -60,6 +60,14 @@ impl Default for Manager {
     }
 }
 
+impl Drop for Manager {
+    fn drop(&mut self) {
+        for rule in self.rules.get_mut().values() {
+            let _ = rule.cancel_tx.send(true);
+        }
+    }
+}
+
 impl Manager {
     #[must_use]
     pub fn new() -> Self {
@@ -516,6 +524,28 @@ mod tests {
         assert!(manager.stop(port).await);
         assert!(!manager.stop(port).await);
         assert!(manager.statuses().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_manager_releases_local_listener() {
+        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let manager = Manager::new();
+        manager.start(request(port)).await.unwrap();
+
+        drop(manager);
+
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if TcpListener::bind(("127.0.0.1", port)).await.is_ok() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("dropping the manager must release its listeners");
     }
 
     #[tokio::test]
