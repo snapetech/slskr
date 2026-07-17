@@ -507,6 +507,7 @@ pub struct MeshServiceReply {
 #[derive(Debug)]
 pub struct OverlayClient<S> {
     framer: OverlayFramer<S>,
+    failed: bool,
     pub remote_username: String,
     pub remote_features: Vec<String>,
     pub remote_overlay_port: Option<u16>,
@@ -529,6 +530,7 @@ where
         }
         Ok(Self {
             framer,
+            failed: false,
             remote_username: acknowledgement.username,
             remote_features: acknowledgement.features,
             remote_overlay_port: acknowledgement.overlay_port,
@@ -545,15 +547,9 @@ where
         call: &MeshServiceCall,
         deadline: Duration,
     ) -> Result<MeshServiceReply, OverlayError> {
-        timeout(deadline, self.call_inner(call))
-            .await
-            .map_err(|_| OverlayError::Timeout("overlay service call"))?
-    }
-
-    async fn call_inner(
-        &mut self,
-        call: &MeshServiceCall,
-    ) -> Result<MeshServiceReply, OverlayError> {
+        if self.failed {
+            return Err(OverlayError::Disconnected);
+        }
         call.validate()?;
         if !self
             .remote_features
@@ -562,6 +558,23 @@ where
         {
             return Err(OverlayError::MeshServiceUnsupported);
         }
+        match timeout(deadline, self.call_inner(call)).await {
+            Ok(Ok(reply)) => Ok(reply),
+            Ok(Err(error)) => {
+                self.failed = true;
+                Err(error)
+            }
+            Err(_) => {
+                self.failed = true;
+                Err(OverlayError::Timeout("overlay service call"))
+            }
+        }
+    }
+
+    async fn call_inner(
+        &mut self,
+        call: &MeshServiceCall,
+    ) -> Result<MeshServiceReply, OverlayError> {
         self.framer.write(call).await?;
         let mut unmatched_frames = 0;
         while unmatched_frames < MAX_UNMATCHED_SERVICE_FRAMES {
@@ -1184,6 +1197,7 @@ mod tests {
         let (client, mut wire) = duplex(1024);
         let mut overlay = OverlayClient {
             framer: OverlayFramer::new(client),
+            failed: false,
             remote_username: "gateway".to_owned(),
             remote_features: vec![FEATURE_MESH_SERVICE.to_owned()],
             remote_overlay_port: None,
@@ -1443,6 +1457,13 @@ mod tests {
         assert!(matches!(
             error,
             OverlayError::Timeout("overlay service call")
+        ));
+        assert!(matches!(
+            client
+                .call_with_timeout(&call, Duration::from_secs(1))
+                .await
+                .unwrap_err(),
+            OverlayError::Disconnected
         ));
         server.abort();
     }
