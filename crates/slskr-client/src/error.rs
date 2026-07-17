@@ -39,6 +39,12 @@ pub enum ClientError {
     UnexpectedTransferMessage(Box<slskr_protocol::peer::PeerMessage>),
     #[error("unexpected search message: {0:?}")]
     UnexpectedSearchMessage(Box<slskr_protocol::peer::PeerMessage>),
+    #[error("search {field} length {length} exceeds maximum {max}")]
+    SearchFieldTooLong {
+        field: &'static str,
+        length: usize,
+        max: usize,
+    },
     #[error("private message recipient list must not be empty")]
     EmptyMessageRecipients,
     #[error("private message recipient must not be blank")]

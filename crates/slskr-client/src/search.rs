@@ -23,6 +23,7 @@ pub const MAX_SEARCH_RESULT_TEXT_BYTES_TOTAL: usize = 64 * 1024 * 1024;
 pub const MAX_SEARCH_RESPONSES_TOTAL: usize = 10_000;
 pub const MAX_WISHLIST_SEARCH_TERMS: usize = 1_024;
 pub const MAX_WISHLIST_SEARCH_TERM_BYTES: usize = 4_096;
+pub const MAX_OUTBOUND_SEARCH_FIELD_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -181,7 +182,7 @@ where
         &mut self,
         query: impl Into<String>,
     ) -> Result<SearchRequestHandle, ClientError> {
-        let query = query.into();
+        let query = bounded_search_field(query.into(), "query")?;
         let token = self.tokens.next_token();
         self.server
             .send_server_message(ServerMessage::FileSearchRequest(SearchRequest {
@@ -201,8 +202,8 @@ where
         username: impl Into<String>,
         query: impl Into<String>,
     ) -> Result<SearchRequestHandle, ClientError> {
-        let username = username.into();
-        let query = query.into();
+        let username = bounded_search_field(username.into(), "username")?;
+        let query = bounded_search_field(query.into(), "query")?;
         self.search_targeted(SearchTarget::User(username), query)
             .await
     }
@@ -212,8 +213,8 @@ where
         room: impl Into<String>,
         query: impl Into<String>,
     ) -> Result<SearchRequestHandle, ClientError> {
-        let room = room.into();
-        let query = query.into();
+        let room = bounded_search_field(room.into(), "room")?;
+        let query = bounded_search_field(query.into(), "query")?;
         self.search_targeted(SearchTarget::Room(room), query).await
     }
 
@@ -221,7 +222,7 @@ where
         &mut self,
         query: impl Into<String>,
     ) -> Result<SearchRequestHandle, ClientError> {
-        let query = query.into();
+        let query = bounded_search_field(query.into(), "query")?;
         let token = self.tokens.next_token();
         self.server
             .send_server_message(ServerMessage::WishlistSearch(SearchRequest {
@@ -263,6 +264,17 @@ where
             target,
         })
     }
+}
+
+fn bounded_search_field(value: String, field: &'static str) -> Result<String, ClientError> {
+    if value.len() > MAX_OUTBOUND_SEARCH_FIELD_BYTES {
+        return Err(ClientError::SearchFieldTooLong {
+            field,
+            length: value.len(),
+            max: MAX_OUTBOUND_SEARCH_FIELD_BYTES,
+        });
+    }
+    Ok(value)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

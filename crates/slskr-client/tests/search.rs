@@ -2,7 +2,8 @@ use slskr_client::{
     search::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
-        WishlistSearchSchedulerOptions, MAX_SEARCH_RESPONSES_PER_TOKEN, MAX_SEARCH_RESPONSES_TOTAL,
+        WishlistSearchSchedulerOptions, MAX_OUTBOUND_SEARCH_FIELD_BYTES,
+        MAX_SEARCH_RESPONSES_PER_TOKEN, MAX_SEARCH_RESPONSES_TOTAL,
         MAX_SEARCH_RESULT_FILES_PER_TOKEN, MAX_SEARCH_RESULT_FILES_TOTAL,
         MAX_SEARCH_RESULT_TEXT_BYTES_PER_TOKEN, MAX_TRACKED_SEARCH_RESULT_TOKENS,
         MAX_WISHLIST_SEARCH_TERMS, MAX_WISHLIST_SEARCH_TERM_BYTES,
@@ -88,6 +89,48 @@ async fn dispatches_targeted_searches_with_incrementing_tokens() {
         ServerMessage::WishlistSearch(SearchRequest {
             token: 202,
             query: "rare".to_owned(),
+        })
+    );
+}
+
+#[tokio::test]
+async fn outbound_searches_reject_oversized_fields_before_consuming_a_token() {
+    let (client, server) = duplex(512);
+    let mut dispatcher =
+        SearchDispatcher::new(ServerSession::new(ServerConnection::new(client)), 300);
+    let oversized = "x".repeat(MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1);
+
+    for (result, expected_field) in [
+        (dispatcher.search_global(&oversized).await, "query"),
+        (
+            dispatcher.search_user(&oversized, "query").await,
+            "username",
+        ),
+        (dispatcher.search_user("alice", &oversized).await, "query"),
+        (dispatcher.search_room(&oversized, "query").await, "room"),
+        (dispatcher.search_room("room", &oversized).await, "query"),
+        (dispatcher.search_wishlist(&oversized).await, "query"),
+    ] {
+        assert!(matches!(
+            result,
+            Err(ClientError::SearchFieldTooLong { field, length, max })
+                if field == expected_field
+                    && length == MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1
+                    && max == MAX_OUTBOUND_SEARCH_FIELD_BYTES
+        ));
+    }
+
+    let handle = dispatcher.search_global("valid").await.unwrap();
+    assert_eq!(handle.token, 300);
+    let mut server = ServerConnection::new(server);
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::FileSearchRequest(SearchRequest {
+            token: 300,
+            query: "valid".to_owned(),
         })
     );
 }
