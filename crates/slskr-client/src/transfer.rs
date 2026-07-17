@@ -273,16 +273,24 @@ impl UploadTransfer {
         }
         match message {
             PeerMessage::TransferResponse(TransferResponse::Allowed { token, .. }) => {
+                self.require_state(UploadState::Requested, "handle transfer response")?;
                 self.validate_token(token)?;
                 self.state = UploadState::Accepted;
                 Ok(())
             }
             PeerMessage::TransferResponse(TransferResponse::Rejected { token, reason }) => {
+                self.require_state(UploadState::Requested, "handle transfer response")?;
                 self.validate_token(token)?;
                 self.state = UploadState::Rejected { reason };
                 Ok(())
             }
             PeerMessage::UploadFailed { filename } => {
+                if !matches!(self.state, UploadState::Requested | UploadState::Accepted) {
+                    return Err(ClientError::InvalidTransferState {
+                        operation: "handle upload failure",
+                        state: self.state.name(),
+                    });
+                }
                 self.validate_filename(filename)?;
                 self.state = UploadState::Failed {
                     reason: "upload failed".to_owned(),
@@ -340,6 +348,21 @@ impl UploadTransfer {
             Err(ClientError::TransferTokenMismatch {
                 expected: self.token,
                 received,
+            })
+        }
+    }
+
+    fn require_state(
+        &self,
+        expected: UploadState,
+        operation: &'static str,
+    ) -> Result<(), ClientError> {
+        if self.state == expected {
+            Ok(())
+        } else {
+            Err(ClientError::InvalidTransferState {
+                operation,
+                state: self.state.name(),
             })
         }
     }

@@ -282,6 +282,7 @@ fn upload_transfer_request_marks_requested() {
 #[test]
 fn upload_transfer_response_updates_state() {
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 100);
+    transfer.transfer_request_message();
 
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
@@ -291,18 +292,48 @@ fn upload_transfer_response_updates_state() {
         .unwrap();
     assert_eq!(transfer.state, UploadState::Accepted);
 
-    transfer
+    let mut rejected = UploadTransfer::new("peer", "Music/file.flac", 7, 100);
+    rejected.transfer_request_message();
+    rejected
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Rejected {
             token: 7,
             reason: "Queued".to_owned(),
         }))
         .unwrap();
     assert_eq!(
-        transfer.state,
+        rejected.state,
         UploadState::Rejected {
             reason: "Queued".to_owned()
         }
     );
+}
+
+#[test]
+fn upload_rejects_unsolicited_control_messages_before_request() {
+    let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
+
+    assert!(matches!(
+        transfer.handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        })),
+        Err(ClientError::InvalidTransferState {
+            operation: "handle transfer response",
+            state: "new",
+        })
+    ));
+    assert_eq!(transfer.state, UploadState::New);
+
+    assert!(matches!(
+        transfer.handle_peer_message(PeerMessage::UploadFailed {
+            filename: "Music/file.flac".to_owned(),
+        }),
+        Err(ClientError::InvalidTransferState {
+            operation: "handle upload failure",
+            state: "new",
+        })
+    ));
+    assert_eq!(transfer.state, UploadState::New);
 }
 
 #[test]
@@ -373,6 +404,7 @@ async fn send_file_uses_requested_offset_and_marks_completed() {
     let mut uploader = FileTransferConnection::new(uploader);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
+    transfer.transfer_request_message();
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: 7,
@@ -402,6 +434,7 @@ async fn send_file_rejects_offset_past_end() {
     let mut uploader = FileTransferConnection::new(uploader);
     let mut downloader = FileTransferConnection::new(downloader);
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 5);
+    transfer.transfer_request_message();
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: 7,
@@ -431,6 +464,7 @@ async fn send_file_rejects_payload_that_differs_from_advertised_size() {
     let (uploader, _downloader) = duplex(64);
     let mut uploader = FileTransferConnection::new(uploader);
     let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 3);
+    transfer.transfer_request_message();
     transfer
         .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: 7,
