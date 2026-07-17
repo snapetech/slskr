@@ -243,20 +243,29 @@ impl RateLimiter {
 
     /// Get statistics
     pub async fn stats(&self) -> RateLimitStats {
+        let now = Instant::now();
         let ip_windows = self.ip_windows.read().await;
         let user_windows = self.user_windows.read().await;
 
-        let ip_entries = ip_windows.len();
-        let ip_requests = ip_windows
-            .values()
+        let active_ip_windows = ip_windows.values().filter(|window| now < window.reset_at);
+        let ip_entries = active_ip_windows.clone().count();
+        let ip_requests = active_ip_windows
+            .clone()
             .fold(0_u32, |total, window| total.saturating_add(window.count));
-        let ip_max = ip_windows.values().map(|w| w.count).max().unwrap_or(0);
+        let ip_max = active_ip_windows
+            .map(|window| window.count)
+            .max()
+            .unwrap_or(0);
 
-        let user_entries = user_windows.len();
-        let user_requests = user_windows
-            .values()
+        let active_user_windows = user_windows.values().filter(|window| now < window.reset_at);
+        let user_entries = active_user_windows.clone().count();
+        let user_requests = active_user_windows
+            .clone()
             .fold(0_u32, |total, window| total.saturating_add(window.count));
-        let user_max = user_windows.values().map(|w| w.count).max().unwrap_or(0);
+        let user_max = active_user_windows
+            .map(|window| window.count)
+            .max()
+            .unwrap_or(0);
 
         RateLimitStats {
             ip_entries,
@@ -671,6 +680,34 @@ mod tests {
         drop(windows);
 
         assert_eq!(limiter.stats().await.ip_requests, u32::MAX);
+    }
+
+    #[tokio::test]
+    async fn rate_limit_stats_exclude_expired_windows() {
+        let limiter = RateLimiter::new(RateLimitConfig::default());
+        let now = Instant::now();
+        limiter.ip_windows.write().await.insert(
+            "expired-ip".to_owned(),
+            RequestWindow {
+                count: 41,
+                reset_at: now,
+            },
+        );
+        limiter.user_windows.write().await.insert(
+            "expired-user".to_owned(),
+            RequestWindow {
+                count: 37,
+                reset_at: now,
+            },
+        );
+
+        let stats = limiter.stats().await;
+        assert_eq!(stats.ip_entries, 0);
+        assert_eq!(stats.ip_requests, 0);
+        assert_eq!(stats.ip_max_requests_seen, 0);
+        assert_eq!(stats.user_entries, 0);
+        assert_eq!(stats.user_requests, 0);
+        assert_eq!(stats.user_max_requests_seen, 0);
     }
 
     #[tokio::test]
