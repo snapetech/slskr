@@ -15,6 +15,7 @@ use slskr_client::{
 use slskr_protocol::server::Direction;
 use tokio::io::{duplex, DuplexStream};
 use tokio::sync::Barrier;
+use tokio::time::Duration;
 
 #[test]
 fn token_generator_wraps() {
@@ -184,6 +185,42 @@ async fn cancelled_peer_connect_does_not_block_retry() {
 
     assert!(manager.ensure_peer_messages("PEER").await.unwrap());
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn timed_out_peer_connect_does_not_block_retry() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_connector = Arc::clone(&calls);
+    let (client, _) = duplex(512);
+    let manager = ConnectionManager::new(
+        ServerSession::new(ServerConnection::new(client)),
+        PeerConnectionCache::new(),
+        Arc::new(move |_| {
+            let call = calls_for_connector.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                if call == 0 {
+                    std::future::pending::<()>().await;
+                }
+                let (stream, _) = duplex(64);
+                Ok(PeerMessageConnection::new(stream))
+            })
+        }),
+    );
+
+    assert!(matches!(
+        manager
+            .ensure_peer_messages_with_timeout("peer", Duration::from_millis(10))
+            .await,
+        Err(slskr_client::ClientError::TimedOut {
+            operation: "managed peer connect",
+        })
+    ));
+    assert!(manager
+        .ensure_peer_messages_with_timeout("PEER", Duration::from_millis(10))
+        .await
+        .unwrap());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(manager.peer_cache().contains("peer").await);
 }
 
 #[tokio::test]

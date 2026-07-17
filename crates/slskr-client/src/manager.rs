@@ -8,6 +8,7 @@ use std::{
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
+use tokio::time::{self, Duration};
 
 use crate::{
     connection::ConnectionKind,
@@ -26,6 +27,7 @@ type ConnectFuture<S> =
 pub type PeerConnector<S> = Arc<dyn Fn(String) -> ConnectFuture<S> + Send + Sync>;
 
 const PEER_CONNECT_STRIPES: usize = 64;
+pub const DEFAULT_MANAGER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenGenerator {
@@ -117,6 +119,15 @@ where
     }
 
     pub async fn ensure_peer_messages(&self, username: &str) -> Result<bool, ClientError> {
+        self.ensure_peer_messages_with_timeout(username, DEFAULT_MANAGER_CONNECT_TIMEOUT)
+            .await
+    }
+
+    pub async fn ensure_peer_messages_with_timeout(
+        &self,
+        username: &str,
+        timeout: Duration,
+    ) -> Result<bool, ClientError> {
         let username = normalize_peer_username(username)?;
         if self.peer_cache.contains(username).await {
             return Ok(false);
@@ -128,7 +139,11 @@ where
         if self.peer_cache.contains(username).await {
             return Ok(false);
         }
-        let connection = (self.connector)(username.to_owned()).await?;
+        let connection = time::timeout(timeout, (self.connector)(username.to_owned()))
+            .await
+            .map_err(|_| ClientError::TimedOut {
+                operation: "managed peer connect",
+            })??;
         self.peer_cache
             .insert(username.to_owned(), connection)
             .await?;
