@@ -50,6 +50,8 @@ pub enum ClientError {
         length: usize,
         max: usize,
     },
+    #[error("search {field} must not be blank")]
+    BlankSearchField { field: &'static str },
     #[error("private message recipient list must not be empty")]
     EmptyMessageRecipients,
     #[error("private message recipient must not be blank")]

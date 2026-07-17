@@ -267,6 +267,10 @@ where
 }
 
 fn bounded_search_field(value: String, field: &'static str) -> Result<String, ClientError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ClientError::BlankSearchField { field });
+    }
     if value.len() > MAX_OUTBOUND_SEARCH_FIELD_BYTES {
         return Err(ClientError::SearchFieldTooLong {
             field,
@@ -274,7 +278,7 @@ fn bounded_search_field(value: String, field: &'static str) -> Result<String, Cl
             max: MAX_OUTBOUND_SEARCH_FIELD_BYTES,
         });
     }
-    Ok(value)
+    Ok(value.to_owned())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

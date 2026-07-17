@@ -135,6 +135,42 @@ async fn outbound_searches_reject_oversized_fields_before_consuming_a_token() {
     );
 }
 
+#[tokio::test]
+async fn outbound_searches_reject_blank_fields_before_consuming_a_token() {
+    let (client, server) = duplex(512);
+    let mut dispatcher =
+        SearchDispatcher::new(ServerSession::new(ServerConnection::new(client)), 400);
+
+    for (result, expected_field) in [
+        (dispatcher.search_global("  ").await, "query"),
+        (dispatcher.search_user("\t", "query").await, "username"),
+        (dispatcher.search_user("alice", "\n").await, "query"),
+        (dispatcher.search_room(" ", "query").await, "room"),
+        (dispatcher.search_room("room", "  ").await, "query"),
+        (dispatcher.search_wishlist("").await, "query"),
+    ] {
+        assert!(matches!(
+            result,
+            Err(ClientError::BlankSearchField { field }) if field == expected_field
+        ));
+    }
+
+    let handle = dispatcher.search_global(" valid ").await.unwrap();
+    assert_eq!(handle.token, 400);
+    assert_eq!(handle.query, "valid");
+    let mut server = ServerConnection::new(server);
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::FileSearchRequest(SearchRequest {
+            token: 400,
+            query: "valid".to_owned(),
+        })
+    );
+}
+
 #[test]
 fn search_results_collect_by_token() {
     let mut results = SearchResults::new();
