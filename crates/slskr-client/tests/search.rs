@@ -1,4 +1,5 @@
 use slskr_client::{
+    peer_cache::MAX_PEER_USERNAME_BYTES,
     search::{
         InMemoryShareIndex, SearchDispatcher, SearchRequestHandle, SearchResponder, SearchResults,
         SearchTarget, ShareIndex, TimedSearchResults, WishlistSearchScheduler,
@@ -643,6 +644,7 @@ fn responder_builds_file_search_response_for_server_search() {
         "local",
         InMemoryShareIndex::new(vec![entry("Music/Artist - Rare Track.flac")]),
     )
+    .unwrap()
     .with_stats(1000, 2, 0);
 
     let message = responder
@@ -671,7 +673,8 @@ fn responder_builds_file_search_response_for_distributed_search() {
     let responder = SearchResponder::new(
         "local",
         InMemoryShareIndex::new(vec![entry("Music/Artist - Rare Track.flac")]),
-    );
+    )
+    .unwrap();
 
     let message = responder
         .respond_to_distributed_search(&DistributedSearch {
@@ -697,7 +700,8 @@ fn responder_returns_none_without_matches() {
     let responder = SearchResponder::new(
         "local",
         InMemoryShareIndex::new(vec![entry("Music/Artist - Rare Track.flac")]),
-    );
+    )
+    .unwrap();
 
     assert!(responder
         .respond_to_server_search(&ServerMessage::FileSearchIncoming {
@@ -714,6 +718,7 @@ fn responder_suppresses_excluded_search_phrases() {
         "local",
         InMemoryShareIndex::new(vec![entry("Music/Artist - Rare Track.flac")]),
     )
+    .unwrap()
     .with_excluded_phrases(vec!["rare".to_owned()]);
 
     assert!(responder
@@ -730,7 +735,7 @@ fn responder_bounds_files_in_a_single_search_response() {
     let entries = (0..(MAX_SEARCH_RESULT_FILES_PER_TOKEN + 1))
         .map(|index| entry(&format!("Music/match-{index}.flac")))
         .collect();
-    let responder = SearchResponder::new("local", InMemoryShareIndex::new(entries));
+    let responder = SearchResponder::new("local", InMemoryShareIndex::new(entries)).unwrap();
 
     let message = responder
         .respond_to_server_search(&ServerMessage::FileSearchIncoming {
@@ -750,6 +755,38 @@ fn responder_bounds_files_in_a_single_search_response() {
         PeerMessage::decode(encoded).unwrap(),
         PeerMessage::FileSearchResponse(_)
     ));
+}
+
+#[test]
+fn responder_rejects_malformed_local_identity() {
+    assert!(matches!(
+        SearchResponder::new("   ", InMemoryShareIndex::new(Vec::new())).unwrap_err(),
+        ClientError::BlankPeerUsername
+    ));
+    assert!(matches!(
+        SearchResponder::new(
+            "x".repeat(MAX_PEER_USERNAME_BYTES + 1),
+            InMemoryShareIndex::new(Vec::new()),
+        )
+        .unwrap_err(),
+        ClientError::PeerUsernameTooLong { length, max }
+            if length == MAX_PEER_USERNAME_BYTES + 1 && max == MAX_PEER_USERNAME_BYTES
+    ));
+
+    let responder =
+        SearchResponder::new(" local ", InMemoryShareIndex::new(vec![entry("x")])).unwrap();
+    let PeerMessage::FileSearchResponse(response) = responder
+        .respond_to_distributed_search(&DistributedSearch {
+            identifier: 1,
+            username: "remote".to_owned(),
+            token: 2,
+            query: "x".to_owned(),
+        })
+        .unwrap()
+    else {
+        panic!("expected search response");
+    };
+    assert_eq!(response.username, "local");
 }
 
 fn response(username: &str, token: u32) -> FileSearchResponse {

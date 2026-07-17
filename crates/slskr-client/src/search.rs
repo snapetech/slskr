@@ -11,7 +11,8 @@ use slskr_protocol::{
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{
-    filters::ExcludedPhraseFilter, manager::TokenGenerator, server::ServerSession, ClientError,
+    filters::ExcludedPhraseFilter, manager::TokenGenerator, peer_cache::normalize_peer_username,
+    server::ServerSession, ClientError,
 };
 
 pub const MAX_SEARCH_RESPONSES_PER_TOKEN: usize = 1_000;
@@ -606,16 +607,16 @@ impl<I> SearchResponder<I>
 where
     I: ShareIndex,
 {
-    #[must_use]
-    pub fn new(username: impl Into<String>, index: I) -> Self {
-        Self {
-            username: username.into(),
+    pub fn new(username: impl Into<String>, index: I) -> Result<Self, ClientError> {
+        let username = username.into();
+        Ok(Self {
+            username: normalize_peer_username(&username)?.to_owned(),
             index,
             excluded_filter: ExcludedPhraseFilter::default(),
             average_speed: 0,
             queue_length: 0,
             unknown: 0,
-        }
+        })
     }
 
     #[must_use]
