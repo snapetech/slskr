@@ -33,10 +33,7 @@ pub fn writable_store_modes() -> &'static [&'static str] {
 
 pub fn load(config: &AppConfig) -> Result<Option<StoredCredentials>, String> {
     if let Some(credentials) = config.credentials() {
-        return Ok(Some(StoredCredentials {
-            credentials,
-            source: "config",
-        }));
+        return Ok(normalize_stored_credentials(credentials, "config"));
     }
 
     match config.credential_store {
@@ -80,14 +77,10 @@ fn load_systemd() -> Result<Option<StoredCredentials>, String> {
 
     let username = read_secret_text(&username_path, "systemd Soulseek username")?;
     let password = read_secret_text(&password_path, "systemd Soulseek password")?;
-    if username.trim().is_empty() || password.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(StoredCredentials {
-        credentials: LoginCredentials::default_client(username.trim().to_owned(), password),
-        source: "systemd",
-    }))
+    Ok(normalize_stored_credentials(
+        LoginCredentials::default_client(username, password),
+        "systemd",
+    ))
 }
 
 fn load_systemd_json(credentials_dir: &Path) -> Result<Option<StoredCredentials>, String> {
@@ -103,17 +96,10 @@ fn load_systemd_json(credentials_dir: &Path) -> Result<Option<StoredCredentials>
             path.display()
         )
     })?;
-    if parsed.username.trim().is_empty() || parsed.password.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(StoredCredentials {
-        credentials: LoginCredentials::default_client(
-            parsed.username.trim().to_owned(),
-            parsed.password,
-        ),
-        source: "systemd",
-    }))
+    Ok(normalize_stored_credentials(
+        LoginCredentials::default_client(parsed.username, parsed.password),
+        "systemd",
+    ))
 }
 
 fn read_secret_text(path: &Path, label: &str) -> Result<String, String> {
@@ -204,10 +190,10 @@ fn load_os() -> Result<Option<StoredCredentials>, String> {
         }
     };
 
-    Ok(Some(StoredCredentials {
-        credentials: LoginCredentials::default_client(username, password),
-        source: "os",
-    }))
+    Ok(normalize_stored_credentials(
+        LoginCredentials::default_client(username, password),
+        "os",
+    ))
 }
 
 fn store_os(credentials: &LoginCredentials) -> Result<&'static str, String> {
@@ -284,13 +270,24 @@ fn load_file(path: &Path) -> Result<Option<StoredCredentials>, String> {
             path.display()
         )
     })?;
-    if parsed.username.trim().is_empty() || parsed.password.is_empty() {
-        return Ok(None);
+    Ok(normalize_stored_credentials(
+        LoginCredentials::default_client(parsed.username, parsed.password),
+        "file",
+    ))
+}
+
+fn normalize_stored_credentials(
+    mut credentials: LoginCredentials,
+    source: &'static str,
+) -> Option<StoredCredentials> {
+    credentials.username = credentials.username.trim().to_owned();
+    if credentials.username.is_empty() || credentials.password.is_empty() {
+        return None;
     }
-    Ok(Some(StoredCredentials {
-        credentials: LoginCredentials::default_client(parsed.username, parsed.password),
-        source: "file",
-    }))
+    Some(StoredCredentials {
+        credentials,
+        source,
+    })
 }
 
 fn store_file(path: &Path, credentials: &LoginCredentials) -> Result<&'static str, String> {
@@ -603,6 +600,46 @@ mod tests {
         let error = load_file(&path).expect_err("reject exposed credential file");
         assert!(error.contains("must not be accessible by group or other users"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_file_load_normalizes_username_before_login() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_dir("normalized-username");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create fixture directory");
+        let path = root.join("credentials.json");
+        fs::write(&path, r#"{"username":"  user  ","password":"secret"}"#)
+            .expect("write credential fixture");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("restrict credential fixture");
+
+        let stored = load_file(&path)
+            .expect("load credentials")
+            .expect("credentials must be present");
+        assert_eq!(stored.credentials.username, "user");
+        assert_eq!(
+            stored.credentials.into_login_request().username,
+            "user",
+            "normalized username must reach the wire request"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stored_credentials_reject_blank_identity_or_password() {
+        assert!(normalize_stored_credentials(
+            LoginCredentials::default_client("  ", "password"),
+            "test"
+        )
+        .is_none());
+        assert!(
+            normalize_stored_credentials(LoginCredentials::default_client("user", ""), "test")
+                .is_none()
+        );
     }
 
     #[test]
