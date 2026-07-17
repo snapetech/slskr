@@ -165,7 +165,9 @@ impl UserWatchState {
                 true
             }
             ServerMessage::UnwatchUser { username } => {
-                let key = username_key(username);
+                let Some(key) = social_lookup_key(username) else {
+                    return false;
+                };
                 self.watched.remove(&key);
                 self.statuses.remove(&key);
                 true
@@ -176,12 +178,12 @@ impl UserWatchState {
 
     #[must_use]
     pub fn watched(&self, username: &str) -> Option<&WatchedUser> {
-        self.watched.get(&username_key(username))
+        self.watched.get(&social_lookup_key(username)?)
     }
 
     #[must_use]
     pub fn status(&self, username: &str) -> Option<&UserStatus> {
-        self.statuses.get(&username_key(username))
+        self.statuses.get(&social_lookup_key(username)?)
     }
 }
 
@@ -276,7 +278,10 @@ impl RoomState {
                 true
             }
             ServerMessage::LeaveRoom { room } => {
-                self.joined.remove(&room_key(room));
+                let Some(key) = social_lookup_key(room) else {
+                    return false;
+                };
+                self.joined.remove(&key);
                 true
             }
             _ => false,
@@ -285,7 +290,7 @@ impl RoomState {
 
     #[must_use]
     pub fn is_joined(&self, room: &str) -> bool {
-        self.joined.contains(&room_key(room))
+        social_lookup_key(room).is_some_and(|key| self.joined.contains(&key))
     }
 
     #[must_use]
@@ -296,6 +301,17 @@ impl RoomState {
 
 fn room_key(room: &str) -> String {
     room.trim().to_ascii_lowercase()
+}
+
+fn social_lookup_key(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > MAX_STORED_SOCIAL_FIELD_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(value.to_ascii_lowercase())
 }
 
 fn normalize_social_field(value: String, field: &'static str) -> Result<String, ClientError> {
@@ -357,7 +373,12 @@ impl PrivateMessageInbox {
 mod tests {
     use std::cell::Cell;
 
-    use super::{private_message_users_command, MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES};
+    use slskr_protocol::server::ServerMessage;
+
+    use super::{
+        private_message_users_command, RoomState, UserWatchState,
+        MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES, MAX_STORED_SOCIAL_FIELD_BYTES,
+    };
     use crate::ClientError;
 
     #[test]
@@ -374,5 +395,26 @@ mod tests {
                 if max == MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES
         ));
         assert_eq!(consumed.get(), MAX_PRIVATE_MESSAGE_RECIPIENT_CANDIDATES + 1);
+    }
+
+    #[test]
+    fn social_lookups_and_removals_reject_malformed_keys() {
+        let mut users = UserWatchState::new();
+        let mut rooms = RoomState::new();
+        let oversized = "x".repeat(MAX_STORED_SOCIAL_FIELD_BYTES + 1);
+
+        for username in ["", "peer\nforged", oversized.as_str()] {
+            assert!(users.watched(username).is_none());
+            assert!(users.status(username).is_none());
+            assert!(!users.apply_server_message(&ServerMessage::UnwatchUser {
+                username: username.to_owned(),
+            }));
+        }
+        for room in ["", "room\rforged", oversized.as_str()] {
+            assert!(!rooms.is_joined(room));
+            assert!(!rooms.apply_server_message(&ServerMessage::LeaveRoom {
+                room: room.to_owned(),
+            }));
+        }
     }
 }
