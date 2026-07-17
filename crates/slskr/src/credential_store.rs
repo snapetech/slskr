@@ -10,6 +10,7 @@ const KEYRING_SERVICE: &str = "slskr.soulseek";
 const KEYRING_USERNAME_KEY: &str = "username";
 const KEYRING_PASSWORD_KEY: &str = "password";
 const MAX_CREDENTIAL_FILE_BYTES: u64 = 64 * 1024;
+const MAX_CREDENTIAL_FIELD_BYTES: usize = MAX_CREDENTIAL_FILE_BYTES as usize;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FileCredentials {
@@ -197,6 +198,7 @@ fn load_os() -> Result<Option<StoredCredentials>, String> {
 }
 
 fn store_os(credentials: &LoginCredentials) -> Result<&'static str, String> {
+    validate_credentials_for_store(credentials)?;
     store_os_with(
         credentials,
         |user| match keyring_entry(user)?.get_password() {
@@ -291,6 +293,7 @@ fn normalize_stored_credentials(
 }
 
 fn store_file(path: &Path, credentials: &LoginCredentials) -> Result<&'static str, String> {
+    validate_credentials_for_store(credentials)?;
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -310,6 +313,26 @@ fn store_file(path: &Path, credentials: &LoginCredentials) -> Result<&'static st
 
     write_secret_file(path, payload.as_bytes())?;
     Ok("file")
+}
+
+fn validate_credentials_for_store(credentials: &LoginCredentials) -> Result<(), String> {
+    if credentials.username.trim().is_empty() {
+        return Err("Soulseek username must not be blank".to_owned());
+    }
+    if credentials.password.is_empty() {
+        return Err("Soulseek password must not be empty".to_owned());
+    }
+    for (field, value) in [
+        ("username", credentials.username.as_str()),
+        ("password", credentials.password.as_str()),
+    ] {
+        if value.len() > MAX_CREDENTIAL_FIELD_BYTES {
+            return Err(format!(
+                "Soulseek {field} exceeds {MAX_CREDENTIAL_FIELD_BYTES} bytes"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn ensure_secure_credential_parent(parent: &Path) -> Result<(), String> {
@@ -640,6 +663,29 @@ mod tests {
             normalize_stored_credentials(LoginCredentials::default_client("user", ""), "test")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn credential_persistence_rejects_values_the_loader_would_discard() {
+        for credentials in [
+            LoginCredentials::default_client("   ", "password"),
+            LoginCredentials::default_client("username", ""),
+        ] {
+            assert!(validate_credentials_for_store(&credentials).is_err());
+        }
+
+        for credentials in [
+            LoginCredentials::default_client(
+                "x".repeat(MAX_CREDENTIAL_FIELD_BYTES + 1),
+                "password",
+            ),
+            LoginCredentials::default_client(
+                "username",
+                "x".repeat(MAX_CREDENTIAL_FIELD_BYTES + 1),
+            ),
+        ] {
+            assert!(validate_credentials_for_store(&credentials).is_err());
+        }
     }
 
     #[test]
