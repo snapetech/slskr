@@ -398,35 +398,38 @@ where
             .transpose()?
             .map(username_key);
         let mut current_child = None;
+        let mut sent = 0;
+        let mut first_error = None;
         let result = time::timeout(timeout, async {
-            let mut sent = 0;
-            let mut failed = Vec::new();
-            let mut first_error = None;
-            for (username, child) in &mut self.children {
+            let mut usernames = self.children.keys().cloned().collect::<Vec<_>>();
+            usernames.sort_unstable();
+            for username in usernames {
                 if except_key.as_deref() == Some(username.as_str()) {
                     continue;
                 }
                 current_child = Some(username.clone());
-                match child
+                let send_result = self
+                    .children
+                    .get_mut(&username)
+                    .expect("child key was collected from the same map")
                     .connection
                     .send(&DistributedMessage::Search(search.clone()))
-                    .await
-                {
+                    .await;
+                match send_result {
                     Ok(()) => sent += 1,
                     Err(error) => {
-                        failed.push(username.clone());
+                        self.children.remove(&username);
                         if first_error.is_none() {
                             first_error = Some(error);
                         }
                     }
                 }
             }
-            (sent, failed, first_error)
         })
         .await;
 
-        let (sent, failed, first_error) = match result {
-            Ok(result) => result,
+        match result {
+            Ok(()) => {}
             Err(_) => {
                 if let Some(username) = current_child {
                     self.children.remove(&username);
@@ -435,9 +438,6 @@ where
                     operation: "distributed search forwarding",
                 });
             }
-        };
-        for username in failed {
-            self.children.remove(&username);
         }
         if let Some(error) = first_error {
             return Err(error);

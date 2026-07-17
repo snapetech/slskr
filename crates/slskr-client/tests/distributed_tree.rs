@@ -702,6 +702,25 @@ async fn distributed_forwarding_times_out_and_evicts_stalled_child() {
 }
 
 #[tokio::test]
+async fn distributed_forwarding_timeout_evicts_failures_seen_before_stall() {
+    let (failed_tree, failed_peer) = duplex(1);
+    let (stalled_tree, _non_reading_child) = duplex(1);
+    let mut tree = DistributedTree::new("local");
+    let search = distributed_search(5, "origin", 44, &"x".repeat(4_096));
+    tree.add_child("a-failed", DistributedConnection::new(failed_tree))
+        .unwrap();
+    tree.add_child("z-stalled", DistributedConnection::new(stalled_tree))
+        .unwrap();
+    drop(failed_peer);
+
+    assert!(tree
+        .forward_search_to_children_with_timeout(&search, None, Duration::from_millis(10))
+        .await
+        .is_err());
+    assert_eq!(tree.children_len(), 0);
+}
+
+#[tokio::test]
 async fn parent_reporting_times_out_and_disconnects_stalled_parent() {
     let (parent_tree, _non_reading_parent) = duplex(1);
     let mut tree = DistributedTree::new("local");
