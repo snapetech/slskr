@@ -140,19 +140,20 @@ where
         };
 
         let mut connection_guard = connection.lock().await;
-        let Some(active) = connection_guard.as_mut() else {
+        let Some(mut active) = connection_guard.take() else {
             return Ok(false);
         };
         match time::timeout(timeout, active.send(message)).await {
-            Ok(Ok(())) => Ok(true),
+            Ok(Ok(())) => {
+                *connection_guard = Some(active);
+                Ok(true)
+            }
             Ok(Err(error)) => {
-                *connection_guard = None;
                 drop(connection_guard);
                 self.remove_if_current(&key, &connection).await;
                 Err(error)
             }
             Err(_) => {
-                *connection_guard = None;
                 drop(connection_guard);
                 self.remove_if_current(&key, &connection).await;
                 Err(ClientError::TimedOut {
@@ -180,21 +181,22 @@ where
         };
 
         let mut connection_guard = connection.lock().await;
-        let Some(active) = connection_guard.as_mut() else {
+        let Some(mut active) = connection_guard.take() else {
             return Ok(None);
         };
         match time::timeout(timeout, active.receive()).await {
             Err(_) => {
-                *connection_guard = None;
                 drop(connection_guard);
                 self.remove_if_current(&key, &connection).await;
                 Err(ClientError::TimedOut {
                     operation: "cached peer receive",
                 })
             }
-            Ok(Ok(message)) => Ok(Some(message)),
+            Ok(Ok(message)) => {
+                *connection_guard = Some(active);
+                Ok(Some(message))
+            }
             Ok(Err(error)) => {
-                *connection_guard = None;
                 drop(connection_guard);
                 self.remove_if_current(&key, &connection).await;
                 Err(error)

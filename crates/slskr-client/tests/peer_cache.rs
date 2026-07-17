@@ -331,3 +331,44 @@ async fn cache_evicts_peer_after_send_timeout() {
     ));
     assert!(!cache.contains("peer").await);
 }
+
+#[tokio::test]
+async fn cancelled_cached_receive_evicts_partial_connection() {
+    let cache = PeerConnectionCache::new();
+    let (cached, _silent_peer) = duplex(64);
+    cache
+        .insert("peer", PeerMessageConnection::new(cached))
+        .await
+        .unwrap();
+
+    assert!(timeout(
+        Duration::from_millis(10),
+        cache.receive_from_with_timeout("peer", Duration::from_secs(60)),
+    )
+    .await
+    .is_err());
+    assert!(!cache.contains("peer").await);
+    assert!(cache.is_empty().await);
+}
+
+#[tokio::test]
+async fn cancelled_cached_send_evicts_partial_connection() {
+    let cache = PeerConnectionCache::new();
+    let (cached, _non_reading_peer) = duplex(1);
+    cache
+        .insert("peer", PeerMessageConnection::new(cached))
+        .await
+        .unwrap();
+    let message = PeerMessage::QueueUpload {
+        filename: "x".repeat(4_096),
+    };
+
+    assert!(timeout(
+        Duration::from_millis(10),
+        cache.send_to_with_timeout("peer", &message, Duration::from_secs(60)),
+    )
+    .await
+    .is_err());
+    assert!(!cache.contains("peer").await);
+    assert!(cache.is_empty().await);
+}
