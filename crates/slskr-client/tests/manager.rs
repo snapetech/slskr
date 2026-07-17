@@ -24,6 +24,16 @@ fn token_generator_wraps() {
     assert_eq!(tokens.next_token(), 0);
 }
 
+#[test]
+fn nonzero_token_generation_skips_direct_connection_token() {
+    let mut tokens = TokenGenerator::new(0);
+    assert_eq!(tokens.next_nonzero_token(), 1);
+
+    let mut wrapping = TokenGenerator::new(u32::MAX);
+    assert_eq!(wrapping.next_nonzero_token(), u32::MAX);
+    assert_eq!(wrapping.next_nonzero_token(), 1);
+}
+
 #[tokio::test]
 async fn ensure_peer_messages_reuses_cached_connection() {
     let manager = manager_with_connector(|_| {
@@ -198,6 +208,34 @@ async fn request_indirect_peer_messages_sends_server_connect_message() {
         request,
         IndirectPeerRequest::new(700, "peer", ConnectionKind::PeerMessages)
     );
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        request.server_message()
+    );
+}
+
+#[tokio::test]
+async fn indirect_requests_never_issue_the_direct_connection_token() {
+    let (client, server) = duplex(512);
+    let manager = ConnectionManager::new(
+        ServerSession::new(ServerConnection::new(client)),
+        PeerConnectionCache::new(),
+        connector(|_| {
+            let (stream, _) = duplex(64);
+            PeerMessageConnection::new(stream)
+        }),
+    )
+    .with_token_seed(0);
+    let mut server = ServerConnection::new(server);
+
+    let request = manager
+        .request_indirect_peer_messages("peer")
+        .await
+        .unwrap();
+    assert_eq!(request.token, 1);
     assert_eq!(
         server
             .receive_with_direction(Direction::ClientToServer)

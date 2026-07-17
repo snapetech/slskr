@@ -57,6 +57,16 @@ impl TokenGenerator {
             }
         }
     }
+
+    #[must_use]
+    pub fn next_nonzero_token(&mut self) -> u32 {
+        loop {
+            let token = self.next_token();
+            if token != 0 {
+                return token;
+            }
+        }
+    }
 }
 
 impl Default for TokenGenerator {
@@ -155,7 +165,7 @@ where
         kind: ConnectionKind,
     ) -> Result<IndirectPeerRequest, ClientError> {
         let username = normalize_peer_username(username)?;
-        let token = self.tokens.lock().await.next_token();
+        let token = self.tokens.lock().await.next_nonzero_token();
         let request = IndirectPeerRequest::new(token, username.to_owned(), kind);
         self.server
             .lock()
