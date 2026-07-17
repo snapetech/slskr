@@ -13,7 +13,7 @@ use crate::{
     connection::ConnectionKind,
     file_transfer::FileTransferConnection,
     listener::IncomingConnection,
-    peer_cache::{validate_peer_username, PeerConnectionCache},
+    peer_cache::{normalize_peer_username, PeerConnectionCache},
     peer_connect::IndirectPeerRequest,
     server::ServerSession,
     stream::{DistributedConnection, PeerMessageConnection},
@@ -107,7 +107,7 @@ where
     }
 
     pub async fn ensure_peer_messages(&self, username: &str) -> Result<bool, ClientError> {
-        validate_peer_username(username)?;
+        let username = normalize_peer_username(username)?;
         if self.peer_cache.contains(username).await {
             return Ok(false);
         }
@@ -154,7 +154,7 @@ where
         username: &str,
         kind: ConnectionKind,
     ) -> Result<IndirectPeerRequest, ClientError> {
-        validate_peer_username(username)?;
+        let username = normalize_peer_username(username)?;
         let token = self.tokens.lock().await.next_token();
         let request = IndirectPeerRequest::new(token, username.to_owned(), kind);
         self.server

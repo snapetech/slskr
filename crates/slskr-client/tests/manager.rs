@@ -53,6 +53,22 @@ async fn ensure_peer_messages_calls_connector_once_for_cached_peer() {
 }
 
 #[tokio::test]
+async fn peer_identity_is_canonicalized_before_connector_and_cache_lookup() {
+    let usernames = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let usernames_for_connector = Arc::clone(&usernames);
+    let manager = manager_with_connector(move |username| {
+        usernames_for_connector.lock().unwrap().push(username);
+        let (stream, _) = duplex(64);
+        PeerMessageConnection::new(stream)
+    });
+
+    assert!(manager.ensure_peer_messages(" Peer ").await.unwrap());
+    assert!(!manager.ensure_peer_messages("peer").await.unwrap());
+    assert_eq!(&*usernames.lock().unwrap(), &["Peer"]);
+    assert_eq!(manager.peer_cache().len().await, 1);
+}
+
+#[tokio::test]
 async fn blank_peer_identity_is_rejected_before_connector_or_server_io() {
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_for_connector = Arc::clone(&calls);
@@ -175,7 +191,7 @@ async fn request_indirect_peer_messages_sends_server_connect_message() {
     let mut server = ServerConnection::new(server);
 
     let request = manager
-        .request_indirect_peer_messages("peer")
+        .request_indirect_peer_messages(" peer ")
         .await
         .unwrap();
     assert_eq!(

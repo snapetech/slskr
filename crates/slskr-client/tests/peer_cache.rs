@@ -48,6 +48,26 @@ async fn cache_rejects_blank_peer_identity_without_storing_it() {
 }
 
 #[tokio::test]
+async fn cache_canonicalizes_whitespace_before_capacity_checks() {
+    let cache = PeerConnectionCache::with_max_connections(1);
+    let (first, _) = duplex(64);
+    cache
+        .insert(" Alice ", PeerMessageConnection::new(first))
+        .await
+        .unwrap();
+
+    let (replacement, _) = duplex(64);
+    assert!(cache
+        .insert("alice", PeerMessageConnection::new(replacement))
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(cache.len().await, 1);
+    assert!(cache.contains(" ALICE ").await);
+    assert!(cache.remove(" alice ").await.is_some());
+}
+
+#[tokio::test]
 async fn cache_sends_to_existing_peer() {
     let cache = PeerConnectionCache::new();
     let (a, b) = duplex(256);
