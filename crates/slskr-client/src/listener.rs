@@ -67,13 +67,15 @@ impl Listener {
         &self,
         timeout: Duration,
     ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
-        let (stream, address) = self.inner.accept().await?;
-        let incoming = time::timeout(timeout, demux_incoming(stream))
-            .await
-            .map_err(|_| ClientError::TimedOut {
-                operation: "peer initialization handshake",
-            })??;
-        Ok((incoming, address))
+        time::timeout(timeout, async {
+            let (stream, address) = self.inner.accept().await?;
+            let incoming = demux_incoming(stream).await?;
+            Ok((incoming, address))
+        })
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "peer initialization handshake",
+        })?
     }
 
     pub async fn accept_raw(&self) -> Result<(TcpStream, SocketAddr), ClientError> {
@@ -91,13 +93,15 @@ impl Listener {
         &self,
         timeout: Duration,
     ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
-        let (stream, address) = self.inner.accept().await?;
-        let incoming = time::timeout(timeout, demux_obfuscated_incoming(stream))
-            .await
-            .map_err(|_| ClientError::TimedOut {
-                operation: "obfuscated peer initialization handshake",
-            })??;
-        Ok((incoming, address))
+        time::timeout(timeout, async {
+            let (stream, address) = self.inner.accept().await?;
+            let incoming = demux_obfuscated_incoming(stream).await?;
+            Ok((incoming, address))
+        })
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "obfuscated peer initialization handshake",
+        })?
     }
 
     #[must_use]

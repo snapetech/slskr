@@ -321,6 +321,20 @@ async fn listener_times_out_silent_initialization_handshake() {
 }
 
 #[tokio::test]
+async fn listener_timeout_covers_waiting_for_a_connection() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+
+    assert!(matches!(
+        listener
+            .accept_with_timeout(Duration::from_millis(10))
+            .await,
+        Err(ClientError::TimedOut {
+            operation: "peer initialization handshake",
+        })
+    ));
+}
+
+#[tokio::test]
 async fn obfuscated_listener_times_out_silent_initialization_handshake() {
     let listener = Listener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -336,5 +350,19 @@ async fn obfuscated_listener_times_out_silent_initialization_handshake() {
         slskr_client::ClientError::TimedOut {
             operation: "obfuscated peer initialization handshake"
         }
+    ));
+}
+
+#[tokio::test]
+async fn obfuscated_listener_timeout_covers_waiting_for_a_connection() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+
+    assert!(matches!(
+        listener
+            .accept_obfuscated_with_timeout(Duration::from_millis(10))
+            .await,
+        Err(ClientError::TimedOut {
+            operation: "obfuscated peer initialization handshake",
+        })
     ));
 }
