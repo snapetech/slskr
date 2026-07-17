@@ -226,17 +226,19 @@ impl ContentDiscoveryStore {
                     && entry.size == incoming.size
                     && entry.flac_key.eq_ignore_ascii_case(&incoming.flac_key)
             });
-            if same_key
-                .is_some_and(|index| !same_hash_identity(&self.hash_entries[index], &incoming))
-            {
+            if same_key.is_some_and(|index| {
+                !same_hash_identity(&self.hash_entries[index], &incoming)
+                    || hash_metadata_conflicts(&self.hash_entries[index], &incoming)
+            }) {
                 self.hash_entries = previous_entries;
                 self.latest_seq = previous_seq;
                 return Err("flacKey and size conflict with existing SHA-256 metadata".to_owned());
             }
             let existing = same_key.or_else(|| {
-                self.hash_entries
-                    .iter()
-                    .position(|entry| same_hash_identity(entry, &incoming))
+                self.hash_entries.iter().position(|entry| {
+                    same_hash_identity(entry, &incoming)
+                        && !hash_metadata_conflicts(entry, &incoming)
+                })
             });
             self.latest_seq += 1;
             incoming.seq_id = self.latest_seq;
@@ -344,6 +346,12 @@ fn normalize_hash_entry(mut entry: HashDbEntry, now: u64) -> Result<HashDbEntry,
     entry.byte_hash = normalize_hash(&entry.byte_hash, "byteHash")?;
     entry.full_file_hash = normalize_hash(&entry.full_file_hash, "fullFileHash")?;
     entry.file_sha256 = normalize_hash(&entry.file_sha256, "fileSha256")?;
+    if !entry.full_file_hash.is_empty()
+        && !entry.file_sha256.is_empty()
+        && entry.full_file_hash != entry.file_sha256
+    {
+        return Err("fullFileHash conflicts with fileSha256".to_owned());
+    }
     if entry.size == 0 {
         return Err("hash entry size must be positive".to_owned());
     }
@@ -422,13 +430,40 @@ fn bounded_non_control(value: &str, max_bytes: usize, field: &str) -> Result<Str
 
 fn same_hash_identity(left: &HashDbEntry, right: &HashDbEntry) -> bool {
     left.size == right.size
-        && [
-            (&left.byte_hash, &right.byte_hash),
-            (&left.full_file_hash, &right.full_file_hash),
-            (&left.file_sha256, &right.file_sha256),
-        ]
-        .into_iter()
-        .any(|(left, right)| !left.is_empty() && left.eq_ignore_ascii_case(right))
+        && ((!left.byte_hash.is_empty() && left.byte_hash.eq_ignore_ascii_case(&right.byte_hash))
+            || [&left.full_file_hash, &left.file_sha256]
+                .into_iter()
+                .filter(|hash| !hash.is_empty())
+                .any(|left_hash| {
+                    [&right.full_file_hash, &right.file_sha256]
+                        .into_iter()
+                        .any(|right_hash| left_hash.eq_ignore_ascii_case(right_hash))
+                }))
+}
+
+fn hash_metadata_conflicts(left: &HashDbEntry, right: &HashDbEntry) -> bool {
+    if !left.byte_hash.is_empty()
+        && !right.byte_hash.is_empty()
+        && !left.byte_hash.eq_ignore_ascii_case(&right.byte_hash)
+    {
+        return true;
+    }
+    let mut whole_file_hash = None;
+    for hash in [
+        &left.full_file_hash,
+        &left.file_sha256,
+        &right.full_file_hash,
+        &right.file_sha256,
+    ] {
+        if hash.is_empty() {
+            continue;
+        }
+        if whole_file_hash.is_some_and(|existing: &String| !existing.eq_ignore_ascii_case(hash)) {
+            return true;
+        }
+        whole_file_hash = Some(hash);
+    }
+    false
 }
 
 fn merge_missing_hash_metadata(incoming: &mut HashDbEntry, existing: &HashDbEntry) {
@@ -453,20 +488,24 @@ fn merge_missing_hash_metadata(incoming: &mut HashDbEntry, existing: &HashDbEntr
 
 fn dedupe_hash_entries(entries: &mut Vec<HashDbEntry>) -> Result<(), String> {
     let mut deduped: Vec<HashDbEntry> = Vec::with_capacity(entries.len());
-    for entry in entries.drain(..) {
+    for mut entry in entries.drain(..) {
         let same_key = deduped.iter().position(|current| {
             !entry.flac_key.is_empty()
                 && current.size == entry.size
                 && current.flac_key.eq_ignore_ascii_case(&entry.flac_key)
         });
-        if same_key.is_some_and(|index| !same_hash_identity(&deduped[index], &entry)) {
+        if same_key.is_some_and(|index| {
+            !same_hash_identity(&deduped[index], &entry)
+                || hash_metadata_conflicts(&deduped[index], &entry)
+        }) {
             return Err("flacKey and size conflict with persisted SHA-256 metadata".to_owned());
         }
         if let Some(index) = same_key.or_else(|| {
-            deduped
-                .iter()
-                .position(|current| same_hash_identity(current, &entry))
+            deduped.iter().position(|current| {
+                same_hash_identity(current, &entry) && !hash_metadata_conflicts(current, &entry)
+            })
         }) {
+            merge_missing_hash_metadata(&mut entry, &deduped[index]);
             deduped[index] = entry;
         } else {
             deduped.push(entry);
@@ -583,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn rescue_lookup_matches_sibling_flac_key_and_requires_consistent_full_hash() {
+    fn rescue_lookup_rejects_conflicting_whole_file_hashes() {
         assert_eq!(
             generate_flac_key("Remote/Album/Track.FLAC", 123),
             "072a888a552d6ba1"
@@ -603,10 +642,39 @@ mod tests {
         conflicting.flac_key = generate_flac_key("Track.FLAC", 123);
         conflicting.full_file_hash =
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned();
-        store
+        let error = store
             .merge_hash_entries(vec![conflicting])
-            .expect("merge conflicting full hashes");
-        assert_eq!(store.verified_file_hash("track.flac", 123), None);
+            .expect_err("reject conflicting full hashes");
+        assert_eq!(error, "fullFileHash conflicts with fileSha256");
+        assert_eq!(
+            store.verified_file_hash("track.flac", 123),
+            Some(HASH.to_owned())
+        );
+    }
+
+    #[test]
+    fn equivalent_whole_file_hash_fields_merge_without_conflict() {
+        let mut store = ContentDiscoveryStore::in_memory();
+        let existing = hash_entry(HASH, "recording-1");
+        store
+            .merge_hash_entries(vec![existing])
+            .expect("merge file hash");
+
+        let incoming = HashDbEntry {
+            flac_key: "track-key".to_owned(),
+            size: 123,
+            full_file_hash: HASH.to_owned(),
+            music_brainz_id: "recording-1".to_owned(),
+            ..HashDbEntry::default()
+        };
+        store
+            .merge_hash_entries(vec![incoming])
+            .expect("merge equivalent full-file hash field");
+
+        assert_eq!(store.hash_entries().len(), 1);
+        assert_eq!(store.hash_entries()[0].file_sha256, HASH);
+        assert_eq!(store.hash_entries()[0].full_file_hash, HASH);
+        assert_eq!(store.hash_entries()[0].use_count, 2);
     }
 
     #[test]
@@ -694,6 +762,27 @@ mod tests {
             error,
             "flacKey and size conflict with persisted SHA-256 metadata"
         );
+    }
+
+    #[test]
+    fn persisted_complementary_whole_file_hashes_preserve_metadata() {
+        let mut file_hash = hash_entry(HASH, "recording-1");
+        let mut full_hash = HashDbEntry {
+            flac_key: file_hash.flac_key.clone(),
+            size: file_hash.size,
+            full_file_hash: HASH.to_owned(),
+            ..HashDbEntry::default()
+        };
+        file_hash.last_updated_at = 1;
+        full_hash.last_updated_at = 2;
+        let mut entries = vec![file_hash, full_hash];
+
+        dedupe_hash_entries(&mut entries).expect("dedupe complementary hashes");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file_sha256, HASH);
+        assert_eq!(entries[0].full_file_hash, HASH);
+        assert_eq!(entries[0].last_updated_at, 2);
     }
 
     #[test]
