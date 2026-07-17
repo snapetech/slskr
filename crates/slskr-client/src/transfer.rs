@@ -87,6 +87,7 @@ impl DownloadTransfer {
         }
         match message {
             PeerMessage::PlaceInQueueResponse { filename, place } => {
+                self.require_queue_state("handle queue position")?;
                 self.validate_filename(filename)?;
                 self.state = DownloadState::PlaceInQueue(place);
                 Ok(())
@@ -182,6 +183,7 @@ impl DownloadTransfer {
     }
 
     fn handle_transfer_request(&mut self, request: TransferRequest) -> Result<(), ClientError> {
+        self.require_queue_state("handle transfer request")?;
         if request.direction != UPLOAD_DIRECTION {
             return Err(ClientError::TransferDirectionMismatch {
                 expected: UPLOAD_DIRECTION,
@@ -229,6 +231,20 @@ impl DownloadTransfer {
             })
         } else {
             Ok(())
+        }
+    }
+
+    fn require_queue_state(&self, operation: &'static str) -> Result<(), ClientError> {
+        if matches!(
+            self.state,
+            DownloadState::New | DownloadState::Queued | DownloadState::PlaceInQueue(_)
+        ) {
+            Ok(())
+        } else {
+            Err(ClientError::InvalidTransferState {
+                operation,
+                state: self.state.name(),
+            })
         }
     }
 

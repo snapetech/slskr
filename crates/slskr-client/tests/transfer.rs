@@ -451,6 +451,42 @@ fn terminal_transfers_reject_replayed_peer_control_messages() {
 }
 
 #[test]
+fn accepted_download_rejects_stale_queue_and_request_messages() {
+    let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut transfer, Some(5));
+    transfer.accept_upload_response_message(5).unwrap();
+
+    for (message, operation) in [
+        (
+            PeerMessage::PlaceInQueueResponse {
+                filename: "Music/file.flac".to_owned(),
+                place: 1,
+            },
+            "handle queue position",
+        ),
+        (
+            PeerMessage::TransferRequest(TransferRequest {
+                direction: 1,
+                token: 7,
+                filename: "Music/file.flac".to_owned(),
+                filename_encoding: ProtocolTextEncoding::Utf8,
+                size: Some(6),
+            }),
+            "handle transfer request",
+        ),
+    ] {
+        assert!(matches!(
+            transfer.handle_peer_message(message),
+            Err(ClientError::InvalidTransferState {
+                operation: actual,
+                state: "accepted",
+            }) if actual == operation
+        ));
+        assert_eq!(transfer.state, DownloadState::Accepted { size: Some(5) });
+    }
+}
+
+#[test]
 fn local_commands_cannot_reopen_or_skip_transfer_states() {
     let mut download = DownloadTransfer::new("peer", "Music/file.flac", 7);
     download.state = DownloadState::Completed;
