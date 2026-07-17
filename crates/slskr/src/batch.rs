@@ -6,6 +6,8 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 pub const MAX_BATCH_OPERATIONS: usize = 100;
+pub const MIN_BATCH_TIMEOUT_MS: u64 = 1;
+pub const MAX_BATCH_TIMEOUT_MS: u64 = 5 * 60 * 1_000;
 
 /// Represents a single operation in a batch request
 #[derive(Debug, Clone)]
@@ -157,6 +159,11 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
             "Too many operations: {}, configured max is {}",
             operations.len(),
             config.max_operations
+        ));
+    }
+    if !(MIN_BATCH_TIMEOUT_MS..=MAX_BATCH_TIMEOUT_MS).contains(&config.timeout_ms) {
+        return Err(format!(
+            "timeoutMs must be between {MIN_BATCH_TIMEOUT_MS} and {MAX_BATCH_TIMEOUT_MS}"
         ));
     }
 
@@ -339,6 +346,30 @@ mod tests {
         }"#;
         let error = parse_batch_request(body).expect_err("partial batch must fail");
         assert!(error.contains("configured max is 1"), "{error}");
+    }
+
+    #[test]
+    fn test_batch_rejects_invalid_timeout() {
+        for timeout_ms in [0, MAX_BATCH_TIMEOUT_MS + 1, u64::MAX] {
+            let body = format!(
+                r#"{{"operations":[{{"id":"op1","method":"GET","path":"/api/health"}}],"config":{{"timeoutMs":{timeout_ms}}}}}"#
+            );
+            let error = parse_batch_request(&body).expect_err("invalid timeout must fail");
+            assert_eq!(
+                error,
+                format!(
+                    "timeoutMs must be between {MIN_BATCH_TIMEOUT_MS} and {MAX_BATCH_TIMEOUT_MS}"
+                )
+            );
+        }
+
+        for timeout_ms in [MIN_BATCH_TIMEOUT_MS, MAX_BATCH_TIMEOUT_MS] {
+            let body = format!(
+                r#"{{"operations":[{{"id":"op1","method":"GET","path":"/api/health"}}],"config":{{"timeoutMs":{timeout_ms}}}}}"#
+            );
+            let (_, config) = parse_batch_request(&body).expect("boundary timeout must pass");
+            assert_eq!(config.timeout_ms, timeout_ms);
+        }
     }
 
     #[test]
