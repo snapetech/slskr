@@ -33,6 +33,7 @@ const MAX_FEATURE_BYTES: usize = 32;
 const MAX_USERNAME_BYTES: usize = 64;
 const MAX_NONCE_BYTES: usize = 64;
 const MAX_SERVICE_FIELD_BYTES: usize = 128;
+const MAX_SERVICE_ERROR_BYTES: usize = 1_024;
 const MAX_POD_ID_BYTES: usize = 512;
 const MAX_DESTINATION_HOST_BYTES: usize = 255;
 const MAX_UNMATCHED_SERVICE_FRAMES: usize = 32;
@@ -504,6 +505,22 @@ pub struct MeshServiceReply {
     pub error_message: Option<String>,
 }
 
+impl MeshServiceReply {
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        validate_overlay_base(&self.magic, &self.message_type, self.version)?;
+        if self.message_type != "mesh_service_reply" {
+            return Err(OverlayError::InvalidMessageType);
+        }
+        validate_service_field("correlation_id", &self.correlation_id)?;
+        if self.error_message.as_ref().is_some_and(|message| {
+            message.len() > MAX_SERVICE_ERROR_BYTES || message.chars().any(char::is_control)
+        }) {
+            return Err(OverlayError::InvalidServiceField("error_message"));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct OverlayClient<S> {
     framer: OverlayFramer<S>,
@@ -583,7 +600,7 @@ where
             match message_type.as_str() {
                 "mesh_service_reply" => {
                     let reply: MeshServiceReply = serde_json::from_slice(&payload)?;
-                    validate_overlay_base(&reply.magic, &reply.message_type, reply.version)?;
+                    reply.validate()?;
                     if reply.correlation_id == call.correlation_id {
                         return Ok(reply);
                     }
@@ -1215,6 +1232,48 @@ mod tests {
         assert!(timeout(Duration::from_millis(10), wire.read_u8())
             .await
             .is_err());
+    }
+
+    #[test]
+    fn service_replies_reject_malformed_remote_fields() {
+        let valid = MeshServiceReply {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "mesh_service_reply".to_owned(),
+            version: OVERLAY_VERSION,
+            correlation_id: "correlation".to_owned(),
+            status_code: 0,
+            payload: Vec::new(),
+            error_message: None,
+        };
+        valid.validate().expect("valid service reply");
+
+        let mut invalid_type = valid.clone();
+        invalid_type.message_type = "ping".to_owned();
+        assert!(matches!(
+            invalid_type.validate(),
+            Err(OverlayError::InvalidMessageType)
+        ));
+
+        for correlation_id in ["   ".to_owned(), "x".repeat(MAX_SERVICE_FIELD_BYTES + 1)] {
+            let mut invalid = valid.clone();
+            invalid.correlation_id = correlation_id;
+            assert!(matches!(
+                invalid.validate(),
+                Err(OverlayError::InvalidServiceField("correlation_id"))
+            ));
+        }
+
+        for error_message in [
+            "forged\r\nterminal entry".to_owned(),
+            "x".repeat(MAX_SERVICE_ERROR_BYTES + 1),
+        ] {
+            let mut invalid = valid.clone();
+            invalid.error_message = Some(error_message);
+            assert!(matches!(
+                invalid.validate(),
+                Err(OverlayError::InvalidServiceField("error_message"))
+            ));
+        }
     }
 
     #[tokio::test]
