@@ -126,9 +126,8 @@ impl<S> DistributedTree<S> {
 
     #[must_use]
     pub fn child_info(&self, username: &str) -> Option<&ChildInfo> {
-        self.children
-            .get(&username_key(username))
-            .map(|child| &child.info)
+        let key = lookup_username_key(username)?;
+        self.children.get(&key).map(|child| &child.info)
     }
 
     #[must_use]
@@ -233,19 +232,8 @@ impl<S> DistributedTree<S> {
         username: impl Into<String>,
         connection: DistributedConnection<S>,
     ) -> Result<bool, ClientError> {
-        let username = username.into().trim().to_owned();
-        if username.is_empty() {
-            return Err(ClientError::BlankDistributedUsername);
-        }
-        if username.chars().any(char::is_control) {
-            return Err(ClientError::InvalidDistributedUsername);
-        }
-        if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
-            return Err(ClientError::DistributedUsernameTooLong {
-                length: username.len(),
-                max: MAX_DISTRIBUTED_USERNAME_BYTES,
-            });
-        }
+        let username = username.into();
+        let username = normalize_distributed_username(&username)?.to_owned();
         let key = username_key(&username);
         if key == username_key(&self.local_username)
             || self
@@ -271,9 +259,8 @@ impl<S> DistributedTree<S> {
     }
 
     pub fn remove_child(&mut self, username: &str) -> Option<ChildInfo> {
-        self.children
-            .remove(&username_key(username))
-            .map(|child| child.info)
+        let key = lookup_username_key(username)?;
+        self.children.remove(&key).map(|child| child.info)
     }
 
     pub fn handle_parent_message(&mut self, message: DistributedMessage) -> DistributedEvent {
@@ -311,7 +298,9 @@ impl<S> DistributedTree<S> {
         username: &str,
         message: DistributedMessage,
     ) -> DistributedEvent {
-        let key = username_key(username);
+        let Some(key) = lookup_username_key(username) else {
+            return DistributedEvent::Ignored;
+        };
         let Some(child) = self.children.get_mut(&key) else {
             return DistributedEvent::Ignored;
         };
@@ -404,7 +393,10 @@ where
         timeout: TokioDuration,
     ) -> Result<usize, ClientError> {
         validate_distributed_search(search)?;
-        let except_key = except_username.map(username_key);
+        let except_key = except_username
+            .map(normalize_distributed_username)
+            .transpose()?
+            .map(username_key);
         let mut current_child = None;
         let result = time::timeout(timeout, async {
             let mut sent = 0;
@@ -471,6 +463,28 @@ fn username_key(username: &str) -> String {
     username.trim().to_ascii_lowercase()
 }
 
+fn lookup_username_key(username: &str) -> Option<String> {
+    normalize_distributed_username(username)
+        .ok()
+        .map(username_key)
+}
+
+fn normalize_distributed_username(username: &str) -> Result<&str, ClientError> {
+    let username = username.trim();
+    if username.is_empty() {
+        Err(ClientError::BlankDistributedUsername)
+    } else if username.chars().any(char::is_control) {
+        Err(ClientError::InvalidDistributedUsername)
+    } else if username.len() > MAX_DISTRIBUTED_USERNAME_BYTES {
+        Err(ClientError::DistributedUsernameTooLong {
+            length: username.len(),
+            max: MAX_DISTRIBUTED_USERNAME_BYTES,
+        })
+    } else {
+        Ok(username)
+    }
+}
+
 fn validate_distributed_search(search: &DistributedSearch) -> Result<(), ClientError> {
     validate_distributed_search_field("distributed search username", &search.username)?;
     validate_distributed_search_field("distributed search query", &search.query)
@@ -479,6 +493,9 @@ fn validate_distributed_search(search: &DistributedSearch) -> Result<(), ClientE
 fn validate_distributed_search_field(field: &'static str, value: &str) -> Result<(), ClientError> {
     if value.trim().is_empty() {
         return Err(ClientError::BlankSearchField { field });
+    }
+    if value.chars().any(char::is_control) {
+        return Err(ClientError::InvalidSearchField { field });
     }
     if value.len() > MAX_OUTBOUND_SEARCH_FIELD_BYTES {
         return Err(ClientError::SearchFieldTooLong {

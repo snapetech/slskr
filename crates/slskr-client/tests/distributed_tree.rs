@@ -17,7 +17,7 @@ use slskr_protocol::{
     distributed::{DistributedMessage, DistributedSearch},
     server::{Direction, PossibleParent, ServerMessage},
 };
-use tokio::io::duplex;
+use tokio::io::{duplex, AsyncReadExt};
 
 #[test]
 fn choose_parent_ignores_self_and_invalid_ports_then_picks_stable_candidate() {
@@ -286,6 +286,13 @@ fn messages_from_unknown_children_are_ignored() {
         tree.handle_child_message("missing", DistributedMessage::Ping),
         DistributedEvent::Ignored
     );
+    let oversized = "x".repeat(MAX_DISTRIBUTED_USERNAME_BYTES + 1);
+    assert_eq!(
+        tree.handle_child_message(&oversized, DistributedMessage::Ping),
+        DistributedEvent::Ignored
+    );
+    assert!(tree.child_info(&oversized).is_none());
+    assert!(tree.remove_child(&oversized).is_none());
     assert_eq!(
         tree.handle_child_message("missing", DistributedMessage::Search(search.clone())),
         DistributedEvent::Ignored
@@ -306,6 +313,8 @@ fn malformed_distributed_searches_are_ignored_at_ingress() {
     for search in [
         distributed_search(1, "   ", 2, "query"),
         distributed_search(1, "remote", 2, "   "),
+        distributed_search(1, "remote\nforged", 2, "query"),
+        distributed_search(1, "remote", 2, "query\rforged"),
         distributed_search(
             1,
             &"u".repeat(MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1),
@@ -353,7 +362,13 @@ async fn malformed_distributed_searches_are_rejected_before_forwarding() {
             max: MAX_OUTBOUND_SEARCH_FIELD_BYTES,
         } if length == MAX_OUTBOUND_SEARCH_FIELD_BYTES + 1
     ));
-    use tokio::io::AsyncReadExt as _;
+    let control = distributed_search(1, "remote", 2, "query\nforged");
+    assert!(matches!(
+        tree.forward_search_to_children(&control, None).await,
+        Err(ClientError::InvalidSearchField {
+            field: "distributed search query"
+        })
+    ));
     let mut byte = [0];
     assert!(
         tokio::time::timeout(Duration::from_millis(10), peer.read(&mut byte))
@@ -617,6 +632,26 @@ async fn distributed_search_source_exclusion_is_case_insensitive() {
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(25), peer.receive())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn distributed_forwarding_rejects_malformed_source_exclusion() {
+    let (tree_side, mut peer_side) = duplex(1024);
+    let mut tree = DistributedTree::new("local");
+    let search = distributed_search(5, "origin", 44, "album");
+    tree.add_child("alice", DistributedConnection::new(tree_side))
+        .unwrap();
+
+    assert!(matches!(
+        tree.forward_search_to_children(&search, Some("alice\nforged"))
+            .await,
+        Err(ClientError::InvalidDistributedUsername)
+    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), peer_side.read_u8())
             .await
             .is_err()
     );
