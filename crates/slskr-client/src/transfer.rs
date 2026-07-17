@@ -119,10 +119,11 @@ impl DownloadTransfer {
         size: u64,
     ) -> Result<PeerMessage, ClientError> {
         self.require_requested("accept download")?;
-        self.state = DownloadState::Accepted { size: Some(size) };
+        let size = self.reconcile_size(Some(size))?;
+        self.state = DownloadState::Accepted { size };
         Ok(PeerMessage::TransferResponse(TransferResponse::Allowed {
             token: self.token,
-            size: Some(size),
+            size,
         }))
     }
 
@@ -243,6 +244,7 @@ impl DownloadTransfer {
         match response {
             TransferResponse::Allowed { token, size } => {
                 self.validate_token(token)?;
+                let size = self.reconcile_size(size)?;
                 self.state = DownloadState::Accepted { size };
                 Ok(())
             }
@@ -305,6 +307,16 @@ impl DownloadTransfer {
         match &self.state {
             DownloadState::Requested { size } | DownloadState::Accepted { size } => *size,
             _ => None,
+        }
+    }
+
+    fn reconcile_size(&self, received: Option<u64>) -> Result<Option<u64>, ClientError> {
+        match (self.expected_size(), received) {
+            (Some(expected), Some(actual)) if expected != actual => {
+                Err(ClientError::TransferSizeMismatch { expected, actual })
+            }
+            (Some(expected), _) => Ok(Some(expected)),
+            (None, received) => Ok(received),
         }
     }
 

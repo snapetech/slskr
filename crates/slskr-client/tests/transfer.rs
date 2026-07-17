@@ -93,6 +93,51 @@ fn transfer_response_updates_state() {
 }
 
 #[test]
+fn download_preserves_advertised_size_and_rejects_conflicts() {
+    let mut unspecified = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut unspecified, Some(100));
+    unspecified
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        }))
+        .unwrap();
+    assert_eq!(
+        unspecified.state,
+        DownloadState::Accepted { size: Some(100) }
+    );
+
+    let mut conflicting = DownloadTransfer::new("peer", "Music/file.flac", 7);
+    request_download(&mut conflicting, Some(100));
+    assert!(matches!(
+        conflicting.handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(99),
+        },)),
+        Err(ClientError::TransferSizeMismatch {
+            expected: 100,
+            actual: 99,
+        })
+    ));
+    assert_eq!(
+        conflicting.state,
+        DownloadState::Requested { size: Some(100) }
+    );
+
+    assert!(matches!(
+        conflicting.accept_upload_response_message(99),
+        Err(ClientError::TransferSizeMismatch {
+            expected: 100,
+            actual: 99,
+        })
+    ));
+    assert_eq!(
+        conflicting.state,
+        DownloadState::Requested { size: Some(100) }
+    );
+}
+
+#[test]
 fn reject_response_message_updates_state_and_payload() {
     let mut transfer = DownloadTransfer::new("peer", "Music/file.flac", 7);
     request_download(&mut transfer, Some(100));
