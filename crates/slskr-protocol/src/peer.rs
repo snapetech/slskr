@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 
 const MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_FILE_ATTRIBUTES: usize = 64;
+pub const MAX_FILE_SEARCH_RESULTS: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -487,15 +488,26 @@ fn decode_user_info(reader: &mut Reader<'_>) -> Result<UserInfo, DecodeError> {
 }
 
 fn decode_search_response(reader: &mut Reader<'_>) -> Result<FileSearchResponse, DecodeError> {
+    let username = reader.read_string()?;
+    let token = reader.read_u32_le()?;
+    let results = decode_file_entries(reader, MAX_FILE_SEARCH_RESULTS)?;
+    let slot_free = reader.read_bool()?;
+    let average_speed = reader.read_u32_le()?;
+    let queue_length = reader.read_u32_le()?;
+    let unknown = reader.read_u32_le()?;
+    let private_results = decode_file_entries(
+        reader,
+        MAX_FILE_SEARCH_RESULTS.saturating_sub(results.len()),
+    )?;
     Ok(FileSearchResponse {
-        username: reader.read_string()?,
-        token: reader.read_u32_le()?,
-        results: decode_file_entries(reader)?,
-        slot_free: reader.read_bool()?,
-        average_speed: reader.read_u32_le()?,
-        queue_length: reader.read_u32_le()?,
-        unknown: reader.read_u32_le()?,
-        private_results: decode_file_entries(reader)?,
+        username,
+        token,
+        results,
+        slot_free,
+        average_speed,
+        queue_length,
+        unknown,
+        private_results,
     })
 }
 
@@ -509,6 +521,17 @@ fn encode_search_response(
     writer: &mut Writer,
     value: &FileSearchResponse,
 ) -> Result<(), EncodeError> {
+    let result_count = value
+        .results
+        .len()
+        .saturating_add(value.private_results.len());
+    if result_count > MAX_FILE_SEARCH_RESULTS {
+        return Err(EncodeError::CountTooLarge {
+            field: "file search results",
+            count: result_count,
+            maximum: MAX_FILE_SEARCH_RESULTS,
+        });
+    }
     writer.write_string(&value.username)?;
     writer.write_u32_le(value.token);
     encode_file_entries(writer, &value.results)?;
@@ -558,8 +581,18 @@ fn compress_zlib(payload: &[u8]) -> Result<Vec<u8>, EncodeError> {
     })
 }
 
-fn decode_file_entries(reader: &mut Reader<'_>) -> Result<Vec<FileEntry>, DecodeError> {
+fn decode_file_entries(
+    reader: &mut Reader<'_>,
+    max_count: usize,
+) -> Result<Vec<FileEntry>, DecodeError> {
     let count = reader.read_bounded_count("file entries", 21)?;
+    if count > max_count {
+        return Err(DecodeError::InvalidCount {
+            field: "file search results",
+            count,
+            maximum: max_count,
+        });
+    }
     let mut entries = Vec::new();
     for _ in 0..count {
         let code = reader.read_u8()?;

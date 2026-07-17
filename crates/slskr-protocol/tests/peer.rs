@@ -5,7 +5,7 @@ use slskr_protocol::{
     frame::MessageFrame,
     peer::{
         FileAttribute, FileEntry, FileSearchResponse, FolderContentsRequest, PeerCode, PeerMessage,
-        TransferRequest, TransferResponse, UserInfo, MAX_FILE_ATTRIBUTES,
+        TransferRequest, TransferResponse, UserInfo, MAX_FILE_ATTRIBUTES, MAX_FILE_SEARCH_RESULTS,
     },
     DecodeError, EncodeError, ProtocolTextEncoding,
 };
@@ -236,6 +236,56 @@ fn file_search_response_rejects_untrusted_count_without_preallocating() {
         zlib(payload),
     ));
     assert!(decoded.is_err());
+}
+
+#[test]
+fn file_search_response_bounds_total_result_entries() {
+    let entry = FileEntry {
+        code: 1,
+        filename: String::new(),
+        filename_encoding: ProtocolTextEncoding::Utf8,
+        size: 0,
+        extension: String::new(),
+        extension_encoding: ProtocolTextEncoding::Utf8,
+        attributes: Vec::new(),
+    };
+    let message = PeerMessage::FileSearchResponse(FileSearchResponse {
+        username: "peer".to_owned(),
+        token: 14,
+        results: vec![entry.clone(); MAX_FILE_SEARCH_RESULTS],
+        slot_free: true,
+        average_speed: 0,
+        queue_length: 0,
+        unknown: 0,
+        private_results: vec![entry],
+    });
+    assert!(matches!(
+        message.encode().unwrap_err(),
+        EncodeError::CountTooLarge {
+            field: "file search results",
+            count,
+            maximum: MAX_FILE_SEARCH_RESULTS,
+        } if count == MAX_FILE_SEARCH_RESULTS + 1
+    ));
+
+    let declared = MAX_FILE_SEARCH_RESULTS + 1;
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4_u32.to_le_bytes());
+    payload.extend_from_slice(b"peer");
+    payload.extend_from_slice(&14_u32.to_le_bytes());
+    payload.extend_from_slice(&u32::try_from(declared).unwrap().to_le_bytes());
+    payload.resize(payload.len() + declared * 21, 0);
+    assert!(matches!(
+        PeerMessage::decode(MessageFrame::new(
+            PeerCode::FileSearchResponse.as_u32(),
+            zlib(payload),
+        )),
+        Err(DecodeError::InvalidCount {
+            field: "file search results",
+            count,
+            maximum: MAX_FILE_SEARCH_RESULTS,
+        }) if count == declared
+    ));
 }
 
 #[test]
