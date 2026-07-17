@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use slskr_protocol::init::InitMessage;
 use slskr_protocol::server::{ConnectToPeerRequest, ServerMessage};
 use tokio::{
@@ -217,12 +219,11 @@ where
 {
     let username = username.into();
     let username = normalize_peer_username(&username)?.to_owned();
-    let stream = time::timeout(timeout, TcpStream::connect(address))
-        .await
-        .map_err(|_| ClientError::TimedOut {
-            operation: "peer-message connect",
-        })??;
-    let stream = send_peer_init(stream, username, ConnectionKind::PeerMessages).await?;
+    let stream = peer_connect_deadline(timeout, "peer-message connect", async {
+        let stream = TcpStream::connect(address).await?;
+        send_peer_init(stream, username, ConnectionKind::PeerMessages).await
+    })
+    .await?;
     Ok(PeerMessageConnection::new(stream))
 }
 
@@ -246,12 +247,11 @@ where
 {
     let username = username.into();
     let username = normalize_peer_username(&username)?.to_owned();
-    let stream = time::timeout(timeout, TcpStream::connect(address))
-        .await
-        .map_err(|_| ClientError::TimedOut {
-            operation: "distributed connect",
-        })??;
-    let stream = send_peer_init(stream, username, ConnectionKind::Distributed).await?;
+    let stream = peer_connect_deadline(timeout, "distributed connect", async {
+        let stream = TcpStream::connect(address).await?;
+        send_peer_init(stream, username, ConnectionKind::Distributed).await
+    })
+    .await?;
     Ok(DistributedConnection::new(stream))
 }
 
@@ -275,11 +275,48 @@ where
 {
     let username = username.into();
     let username = normalize_peer_username(&username)?.to_owned();
-    let stream = time::timeout(timeout, TcpStream::connect(address))
-        .await
-        .map_err(|_| ClientError::TimedOut {
-            operation: "file-transfer connect",
-        })??;
-    let stream = send_peer_init(stream, username, ConnectionKind::FileTransfer).await?;
+    let stream = peer_connect_deadline(timeout, "file-transfer connect", async {
+        let stream = TcpStream::connect(address).await?;
+        send_peer_init(stream, username, ConnectionKind::FileTransfer).await
+    })
+    .await?;
     Ok(FileTransferConnection::new(stream))
+}
+
+async fn peer_connect_deadline<T, F>(
+    timeout: Duration,
+    operation: &'static str,
+    future: F,
+) -> Result<T, ClientError>
+where
+    F: Future<Output = Result<T, ClientError>>,
+{
+    time::timeout(timeout, future)
+        .await
+        .map_err(|_| ClientError::TimedOut { operation })?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::peer_cache::MAX_PEER_USERNAME_BYTES;
+    use tokio::io::duplex;
+
+    #[tokio::test]
+    async fn peer_connect_deadline_covers_initialization_write() {
+        let (client, _non_reading_peer) = duplex(1);
+        let username = "x".repeat(MAX_PEER_USERNAME_BYTES);
+
+        assert!(matches!(
+            peer_connect_deadline(
+                Duration::from_millis(10),
+                "peer-message connect",
+                send_peer_init(client, username, ConnectionKind::PeerMessages),
+            )
+            .await,
+            Err(ClientError::TimedOut {
+                operation: "peer-message connect",
+            })
+        ));
+    }
 }
