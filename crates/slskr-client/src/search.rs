@@ -431,6 +431,22 @@ impl TimedSearchResults {
     }
 
     pub fn track(&mut self, handle: SearchRequestHandle, now: Instant) -> Option<TimedSearch> {
+        if !self.searches.contains_key(&handle.token)
+            && self.searches.len() >= MAX_TRACKED_SEARCH_RESULT_TOKENS
+        {
+            let _ = self.drain_expired(now);
+            if self.searches.len() >= MAX_TRACKED_SEARCH_RESULT_TOKENS {
+                let oldest_token = self
+                    .searches
+                    .iter()
+                    .min_by_key(|(token, search)| (search.created_at, **token))
+                    .map(|(token, _)| *token);
+                if let Some(oldest_token) = oldest_token {
+                    self.searches.remove(&oldest_token);
+                    let _ = self.results.take(oldest_token);
+                }
+            }
+        }
         let timed = TimedSearch {
             handle,
             created_at: now,

@@ -526,6 +526,25 @@ fn timed_search_window_overflow_saturates_instead_of_panicking() {
 }
 
 #[test]
+fn timed_search_tracking_evicts_oldest_state_at_token_limit() {
+    let now = Instant::now();
+    let mut results = TimedSearchResults::new(Duration::from_secs(60));
+    results.track(handle(0), now);
+    results
+        .accept_peer_message(PeerMessage::FileSearchResponse(response("alice", 0)))
+        .unwrap();
+
+    for token in 1..=u32::try_from(MAX_TRACKED_SEARCH_RESULT_TOKENS).unwrap() {
+        results.track(handle(token), now + Duration::from_nanos(u64::from(token)));
+    }
+
+    assert_eq!(results.active_len(), MAX_TRACKED_SEARCH_RESULT_TOKENS);
+    assert!(!results.is_active(0));
+    assert!(results.responses_for(0).is_empty());
+    assert!(results.is_active(u32::try_from(MAX_TRACKED_SEARCH_RESULT_TOKENS).unwrap()));
+}
+
+#[test]
 fn in_memory_share_index_matches_all_terms_case_insensitively() {
     let index = InMemoryShareIndex::new(vec![
         entry("Music/Artist - Rare Track.flac"),
