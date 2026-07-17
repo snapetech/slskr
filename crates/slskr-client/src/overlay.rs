@@ -632,6 +632,7 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "OpenTunnelRequestWire")]
 #[serde(rename_all = "PascalCase")]
 pub struct OpenTunnelRequest {
     pub pod_id: String,
@@ -640,6 +641,34 @@ pub struct OpenTunnelRequest {
     pub service_name: Option<String>,
     pub request_nonce: String,
     pub request_timestamp: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct OpenTunnelRequestWire {
+    pod_id: String,
+    destination_host: String,
+    destination_port: u16,
+    service_name: Option<String>,
+    request_nonce: String,
+    request_timestamp: i64,
+}
+
+impl TryFrom<OpenTunnelRequestWire> for OpenTunnelRequest {
+    type Error = OverlayError;
+
+    fn try_from(request: OpenTunnelRequestWire) -> Result<Self, Self::Error> {
+        let request = Self {
+            pod_id: request.pod_id,
+            destination_host: request.destination_host,
+            destination_port: request.destination_port,
+            service_name: request.service_name,
+            request_nonce: request.request_nonce,
+            request_timestamp: request.request_timestamp,
+        };
+        request.validate()?;
+        Ok(request)
+    }
 }
 
 impl OpenTunnelRequest {
@@ -658,25 +687,30 @@ impl OpenTunnelRequest {
             request_nonce: request_nonce.into(),
             request_timestamp: unix_seconds()?,
         };
-        if request.pod_id.trim().is_empty()
-            || request.pod_id.len() > MAX_POD_ID_BYTES
-            || request.pod_id.chars().any(char::is_control)
-            || request.destination_host.trim().is_empty()
-            || request.destination_host.len() > MAX_DESTINATION_HOST_BYTES
-            || request.destination_host.chars().any(char::is_control)
-            || request.destination_port == 0
-            || request.service_name.as_ref().is_some_and(|service| {
+        request.validate()?;
+        Ok(request)
+    }
+
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        if self.pod_id.trim().is_empty()
+            || self.pod_id.len() > MAX_POD_ID_BYTES
+            || self.pod_id.chars().any(char::is_control)
+            || self.destination_host.trim().is_empty()
+            || self.destination_host.len() > MAX_DESTINATION_HOST_BYTES
+            || self.destination_host.chars().any(char::is_control)
+            || self.destination_port == 0
+            || self.service_name.as_ref().is_some_and(|service| {
                 service.trim().is_empty()
                     || service.len() > MAX_SERVICE_FIELD_BYTES
                     || service.chars().any(char::is_control)
             })
-            || request.request_nonce.trim().is_empty()
-            || request.request_nonce.len() > MAX_NONCE_BYTES
-            || request.request_nonce.chars().any(char::is_control)
+            || self.request_nonce.trim().is_empty()
+            || self.request_nonce.len() > MAX_NONCE_BYTES
+            || self.request_nonce.chars().any(char::is_control)
         {
             return Err(OverlayError::InvalidPrivateGatewayRequest);
         }
-        Ok(request)
+        Ok(())
     }
 }
 
@@ -1449,6 +1483,30 @@ mod tests {
         assert!(invalid
             .into_iter()
             .all(|request| matches!(request, Err(OverlayError::InvalidPrivateGatewayRequest))));
+    }
+
+    #[test]
+    fn private_gateway_request_deserialization_enforces_gateway_field_limits() {
+        let request = serde_json::json!({
+            "PodId": "pod",
+            "DestinationHost": "host",
+            "DestinationPort": 80,
+            "ServiceName": "service",
+            "RequestNonce": "nonce",
+            "RequestTimestamp": 1_700_000_000_i64,
+        });
+        assert!(serde_json::from_value::<OpenTunnelRequest>(request.clone()).is_ok());
+
+        for (field, value) in [
+            ("PodId", "pod\nforged"),
+            ("DestinationHost", "host\r\nforged"),
+            ("ServiceName", "service\tforged"),
+            ("RequestNonce", "nonce\0forged"),
+        ] {
+            let mut invalid = request.clone();
+            invalid[field] = serde_json::Value::String(value.to_owned());
+            assert!(serde_json::from_value::<OpenTunnelRequest>(invalid).is_err());
+        }
     }
 
     #[tokio::test]
