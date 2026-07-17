@@ -10,6 +10,7 @@ use crate::{
     connection::ConnectionKind,
     file_transfer::FileTransferConnection,
     io::{read_init_frame_with_first_len_byte, read_obfuscated_init_frame},
+    peer_cache::normalize_peer_username,
     stream::{DistributedConnection, ObfuscatedPeerMessageConnection, PeerMessageConnection},
     ClientError,
 };
@@ -117,6 +118,7 @@ where
             connection_type,
             token,
         } => {
+            let username = normalize_peer_username(&username)?.to_owned();
             let kind = ConnectionKind::try_from_connection_type(&connection_type)?;
             if kind == ConnectionKind::PeerMessages {
                 Ok(IncomingConnection::ObfuscatedPeerMessages(
@@ -173,12 +175,15 @@ where
             username,
             connection_type,
             token,
-        } => Ok(IncomingConnection::PeerInit {
-            username,
-            kind: ConnectionKind::try_from_connection_type(&connection_type)?,
-            token,
-            stream,
-        }),
+        } => {
+            let username = normalize_peer_username(&username)?.to_owned();
+            Ok(IncomingConnection::PeerInit {
+                username,
+                kind: ConnectionKind::try_from_connection_type(&connection_type)?,
+                token,
+                stream,
+            })
+        }
         InitMessage::PierceFirewall { token } => {
             Ok(IncomingConnection::PierceFirewall { token, stream })
         }

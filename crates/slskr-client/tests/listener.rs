@@ -5,6 +5,8 @@ use slskr_client::{
         write_obfuscated_init_frame_with_key,
     },
     listener::{demux_incoming, demux_obfuscated_incoming, IncomingConnection, Listener},
+    peer_cache::MAX_PEER_USERNAME_BYTES,
+    ClientError,
 };
 use slskr_protocol::{distributed::DistributedMessage, init::InitMessage, peer::PeerMessage};
 use tokio::io::duplex;
@@ -90,6 +92,31 @@ async fn demuxes_peer_init_and_leaves_stream_after_init_frame() {
 }
 
 #[tokio::test]
+async fn demux_rejects_malformed_plain_peer_init_identities() {
+    for (username, expected_oversized) in [
+        ("   ".to_owned(), false),
+        ("x".repeat(MAX_PEER_USERNAME_BYTES + 1), true),
+    ] {
+        let (mut client, server) = duplex(8192);
+        let init = InitMessage::PeerInit {
+            username,
+            connection_type: "P".to_owned(),
+            token: 0,
+        };
+        write_init_frame(&mut client, &init.encode().unwrap())
+            .await
+            .unwrap();
+
+        let error = demux_incoming(server).await.unwrap_err();
+        assert!(if expected_oversized {
+            matches!(error, ClientError::PeerUsernameTooLong { .. })
+        } else {
+            matches!(error, ClientError::BlankPeerUsername)
+        });
+    }
+}
+
+#[tokio::test]
 async fn demuxes_obfuscated_peer_message_connection() {
     let (mut client, server) = duplex(512);
     let init = InitMessage::PeerInit {
@@ -111,6 +138,31 @@ async fn demuxes_obfuscated_peer_message_connection() {
         panic!("expected obfuscated peer messages");
     };
     assert_eq!(peer.receive().await.unwrap(), message);
+}
+
+#[tokio::test]
+async fn demux_rejects_malformed_obfuscated_peer_init_identities() {
+    for (username, expected_oversized) in [
+        ("   ".to_owned(), false),
+        ("x".repeat(MAX_PEER_USERNAME_BYTES + 1), true),
+    ] {
+        let (mut client, server) = duplex(8192);
+        let init = InitMessage::PeerInit {
+            username,
+            connection_type: "P".to_owned(),
+            token: 0,
+        };
+        write_obfuscated_init_frame(&mut client, &init.encode().unwrap())
+            .await
+            .unwrap();
+
+        let error = demux_obfuscated_incoming(server).await.unwrap_err();
+        assert!(if expected_oversized {
+            matches!(error, ClientError::PeerUsernameTooLong { .. })
+        } else {
+            matches!(error, ClientError::BlankPeerUsername)
+        });
+    }
 }
 
 #[tokio::test]
