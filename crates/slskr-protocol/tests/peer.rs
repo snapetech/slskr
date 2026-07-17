@@ -5,9 +5,9 @@ use slskr_protocol::{
     frame::MessageFrame,
     peer::{
         FileAttribute, FileEntry, FileSearchResponse, FolderContentsRequest, PeerCode, PeerMessage,
-        TransferRequest, TransferResponse, UserInfo,
+        TransferRequest, TransferResponse, UserInfo, MAX_FILE_ATTRIBUTES,
     },
-    ProtocolTextEncoding,
+    DecodeError, EncodeError, ProtocolTextEncoding,
 };
 use std::io::Write;
 
@@ -257,6 +257,69 @@ fn file_search_response_rejects_untrusted_attribute_count_without_looping() {
         zlib(payload),
     ));
     assert!(decoded.is_err());
+}
+
+#[test]
+fn file_search_response_bounds_attributes_per_file() {
+    let attributes = (0..=MAX_FILE_ATTRIBUTES)
+        .map(|code| FileAttribute {
+            code: code as u32,
+            value: 1,
+        })
+        .collect::<Vec<_>>();
+    let message = PeerMessage::FileSearchResponse(FileSearchResponse {
+        username: "peer".to_owned(),
+        token: 14,
+        results: vec![FileEntry {
+            code: 1,
+            filename: "song".to_owned(),
+            filename_encoding: ProtocolTextEncoding::Utf8,
+            size: 123,
+            extension: String::new(),
+            extension_encoding: ProtocolTextEncoding::Utf8,
+            attributes: attributes.clone(),
+        }],
+        slot_free: true,
+        average_speed: 0,
+        queue_length: 0,
+        unknown: 0,
+        private_results: Vec::new(),
+    });
+    assert!(matches!(
+        message.encode().unwrap_err(),
+        EncodeError::CountTooLarge {
+            field: "file attributes",
+            count,
+            maximum: MAX_FILE_ATTRIBUTES,
+        } if count == MAX_FILE_ATTRIBUTES + 1
+    ));
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4_u32.to_le_bytes());
+    payload.extend_from_slice(b"peer");
+    payload.extend_from_slice(&14_u32.to_le_bytes());
+    payload.extend_from_slice(&1_u32.to_le_bytes());
+    payload.push(1);
+    payload.extend_from_slice(&4_u32.to_le_bytes());
+    payload.extend_from_slice(b"song");
+    payload.extend_from_slice(&123_u64.to_le_bytes());
+    payload.extend_from_slice(&0_u32.to_le_bytes());
+    payload.extend_from_slice(&u32::try_from(attributes.len()).unwrap().to_le_bytes());
+    for attribute in attributes {
+        payload.extend_from_slice(&attribute.code.to_le_bytes());
+        payload.extend_from_slice(&attribute.value.to_le_bytes());
+    }
+    assert!(matches!(
+        PeerMessage::decode(MessageFrame::new(
+            PeerCode::FileSearchResponse.as_u32(),
+            zlib(payload),
+        )),
+        Err(DecodeError::InvalidCount {
+            field: "file attributes",
+            count,
+            maximum: MAX_FILE_ATTRIBUTES,
+        }) if count == MAX_FILE_ATTRIBUTES + 1
+    ));
 }
 
 #[test]

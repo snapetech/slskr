@@ -7,6 +7,7 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use std::io::{Read, Write};
 
 const MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_FILE_ATTRIBUTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -566,6 +567,13 @@ fn decode_file_entries(reader: &mut Reader<'_>) -> Result<Vec<FileEntry>, Decode
         let size = reader.read_u64_le()?;
         let (extension, extension_encoding) = reader.read_string_with_encoding()?;
         let attribute_count = reader.read_bounded_count("file attributes", 8)?;
+        if attribute_count > MAX_FILE_ATTRIBUTES {
+            return Err(DecodeError::InvalidCount {
+                field: "file attributes",
+                count: attribute_count,
+                maximum: MAX_FILE_ATTRIBUTES,
+            });
+        }
         let mut attributes = Vec::new();
         for _ in 0..attribute_count {
             attributes.push(FileAttribute {
@@ -591,6 +599,13 @@ fn encode_file_entries(writer: &mut Writer, entries: &[FileEntry]) -> Result<(),
         .map_err(|_| EncodeError::length_overflow("file entries", entries.len()))?;
     writer.write_u32_le(count);
     for entry in entries {
+        if entry.attributes.len() > MAX_FILE_ATTRIBUTES {
+            return Err(EncodeError::CountTooLarge {
+                field: "file attributes",
+                count: entry.attributes.len(),
+                maximum: MAX_FILE_ATTRIBUTES,
+            });
+        }
         writer.write_u8(entry.code);
         writer.write_string_with_encoding(&entry.filename, entry.filename_encoding)?;
         writer.write_u64_le(entry.size);
