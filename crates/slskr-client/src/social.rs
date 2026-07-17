@@ -25,6 +25,14 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
+    let message = message.into();
+    if message.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
+        return Err(ClientError::PrivateMessageFieldTooLong {
+            field: "body",
+            length: message.len(),
+            max: MAX_STORED_SOCIAL_FIELD_BYTES,
+        });
+    }
     let mut seen = HashSet::new();
     let mut recipients = Vec::new();
 
@@ -32,6 +40,13 @@ where
         let username = username.into().trim().to_owned();
         if username.is_empty() {
             return Err(ClientError::BlankMessageRecipient);
+        }
+        if username.len() > MAX_STORED_SOCIAL_FIELD_BYTES {
+            return Err(ClientError::PrivateMessageFieldTooLong {
+                field: "recipient",
+                length: username.len(),
+                max: MAX_STORED_SOCIAL_FIELD_BYTES,
+            });
         }
         if seen.insert(username.to_ascii_lowercase()) {
             recipients.push(username);
@@ -49,7 +64,7 @@ where
     }
     Ok(ServerMessage::MessageUsers {
         usernames: recipients,
-        message: message.into(),
+        message,
     })
 }
 

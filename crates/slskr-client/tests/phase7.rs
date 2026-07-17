@@ -519,6 +519,28 @@ fn multi_user_private_message_stops_consuming_at_recipient_limit() {
 }
 
 #[test]
+fn multi_user_private_message_rejects_oversized_fields() {
+    let oversized = "x".repeat(MAX_STORED_SOCIAL_FIELD_BYTES + 1);
+
+    assert!(matches!(
+        private_message_users_command([oversized.clone()], "hello"),
+        Err(ClientError::PrivateMessageFieldTooLong {
+            field: "recipient",
+            length,
+            max: MAX_STORED_SOCIAL_FIELD_BYTES,
+        }) if length == MAX_STORED_SOCIAL_FIELD_BYTES + 1
+    ));
+    assert!(matches!(
+        private_message_users_command(["alice"], oversized),
+        Err(ClientError::PrivateMessageFieldTooLong {
+            field: "body",
+            length,
+            max: MAX_STORED_SOCIAL_FIELD_BYTES,
+        }) if length == MAX_STORED_SOCIAL_FIELD_BYTES + 1
+    ));
+}
+
+#[test]
 fn tracing_hooks_are_noop_without_a_subscriber() {
     trace_server_message("in", &ServerMessage::ServerPing);
     trace_peer_message("alice", "out", &PeerMessage::GetShareFileList);
