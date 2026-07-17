@@ -178,6 +178,7 @@ where
     .await;
 
     reader_task.abort();
+    let _ = reader_task.await;
     result
 }
 
@@ -366,7 +367,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        pin::Pin,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        task::{Context, Poll},
+    };
 
     use futures_util::StreamExt;
     use tokio::{
@@ -379,6 +387,26 @@ mod tests {
 
     use super::*;
     use crate::{http_server, EventStore};
+
+    struct PendingReader {
+        dropped: Arc<AtomicBool>,
+    }
+
+    impl AsyncRead for PendingReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for PendingReader {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn websocket_key_must_be_base64_nonce() {
@@ -612,6 +640,33 @@ mod tests {
         .expect("valid close handshake");
 
         assert_eq!(writer, [vec![0x88, 2], payload.to_vec()].concat());
+    }
+
+    #[tokio::test]
+    async fn websocket_shutdown_joins_pending_reader() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let reader = PendingReader {
+            dropped: Arc::clone(&dropped),
+        };
+        let events = RwLock::new(EventStore::new(10));
+        let (event_tx, receiver) = broadcast::channel(1);
+        drop(event_tx);
+        let mut writer = Vec::new();
+
+        stream_events_with_heartbeat(
+            reader,
+            &mut writer,
+            &events,
+            receiver,
+            Duration::from_secs(60),
+        )
+        .await
+        .expect("closed event feed must shut down cleanly");
+
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "reader ownership must be released before stream shutdown returns"
+        );
     }
 
     #[tokio::test]
