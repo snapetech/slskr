@@ -32044,9 +32044,7 @@ fn controller_transfer_validation_error(
         .and_then(|transfers| transfers.get("groups"))
         .or_else(|| value.get("groups"))
         .and_then(serde_json::Value::as_object);
-    let Some(groups) = groups else {
-        return None;
-    };
+    let groups = groups?;
 
     let validate_group = |name: &str,
                           group: &serde_json::Value,
@@ -32358,9 +32356,7 @@ fn controller_soulseek_profile_distributed_validation_error(
     if soulseek.is_null() {
         return None;
     }
-    let Some(soulseek) = soulseek.as_object() else {
-        return None;
-    };
+    let soulseek = soulseek.as_object()?;
     if let Some(level) = soulseek.get("diagnostic_level") {
         let level = match level {
             serde_json::Value::Null => "info".to_owned(),
@@ -32406,9 +32402,7 @@ fn controller_soulseek_profile_distributed_validation_error(
             }
         }
     }
-    let Some(distributed) = soulseek.get("distributed_network") else {
-        return None;
-    };
+    let distributed = soulseek.get("distributed_network")?;
     if distributed.is_null() {
         return None;
     }
@@ -36315,6 +36309,7 @@ fn listenbrainz_user(source_text: &str) -> String {
         .to_owned()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn preview_configured_provider_source_feed(
     state: &AppState,
     source_text: &str,
@@ -36670,9 +36665,11 @@ fn local_csv_rows(source_text: &str, include_album: bool) -> Vec<SpotifySourceRo
             SpotifySourceRow {
                 title: title.clone(),
                 artist: cell(artist_index).to_owned(),
-                album: include_album
-                    .then(|| cell(album_index).to_owned())
-                    .unwrap_or_default(),
+                album: if include_album {
+                    cell(album_index).to_owned()
+                } else {
+                    String::new()
+                },
                 source: "csv".to_owned(),
                 source_id: (index + 1).to_string(),
                 provider_url: url_index
@@ -49516,7 +49513,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         let cache_is_fresh = config
             .share_settings
             .cache_retention
-            .map_or(true, |retention| {
+            .is_none_or(|retention| {
                 newest_cache_record.is_some_and(|updated_at| {
                     unix_timestamp().saturating_sub(updated_at) <= retention.as_secs()
                 })
@@ -63437,16 +63434,12 @@ fn scan_share_dirs(
             .into_iter()
             .map(|group| {
                 let exclusions = &exclusions;
-                let filters = filters;
                 scope.spawn(move || {
                     group
                         .into_iter()
                         .map(|(index, directory)| {
                             let scan = scan_single_share_directory(
-                                &directory,
-                                &exclusions,
-                                filters,
-                                options,
+                                &directory, exclusions, filters, options,
                             );
                             (index, scan)
                         })
@@ -79826,7 +79819,7 @@ mod tests {
         let path = super::safe_download_path(&state.config.downloads_dir, "Remote/Song.flac")
             .expect("download path");
         std::fs::create_dir_all(path.parent().unwrap()).expect("download dir");
-        std::fs::write(&path, [b'f']).expect("write partial download file");
+        std::fs::write(&path, *b"f").expect("write partial download file");
         {
             let mut transfers = state.transfers.write().await;
             let entry = transfers.create(
@@ -79892,7 +79885,7 @@ mod tests {
                 slskr_client::file_transfer::FileTransferConnection::new(init.into_inner());
             file.send_token(1).await.expect("token");
             assert_eq!(file.receive_offset().await.expect("offset"), 1);
-            file.write_chunk(&[b'L', b'a', b'C']).await.expect("chunk");
+            file.write_chunk(b"LaC").await.expect("chunk");
         });
         let address = slskr_client::protocol::server::PeerAddress {
             username: "friend".to_owned(),

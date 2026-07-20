@@ -238,8 +238,7 @@ async fn attempt_upload(
             let secure = async {
                 let ftp = AsyncRustlsFtpStream::connect(&endpoint).await?;
                 ftp.into_secure(
-                    ftp_connector(options, target)
-                        .map_err(|error| suppaftp::FtpError::SecureError(error))?,
+                    ftp_connector(options, target).map_err(suppaftp::FtpError::SecureError)?,
                     &options.address,
                 )
                 .await

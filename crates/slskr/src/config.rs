@@ -5050,17 +5050,12 @@ impl Default for TransferLimitsFileConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 enum NullableConfig<T> {
+    #[default]
     Missing,
     Null,
     Value(T),
-}
-
-impl<T> Default for NullableConfig<T> {
-    fn default() -> Self {
-        Self::Missing
-    }
 }
 
 impl<'de, T> Deserialize<'de> for NullableConfig<T>
@@ -5846,14 +5841,14 @@ impl AdvancedNetworkingSettings {
             &["SLSKD_RELAY", "RELAY"],
             relay_file.enabled.unwrap_or(false),
         )?;
-        if relay_enabled && relay_mode == "agent" {
-            if !(controller.address.starts_with("http://")
+        if relay_enabled
+            && relay_mode == "agent"
+            && (!(controller.address.starts_with("http://")
                 || controller.address.starts_with("https://"))
                 || !(16..=255).contains(&controller.api_key.len())
-                || !(16..=255).contains(&controller.secret.len())
-            {
-                return Err("relay agent mode requires a controller URL and 16-255 character API key and secret".to_owned());
-            }
+                || !(16..=255).contains(&controller.secret.len()))
+        {
+            return Err("relay agent mode requires a controller URL and 16-255 character API key and secret".to_owned());
         }
         let mut agents = BTreeMap::new();
         for (name, agent) in &relay_file.agents {
