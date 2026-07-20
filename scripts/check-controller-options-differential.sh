@@ -2613,12 +2613,15 @@ run_no_connect_invalid_watch_case() {
     local observed=false
     for _ in $(seq 1 200); do
       local status
-      status="$(curl --silent --show-error --max-time 1 \
+      if curl --silent --show-error --max-time 1 \
         --output "$suite/no-connect-invalid-watch.body" \
         --write-out $'status=%{http_code}\ncontent-type=%{content_type}\n' \
         "$base_url/api/v0/options" \
-        >"$suite/no-connect-invalid-watch.meta" 2>/dev/null \
-        && sed -n 's/^status=//p' "$suite/no-connect-invalid-watch.meta" || true)"
+        >"$suite/no-connect-invalid-watch.meta" 2>/dev/null; then
+        status="$(sed -n 's/^status=//p' "$suite/no-connect-invalid-watch.meta")"
+      else
+        status=""
+      fi
       if [[ "$status" == 500 ]]; then
         observed=true
         break
@@ -7311,11 +7314,14 @@ PY
     local invalid_observed=false
     for _ in $(seq 1 200); do
       local status
-      status="$(curl --silent --show-error --max-time 1 \
+      if curl --silent --show-error --max-time 1 \
         --output "$suite/listener-invalid-watch.body" \
         --write-out $'status=%{http_code}\ncontent-type=%{content_type}\n' \
-        "$base_url/api/v0/options" >"$suite/listener-invalid-watch.meta" 2>/dev/null \
-        && sed -n 's/^status=//p' "$suite/listener-invalid-watch.meta" || true)"
+        "$base_url/api/v0/options" >"$suite/listener-invalid-watch.meta" 2>/dev/null; then
+        status="$(sed -n 's/^status=//p' "$suite/listener-invalid-watch.meta")"
+      else
+        status=""
+      fi
       if [[ "$status" == 500 ]]; then
         invalid_observed=true
         break

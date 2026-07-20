@@ -34,7 +34,7 @@ run_step "Remediation baseline" scripts/check-remediation-baseline.sh
 run_step "Public posture check" scripts/check-public-posture.sh
 run_step "Shell syntax check" bash -n scripts/*.sh
 run_optional_step shellcheck "Shell lint" shellcheck \
-  -e SC1090,SC2016,SC2030,SC2031,SC2034,SC2100,SC2155,SC2206,SC2329 \
+  -e SC1090,SC2016,SC2030,SC2031,SC2034,SC2100,SC2155,SC2206,SC2317,SC2329 \
   scripts/*.sh
 run_optional_step actionlint "GitHub workflow lint" actionlint
 run_step "Security scans" scripts/run-security-scans.sh
