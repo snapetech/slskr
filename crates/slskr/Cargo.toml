@@ -44,10 +44,14 @@ mainline = "7"
 sha1 = "0.10"
 socket2 = "0.6"
 suppaftp = { version = "10.0.1", default-features = false, features = ["tokio-rustls-ring", "deprecated"] }
-openssl = "0.10"
-
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }
+
+[target.'cfg(not(target_env = "musl"))'.dependencies]
+openssl = "0.10"
+
+[target.'cfg(target_env = "musl")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
 
 [lints]
 workspace = true
