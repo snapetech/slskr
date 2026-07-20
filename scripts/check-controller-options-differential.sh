@@ -4554,9 +4554,10 @@ start_instance_daemon() {
   local log="$5"
   local http_port="$6"
   local https_port="$7"
-  local environment_name="$8"
-  local command_line_name="$9"
-  local append="${10:-false}"
+  local listen_port="$8"
+  local environment_name="$9"
+  local command_line_name="${10}"
+  local append="${11:-false}"
   local redirection='>'
   [[ "$append" == true ]] && redirection='>>'
 
@@ -4568,6 +4569,7 @@ start_instance_daemon() {
     if [[ "$implementation" == upstream ]]; then
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
+      export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       local dll="$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"
       local args=(dotnet "$dll")
       if [[ "$command_line_name" != __unset__ ]]; then
@@ -4580,7 +4582,7 @@ start_instance_daemon() {
       fi
     else
       export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
-      local args=("$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port")
+      local args=("$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
       if [[ "$command_line_name" != __unset__ ]]; then
         args+=(-i "$command_line_name")
       fi
@@ -4670,6 +4672,7 @@ run_instance_name_scenario() {
   for implementation in upstream slskr; do
     local http_port="$(pick_free_port)"
     local https_port="$(pick_free_port)"
+    local listen_port="$(pick_free_port)"
     local base_url="http://127.0.0.1:$http_port"
     local state="$work_dir/state-$target-instance-$implementation"
     local suite="$work_dir/$target-instance-$implementation"
@@ -4678,20 +4681,20 @@ run_instance_name_scenario() {
 
     write_instance_yaml "$state/slskd.yml" '"yaml-wins-environment"'
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" environment-loses __unset__
+      "$http_port" "$https_port" "$listen_port" environment-loses __unset__
     wait_for_options "$base_url" "$work_dir/$target-instance-$implementation-yaml-precedence.json" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" yaml-precedence "$log" yaml-wins-environment
     stop_daemon
 
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" environment-loses cli-wins true
+      "$http_port" "$https_port" "$listen_port" environment-loses cli-wins true
     wait_for_options "$base_url" "$work_dir/$target-instance-$implementation-cli-precedence.json" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" cli-precedence "$log" cli-wins
     stop_daemon
 
     write_instance_yaml "$state/slskd.yml" '"watched-old"'
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" __unset__ __unset__ true
+      "$http_port" "$https_port" "$listen_port" __unset__ __unset__ true
     wait_for_options "$base_url" "$work_dir/$target-instance-$implementation-lifecycle.json" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" lifecycle-startup "$log" watched-old
 
@@ -4706,14 +4709,14 @@ run_instance_name_scenario() {
 
     write_instance_yaml "$state/slskd.yml" "$long_control_yaml"
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" __unset__ __unset__ true
+      "$http_port" "$https_port" "$listen_port" __unset__ __unset__ true
     wait_for_instance_option "$base_url" "$long_control_name" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" long-control-restarted "$log" __skip__
     stop_daemon
 
     write_instance_yaml "$state/slskd.yml" '""'
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" __unset__ __unset__ true
+      "$http_port" "$https_port" "$listen_port" __unset__ __unset__ true
     wait_for_instance_option "$base_url" default "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" empty-restarted "$log" default
 
