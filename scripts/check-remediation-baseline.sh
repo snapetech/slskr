@@ -9,6 +9,14 @@ GATES=(
   scripts/check-slskdn-controller-parity.sh
   scripts/check-controller-auth-profiles.sh
   scripts/check-controller-options-differential.sh
+  scripts/check-diagnostics-memory-dump-differential.sh
+  scripts/check-web-auth-credentials-differential.sh
+  scripts/check-web-auth-disabled-differential.sh
+  scripts/check-web-cors-differential.sh
+  scripts/check-web-enforce-security-differential.sh
+  scripts/check-web-no-auth-passthrough-differential.sh
+  scripts/check-web-rate-limiting-differential.sh
+  scripts/check-web-request-body-limit-differential.sh
   scripts/check-browser-token-persistence.sh
   scripts/check-unsafe-blank-opens.sh
   scripts/check-websocket-auth-coverage.sh

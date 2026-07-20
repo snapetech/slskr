@@ -12,8 +12,10 @@ Date: 2026-07-15
 | `digest` | `sha1`/`tungstenite` remain on `0.10`, while direct `hmac`/`sha2` usage and `ed25519-dalek 3` are on `0.11`. | Tracked transitive duplicate. |
 | `getrandom` | `ring` uses `0.2`, `rand`/`tungstenite` use `0.3`, and `uuid` uses `0.4`. | Tracked transitive duplicate. |
 | `hashbrown` | `sqlx`/`hashlink` use `0.15`, while `indexmap`/`toml_edit` use `0.17`. | Tracked transitive duplicate. |
+| `memchr` | The release dependency graph resolves one `2.8` package through both host/proc-macro and target runtime paths. | Reviewed same-version graph duplicate. |
 | `rand` | Direct workspace randomness uses `0.10`, while `tungstenite` and dev-only `proptest` remain on `0.9`. | Tracked transitive duplicate until upstreams converge. |
 | `rand_core` | Direct `rand 0.10` uses `rand_core 0.10`, while `tungstenite`/`proptest` keep `rand_core 0.9`. | Tracked transitive duplicate until upstreams converge. |
+| `regex-automata` | The release dependency graph resolves one `0.4` package through `regex`, `fancy-regex`, `matchers`, and host/proc-macro paths. | Reviewed same-version graph duplicate. |
 | `sha2` | Direct hashing, `ed25519-dalek 3`, and Mainline DHT use `0.11`. | Resolved; retained here because the hygiene gate tracks historical allowlist roots. |
 
 Policy:

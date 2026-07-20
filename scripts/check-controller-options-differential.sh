@@ -6264,7 +6264,7 @@ write_dht_yaml() {
   local enabled="$2"
   local dht_port="$3"
   local temporary="$path.tmp"
-  printf 'remote_configuration: true\nflags:\n  no_connect: true\ndht:\n  enabled: %s\n  dht_port: %s\n' \
+  printf 'remote_configuration: true\nflags:\n  no_connect: true\nweb:\n  rate_limiting:\n    enabled: false\ndht:\n  enabled: %s\n  dht_port: %s\n' \
     "$enabled" "$dht_port" >"$temporary"
   mv "$temporary" "$path"
 }

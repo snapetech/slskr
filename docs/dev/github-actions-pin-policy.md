@@ -11,7 +11,7 @@ or if a pinned action is missing from this ledger.
 | Action | Reviewed ref | Pinned commit | Notes |
 | --- | --- | --- | --- |
 | `actions/checkout` | `v6` | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` | CI, release, live parity, local identity, and CodeQL checkout. |
-| `actions/cache` | `v4` | `0057852bfaa89a56745cba8c7296529d2fc39830` | Cached pinned `cargo-audit` binaries for CI and release gates. |
+| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | Cached pinned `cargo-audit` binaries for CI and release gates. |
 | `dtolnay/rust-toolchain` | `stable` | `29eef336d9b2848a0b548edc03f92a220660cdb8` | Rust toolchain install for CI, release, and live parity jobs. |
 | `Swatinem/rust-cache` | `v2` | `e18b497796c12c097a38f9edb9d0641fb99eee32` | Dereferenced tag target for Rust cache setup. |
 | `actions/setup-node` | `v6` | `48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e` | Node setup for web, dashboard, TypeScript SDK, and live parity gates. |
