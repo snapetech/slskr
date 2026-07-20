@@ -55,6 +55,7 @@ jobs:
             "slskr-${version}-x86_64-unknown-linux-gnu.tar.gz" \
             "slskr-${version}-aarch64-unknown-linux-gnu.tar.gz" \
             "slskr-${version}-x86_64-unknown-linux-musl.tar.gz" \
+            "slskr-${version}-aarch64-unknown-linux-musl.tar.gz" \
             "slskr-${version}-x86_64-apple-darwin.tar.gz" \
             "slskr-${version}-aarch64-apple-darwin.tar.gz" \
             "slskr-${version}-x86_64-pc-windows-msvc.zip"; do

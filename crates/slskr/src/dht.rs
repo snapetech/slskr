@@ -1,7 +1,10 @@
 use std::{
     collections::BTreeSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -18,14 +21,18 @@ const RENDEZVOUS_NAMES: [&str; 3] = [
     "slskdn-mesh-v1-backup-2",
 ];
 const MAX_DISCOVERED_PEERS: usize = 256;
-const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+#[cfg(test)]
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub struct Rendezvous {
     client: AsyncDht,
-    overlay_port: Option<u16>,
+    overlay_port: AtomicU16,
     allow_special_use_peers: bool,
+    lan_only: bool,
+    refresh_interval: Duration,
+    lookup_timeout: Duration,
+    min_neighbors: usize,
     peers: RwLock<BTreeSet<SocketAddrV4>>,
     status: RwLock<Status>,
 }
@@ -44,14 +51,56 @@ struct Status {
 }
 
 impl Rendezvous {
-    pub fn new(port: u16, overlay_port: Option<u16>) -> Result<Self, String> {
-        Self::with_builder(port, overlay_port, None)
+    pub fn new(settings: &crate::config::DhtSettings) -> Result<Self, String> {
+        let bootstrap = settings
+            .bootstrap_routers
+            .iter()
+            .map(|router| {
+                if router.contains(':') {
+                    router.clone()
+                } else {
+                    format!("{router}:6881")
+                }
+            })
+            .collect::<Vec<_>>();
+        Self::with_runtime_builder(
+            settings.dht_port,
+            Some(settings.effective_overlay_port()),
+            Some(if settings.lan_only { &[] } else { &bootstrap }),
+            settings.lan_only,
+            settings.discovery_interval,
+            settings
+                .bootstrap_timeout
+                .max(settings.cold_bootstrap_timeout),
+            settings.min_neighbors,
+        )
     }
 
+    #[cfg(test)]
     fn with_builder(
         port: u16,
         overlay_port: Option<u16>,
         bootstrap: Option<&[String]>,
+    ) -> Result<Self, String> {
+        Self::with_runtime_builder(
+            port,
+            overlay_port,
+            bootstrap,
+            false,
+            Duration::from_secs(15 * 60),
+            LOOKUP_TIMEOUT,
+            3,
+        )
+    }
+
+    fn with_runtime_builder(
+        port: u16,
+        overlay_port: Option<u16>,
+        bootstrap: Option<&[String]>,
+        lan_only: bool,
+        refresh_interval: Duration,
+        lookup_timeout: Duration,
+        min_neighbors: usize,
     ) -> Result<Self, String> {
         let mut builder = Dht::builder();
         builder.bind_address(Ipv4Addr::UNSPECIFIED).port(port);
@@ -64,8 +113,12 @@ impl Rendezvous {
             .as_async();
         Ok(Self {
             client,
-            overlay_port,
-            allow_special_use_peers: bootstrap.is_some(),
+            overlay_port: AtomicU16::new(overlay_port.unwrap_or(0)),
+            allow_special_use_peers: lan_only || bootstrap.is_some(),
+            lan_only,
+            refresh_interval,
+            lookup_timeout,
+            min_neighbors,
             peers: RwLock::new(BTreeSet::new()),
             status: RwLock::new(Status::default()),
         })
@@ -74,20 +127,30 @@ impl Rendezvous {
     pub async fn run(self: Arc<Self>) {
         loop {
             self.refresh().await;
-            tokio::time::sleep(REFRESH_INTERVAL).await;
+            tokio::time::sleep(self.refresh_interval).await;
         }
     }
 
     pub async fn refresh(&self) {
-        let bootstrapped = timeout(LOOKUP_TIMEOUT, self.client.bootstrapped())
+        let bootstrapped = timeout(self.lookup_timeout, self.client.bootstrapped())
             .await
             .unwrap_or(false);
+        // Publish readiness as soon as the bootstrap probe completes. The
+        // rendezvous lookups below can each consume their full timeout, but
+        // frozen slskdN exposes DHT Ready independently of that refresh work.
+        self.status.write().await.bootstrapped = bootstrapped;
         let mut discovered = BTreeSet::new();
         let mut last_error = None;
         let mut announced = false;
         for key in rendezvous_keys() {
-            if let Some(port) = self.overlay_port {
-                match timeout(LOOKUP_TIMEOUT, self.client.announce_peer(key, Some(port))).await {
+            let port = self.overlay_port.load(Ordering::Relaxed);
+            if port != 0 {
+                match timeout(
+                    self.lookup_timeout,
+                    self.client.announce_peer(key, Some(port)),
+                )
+                .await
+                {
                     Ok(Ok(_)) => announced = true,
                     Ok(Err(error)) => last_error = Some(format!("DHT announce failed: {error}")),
                     Err(_) => last_error = Some("DHT announce timed out".to_owned()),
@@ -123,7 +186,7 @@ impl Rendezvous {
     }
 
     async fn lookup(&self, key: Id) -> Result<Vec<SocketAddrV4>, String> {
-        timeout(LOOKUP_TIMEOUT, async {
+        timeout(self.lookup_timeout, async {
             let mut stream = self.client.get_peers(key);
             let mut peers = BTreeSet::new();
             while let Some(batch) = stream.next().await {
@@ -156,10 +219,11 @@ impl Rendezvous {
         let peer_count = self.peers.read().await.len();
         serde_json::json!({
             "dhtNodeCount": status.routing_nodes,
-            "isLanOnly": false,
-            "lanOnly": false,
-            "isBeaconCapable": self.overlay_port.is_some(),
-            "isDhtRunning": true,
+            "isLanOnly": self.lan_only,
+            "lanOnly": self.lan_only,
+            "minNeighbors": self.min_neighbors,
+            "isBeaconCapable": self.overlay_port.load(Ordering::Relaxed) != 0,
+            "isDhtRunning": status.bootstrapped,
             "verifiedBeaconCount": 0,
             "discoveredBeaconCount": peer_count,
             "bootstrapped": status.bootstrapped,
@@ -173,6 +237,10 @@ impl Rendezvous {
             "lastError": status.last_error,
         })
         .to_string()
+    }
+
+    pub fn set_advertised_overlay_port(&self, port: u16) {
+        self.overlay_port.store(port, Ordering::Relaxed);
     }
 }
 
@@ -241,5 +309,13 @@ mod tests {
         announcer.announce_peer(key, Some(50_305)).await.unwrap();
         let peers = rendezvous.lookup(key).await.unwrap();
         assert!(peers.iter().any(|peer| peer.port() == 50_305));
+        rendezvous.refresh().await;
+        let status =
+            serde_json::from_str::<serde_json::Value>(&rendezvous.status_json().await).unwrap();
+        assert_eq!(status["isDhtRunning"], true);
+        assert_eq!(status["bootstrapped"], true);
+        assert!(status["dhtNodeCount"]
+            .as_u64()
+            .is_some_and(|count| count > 0));
     }
 }

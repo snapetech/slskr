@@ -42,7 +42,7 @@ fn session_debug_output_redacts_password_hash() {
     let session = SessionInfo {
         greeting: "motd".to_owned(),
         ip: Ipv4Addr::LOCALHOST,
-        password_hash: "unique-password-hash".to_owned(),
+        password_hash: "redacted-password-hash-placeholder".to_owned(),
         is_supporter: true,
     };
 
@@ -50,7 +50,7 @@ fn session_debug_output_redacts_password_hash() {
 
     assert!(output.contains("motd"));
     assert!(output.contains("[REDACTED]"));
-    assert!(!output.contains("unique-password-hash"));
+    assert!(!output.contains("redacted-password-hash-placeholder"));
 }
 
 #[tokio::test]
@@ -104,6 +104,63 @@ async fn login_sends_request_and_returns_session_info() {
             is_supporter: true,
         }
     );
+}
+
+#[tokio::test]
+async fn login_with_wait_port_sends_both_frames_before_waiting_for_response() {
+    let (client, server) = duplex(512);
+    let mut session = ServerSession::new(ServerConnection::new(client));
+    let mut server = ServerConnection::new(server);
+    let wait_port = WaitPort {
+        port: 2234,
+        obfuscation: Some(ObfuscatedPort {
+            kind: 1,
+            port: 2235,
+        }),
+    };
+
+    let client_task = tokio::spawn(async move {
+        session
+            .login_with_wait_port(
+                LoginCredentials::new("username", "password", 175, 1),
+                wait_port,
+            )
+            .await
+            .unwrap()
+    });
+
+    assert!(matches!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::LoginRequest(_)
+    ));
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::SetWaitPort(WaitPort {
+            port: 2234,
+            obfuscation: Some(ObfuscatedPort {
+                kind: 1,
+                port: 2235,
+            }),
+        })
+    );
+
+    server
+        .send(&ServerMessage::LoginResponse(LoginResponse::Success {
+            greet: "motd".to_owned(),
+            ip: Ipv4Addr::LOCALHOST,
+            hash: "hash".to_owned(),
+            is_supporter: false,
+        }))
+        .await
+        .unwrap();
+
+    assert_eq!(client_task.await.unwrap().greeting, "motd");
 }
 
 #[tokio::test]

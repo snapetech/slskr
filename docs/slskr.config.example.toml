@@ -1,5 +1,27 @@
 # Example slskr app config. Environment variables override these values.
 
+# Disable the web UI and browser-session login while retaining API routes.
+headless = false
+
+[flags]
+# Suppress the target-compatible startup banner.
+no_logo = false
+# Complete configuration bootstrap, then exit successfully without starting
+# the hosted application or binding HTTP.
+no_start = false
+# Skip the target-specific startup release check.
+no_version_check = false
+# Preserve the frozen restart-only experimental marker. Neither target uses
+# this legacy flag to activate feature-specific APIs.
+experimental = false
+# Make user-supplied search/share/blacklist regular expressions case-sensitive.
+# This is restart-bound in both frozen targets.
+case_sensitive_reg_ex = false
+# Skip all startup share initialization. If both flags are true, this wins.
+no_share_scan = false
+# Bypass a valid persisted share cache and scan the filesystem at startup.
+force_share_scan = false
+
 [app]
 http_bind = "127.0.0.1:5030"
 state_dir = "/var/lib/slskr"
@@ -60,6 +82,25 @@ advertised_port = 2234
 [profile]
 user_info_description = "slskr daemon"
 
+[blacklist]
+enabled = false
+# file = "/etc/slskr/blacklist.txt"
+
+[feature]
+# Frozen target defaults differ: false for slskd and true for slskdN.
+swagger = true
+
+[metrics]
+enabled = false
+url = "/metrics"
+
+[metrics.authentication]
+disabled = false
+username = "slskd"
+# Frozen slskd defaults this to "slskd"; frozen slskdN requires an explicit
+# non-empty password whenever metrics are enabled with authentication.
+password = "replace-with-a-secret"
+
 [timeouts]
 peer_response_seconds = 5
 
@@ -72,6 +113,8 @@ signature_mode = "off"
 
 [shares]
 dirs = ["/srv/slskr/shares/music"]
+# Regular expressions match original local directory and file paths.
+filters = ["\\.ini$", "Thumbs\\.db$", "\\.DS_Store$"]
 follow_symlinks = false
 include_hidden = false
 scan_max_files = 50000
@@ -80,12 +123,25 @@ scan_max_files = 50000
 cache_tsv_enabled = true
 # fixture = "Virtual/Example.flac=12345"
 
+[filters.search]
+# Drop incoming Soulseek search requests matching any expression.
+request = ["^.{1,2}$"]
+
 [transfers]
 history_limit = 500
 max_active = 3
 allow_inbound = true
 allow_outbound = true
 # completed_path_template = "{uploader}/{remote_parent}/{request_name}"
+
+[transfers.groups.blacklisted]
+# The frozen options API projects this under `groups.blacklisted` in slskdN
+# mode and `transfers.groups.blacklisted` in slskd mode. Controller YAML accepts
+# the documented `transfers.groups` runtime placement for both targets; slskdN
+# also accepts top-level `groups` and gives it precedence.
+members = []
+patterns = []
+cidrs = []
 
 [transfers.auto_retry]
 enabled = true
@@ -112,11 +168,30 @@ retry_cooldown_seconds = 1800
 max_files_per_cycle = 2
 alternate_source_size_tolerance_percent = 5
 
+[compatibility]
+# Selects behavior where frozen slskd and slskdN contracts conflict. The
+# default is slskdn. This currently selects the exact generated controller
+# authorization registry; additional target conflicts are added here as their
+# differential proofs are completed. Environment equivalent:
+# SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskd
+controller_target = "slskdn"
+# Matches frozen slskd/slskdN: remote option overlays and configuration-file
+# reads/writes are forbidden unless explicitly enabled.
+remote_configuration = false
+# Frozen upstream aliases DEBUG and NO_CONFIG_WATCH are also accepted.
+debug = false
+no_config_watch = false
+
 [auth]
 # Loopback-only binds default to no API auth unless api_token is configured.
 # Non-loopback binds require an API token unless auth is explicitly disabled.
 disabled = false
 api_token = "replace-with-a-random-token"
+# Optional distinct least-privilege credentials. Never reuse a token value
+# across roles.
+read_write_token = "replace-with-a-distinct-read-write-token"
+read_only_token = "replace-with-a-distinct-read-only-token"
+nowplaying_token = "replace-with-a-distinct-nowplaying-token"
 cookie_auth_enabled = false
 rate_limit_anonymous = 1000
 rate_limit_authenticated = 5000

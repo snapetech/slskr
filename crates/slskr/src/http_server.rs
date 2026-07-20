@@ -42,6 +42,8 @@ pub const RESPONSE_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct HttpHeaders {
     pub host: Option<String>,
     pub origin: Option<String>,
+    pub access_control_request_method: Option<String>,
+    pub access_control_request_headers: Option<String>,
     pub referer: Option<String>,
     pub cookie: Option<String>,
     pub content_type: Option<String>,
@@ -82,6 +84,12 @@ impl HttpHeaders {
                 match name.as_str() {
                     "host" => headers.host = Some(value.to_string()),
                     "origin" => headers.origin = Some(value.to_string()),
+                    "access-control-request-method" => {
+                        headers.access_control_request_method = Some(value.to_string());
+                    }
+                    "access-control-request-headers" => {
+                        headers.access_control_request_headers = Some(value.to_string());
+                    }
                     "referer" => headers.referer = Some(value.to_string()),
                     "cookie" => headers.cookie = Some(value.to_string()),
                     "content-type" => headers.content_type = Some(value.to_string()),
@@ -147,23 +155,33 @@ pub fn parse_http_request(data: &str) -> Option<(String, String, Option<String>,
 
 /// Read HTTP request from stream with proper buffering.
 /// Returns `Ok(None)` on clean EOF, `Ok(Some(...))` on success, `Err(msg)` on protocol error.
+#[allow(dead_code)]
 pub async fn read_http_request<R: AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> Result<Option<(HttpRequest, bool)>, String> {
-    read_http_request_with_timeout(reader, REQUEST_READ_TIMEOUT).await
+    read_http_request_with_body_limit(reader, BODY_SIZE_LIMIT).await
+}
+
+pub async fn read_http_request_with_body_limit<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    body_size_limit: usize,
+) -> Result<Option<(HttpRequest, bool)>, String> {
+    read_http_request_with_timeout(reader, REQUEST_READ_TIMEOUT, body_size_limit).await
 }
 
 async fn read_http_request_with_timeout<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     timeout: Duration,
+    body_size_limit: usize,
 ) -> Result<Option<(HttpRequest, bool)>, String> {
-    time::timeout(timeout, read_http_request_inner(reader))
+    time::timeout(timeout, read_http_request_inner(reader, body_size_limit))
         .await
         .map_err(|_| "request read deadline exceeded".to_owned())?
 }
 
 async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
     reader: &mut R,
+    body_size_limit: usize,
 ) -> Result<Option<(HttpRequest, bool)>, String> {
     let Some(request_line) =
         read_limited_line(reader, REQUEST_LINE_LIMIT, HEADER_READ_TIMEOUT).await?
@@ -262,6 +280,14 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.origin = Some(value.to_string());
             }
+            "access-control-request-method" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.access_control_request_method = Some(value.to_string());
+            }
+            "access-control-request-headers" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.access_control_request_headers = Some(value.to_string());
+            }
             "referer" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.referer = Some(value.to_string());
@@ -358,10 +384,10 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
     }
 
     // Reject oversized bodies before reading
-    if content_length > BODY_SIZE_LIMIT {
+    if content_length > body_size_limit {
         return Err(format!(
             "request body too large: {} bytes (limit {})",
-            content_length, BODY_SIZE_LIMIT
+            content_length, body_size_limit
         ));
     }
 
@@ -668,12 +694,14 @@ async fn write_http_response_inner<W: AsyncWrite + Unpin>(
         .await
         .map_err(e)?;
     writer.write_all(b"\r\n").await.map_err(e)?;
-    writer.write_all(b"Content-Type: ").await.map_err(e)?;
-    writer
-        .write_all(response.content_type.as_bytes())
-        .await
-        .map_err(e)?;
-    writer.write_all(b"\r\n").await.map_err(e)?;
+    if !response.content_type.is_empty() {
+        writer.write_all(b"Content-Type: ").await.map_err(e)?;
+        writer
+            .write_all(response.content_type.as_bytes())
+            .await
+            .map_err(e)?;
+        writer.write_all(b"\r\n").await.map_err(e)?;
+    }
     writer.write_all(b"Content-Length: ").await.map_err(e)?;
     writer
         .write_all(body_bytes.len().to_string().as_bytes())
@@ -1186,6 +1214,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn configured_body_size_limit_is_applied_before_payload_read() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(b"POST /api/upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\n")
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let error = read_http_request_with_body_limit(&mut reader, 8)
+            .await
+            .expect_err("configured limit must reject oversized content length");
+        assert!(error.contains("9 bytes (limit 8)"), "{error}");
+    }
+
+    #[tokio::test]
     async fn test_malformed_request_line() {
         let (mut client, server) = tokio::io::duplex(4096);
         // Only one token on the request line — not a valid HTTP request
@@ -1453,9 +1495,13 @@ mod tests {
         });
 
         let mut reader = BufReader::new(server);
-        let error = read_http_request_with_timeout(&mut reader, Duration::from_millis(100))
-            .await
-            .expect_err("request must hit the absolute deadline");
+        let error = read_http_request_with_timeout(
+            &mut reader,
+            Duration::from_millis(100),
+            BODY_SIZE_LIMIT,
+        )
+        .await
+        .expect_err("request must hit the absolute deadline");
         assert!(error.contains("deadline exceeded"), "{error}");
     }
 

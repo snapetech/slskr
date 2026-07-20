@@ -44,7 +44,7 @@ for anchor in \
   'browse_errors_redact_internal_details' \
   'browse_failure_events_redact_internal_details' \
   'external_visualizer_launch_errors_redact_command_details' \
-  'options_config_endpoints_redact_file_path' \
+  'options_config_location_is_the_confined_compatibility_file' \
   'toml_config_sanitizes_secrets_and_storage_paths' \
   'lidarr_projections_redact_endpoint_and_errors' \
   'bridge_projections_redact_internal_endpoint' \
@@ -138,7 +138,7 @@ for anchor in \
   'bounded SongID run history must leave an available u64 id' \
   'open_shared_local_file(state, &shared_file.local_path)' \
   'options.custom_flags(libc::O_NOFOLLOW)' \
-  'open_download_file(&download_root(&state.config.state_dir), &path)' \
+  'open_download_file(&downloads_dir, &path)' \
   'download_confined_open_rejects_symlinked_parent' \
   'download directory confined open failed' \
   'scoped_storage_confined_delete_rejects_symlinked_parent' \

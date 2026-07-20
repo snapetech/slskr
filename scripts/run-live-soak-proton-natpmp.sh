@@ -14,6 +14,7 @@ lifetime="${PROTON_NATPMP_LIFETIME:-60}"
 renew_seconds="${PROTON_NATPMP_RENEW_SECONDS:-45}"
 listen_port="${SLSK_LISTEN_PORT:-2234}"
 obfuscated_port="${SLSK_SOAK_OBFUSCATED_LISTEN_PORT:-2235}"
+natpmp_command="${NATPMP_COMMAND:-natpmpc}"
 
 mkdir -p "$(dirname "$log_file")"
 
@@ -27,7 +28,7 @@ require_command() {
 claim_tcp_port() {
     local private_port="$1"
     local output
-    output="$(natpmpc -g "$gateway" -a 0 "$private_port" tcp "$lifetime")"
+    output="$("$natpmp_command" -g "$gateway" -a 0 "$private_port" tcp "$lifetime")"
     printf '%s\n' "$output" >&2
     awk '
         /Mapped public port/ {
@@ -41,27 +42,62 @@ claim_tcp_port() {
     ' <<<"$output"
 }
 
+renew_ports_once() {
+    local renewed_at regular_output obfuscated_output
+    renewed_at="$(date -Is)"
+    if ! regular_output="$("$natpmp_command" -g "$gateway" -a "$advertised_port" "$listen_port" tcp "$lifetime" 2>&1)"; then
+        printf '[slskr-proton-natpmp-soak renew_failed at=%s port=%s local_port=%s]\n%s\n' \
+            "$renewed_at" "$advertised_port" "$listen_port" "$regular_output"
+        return 1
+    fi
+    if ! obfuscated_output="$("$natpmp_command" -g "$gateway" -a "$obfuscated_advertised_port" "$obfuscated_port" tcp "$lifetime" 2>&1)"; then
+        printf '[slskr-proton-natpmp-soak renew_failed at=%s port=%s local_port=%s]\n%s\n' \
+            "$renewed_at" "$obfuscated_advertised_port" "$obfuscated_port" "$obfuscated_output"
+        return 1
+    fi
+    printf '[slskr-proton-natpmp-soak renew_ok at=%s regular_public_port=%s obfuscated_public_port=%s]\n' \
+        "$renewed_at" "$advertised_port" "$obfuscated_advertised_port"
+}
+
 renew_loop() {
     while true; do
         sleep "$renew_seconds"
-        local renewed_at regular_output obfuscated_output
-        renewed_at="$(date -Is)"
-        if ! regular_output="$(natpmpc -g "$gateway" -a "$advertised_port" "$listen_port" tcp "$lifetime" 2>&1)"; then
-            printf '[slskr-proton-natpmp-soak renew_failed at=%s port=%s local_port=%s]\n%s\n' \
-                "$renewed_at" "$advertised_port" "$listen_port" "$regular_output"
-            continue
-        fi
-        if ! obfuscated_output="$(natpmpc -g "$gateway" -a "$obfuscated_advertised_port" "$obfuscated_port" tcp "$lifetime" 2>&1)"; then
-            printf '[slskr-proton-natpmp-soak renew_failed at=%s port=%s local_port=%s]\n%s\n' \
-                "$renewed_at" "$obfuscated_advertised_port" "$obfuscated_port" "$obfuscated_output"
-            continue
-        fi
-        printf '[slskr-proton-natpmp-soak renew_ok at=%s regular_public_port=%s obfuscated_public_port=%s]\n' \
-            "$renewed_at" "$advertised_port" "$obfuscated_advertised_port"
+        renew_ports_once || true
     done
 }
 
-require_command natpmpc
+advertised_port=""
+obfuscated_advertised_port=""
+renew_pid=""
+
+cleanup_soak() {
+    if [[ -n "$renew_pid" ]]; then
+        kill "$renew_pid" 2>/dev/null || true
+        wait "$renew_pid" 2>/dev/null || true
+    fi
+    if [[ -n "$advertised_port" ]]; then
+        "$natpmp_command" -g "$gateway" -a "$advertised_port" "$listen_port" tcp 0 \
+            >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$obfuscated_advertised_port" ]]; then
+        "$natpmp_command" -g "$gateway" -a "$obfuscated_advertised_port" "$obfuscated_port" tcp 0 \
+            >/dev/null 2>&1 || true
+    fi
+}
+
+require_command "$natpmp_command"
+
+if [[ "${SLSKR_NATPMP_RENEWAL_FAILURE_PROBE:-0}" == "1" ]]; then
+    advertised_port="${SLSKR_NATPMP_PROBE_ADVERTISED_PORT:-40001}"
+    obfuscated_advertised_port="${SLSKR_NATPMP_PROBE_OBFUSCATED_PORT:-40002}"
+    if renew_ports_once; then
+        echo "NAT-PMP renewal failure probe unexpectedly succeeded" >&2
+        exit 1
+    fi
+    echo "NAT-PMP renewal failure was recorded and the renewal loop can continue"
+    exit 0
+fi
+
 require_command cargo
 
 set -a
@@ -86,6 +122,11 @@ cd "$repo_root"
 slskr_bin="$repo_root/target/debug/slskr"
 
 {
+    trap cleanup_soak EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
     printf '[slskr-proton-natpmp-soak start=%s gateway=%s listen_port=%s obfuscated_port=%s]\n' \
         "$(date -Is)" "$gateway" "$listen_port" "$obfuscated_port"
 
@@ -110,7 +151,6 @@ slskr_bin="$repo_root/target/debug/slskr"
 
     renew_loop &
     renew_pid=$!
-    trap 'kill "$renew_pid" 2>/dev/null || true' EXIT
 
     "$slskr_bin" soak live
     status=$?

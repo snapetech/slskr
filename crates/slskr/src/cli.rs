@@ -1,17 +1,21 @@
 use crate::probe_output::{emit_and_result, ProbeContext};
+use crate::{config::TrustedMeshPeer, mesh_dht};
+use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
 use slskr_client::protocol::{
-    distributed::DistributedMessage,
+    distributed::{DistributedMessage, DistributedSearch},
     init::InitMessage,
     peer::{FileEntry, PeerMessage, TransferRequest, TransferResponse, UserInfo},
-    server::{ConnectToPeerResponse, SearchRequest, ServerMessage, WaitPort},
+    server::{ConnectToPeerResponse, JoinedRoom, SearchRequest, ServerMessage, WaitPort},
     ProtocolTextEncoding, Writer, ROTATED_OBFUSCATION_TYPE,
 };
 use slskr_client::{
     connection::ConnectionKind,
+    distributed_tree::{DistributedEvent, DistributedTree, ParentInfo},
     file_transfer::FileTransferConnection,
     io::read_init_frame_with_first_len_byte,
     listener::{IncomingConnection, Listener},
+    overlay::{connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE},
     peer_connect::{
         send_obfuscated_peer_init, send_obfuscated_peer_init_with_token, send_peer_init,
         send_peer_init_with_token, send_pierce_firewall, IndirectPeerRequest,
@@ -30,7 +34,7 @@ use slskr_client::{
 use std::{
     ffi::OsString,
     fs,
-    net::SocketAddr,
+    net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -38,8 +42,11 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::net::TcpStream;
 use tokio::time::{self, Instant};
+use tokio::{
+    io::{duplex, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+};
 
 pub async fn run_from_args<I>(args: I) -> Result<(), String>
 where
@@ -51,17 +58,29 @@ where
         Some("obfuscated-peer-probe") => obfuscated_peer_probe().await,
         Some("indirect-peer-probe") => indirect_peer_probe().await,
         Some("plain-peer-probe") => plain_peer_probe().await,
+        Some("direct-user-info-probe") => direct_user_info_probe().await,
         Some("browse-peer-probe") => browse_peer_probe().await,
         Some("search-peer-probe") => search_peer_probe().await,
         Some("download-peer-probe") => download_peer_probe().await,
         Some("private-message-probe") => private_message_probe().await,
         Some("room-message-probe") => room_message_probe().await,
+        Some("user-watch-probe") => user_watch_probe().await,
+        Some("wishlist-interval-probe") => wishlist_interval_probe().await,
         Some("distributed-peer-probe") => distributed_peer_probe().await,
         Some("file-transfer-peer-probe") => file_transfer_peer_probe().await,
         Some("metadata-relogin-probe") => metadata_relogin_probe().await,
         Some("negative-indirect-probe") => negative_indirect_probe().await,
         Some("peer-address-probe") => peer_address_probe().await,
+        Some("overlay-service-probe") => overlay_service_probe().await,
+        Some("dht-store-probe") => dht_store_probe().await,
         Some("fixture-peer-smoke") => fixture_peer_smoke().await,
+        Some("distributed-tree-smoke") => distributed_tree_smoke().await,
+        Some("room-create-smoke") => room_create_smoke().await,
+        Some("server-relogin-smoke") => server_relogin_smoke().await,
+        Some("server-reconnect-smoke") => server_reconnect_smoke().await,
+        Some("closed-listener-smoke") => closed_listener_smoke().await,
+        Some("bad-obfuscation-type-smoke") => bad_obfuscation_type_smoke().await,
+        Some("malformed-peer-response-smoke") => malformed_peer_response_smoke().await,
         Some("transfer-resume-smoke") => transfer_resume_smoke().await,
         Some("transfer-reject-smoke") => transfer_reject_smoke().await,
         Some("local-peer-smoke") => local_peer_smoke().await,
@@ -104,6 +123,27 @@ where
         "smoke" if args.get(1).map(String::as_str) == Some("fixture-peer") => {
             vec!["fixture-peer-smoke"]
         }
+        "smoke" if args.get(1).map(String::as_str) == Some("distributed-tree") => {
+            vec!["distributed-tree-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("room-create") => {
+            vec!["room-create-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("server-relogin") => {
+            vec!["server-relogin-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("server-reconnect") => {
+            vec!["server-reconnect-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("closed-listener") => {
+            vec!["closed-listener-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("bad-obfuscation-type") => {
+            vec!["bad-obfuscation-type-smoke"]
+        }
+        "smoke" if args.get(1).map(String::as_str) == Some("malformed-peer-response") => {
+            vec!["malformed-peer-response-smoke"]
+        }
         "smoke" if args.get(1).map(String::as_str) == Some("transfer-resume") => {
             vec!["transfer-resume-smoke"]
         }
@@ -112,12 +152,16 @@ where
         }
         "probe" => match args.get(1).map(String::as_str) {
             Some("peer-address") => vec!["peer-address-probe"],
+            Some("overlay-service") => vec!["overlay-service-probe"],
+            Some("dht-store") => vec!["dht-store-probe"],
             Some("plain-peer") => vec!["plain-peer-probe"],
             Some("browse-peer") => vec!["browse-peer-probe"],
             Some("search-peer") => vec!["search-peer-probe"],
             Some("download-peer") => vec!["download-peer-probe"],
             Some("private-message") => vec!["private-message-probe"],
             Some("room-message") => vec!["room-message-probe"],
+            Some("user-watch") => vec!["user-watch-probe"],
+            Some("wishlist-interval") => vec!["wishlist-interval-probe"],
             Some("obfuscated-peer") => vec!["obfuscated-peer-probe"],
             Some("indirect-peer") => vec!["indirect-peer-probe"],
             Some("distributed-peer") => vec!["distributed-peer-probe"],
@@ -146,12 +190,16 @@ fn usage() -> &'static str {
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr login smoke
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr soak live
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe peer-address
+  SLSKR_OVERLAY_ENDPOINT=<ip:port> SLSKR_OVERLAY_CERTIFICATE_SHA256=<hex> SLSK_USERNAME=<user> SLSK_PEER_USERNAME=<peer> slskr probe overlay-service
+  SLSKR_OVERLAY_ENDPOINT=<ip:port> SLSKR_OVERLAY_CERTIFICATE_SHA256=<hex> SLSK_USERNAME=<user> SLSK_PEER_USERNAME=<peer> slskr probe dht-store
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe plain-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe browse-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> SLSK_SEARCH_QUERY=<query> slskr probe search-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> SLSK_DOWNLOAD_FILENAME='Share\\File.txt' slskr probe download-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_MESSAGE_USERNAME=<user2> SLSK_MESSAGE_PASSWORD=<pass2> slskr probe private-message
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr probe room-message
+  SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe user-watch
+  SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr probe wishlist-interval
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_OBFUSCATED_PEER_USERNAME=<peer> slskr probe obfuscated-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe indirect-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe distributed-peer
@@ -159,7 +207,129 @@ fn usage() -> &'static str {
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe metadata-relogin
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe negative-indirect
   SLSKR_A_USERNAME=<user> SLSKR_A_PASSWORD=<pass> SLSKR_B_USERNAME=<user> SLSKR_B_PASSWORD=<pass> slskr smoke local-peer
-  slskr smoke fixture-peer"
+  slskr smoke fixture-peer
+  slskr smoke distributed-tree
+  slskr smoke room-create
+  SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr smoke server-relogin
+  SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr smoke server-reconnect
+  slskr smoke closed-listener
+  slskr smoke bad-obfuscation-type
+  slskr smoke malformed-peer-response"
+}
+
+async fn overlay_service_probe() -> Result<(), String> {
+    let endpoint = required_env_any(&["SLSKR_OVERLAY_ENDPOINT"])?
+        .parse::<SocketAddr>()
+        .map_err(|error| format!("invalid SLSKR_OVERLAY_ENDPOINT: {error}"))?;
+    let certificate_hex = required_env_any(&["SLSKR_OVERLAY_CERTIFICATE_SHA256"])?;
+    let certificate_bytes = hex::decode(&certificate_hex)
+        .map_err(|_| "SLSKR_OVERLAY_CERTIFICATE_SHA256 must be 64 hexadecimal digits".to_owned())?;
+    let certificate_sha256: [u8; 32] = certificate_bytes
+        .try_into()
+        .map_err(|_| "SLSKR_OVERLAY_CERTIFICATE_SHA256 must be 64 hexadecimal digits".to_owned())?;
+    let username = required_env_any(&["SLSK_USERNAME"])?;
+    let peer_username = required_env_any(&["SLSK_PEER_USERNAME"])?;
+    let service_name = std::env::var("SLSKR_OVERLAY_SERVICE").unwrap_or_else(|_| "dht".to_owned());
+    let method = std::env::var("SLSKR_OVERLAY_METHOD").unwrap_or_else(|_| "Ping".to_owned());
+    let payload = std::env::var("SLSKR_OVERLAY_PAYLOAD")
+        .unwrap_or_else(|_| r#"{"RequesterId":"AAAAAAAAAAAAAAAAAAAAAAAAAAA="}"#.to_owned())
+        .into_bytes();
+    let expected = std::env::var("SLSKR_OVERLAY_EXPECTED")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let expected_sha256 = std::env::var("SLSKR_OVERLAY_EXPECTED_SHA256")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let ctx = ProbeContext::new("overlay-service").with_peer(&peer_username);
+
+    let hello = MeshHello::new(
+        username,
+        vec![FEATURE_MESH_SERVICE.to_owned()],
+        None,
+        None,
+        uuid::Uuid::new_v4().simple().to_string(),
+    )
+    .map_err(|error| format!("overlay hello failed: {error}"))?;
+    let mut client = connect_tls_overlay(endpoint, certificate_sha256, hello)
+        .await
+        .map_err(|error| format!("overlay connect failed: {error}"))?;
+    if !client.remote_username.eq_ignore_ascii_case(&peer_username) {
+        return emit_and_result(ctx.fail("overlay acknowledgement username mismatch"));
+    }
+    let call = MeshServiceCall::new(
+        uuid::Uuid::new_v4().to_string(),
+        service_name.clone(),
+        method.clone(),
+        payload,
+    )
+    .map_err(|error| format!("overlay service call failed: {error}"))?;
+    let reply = client
+        .call(&call)
+        .await
+        .map_err(|error| format!("overlay service call failed: {error}"))?;
+    if reply.status_code != 0 {
+        return emit_and_result(ctx.fail(format!(
+            "overlay service rejected call with status {}: {}",
+            reply.status_code,
+            reply.error_message.as_deref().unwrap_or("remote error")
+        )));
+    }
+    let response_sha256 = hex::encode(Sha256::digest(&reply.payload));
+    if expected_sha256
+        .as_deref()
+        .is_some_and(|expected| !response_sha256.eq_ignore_ascii_case(expected.trim()))
+    {
+        return emit_and_result(ctx.fail(format!(
+            "overlay service response SHA-256 mismatch: expected {}; received {response_sha256}",
+            expected_sha256.as_deref().unwrap_or_default().trim()
+        )));
+    }
+    if let Some(expected) = expected.as_deref() {
+        let response = String::from_utf8(reply.payload.clone())
+            .map_err(|_| "overlay service response was not UTF-8".to_owned())?;
+        if !response.contains(expected) {
+            return emit_and_result(
+                ctx.fail("overlay service response did not contain expected text"),
+            );
+        }
+        println!("{response}");
+    } else if expected_sha256.is_some() {
+        println!(
+            "response_bytes={} response_sha256={response_sha256}",
+            reply.payload.len()
+        );
+    } else {
+        let response = String::from_utf8(reply.payload)
+            .map_err(|_| "overlay service response was not UTF-8".to_owned())?;
+        println!("{response}");
+    }
+    emit_and_result(ctx.ok(format!("{service_name}.{method} succeeded")))
+}
+
+async fn dht_store_probe() -> Result<(), String> {
+    let endpoint = required_env_any(&["SLSKR_OVERLAY_ENDPOINT"])?
+        .parse::<SocketAddr>()
+        .map_err(|error| format!("invalid SLSKR_OVERLAY_ENDPOINT: {error}"))?;
+    let certificate_hex = required_env_any(&["SLSKR_OVERLAY_CERTIFICATE_SHA256"])?;
+    let certificate_sha256: [u8; 32] = hex::decode(&certificate_hex)
+        .map_err(|_| "SLSKR_OVERLAY_CERTIFICATE_SHA256 must be hexadecimal".to_owned())?
+        .try_into()
+        .map_err(|_| "SLSKR_OVERLAY_CERTIFICATE_SHA256 must be 64 hexadecimal digits".to_owned())?;
+    let username = required_env_any(&["SLSK_USERNAME"])?;
+    let peer_username = required_env_any(&["SLSK_PEER_USERNAME"])?;
+    let peer = TrustedMeshPeer {
+        peer_id: peer_username.clone(),
+        username: peer_username.clone(),
+        overlay_endpoint: endpoint,
+        certificate_sha256,
+        range_endpoint: None,
+    };
+    let signing_key = SigningKey::from_bytes(&[0x2a; 32]);
+    let ctx = ProbeContext::new("dht-store").with_peer(&peer_username);
+    if let Err(error) = mesh_dht::probe_store(&peer, &username, &signing_key).await {
+        return emit_and_result(ctx.fail(error));
+    }
+    emit_and_result(ctx.ok("authenticated signed DHT Store accepted"))
 }
 
 async fn peer_address_probe() -> Result<(), String> {
@@ -274,7 +444,13 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
         )
         .await
         {
-            Ok(candidate) if candidate.obfuscation_type == 1 && candidate.obfuscated_port != 0 => {
+            Ok(candidate)
+                if validated_obfuscated_port(
+                    candidate.obfuscation_type,
+                    candidate.obfuscated_port,
+                )
+                .is_ok() =>
+            {
                 address = Some(candidate);
                 break;
             }
@@ -291,18 +467,14 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
     let address = address.ok_or_else(|| {
         last_error.unwrap_or_else(|| "peer did not advertise rotated obfuscation".to_owned())
     })?;
-    if address.obfuscation_type != 1 || address.obfuscated_port == 0 {
-        return Err(format!(
-            "peer did not advertise rotated obfuscation: type={} obfuscated_port={}",
-            address.obfuscation_type, address.obfuscated_port
-        ));
-    }
+    let obfuscated_port =
+        validated_obfuscated_port(address.obfuscation_type, address.obfuscated_port)?;
 
     let host =
         optional_env("SLSK_OBFUSCATED_HOST_OVERRIDE").unwrap_or_else(|| address.ip.to_string());
     let stream = time::timeout(
         timeout,
-        TcpStream::connect((host.as_str(), address.obfuscated_port)),
+        TcpStream::connect((host.as_str(), obfuscated_port)),
     )
     .await
     .map_err(|_| "obfuscated peer connect timed out".to_owned())?
@@ -606,6 +778,52 @@ async fn plain_peer_probe() -> Result<(), String> {
         optional_env("SLSK_PLAIN_HOST_OVERRIDE").is_some()
     );
     Ok(())
+}
+
+async fn direct_user_info_probe() -> Result<(), String> {
+    let host = required_env_any(&["SLSK_DIRECT_PEER_HOST"])?;
+    let port = required_env_any(&["SLSK_DIRECT_PEER_PORT"])?
+        .parse::<u16>()
+        .map_err(|error| format!("invalid SLSK_DIRECT_PEER_PORT: {error}"))?;
+    let username = optional_env("SLSK_DIRECT_PEER_USERNAME")
+        .unwrap_or_else(|| "slskr-description-probe".to_owned());
+    let token = env_u32("SLSK_DIRECT_PEER_INIT_TOKEN", 0)?;
+    let timeout = env_duration_secs("SLSK_DIRECT_PEER_TIMEOUT_SECONDS", 5, false)?;
+    let stream = time::timeout(timeout, TcpStream::connect((host.as_str(), port)))
+        .await
+        .map_err(|_| "direct peer connect timed out".to_owned())?
+        .map_err(|error| format!("direct peer connect failed: {error}"))?;
+    let stream = send_peer_init_with_token(stream, &username, ConnectionKind::PeerMessages, token)
+        .await
+        .map_err(|error| format!("direct peer init failed: {error}"))?;
+    let mut peer = PeerMessageConnection::new(stream);
+    peer.send(&PeerMessage::UserInfoRequest)
+        .await
+        .map_err(|error| format!("direct user-info request failed: {error}"))?;
+    let response = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "direct user-info response timed out".to_owned())?
+        .map_err(|error| format!("direct user-info response failed: {error}"))?;
+    match response {
+        PeerMessage::UserInfoResponse(info) => {
+            if optional_env("SLSK_DIRECT_USER_INFO_INCLUDE_PICTURE")
+                .as_deref()
+                .is_some_and(|value| matches!(value, "1" | "true" | "TRUE"))
+            {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "description": info.description,
+                        "pictureHex": info.picture.as_deref().map(hex::encode),
+                    })
+                );
+            } else {
+                println!("{}", serde_json::Value::String(info.description));
+            }
+            Ok(())
+        }
+        response => Err(format!("unexpected direct peer response: {response:?}")),
+    }
 }
 
 async fn browse_peer_probe() -> Result<(), String> {
@@ -1413,9 +1631,13 @@ async fn room_message_probe() -> Result<(), String> {
 
     let mut session = login_probe_session(&server_address, username.clone(), password).await?;
     session
-        .send_server_message(ServerMessage::JoinRoom { room: room.clone() })
+        .send_server_message(ServerMessage::JoinRoom {
+            room: room.clone(),
+            private: false,
+        })
         .await
         .map_err(|error| format!("room join failed: {error}"))?;
+    wait_for_room_join(&mut session, &room, timeout).await?;
     session
         .send_server_message(ServerMessage::SayChatroomRequest {
             room: room.clone(),
@@ -1435,6 +1657,152 @@ async fn room_message_probe() -> Result<(), String> {
         redact_username(&username)
     );
     Ok(())
+}
+
+async fn user_watch_probe() -> Result<(), String> {
+    let username = required_env_any(&["SLSK_USERNAME"])?;
+    let password = required_env_any(&["SLSK_PASSWORD"])?;
+    let watched_username = required_env_any(&["SLSK_PEER_USERNAME"])?;
+    let server_address =
+        std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
+    let timeout = env_duration_secs("SLSK_USER_WATCH_PROBE_TIMEOUT_SECONDS", 20, false)?;
+    let ctx = ProbeContext::new("user-watch").with_peer(&watched_username);
+    let mut session = login_probe_session(&server_address, username, password).await?;
+
+    session
+        .send_server_message(ServerMessage::WatchUserRequest {
+            username: watched_username.clone(),
+        })
+        .await
+        .map_err(|error| format!("watch-user request failed: {error}"))?;
+    session
+        .send_server_message(ServerMessage::GetUserStatsRequest {
+            username: watched_username.clone(),
+        })
+        .await
+        .map_err(|error| format!("user-stats request failed: {error}"))?;
+
+    let deadline = Instant::now() + timeout;
+    let mut watched = false;
+    let mut stats = None;
+    while !(watched && stats.is_some()) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return emit_and_result(ctx.fail("watch-user and user-stats responses timed out"));
+        }
+        match time::timeout(remaining, session.receive()).await {
+            Ok(Ok(ServerMessage::WatchUserResponse(user)))
+                if user.username.eq_ignore_ascii_case(&watched_username) =>
+            {
+                if !user.exists {
+                    return emit_and_result(ctx.fail("watched user does not exist"));
+                }
+                watched = true;
+            }
+            Ok(Ok(ServerMessage::GetUserStats {
+                username: response_username,
+                stats: response_stats,
+            })) if response_username.eq_ignore_ascii_case(&watched_username) => {
+                stats = Some(response_stats);
+            }
+            Ok(Ok(ServerMessage::MessageUserResponse(message))) => {
+                session
+                    .send_server_message(ServerMessage::MessageAcked { id: message.id })
+                    .await
+                    .map_err(|error| {
+                        format!("user-watch message acknowledgement failed: {error}")
+                    })?;
+            }
+            Ok(Ok(ServerMessage::Relogged)) => {
+                return Err("account was logged in elsewhere".to_owned());
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => return Err(format!("user-watch receive failed: {error}")),
+            Err(_) => {
+                return emit_and_result(ctx.fail("watch-user and user-stats responses timed out"));
+            }
+        }
+    }
+
+    let stats = stats.expect("loop exits only after user stats are received");
+    emit_and_result(ctx.ok(format!(
+        "WatchUser exists; files={}; directories={}",
+        stats.file_count, stats.directory_count
+    )))
+}
+
+async fn wishlist_interval_probe() -> Result<(), String> {
+    let username = required_env_any(&["SLSK_USERNAME"])?;
+    let password = required_env_any(&["SLSK_PASSWORD"])?;
+    let server_address =
+        std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
+    let timeout = env_duration_secs("SLSK_WISHLIST_PROBE_TIMEOUT_SECONDS", 30, false)?;
+    let query = optional_env("SLSK_WISHLIST_QUERY").unwrap_or_else(|| {
+        format!(
+            "slskr-wishlist-live-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0)
+        )
+    });
+    let token = env_u32("SLSK_WISHLIST_TOKEN", 0x51ab_4001)?;
+    if token == 0 {
+        return Err("SLSK_WISHLIST_TOKEN must be nonzero".to_owned());
+    }
+
+    let mut session = login_probe_session(&server_address, username.clone(), password).await?;
+    let deadline = Instant::now() + timeout;
+    let interval_seconds = loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("wishlist interval probe timed out".to_owned());
+        }
+        match time::timeout(remaining, session.receive()).await {
+            Ok(Ok(ServerMessage::WishlistInterval { seconds })) if seconds > 0 => break seconds,
+            Ok(Ok(ServerMessage::WishlistInterval { .. })) => {
+                return Err("server advertised a zero wishlist interval".to_owned());
+            }
+            Ok(Ok(ServerMessage::MessageUserResponse(private_message))) => {
+                session
+                    .send_server_message(ServerMessage::MessageAcked {
+                        id: private_message.id,
+                    })
+                    .await
+                    .map_err(|error| format!("wishlist probe message ack failed: {error}"))?;
+            }
+            Ok(Ok(ServerMessage::Relogged)) => {
+                return Err("account was logged in elsewhere".to_owned());
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                return Err(format!("wishlist interval receive failed: {error}"));
+            }
+            Err(_) => return Err("wishlist interval probe timed out".to_owned()),
+        }
+    };
+
+    session
+        .send_server_message(ServerMessage::WishlistSearch(SearchRequest {
+            token,
+            query: query.clone(),
+        }))
+        .await
+        .map_err(|error| format!("wishlist search send failed: {error}"))?;
+
+    match time::timeout(Duration::from_secs(2), session.receive()).await {
+        Ok(Ok(ServerMessage::Relogged)) => {
+            return Err("account was logged in elsewhere".to_owned());
+        }
+        Ok(Err(error)) => return Err(format!("wishlist search was rejected: {error}")),
+        Ok(Ok(_)) | Err(_) => {}
+    }
+
+    let ctx = ProbeContext::new("wishlist-interval");
+    emit_and_result(ctx.ok(format!(
+        "server interval={interval_seconds}s; WishlistSearch token={token} sent; query_bytes={}",
+        query.len()
+    )))
 }
 
 async fn distributed_peer_probe() -> Result<(), String> {
@@ -1818,6 +2186,383 @@ async fn fixture_peer_smoke() -> Result<(), String> {
         bytes.len()
     );
     Ok(())
+}
+
+async fn distributed_tree_smoke() -> Result<(), String> {
+    let timeout = Duration::from_secs(5);
+    let listener = Listener::bind("127.0.0.1:0")
+        .await
+        .map_err(|error| format!("distributed listener bind failed: {error}"))?;
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("distributed listener address failed: {error}"))?;
+    let server_task = tokio::spawn(async move {
+        let (incoming, _) = listener
+            .accept()
+            .await
+            .map_err(|error| format!("distributed listener accept failed: {error}"))?;
+        let IncomingConnection::PeerInit {
+            kind: ConnectionKind::Distributed,
+            stream,
+            ..
+        } = incoming
+        else {
+            return Err("distributed listener received the wrong connection kind".to_owned());
+        };
+        let mut connection = DistributedConnection::new(stream);
+        let message = connection
+            .receive()
+            .await
+            .map_err(|error| format!("distributed listener receive failed: {error}"))?;
+        if message != DistributedMessage::Ping {
+            return Err("distributed listener did not receive Ping".to_owned());
+        }
+        connection
+            .send(&DistributedMessage::Ping)
+            .await
+            .map_err(|error| format!("distributed listener response failed: {error}"))
+    });
+
+    let stream = TcpStream::connect(address)
+        .await
+        .map_err(|error| format!("distributed fixture connect failed: {error}"))?;
+    let stream = send_peer_init(
+        stream,
+        "slskr-distributed-fixture",
+        ConnectionKind::Distributed,
+    )
+    .await
+    .map_err(|error| format!("distributed fixture init failed: {error}"))?;
+    let mut connection = DistributedConnection::new(stream);
+    connection
+        .send(&DistributedMessage::Ping)
+        .await
+        .map_err(|error| format!("distributed fixture ping failed: {error}"))?;
+    let response = time::timeout(timeout, connection.receive())
+        .await
+        .map_err(|_| "distributed fixture response timed out".to_owned())?
+        .map_err(|error| format!("distributed fixture response failed: {error}"))?;
+    if response != DistributedMessage::Ping {
+        return Err("distributed fixture returned a non-Ping response".to_owned());
+    }
+    time::timeout(timeout, server_task)
+        .await
+        .map_err(|_| "distributed listener task timed out".to_owned())?
+        .map_err(|error| format!("distributed listener task failed: {error}"))??;
+
+    let (parent_side, parent_peer) = duplex(2_048);
+    let mut tree = DistributedTree::new("local");
+    let mut parent_peer = DistributedConnection::new(parent_peer);
+    tree.connect_parent(
+        ParentInfo {
+            username: "parent".to_owned(),
+            ip: Ipv4Addr::LOCALHOST,
+            port: u32::from(address.port()),
+        },
+        DistributedConnection::new(parent_side),
+    );
+    if tree.branch_level() != 1 || tree.branch_root() != "parent" || tree.parent().is_none() {
+        return Err("distributed parent adoption did not update branch state".to_owned());
+    }
+    if !tree
+        .send_branch_info_to_parent()
+        .await
+        .map_err(|error| format!("distributed branch report failed: {error}"))?
+    {
+        return Err("distributed branch report did not reach the parent".to_owned());
+    }
+    for expected in [
+        DistributedMessage::BranchLevel { level: 1 },
+        DistributedMessage::BranchRoot {
+            username: "parent".to_owned(),
+        },
+        DistributedMessage::ChildDepth { depth: 0 },
+    ] {
+        let received = time::timeout(timeout, parent_peer.receive())
+            .await
+            .map_err(|_| "distributed parent report timed out".to_owned())?
+            .map_err(|error| format!("distributed parent report receive failed: {error}"))?;
+        if received != expected {
+            return Err("distributed parent received incorrect branch metadata".to_owned());
+        }
+    }
+
+    let (first_tree, first_peer) = duplex(2_048);
+    let (second_tree, second_peer) = duplex(2_048);
+    let mut first_peer = DistributedConnection::new(first_peer);
+    let mut second_peer = DistributedConnection::new(second_peer);
+    tree.add_child("first", DistributedConnection::new(first_tree))
+        .map_err(|error| format!("distributed first child failed: {error}"))?;
+    tree.add_child("second", DistributedConnection::new(second_tree))
+        .map_err(|error| format!("distributed second child failed: {error}"))?;
+    let search = DistributedSearch {
+        identifier: 49,
+        username: "origin".to_owned(),
+        token: 0x51ab_5001,
+        query: "distributed fixture".to_owned(),
+    };
+    let forwarded = tree
+        .forward_search_to_children(&search, Some("first"))
+        .await
+        .map_err(|error| format!("distributed search forwarding failed: {error}"))?;
+    if forwarded != 1 {
+        return Err(format!(
+            "distributed search reached {forwarded} children instead of one"
+        ));
+    }
+    let received = time::timeout(timeout, second_peer.receive())
+        .await
+        .map_err(|_| "distributed child search timed out".to_owned())?
+        .map_err(|error| format!("distributed child search receive failed: {error}"))?;
+    if received != DistributedMessage::Search(search) {
+        return Err("distributed child received incorrect search payload".to_owned());
+    }
+    if time::timeout(Duration::from_millis(25), first_peer.receive())
+        .await
+        .is_ok()
+    {
+        return Err("distributed search was reflected to its source child".to_owned());
+    }
+    if tree.handle_child_message("second", DistributedMessage::ChildDepth { depth: 3 })
+        != DistributedEvent::BranchChanged
+        || tree.child_info("second").map(|child| child.depth) != Some(3)
+    {
+        return Err("distributed child depth was not tracked".to_owned());
+    }
+    if tree.remove_child("SECOND").is_none() || tree.child_info("second").is_some() {
+        return Err("distributed child disconnect was not handled".to_owned());
+    }
+
+    emit_and_result(
+        ProbeContext::new("distributed-tree").ok(
+            "Ping round-trip, parent adoption, search forwarding, and child lifecycle completed",
+        ),
+    )
+}
+
+async fn room_create_smoke() -> Result<(), String> {
+    let (client, server) = duplex(1_024);
+    let mut client = ServerConnection::new(client);
+    let mut server = ServerConnection::new(server);
+    let room = "slskr-room-create-fixture".to_owned();
+
+    client
+        .send(&ServerMessage::JoinRoom {
+            room: room.clone(),
+            private: false,
+        })
+        .await
+        .map_err(|error| format!("room-create request send failed: {error}"))?;
+    let request = server
+        .receive_with_direction(slskr_client::protocol::server::Direction::ClientToServer)
+        .await
+        .map_err(|error| format!("room-create request decode failed: {error}"))?;
+    if request
+        != (ServerMessage::JoinRoom {
+            room: room.clone(),
+            private: false,
+        })
+    {
+        return Err("room-create request did not preserve public/private intent".to_owned());
+    }
+
+    server
+        .send(&ServerMessage::JoinedRoom(JoinedRoom {
+            room: room.clone(),
+            users: Vec::new(),
+            owner: None,
+            operators: Vec::new(),
+        }))
+        .await
+        .map_err(|error| format!("room-create response send failed: {error}"))?;
+    match client
+        .receive_with_direction(slskr_client::protocol::server::Direction::ServerToClient)
+        .await
+        .map_err(|error| format!("room-create response decode failed: {error}"))?
+    {
+        ServerMessage::JoinedRoom(joined) if joined.room == room => {}
+        _ => return Err("room-create response was not decoded as JoinedRoom".to_owned()),
+    }
+
+    for rejection in [
+        ServerMessage::CantCreateRoom { room: room.clone() },
+        ServerMessage::CantJoinRoom { room: room.clone() },
+    ] {
+        server
+            .send(&rejection)
+            .await
+            .map_err(|error| format!("room rejection send failed: {error}"))?;
+        let decoded = client
+            .receive_with_direction(slskr_client::protocol::server::Direction::ServerToClient)
+            .await
+            .map_err(|error| format!("room rejection decode failed: {error}"))?;
+        if decoded != rejection {
+            return Err("room rejection code changed during round-trip".to_owned());
+        }
+    }
+
+    emit_and_result(
+        ProbeContext::new("room-create")
+            .ok("public join, JoinedRoom, CannotCreateRoom, and CannotJoinRoom completed"),
+    )
+}
+
+async fn server_relogin_smoke() -> Result<(), String> {
+    let username = required_env_any(&["SLSK_USERNAME"])?;
+    let password = required_env_any(&["SLSK_PASSWORD"])?;
+    let server_address =
+        std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
+    let timeout = env_duration_secs("SLSKR_RELOGIN_TIMEOUT_SECONDS", 15, false)?;
+    let ctx = ProbeContext::new("server-relogin").with_peer(&username);
+
+    let mut first =
+        login_probe_session(&server_address, username.clone(), password.clone()).await?;
+    let _second = login_probe_session(&server_address, username, password).await?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return emit_and_result(ctx.fail("first session did not receive Relogged"));
+        }
+        match time::timeout(remaining, first.receive()).await {
+            Ok(Ok(ServerMessage::Relogged)) => {
+                return emit_and_result(ctx.ok("first session received Relogged"));
+            }
+            Ok(Ok(ServerMessage::MessageUserResponse(message))) => {
+                first
+                    .send_server_message(ServerMessage::MessageAcked { id: message.id })
+                    .await
+                    .map_err(|error| format!("relogin message acknowledgement failed: {error}"))?;
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                return Err(format!("first relogin session receive failed: {error}"));
+            }
+            Err(_) => return emit_and_result(ctx.fail("first session did not receive Relogged")),
+        }
+    }
+}
+
+async fn server_reconnect_smoke() -> Result<(), String> {
+    let username = required_env_any(&["SLSK_USERNAME"])?;
+    let password = required_env_any(&["SLSK_PASSWORD"])?;
+    let server_address =
+        std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
+    let delay = env_duration_secs("SLSKR_RECONNECT_DELAY_SECONDS", 2, true)?;
+    let attempts = env_usize("SLSKR_RECONNECT_ATTEMPTS", 3)?;
+    let ctx = ProbeContext::new("server-reconnect").with_peer(&username);
+
+    let first = login_probe_session(&server_address, username.clone(), password.clone()).await?;
+    drop(first);
+    time::sleep(delay).await;
+
+    let mut last_error = String::new();
+    for attempt in 1..=attempts {
+        match login_probe_session(&server_address, username.clone(), password.clone()).await {
+            Ok(mut reconnected) => {
+                reconnected
+                    .send_ping()
+                    .await
+                    .map_err(|error| format!("reconnected session ping failed: {error}"))?;
+                return emit_and_result(ctx.ok(format!(
+                    "session reconnected and pinged on attempt {attempt}"
+                )));
+            }
+            Err(error) => last_error = error,
+        }
+        time::sleep(delay).await;
+    }
+    emit_and_result(ctx.fail(format!(
+        "session did not reconnect after {attempts} attempts: {last_error}"
+    )))
+}
+
+async fn closed_listener_smoke() -> Result<(), String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|error| format!("closed-listener fixture bind failed: {error}"))?;
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("closed-listener fixture address failed: {error}"))?;
+    drop(listener);
+
+    match time::timeout(Duration::from_secs(2), TcpStream::connect(address)).await {
+        Ok(Err(_)) => emit_and_result(
+            ProbeContext::new("closed-listener").ok("connection refusal returned without panic"),
+        ),
+        Ok(Ok(_)) => Err("connection to the closed listener unexpectedly succeeded".to_owned()),
+        Err(_) => Err("connection to the closed listener did not fail promptly".to_owned()),
+    }
+}
+
+async fn bad_obfuscation_type_smoke() -> Result<(), String> {
+    match validated_obfuscated_port(ROTATED_OBFUSCATION_TYPE.saturating_add(1), 2235) {
+        Err(error) if error.contains("unsupported obfuscation type") => {
+            emit_and_result(ProbeContext::new("bad-obfuscation-type").ok(error))
+        }
+        Err(error) => Err(format!(
+            "bad obfuscation type returned the wrong error: {error}"
+        )),
+        Ok(_) => Err("unsupported obfuscation type was accepted".to_owned()),
+    }
+}
+
+async fn malformed_peer_response_smoke() -> Result<(), String> {
+    let timeout = Duration::from_secs(5);
+    let listener = Listener::bind("127.0.0.1:0")
+        .await
+        .map_err(|error| format!("malformed-peer listener bind failed: {error}"))?;
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("malformed-peer listener address failed: {error}"))?;
+    let server_task = tokio::spawn(async move {
+        let (incoming, _) = listener
+            .accept()
+            .await
+            .map_err(|error| format!("malformed-peer accept failed: {error}"))?;
+        let IncomingConnection::PeerInit {
+            kind: ConnectionKind::PeerMessages,
+            mut stream,
+            ..
+        } = incoming
+        else {
+            return Err("malformed-peer fixture received the wrong connection kind".to_owned());
+        };
+        stream
+            .write_all(&[8, 0, 0, 0, 1, 2])
+            .await
+            .map_err(|error| format!("malformed-peer fixture write failed: {error}"))?;
+        stream
+            .shutdown()
+            .await
+            .map_err(|error| format!("malformed-peer fixture shutdown failed: {error}"))
+    });
+
+    let stream = TcpStream::connect(address)
+        .await
+        .map_err(|error| format!("malformed-peer connect failed: {error}"))?;
+    let stream = send_peer_init(
+        stream,
+        "slskr-malformed-fixture",
+        ConnectionKind::PeerMessages,
+    )
+    .await
+    .map_err(|error| format!("malformed-peer init failed: {error}"))?;
+    let mut peer = PeerMessageConnection::new(stream);
+    let result = time::timeout(timeout, peer.receive())
+        .await
+        .map_err(|_| "malformed peer response did not terminate promptly".to_owned())?;
+    if result.is_ok() {
+        return Err("malformed peer response was accepted".to_owned());
+    }
+    time::timeout(timeout, server_task)
+        .await
+        .map_err(|_| "malformed-peer fixture task timed out".to_owned())?
+        .map_err(|error| format!("malformed-peer fixture task failed: {error}"))??;
+    emit_and_result(
+        ProbeContext::new("malformed-peer-response")
+            .ok("truncated peer frame was rejected without panic"),
+    )
 }
 
 /// Transfer resume smoke: download with non-zero offset, verify remaining bytes match.
@@ -3044,6 +3789,45 @@ async fn wait_for_room_message(
     Err("room message timed out".to_owned())
 }
 
+async fn wait_for_room_join(
+    session: &mut ServerSession<TcpStream>,
+    room: &str,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        match time::timeout(
+            deadline.saturating_duration_since(Instant::now()),
+            session.receive(),
+        )
+        .await
+        {
+            Ok(Ok(ServerMessage::JoinedRoom(joined))) if joined.room == room => return Ok(()),
+            Ok(Ok(ServerMessage::CantCreateRoom { room: rejected })) if rejected == room => {
+                return Err("server rejected room creation".to_owned());
+            }
+            Ok(Ok(ServerMessage::CantJoinRoom { room: rejected })) if rejected == room => {
+                return Err("server rejected room join".to_owned());
+            }
+            Ok(Ok(ServerMessage::MessageUserResponse(private_message))) => {
+                session
+                    .send_server_message(ServerMessage::MessageAcked {
+                        id: private_message.id,
+                    })
+                    .await
+                    .map_err(|error| format!("room join message ack failed: {error}"))?;
+            }
+            Ok(Ok(ServerMessage::Relogged)) => {
+                return Err("account was logged in elsewhere".to_owned());
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => return Err(format!("room join receive failed: {error}")),
+            Err(_) => break,
+        }
+    }
+    Err("room join timed out".to_owned())
+}
+
 fn peer_regular_port(address: &slskr_client::protocol::server::PeerAddress) -> Result<u16, String> {
     if address.port == 0 {
         return Err("peer did not advertise a plain listener port".to_owned());
@@ -3055,6 +3839,18 @@ fn peer_regular_port(address: &slskr_client::protocol::server::PeerAddress) -> R
             address.port
         )
     })
+}
+
+fn validated_obfuscated_port(obfuscation_type: u32, port: u16) -> Result<u16, String> {
+    if obfuscation_type != ROTATED_OBFUSCATION_TYPE {
+        return Err(format!(
+            "peer advertised unsupported obfuscation type {obfuscation_type}"
+        ));
+    }
+    if port == 0 {
+        return Err("peer did not advertise an obfuscated listener port".to_owned());
+    }
+    Ok(port)
 }
 
 async fn connect_plain_peer_messages(
@@ -3360,6 +4156,13 @@ where
         ServerMessage::WatchUserResponse(user) => {
             println!("server event: watched user exists={}", user.exists);
         }
+        ServerMessage::JoinedRoom(room) => {
+            println!(
+                "server event: joined room users={} private={}",
+                room.users.len(),
+                room.owner.is_some()
+            );
+        }
         ServerMessage::GetUserStatusResponse(status) => {
             println!(
                 "server event: user status status={} privileged={}",
@@ -3477,38 +4280,45 @@ async fn handle_live_soak_connect_to_peer_response(
         peer.send(&PeerMessage::UserInfoRequest)
             .await
             .map_err(|error| format!("live soak indirect user-info request failed: {error}"))?;
-        let peer_response = match time::timeout(timeout, peer.receive()).await {
-            Ok(Ok(message)) => message,
-            Ok(Err(error)) => {
-                log_live_soak_indirect_close(peer_close_reason(&error.to_string()));
-                return Ok(());
-            }
-            Err(_) => {
+        let deadline = Instant::now() + timeout;
+        for _ in 0..16 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
                 log_live_soak_indirect_close("response timed out");
                 return Ok(());
             }
-        };
-        match peer_response {
-            PeerMessage::UserInfoResponse(_) => {}
-            PeerMessage::UserInfoRequest => {
-                peer.send(&PeerMessage::UserInfoResponse(UserInfo {
-                    description: "slskr live soak indirect".to_owned(),
-                    picture: None,
-                    total_uploads: 0,
-                    queue_size: 0,
-                    slots_free: true,
-                    upload_permissions: None,
-                }))
-                .await
-                .map_err(|error| {
-                    format!("live soak indirect user-info response send failed: {error}")
-                })?;
-            }
-            other => {
-                return Err(format!(
-                    "unexpected live soak indirect response: {}",
+            let peer_response = match time::timeout(remaining, peer.receive()).await {
+                Ok(Ok(message)) => message,
+                Ok(Err(error)) => {
+                    log_live_soak_indirect_close(peer_close_reason(&error.to_string()));
+                    return Ok(());
+                }
+                Err(_) => {
+                    log_live_soak_indirect_close("response timed out");
+                    return Ok(());
+                }
+            };
+            match peer_response {
+                PeerMessage::UserInfoResponse(_) => break,
+                PeerMessage::UserInfoRequest => {
+                    peer.send(&PeerMessage::UserInfoResponse(UserInfo {
+                        description: "slskr live soak indirect".to_owned(),
+                        picture: None,
+                        total_uploads: 0,
+                        queue_size: 0,
+                        slots_free: true,
+                        upload_permissions: None,
+                    }))
+                    .await
+                    .map_err(|error| {
+                        format!("live soak indirect user-info response send failed: {error}")
+                    })?;
+                    break;
+                }
+                other => println!(
+                    "live soak indirect interleaved peer message: {}",
                     peer_message_name(&other)
-                ));
+                ),
             }
         }
     } else if kind == ConnectionKind::Distributed {
@@ -3559,9 +4369,17 @@ async fn run_listener(listener: Listener, duration: Duration) -> Result<(), Stri
                     name,
                     scrub_socket_addr(address)
                 );
-                response_result?;
+                if let Err(error) = response_result {
+                    println!(
+                        "listener isolated failed peer connection: {}",
+                        peer_close_reason(&error)
+                    );
+                }
             }
-            Ok(Err(error)) => return Err(format!("listener accept failed: {error}")),
+            Ok(Err(error)) => println!(
+                "listener rejected invalid peer initialization: {}",
+                peer_close_reason(&error.to_string())
+            ),
             Err(_) => break,
         }
     }
@@ -3590,9 +4408,17 @@ async fn run_obfuscated_listener(listener: Listener, duration: Duration) -> Resu
                     name,
                     scrub_socket_addr(address)
                 );
-                response_result?;
+                if let Err(error) = response_result {
+                    println!(
+                        "obfuscated listener isolated failed peer connection: {}",
+                        peer_close_reason(&error)
+                    );
+                }
             }
-            Ok(Err(error)) => return Err(format!("obfuscated listener accept failed: {error}")),
+            Ok(Err(error)) => println!(
+                "obfuscated listener rejected invalid peer initialization: {}",
+                peer_close_reason(&error.to_string())
+            ),
             Err(_) => break,
         }
     }
@@ -3856,6 +4682,7 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::FileSearchRequest(_) => "file_search_request",
         ServerMessage::FileSearchIncoming { .. } => "file_search_incoming",
         ServerMessage::JoinRoom { .. } => "join_room",
+        ServerMessage::JoinedRoom(_) => "joined_room",
         ServerMessage::LeaveRoom { .. } => "leave_room",
         ServerMessage::SetStatus { .. } => "set_status",
         ServerMessage::ServerPing => "server_ping",
@@ -3864,6 +4691,8 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::GetUserStats { .. } => "get_user_stats",
         ServerMessage::Relogged => "relogged",
         ServerMessage::UserSearch(_) => "user_search",
+        ServerMessage::AddThingILike { .. } => "add_thing_i_like",
+        ServerMessage::RemoveThingILike { .. } => "remove_thing_i_like",
         ServerMessage::RoomListRequest => "room_list_request",
         ServerMessage::RoomList(_) => "room_list",
         ServerMessage::PrivilegedUsers(_) => "privileged_users",
@@ -3886,9 +4715,12 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::LeaveGlobalRoom => "leave_global_room",
         ServerMessage::GlobalRoomMessage { .. } => "global_room_message",
         ServerMessage::ExcludedSearchPhrases(_) => "excluded_search_phrases",
+        ServerMessage::AddThingIHate { .. } => "add_thing_i_hate",
+        ServerMessage::RemoveThingIHate { .. } => "remove_thing_i_hate",
         ServerMessage::CantConnectToPeerRequest { .. } => "cant_connect_to_peer_request",
         ServerMessage::CantConnectToPeerResponse { .. } => "cant_connect_to_peer_response",
         ServerMessage::CantCreateRoom { .. } => "cant_create_room",
+        ServerMessage::CantJoinRoom { .. } => "cant_join_room",
         ServerMessage::Unknown { .. } => "unknown",
     }
 }
@@ -3951,7 +4783,8 @@ fn redact_peer_text(value: &str) -> String {
 fn peer_close_reason(error: &str) -> &'static str {
     if error.contains("Connection reset by peer") {
         "connection reset by peer"
-    } else if error.contains("unexpected end of file") {
+    } else if error.contains("unexpected end of file") || error.contains("unexpected end of input")
+    {
         "unexpected eof"
     } else {
         "closed"
@@ -4096,6 +4929,7 @@ mod tests {
     use super::{
         await_fixture_server_task, incoming_connection_name, normalize_command,
         peer_probe_messages, redact_peer_text, scrub_socket_addr, validated_duration_secs,
+        validated_obfuscated_port,
     };
     use slskr_client::{
         listener::IncomingConnection, protocol::server::ServerMessage,
@@ -4120,6 +4954,41 @@ mod tests {
         assert_eq!(
             normalize(&["probe", "obfuscated-peer"]),
             ["obfuscated-peer-probe"]
+        );
+        assert_eq!(
+            normalize(&["probe", "overlay-service"]),
+            ["overlay-service-probe"]
+        );
+        assert_eq!(normalize(&["probe", "dht-store"]), ["dht-store-probe"]);
+        assert_eq!(
+            normalize(&["probe", "wishlist-interval"]),
+            ["wishlist-interval-probe"]
+        );
+        assert_eq!(normalize(&["probe", "user-watch"]), ["user-watch-probe"]);
+        assert_eq!(
+            normalize(&["smoke", "distributed-tree"]),
+            ["distributed-tree-smoke"]
+        );
+        assert_eq!(normalize(&["smoke", "room-create"]), ["room-create-smoke"]);
+        assert_eq!(
+            normalize(&["smoke", "server-relogin"]),
+            ["server-relogin-smoke"]
+        );
+        assert_eq!(
+            normalize(&["smoke", "server-reconnect"]),
+            ["server-reconnect-smoke"]
+        );
+        assert_eq!(
+            normalize(&["smoke", "closed-listener"]),
+            ["closed-listener-smoke"]
+        );
+        assert_eq!(
+            normalize(&["smoke", "bad-obfuscation-type"]),
+            ["bad-obfuscation-type-smoke"]
+        );
+        assert_eq!(
+            normalize(&["smoke", "malformed-peer-response"]),
+            ["malformed-peer-response-smoke"]
         );
     }
 
@@ -4169,6 +5038,17 @@ mod tests {
             validated_duration_secs("TEST_SECONDS", 0, true).unwrap(),
             Duration::ZERO
         );
+    }
+
+    #[test]
+    fn obfuscated_port_validation_rejects_unsupported_and_missing_endpoints() {
+        assert_eq!(validated_obfuscated_port(1, 2235).unwrap(), 2235);
+        assert!(validated_obfuscated_port(2, 2235)
+            .unwrap_err()
+            .contains("unsupported obfuscation type"));
+        assert!(validated_obfuscated_port(1, 0)
+            .unwrap_err()
+            .contains("did not advertise"));
     }
 
     #[test]

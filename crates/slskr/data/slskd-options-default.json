@@ -1,0 +1,236 @@
+{
+  "blacklist": {
+    "enabled": false
+  },
+  "debug": false,
+  "directories": {
+    "downloads": "<APP_DIR>/downloads",
+    "incomplete": "<APP_DIR>/incomplete"
+  },
+  "feature": {
+    "swagger": false
+  },
+  "filters": {
+    "search": {
+      "request": []
+    }
+  },
+  "flags": {
+    "caseSensitiveRegEx": false,
+    "experimental": false,
+    "forceMigrations": false,
+    "forceShareScan": false,
+    "legacyWindowsTcpKeepalive": false,
+    "logSQL": false,
+    "logUnobservedExceptions": false,
+    "noConfigWatch": false,
+    "noConnect": false,
+    "noLogo": false,
+    "noShareScan": false,
+    "noSqlitePooling": false,
+    "noStart": false,
+    "noVersionCheck": false,
+    "optimisticRelayFileInfo": false,
+    "volatile": false
+  },
+  "headless": false,
+  "instanceName": "default",
+  "integrations": {
+    "ftp": {
+      "connectionTimeout": 5000,
+      "enabled": false,
+      "encryptionMode": "auto",
+      "ignoreCertificateErrors": false,
+      "overwriteExisting": true,
+      "port": 21,
+      "remotePath": "/",
+      "retryAttempts": 3
+    },
+    "pushbullet": {
+      "cooldownTime": 900000,
+      "enabled": false,
+      "notificationPrefix": "From slskd:",
+      "notifyOnPrivateMessage": true,
+      "notifyOnRoomMention": true,
+      "retryAttempts": 3
+    },
+    "scripts": {},
+    "vpn": {
+      "enabled": false,
+      "gluetun": {
+        "timeout": 1000,
+        "version": 1
+      },
+      "pollingInterval": 2500,
+      "portForwarding": false
+    },
+    "webhooks": {}
+  },
+  "logger": {
+    "disk": false,
+    "noColor": false
+  },
+  "metrics": {
+    "authentication": {
+      "disabled": false,
+      "password": "*****",
+      "username": "slskd"
+    },
+    "enabled": false,
+    "url": "/metrics"
+  },
+  "relay": {
+    "agents": {},
+    "controller": {
+      "downloads": false,
+      "ignoreCertificateErrors": false
+    },
+    "enabled": false,
+    "mode": "controller"
+  },
+  "remoteConfiguration": false,
+  "remoteFileManagement": false,
+  "retention": {
+    "files": {},
+    "logs": 180,
+    "transfers": {
+      "download": {},
+      "upload": {}
+    }
+  },
+  "rooms": [],
+  "shares": {
+    "cache": {
+      "storageMode": "memory",
+      "workers": 32
+    },
+    "directories": [],
+    "filters": []
+  },
+  "soulseek": {
+    "address": "vps.slsknet.org",
+    "connection": {
+      "buffer": {
+        "read": 16384,
+        "transfer": 262144,
+        "write": 16384,
+        "writeQueue": 50
+      },
+      "proxy": {
+        "enabled": false
+      },
+      "timeout": {
+        "connect": 10000,
+        "inactivity": 15000,
+        "transfer": 60000
+      }
+    },
+    "description": "A slskd user. https://github.com/slskd/slskd",
+    "diagnosticLevel": "info",
+    "distributedNetwork": {
+      "childLimit": 25,
+      "disableChildren": false,
+      "disabled": false,
+      "logging": false
+    },
+    "listenIpAddress": "0.0.0.0",
+    "listenPort": 50300,
+    "port": 2271
+  },
+  "throttling": {
+    "search": {
+      "incoming": {
+        "circuitBreaker": 500,
+        "concurrency": 10,
+        "responseFileLimit": 500
+      }
+    }
+  },
+  "transfers": {
+    "download": {
+      "destination": {
+        "exists": "rename",
+        "permissions": {},
+        "subdirectory": "${SOURCE_DIRECTORY}"
+      },
+      "retry": {
+        "attempts": 3,
+        "delay": 5000,
+        "maxDelay": 60000,
+        "partial": "resume"
+      },
+      "slots": 2147483647,
+      "speedLimit": 2147483647
+    },
+    "groups": {
+      "blacklisted": {
+        "cidrs": [],
+        "members": [],
+        "patterns": []
+      },
+      "default": {
+        "upload": {
+          "limits": {
+            "daily": {},
+            "queued": {},
+            "weekly": {}
+          },
+          "priority": 1,
+          "slots": 2147483647,
+          "speedLimit": 2147483647,
+          "strategy": "roundrobin"
+        }
+      },
+      "leechers": {
+        "thresholds": {
+          "directories": 1,
+          "files": 1
+        },
+        "upload": {
+          "limits": {
+            "daily": {},
+            "queued": {},
+            "weekly": {}
+          },
+          "priority": 1,
+          "slots": 2147483647,
+          "speedLimit": 2147483647,
+          "strategy": "roundrobin"
+        }
+      },
+      "userDefined": {}
+    },
+    "upload": {
+      "limits": {
+        "daily": {},
+        "queued": {},
+        "weekly": {}
+      },
+      "slots": 10,
+      "speedLimit": 2147483647
+    }
+  },
+  "web": {
+    "authentication": {
+      "apiKeys": {},
+      "disabled": true,
+      "jwt": {
+        "key": "*****",
+        "ttl": 604800000
+      },
+      "password": "*****",
+      "username": "slskd"
+    },
+    "contentPath": "wwwroot",
+    "https": {
+      "certificate": {},
+      "disabled": false,
+      "force": false,
+      "port": 5031
+    },
+    "ipAddress": "127.0.0.1",
+    "logging": false,
+    "port": 5030,
+    "urlBase": "/"
+  }
+}

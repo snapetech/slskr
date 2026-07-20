@@ -1,8 +1,26 @@
-// <copyright file="swarmAnalytics.js" company="slskr Team">
-// Copyright (c) slskr Team. All rights reserved.
+// <copyright file="swarmAnalytics.js" company="slskdN Team">
+// Copyright (c) slskdN Team. All rights reserved.
 // </copyright>
 
 import api from './api';
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+/**
+ * Get the complete swarm analytics dashboard from one server snapshot.
+ * @param {number} timeWindowHours - Time window in hours.
+ * @param {number} rankingLimit - Maximum peer rankings to return.
+ * @returns {Promise<object>} Complete analytics dashboard
+ */
+export const getDashboard = async (
+  timeWindowHours = 24,
+  rankingLimit = 20,
+) => {
+  const response = await api.get('/swarm/analytics/dashboard', {
+    params: { rankingLimit, timeWindowHours },
+  });
+  return response.data;
+};
 
 /**
  * Get swarm performance metrics.
@@ -31,7 +49,7 @@ export const getPeerRankings = async (limit = 20) => {
     const response = await api.get(
       `/swarm/analytics/peers/rankings?limit=${limit}`,
     );
-    return response.data;
+    return asArray(response.data);
   } catch (error) {
     console.error('Failed to fetch peer rankings:', error);
     throw error;
@@ -80,7 +98,7 @@ export const getTrends = async (timeWindowHours = 24, dataPoints = 24) => {
 export const getRecommendations = async () => {
   try {
     const response = await api.get('/swarm/analytics/recommendations');
-    return response.data;
+    return asArray(response.data);
   } catch (error) {
     console.error('Failed to fetch recommendations:', error);
     throw error;

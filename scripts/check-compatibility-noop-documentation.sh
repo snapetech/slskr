@@ -25,7 +25,7 @@ for route in '/api/options' '/api/options/yaml' '/api/options/yaml/location' 'lo
   fi
 done
 
-for expected in 'compatibility endpoint is read-only' 'not active in this runtime' 'acknowledgement|acknowledged|persisted compatibility acknowledgement' 'configPersisted: false' 'compatibility_acknowledgement' 'compatibility_noop_routes_advertise_supported_shape' 'patch_options_reports_config_read_only_acknowledgement_state'; do
+for expected in 'not active in this runtime' 'acknowledgement|acknowledged|persisted compatibility acknowledgement' 'compatibility_acknowledgement' 'compatibility_noop_routes_advertise_supported_shape' 'remote_options_overlay_and_yaml_are_effective_and_durable'; do
   if ! rg -n "$expected" crates/slskr/src/main.rs docs/security-bug-burndown.md docs/http-api.md docs/app-surface.md "$ledger" >/dev/null; then
     printf 'compatibility no-op documentation check failed: expected implementation/docs token missing: %s\n' "$expected" >&2
     status=1

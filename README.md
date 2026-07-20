@@ -158,9 +158,11 @@ Release artifacts are published from tags named `release-v<semver>`:
 https://github.com/snapetech/slskr/releases
 ```
 
-Archives include the `slskr` binary and bundled web assets for supported Linux,
-macOS, and Windows targets, plus checksums and release manifests. Extract the
-archive for your platform, put the binary on your `PATH`, then create a config.
+Archives include the `slskr` binary and bundled web assets for Linux x86-64 and
+AArch64 (GNU and static musl), macOS x86-64 and Apple silicon, and Windows
+x86-64, plus checksums and release manifests. Multi-architecture container
+images support `linux/amd64` and `linux/arm64`. Extract the archive for your
+platform, put the binary on your `PATH`, then create a config.
 
 ### Build From Source
 
@@ -267,7 +269,12 @@ Common settings:
 | `SLSKR_CREDENTIAL_STORE` | Soulseek credential storage: `os`, `systemd`, `memory`, or `file`. |
 | `SLSKR_CREDENTIAL_FILE` | Local credential-file fallback path; default is under `SLSKR_STATE_DIR`. |
 | `SLSK_USERNAME`, `SLSK_PASSWORD` | Soulseek account credentials for env/config secret-manager deployments. |
-| `SLSKR_API_TOKEN` | Token for protected API routes. |
+| `SLSKR_API_TOKEN` | Administrator token for protected API routes. |
+| `SLSKR_API_READ_WRITE_TOKEN` | Optional non-administrator read/write token. |
+| `SLSKR_API_READ_ONLY_TOKEN` | Optional read-only token. |
+| `SLSKR_API_NOWPLAYING_TOKEN` | Optional token restricted to the scoped now-playing webhook. |
+| `SLSKR_CONTROLLER_COMPATIBILITY_TARGET` | Select frozen conflicting controller semantics: `slskd` or `slskdn` (default). |
+| `SLSKR_REMOTE_CONFIGURATION` | Enable remote option overlays and configuration-file APIs; disabled by default. |
 | `SLSKR_SHARE_DIRS` | Semicolon-separated share roots. |
 | `SLSKR_LISTENER_BIND` | Regular peer listener bind address. |
 | `SLSKR_ADVERTISED_PORT` | Public regular peer port advertised to the network. |
@@ -295,8 +302,8 @@ state layout, container shape, and exposure rules.
 Default behavior is intentionally conservative:
 
 - HTTP binds to `127.0.0.1:5030` by default.
-- Non-loopback HTTP binds require `SLSKR_API_TOKEN` unless auth is explicitly
-  disabled with `SLSKR_AUTH_DISABLED=true`.
+- Non-loopback HTTP binds require at least one API token unless auth is
+  explicitly disabled with `SLSKR_AUTH_DISABLED=true`.
 - Protected API routes accept `Authorization: Bearer <token>` or
   `X-API-Key: <token>`.
 - Browser-origin mutating requests are checked with `Origin`/`Referer` to reduce
@@ -430,11 +437,11 @@ scripts/run-certification.sh --dry-run
 
 Each test account is routed through its own isolated Proton WireGuard namespace
 so the Soulseek server sees different source IPs per login. The runner covers
-7 phases across 36 test cases:
+7 phases across 39 test cases:
 
 | Phase | Coverage | Tests |
 | --- | --- | --- |
-| **A: Foundation** | Login, peer-address, plain/obfuscated/indirect peer | 5 |
+| **A: Foundation** | Four isolated logins, peer-address, plain/obfuscated/indirect peer | 8 |
 | **B: Transfers** | Download, upload, resume, rejection | 5 |
 | **C: Social** | Private messages, rooms, wishlist, browse | 6 |
 | **D: Distributed** | Distributed ping, branch, search forwarding | 4 |

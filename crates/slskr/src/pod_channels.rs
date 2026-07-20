@@ -161,6 +161,19 @@ impl PodChannelStore {
         })
     }
 
+    pub fn delete_older_than(
+        &mut self,
+        older_than_unix_ms: u64,
+        pod_id: Option<&str>,
+        channel_id: Option<&str>,
+    ) -> Result<Vec<PodChannelMessage>, String> {
+        self.delete_matching(|message| {
+            message.timestamp_unix_ms < older_than_unix_ms
+                && pod_id.is_none_or(|pod_id| message.pod_id == pod_id)
+                && channel_id.is_none_or(|channel_id| message.channel_id == channel_id)
+        })
+    }
+
     fn delete_matching(
         &mut self,
         matches: impl Fn(&PodChannelMessage) -> bool,

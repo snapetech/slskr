@@ -12,7 +12,7 @@ slskr already has a mature live-interop harness: VPN-isolated Proton WireGuard n
 | Protocol unit tests | All 102 server codes, ~18 peer codes, ~6 distributed codes, 2 init codes, obfuscation type 1 | `cargo test --workspace` |
 | Live login | 4–8 accounts via `.env` / generated accounts / credential pool | `run-live-interop-matrix.sh` |
 | VPN harness | 8 Proton WireGuard configs in isolated netns with veth routing, per-account IP isolation | `run-in-proton-wg-netns.sh` |
-| Certification runner | 7 phases (A-H), 36 tests, per-account VPN routing, JSON/text output, auto-detect VPN configs | `run-certification.sh` |
+| Certification runner | 7 phases (A-H), 39 tests, per-account VPN routing, JSON/text output, auto-detect VPN configs | `run-certification.sh` |
 | NAT-PMP | Claim/renew of regular + obfuscated ports via `natpmpc` | `run-live-soak-proton-natpmp.sh` |
 | Probe matrix | peer-address, plain-peer, obfuscated-peer, indirect-peer, distributed-peer, file-transfer-peer, metadata-relogin, negative-indirect | `run-proton-public-matrix.sh` → TSV |
 | Social probes | private-message, room-message | `run-live-interop-matrix.sh` |
@@ -124,9 +124,9 @@ Environment variable `SLSKR_LOG_LEVEL` already exists for the HTTP API. Extend i
 |---|------|-----|---------|----------|----------|
 | C1 | Private message bidirectional | 4+ pairings | N/A | 2 accounts | Send/receive/ack both directions |
 | C2 | Room join/leave/message | 4+ pairings | N/A | 2+ accounts | Join, send, receive, leave |
-| C3 | Room create (if allowed) | 2+ pairings | N/A | 1 account | Create room, verify in room list |
+| C3 | Room-create protocol state machine | deterministic protocol smoke | N/A | synthetic frames | Public join round trip plus `JoinedRoom`, `CantCreateRoom`, and `CantJoinRoom` decoding |
 | C4 | Wishlist search | 4+ pairings | N/A | 1 account | Wishlist interval received, search dispatched, results received |
-| C5 | User watch/stats | 4+ pairings | N/A | 2 accounts | Watch user, receive status change, receive stats |
+| C5 | User watch/stats | 4+ pairings | N/A | 2 accounts | Live `WatchUser` and `GetUserStats` responses identify the requested online user |
 | C6 | Browse complete shares | 4+ pairings | N/A | listener + probe | Full share list received, decompressed, verified |
 
 ### Phase D — Distributed Search Tree
@@ -425,7 +425,7 @@ Final Summary: 8 passed, 0 failed, 31 skipped, 101s total
 | --- | --- |
 | `crates/slskr/src/probe_output.rs` | Structured probe output module — `ProbeContext`, `ProbeResult`, JSON emission via `SLSKR_PROBE_OUTPUT=json` |
 | `crates/slskr/src/cli.rs` | Wired `distributed-peer` and `file-transfer-peer` probes with `ProbeContext`; fixed `emit_and_result` warnings |
-| `scripts/run-certification.sh` | Full certification runner — 7 phases (A-H), 36 test cases, per-account VPN isolation, auto-detect VPN configs |
+| `scripts/run-certification.sh` | Full certification runner — 7 phases (A-H), 39 test cases, per-account VPN isolation, auto-detect VPN configs |
 | `scripts/run-in-proton-wg-netns.sh` | Network namespace runner with WireGuard, veth routing, split-routing, and cleanup |
 | `docs/vpn-certification.md` | Per-account VPN isolation architecture, setup, and troubleshooting |
 | `docs/full-network-test-plan.md` | This plan document |
@@ -445,20 +445,20 @@ scripts/run-certification.sh --phases B,G,H --log-format json
 scripts/run-certification.sh --dry-run
 ```
 
-### Latest Results (2026-05-17)
+### Latest Results (2026-07-16)
 
-Full certification run with per-account VPN isolation (36 tests):
+Full certification run with per-account VPN isolation (39 tests):
 
 | Phase | Passed | Failed | Skipped | Notes |
 | --- | --- | --- | --- | --- |
-| A: Foundation | 4 | 1 | 0 | All 4 accounts logged in via isolated VPN; A2-A5 needs listener credentials |
-| B: Transfers | 5 | 0 | 0 | All pass via VPN |
-| C: Social | 6 | 0 | 0 | All pass via VPN |
-| D: Distributed | 3 | 1 | 0 | D1 transient failure; D2-D4 pass |
-| E: NAT-PMP | 4 | 1 | 0 | E1-E4 port mapping passes; E5 soak exits 1 (unexpected events) |
-| G: Soak | 3 | 0 | 0 | All pass via VPN |
-| H: Negative | 2 | 0 | 6 | Wrong password + offline peer pass; H4-H8 deferred |
-| **Total** | **27** | **3** | **6** | **330s** |
+| A: Foundation | 8 | 0 | 0 | Four isolated logins plus public direct, type-1 obfuscated, and indirect peer paths |
+| B: Transfers | 5 | 0 | 0 | Fixture hash, large transfer, upload, resume, and rejection paths |
+| C: Social | 6 | 0 | 0 | Private messages, live room traffic, deterministic room-create/rejection protocol, wishlist wire behavior, live user watch/stats, and browse |
+| D: Distributed | 4 | 0 | 0 | Ping, parent adoption, source-excluding forwarding, and child lifecycle |
+| E: NAT-PMP | 5 | 0 | 0 | Cleanup-aware claim, exact renewal, collision, obfuscated mapping, and real mapped soak |
+| G: Soak | 3 | 0 | 0 | Server, listener, and real NAT-PMP soaks |
+| H: Negative | 8 | 0 | 0 | Explicit invalid-password/offline outcomes, relog/reconnect, closed port, bad type, renewal failure, malformed frame |
+| **Total** | **39** | **0** | **0** | **442s; `target/certify/summary-20260716-103416.json`** |
 
 See [vpn-certification.md](./vpn-certification.md) for the VPN isolation architecture and
 setup instructions.

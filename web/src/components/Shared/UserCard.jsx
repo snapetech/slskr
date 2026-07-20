@@ -1,63 +1,226 @@
 import './UserCard.css';
+import * as opinions from '../../lib/opinions';
 import * as security from '../../lib/security';
 import * as soulseekDiscovery from '../../lib/soulseekDiscovery';
 import * as users from '../../lib/users';
 import React, { Component } from 'react';
 import { Icon, Popup } from 'semantic-ui-react';
 
+const asArray = (value) => (Array.isArray(value) ? value : []);
+const USER_DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const USER_DATA_MAX_CONCURRENT = 4;
+const userDataCache = new Map();
+const userDataInflight = new Map();
+const userDataQueue = [];
+let activeUserDataRequests = 0;
+
+const getCachedUserData = (username) => {
+  const cached = userDataCache.get(username);
+
+  if (!cached || cached.expiresAt <= Date.now()) {
+    userDataCache.delete(username);
+    return null;
+  }
+
+  return cached.data;
+};
+
+const setCachedUserData = (username, data) => {
+  userDataCache.set(username, {
+    data,
+    expiresAt: Date.now() + USER_DATA_CACHE_TTL_MS,
+  });
+};
+
+const runNextUserDataRequest = () => {
+  while (
+    activeUserDataRequests < USER_DATA_MAX_CONCURRENT &&
+    userDataQueue.length > 0
+  ) {
+    const request = userDataQueue.shift();
+    activeUserDataRequests += 1;
+
+    request()
+      .catch(() => {})
+      .finally(() => {
+        activeUserDataRequests -= 1;
+        runNextUserDataRequest();
+      });
+  }
+};
+
+const enqueueUserDataRequest = (request) => {
+  userDataQueue.push(request);
+  runNextUserDataRequest();
+};
+
+const scheduleAfterPaint = (callback) => {
+  if (typeof window === 'undefined') {
+    callback();
+    return undefined;
+  }
+
+  if (typeof window.requestIdleCallback === 'function') {
+    const idleHandle = window.requestIdleCallback(callback, { timeout: 1_500 });
+    return () => window.cancelIdleCallback?.(idleHandle);
+  }
+
+  const timeout = window.setTimeout(callback, 250);
+  return () => window.clearTimeout(timeout);
+};
+
 class UserCard extends Component {
   constructor(props) {
     super(props);
     this.state = {
-      info: null,
+      info: this.props.info || null,
       interests: null,
       interestsError: null,
       interestsLoading: false,
       loading: false,
+      opinionSummary: null,
       reputation: null,
     };
+    this.cancelScheduledFetch = null;
+    this.mounted = false;
+    this.userDataRequested = false;
   }
 
   componentDidMount() {
-    this.fetchUserData();
+    this.mounted = true;
+    const cached = getCachedUserData(this.props.username);
+    if (cached) {
+      this.userDataRequested = true;
+      this.setState({ ...cached, info: this.props.info || cached.info });
+    } else if (!this.props.deferSupplementalData) {
+      this.scheduleUserDataFetch();
+    }
   }
 
   componentDidUpdate(previousProps) {
     if (previousProps.username !== this.props.username) {
-      this.setState({
+      this.cancelScheduledFetch?.();
+      this.userDataRequested = false;
+      const cached = getCachedUserData(this.props.username);
+      const nextState = {
         interests: null,
         interestsError: null,
         interestsLoading: false,
-      });
-      this.fetchUserData();
+        info: this.props.info || null,
+        loading: false,
+        opinionSummary: null,
+        reputation: null,
+      };
+
+      if (cached) {
+        this.userDataRequested = true;
+        this.setState({ ...nextState, ...cached, info: this.props.info || cached.info });
+      } else {
+        this.setState(nextState);
+      }
+
+      if (!cached && !this.props.deferSupplementalData) {
+        this.scheduleUserDataFetch();
+      }
+    } else if (previousProps.info !== this.props.info) {
+      this.setState({ info: this.props.info || null });
+    }
+
+    if (
+      previousProps.deferSupplementalData &&
+      !this.props.deferSupplementalData
+    ) {
+      this.scheduleUserDataFetch();
     }
   }
 
-  fetchUserData = async () => {
-    const { username } = this.props;
-    if (!username) return;
+  componentWillUnmount() {
+    this.mounted = false;
+    this.cancelScheduledFetch?.();
+  }
 
-    this.setState({ loading: true });
+  scheduleUserDataFetch = () => {
+    const { username } = this.props;
+    if (!username || this.userDataRequested) return;
+
+    this.userDataRequested = true;
+
+    const cached = getCachedUserData(username);
+    if (cached) {
+      this.setState({ ...cached, info: this.props.info || cached.info });
+      return;
+    }
+
+    this.cancelScheduledFetch = scheduleAfterPaint(() => {
+      enqueueUserDataRequest(() => this.fetchUserData(username));
+    });
+  };
+
+  fetchUserData = async (username) => {
+    const cached = getCachedUserData(username);
+    if (cached) {
+      if (this.mounted && this.props.username === username) {
+        this.setState({ ...cached, info: this.props.info || cached.info });
+      }
+
+      return;
+    }
 
     try {
-      const [infoResponse, reputationData] = await Promise.allSettled([
-        users.getInfo({ quietUnavailable: true, username }),
-        security.getReputation(username).catch(() => null),
-      ]);
+      if (this.mounted && this.props.username === username) {
+        this.setState({ loading: true });
+      }
 
-      this.setState({
-        info:
-          infoResponse.status === 'fulfilled' && infoResponse.value?.data
-            ? infoResponse.value.data
-            : null,
-        loading: false,
-        reputation:
-          reputationData.status === 'fulfilled' && reputationData.value
-            ? reputationData.value
-            : null,
-      });
+      let userDataPromise = userDataInflight.get(username);
+
+      if (!userDataPromise) {
+        userDataPromise = Promise.allSettled([
+          this.props.info
+            ? Promise.resolve({ data: this.props.info })
+            : users.getInfo({ quietUnavailable: true, username }),
+          security.getReputation(username).catch(() => null),
+          opinions.getOpinionSummary({
+            subjectId: username,
+            subjectType: 'User',
+          }).catch(() => null),
+        ]).then(([infoResponse, reputationData, opinionData]) => ({
+          info:
+            infoResponse.status === 'fulfilled' && infoResponse.value?.data
+              ? infoResponse.value.data
+              : null,
+          loading: false,
+          opinionSummary:
+            opinionData.status === 'fulfilled' && opinionData.value?.data
+              ? opinionData.value.data
+              : null,
+          reputation:
+            reputationData.status === 'fulfilled' && reputationData.value
+              ? reputationData.value
+              : null,
+        }));
+
+        userDataInflight.set(username, userDataPromise);
+      }
+
+      const userData = await userDataPromise;
+
+      setCachedUserData(username, userData);
+      userDataInflight.delete(username);
+
+      if (this.mounted && this.props.username === username) {
+        this.setState({ ...userData, info: this.props.info || userData.info });
+      }
     } catch {
-      this.setState({ loading: false });
+      userDataInflight.delete(username);
+      if (this.mounted && this.props.username === username) {
+        this.setState({ loading: false });
+      }
+    }
+  };
+
+  requestSupplementalData = () => {
+    if (this.props.deferSupplementalData) {
+      this.scheduleUserDataFetch();
     }
   };
 
@@ -72,9 +235,13 @@ class UserCard extends Component {
       const response = await soulseekDiscovery.getUserInterests({
         username,
       });
+      const responseInterests =
+        response.data && typeof response.data === 'object' && !Array.isArray(response.data)
+          ? response.data
+          : {};
 
       this.setState({
-        interests: response.data || {},
+        interests: responseInterests,
         interestsLoading: false,
       });
     } catch (error) {
@@ -98,6 +265,21 @@ class UserCard extends Component {
     return 'red'; // Very poor (0-19)
   };
 
+  getOpinionColor = (summary) => {
+    const score = Number(summary?.weightedScore ?? 0);
+    if (!summary || Number(summary.total ?? 0) === 0) return 'grey';
+    if (score > 0.15) return 'green';
+    if (score < -0.15) return 'red';
+    return 'olive';
+  };
+
+  getOpinionValue = (summary) => {
+    if (!summary || Number(summary.total ?? 0) === 0) return '?';
+    const score = Number(summary.weightedScore ?? 0);
+    if (Math.abs(score) < 0.05) return '0';
+    return score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
+  };
+
   renderInterestPopup = () => {
     const { username } = this.props;
     const { interests, interestsError, interestsLoading } = this.state;
@@ -118,8 +300,8 @@ class UserCard extends Component {
       return <span>{interestsError}</span>;
     }
 
-    const liked = interests?.liked || interests?.Liked || [];
-    const hated = interests?.hated || interests?.Hated || [];
+    const liked = asArray(interests?.liked ?? interests?.Liked);
+    const hated = asArray(interests?.hated ?? interests?.Hated);
 
     if (!interests) {
       return <span>Click to load native Soulseek interests for {username}.</span>;
@@ -163,7 +345,7 @@ class UserCard extends Component {
 
   render() {
     const { children, inline = true, username } = this.props;
-    const { info, loading, reputation } = this.state;
+    const { info, loading, opinionSummary, reputation } = this.state;
 
     const reputationScore = reputation?.score ?? null;
     const reputationColor = this.getReputationColor(reputationScore);
@@ -182,6 +364,16 @@ class UserCard extends Component {
           ? 'Reputation unavailable'
           : `Reputation Score: ${reputationScore}/100`,
       value: reputationScore === null ? '?' : reputationScore,
+    });
+
+    stats.push({
+      color: this.getOpinionColor(opinionSummary),
+      icon: 'thumbs up outline',
+      key: 'opinion',
+      tooltip: opinionSummary?.total
+        ? `Canonical opinions: ${opinionSummary.positive || 0} positive, ${opinionSummary.negative || 0} negative, weighted ${Number(opinionSummary.weightedScore || 0).toFixed(2)}`
+        : 'No canonical opinions recorded',
+      value: this.getOpinionValue(opinionSummary),
     });
 
     // Upload speed (always show, grayed if no data)
@@ -251,9 +443,13 @@ class UserCard extends Component {
 
     // Render the card
     const cardContent = (
-      <span className={`user-card ${inline ? 'user-card-inline' : ''}`}>
+      <span
+        className={`user-card ${inline ? 'user-card-inline' : ''}`}
+        onFocus={this.requestSupplementalData}
+        onMouseEnter={this.requestSupplementalData}
+      >
         <span className="user-card-username">{children || username}</span>
-        {loading ? (
+        {loading && !info ? (
           <span className="user-card-loading">
             <Icon
               loading

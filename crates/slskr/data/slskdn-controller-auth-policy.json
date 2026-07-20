@@ -1,0 +1,4750 @@
+[
+  {
+    "method": "DELETE",
+    "route": "/api/integrations/spotify",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/rooms/{roomName}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/application",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/collections/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/collections/{id}/items/{itemId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/contacts/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/conversations/{username}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/downloads/directories/{base64SubdirectoryName}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/downloads/files/{base64FileName}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/incomplete/directories/{base64SubdirectoryName}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/incomplete/files/{base64FileName}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/integrations/spotify",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/mediacore/publish/descriptor/{*contentId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/nowplaying",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/opinions/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/overlay/blocklist/{type}/{target}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/{podId}/channels/{channelId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/dht/unpublish/{*podId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/discovery/unregister/{podId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/membership/{podId}/{peerId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/membership/join/{podId}/{peerId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/membership/leave/{podId}/{peerId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/messages/{podId}/{channelId}/cleanup",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/podcore/messages/cleanup",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/pods/{podId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/relay/agent",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/rooms/joined/{roomName}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/searches",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/searches/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/security/bans/ip/{ipAddress}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/security/bans/username/{username}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/security/circuits/{circuitId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/server",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/session",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/share-grants/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/sharegroups/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/sharegroups/{id}/members/{userId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/shares",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/soulseek/hated-interests/{item}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/soulseek/interests/{item}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/soulseek/mesh-rendezvous/interest",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/downloads/{username}/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/downloads/all/completed",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/uploads/{username}/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/uploads/all/completed",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/users/notes/{username}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/wishlist/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/wishlist/{id}/ignored-results/{ignoredResultId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/.well-known/webfinger",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/actors/{actorName}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/actors/{actorName}/followers",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/actors/{actorName}/following",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/actors/{actorName}/inbox",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/actors/{actorName}/outbox",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/audio/canonical/{recordingId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/audio/variants/dedupe/{recordingId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/bridge/admin/clients",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/bridge/admin/config",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/bridge/admin/dashboard",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/bridge/admin/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/bridge/rooms",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/bridge/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/bridge/transfer/{transferId}/progress",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/compatibility/users/{username}/browse",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/downloads",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/downloads/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/info",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/integrations/spotify/callback",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/integrations/spotify/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/jobs",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/jobs/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/jobs/discography/{jobId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/jobs/label-crate/{jobId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/dashboard",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/issues",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/issues/by-artist",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/issues/by-codec",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/issues/by-release",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/issues/by-type",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/scans/{scanId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/library/health/summary",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/server/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/slskdn/capabilities",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/slskdn/library/health",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/source-feed-imports/history",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/source-feed-imports/history/{importId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/source-providers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application/build",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application/version",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application/version/latest",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/audio/canonical/{recordingId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/audio/variants/dedupe/{recordingId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/autoreplace",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/backfill/candidates",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/backfill/config",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/backfill/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/bridge/admin/clients",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/bridge/admin/config",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/bridge/admin/dashboard",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/bridge/admin/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/bridge/rooms",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/bridge/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/bridge/transfer/{transferId}/progress",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/capabilities",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/capabilities/mesh-peers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/capabilities/peers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/capabilities/peers/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/collections",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/collections/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/collections/{id}/items",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/contacts",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/contacts/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/contacts/nearby",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/conversations",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/conversations/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/conversations/{username}/messages",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/conversations/activity/unacknowledged",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/destinations",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/destinations/default",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/dht/peers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/dht/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/discovery",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/discovery/no-partial-count",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/discovery/sources/by-filename",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/discovery/sources/by-size/{size}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/discovery/summaries",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/downloads/requests",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/downloads/requests/{id:guid}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/events",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/fairness/summary",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/federation/diagnostics",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/downloads/directories",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/downloads/directories/{base64SubdirectoryName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/incomplete/directories",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/incomplete/directories/{base64SubdirectoryName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/backfill/candidates",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/entries",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/hash/{flacKey}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/hash/by-size/{size}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/inventory/by-size/{size}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/inventory/unhashed",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/key",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/optimize/analyze",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/optimize/slow-queries",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/peers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/schema",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/hashdb/sync/since/{sinceSeq}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/integrations/lidarr/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/integrations/lidarr/sync/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/integrations/lidarr/wanted/missing",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/integrations/spotify/callback",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/integrations/spotify/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/jobs",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/jobs/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/jobs/discography/{jobId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/jobs/label-crate/{jobId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/dashboard",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/issues",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/issues/by-artist",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/issues/by-codec",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/issues/by-release",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/issues/by-type",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/scans/{scanId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/health/summary",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/items",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/items/{contentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/library/items/browser",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/listening-party",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/listening-party/{podId}/{channelId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/listening-party/radio/{partyId}/{contentId}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/logs",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/contentid/domain/{domain}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/contentid/domain/{domain}/type/{type}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/contentid/exists/{externalId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/contentid/external/{contentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/contentid/resolve/{externalId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/contentid/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/contentid/validate/{*contentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/ipld/graph/{*contentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/ipld/inbound/{*targetContentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/ipld/traverse/{*startContentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/ipld/validate",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/perceptualhash/algorithms",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/portability/merge-strategies",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/portability/strategies",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/publish/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/retrieve/descriptor/{*contentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/retrieve/query/domain/{domain}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/retrieve/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/dashboard",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/descriptors",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/fuzzy",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/ipld",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/perceptual",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/portability",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/publishing",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mediacore/stats/registry",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh-streams/{ticket}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh/delta",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh/health",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh/hello",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh/lookup/{flacKey}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh/peers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/mesh/transport",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/multisource/jobs",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/multisource/jobs/{jobId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/multisource/search",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/multisource/users",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/multisource/users/{username}/files",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/albums/completion",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/artist/{artistId}/discography-coverage",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/artist/{artistId}/release-graph",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/overlays/artist/{artistId}/release-graph",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/overlays/edits/{editId}/export-review",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/overlays/edits/{editId}/routes",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/release-radar/notifications",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/release-radar/notifications/{notificationId}/routes",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/musicbrainz/release-radar/subscriptions",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/network/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/nowplaying",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/opinions",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/opinions/summary",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/options",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/overlay/blocklist",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/overlay/connections",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/overlay/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/peer-streams/{ticket}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/playback/{jobId}/diagnostics",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/player/external-visualizer",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/channels",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/channels/{channelId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/opinions/content/{contentId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/opinions/content/{contentId}/aggregated",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/opinions/content/{contentId}/recommendations",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/opinions/content/{contentId}/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/opinions/content/{contentId}/variant/{variantHash}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/{podId}/opinions/members/affinity",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/backfill/{podId}/last-seen",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/backfill/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/content/metadata",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/content/search",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/dht/metadata/{*podId}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/dht/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/discovery/all",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/discovery/content/{*contentId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/discovery/name/{name}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/discovery/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/discovery/tag/{tag}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/discovery/tags/{tags}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/membership/{podId}/{peerId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/membership/{podId}/{peerId}/verify",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/membership/join/pending/{podId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/membership/leave/pending/{podId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/membership/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/messages/{podId}/{channelId}/count",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/messages/{podId}/search",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/messages/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/routing/seen/{messageId}/{podId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/routing/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/signing/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/verification/membership/{podId}/{peerId}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/verification/role/{podId}/{peerId}/{requiredRole}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/podcore/verification/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/pods",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/pods/{podId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/pods/{podId}/channels/{channelId}/messages",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/pods/{podId}/members",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/portforwarding/available-ports",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/portforwarding/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/portforwarding/status/{localPort:int}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/portforwarding/stream-stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/profile/{peerId}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/profile/me",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/quarantine-jury/audit",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/quarantine-jury/requests",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/quarantine-jury/requests/{requestId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/quarantine-jury/requests/{requestId}/aggregate",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/quarantine-jury/requests/{requestId}/release-package",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/quarantine-jury/requests/{requestId}/review",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/quarantine-jury/requests/{requestId}/routes",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/ranking/history/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/realm-subject-indexes/{realmId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/realm-subject-indexes/{realmId}/authority-decisions",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/realm-subject-indexes/{realmId}/conflicts",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/realm-subject-indexes/recordings/{recordingId}/resolutions",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/relay/controller/downloads/{token}",
+    "access": "authenticated",
+    "scheme": "api_key",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/relay/streams/{contentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/activity",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/available",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined/{roomName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined/{roomName}/messages",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined/{roomName}/users",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/searches",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/searches/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/searches/{id}/responses",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/adversarial",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/adversarial/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/anomalies",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/bans",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/canaries",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/circuits",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/circuits/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/dashboard",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/disclosure/{username}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/events",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/network",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/network/top",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/peers",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/peers/stats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/reputation/{username}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/reputation/suspicious",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/reputation/trusted",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/scanners",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/threats",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/tor/status",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/transports",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/security/transports/status",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/server",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/session",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/share-grants",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/share-grants/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/share-grants/{id}/manifest",
+    "access": "delegated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/share-grants/by-collection/{collectionId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/sharegroups",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/sharegroups/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/sharegroups/{id}/members",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares/{id}/contents",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares/contents",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/signals/config",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/signals/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/slskdn/capabilities",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/slskdn/library/health",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/solid/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/songid/capabilities",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/songid/runs",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/songid/runs/{id:guid}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/songid/runs/{id:guid}/evidence-package",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/songid/runs/{id:guid}/forensic-matrix",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/songid/runs/queue",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/items/{item}/recommendations",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/items/{item}/similar-users",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/mesh-rendezvous/discover",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/mesh-rendezvous/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/mesh-rendezvous/users",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/peer-capabilities",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/recommendations",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/recommendations/global",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/users/{username}/interests",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/soulseek/users/similar",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/source-feed-imports/history",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/source-feed-imports/history/{importId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/source-providers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/streams/{contentId}",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/swarm/analytics/dashboard",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/swarm/analytics/efficiency",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/swarm/analytics/peers/rankings",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/swarm/analytics/performance",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/swarm/analytics/recommendations",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/swarm/analytics/trends",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/metrics",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/metrics/kpi",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/prometheus",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/prometheus/kpis",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/directories",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/exceptions",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/histogram",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/leaderboard",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/summary",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/users/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/traces/{jobId}/summary",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/changes",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/{username}/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/{username}/{id}/position",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/accelerated",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/auto-replace/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/batches/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/stuck",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/user-stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/history",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/speeds",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/uploads",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/uploads/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/uploads/{username}/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/uploads/diagnostics",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/browse",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/browse/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/endpoint",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/group",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/info",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/groups",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/notes",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/notes/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/virtualsoulfind/canonical/{mbid}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/virtualsoulfind/disaster-mode/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/virtualsoulfind/shadow-index/{mbid}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/wishlist",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/wishlist/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/wishlist/{id}/ignored-results",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/wishlist/{id}/searches",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/catalogue/artists/{artistId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/catalogue/artists/{artistId}/releases",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/catalogue/artists/search",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/catalogue/releases/{releaseId}/tracks",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/executions/{executionId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/intents/releases/{intentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/intents/tracks/{intentId}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/intents/tracks/pending",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v1/virtualsoulfind/v2/stats",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/virtualsoulfind/canonical/{mbid}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/virtualsoulfind/disaster-mode/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/virtualsoulfind/shadow-index/{mbid}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/mesh/http/services",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PATCH",
+    "route": "/api/library/health/issues/{issueId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PATCH",
+    "route": "/api/v0/downloads/requests/{id:guid}/name",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PATCH",
+    "route": "/api/v0/library/health/issues/{issueId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PATCH",
+    "route": "/api/v0/options",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PATCH",
+    "route": "/api/v1/virtualsoulfind/v2/intents/tracks/{intentId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/actors/{actorName}/inbox",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/actors/{actorName}/outbox",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/audio/analyzers/migrate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/bridge/download",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/bridge/search",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/bridge/start",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/bridge/stop",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/downloads",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/integrations/spotify/authorize",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/jobs/discography",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/jobs/label-crate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/jobs/mb-release",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/library/health/issues/fix",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/library/health/scans",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/library/scan",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/rooms",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/search",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/slskdn/library/remediate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/slskdn/warm-cache/hints",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/source-feed-imports/preview",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/application/dump",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/application/gc",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/application/loopback",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/audio/analyzers/migrate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/backfill/busy",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/backfill/enable",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/backfill/file",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/backfill/idle",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/backfill/trigger",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/bridge/download",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/bridge/search",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/bridge/start",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/bridge/stop",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/capabilities/parse",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/collections",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/collections/{id}/items",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/collections/{id}/items/reorder",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/contacts/from-discovery",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/contacts/from-invite",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/conversations/{username}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/conversations/batch",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/destinations/validate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/dht/announce",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/dht/discover",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/discovery-graph",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/discovery/reset-partial-flags",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/discovery/start",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/discovery/stop",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/downloads/requests/{id:guid}/cancel",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/events",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/hashdb/backfill/from-history",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/hashdb/hash",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/hashdb/optimize/indexes",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/hashdb/optimize/profile",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/hashdb/optimize/vacuum",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/hashdb/sync/merge",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/integrations/lidarr/manualimport",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/integrations/lidarr/wanted/sync",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/integrations/spotify/authorize",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/jobs/discography",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/jobs/label-crate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/jobs/mb-release",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/library/health/issues/fix",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/library/health/scans",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/listening-party/{podId}/{channelId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/contentid/register",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/fuzzymatch/find/{*contentId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/fuzzymatch/perceptual",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/fuzzymatch/text",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/ipld/links/{*contentId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/perceptualhash/audio",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/perceptualhash/image",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/perceptualhash/similarity",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/portability/analyze",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/portability/export",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/portability/import",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/publish/batch",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/publish/descriptor",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/publish/republish",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/retrieve/batch",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/retrieve/cache/clear",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/retrieve/verify",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mediacore/stats/reset",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mesh-streams/tickets",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mesh/merge",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mesh/message",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mesh/nat/detect",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mesh/publish",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/mesh/sync/{username}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/multisource/download",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/multisource/download-file",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/multisource/file-sources",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/multisource/swarm",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/multisource/swarm/async",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/multisource/test",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/multisource/verify",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/artist/{artistId}/discography-coverage/wishlist",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/library-bloom/diffs",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/library-bloom/wishlist",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/overlays/edits",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/overlays/edits/{editId}/approve-export",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/overlays/edits/{editId}/routes",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/release-radar/notifications/{notificationId}/routes",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/release-radar/observations",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/release-radar/subscriptions",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/musicbrainz/targets",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/nowplaying/webhook",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": [
+      "nowplaying"
+    ]
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/opinions",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/options",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/overlay/blocklist/ip",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/overlay/blocklist/username",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/overlay/connect",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/peer-streams/tickets",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/playback/feedback",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/player/external-visualizer/launch",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/{podId}/channels",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/{podId}/opinions",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/{podId}/opinions/members/affinity/update",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/{podId}/opinions/refresh",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/backfill/{podId}/sync",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/backfill/sync-all",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/content/create-pod",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/content/validate",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/dht/publish",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/dht/refresh/{*podId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/dht/update",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/discovery/refresh",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/discovery/register",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/discovery/update",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/{podId}/{peerId}/ban",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/{podId}/{peerId}/role",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/{podId}/{peerId}/unban",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/{podId}/members",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/cleanup",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/join",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/join/accept",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/leave",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/membership/leave/accept",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/messages/rebuild-index",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/messages/vacuum",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/routing/cleanup",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/routing/route",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/routing/route-to-peers",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/routing/seen/{messageId}/{podId}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/signing/generate-keypair",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/signing/sign",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/signing/verify",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/podcore/verification/message",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/pods",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/pods/{podId}/ban",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/pods/{podId}/channels/{channelId}/bind",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/pods/{podId}/channels/{channelId}/messages",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/pods/{podId}/channels/{channelId}/unbind",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/pods/{podId}/join",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/pods/{podId}/leave",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/portforwarding/start",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/portforwarding/stop/{localPort:int}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/profile/invite",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/quarantine-jury/requests",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/quarantine-jury/requests/{requestId}/accept-release-candidate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/quarantine-jury/requests/{requestId}/routes",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/quarantine-jury/verdicts",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/ranking/history",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/ranking/rank",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/realm-subject-indexes/{realmId}/{indexId}/authority-decision",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/relay/controller/files/{token}",
+    "access": "read_write",
+    "scheme": "api_key",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/relay/controller/shares/{token}",
+    "access": "read_write",
+    "scheme": "api_key",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined/{roomName}/members",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined/{roomName}/messages",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined/{roomName}/ticker",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/searches",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/searches/{searchId}/items/{itemId}/download",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/searches/{searchId}/items/{itemId}/stream",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/searches/cleanup",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/security/bans/ip",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/security/bans/username",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/security/circuits",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/security/entropy/check",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/security/tor/test",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/security/transports/test",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/session",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/share-grants",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/share-grants/{id}/backfill",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/share-grants/{id}/token",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/share-grants/announce",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/sharegroups",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/sharegroups/{id}/members",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/slskdn/library/remediate",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/slskdn/warm-cache/hints",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/solid/resolve-webid",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/songid/runs",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/soulseek/hated-interests",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/soulseek/interests",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/soulseek/mesh-rendezvous/interest",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/source-feed-imports/preview",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/streams/{contentId}/share-ticket",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/streams/{contentId}/ticket",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/taste-recommendations",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/taste-recommendations/graph-preview",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/taste-recommendations/release-radar",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/taste-recommendations/wishlist",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/transfers/downloads/{username}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/transfers/downloads/auto-replace",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/transfers/downloads/find-alternative",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/transfers/downloads/replace",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/users/{username}/directory",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/users/notes",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/wishlist",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/wishlist/{id}/ignored-results",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/wishlist/{id}/mark-viewed",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/wishlist/{id}/search",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/wishlist/import/csv",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/wishlist/mark-all-viewed",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v1/virtualsoulfind/v2/intents/releases",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v1/virtualsoulfind/v2/intents/tracks",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v1/virtualsoulfind/v2/intents/tracks/{intentId}/process",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v1/virtualsoulfind/v2/plans",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/mesh/http/{serviceName}/{method}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/bridge/admin/config",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/application",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/autoreplace/disable",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/autoreplace/enable",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/bridge/admin/config",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/collections/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/collections/{id}/items/{itemId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/contacts/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/conversations/{username}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/conversations/{username}/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/mediacore/publish/descriptor/{*contentId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/nowplaying",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/options",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/overlay/pins/{username}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/podcore/{podId}/channels/{channelId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/podcore/backfill/{podId}/{channelId}/last-seen",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/podcore/membership/{podId}/members/{peerId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/pods/{podId}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/profile/me",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/relay/agent",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/searches/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/security/adversarial",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/security/disclosure/{username}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/security/reputation/{username}",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/server",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/share-grants/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/sharegroups/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/shares",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/transfers/downloads/accelerated",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/wishlist/{id}",
+    "access": "read_write",
+    "scheme": "any",
+    "scopes": []
+  }
+]

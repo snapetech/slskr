@@ -3,8 +3,9 @@ use std::{collections::HashSet, net::Ipv4Addr};
 use slskr_protocol::{
     frame::MessageFrame,
     server::{
-        Direction, LoginRequest, LoginResponse, ObfuscatedPort, PeerAddress, RoomList,
-        RoomListEntry, ServerCode, ServerMessage, TargetedSearchRequest, UserStats, WaitPort,
+        Direction, JoinedRoom, LoginRequest, LoginResponse, ObfuscatedPort, PeerAddress, RoomList,
+        RoomListEntry, RoomUser, ServerCode, ServerMessage, TargetedSearchRequest, UserStats,
+        WaitPort,
     },
     Writer,
 };
@@ -16,7 +17,8 @@ fn server_code_table_maps_known_codes() {
         ServerCode::try_from(160),
         Ok(ServerCode::ExcludedSearchPhrases)
     );
-    assert_eq!(ServerCode::try_from(1003), Ok(ServerCode::CantCreateRoom));
+    assert_eq!(ServerCode::try_from(1002), Ok(ServerCode::CantCreateRoom));
+    assert_eq!(ServerCode::try_from(1003), Ok(ServerCode::CantJoinRoom));
     assert_eq!(ServerCode::try_from(4), Err(4));
     assert_eq!(ServerCode::Login.name(), "Login");
 }
@@ -35,7 +37,7 @@ fn server_code_inventory_is_complete_and_unique() {
         assert!(!code.name().is_empty());
     }
 
-    assert_eq!(ServerCode::ALL.len(), 102);
+    assert_eq!(ServerCode::ALL.len(), 103);
 }
 
 #[test]
@@ -265,6 +267,28 @@ fn common_user_messages_round_trip() {
 }
 
 #[test]
+fn native_interest_management_messages_round_trip() {
+    for message in [
+        ServerMessage::AddThingILike {
+            item: "ambient".to_owned(),
+        },
+        ServerMessage::RemoveThingILike {
+            item: "ambient".to_owned(),
+        },
+        ServerMessage::AddThingIHate {
+            item: "spam".to_owned(),
+        },
+        ServerMessage::RemoveThingIHate {
+            item: "spam".to_owned(),
+        },
+    ] {
+        let decoded =
+            ServerMessage::decode(message.encode().unwrap(), Direction::ClientToServer).unwrap();
+        assert_eq!(decoded, message);
+    }
+}
+
+#[test]
 fn room_list_round_trips() {
     let message = ServerMessage::RoomList(RoomList {
         public_rooms: vec![
@@ -348,8 +372,27 @@ fn connection_and_search_messages_round_trip() {
         (
             ServerMessage::JoinRoom {
                 room: "room".to_owned(),
+                private: false,
             },
             Direction::ClientToServer,
+        ),
+        (
+            ServerMessage::JoinedRoom(JoinedRoom {
+                room: "room".to_owned(),
+                users: vec![RoomUser {
+                    username: "peer".to_owned(),
+                    status: 2,
+                    average_speed: 10,
+                    upload_count: 11,
+                    file_count: 12,
+                    directory_count: 13,
+                    slots_free: 14,
+                    country_code: "CA".to_owned(),
+                }],
+                owner: Some("owner".to_owned()),
+                operators: vec!["operator".to_owned()],
+            }),
+            Direction::ServerToClient,
         ),
         (
             ServerMessage::RoomSearch(TargetedSearchRequest {
@@ -461,6 +504,12 @@ fn private_message_and_error_messages_round_trip() {
         ),
         (
             ServerMessage::CantCreateRoom {
+                room: "room".to_owned(),
+            },
+            Direction::ServerToClient,
+        ),
+        (
+            ServerMessage::CantJoinRoom {
                 room: "room".to_owned(),
             },
             Direction::ServerToClient,

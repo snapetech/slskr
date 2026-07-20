@@ -868,17 +868,15 @@ Monitor these key metrics:
 - New fields in responses are backwards compatible
 - Deprecated fields will remain but may be marked as such
 - Major breaking changes will include API version bump
-- Preserved slskd compatibility mutation routes can return successful
-  acknowledgements without persisting runtime config. `/api/options`,
-  `/api/options/yaml`, and `/api/options/yaml/validate` advertise this with
-  `runtimeMutationEnabled: false`, `configPersisted: false`, and
-  compatibility metadata. When SQLite persistence is enabled the
-  acknowledgement counters themselves are written to the runtime compatibility
-  state and exposed as `persisted: true`.
+- The slskd-compatible `/api/options`, `/api/options/yaml`, and
+  `/api/options/yaml/validate` routes apply bounded target-specific overlays,
+  validate and atomically persist `slskd.yml`, and expose the frozen
+  restart/reconnect lifecycle. Unsupported shapes fail instead of returning a
+  false-success compatibility acknowledgement.
 - Compatibility shells that are not active in this runtime keep their endpoint
   paths and stable response shapes, but may return empty arrays or
-  `compatibility_acknowledgement` objects. Runtime options acknowledgements,
-  bridge start/stop/config aliases, logs, profile invite/cache
+  `compatibility_acknowledgement` objects. Bridge start/stop/config aliases,
+  logs, profile invite/cache
   warm/backfill/SongID/Lidarr operation counters,
   unconfigured Lidarr wanted/sync/import fallbacks, destination validation,
   listening-party content helpers, share-grant token/backfill helpers, profile

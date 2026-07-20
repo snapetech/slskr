@@ -1,11 +1,12 @@
 import api from './api';
 
 export const getAll = async () => {
-  return (await api.get('/wishlist')).data;
+  const data = (await api.get('/wishlist')).data;
+  return Array.isArray(data) ? data : [];
 };
 
 export const get = async (id) => {
-  return (await api.get(`/wishlist/${id}`)).data;
+  return (await api.get(`/wishlist/${encodeURIComponent(id)}`)).data;
 };
 
 export const create = async ({
@@ -14,12 +15,14 @@ export const create = async ({
   enabled,
   autoDownload,
   maxResults,
+  maxDownloads,
 }) => {
   return (
     await api.post('/wishlist', {
       autoDownload,
       enabled,
       filter,
+      maxDownloads,
       maxResults,
       searchText,
     })
@@ -28,13 +31,14 @@ export const create = async ({
 
 export const update = async (
   id,
-  { searchText, filter, enabled, autoDownload, maxResults },
+  { searchText, filter, enabled, autoDownload, maxResults, maxDownloads },
 ) => {
   return (
-    await api.put(`/wishlist/${id}`, {
+    await api.put(`/wishlist/${encodeURIComponent(id)}`, {
       autoDownload,
       enabled,
       filter,
+      maxDownloads,
       maxResults,
       searchText,
     })
@@ -42,11 +46,11 @@ export const update = async (
 };
 
 export const remove = async (id) => {
-  await api.delete(`/wishlist/${id}`);
+  await api.delete(`/wishlist/${encodeURIComponent(id)}`);
 };
 
 export const runSearch = async (id) => {
-  return (await api.post(`/wishlist/${id}/search`)).data;
+  return (await api.post(`/wishlist/${encodeURIComponent(id)}/search`)).data;
 };
 
 export const importCsv = async ({
@@ -67,4 +71,41 @@ export const importCsv = async ({
       maxResults,
     })
   ).data;
+};
+
+export const getSearches = async (id, limit = 50) => {
+  const data = (
+    await api.get(`/wishlist/${encodeURIComponent(id)}/searches?limit=${limit}`)
+  ).data;
+  return Array.isArray(data) ? data : [];
+};
+
+export const markViewed = async (id) => {
+  return api.post(`/wishlist/${encodeURIComponent(id)}/mark-viewed`);
+};
+
+export const markAllViewed = async () => {
+  return api.post('/wishlist/mark-all-viewed');
+};
+
+export const getIgnoredResults = async (id) => {
+  const data = (
+    await api.get(`/wishlist/${encodeURIComponent(id)}/ignored-results`)
+  ).data;
+  return Array.isArray(data) ? data : [];
+};
+
+export const ignoreResult = async (id, { username, directory }) => {
+  return (
+    await api.post(`/wishlist/${encodeURIComponent(id)}/ignored-results`, {
+      directory,
+      username,
+    })
+  ).data;
+};
+
+export const removeIgnoredResult = async (id, ignoredResultId) => {
+  await api.delete(
+    `/wishlist/${encodeURIComponent(id)}/ignored-results/${encodeURIComponent(ignoredResultId)}`,
+  );
 };

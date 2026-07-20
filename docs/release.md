@@ -56,6 +56,7 @@ The release workflow builds these native runner variants:
 - `linux-x64` on `ubuntu-latest`
 - `linux-musl-x64` on `ubuntu-latest`
 - `linux-arm64` on `ubuntu-24.04-arm`
+- `linux-musl-arm64` on `ubuntu-24.04-arm`
 - `macos-x64` on `macos-14` with the `x86_64-apple-darwin` Rust target
 - `macos-arm64` on `macos-14`
 - `windows-x64` on `windows-latest`

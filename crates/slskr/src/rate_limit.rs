@@ -143,6 +143,80 @@ impl RateLimiter {
         true
     }
 
+    /// Check a caller-supplied fixed-window IP partition. Controller compatibility
+    /// policies use this path so independent API, federation, mesh, and injection
+    /// buckets do not share the native slskR limiter configuration.
+    pub async fn check_ip_partition(
+        &self,
+        remote_addr: Option<SocketAddr>,
+        partition: &str,
+        max_requests: u32,
+        window_seconds: u64,
+    ) -> bool {
+        let ip = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_owned());
+        let key = format!("{partition}:{ip}");
+        let window_seconds = window_seconds.max(1);
+        let now = Instant::now();
+        let mut windows = self.ip_windows.write().await;
+        if !windows.contains_key(&key) && windows.len() >= MAX_IP_WINDOWS {
+            windows.retain(|_, window| now < window.reset_at);
+            if windows.len() >= MAX_IP_WINDOWS {
+                return false;
+            }
+        }
+
+        let window = windows.entry(key).or_insert_with(|| RequestWindow {
+            count: 0,
+            reset_at: reset_deadline(now, window_seconds),
+        });
+        if now >= window.reset_at {
+            window.count = 0;
+            window.reset_at = reset_deadline(now, window_seconds);
+        }
+        if window.count >= max_requests {
+            return false;
+        }
+        window.count += 1;
+        true
+    }
+
+    pub async fn get_ip_partition_remaining(
+        &self,
+        remote_addr: Option<SocketAddr>,
+        partition: &str,
+        max_requests: u32,
+    ) -> u32 {
+        let ip = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_owned());
+        let key = format!("{partition}:{ip}");
+        let now = Instant::now();
+        let windows = self.ip_windows.read().await;
+        windows.get(&key).map_or(max_requests, |window| {
+            if now < window.reset_at {
+                max_requests.saturating_sub(window.count)
+            } else {
+                max_requests
+            }
+        })
+    }
+
+    pub async fn get_ip_partition_reset_time(
+        &self,
+        remote_addr: Option<SocketAddr>,
+        partition: &str,
+    ) -> u64 {
+        let ip = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_owned());
+        let key = format!("{partition}:{ip}");
+        let now = Instant::now();
+        let windows = self.ip_windows.read().await;
+        windows.get(&key).map_or(0, |window| {
+            if now < window.reset_at {
+                duration_ceiling_seconds(window.reset_at.duration_since(now))
+            } else {
+                0
+            }
+        })
+    }
+
     /// Get remaining requests for user or IP
     pub async fn get_remaining(&self, remote_addr: Option<SocketAddr>, user: Option<&str>) -> u32 {
         if !self.config.enabled {
@@ -499,6 +573,26 @@ mod tests {
         assert!(!limiter.check_rate_limit(mapped, None).await);
         assert_eq!(limiter.get_remaining(mapped, None).await, 0);
         assert_eq!(limiter.ip_windows.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn controller_ip_partitions_are_independent_and_report_state() {
+        let limiter = RateLimiter::new(RateLimitConfig::default());
+        let first_port = Some(SocketAddr::new("192.0.2.20".parse().unwrap(), 1000));
+        let second_port = Some(SocketAddr::new("192.0.2.20".parse().unwrap(), 2000));
+
+        assert!(limiter.check_ip_partition(first_port, "api", 1, 60).await);
+        assert!(!limiter.check_ip_partition(second_port, "api", 1, 60).await);
+        assert_eq!(
+            limiter
+                .get_ip_partition_remaining(first_port, "api", 1)
+                .await,
+            0
+        );
+        assert!(limiter.get_ip_partition_reset_time(first_port, "api").await > 0);
+
+        assert!(limiter.check_ip_partition(first_port, "mesh", 1, 60).await);
+        assert_eq!(limiter.ip_windows.read().await.len(), 2);
     }
 
     #[tokio::test]

@@ -1,13 +1,18 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use hmac::{Hmac, KeyInit, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use slskr_client::listener::IncomingConnection;
 use slskr_client::protocol::peer::PeerMessage;
 use slskr_client::protocol::server::ServerMessage;
 use tokio::net::TcpStream;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ControllerCompatibilityTarget};
 
 pub(crate) fn is_blocked_outbound_ipv4(ip: Ipv4Addr) -> bool {
     let address = u32::from(ip);
@@ -80,6 +85,7 @@ pub struct RequestSecurityHeaders {
     pub referer: Option<String>,
     pub cookie: Option<String>,
     pub x_share_token: Option<String>,
+    pub remote_addr: Option<SocketAddr>,
 }
 
 impl RequestSecurityHeaders {
@@ -90,6 +96,7 @@ impl RequestSecurityHeaders {
             referer: h.referer.clone(),
             cookie: h.cookie.clone(),
             x_share_token: h.x_share_token.clone(),
+            remote_addr: None,
         }
     }
 }
@@ -109,6 +116,365 @@ pub fn route_requires_auth(config: &AppConfig, path: &str) -> bool {
         && path != "/api/version"
         && path != "/api/capabilities"
         && path != "/api/session/enabled"
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ApiAccess {
+    Authenticated,
+    ReadWrite,
+    Administrator,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ApiAuthScheme {
+    Any,
+    Jwt,
+    ApiKey,
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerAuthRule {
+    method: String,
+    route: String,
+    access: String,
+    scheme: String,
+    scopes: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RouteAuthPolicy<'a> {
+    access: Option<ApiAccess>,
+    scheme: ApiAuthScheme,
+    scopes: &'a [String],
+}
+
+static SLSKDN_CONTROLLER_AUTH_RULES: LazyLock<Vec<ControllerAuthRule>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../data/slskdn-controller-auth-policy.json"))
+        .expect("checked slskdN controller auth policy registry")
+});
+
+static SLSKD_CONTROLLER_AUTH_RULES: LazyLock<Vec<ControllerAuthRule>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../data/slskd-controller-auth-policy.json"))
+        .expect("checked slskd controller auth policy registry")
+});
+
+fn route_template_matches(template: &str, path: &str) -> bool {
+    let template = template.trim_end_matches('/');
+    let path = path.trim_end_matches('/');
+    let mut expected = template.trim_start_matches('/').split('/');
+    let mut actual = path.trim_start_matches('/').split('/');
+    loop {
+        match (expected.next(), actual.next()) {
+            (None, None) => return true,
+            (Some(segment), Some(_)) if segment.starts_with("{*") && segment.ends_with('}') => {
+                return true;
+            }
+            (Some(segment), Some(_)) if segment.starts_with('{') && segment.ends_with('}') => {}
+            (Some(segment), Some(value)) if segment == value => {}
+            _ => return false,
+        }
+    }
+}
+
+fn route_template_precedence(template: &str) -> Vec<u8> {
+    template
+        .trim_matches('/')
+        .split('/')
+        .map(|segment| {
+            if segment.starts_with("{*") && segment.ends_with('}') {
+                1
+            } else if segment.starts_with('{') && segment.ends_with('}') {
+                if segment.contains(':') {
+                    3
+                } else {
+                    2
+                }
+            } else {
+                4
+            }
+        })
+        .collect()
+}
+
+fn controller_route_auth_policy(
+    target: ControllerCompatibilityTarget,
+    method: &str,
+    path: &str,
+) -> Option<RouteAuthPolicy<'static>> {
+    let rules = match target {
+        ControllerCompatibilityTarget::Slskd => &*SLSKD_CONTROLLER_AUTH_RULES,
+        ControllerCompatibilityTarget::Slskdn => &*SLSKDN_CONTROLLER_AUTH_RULES,
+    };
+    let rule = rules
+        .iter()
+        .filter(|rule| rule.method == method && route_template_matches(&rule.route, path))
+        .max_by_key(|rule| route_template_precedence(&rule.route))?;
+    let access = match rule.access.as_str() {
+        "anonymous" | "delegated" => None,
+        "administrator" => Some(ApiAccess::Administrator),
+        "read_write" => Some(ApiAccess::ReadWrite),
+        _ => Some(ApiAccess::Authenticated),
+    };
+    let scheme = match rule.scheme.as_str() {
+        "jwt" => ApiAuthScheme::Jwt,
+        "api_key" => ApiAuthScheme::ApiKey,
+        _ => ApiAuthScheme::Any,
+    };
+    Some(RouteAuthPolicy {
+        access,
+        scheme,
+        scopes: &rule.scopes,
+    })
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ApiCredential {
+    access: ApiAccess,
+    scheme: ApiAuthScheme,
+    nowplaying_only: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct AdminJwtClaims {
+    pub jti: String,
+    pub name: String,
+    pub role: String,
+    pub scope: String,
+    pub iat: u64,
+    pub nbf: u64,
+    pub exp: u64,
+    pub iss: String,
+    pub aud: String,
+}
+
+pub(crate) fn issue_admin_jwt(
+    config: &AppConfig,
+    username: &str,
+    now: u64,
+) -> Option<(String, AdminJwtClaims)> {
+    let secret = config.controller_web_jwt_key.as_str();
+    let claims = AdminJwtClaims {
+        jti: uuid::Uuid::new_v4().simple().to_string(),
+        name: username.to_owned(),
+        role: "Administrator".to_owned(),
+        scope: "*".to_owned(),
+        iat: now,
+        nbf: now,
+        exp: now.saturating_add(config.controller_web_jwt_ttl_millis / 1000),
+        iss: "slskd".to_owned(),
+        aud: "slskd".to_owned(),
+    };
+    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
+    let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).ok()?);
+    let signing_input = format!("{header}.{payload}");
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).ok()?;
+    mac.update(signing_input.as_bytes());
+    let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    Some((format!("{signing_input}.{signature}"), claims))
+}
+
+pub(crate) fn verify_admin_jwt(
+    config: &AppConfig,
+    token: &str,
+    now: u64,
+) -> Option<AdminJwtClaims> {
+    let secret = config.controller_web_jwt_key.as_str();
+    let mut parts = token.split('.');
+    let header = parts.next()?;
+    let payload = parts.next()?;
+    let signature = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let decoded_header = URL_SAFE_NO_PAD.decode(header).ok()?;
+    let decoded_header = serde_json::from_slice::<serde_json::Value>(&decoded_header).ok()?;
+    if decoded_header
+        .get("alg")
+        .and_then(serde_json::Value::as_str)
+        != Some("HS256")
+    {
+        return None;
+    }
+    let signature = URL_SAFE_NO_PAD.decode(signature).ok()?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).ok()?;
+    mac.update(format!("{header}.{payload}").as_bytes());
+    mac.verify_slice(&signature).ok()?;
+    let claims =
+        serde_json::from_slice::<AdminJwtClaims>(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
+    if claims.role != "Administrator"
+        || claims.scope != "*"
+        || claims.iss != "slskd"
+        || claims.aud != "slskd"
+        || claims.jti.is_empty()
+        || claims.name.trim().is_empty()
+        || claims.nbf > now
+        || claims.exp <= now
+        || claims.iat > now
+    {
+        return None;
+    }
+    Some(claims)
+}
+
+fn api_credential(
+    config: &AppConfig,
+    authorization: Option<&str>,
+    cookie: Option<&str>,
+    remote_addr: Option<SocketAddr>,
+) -> Option<ApiCredential> {
+    if let Some(value) = authorization {
+        let (scheme, token) = value
+            .strip_prefix("Bearer ")
+            .map(|token| (ApiAuthScheme::Jwt, token))
+            .or_else(|| {
+                value
+                    .strip_prefix("ApiKey ")
+                    .map(|token| (ApiAuthScheme::ApiKey, token))
+            })?;
+        let matches = |expected: Option<&str>| {
+            expected.is_some_and(|expected| constant_time_eq(token.as_bytes(), expected.as_bytes()))
+        };
+        if scheme == ApiAuthScheme::ApiKey {
+            if let Some(configured) = config.controller_api_keys.values().find(|configured| {
+                constant_time_eq(token.as_bytes(), configured.key.as_bytes())
+                    && remote_addr.is_some_and(|remote| {
+                        configured
+                            .cidrs
+                            .iter()
+                            .any(|cidr| cidr.contains(remote.ip()))
+                    })
+            }) {
+                let access = match configured.role.as_str() {
+                    "readonly" => ApiAccess::Authenticated,
+                    "readwrite" => ApiAccess::ReadWrite,
+                    "administrator" => ApiAccess::Administrator,
+                    _ => return None,
+                };
+                return Some(ApiCredential {
+                    access,
+                    scheme,
+                    nowplaying_only: false,
+                });
+            }
+        }
+        return if matches(config.api_token.as_deref()) {
+            Some(ApiCredential {
+                access: ApiAccess::Administrator,
+                scheme,
+                nowplaying_only: false,
+            })
+        } else if matches(config.api_read_write_token.as_deref()) {
+            Some(ApiCredential {
+                access: ApiAccess::ReadWrite,
+                scheme,
+                nowplaying_only: false,
+            })
+        } else if matches(config.api_read_only_token.as_deref()) {
+            Some(ApiCredential {
+                access: ApiAccess::Authenticated,
+                scheme,
+                nowplaying_only: false,
+            })
+        } else if matches(config.api_nowplaying_token.as_deref()) {
+            Some(ApiCredential {
+                access: ApiAccess::ReadWrite,
+                scheme,
+                nowplaying_only: true,
+            })
+        } else if scheme == ApiAuthScheme::Jwt
+            && verify_admin_jwt(config, token, unix_timestamp()).is_some()
+        {
+            Some(ApiCredential {
+                access: ApiAccess::Administrator,
+                scheme,
+                nowplaying_only: false,
+            })
+        } else {
+            None
+        };
+    }
+    if config.api_cookie_auth_enabled {
+        let token = parse_cookie_session_token(cookie).ok().flatten()?;
+        if config
+            .api_token
+            .as_deref()
+            .is_some_and(|expected| constant_time_eq(token.as_bytes(), expected.as_bytes()))
+        {
+            return Some(ApiCredential {
+                access: ApiAccess::Administrator,
+                scheme: ApiAuthScheme::Jwt,
+                nowplaying_only: false,
+            });
+        }
+    }
+    None
+}
+
+pub fn authorize_controller_route(
+    config: &AppConfig,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+    cookie: Option<&str>,
+) -> Result<(), &'static str> {
+    authorize_controller_route_from(config, method, path, authorization, cookie, None)
+}
+
+pub fn authorize_controller_route_from(
+    config: &AppConfig,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+    cookie: Option<&str>,
+    remote_addr: Option<SocketAddr>,
+) -> Result<(), &'static str> {
+    if !config.auth_required {
+        return Ok(());
+    }
+    let policy = controller_route_auth_policy(config.controller_compatibility_target, method, path)
+        .unwrap_or_else(|| {
+            let normalized = normalize_api_path(path);
+            let public = !path.starts_with("/api/")
+                || matches!(
+                    normalized,
+                    "/api/health" | "/api/version" | "/api/capabilities" | "/api/session/enabled"
+                );
+            RouteAuthPolicy {
+                access: (!public).then_some(ApiAccess::Administrator),
+                scheme: ApiAuthScheme::Any,
+                scopes: &[],
+            }
+        });
+    let Some(required_access) = policy.access else {
+        return Ok(());
+    };
+    let credential =
+        api_credential(config, authorization, cookie, remote_addr).ok_or("unauthorized")?;
+    if credential.access < required_access {
+        return Err("forbidden");
+    }
+    if policy.scheme != ApiAuthScheme::Any && credential.scheme != policy.scheme {
+        return Err("forbidden");
+    }
+    let requires_nowplaying = policy.scopes.iter().any(|scope| scope == "nowplaying");
+    if credential.nowplaying_only != requires_nowplaying && credential.nowplaying_only {
+        return Err("forbidden");
+    }
+    Ok(())
+}
+
+pub fn controller_route_requires_principal(config: &AppConfig, method: &str, path: &str) -> bool {
+    controller_route_auth_policy(config.controller_compatibility_target, method, path).map_or_else(
+        || {
+            let normalized = normalize_api_path(path);
+            path.starts_with("/api/")
+                && !matches!(
+                    normalized,
+                    "/api/health" | "/api/version" | "/api/capabilities" | "/api/session/enabled"
+                )
+        },
+        |policy| policy.access.is_some(),
+    )
 }
 
 pub fn csrf_origin_allowed(
@@ -215,35 +581,7 @@ pub fn is_authorized(
     authorization: Option<&str>,
     cookie: Option<&str>,
 ) -> bool {
-    let Some(expected_token) = config.api_token.as_deref() else {
-        return false;
-    };
-    let mut supplied_credential = false;
-    if let Some(value) = authorization {
-        supplied_credential = true;
-        let Some(token) = value
-            .strip_prefix("Bearer ")
-            .or_else(|| value.strip_prefix("ApiKey "))
-        else {
-            return false;
-        };
-        if !constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
-            return false;
-        }
-    }
-    if config.api_cookie_auth_enabled {
-        let cookie_token = match parse_cookie_session_token(cookie) {
-            Ok(token) => token,
-            Err(()) => return false,
-        };
-        if let Some(token) = cookie_token {
-            supplied_credential = true;
-            if !constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
-                return false;
-            }
-        }
-    }
-    supplied_credential
+    api_credential(config, authorization, cookie, None).is_some()
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -369,6 +707,7 @@ pub fn normalize_api_path(path: &str) -> &str {
         "/api/v0/browse" => "/api/browse",
         "/api/v0/browse-responses" => "/api/browse-responses",
         "/api/v0/session" => "/api/session",
+        "/api/v0/session/enabled" => "/api/session/enabled",
         "/api/v0/session/connect" => "/api/session/connect",
         "/api/v0/session/disconnect" => "/api/session/disconnect",
         "/api/v0/session/ping" => "/api/session/ping",
@@ -382,6 +721,17 @@ pub fn normalize_api_path(path: &str) -> &str {
         "/api/v0/rooms/refresh" => "/api/rooms/refresh",
         "/api/v0/transfers" => "/api/transfers",
         "/api/v0/transfers/stats" => "/api/transfers/stats",
+        "/api/info" => "/api/application",
+        "/api/downloads" => "/api/transfers/downloads",
+        "/api/server/status" => "/api/server",
+        "/api/slskdn/capabilities" | "/api/v0/slskdn/capabilities" => "/api/capabilities",
+        "/api/v0/capabilities/mesh-peers" => "/api/capabilities/peers",
+        "/api/v0/fairness/summary" => "/api/fairness",
+        "/api/v0/hashdb/backfill/candidates" => "/api/backfill/candidates",
+        "/api/v0/transfers/downloads/auto-replace/status" => "/api/autoreplace",
+        "/api/v0/portforwarding/available-ports" => "/api/port-forwarding/available-ports",
+        "/api/v0/portforwarding/stream-stats" => "/api/port-forwarding/stream-stats",
+        "/api/v0/portforwarding/start" => "/api/portforwarding/start",
         _ => path,
     }
 }
@@ -752,6 +1102,7 @@ pub fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::FileSearchRequest(_) => "FileSearchRequest",
         ServerMessage::FileSearchIncoming { .. } => "FileSearchIncoming",
         ServerMessage::JoinRoom { .. } => "JoinRoom",
+        ServerMessage::JoinedRoom(_) => "JoinedRoom",
         ServerMessage::LeaveRoom { .. } => "LeaveRoom",
         ServerMessage::SetStatus { .. } => "SetStatus",
         ServerMessage::ServerPing => "ServerPing",
@@ -926,4 +1277,170 @@ pub fn json_escape(s: &str) -> String {
         }
     }
     escaped
+}
+
+#[cfg(test)]
+mod controller_auth_tests {
+    use std::collections::{BTreeMap, HashSet};
+
+    use super::*;
+    use crate::config::{ConfigEnv, ControllerApiKeySettings, FileConfig, TrustedProxyCidr};
+
+    #[derive(Default)]
+    struct TestEnv(BTreeMap<String, String>);
+
+    impl TestEnv {
+        fn with(mut self, name: &str, value: &str) -> Self {
+            self.0.insert(name.to_owned(), value.to_owned());
+            self
+        }
+    }
+
+    impl ConfigEnv for TestEnv {
+        fn var(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    fn config(target: &str) -> AppConfig {
+        AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &TestEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_API_TOKEN", "admin-token")
+                .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
+                .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
+                .with("SLSKR_API_NOWPLAYING_TOKEN", "nowplaying-token"),
+        )
+        .expect("controller auth test config")
+    }
+
+    fn permitted_credential(rule: &ControllerAuthRule) -> Option<String> {
+        if matches!(rule.access.as_str(), "anonymous" | "delegated") {
+            return None;
+        }
+        let token = if rule.scopes.iter().any(|scope| scope == "nowplaying") {
+            "nowplaying-token"
+        } else {
+            match rule.access.as_str() {
+                "administrator" => "admin-token",
+                "read_write" => "write-token",
+                _ => "read-token",
+            }
+        };
+        let scheme = if rule.scheme == "api_key" {
+            "ApiKey"
+        } else {
+            "Bearer"
+        };
+        Some(format!("{scheme} {token}"))
+    }
+
+    fn assert_registry(target: &str, rules: &[ControllerAuthRule], expected: usize) {
+        assert_eq!(rules.len(), expected, "{target} route count drift");
+        let config = config(target);
+        let mut keys = HashSet::new();
+        for rule in rules {
+            let key = format!("{} {}", rule.method, rule.route);
+            assert!(keys.insert(key.clone()), "duplicate auth rule {key}");
+
+            let absent = authorize_controller_route(&config, &rule.method, &rule.route, None, None);
+            if matches!(rule.access.as_str(), "anonymous" | "delegated") {
+                assert!(absent.is_ok(), "{target} {key} must be anonymous/delegated");
+                continue;
+            }
+            assert_eq!(absent, Err("unauthorized"), "{target} {key}");
+
+            let permitted = permitted_credential(rule).expect("protected route credential");
+            assert!(
+                authorize_controller_route(
+                    &config,
+                    &rule.method,
+                    &rule.route,
+                    Some(&permitted),
+                    None,
+                )
+                .is_ok(),
+                "{target} {key} rejected {permitted}"
+            );
+
+            let insufficient = match rule.access.as_str() {
+                "administrator" => Some(if rule.scheme == "api_key" {
+                    "ApiKey write-token"
+                } else {
+                    "Bearer write-token"
+                }),
+                "read_write" if !rule.scopes.iter().any(|scope| scope == "nowplaying") => {
+                    Some(if rule.scheme == "api_key" {
+                        "ApiKey read-token"
+                    } else {
+                        "Bearer read-token"
+                    })
+                }
+                _ => None,
+            };
+            if let Some(insufficient) = insufficient {
+                assert_eq!(
+                    authorize_controller_route(
+                        &config,
+                        &rule.method,
+                        &rule.route,
+                        Some(insufficient),
+                        None,
+                    ),
+                    Err("forbidden"),
+                    "{target} {key} accepted insufficient access"
+                );
+            }
+
+            let wrong_scheme = match rule.scheme.as_str() {
+                "jwt" => Some("ApiKey admin-token"),
+                "api_key" => Some("Bearer admin-token"),
+                _ => None,
+            };
+            if let Some(wrong_scheme) = wrong_scheme {
+                assert_eq!(
+                    authorize_controller_route(
+                        &config,
+                        &rule.method,
+                        &rule.route,
+                        Some(wrong_scheme),
+                        None,
+                    ),
+                    Err("forbidden"),
+                    "{target} {key} accepted the wrong auth scheme"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn frozen_slskd_and_slskdn_auth_registries_are_exhaustively_enforced() {
+        assert_registry("slskd", &SLSKD_CONTROLLER_AUTH_RULES, 91);
+        assert_registry("slskdn", &SLSKDN_CONTROLLER_AUTH_RULES, 678);
+    }
+
+    #[test]
+    fn configured_controller_api_keys_enforce_role_and_cidr() {
+        let mut config = config("slskdn");
+        config.controller_api_keys.insert(
+            "operator".to_owned(),
+            ControllerApiKeySettings {
+                key: "0123456789abcdef".to_owned(),
+                role: "readwrite".to_owned(),
+                cidr: "127.0.0.1/32".to_owned(),
+                cidrs: vec![TrustedProxyCidr::parse("127.0.0.1/32").unwrap()],
+            },
+        );
+        let loopback = Some("127.0.0.1:1234".parse().unwrap());
+        let remote = Some("192.0.2.1:1234".parse().unwrap());
+        let credential = api_credential(&config, Some("ApiKey 0123456789abcdef"), None, loopback)
+            .expect("configured API key must authenticate from its CIDR");
+        assert_eq!(credential.access, ApiAccess::ReadWrite);
+        assert!(api_credential(&config, Some("ApiKey 0123456789abcdef"), None, remote,).is_none());
+        assert!(
+            api_credential(&config, Some("ApiKey wrong-wrong-wrong"), None, loopback,).is_none()
+        );
+    }
 }

@@ -131,6 +131,25 @@ where
             ))
             .await?;
 
+        self.receive_login_response().await
+    }
+
+    pub async fn login_with_wait_port(
+        &mut self,
+        credentials: LoginCredentials,
+        wait_port: WaitPort,
+    ) -> Result<SessionInfo, ClientError> {
+        self.connection
+            .send_batch(&[
+                ServerMessage::LoginRequest(credentials.into_login_request()),
+                ServerMessage::SetWaitPort(wait_port),
+            ])
+            .await?;
+
+        self.receive_login_response().await
+    }
+
+    async fn receive_login_response(&mut self) -> Result<SessionInfo, ClientError> {
         match self.connection.receive().await? {
             ServerMessage::LoginResponse(LoginResponse::Success {
                 greet,

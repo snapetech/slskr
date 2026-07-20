@@ -12,6 +12,7 @@ label="$2"
 session="${SLSKR_PROTON_SOAK_SESSION:-slskr-live-soak-proton}"
 interface="${SLSKR_PROTON_INTERFACE:-slskrwg}"
 namespace="${SLSKR_PROTON_NAMESPACE:-slskr-proton-listener}"
+credential_file="${SLSKR_SOAK_CREDENTIAL_FILE:-$repo_root/.secrets/live-soak-account.env}"
 active_config="$repo_root/.secrets/${interface}.conf"
 log_file="$repo_root/target/live-soak/live-soak-proton-${label}-$(date +%Y%m%d-%H%M%S).log"
 
@@ -34,6 +35,6 @@ install -m 600 "$tmp_config" "$active_config"
 chmod 600 "$active_config"
 
 tmux new-session -d -s "$session" \
-    "cd '$repo_root' && SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL='${SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL:-1}' scripts/run-in-proton-wg-netns.sh '$namespace' '$active_config' scripts/run-live-soak-proton-natpmp.sh '$log_file'"
+    "cd '$repo_root' && SLSKR_SOAK_CREDENTIAL_FILE='$credential_file' SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL='${SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL:-1}' SLSK_SOAK_ACTIVE_PROBES='${SLSK_SOAK_ACTIVE_PROBES:-1}' SLSK_SOAK_DEFAULT_SEARCH='${SLSK_SOAK_DEFAULT_SEARCH:-1}' SLSK_SERVER='${SLSK_SERVER:-}' scripts/run-in-proton-wg-netns.sh '$namespace' '$active_config' scripts/run-live-soak-proton-natpmp.sh '$log_file'"
 
 printf '%s\n' "$log_file"

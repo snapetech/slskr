@@ -18,11 +18,36 @@ for target in \
   x86_64-unknown-linux-gnu \
   x86_64-unknown-linux-musl \
   aarch64-unknown-linux-gnu \
+  aarch64-unknown-linux-musl \
   x86_64-apple-darwin \
   aarch64-apple-darwin \
   x86_64-pc-windows-msvc; do
   if ! rg -n -F "$target" .github/workflows/release.yml scripts/build-release-archive.sh >/dev/null; then
     printf 'package artifact matrix check failed: release target missing: %s\n' "$target" >&2
+    status=1
+  fi
+done
+
+for target in \
+  x86_64-unknown-linux-gnu \
+  x86_64-unknown-linux-musl \
+  aarch64-unknown-linux-gnu \
+  aarch64-unknown-linux-musl \
+  x86_64-apple-darwin \
+  aarch64-apple-darwin \
+  x86_64-pc-windows-msvc; do
+  if ! rg -n -F "slskr-\${version}-${target}" .github/workflows/release-publish.yml >/dev/null; then
+    printf 'package artifact matrix check failed: downstream publish asset missing: %s\n' "$target" >&2
+    status=1
+  fi
+done
+
+for expected in \
+  "arch=('x86_64' 'aarch64')" \
+  'source_aarch64=' \
+  'sha256sums_aarch64='; do
+  if ! rg -n -F "$expected" packaging/aur/PKGBUILD packaging/aur/PKGBUILD-bin >/dev/null; then
+    printf 'package artifact matrix check failed: AUR AArch64 token missing: %s\n' "$expected" >&2
     status=1
   fi
 done

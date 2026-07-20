@@ -2,8 +2,25 @@ import api from './api';
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 import { v4 as uuidv4 } from 'uuid';
 
-export const getAll = async (limit = 500) => {
-  return (await api.get(`/searches?limit=${limit}`)).data;
+const USER_DOWNLOAD_STATS_CACHE_TTL_MS = 30_000;
+let userDownloadStatsCache = null;
+let userDownloadStatsCacheExpiresAt = 0;
+let userDownloadStatsInflight = null;
+
+export const getAll = async (limit = 500, source = null) => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (source && source !== 'all') {
+    params.set('source', source);
+  }
+  return (await api.get(`/searches?${params.toString()}`)).data;
+};
+
+export const cleanupSearches = () => {
+  return api.post('/searches/cleanup');
+};
+
+export const get = async ({ id }) => {
+  return (await api.get(`/searches/${encodeURIComponent(id)}`)).data;
 };
 
 export const stop = ({ id }) => {
@@ -19,17 +36,47 @@ export const removeAll = () => {
 };
 
 // User download stats for badges
-export const getUserDownloadStats = async () => {
-  return (await api.get('/transfers/downloads/user-stats')).data;
+export const getUserDownloadStats = () => {
+  if (
+    userDownloadStatsCache &&
+    userDownloadStatsCacheExpiresAt > Date.now()
+  ) {
+    return Promise.resolve(userDownloadStatsCache);
+  }
+
+  if (userDownloadStatsInflight) {
+    return userDownloadStatsInflight;
+  }
+
+  userDownloadStatsInflight = api
+    .get('/transfers/downloads/user-stats')
+    .then((response) => {
+      const stats =
+        response.data &&
+        typeof response.data === 'object' &&
+        !Array.isArray(response.data)
+          ? response.data
+          : {};
+      userDownloadStatsCache = stats;
+      userDownloadStatsCacheExpiresAt =
+        Date.now() + USER_DOWNLOAD_STATS_CACHE_TTL_MS;
+      return stats;
+    })
+    .finally(() => {
+      userDownloadStatsInflight = null;
+    });
+
+  return userDownloadStatsInflight;
 };
 
 // Blocked users management (localStorage-based)
-const BLOCKED_USERS_KEY = 'slskr_blocked_users';
+const BLOCKED_USERS_KEY = 'slskdn_blocked_users';
 
 export const getBlockedUsers = () => {
   try {
     const blocked = getLocalStorageItem(BLOCKED_USERS_KEY);
-    return blocked ? JSON.parse(blocked) : [];
+    const parsed = blocked ? JSON.parse(blocked) : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -260,9 +307,12 @@ export const parseFiltersFromString = (string) => {
       .filter((e) => e.length > 0);
   }
 
-  const terms = string
-    .toLowerCase()
-    .split(' ')
+  const terms = (string.toLowerCase().match(/-?"[^"]+"|\S+/gu) || [])
+    .map((term) => {
+      const excluded = term.startsWith('-');
+      const value = (excluded ? term.slice(1) : term).replace(/^"|"$/gu, '');
+      return excluded ? `-${value}` : value;
+    })
     .filter(
       (term) =>
         !term.includes(':') &&

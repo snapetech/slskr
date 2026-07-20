@@ -6,6 +6,9 @@ cd "$repo_root"
 
 GATES=(
   scripts/check-endpoint-parity-drift.sh
+  scripts/check-slskdn-controller-parity.sh
+  scripts/check-controller-auth-profiles.sh
+  scripts/check-controller-options-differential.sh
   scripts/check-browser-token-persistence.sh
   scripts/check-unsafe-blank-opens.sh
   scripts/check-websocket-auth-coverage.sh

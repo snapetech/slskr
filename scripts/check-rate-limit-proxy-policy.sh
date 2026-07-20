@@ -34,14 +34,15 @@ if ! rg -n 'BUG-008 .*Verified' docs/dev/bug-burndown-ledger.md >/dev/null; then
 fi
 
 if ! rg -n --fixed-strings -- 'authenticated_rate_limit_user_key' crates/slskr/src/main.rs >/dev/null ||
-   ! rg -n --fixed-strings -- '.then_some(config.api_token.as_deref())' crates/slskr/src/main.rs >/dev/null ||
-   ! rg -n --fixed-strings -- 'authenticated_rate_limit_key_uses_configured_identity' crates/slskr/src/main.rs >/dev/null; then
-  printf 'rate-limit proxy policy check failed: configured authenticated rate-limit identity is missing\n' >&2
+   ! rg -n --fixed-strings -- 'if !is_authorized(config, authorization, cookie)' crates/slskr/src/main.rs >/dev/null ||
+   ! rg -n --fixed-strings -- '.map(|token| rate_limit_user_key(&token))' crates/slskr/src/main.rs >/dev/null ||
+   ! rg -n --fixed-strings -- 'authenticated_rate_limit_key_uses_verified_credential_identity' crates/slskr/src/main.rs >/dev/null; then
+  printf 'rate-limit proxy policy check failed: verified authenticated rate-limit identity is missing\n' >&2
   status=1
 fi
 
-if rg -n 'fn rate_limit_user_key\((authorization|cookie)' crates/slskr/src/main.rs >/dev/null; then
-  printf 'rate-limit proxy policy check failed: rate-limit identity must not prefer raw request credentials\n' >&2
+if rg -n 'rate_limit_user_key\((authorization|cookie)' crates/slskr/src/main.rs >/dev/null; then
+  printf 'rate-limit proxy policy check failed: rate-limit identity must hash only a verified credential\n' >&2
   status=1
 fi
 

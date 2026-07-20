@@ -19,6 +19,25 @@ The binary lands at `target/release/slskr`. For a local user install:
 install -Dm755 target/release/slskr "$HOME/.local/bin/slskr"
 ```
 
+Tagged releases provide native AArch64 Linux archives for both glibc and musl:
+
+- `aarch64-unknown-linux-gnu` for standard glibc distributions.
+- `aarch64-unknown-linux-musl` for a static musl build, including Alpine-style
+  deployments.
+
+On an AArch64 Linux host, the same archives can be built locally with:
+
+```sh
+rustup target add aarch64-unknown-linux-gnu aarch64-unknown-linux-musl
+sudo apt-get install musl-tools
+scripts/build-release-archive.sh --target aarch64-unknown-linux-gnu
+scripts/build-release-archive.sh --target aarch64-unknown-linux-musl
+```
+
+Cross-compiling those targets from x86-64 additionally requires matching
+AArch64 C linkers; the release workflow avoids that dependency by building on
+native ARM64 runners.
+
 ## Config And State
 
 Default config file:

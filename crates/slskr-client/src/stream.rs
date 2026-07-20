@@ -5,7 +5,7 @@ use slskr_protocol::{
     server::{Direction, ServerMessage},
 };
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     net::{TcpStream, ToSocketAddrs},
     time::{self, Duration},
 };
@@ -68,6 +68,16 @@ where
 {
     pub async fn send(&mut self, message: &ServerMessage) -> Result<(), ClientError> {
         write_message_frame(&mut self.stream, &message.encode()?).await
+    }
+
+    pub async fn send_batch(&mut self, messages: &[ServerMessage]) -> Result<(), ClientError> {
+        let mut encoded = Vec::new();
+        for message in messages {
+            encoded.extend_from_slice(&message.encode()?.encode()?);
+        }
+        self.stream.write_all(&encoded).await?;
+        self.stream.flush().await?;
+        Ok(())
     }
 
     pub async fn receive(&mut self) -> Result<ServerMessage, ClientError> {
@@ -161,12 +171,17 @@ impl<S> DistributedConnection<S> {
 
 impl<S> DistributedConnection<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: AsyncWrite + Unpin,
 {
     pub async fn send(&mut self, message: &DistributedMessage) -> Result<(), ClientError> {
         write_init_frame(&mut self.stream, &message.encode()?).await
     }
+}
 
+impl<S> DistributedConnection<S>
+where
+    S: AsyncRead + Unpin,
+{
     pub async fn receive(&mut self) -> Result<DistributedMessage, ClientError> {
         let frame = read_init_frame(&mut self.stream).await?;
         Ok(DistributedMessage::decode(frame)?)

@@ -1,10 +1,10 @@
 //! HTTP routing module: request dispatching and path extraction.
 
 use crate::utils::{
-    csrf_origin_allowed, is_authorized, normalize_api_path, route_requires_auth,
-    split_request_target, RequestSecurityHeaders,
+    authorize_controller_route_from, controller_route_requires_principal, csrf_origin_allowed,
+    normalize_api_path, split_request_target, RequestSecurityHeaders,
 };
-use crate::AppConfig;
+use crate::{AppConfig, ControllerCompatibilityTarget};
 
 // ============================================================================
 // HTTP Response Type
@@ -59,11 +59,23 @@ pub fn check_route_auth(
             && normalized.starts_with("/api/share-grants/")
             && normalized.ends_with("/manifest"));
 
-    if route_requires_auth(config, normalized)
-        && !delegated_share_route
-        && !is_authorized(config, auth, headers.cookie.as_deref())
+    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && !config.auth_required
+        && controller_route_requires_principal(config, method, path)
+        && !config.controller_passthrough_allows(headers.remote_addr)
     {
         return Err("unauthorized");
+    }
+
+    if !delegated_share_route {
+        authorize_controller_route_from(
+            config,
+            method,
+            path,
+            auth,
+            headers.cookie.as_deref(),
+            headers.remote_addr,
+        )?;
     }
 
     if !csrf_origin_allowed(config, method, normalized, headers) {
@@ -98,6 +110,14 @@ pub fn not_found_response() -> HttpResponse {
         status: "404 Not Found",
         content_type: "application/json",
         body: "{\"error\":\"not found\"}".to_owned(),
+    }
+}
+
+pub fn unmatched_route_response() -> HttpResponse {
+    HttpResponse {
+        status: "404 Not Found",
+        content_type: "application/json",
+        body: "{\"error\":\"route not found\"}".to_owned(),
     }
 }
 

@@ -7,12 +7,21 @@ export const startScan = (libraryPath) =>
   });
 
 export const getScanStatus = (scanId) =>
-  api.get(`/library/health/scans/${scanId}`);
+  api.get(`/library/health/scans/${encodeURIComponent(scanId)}`);
 
 export const getSummary = (libraryPath) =>
   api.get(
     `/library/health/summary?libraryPath=${encodeURIComponent(libraryPath)}`,
   );
+
+export const getDashboard = (libraryPath, artistLimit = 10, issueLimit = 100) => {
+  const parameters = new URLSearchParams({
+    artistLimit: String(artistLimit),
+    issueLimit: String(issueLimit),
+    libraryPath,
+  });
+  return api.get(`/library/health/dashboard?${parameters.toString()}`);
+};
 
 export const getIssues = (filter = {}) => {
   const parameters = new URLSearchParams();
@@ -36,13 +45,14 @@ export const getIssuesByRelease = (limit = 20) =>
   api.get(`/library/health/issues/by-release?limit=${limit}`);
 
 export const updateIssueStatus = (issueId, status) =>
-  api.patch(`/library/health/issues/${issueId}`, { status });
+  api.patch(`/library/health/issues/${encodeURIComponent(issueId)}`, { status });
 
 export const createRemediationJob = (issueIds) =>
   api.post(`/library/health/issues/fix`, { issueIds });
 
 export default {
   createRemediationJob,
+  getDashboard,
   getIssues,
   getIssuesByArtist,
   getIssuesByRelease,

@@ -42,9 +42,11 @@ async fn daemon_http_api_smoke() {
         .arg("serve")
         .env("SLSKR_HTTP_BIND", format!("127.0.0.1:{port}"))
         .env("SLSKR_STATE_DIR", &state_dir)
+        .env("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+        .env("SLSKD_NO_HTTPS", "true")
         .env("SLSKR_API_TOKEN", "smoke-token")
-        .env("SLSKR_API_RATE_LIMIT_AUTHENTICATED", "8")
         .env("SLSKR_SHARE_FIXTURE", "Virtual/Test.flac=42")
+        .env("SLSKR_DHT_ENABLED", "false")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -135,20 +137,16 @@ async fn daemon_http_api_smoke() {
         .unwrap();
     assert_eq!(transfers.status(), StatusCode::OK);
 
-    let mut last_status = StatusCode::OK;
     for _ in 0..10 {
-        last_status = client
+        let status = client
             .get(format!("{base_url}/api/v0/config"))
             .bearer_auth("smoke-token")
             .send()
             .await
             .unwrap()
             .status();
-        if last_status == StatusCode::TOO_MANY_REQUESTS {
-            break;
-        }
+        assert_eq!(status, StatusCode::OK);
     }
-    assert_eq!(last_status, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]
@@ -171,7 +169,10 @@ async fn serve_once_waits_for_the_accepted_request() {
         .args(["serve", "--once"])
         .env("SLSKR_HTTP_BIND", format!("127.0.0.1:{port}"))
         .env("SLSKR_STATE_DIR", &state_dir)
+        .env("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+        .env("SLSKD_NO_HTTPS", "true")
         .env("SLSKR_AUTO_CONNECT", "false")
+        .env("SLSKR_DHT_ENABLED", "false")
         .env("SLSKR_API_TOKEN", "once-token")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

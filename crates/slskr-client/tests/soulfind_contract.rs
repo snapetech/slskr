@@ -81,6 +81,7 @@ async fn soulfind_accepts_room_search_and_reconnect_flow() {
     session
         .send_server_message(ServerMessage::JoinRoom {
             room: "slskr-contract".to_owned(),
+            private: false,
         })
         .await
         .unwrap();

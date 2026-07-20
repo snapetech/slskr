@@ -55,8 +55,8 @@ check_current_delta_registry() {
   slskdn_delta_registry="$(printf '%s\n' "$section" | rg -o '`[0-9a-f]{8}`' | tr -d '`')"
   check_prefix_set \
     "slskdN current-head delta" \
-    10 \
-    "b68a78bfef5a542122ec8c8cabc767a1a7d24073966e2233cc20b1d0512a9ce0" \
+    87 \
+    "7ea4208693973390cd3f19c5bff58201e99f638b6540ab0dcf640011f1b0c801" \
     "$slskdn_delta_registry"
 }
 
@@ -251,9 +251,9 @@ check_delta_repo \
   "slskdN" \
   "${SLSKR_SLSKDN_REPO:-$repo_root/../slskdn}" \
   "c2586f576d8443e0229bf53501989568e6cbd61e" \
-  "7527bfe9d5622b40e893d13766ce51aafacc1d38" \
-  40 \
-  10 \
+  "db9d6eee2af1b484c62495d4fb3683f7009a15f4" \
+  192 \
+  87 \
   "$slskdn_delta_registry"
 
 if (( status != 0 )); then

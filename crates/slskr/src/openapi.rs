@@ -465,6 +465,38 @@ pub fn swagger_ui_html(spec_url: &str) -> String {
     )
 }
 
+/// Generate the frozen slskd/slskdN Swagger UI shell. The upstream targets
+/// publish the same static Swashbuckle index and vary only the generated spec.
+pub fn frozen_swagger_ui_html() -> String {
+    r#"<!-- HTML for static distribution bundle build -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Swagger UI</title>
+    <link rel="stylesheet" type="text/css" href="./swagger-ui.css">
+    <link rel="stylesheet" type="text/css" href="./index.css">
+    <link rel="icon" type="image/png" href="./favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="./favicon-16x16.png" sizes="16x16" />
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="./swagger-ui-bundle.js" charset="utf-8"></script>
+    <script src="./swagger-ui-standalone-preset.js" charset="utf-8"></script>
+    <script src="index.js" charset="utf-8"></script>
+</body>
+</html>"#
+        .to_owned()
+}
+
+/// Small local bootstrap that preserves the upstream asset paths while using
+/// the already-supported Swagger UI distribution when the browser loads them.
+pub fn frozen_swagger_index_js(spec_url: &str) -> String {
+    format!(
+        "window.onload=function(){{window.ui=SwaggerUIBundle({{url:{spec_url:?},dom_id:'#swagger-ui',deepLinking:true,presets:[SwaggerUIBundle.presets.apis,SwaggerUIStandalonePreset],layout:'StandaloneLayout'}});}};"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

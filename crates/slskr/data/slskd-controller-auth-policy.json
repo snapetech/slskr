@@ -1,0 +1,639 @@
+[
+  {
+    "method": "DELETE",
+    "route": "/api/v0/application",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/conversations/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/downloads/directories/{base64SubdirectoryName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/downloads/files/{base64FileName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/incomplete/directories/{base64SubdirectoryName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/files/incomplete/files/{base64FileName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/relay/agent",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/rooms/joined/{roomName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/searches/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/server",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/shares",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/downloads/{username}/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/downloads/all/completed",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/uploads/{username}/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "DELETE",
+    "route": "/api/v0/transfers/uploads/all/completed",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application/dump",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application/version",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/application/version/latest",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/conversations",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/conversations/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/conversations/{username}/messages",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/events",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/downloads/directories",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/downloads/directories/{base64SubdirectoryName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/incomplete/directories",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/files/incomplete/directories/{base64SubdirectoryName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/logs",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/options",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/relay/controller/downloads/{token}",
+    "access": "authenticated",
+    "scheme": "api_key",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/available",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined/{roomName}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined/{roomName}/messages",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/rooms/joined/{roomName}/users",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/searches",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/searches/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/searches/{id}/responses",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/server",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/session",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares/{id}/contents",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/shares/contents",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/metrics",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/metrics/kpis",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/directories",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/exceptions",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/histogram",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/leaderboard",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/summary",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/telemetry/reports/transfers/users/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/{username}/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/{username}/{id}/position",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/downloads/batches/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/uploads",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/uploads/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/transfers/uploads/{username}/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/browse",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/browse/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/endpoint",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/info",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/users/{username}/status",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PATCH",
+    "route": "/api/v0/options",
+    "access": "administrator",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/application/gc",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/application/loopback",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/conversations/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/events",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/options",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/relay/controller/files/{token}",
+    "access": "read_write",
+    "scheme": "api_key",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/relay/controller/shares/{token}",
+    "access": "read_write",
+    "scheme": "api_key",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined/{roomName}/members",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined/{roomName}/messages",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/rooms/joined/{roomName}/ticker",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/searches",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/session",
+    "access": "anonymous",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/transfers/downloads/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/transfers/downloads/batches",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "POST",
+    "route": "/api/v0/users/{username}/directory",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/application",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/conversations/{username}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/conversations/{username}/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/options",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/relay/agent",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/searches/{id}",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/server",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "PUT",
+    "route": "/api/v0/shares",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  }
+]

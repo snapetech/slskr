@@ -46,6 +46,7 @@ pub struct LogConfig {
     pub log_requests: bool,
     pub log_responses: bool,
     pub log_errors_only: bool,
+    pub no_color: bool,
 }
 
 impl Default for LogConfig {
@@ -55,6 +56,7 @@ impl Default for LogConfig {
             log_requests: true,
             log_responses: true,
             log_errors_only: false,
+            no_color: false,
         }
     }
 }
@@ -98,6 +100,7 @@ impl LogConfig {
             log_requests: level <= LogLevel::Debug,
             log_responses: level <= LogLevel::Info,
             log_errors_only: false,
+            no_color: std::env::var_os("NO_COLOR").is_some(),
         }
     }
 }
@@ -210,19 +213,33 @@ pub fn log_transaction(config: &LogConfig, log: &HttpTransactionLog) {
         .map(|error| format!(" - {}", sanitize_log_field(error)))
         .unwrap_or_default();
 
-    eprintln!(
-        "[{}] \x1b[{}m{} {}{}\x1b[0m \x1b[{}m{}\x1b[0m {} bytes in {}ms{}",
-        timestamp,
-        method_color,
-        method,
-        path,
-        query_str,
-        status_color,
-        log.response.status_code,
-        log.response.content_length,
-        log.response.duration_ms,
-        error_str
-    );
+    if config.no_color {
+        eprintln!(
+            "[{}] {} {}{} {} {} bytes in {}ms{}",
+            timestamp,
+            method,
+            path,
+            query_str,
+            log.response.status_code,
+            log.response.content_length,
+            log.response.duration_ms,
+            error_str
+        );
+    } else {
+        eprintln!(
+            "[{}] \x1b[{}m{} {}{}\x1b[0m \x1b[{}m{}\x1b[0m {} bytes in {}ms{}",
+            timestamp,
+            method_color,
+            method,
+            path,
+            query_str,
+            status_color,
+            log.response.status_code,
+            log.response.content_length,
+            log.response.duration_ms,
+            error_str
+        );
+    }
 }
 
 pub fn response_level(status_code: u16) -> LogLevel {

@@ -1,11 +1,38 @@
 import api from './api';
 
-export const getStatus = async () =>
-  (await api.get('/integrations/lidarr/status')).data;
+const STATUS_CACHE_TTL_MS = 15_000;
+let statusCache = null;
+let statusCacheExpiresAt = 0;
+let statusInflight = null;
 
-export const getWantedMissing = async ({ pageSize = 100 } = {}) =>
-  (await api.get(`/integrations/lidarr/wanted/missing?pageSize=${pageSize}`))
-    .data;
+export const getStatus = () => {
+  if (statusCache && statusCacheExpiresAt > Date.now()) {
+    return Promise.resolve(statusCache);
+  }
+
+  if (statusInflight) {
+    return statusInflight;
+  }
+
+  statusInflight = api
+    .get('/integrations/lidarr/status')
+    .then((response) => {
+      statusCache = response.data;
+      statusCacheExpiresAt = Date.now() + STATUS_CACHE_TTL_MS;
+      return statusCache;
+    })
+    .finally(() => {
+      statusInflight = null;
+    });
+
+  return statusInflight;
+};
+
+export const getSyncStatus = async () =>
+  (await api.get('/integrations/lidarr/sync/status')).data;
+
+export const getWantedMissing = async ({ page = 1, pageSize = 50 } = {}) =>
+  (await api.get(`/integrations/lidarr/wanted/missing?page=${page}&pageSize=${pageSize}`)).data;
 
 export const syncWanted = async () =>
   (await api.post('/integrations/lidarr/wanted/sync')).data;

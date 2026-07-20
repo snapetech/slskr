@@ -14,6 +14,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
+use tokio_rustls::rustls;
 use uuid::Uuid;
 
 use crate::persistence::DatabaseManager;
@@ -395,7 +396,227 @@ fn constant_time_compare(a: &[u8], b: &[u8]) -> bool {
 /// Webhook dispatcher for async event publishing
 pub struct WebhookDispatcher;
 
+#[derive(Debug)]
+struct SelfIssuedWebhookVerifier {
+    standard: Arc<rustls::client::WebPkiServerVerifier>,
+    provider: Arc<rustls::crypto::CryptoProvider>,
+}
+
+fn der_tlv<'a>(input: &'a [u8], offset: &mut usize) -> Option<(u8, &'a [u8], &'a [u8])> {
+    let start = *offset;
+    let tag = *input.get(*offset)?;
+    *offset += 1;
+    let first = *input.get(*offset)?;
+    *offset += 1;
+    let length = if first & 0x80 == 0 {
+        usize::from(first)
+    } else {
+        let count = usize::from(first & 0x7f);
+        if count == 0 || count > std::mem::size_of::<usize>() {
+            return None;
+        }
+        let mut length = 0_usize;
+        for _ in 0..count {
+            length = length
+                .checked_mul(256)?
+                .checked_add(usize::from(*input.get(*offset)?))?;
+            *offset += 1;
+        }
+        length
+    };
+    let content_start = *offset;
+    let end = content_start.checked_add(length)?;
+    let content = input.get(content_start..end)?;
+    *offset = end;
+    Some((tag, input.get(start..end)?, content))
+}
+
+fn certificate_is_self_issued(der: &[u8]) -> bool {
+    let mut offset = 0;
+    let Some((0x30, _, certificate)) = der_tlv(der, &mut offset) else {
+        return false;
+    };
+    let mut certificate_offset = 0;
+    let Some((0x30, _, tbs)) = der_tlv(certificate, &mut certificate_offset) else {
+        return false;
+    };
+    let mut tbs_offset = 0;
+    if tbs.first() == Some(&0xa0) && der_tlv(tbs, &mut tbs_offset).is_none() {
+        return false;
+    }
+    if der_tlv(tbs, &mut tbs_offset).is_none() || der_tlv(tbs, &mut tbs_offset).is_none() {
+        return false;
+    }
+    let Some((_, issuer, _)) = der_tlv(tbs, &mut tbs_offset) else {
+        return false;
+    };
+    if der_tlv(tbs, &mut tbs_offset).is_none() {
+        return false;
+    }
+    let Some((_, subject, _)) = der_tlv(tbs, &mut tbs_offset) else {
+        return false;
+    };
+    issuer == subject
+}
+
+impl rustls::client::danger::ServerCertVerifier for SelfIssuedWebhookVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        server_name: &rustls::pki_types::ServerName<'_>,
+        ocsp_response: &[u8],
+        now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        match self.standard.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        ) {
+            Ok(valid) => Ok(valid),
+            Err(original)
+                if intermediates.is_empty() && certificate_is_self_issued(end_entity.as_ref()) =>
+            {
+                let mut roots = rustls::RootCertStore::empty();
+                if roots.add(end_entity.clone()).is_err() {
+                    return Err(original);
+                }
+                let verifier = match rustls::client::WebPkiServerVerifier::builder_with_provider(
+                    Arc::new(roots),
+                    Arc::clone(&self.provider),
+                )
+                .build()
+                {
+                    Ok(verifier) => verifier,
+                    Err(_) => return Err(original),
+                };
+                verifier.verify_server_cert(
+                    end_entity,
+                    intermediates,
+                    server_name,
+                    ocsp_response,
+                    now,
+                )
+            }
+            Err(error) => Err(error),
+        }
+    }
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.standard.verify_tls12_signature(message, cert, dss)
+    }
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.standard.verify_tls13_signature(message, cert, dss)
+    }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.standard.supported_verify_schemes()
+    }
+}
+
+pub(crate) fn self_issued_tls_config() -> Result<rustls::ClientConfig, Box<dyn std::error::Error>> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let standard = rustls::client::WebPkiServerVerifier::builder_with_provider(
+        Arc::new(roots),
+        Arc::clone(&provider),
+    )
+    .build()?;
+    Ok(
+        rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
+            .with_safe_default_protocol_versions()?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(SelfIssuedWebhookVerifier {
+                standard,
+                provider,
+            }))
+            .with_no_client_auth(),
+    )
+}
+
 impl WebhookDispatcher {
+    pub async fn send_frozen_compat_webhook(
+        url: &str,
+        headers: &[(String, String)],
+        payload: &str,
+        timeout_millis: u64,
+        attempts: u32,
+        ignore_certificate_errors: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let timeout = Duration::from_millis(timeout_millis.max(500));
+        let resolved = validate_and_resolve_webhook_url(url, timeout).await?;
+        Self::send_frozen_compat_webhook_resolved(
+            url,
+            headers,
+            payload,
+            timeout,
+            attempts,
+            ignore_certificate_errors,
+            &resolved,
+        )
+        .await
+    }
+
+    async fn send_frozen_compat_webhook_resolved(
+        url: &str,
+        headers: &[(String, String)],
+        payload: &str,
+        timeout: Duration,
+        attempts: u32,
+        ignore_certificate_errors: bool,
+        resolved: &ResolvedWebhookTarget,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut client_builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .resolve_to_addrs(&resolved.host, &resolved.addrs);
+        if ignore_certificate_errors {
+            client_builder = client_builder.use_preconfigured_tls(self_issued_tls_config()?);
+        }
+        let client = client_builder.build()?;
+        let attempts = attempts.max(1);
+        let mut last_error = "webhook delivery failed".to_owned();
+        for attempt in 1..=attempts {
+            if attempt > 1 {
+                let completed_failures = attempt - 1;
+                let delay = (((1_u64 << completed_failures.min(16)) - 1) / 2)
+                    .saturating_mul(1_000)
+                    .min(30_000);
+                if delay > 0 {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                }
+            }
+            let mut request = client.post(url).header("Content-Type", "application/json");
+            for (name, value) in headers {
+                request = request.header(name, value);
+            }
+            match request
+                .body(payload.to_owned())
+                .timeout(timeout)
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => return Ok(()),
+                Ok(response) => {
+                    last_error =
+                        format!("webhook delivery failed with status {}", response.status())
+                }
+                Err(_) => last_error = "webhook delivery request failed".to_owned(),
+            }
+        }
+        Err(last_error.into())
+    }
+
     /// Dispatch event to all matching webhooks
     pub async fn dispatch(
         manager: &WebhookManager,
@@ -787,6 +1008,184 @@ impl WebhookRetryScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn spawn_tls_webhook_fixture(
+        certificate_host: &str,
+    ) -> (SocketAddr, tokio::task::JoinHandle<bool>) {
+        use rcgen::generate_simple_self_signed;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_rustls::{
+            rustls::{pki_types::PrivatePkcs8KeyDer, ServerConfig},
+            TlsAcceptor,
+        };
+
+        let certified = generate_simple_self_signed(vec![certificate_host.to_owned()]).unwrap();
+        let certificate = certified.cert.der().clone();
+        let private_key = PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
+        let config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+            .with_no_client_auth()
+            .with_single_cert(vec![certificate], private_key.into())
+            .unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let Ok(mut tls) = acceptor.accept(tcp).await else {
+                return false;
+            };
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let read = tls.read(&mut buffer).await.unwrap();
+                if read == 0 {
+                    return false;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            tls.write_all(
+                b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+            true
+        });
+        (address, server)
+    }
+
+    #[tokio::test]
+    async fn frozen_compat_webhook_sends_custom_headers_and_retries() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for status in ["500 Internal Server Error", "204 No Content"] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                let header_end = loop {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    assert!(read > 0);
+                    request.extend_from_slice(&buffer[..read]);
+                    if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        break end + 4;
+                    }
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length: ")
+                            .and_then(|value| value.parse::<usize>().ok())
+                    })
+                    .unwrap();
+                while request.len() < header_end + length {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.starts_with("POST /hook HTTP/1.1"), "{request}");
+                assert!(
+                    request
+                        .to_ascii_lowercase()
+                        .contains("authorization: fixture-secret"),
+                    "{request}"
+                );
+                assert!(
+                    request.ends_with(r#"{"type":"PrivateMessageReceived"}"#),
+                    "{request}"
+                );
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let resolved = ResolvedWebhookTarget {
+            host: "fixture.invalid".to_owned(),
+            addrs: vec![address],
+        };
+        WebhookDispatcher::send_frozen_compat_webhook_resolved(
+            "http://fixture.invalid/hook",
+            &[("Authorization".to_owned(), "fixture-secret".to_owned())],
+            r#"{"type":"PrivateMessageReceived"}"#,
+            Duration::from_millis(500),
+            2,
+            false,
+            &resolved,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn frozen_compat_certificate_override_accepts_only_matching_self_issued_certificates() {
+        let payload = r#"{"type":"PrivateMessageReceived"}"#;
+
+        let (address, server) = spawn_tls_webhook_fixture("fixture.invalid").await;
+        let resolved = ResolvedWebhookTarget {
+            host: "fixture.invalid".to_owned(),
+            addrs: vec![address],
+        };
+        WebhookDispatcher::send_frozen_compat_webhook_resolved(
+            "https://fixture.invalid/hook",
+            &[],
+            payload,
+            Duration::from_secs(2),
+            1,
+            true,
+            &resolved,
+        )
+        .await
+        .unwrap();
+        assert!(server.await.unwrap());
+
+        let (address, server) = spawn_tls_webhook_fixture("fixture.invalid").await;
+        let resolved = ResolvedWebhookTarget {
+            host: "fixture.invalid".to_owned(),
+            addrs: vec![address],
+        };
+        assert!(WebhookDispatcher::send_frozen_compat_webhook_resolved(
+            "https://fixture.invalid/hook",
+            &[],
+            payload,
+            Duration::from_secs(2),
+            1,
+            false,
+            &resolved,
+        )
+        .await
+        .is_err());
+        assert!(!server.await.unwrap());
+
+        let (address, server) = spawn_tls_webhook_fixture("fixture.invalid").await;
+        let resolved = ResolvedWebhookTarget {
+            host: "wrong.invalid".to_owned(),
+            addrs: vec![address],
+        };
+        assert!(WebhookDispatcher::send_frozen_compat_webhook_resolved(
+            "https://wrong.invalid/hook",
+            &[],
+            payload,
+            Duration::from_secs(2),
+            1,
+            true,
+            &resolved,
+        )
+        .await
+        .is_err());
+        assert!(!server.await.unwrap());
+    }
 
     #[test]
     fn test_webhook_event_display() {

@@ -235,13 +235,13 @@ A successful full certification run produces:
 
 ```
 === Certification Summary ===
-  Total:    36
-  Passed:   27+
-  Failed:   3-5 (non-VPN-related)
-  Skipped:  6 (deferred)
-  Duration: 300-350s
-  Report:   target/certify/summary-YYYYMMDD-HHMMSS.json
-  Log:      target/certify/certify-YYYYMMDD-HHMMSS.log
+  Total:    39
+  Passed:   39
+  Failed:   0
+  Skipped:  0
+  Duration: 442s
+  Report:   target/certify/summary-20260716-103416.json
+  Log:      target/certify/certify-20260716-103416.log
 ```
 
 Reports and logs are saved to `target/certify/` for each run.

@@ -3,7 +3,9 @@
 /// SQLite-backed durable storage using sqlx for async operations.
 /// Provides full persistence for searches, transfers, messages, and user stats.
 use serde::{Deserialize, Serialize};
-use sqlx_core::{from_row::FromRow, query::query, query_as::query_as, row::Row, Error};
+use sqlx_core::{
+    from_row::FromRow, query::query, query_as::query_as, row::Row, sql_str::AssertSqlSafe, Error,
+};
 use sqlx_sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow};
 #[cfg(unix)]
 use std::fs::OpenOptions;
@@ -111,6 +113,7 @@ pub struct ShareFileRecord {
     pub extension: String,
     pub root_label: String,
     pub local_path: Option<String>,
+    pub attributes_json: String,
     pub updated_at: i64,
 }
 
@@ -178,6 +181,9 @@ pub struct UserNoteRecord {
     pub id: String,
     pub username: String,
     pub note: String,
+    pub color: String,
+    pub icon: String,
+    pub is_high_priority: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -197,6 +203,9 @@ pub struct SecurityBanRecord {
     pub kind: String,
     pub value: String,
     pub created_at: i64,
+    pub reason: String,
+    pub expires_at: i64,
+    pub is_permanent: bool,
 }
 
 /// Wishlist item record for persistence
@@ -288,8 +297,10 @@ pub struct ShareGroupMemberRecord {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CollectionRecord {
     pub id: String,
+    pub owner_user_id: String,
     pub name: String,
     pub description: String,
+    pub collection_type: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -303,6 +314,9 @@ pub struct CollectionItemRecord {
     pub artist: String,
     pub title: String,
     pub kind: String,
+    pub file_name: String,
+    pub album: String,
+    pub content_hash: String,
     pub added_at: i64,
     pub position: i64,
 }
@@ -504,6 +518,7 @@ impl<'r> FromRow<'r, SqliteRow> for ShareFileRecord {
             extension: row.try_get("extension")?,
             root_label: row.try_get("root_label")?,
             local_path: row.try_get("local_path")?,
+            attributes_json: row.try_get("attributes_json")?,
             updated_at: row.try_get("updated_at")?,
         })
     }
@@ -583,6 +598,9 @@ impl<'r> FromRow<'r, SqliteRow> for UserNoteRecord {
             id: row.try_get("id")?,
             username: row.try_get("username")?,
             note: row.try_get("note")?,
+            color: row.try_get("color")?,
+            icon: row.try_get("icon")?,
+            is_high_priority: row.try_get("is_high_priority")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -606,6 +624,9 @@ impl<'r> FromRow<'r, SqliteRow> for SecurityBanRecord {
             kind: row.try_get("kind")?,
             value: row.try_get("value")?,
             created_at: row.try_get("created_at")?,
+            reason: row.try_get("reason")?,
+            expires_at: row.try_get("expires_at")?,
+            is_permanent: row.try_get("is_permanent")?,
         })
     }
 }
@@ -713,8 +734,10 @@ impl<'r> FromRow<'r, SqliteRow> for CollectionRecord {
     fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
         Ok(Self {
             id: row.try_get("id")?,
+            owner_user_id: row.try_get("owner_user_id")?,
             name: row.try_get("name")?,
             description: row.try_get("description")?,
+            collection_type: row.try_get("collection_type")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -730,6 +753,9 @@ impl<'r> FromRow<'r, SqliteRow> for CollectionItemRecord {
             artist: row.try_get("artist")?,
             title: row.try_get("title")?,
             kind: row.try_get("kind")?,
+            file_name: row.try_get("file_name")?,
+            album: row.try_get("album")?,
+            content_hash: row.try_get("content_hash")?,
             added_at: row.try_get("added_at")?,
             position: row.try_get("position")?,
         })
@@ -1025,6 +1051,7 @@ impl DatabaseManager {
                 extension TEXT NOT NULL,
                 root_label TEXT NOT NULL,
                 local_path TEXT,
+                attributes_json TEXT NOT NULL DEFAULT '[]',
                 updated_at INTEGER NOT NULL
             )
             "#,
@@ -1122,6 +1149,9 @@ impl DatabaseManager {
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
                 note TEXT NOT NULL,
+                color TEXT NOT NULL DEFAULT '',
+                icon TEXT NOT NULL DEFAULT '',
+                is_high_priority INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
@@ -1151,6 +1181,9 @@ impl DatabaseManager {
                 kind TEXT NOT NULL,
                 value TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
+                reason TEXT NOT NULL DEFAULT 'Manual ban',
+                expires_at INTEGER NOT NULL DEFAULT 0,
+                is_permanent INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (kind, value)
             )
             "#,
@@ -1286,8 +1319,10 @@ impl DatabaseManager {
             r#"
             CREATE TABLE IF NOT EXISTS collections (
                 id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL DEFAULT '',
                 name TEXT NOT NULL,
                 description TEXT NOT NULL,
+                collection_type TEXT NOT NULL DEFAULT 'ShareList',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
@@ -1306,6 +1341,9 @@ impl DatabaseManager {
                 artist TEXT NOT NULL,
                 title TEXT NOT NULL,
                 kind TEXT NOT NULL,
+                file_name TEXT NOT NULL DEFAULT '',
+                album TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
                 added_at INTEGER NOT NULL,
                 position INTEGER NOT NULL,
                 FOREIGN KEY (collection_id) REFERENCES collections(id)
@@ -1406,8 +1444,13 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
         self.ensure_runtime_compat_columns().await?;
+        self.ensure_security_ban_columns().await?;
         self.ensure_wishlist_item_columns().await?;
+        self.ensure_collection_columns().await?;
+        self.ensure_collection_item_columns().await?;
+        self.ensure_user_note_columns().await?;
         self.ensure_transfer_columns().await?;
+        self.ensure_share_file_columns().await?;
 
         // Create pending OAuth states table
         query(
@@ -1612,6 +1655,24 @@ impl DatabaseManager {
         Ok(())
     }
 
+    async fn ensure_security_ban_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE security_bans ADD COLUMN reason TEXT NOT NULL DEFAULT 'Manual ban'",
+            "ALTER TABLE security_bans ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE security_bans ADD COLUMN is_permanent INTEGER NOT NULL DEFAULT 0",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                if !error.to_string().contains("duplicate column name") {
+                    return Err(Box::new(error));
+                }
+            }
+        }
+        query("UPDATE security_bans SET expires_at = created_at + 3600 WHERE expires_at = 0")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn ensure_wishlist_item_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
         for statement in [
             "ALTER TABLE wishlist_items ADD COLUMN filter TEXT NOT NULL DEFAULT ''",
@@ -1635,6 +1696,50 @@ impl DatabaseManager {
                 let message = error.to_string();
                 if !message.contains("duplicate column name") {
                     return Err(Box::new(error));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn ensure_collection_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE collections ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE collections ADD COLUMN collection_type TEXT NOT NULL DEFAULT 'ShareList'",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                if !error.to_string().contains("duplicate column name") {
+                    return Err(Box::new(error));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn ensure_collection_item_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE collection_items ADD COLUMN file_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE collection_items ADD COLUMN album TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE collection_items ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                if !error.to_string().contains("duplicate column name") {
+                    return Err(Box::new(error));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn ensure_user_note_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE user_notes ADD COLUMN color TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE user_notes ADD COLUMN icon TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE user_notes ADD COLUMN is_high_priority INTEGER NOT NULL DEFAULT 0",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                if !error.to_string().contains("duplicate column name") {
+                    return Err(error.into());
                 }
             }
         }
@@ -1668,6 +1773,14 @@ impl DatabaseManager {
         query("CREATE INDEX IF NOT EXISTS idx_transfers_request ON transfers(request_id, started_at DESC)")
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    async fn ensure_share_file_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let _ =
+            query("ALTER TABLE share_files ADD COLUMN attributes_json TEXT NOT NULL DEFAULT '[]'")
+                .execute(&self.pool)
+                .await;
         Ok(())
     }
 
@@ -2237,8 +2350,8 @@ impl DatabaseManager {
             query(
                 r#"
                 INSERT OR REPLACE INTO share_files
-                (filename, size, extension, root_label, local_path, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (filename, size, extension, root_label, local_path, attributes_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&record.filename)
@@ -2246,6 +2359,7 @@ impl DatabaseManager {
             .bind(&record.extension)
             .bind(&record.root_label)
             .bind(&record.local_path)
+            .bind(&record.attributes_json)
             .bind(record.updated_at)
             .execute(&mut *tx)
             .await?;
@@ -2262,7 +2376,7 @@ impl DatabaseManager {
     ) -> Result<Vec<ShareFileRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, ShareFileRecord>(
             r#"
-            SELECT filename, size, extension, root_label, local_path, updated_at
+            SELECT filename, size, extension, root_label, local_path, attributes_json, updated_at
             FROM share_files
             ORDER BY filename ASC
             LIMIT ? OFFSET ?
@@ -2686,13 +2800,17 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO user_notes (id, username, note, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO user_notes
+                (id, username, note, color, icon, is_high_priority, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&record.id)
         .bind(&record.username)
         .bind(&record.note)
+        .bind(&record.color)
+        .bind(&record.icon)
+        .bind(record.is_high_priority)
         .bind(record.created_at)
         .bind(record.updated_at)
         .execute(&self.pool)
@@ -2716,7 +2834,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<UserNoteRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, UserNoteRecord>(
-            "SELECT id, username, note, created_at, updated_at FROM user_notes ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, username, note, color, icon, is_high_priority, created_at, updated_at FROM user_notes ORDER BY updated_at DESC LIMIT ? OFFSET ?",
         )
         .bind(limit)
         .bind(offset)
@@ -2777,13 +2895,17 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO security_bans (kind, value, created_at)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO security_bans
+                (kind, value, created_at, reason, expires_at, is_permanent)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&record.kind)
         .bind(&record.value)
         .bind(record.created_at)
+        .bind(&record.reason)
+        .bind(record.expires_at)
+        .bind(record.is_permanent)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -2808,7 +2930,7 @@ impl DatabaseManager {
         &self,
     ) -> Result<Vec<SecurityBanRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, SecurityBanRecord>(
-            "SELECT kind, value, created_at FROM security_bans ORDER BY created_at DESC",
+            "SELECT kind, value, created_at, reason, expires_at, is_permanent FROM security_bans ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -2885,8 +3007,14 @@ impl DatabaseManager {
         records: &[WishlistItemRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        for record in records {
-            query(
+        for batch in records.chunks(40) {
+            let values = std::iter::repeat_n(
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                batch.len(),
+            )
+            .collect::<Vec<_>>()
+            .join(", ");
+            let statement = format!(
                 r#"
                 INSERT INTO wishlist_items
                     (id, artist, title, kind, filter, enabled, auto_download, max_results,
@@ -2895,7 +3023,7 @@ impl DatabaseManager {
                      last_filtered_out_hit_count, last_ignored_result_hit_count,
                      last_response_count, total_search_count, total_download_count,
                      last_search_id, added_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES {values}
                 ON CONFLICT(id) DO UPDATE SET
                     artist = excluded.artist,
                     title = excluded.title,
@@ -2917,31 +3045,36 @@ impl DatabaseManager {
                     total_download_count = excluded.total_download_count,
                     last_search_id = excluded.last_search_id,
                     added_at = excluded.added_at
-                "#,
-            )
-            .bind(&record.id)
-            .bind(&record.artist)
-            .bind(&record.title)
-            .bind(&record.kind)
-            .bind(&record.filter)
-            .bind(record.enabled)
-            .bind(record.auto_download)
-            .bind(record.max_results)
-            .bind(record.max_downloads)
-            .bind(record.last_viewed_at)
-            .bind(record.last_searched_at)
-            .bind(record.last_match_count)
-            .bind(record.last_visible_hit_count)
-            .bind(record.last_hidden_locked_hit_count)
-            .bind(record.last_filtered_out_hit_count)
-            .bind(record.last_ignored_result_hit_count)
-            .bind(record.last_response_count)
-            .bind(record.total_search_count)
-            .bind(record.total_download_count)
-            .bind(&record.last_search_id)
-            .bind(record.added_at)
-            .execute(&mut *transaction)
-            .await?;
+                "#
+            );
+            // The only dynamic fragment is a fixed placeholder tuple repeated for the bounded
+            // batch length; every record value remains a bind parameter.
+            let mut statement = query(AssertSqlSafe(statement));
+            for record in batch {
+                statement = statement
+                    .bind(&record.id)
+                    .bind(&record.artist)
+                    .bind(&record.title)
+                    .bind(&record.kind)
+                    .bind(&record.filter)
+                    .bind(record.enabled)
+                    .bind(record.auto_download)
+                    .bind(record.max_results)
+                    .bind(record.max_downloads)
+                    .bind(record.last_viewed_at)
+                    .bind(record.last_searched_at)
+                    .bind(record.last_match_count)
+                    .bind(record.last_visible_hit_count)
+                    .bind(record.last_hidden_locked_hit_count)
+                    .bind(record.last_filtered_out_hit_count)
+                    .bind(record.last_ignored_result_hit_count)
+                    .bind(record.last_response_count)
+                    .bind(record.total_search_count)
+                    .bind(record.total_download_count)
+                    .bind(&record.last_search_id)
+                    .bind(record.added_at);
+            }
+            statement.execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -3433,13 +3566,16 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO collections (id, name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO collections
+                (id, owner_user_id, name, description, collection_type, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&record.id)
+        .bind(&record.owner_user_id)
         .bind(&record.name)
         .bind(&record.description)
+        .bind(&record.collection_type)
         .bind(record.created_at)
         .bind(record.updated_at)
         .execute(&self.pool)
@@ -3457,18 +3593,23 @@ impl DatabaseManager {
         let result = async {
             query(
                 r#"
-                INSERT INTO collections (id, name, description, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO collections
+                    (id, owner_user_id, name, description, collection_type, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    owner_user_id = excluded.owner_user_id,
                     name = excluded.name,
                     description = excluded.description,
+                    collection_type = excluded.collection_type,
                     created_at = excluded.created_at,
                     updated_at = excluded.updated_at
                 "#,
             )
             .bind(&record.id)
+            .bind(&record.owner_user_id)
             .bind(&record.name)
             .bind(&record.description)
+            .bind(&record.collection_type)
             .bind(record.created_at)
             .bind(record.updated_at)
             .execute(&mut *transaction)
@@ -3481,8 +3622,8 @@ impl DatabaseManager {
                 query(
                     r#"
                     INSERT INTO collection_items
-                        (id, collection_id, content_id, artist, title, kind, added_at, position)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, collection_id, content_id, artist, title, kind, file_name, album, content_hash, added_at, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(&item.id)
@@ -3491,6 +3632,9 @@ impl DatabaseManager {
                 .bind(&item.artist)
                 .bind(&item.title)
                 .bind(&item.kind)
+                .bind(&item.file_name)
+                .bind(&item.album)
+                .bind(&item.content_hash)
                 .bind(item.added_at)
                 .bind(item.position)
                 .execute(&mut *transaction)
@@ -3539,7 +3683,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<CollectionRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, CollectionRecord>(
-            "SELECT id, name, description, created_at, updated_at FROM collections ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, owner_user_id, name, description, collection_type, created_at, updated_at FROM collections ORDER BY updated_at DESC LIMIT ? OFFSET ?",
         )
         .bind(limit)
         .bind(offset)
@@ -3555,8 +3699,9 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO collection_items (id, collection_id, content_id, artist, title, kind, added_at, position)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO collection_items
+                (id, collection_id, content_id, artist, title, kind, file_name, album, content_hash, added_at, position)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&record.id)
@@ -3565,6 +3710,9 @@ impl DatabaseManager {
         .bind(&record.artist)
         .bind(&record.title)
         .bind(&record.kind)
+        .bind(&record.file_name)
+        .bind(&record.album)
+        .bind(&record.content_hash)
         .bind(record.added_at)
         .bind(record.position)
         .execute(&self.pool)
@@ -3588,7 +3736,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<CollectionItemRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, CollectionItemRecord>(
-            "SELECT id, collection_id, content_id, artist, title, kind, added_at, position FROM collection_items ORDER BY collection_id, position, added_at LIMIT ? OFFSET ?",
+            "SELECT id, collection_id, content_id, artist, title, kind, file_name, album, content_hash, added_at, position FROM collection_items ORDER BY collection_id, position, added_at LIMIT ? OFFSET ?",
         )
         .bind(limit)
         .bind(offset)

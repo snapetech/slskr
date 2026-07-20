@@ -181,6 +181,160 @@ impl PodStore {
         })
     }
 
+    pub fn upsert_channel(
+        &mut self,
+        pod_id: &str,
+        mut channel: PodChannel,
+    ) -> Result<Option<PodChannel>, String> {
+        validate_text("ChannelId", &channel.channel_id, MAX_NAME_BYTES, false)?;
+        validate_text("Channel name", &channel.name, MAX_NAME_BYTES, false)?;
+        channel.channel_id = channel.channel_id.trim().to_owned();
+        channel.name = channel.name.trim().to_owned();
+        let Some(stored) = self.pods.get(pod_id) else {
+            return Ok(None);
+        };
+        if stored.pod.channels.len() >= MAX_CHANNELS
+            && !stored
+                .pod
+                .channels
+                .iter()
+                .any(|existing| existing.channel_id == channel.channel_id)
+        {
+            return Err("Pod channel capacity is full".to_owned());
+        }
+        let updated = channel.clone();
+        self.commit_change(|pods| {
+            if let Some(stored) = pods.get_mut(pod_id) {
+                if let Some(existing) = stored
+                    .pod
+                    .channels
+                    .iter_mut()
+                    .find(|existing| existing.channel_id == channel.channel_id)
+                {
+                    *existing = channel;
+                } else {
+                    stored.pod.channels.push(channel);
+                }
+                stored.pod.updated_at = current_timestamp();
+            }
+        })?;
+        Ok(Some(updated))
+    }
+
+    pub fn remove_channel(
+        &mut self,
+        pod_id: &str,
+        channel_id: &str,
+    ) -> Result<Option<bool>, String> {
+        let Some(stored) = self.pods.get(pod_id) else {
+            return Ok(None);
+        };
+        if !stored
+            .pod
+            .channels
+            .iter()
+            .any(|channel| channel.channel_id == channel_id)
+        {
+            return Ok(Some(false));
+        }
+        self.commit_change(|pods| {
+            if let Some(stored) = pods.get_mut(pod_id) {
+                stored
+                    .pod
+                    .channels
+                    .retain(|channel| channel.channel_id != channel_id);
+                stored.pod.updated_at = current_timestamp();
+            }
+        })?;
+        Ok(Some(true))
+    }
+
+    pub fn upsert_member(
+        &mut self,
+        pod_id: &str,
+        mut member: PodMember,
+    ) -> Result<Option<PodMember>, String> {
+        validate_peer_id(&member.peer_id)?;
+        validate_text("Role", &member.role, MAX_NAME_BYTES, false)?;
+        member.peer_id = member.peer_id.trim().to_owned();
+        member.role = member.role.trim().to_ascii_lowercase();
+        if !matches!(member.role.as_str(), "owner" | "mod" | "member" | "guest") {
+            return Err("Role must be owner, mod, member, or guest".to_owned());
+        }
+        let Some(stored) = self.pods.get(pod_id) else {
+            return Ok(None);
+        };
+        if stored.members.len() >= MAX_MEMBERS
+            && !stored
+                .members
+                .iter()
+                .any(|existing| peer_ids_equal(&existing.peer_id, &member.peer_id))
+        {
+            return Err("Pod member capacity is full".to_owned());
+        }
+        let updated = member.clone();
+        self.commit_change(|pods| {
+            if let Some(stored) = pods.get_mut(pod_id) {
+                if let Some(existing) = stored
+                    .members
+                    .iter_mut()
+                    .find(|existing| peer_ids_equal(&existing.peer_id, &member.peer_id))
+                {
+                    *existing = member;
+                } else {
+                    stored.members.push(member);
+                }
+                stored.pod.updated_at = current_timestamp();
+            }
+        })?;
+        Ok(Some(updated))
+    }
+
+    pub fn set_member_role(
+        &mut self,
+        pod_id: &str,
+        peer_id: &str,
+        role: &str,
+    ) -> Result<Option<PodMember>, String> {
+        let Some(mut member) = self.members(pod_id).and_then(|members| {
+            members
+                .into_iter()
+                .find(|member| peer_ids_equal(&member.peer_id, peer_id))
+        }) else {
+            return Ok(None);
+        };
+        member.role = role.to_owned();
+        self.upsert_member(pod_id, member)
+    }
+
+    pub fn unban(&mut self, pod_id: &str, peer_id: &str) -> Result<Option<bool>, String> {
+        validate_peer_id(peer_id)?;
+        let Some(stored) = self.pods.get(pod_id) else {
+            return Ok(None);
+        };
+        if !stored
+            .members
+            .iter()
+            .any(|member| member.is_banned && peer_ids_equal(&member.peer_id, peer_id))
+        {
+            return Ok(Some(false));
+        }
+        self.commit_change(|pods| {
+            if let Some(stored) = pods.get_mut(pod_id) {
+                if let Some(member) = stored
+                    .members
+                    .iter_mut()
+                    .find(|member| peer_ids_equal(&member.peer_id, peer_id))
+                {
+                    member.is_banned = false;
+                    member.last_seen = Some(current_timestamp());
+                }
+                stored.pod.updated_at = current_timestamp();
+            }
+        })?;
+        Ok(Some(true))
+    }
+
     pub fn soulseek_binding(&self, pod_id: &str, channel_id: &str) -> Option<SoulseekBinding> {
         let stored = self.pods.get(pod_id)?;
         let binding_info = stored

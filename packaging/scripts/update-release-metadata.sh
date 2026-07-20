@@ -20,12 +20,13 @@ sha_for() {
 
 linux_x64="slskr-${release_version}-x86_64-unknown-linux-gnu.tar.gz"
 linux_arm64="slskr-${release_version}-aarch64-unknown-linux-gnu.tar.gz"
-linux_musl="slskr-${release_version}-x86_64-unknown-linux-musl.tar.gz"
+linux_musl_x64="slskr-${release_version}-x86_64-unknown-linux-musl.tar.gz"
+linux_musl_arm64="slskr-${release_version}-aarch64-unknown-linux-musl.tar.gz"
 mac_x64="slskr-${release_version}-x86_64-apple-darwin.tar.gz"
 mac_arm64="slskr-${release_version}-aarch64-apple-darwin.tar.gz"
 win_x64="slskr-${release_version}-x86_64-pc-windows-msvc.zip"
 
-for file in "$linux_x64" "$linux_arm64" "$linux_musl" "$mac_x64" "$mac_arm64" "$win_x64"; do
+for file in "$linux_x64" "$linux_arm64" "$linux_musl_x64" "$linux_musl_arm64" "$mac_x64" "$mac_arm64" "$win_x64"; do
   test -f "$(asset_path "$file")" || { echo "missing release asset: $file" >&2; exit 1; }
 done
 
@@ -42,7 +43,9 @@ install_sha="$(slskr_sha256 packaging/aur/slskr.install)"
 
 sed -i \
   -e "s/^pkgver=.*/pkgver=${pkgver}/" \
-  -e "s/^sha256sums=.*/sha256sums=('${linux_x64_sha}' '${svc_sha}' '${sys_sha}' '${tmp_sha}' '${install_sha}')/" \
+  -e "s/^sha256sums=.*/sha256sums=('${svc_sha}' '${sys_sha}' '${tmp_sha}' '${install_sha}')/" \
+  -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${linux_x64_sha}')/" \
+  -e "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${linux_arm64_sha}')/" \
   packaging/aur/PKGBUILD-bin
 
 sed -i \

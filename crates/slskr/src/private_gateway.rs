@@ -435,6 +435,7 @@ impl Gateway {
             (local_path, entry.size)
         };
         let mut file = super::open_shared_local_file(state, &local_path)
+            .await
             .map_err(|_| (2, "Content not found or not advertisable".to_owned()))?;
         let actual_size = file
             .metadata()

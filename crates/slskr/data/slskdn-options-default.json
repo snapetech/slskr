@@ -1,0 +1,813 @@
+{
+  "autoReplace": {
+    "intervalSeconds": 300,
+    "maxRetries": 3,
+    "sizeThresholdPercent": 0
+  },
+  "blacklist": {
+    "enabled": false,
+    "file": ""
+  },
+  "debug": false,
+  "destinations": {
+    "folders": []
+  },
+  "dhtRendezvous": {
+    "advertisedOverlayPort": 0,
+    "announceIntervalSeconds": 900,
+    "bootstrapRouters": [
+      "router.bittorrent.com",
+      "router.utorrent.com",
+      "dht.transmissionbt.com"
+    ],
+    "bootstrapTimeoutSeconds": 120,
+    "coldBootstrapTimeoutSeconds": 180,
+    "dhtPort": 50305,
+    "discoveryIntervalSeconds": 600,
+    "effectiveOverlayPort": 50305,
+    "enablePeerDiversity": true,
+    "enableStun": true,
+    "enableUpnp": false,
+    "enableUsernameVerification": false,
+    "enabled": true,
+    "lanOnly": false,
+    "lanOnlyBootstrapTimeoutSeconds": 30,
+    "minNeighbors": 3,
+    "overlayPort": 50305,
+    "vpnPortSync": "disabled",
+    "vpnPortSyncMode": "Disabled"
+  },
+  "diagnostics": {
+    "allowMemoryDump": false,
+    "allowRemoteDump": false
+  },
+  "directories": {
+    "downloads": "<APP_DIR>/downloads",
+    "incomplete": "<APP_DIR>/incomplete"
+  },
+  "feature": {
+    "collectionsSharing": true,
+    "dht": true,
+    "identityFriends": true,
+    "mesh": true,
+    "meshParallelSearch": true,
+    "meshPublishAvailability": true,
+    "multiSourceDownloads": true,
+    "pods": true,
+    "scenePodBridge": false,
+    "scenePodBridgeOptions": {
+      "exportPodAvailability": false,
+      "proxyTransfers": false
+    },
+    "socialFederation": true,
+    "solid": true,
+    "songId": true,
+    "streaming": true,
+    "streamingRelayFallback": true,
+    "swagger": true,
+    "virtualSoulfind": true
+  },
+  "federationPublishing": {
+    "approvedCircles": [],
+    "defaultVisibility": "public",
+    "deliveryTimeoutSeconds": 30,
+    "enabled": false,
+    "includeExternalLinks": true,
+    "maxActivitiesPerHour": 100,
+    "maxDeliveryRetries": 3,
+    "maxMetadataSizeKb": 10,
+    "publishableDomains": [
+      "music"
+    ],
+    "requireModerationApproval": true
+  },
+  "filters": {
+    "search": {
+      "request": []
+    },
+    "searchRetention": {
+      "cleanupIntervalSeconds": 86400,
+      "maxAgeDays": 30,
+      "maxCount": 1000
+    }
+  },
+  "flags": {
+    "audioReanalyze": false,
+    "audioReanalyzeForce": false,
+    "caseSensitiveRegEx": false,
+    "experimental": false,
+    "forceMigrations": false,
+    "forceShareScan": false,
+    "hashFromAudioFileEnabled": false,
+    "legacyWindowsTcpKeepalive": false,
+    "logSQL": false,
+    "logUnobservedExceptions": false,
+    "noConfigWatch": false,
+    "noConnect": false,
+    "noLogo": false,
+    "noShareScan": false,
+    "noSqlitePooling": false,
+    "noStart": false,
+    "noVersionCheck": false,
+    "optimisticRelayFileInfo": false,
+    "volatile": false
+  },
+  "global": {
+    "download": {
+      "autoReplaceInterval": 60,
+      "autoReplaceStuck": false,
+      "autoReplaceThreshold": 5,
+      "autoRetry": {
+        "alternateSourceSizeTolerancePercent": 5,
+        "alternateSourcesEnabled": true,
+        "checkIntervalSeconds": 300,
+        "enabled": true,
+        "maxAlternateSourceSearchesPerCycle": 1,
+        "maxAttempts": 5,
+        "maxFilesPerCycle": 10,
+        "maxFilesPerPeerPerCycle": 1,
+        "peerCooldownSeconds": 900,
+        "retryDelaySeconds": 1800
+      },
+      "completedLayout": "remote_folder",
+      "completedPathTemplate": "",
+      "costBasedScheduling": true,
+      "retry": {
+        "attempts": 1,
+        "delay": 5000,
+        "incomplete": "resume",
+        "maxDelay": 60000
+      },
+      "scheduledLimits": {
+        "enabled": false,
+        "nightDownloadSpeedLimit": 200,
+        "nightEndHour": 6,
+        "nightStartHour": 22,
+        "nightUploadSpeedLimit": 100
+      },
+      "slots": 2147483647,
+      "speedLimit": 2147483647
+    },
+    "limits": {
+      "daily": {},
+      "queued": {},
+      "weekly": {}
+    },
+    "upload": {
+      "scheduledLimits": {
+        "enabled": false,
+        "nightDownloadSpeedLimit": 200,
+        "nightEndHour": 6,
+        "nightStartHour": 22,
+        "nightUploadSpeedLimit": 100
+      },
+      "slots": 10,
+      "speedLimit": 2147483647
+    }
+  },
+  "groups": {
+    "blacklisted": {
+      "cidrs": [],
+      "members": [],
+      "patterns": []
+    },
+    "default": {
+      "limits": {
+        "daily": {},
+        "queued": {},
+        "weekly": {}
+      },
+      "upload": {
+        "allowedFileTypes": [],
+        "priority": 1,
+        "slots": 2147483647,
+        "speedLimit": 2147483647,
+        "strategy": "roundrobin"
+      }
+    },
+    "leechers": {
+      "limits": {
+        "daily": {},
+        "queued": {},
+        "weekly": {}
+      },
+      "thresholds": {
+        "directories": 1,
+        "files": 1
+      },
+      "upload": {
+        "allowedFileTypes": [],
+        "priority": 1,
+        "slots": 2147483647,
+        "speedLimit": 2147483647,
+        "strategy": "roundrobin"
+      }
+    },
+    "userDefined": {}
+  },
+  "headless": false,
+  "instanceName": "default",
+  "integration": {
+    "acoustId": {
+      "baseUrl": "https://api.acoustid.org/v2",
+      "clientId": "",
+      "enabled": false
+    },
+    "chromaprint": {
+      "algorithm": "Default",
+      "channels": 2,
+      "durationSeconds": 120,
+      "enabled": false,
+      "ffmpegPath": "ffmpeg",
+      "sampleRate": 44100
+    },
+    "ftp": {
+      "address": "",
+      "connectionTimeout": 5000,
+      "enabled": false,
+      "encryptionMode": "auto",
+      "ignoreCertificateErrors": false,
+      "overwriteExisting": true,
+      "password": "*****",
+      "port": 21,
+      "remotePath": "/",
+      "retryAttempts": 3,
+      "username": ""
+    },
+    "lastFm": {
+      "apiKey": "*****",
+      "enabled": false
+    },
+    "lidarr": {
+      "apiKey": "*****",
+      "autoDownload": false,
+      "autoImportCompleted": false,
+      "enabled": false,
+      "importMode": "move",
+      "importPathFrom": "",
+      "importPathTo": "",
+      "importReplaceExistingFiles": false,
+      "maxItemsPerSync": 100,
+      "syncIntervalSeconds": 3600,
+      "syncWantedToWishlist": false,
+      "timeoutSeconds": 20,
+      "url": "",
+      "wishlistFilter": "",
+      "wishlistMaxResults": 100
+    },
+    "musicBrainz": {
+      "baseUrl": "https://musicbrainz.org/ws/2",
+      "retryAttempts": 2,
+      "timeout": "00:00:20",
+      "timeoutSeconds": 20,
+      "userAgent": "slskd/0.0.0 (https://github.com/snapetech/slskdn)"
+    },
+    "ntfy": {
+      "accessToken": "*****",
+      "enabled": false,
+      "notificationPrefix": "slskdN",
+      "notifyOnPrivateMessage": true,
+      "notifyOnRoomMention": true,
+      "url": ""
+    },
+    "pushbullet": {
+      "accessToken": "*****",
+      "cooldownTime": 900000,
+      "enabled": false,
+      "notificationPrefix": "From slskdN:",
+      "notifyOnPrivateMessage": true,
+      "notifyOnRoomMention": true,
+      "retryAttempts": 3
+    },
+    "pushover": {
+      "enabled": false,
+      "notificationPrefix": "slskdN",
+      "notifyOnPrivateMessage": true,
+      "notifyOnRoomMention": true,
+      "token": "*****",
+      "userKey": "*****"
+    },
+    "scripts": {},
+    "spotify": {
+      "clientId": "*****",
+      "clientSecret": "*****",
+      "enabled": false,
+      "market": "US",
+      "maxItemsPerImport": 500,
+      "redirectUri": "",
+      "timeoutSeconds": 20
+    },
+    "vpn": {
+      "enabled": false,
+      "gluetun": {
+        "apiKey": "*****",
+        "password": "*****",
+        "timeout": 1000,
+        "url": "",
+        "username": "",
+        "version": 1
+      },
+      "pollingInterval": 2500,
+      "portForwarding": false
+    },
+    "webhooks": {},
+    "youTube": {
+      "apiKey": "*****",
+      "enabled": false
+    }
+  },
+  "logger": {
+    "disk": false,
+    "loki": "",
+    "noColor": false
+  },
+  "metrics": {
+    "authentication": {
+      "disabled": false,
+      "password": "*****",
+      "username": "slskd"
+    },
+    "enabled": false,
+    "url": "/metrics"
+  },
+  "moderation": {
+    "enabled": false,
+    "externalModeration": {
+      "allowedDomains": [],
+      "enabled": false,
+      "mode": "Off",
+      "timeoutSeconds": 5
+    },
+    "failsafeMode": "block",
+    "hashBlocklist": {
+      "enabled": false
+    },
+    "llmModeration": {
+      "apiKey": "",
+      "cacheTtl": "1.00:00:00",
+      "enabled": false,
+      "endpoint": "",
+      "fallbackBehavior": "pass_to_next_provider",
+      "maxContentLength": 10000,
+      "minConfidenceThreshold": 0.8,
+      "model": "gpt-4",
+      "rateLimiting": {
+        "burstLimit": 10,
+        "requestsPerHour": 1000,
+        "requestsPerMinute": 60
+      },
+      "timeout": "00:00:30"
+    },
+    "reputation": {
+      "banThreshold": 10,
+      "decayDays": 30,
+      "enabled": false
+    }
+  },
+  "multiRealm": {
+    "bridge": {
+      "allowedFlows": [],
+      "disallowedFlows": [
+        "governance:root",
+        "replication:fullcopy",
+        "mcp:control"
+      ],
+      "enabled": false
+    },
+    "isBridgingEnabled": false,
+    "isValid": true,
+    "realmIds": [
+      "default-realm"
+    ],
+    "realms": [
+      {
+        "bootstrapNodes": [],
+        "governanceRoots": [
+          "default-governance"
+        ],
+        "id": "default-realm",
+        "isValid": true,
+        "policies": {
+          "federationAllowed": true,
+          "gossipEnabled": true,
+          "gossipIntervalSeconds": 300,
+          "maxGossipHops": 3,
+          "replicationEnabled": true
+        }
+      }
+    ]
+  },
+  "permissions": {
+    "file": {
+      "mode": ""
+    }
+  },
+  "player": {
+    "externalVisualizer": {
+      "arguments": [],
+      "enabled": false,
+      "name": "MilkDrop3"
+    }
+  },
+  "realm": {
+    "bootstrapNodes": [],
+    "governanceRoots": [
+      "default-governance"
+    ],
+    "id": "default-realm-v1",
+    "isValid": true,
+    "policies": {
+      "federationAllowed": true,
+      "gossipEnabled": true,
+      "gossipIntervalSeconds": 300,
+      "maxGossipHops": 3,
+      "replicationEnabled": true
+    }
+  },
+  "relay": {
+    "agents": {},
+    "controller": {
+      "address": "",
+      "apiKey": "*****",
+      "downloads": false,
+      "ignoreCertificateErrors": false,
+      "pinnedSpki": "",
+      "secret": "*****"
+    },
+    "enabled": false,
+    "mode": "controller"
+  },
+  "remoteConfiguration": false,
+  "remoteFileManagement": false,
+  "rescueMode": {
+    "checkIntervalSeconds": 45,
+    "enabled": true,
+    "maxQueueTimeSeconds": 1800,
+    "minDurationSeconds": 300,
+    "minThroughputKBps": 10,
+    "stalledTimeoutSeconds": 120
+  },
+  "retention": {
+    "events": 30,
+    "files": {},
+    "logs": 180,
+    "transfers": {
+      "download": {},
+      "upload": {}
+    }
+  },
+  "rooms": [],
+  "security": {
+    "contentSafety": {
+      "blockExecutables": true,
+      "enabled": true,
+      "quarantineDirectory": "",
+      "quarantineSuspicious": true,
+      "verifyMagicBytes": true
+    },
+    "enabled": true,
+    "events": {
+      "maxEventsInMemory": 10000,
+      "minLogSeverity": "Medium",
+      "persistEvents": false
+    },
+    "honeypot": {
+      "enabled": false,
+      "honeypotFiles": [],
+      "logInteractions": true
+    },
+    "networkGuard": {
+      "enabled": true,
+      "maxConnectionsPerIp": 100,
+      "maxGlobalConnections": 100,
+      "maxMessageSize": 65536,
+      "maxMessagesPerMinute": 60,
+      "maxPendingRequestsPerIp": 10
+    },
+    "paranoidMode": {
+      "blockedIpRanges": [],
+      "enabled": false,
+      "logServerMessages": false,
+      "maxSearchResults": 1000,
+      "validateServerResponses": true
+    },
+    "pathGuard": {
+      "blockedExtensions": [
+        ".exe",
+        ".bat",
+        ".cmd",
+        ".com",
+        ".pif",
+        ".scr",
+        ".ps1",
+        ".vbs",
+        ".vbe",
+        ".js",
+        ".jse",
+        ".wsf",
+        ".msi",
+        ".msp",
+        ".hta",
+        ".cpl",
+        ".jar",
+        ".app"
+      ],
+      "downloadRoot": "",
+      "enabled": true,
+      "maxPathDepth": 20,
+      "maxPathLength": 512,
+      "shareRoot": ""
+    },
+    "peerReputation": {
+      "enabled": true,
+      "persistReputation": true,
+      "trustedThreshold": 70,
+      "untrustedThreshold": 20
+    },
+    "privacyMode": {
+      "avoidPublicRooms": false,
+      "enabled": false,
+      "minimizeMetadata": true,
+      "stripSharePaths": false,
+      "useGenericClientId": true
+    },
+    "profile": "Standard",
+    "violationTracker": {
+      "autoBansBeforePermanent": 3,
+      "baseBanDurationMinutes": 60,
+      "enabled": true,
+      "violationWindowMinutes": 60,
+      "violationsBeforeAutoBan": 5
+    }
+  },
+  "shares": {
+    "cache": {
+      "storageMode": "memory",
+      "workers": 4
+    },
+    "directories": [],
+    "filters": [],
+    "probeMediaAttributes": true
+  },
+  "sharing": {
+    "tokenSigningKey": "*****"
+  },
+  "signalSystem": {
+    "btExtensionChannel": {
+      "enabled": true,
+      "priority": 1,
+      "requireActiveSession": false
+    },
+    "deduplicationCacheSize": 10000,
+    "defaultTtl": "00:05:00",
+    "enabled": true,
+    "meshChannel": {
+      "enabled": true,
+      "priority": 1,
+      "requireActiveSession": false
+    }
+  },
+  "socialFederation": {
+    "approvedPeers": [],
+    "enabled": false,
+    "httpTimeoutSeconds": 30,
+    "isFriendsOnly": false,
+    "isHermit": true,
+    "isPublic": false,
+    "mode": "Hermit",
+    "outboxMaxActivities": 100,
+    "pageSize": 20,
+    "verifySignatures": true
+  },
+  "solid": {
+    "allowInsecureHttp": false,
+    "allowLocalhostForWebId": false,
+    "allowedHosts": [],
+    "maxFetchBytes": 1000000,
+    "redirectPath": "/solid/callback",
+    "timeoutSeconds": 10
+  },
+  "songId": {
+    "maxConcurrentRuns": 2
+  },
+  "soulseek": {
+    "address": "vps.slsknet.org",
+    "connection": {
+      "buffer": {
+        "read": 16384,
+        "transfer": 262144,
+        "write": 16384,
+        "writeQueue": 50
+      },
+      "proxy": {
+        "address": "",
+        "enabled": false,
+        "password": "*****",
+        "username": ""
+      },
+      "timeout": {
+        "connect": 10000,
+        "inactivity": 60000,
+        "transfer": 60000
+      }
+    },
+    "description": "A slskdN user. Unofficial fork of slskd: https://github.com/snapetech/slskdn",
+    "diagnosticLevel": "info",
+    "distributedNetwork": {
+      "childLimit": 25,
+      "disableChildren": false,
+      "disabled": false,
+      "logging": false
+    },
+    "hatedInterests": [],
+    "likedInterests": [],
+    "listenIpAddress": "0.0.0.0",
+    "listenPort": 50300,
+    "obfuscation": {
+      "advertiseRegularPort": true,
+      "enabled": true,
+      "listenPort": 0,
+      "mode": "compatibility",
+      "preferOutbound": true
+    },
+    "password": "*****",
+    "picture": "",
+    "port": 2271,
+    "privateMessageAutoResponse": {
+      "cooldownMinutes": 360,
+      "enabled": false,
+      "message": "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client."
+    },
+    "safety": {
+      "enabled": true,
+      "maxBrowsesPerMinute": 5,
+      "maxConcurrentSwarmConnections": 10,
+      "maxDownloadSlotsUsed": 50,
+      "maxSearchesPerMinute": 10
+    },
+    "username": ""
+  },
+  "telemetry": {
+    "tracing": {
+      "enabled": false,
+      "exporter": "console"
+    }
+  },
+  "throttling": {
+    "search": {
+      "incoming": {
+        "circuitBreaker": 500,
+        "concurrency": 10,
+        "responseFileLimit": 500
+      }
+    }
+  },
+  "virtualSoulfind": {
+    "bridge": {
+      "bindAddress": "127.0.0.1",
+      "enabled": false,
+      "maxClients": 10,
+      "maxRequestsPerMinute": 60,
+      "maxTransfersPerSession": 10,
+      "port": 2242,
+      "requireAuth": true
+    },
+    "capture": {
+      "audioExtensions": [
+        ".flac",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".opus",
+        ".ogg",
+        ".wav"
+      ],
+      "enabled": false,
+      "minimumFileSizeBytes": 1048576
+    },
+    "disasterMode": {
+      "auto": false,
+      "enableGracefulDegradation": true,
+      "force": false,
+      "recoveryCheckIntervalMinutes": 5,
+      "recoveryHealthyChecksRequired": 3,
+      "unavailableThresholdMinutes": 10
+    },
+    "meshSearch": {
+      "enabled": false
+    },
+    "privacy": {
+      "anonymizationLevel": "Pseudonymized",
+      "persistRawObservations": false,
+      "rawObservationRetentionDays": 7,
+      "variantCacheRetentionDays": 30
+    },
+    "scenes": {
+      "announcementRefreshMinutes": 15,
+      "enableChat": false,
+      "enabled": false,
+      "maxJoinedScenes": 20
+    },
+    "shadowIndex": {
+      "cacheTTLMinutes": 10,
+      "enableCache": true,
+      "enabled": false,
+      "maxDhtOperationsPerMinute": 60,
+      "maxShardsPerPublish": 100,
+      "publishIntervalMinutes": 15,
+      "shardTTLHours": 1
+    }
+  },
+  "virtualSoulfindV2": {
+    "backends": {
+      "http": {
+        "maxRequestsPerMinute": 60,
+        "requestTimeoutMs": 30000,
+        "requireHttps": false
+      },
+      "mesh": {
+        "maxQueriesPerMinute": 30,
+        "minTrustScore": 0.5,
+        "queryTimeoutMs": 5000
+      },
+      "soulseek": {
+        "maxBrowsesPerMinute": 5,
+        "maxParallelSearches": 2,
+        "maxSearchesPerMinute": 10,
+        "minUploadSpeedBytesPerSec": 51200,
+        "searchTimeoutMs": 10000
+      },
+      "torrent": {
+        "maxDhtQueriesPerMinute": 20,
+        "minSeeders": 3
+      }
+    },
+    "defaultMode": "SoulseekFriendly",
+    "enabled": true,
+    "maxConcurrentExecutions": 3,
+    "processorBatchSize": 10,
+    "processorIntervalMs": 5000,
+    "workBudget": {
+      "defaultBudgetPerExecution": 1000,
+      "maxBudgetPerExecution": 5000
+    }
+  },
+  "warmCache": {
+    "enabled": false,
+    "maxStorageGb": 50,
+    "minPopularityThreshold": 0.1
+  },
+  "web": {
+    "address": "127.0.0.1",
+    "allowRemoteNoAuth": false,
+    "authentication": {
+      "apiKeys": {},
+      "disabled": true,
+      "jwt": {
+        "key": "*****",
+        "ttl": 3600000
+      },
+      "passthrough": {},
+      "password": "*****",
+      "username": "slskd"
+    },
+    "contentPath": "wwwroot",
+    "cors": {
+      "allowCredentials": false,
+      "allowedHeaders": [],
+      "allowedMethods": [],
+      "allowedOrigins": [],
+      "enabled": false
+    },
+    "enforceSecurity": false,
+    "https": {
+      "certificate": {
+        "password": "*****",
+        "pfx": ""
+      },
+      "disabled": false,
+      "force": false,
+      "port": 5031
+    },
+    "logging": false,
+    "maxRequestBodySize": 10485760,
+    "port": 5030,
+    "rateLimiting": {
+      "apiPermitLimit": 200,
+      "apiWindowSeconds": 60,
+      "enabled": true,
+      "federationPermitLimit": 30,
+      "federationWindowSeconds": 60,
+      "meshGatewayPermitLimit": 60,
+      "meshGatewayWindowSeconds": 60
+    },
+    "socket": "",
+    "urlBase": "/"
+  },
+  "wishlist": {
+    "autoDownload": false,
+    "enabled": true,
+    "intervalSeconds": 3600,
+    "maxResults": 100
+  }
+}

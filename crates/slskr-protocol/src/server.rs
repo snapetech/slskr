@@ -116,7 +116,8 @@ pub enum ServerCode {
     RelatedSearch = 153,
     ExcludedSearchPhrases = 160,
     CantConnectToPeer = 1001,
-    CantCreateRoom = 1003,
+    CantCreateRoom = 1002,
+    CantJoinRoom = 1003,
 }
 
 impl ServerCode {
@@ -223,6 +224,7 @@ impl ServerCode {
         Self::ExcludedSearchPhrases,
         Self::CantConnectToPeer,
         Self::CantCreateRoom,
+        Self::CantJoinRoom,
     ];
 
     #[must_use]
@@ -335,6 +337,7 @@ impl ServerCode {
             Self::ExcludedSearchPhrases => "ExcludedSearchPhrases",
             Self::CantConnectToPeer => "CantConnectToPeer",
             Self::CantCreateRoom => "CantCreateRoom",
+            Self::CantJoinRoom => "CantJoinRoom",
         }
     }
 }
@@ -445,7 +448,8 @@ impl TryFrom<u32> for ServerCode {
             153 => Self::RelatedSearch,
             160 => Self::ExcludedSearchPhrases,
             1001 => Self::CantConnectToPeer,
-            1003 => Self::CantCreateRoom,
+            1002 => Self::CantCreateRoom,
+            1003 => Self::CantJoinRoom,
             _ => return Err(value),
         };
         Ok(code)
@@ -584,6 +588,26 @@ pub struct RoomList {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomUser {
+    pub username: String,
+    pub status: u32,
+    pub average_speed: u32,
+    pub upload_count: u64,
+    pub file_count: u32,
+    pub directory_count: u32,
+    pub slots_free: u32,
+    pub country_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinedRoom {
+    pub room: String,
+    pub users: Vec<RoomUser>,
+    pub owner: Option<String>,
+    pub operators: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerMessage {
     LoginRequest(LoginRequest),
     LoginResponse(LoginResponse),
@@ -636,7 +660,9 @@ pub enum ServerMessage {
     },
     JoinRoom {
         room: String,
+        private: bool,
     },
+    JoinedRoom(JoinedRoom),
     LeaveRoom {
         room: String,
     },
@@ -657,6 +683,12 @@ pub enum ServerMessage {
     },
     Relogged,
     UserSearch(TargetedSearchRequest),
+    AddThingILike {
+        item: String,
+    },
+    RemoveThingILike {
+        item: String,
+    },
     RoomListRequest,
     RoomList(RoomList),
     PrivilegedUsers(Vec<String>),
@@ -704,6 +736,12 @@ pub enum ServerMessage {
         message: String,
     },
     ExcludedSearchPhrases(Vec<String>),
+    AddThingIHate {
+        item: String,
+    },
+    RemoveThingIHate {
+        item: String,
+    },
     CantConnectToPeerRequest {
         token: u32,
         username: String,
@@ -712,6 +750,9 @@ pub enum ServerMessage {
         token: u32,
     },
     CantCreateRoom {
+        room: String,
+    },
+    CantJoinRoom {
         room: String,
     },
     Unknown {
@@ -838,7 +879,15 @@ impl ServerMessage {
             },
             (ServerCode::JoinRoom, Direction::ClientToServer) => Self::JoinRoom {
                 room: reader.read_string()?,
+                private: if reader.is_empty() {
+                    false
+                } else {
+                    reader.read_u32_le()? != 0
+                },
             },
+            (ServerCode::JoinRoom, Direction::ServerToClient) => {
+                Self::JoinedRoom(decode_joined_room(&mut reader)?)
+            }
             (ServerCode::LeaveRoom, _) => Self::LeaveRoom {
                 room: reader.read_string()?,
             },
@@ -863,6 +912,12 @@ impl ServerMessage {
             (ServerCode::UserSearch, Direction::ClientToServer) => {
                 Self::UserSearch(decode_targeted_search_request(&mut reader)?)
             }
+            (ServerCode::AddThingILike, Direction::ClientToServer) => Self::AddThingILike {
+                item: reader.read_string()?,
+            },
+            (ServerCode::RemoveThingILike, Direction::ClientToServer) => Self::RemoveThingILike {
+                item: reader.read_string()?,
+            },
             (ServerCode::RoomList, Direction::ClientToServer) => Self::RoomListRequest,
             (ServerCode::RoomList, Direction::ServerToClient) => {
                 Self::RoomList(decode_room_list(&mut reader)?)
@@ -926,6 +981,12 @@ impl ServerMessage {
             (ServerCode::ExcludedSearchPhrases, Direction::ServerToClient) => {
                 Self::ExcludedSearchPhrases(decode_string_vec(&mut reader)?)
             }
+            (ServerCode::AddThingIHate, Direction::ClientToServer) => Self::AddThingIHate {
+                item: reader.read_string()?,
+            },
+            (ServerCode::RemoveThingIHate, Direction::ClientToServer) => Self::RemoveThingIHate {
+                item: reader.read_string()?,
+            },
             (ServerCode::CantConnectToPeer, Direction::ClientToServer) => {
                 Self::CantConnectToPeerRequest {
                     token: reader.read_u32_le()?,
@@ -938,6 +999,9 @@ impl ServerMessage {
                 }
             }
             (ServerCode::CantCreateRoom, Direction::ServerToClient) => Self::CantCreateRoom {
+                room: reader.read_string()?,
+            },
+            (ServerCode::CantJoinRoom, Direction::ServerToClient) => Self::CantJoinRoom {
                 room: reader.read_string()?,
             },
             _ => {
@@ -1110,8 +1174,13 @@ impl ServerMessage {
                 writer.write_string(query)?;
                 ServerCode::FileSearch
             }
-            Self::JoinRoom { room } => {
+            Self::JoinRoom { room, private } => {
                 writer.write_string(room)?;
+                writer.write_u32_le(u32::from(*private));
+                ServerCode::JoinRoom
+            }
+            Self::JoinedRoom(value) => {
+                encode_joined_room(&mut writer, value)?;
                 ServerCode::JoinRoom
             }
             Self::LeaveRoom { room } => {
@@ -1141,6 +1210,14 @@ impl ServerMessage {
             Self::UserSearch(value) => {
                 encode_targeted_search_request(&mut writer, value)?;
                 ServerCode::UserSearch
+            }
+            Self::AddThingILike { item } => {
+                writer.write_string(item)?;
+                ServerCode::AddThingILike
+            }
+            Self::RemoveThingILike { item } => {
+                writer.write_string(item)?;
+                ServerCode::RemoveThingILike
             }
             Self::RoomListRequest => ServerCode::RoomList,
             Self::RoomList(value) => {
@@ -1222,6 +1299,14 @@ impl ServerMessage {
                 encode_string_vec(&mut writer, value)?;
                 ServerCode::ExcludedSearchPhrases
             }
+            Self::AddThingIHate { item } => {
+                writer.write_string(item)?;
+                ServerCode::AddThingIHate
+            }
+            Self::RemoveThingIHate { item } => {
+                writer.write_string(item)?;
+                ServerCode::RemoveThingIHate
+            }
             Self::CantConnectToPeerRequest { token, username } => {
                 writer.write_u32_le(*token);
                 writer.write_string(username)?;
@@ -1234,6 +1319,10 @@ impl ServerMessage {
             Self::CantCreateRoom { room } => {
                 writer.write_string(room)?;
                 ServerCode::CantCreateRoom
+            }
+            Self::CantJoinRoom { room } => {
+                writer.write_string(room)?;
+                ServerCode::CantJoinRoom
             }
             Self::Unknown { code, payload } => {
                 return Ok(MessageFrame::new(*code, payload.clone()))
@@ -1407,6 +1496,122 @@ fn encode_string_vec(writer: &mut Writer, values: &[String]) -> Result<(), Encod
     writer.write_u32_le(count);
     for value in values {
         writer.write_string(value)?;
+    }
+    Ok(())
+}
+
+fn matching_room_count(
+    reader: &mut Reader<'_>,
+    field: &'static str,
+    expected: usize,
+    minimum_bytes_per_item: usize,
+) -> Result<usize, DecodeError> {
+    let actual = reader.read_bounded_count(field, minimum_bytes_per_item)?;
+    if actual != expected {
+        return Err(DecodeError::InvalidVectorLength {
+            field,
+            expected,
+            actual,
+        });
+    }
+    Ok(actual)
+}
+
+fn decode_joined_room(reader: &mut Reader<'_>) -> Result<JoinedRoom, DecodeError> {
+    let room = reader.read_string()?;
+    let user_count = reader.read_bounded_count("room users", 4)?;
+    let mut usernames = Vec::with_capacity(user_count);
+    for _ in 0..user_count {
+        usernames.push(reader.read_string()?);
+    }
+
+    matching_room_count(reader, "room user statuses", user_count, 4)?;
+    let mut statuses = Vec::with_capacity(user_count);
+    for _ in 0..user_count {
+        statuses.push(reader.read_u32_le()?);
+    }
+
+    matching_room_count(reader, "room user data", user_count, 20)?;
+    let mut data = Vec::with_capacity(user_count);
+    for _ in 0..user_count {
+        data.push((
+            reader.read_u32_le()?,
+            reader.read_u64_le()?,
+            reader.read_u32_le()?,
+            reader.read_u32_le()?,
+        ));
+    }
+
+    matching_room_count(reader, "room user slots", user_count, 4)?;
+    let mut slots = Vec::with_capacity(user_count);
+    for _ in 0..user_count {
+        slots.push(reader.read_u32_le()?);
+    }
+
+    matching_room_count(reader, "room user countries", user_count, 4)?;
+    let mut countries = Vec::with_capacity(user_count);
+    for _ in 0..user_count {
+        countries.push(reader.read_string()?);
+    }
+
+    let mut users = Vec::with_capacity(user_count);
+    for (index, username) in usernames.into_iter().enumerate() {
+        let (average_speed, upload_count, file_count, directory_count) = data[index];
+        users.push(RoomUser {
+            username,
+            status: statuses[index],
+            average_speed,
+            upload_count,
+            file_count,
+            directory_count,
+            slots_free: slots[index],
+            country_code: countries[index].clone(),
+        });
+    }
+
+    let (owner, operators) = if reader.is_empty() {
+        (None, Vec::new())
+    } else {
+        (Some(reader.read_string()?), decode_string_vec(reader)?)
+    };
+    Ok(JoinedRoom {
+        room,
+        users,
+        owner,
+        operators,
+    })
+}
+
+fn encode_joined_room(writer: &mut Writer, value: &JoinedRoom) -> Result<(), EncodeError> {
+    let count = u32::try_from(value.users.len())
+        .map_err(|_| EncodeError::length_overflow("room users", value.users.len()))?;
+    writer.write_string(&value.room)?;
+    writer.write_u32_le(count);
+    for user in &value.users {
+        writer.write_string(&user.username)?;
+    }
+    writer.write_u32_le(count);
+    for user in &value.users {
+        writer.write_u32_le(user.status);
+    }
+    writer.write_u32_le(count);
+    for user in &value.users {
+        writer.write_u32_le(user.average_speed);
+        writer.write_u64_le(user.upload_count);
+        writer.write_u32_le(user.file_count);
+        writer.write_u32_le(user.directory_count);
+    }
+    writer.write_u32_le(count);
+    for user in &value.users {
+        writer.write_u32_le(user.slots_free);
+    }
+    writer.write_u32_le(count);
+    for user in &value.users {
+        writer.write_string(&user.country_code)?;
+    }
+    if let Some(owner) = &value.owner {
+        writer.write_string(owner)?;
+        encode_string_vec(writer, &value.operators)?;
     }
     Ok(())
 }
