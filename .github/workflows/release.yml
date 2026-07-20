@@ -100,6 +100,13 @@ jobs:
           path: slskdn-reference
           fetch-depth: 0
           persist-credentials: false
+      - name: Fetch frozen slskd parity reference
+        run: |
+          git -C slskdn-reference fetch --no-tags --depth=1 \
+            https://github.com/slskd/slskd.git \
+            16e5d86ec9a91120f3ef40b85cb22036566b788a
+          git -C slskdn-reference cat-file -e \
+            '16e5d86ec9a91120f3ef40b85cb22036566b788a^{commit}'
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
