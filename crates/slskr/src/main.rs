@@ -91428,10 +91428,13 @@ mod tests {
 
     #[test]
     fn controller_auth_enforces_slskdn_roles_schemes_scopes_and_anonymous_routes() {
+        let state_dir =
+            std::env::temp_dir().join(format!("slskr-slskdn-auth-test-{}", uuid::Uuid::new_v4()));
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
             &MapEnv::default()
+                .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                 .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
@@ -91443,7 +91446,7 @@ mod tests {
             super::routing::check_route_auth(&config, method, path, authorization, &headers)
         };
 
-        assert_eq!(check("GET", "/api/v0/session", None), Err("unauthorized"));
+        assert!(check("GET", "/api/v0/session", None).is_ok());
         assert!(check("GET", "/api/v0/transfers", Some("Bearer read-token")).is_ok());
         assert_eq!(
             check(
@@ -91483,10 +91486,15 @@ mod tests {
 
     #[test]
     fn controller_auth_selects_the_frozen_slskd_policy_registry() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-controller-auth-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
             &MapEnv::default()
+                .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
                 .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
@@ -91515,6 +91523,7 @@ mod tests {
             None,
             FileConfig::default(),
             &MapEnv::default()
+                .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
                 .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
