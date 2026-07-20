@@ -7078,6 +7078,56 @@ PY
   printf 'status=200\ncontent-type=application/json\n' >"$suite/obfuscation-outbound-$stage.meta"
 }
 
+wait_for_obfuscation_server_connected() {
+  local base_url="$1"
+  local log="$2"
+  for _ in $(seq 1 300); do
+    if curl --fail --silent --max-time 1 "$base_url/api/v0/server" \
+      | "$python_bin" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("isConnected") is True else 1)' \
+        2>/dev/null
+    then
+      return
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'obfuscation outbound differential: daemon exited before login completed\n' >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'obfuscation outbound differential: timed out waiting for server login\n' >&2
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
+wait_for_obfuscation_address_request() {
+  local status="$1"
+  local log="$2"
+  for _ in $(seq 1 100); do
+    if "$python_bin" - "$status" <<'PY' 2>/dev/null
+import json,sys
+value=json.load(open(sys.argv[1], encoding="utf-8"))
+raise SystemExit(0 if "fixture-peer" in value.get("peer_address_requests", []) else 1)
+PY
+    then
+      # Allow the direct connection or regular fallback to settle after the
+      # fixture has answered the address request.
+      sleep 1
+      return
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'obfuscation outbound differential: daemon exited before requesting the peer address\n' >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'obfuscation outbound differential: timed out waiting for peer address request\n' >&2
+  cat "$status" >&2 || true
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
 trigger_obfuscation_outbound() {
   local implementation="$1"
   local base_url="$2"
@@ -7086,7 +7136,6 @@ trigger_obfuscation_outbound() {
   else
     curl --fail --silent --max-time 3 --request POST \
       "$base_url/api/v0/users/fixture-peer/browse/request" >/dev/null
-    sleep 3
   fi
 }
 
@@ -7125,7 +7174,9 @@ run_obfuscation_outbound_scenario() {
         "$http_port" "$https_port"
       wait_for_options "$base_url" "$work_dir/slskdn-obfuscation-outbound-$implementation-$stage.json" "$log"
       wait_for_fixture_active "$fixture_status" 1 "$log"
+      wait_for_obfuscation_server_connected "$base_url" "$log"
       trigger_obfuscation_outbound "$implementation" "$base_url"
+      wait_for_obfuscation_address_request "$fixture_status" "$log"
       capture_obfuscation_outbound "$suite" "$stage" "$fixture_status"
       stop_daemon
       stop_soulseek_fixture
@@ -9071,6 +9122,8 @@ fi
 if scenario_enabled obfuscation; then
   run_obfuscation_options_scenario "$slskdn_root"
   run_obfuscation_runtime_scenario "$slskdn_root"
+  run_obfuscation_outbound_scenario "$slskdn_root"
+elif scenario_enabled obfuscation-outbound; then
   run_obfuscation_outbound_scenario "$slskdn_root"
 fi
 if scenario_enabled no-connect; then
