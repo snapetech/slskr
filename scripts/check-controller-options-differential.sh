@@ -5586,6 +5586,29 @@ wait_for_blacklist_option() {
   exit 1
 }
 
+wait_for_blacklist_listener() {
+  local listen_port="$1"
+  local log="$2"
+  local consecutive=0
+  for _ in $(seq 1 600); do
+    if ss -H -ltn "sport = :$listen_port" | rg -q '^LISTEN'; then
+      consecutive=$((consecutive + 1))
+      [[ "$consecutive" -ge 10 ]] && return
+    else
+      consecutive=0
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'blacklist differential failed: daemon exited while waiting for peer listener\n' >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'blacklist differential failed: peer listener did not stabilize on 127.0.0.1:%s\n' "$listen_port" >&2
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
 capture_blacklist_peer_suite() {
   local suite="$1"
   local label="$2"
@@ -5756,21 +5779,24 @@ run_blacklist_scenario() {
     wait_for_options "$base_url" "$work_dir/$target-blacklist-$implementation-startup.json" "$log"
     wait_for_blacklist_option "$base_url" false "$cidr_file" "$log"
     wait_for_fixture_active "$fixture_status" 1 "$log"
-    wait_for_direct_user_info_state 127.0.0.1 "$listen_port" open "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     wait_for_share_files "$base_url" share 1 "$log"
     capture_blacklist_stage "$base_url" "$suite" startup-disabled
     capture_blacklist_peer_suite "$suite" peer-startup-disabled "$listen_port" false
 
     write_blacklist_yaml "$state/slskd.yml" "$server_port" "$listen_port" "$share_dir" true "$cidr_file"
     wait_for_blacklist_option "$base_url" true "$cidr_file" "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_stage "$base_url" "$suite" watched-cidr
     capture_blacklist_peer_suite "$suite" peer-watched-cidr "$listen_port" true
 
     write_blacklist_yaml "$state/slskd.yml" "$server_port" "$listen_port" "$share_dir" false "$p2p_file"
     wait_for_blacklist_option "$base_url" false "$p2p_file" "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_peer_suite "$suite" peer-watched-disabled "$listen_port" false
     write_blacklist_yaml "$state/slskd.yml" "$server_port" "$listen_port" "$share_dir" true "$p2p_file"
     wait_for_blacklist_option "$base_url" true "$p2p_file" "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_stage "$base_url" "$suite" watched-p2p
     capture_blacklist_peer_suite "$suite" peer-watched-p2p "$listen_port" true
 
@@ -5801,7 +5827,7 @@ run_blacklist_scenario() {
     wait_for_options "$base_url" "$work_dir/$target-blacklist-$implementation-restart.json" "$log"
     wait_for_blacklist_option "$base_url" true "$p2p_file" "$log"
     wait_for_fixture_active "$fixture_status" 1 "$log"
-    wait_for_direct_user_info_state 127.0.0.1 "$listen_port" open "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_stage "$base_url" "$suite" restarted
     capture_blacklist_peer_suite "$suite" peer-restarted "$listen_port" true
     stop_daemon
