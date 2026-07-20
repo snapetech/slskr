@@ -5311,6 +5311,34 @@ PY
   exit 1
 }
 
+wait_for_download_auto_retry_requests() {
+  local fixture_status="$1"
+  local expected="$2"
+  local log="$3"
+  for _ in $(seq 1 300); do
+    if "$python_bin" - "$fixture_status" "$expected" 2>/dev/null <<'PY'
+import json,sys
+fixture=json.load(open(sys.argv[1],encoding="utf-8"))
+requests=fixture.get("peer_address_requests",[])
+expected=int(sys.argv[2])
+expected_peers=["fixture-peer-a","fixture-peer-b"]
+raise SystemExit(0 if len(requests)==expected and sorted(requests)==expected_peers else 1)
+PY
+    then
+      return
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'download auto-retry daemon exited while waiting for %s peer requests\n' "$expected" >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'download auto-retry timed out waiting for %s peer requests\n' "$expected" >&2
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
 capture_download_auto_retry_stage() {
   local base_url="$1"
   local suite="$2"
@@ -5334,24 +5362,17 @@ PY
 }
 
 capture_download_auto_retry_behavior() {
-  local implementation="$1"
-  local state="$2"
-  local fixture_status="$3"
-  local suite="$4"
-  local count
-  if [[ "$implementation" == upstream ]]; then
-    count="$(sqlite3 "$state/data/transfers.db" 'SELECT COUNT(*) FROM Transfers;')"
-  else
-    count="$($python_bin -c 'import json,sys; print(len(json.load(open(sys.argv[1],encoding="utf-8"))["entries"]))' "$state/transfer-state.json")"
-  fi
-  "$python_bin" - "$fixture_status" "$count" >"$suite/auto-retry-behavior.body" <<'PY'
+  local fixture_status="$1"
+  local suite="$2"
+  "$python_bin" - "$fixture_status" >"$suite/auto-retry-behavior.body" <<'PY'
 import json,sys
 fixture=json.load(open(sys.argv[1],encoding="utf-8"))
-requests=sorted(set(fixture.get("peer_address_requests",[])))
+all_requests=fixture.get("peer_address_requests",[])
+requests=sorted(set(all_requests))
 print(json.dumps({
     "initialFailures":3,
-    "retryCount":int(sys.argv[2])-3,
-    "boundedToTwo":int(sys.argv[2])==5,
+    "retryCount":len(all_requests),
+    "boundedToTwo":len(all_requests)==2,
     "contactedPeers":requests,
 },sort_keys=True,separators=(",",":")))
 PY
@@ -5399,12 +5420,12 @@ run_download_auto_retry_scenario() {
       true 10 10 1 2 1 60 false 0 5.5
     wait_for_download_auto_retry_options "$base_url" true 5.5 "$log"
     capture_download_auto_retry_stage "$base_url" "$suite" watched-enabled
-    wait_for_download_auto_retry_count "$implementation" "$state" 5 "$log"
+    wait_for_download_auto_retry_requests "$fixture_status" 2 "$log"
     sleep 1
-    wait_for_download_auto_retry_count "$implementation" "$state" 5 "$log"
+    wait_for_download_auto_retry_requests "$fixture_status" 2 "$log"
     sleep 11
-    wait_for_download_auto_retry_count "$implementation" "$state" 5 "$log"
-    capture_download_auto_retry_behavior "$implementation" "$state" "$fixture_status" "$suite"
+    wait_for_download_auto_retry_requests "$fixture_status" 2 "$log"
+    capture_download_auto_retry_behavior "$fixture_status" "$suite"
 
     write_download_auto_retry_yaml "$state/slskd.yml" false "$server_port" "$listen_port" \
       null null null null null null null null null null
