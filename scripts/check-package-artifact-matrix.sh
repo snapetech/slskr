@@ -34,6 +34,16 @@ if ! rg -n -U 'name: macos-x64\n[[:space:]]+os: macos-15-intel\n[[:space:]]+targ
 fi
 
 for expected in \
+  'Select full Perl for vendored OpenSSL' \
+  'OPENSSL_SRC_PERL=' \
+  'Locale::Maketext::Simple'; do
+  if ! rg -n -F "$expected" .github/workflows/release.yml >/dev/null; then
+    printf 'package artifact matrix check failed: Windows vendored OpenSSL prerequisite missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+for expected in \
   'cfg(all(not(target_os = "windows"), not(target_env = "musl")))' \
   'cfg(any(target_os = "windows", target_env = "musl"))' \
   'features = ["vendored"]'; do
