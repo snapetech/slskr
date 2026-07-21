@@ -2,7 +2,7 @@ name: Release
 
 env:
   CARGO_AUDIT_VERSION: 0.22.1
-  ACTIONLINT_VERSION: v1.7.7
+  ACTIONLINT_VERSION: v1.7.12
   SLSKR_SECURITY_SCANS_REQUIRED: '1'
   SLSKR_SEMGREP_IMAGE: semgrep/semgrep:1.167.0
   SLSKR_TRIVY_IMAGE: aquasec/trivy:0.72.0
@@ -180,7 +180,7 @@ jobs:
             target: aarch64-unknown-linux-musl
             apt: musl-tools
           - name: macos-x64
-            os: macos-14
+            os: macos-15-intel
             target: x86_64-apple-darwin
             apt: ''
           - name: macos-arm64
