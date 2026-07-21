@@ -1,5 +1,5 @@
 pkgname=slskr
-pkgver=0.2.15
+pkgver=0.2.27
 pkgrel=1
 pkgdesc='Rust Soulseek daemon with bundled Web UI'
 arch=('x86_64' 'aarch64')
@@ -9,13 +9,15 @@ depends=('gcc-libs' 'glibc')
 makedepends=('cargo' 'npm')
 backup=('etc/slskr/config.toml')
 source=(
-  "slskr-${pkgver}.tar.gz::https://github.com/snapetech/slskr/archive/refs/tags/release-v${pkgver}.tar.gz"
+  "slskr-${pkgver}.tar.gz::${url}/archive/refs/tags/release-v${pkgver}.tar.gz"
   'slskr.service'
   'slskr.sysusers'
   'slskr.tmpfiles'
-  'slskr.install'
 )
-sha256sums=('SKIP' '3553ccff12888654c51848ae84c2ffec6fd35171a41ecfc4e7985553a59a90c9' '384dc783fd133eadcee6d9575eb41209fd231bd0728b815a5cf4af2ff6c43629' 'efbe26e7b0765a17276981f4694d30d3174cba6799588e7ae6590acdd1fe73d9' 'befeeb12e6ca2ca61d2b20a94c834e71e7f9c79dc38b236fb9bf5f0494f694bf')
+sha256sums=(
+  '4b658e4a7102b0dcd61dd54c0ffdf3798a048ce1dde1b8dfdf6730c66a9a5649'
+  '3553ccff12888654c51848ae84c2ffec6fd35171a41ecfc4e7985553a59a90c9' '384dc783fd133eadcee6d9575eb41209fd231bd0728b815a5cf4af2ff6c43629' 'efbe26e7b0765a17276981f4694d30d3174cba6799588e7ae6590acdd1fe73d9'
+)
 install=slskr.install
 
 build() {
