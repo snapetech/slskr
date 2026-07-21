@@ -19,13 +19,28 @@ daemon_pid=""
 soulseek_fixture_pid=""
 listener_blocker_pid=""
 lidarr_fixture_pid=""
+tcp_port_registry="$work_dir/.allocated-tcp-ports"
+mkdir -p "$tcp_port_registry"
 
 pick_free_port() {
-  "$python_bin" - <<'PY'
+  "$python_bin" - "$tcp_port_registry" <<'PY'
+import os
 import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("0.0.0.0", 0))
-    print(sock.getsockname()[1])
+import sys
+
+registry = sys.argv[1]
+for _ in range(256):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("0.0.0.0", 0))
+        port = sock.getsockname()[1]
+        try:
+            os.mkdir(os.path.join(registry, str(port)))
+        except FileExistsError:
+            continue
+        print(port)
+        break
+else:
+    raise SystemExit("unable to allocate a unique free TCP port")
 PY
 }
 
@@ -39,8 +54,12 @@ PY
 }
 
 pick_free_port_with_free_successor() {
-  "$python_bin" - <<'PY'
+  "$python_bin" - "$tcp_port_registry" <<'PY'
+import os
 import socket
+import sys
+
+registry = sys.argv[1]
 for _ in range(256):
     first = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     first.bind(("0.0.0.0", 0))
@@ -52,6 +71,21 @@ for _ in range(256):
     try:
         second.bind(("0.0.0.0", port + 1))
     except OSError:
+        first.close()
+        second.close()
+        continue
+    first_claim = os.path.join(registry, str(port))
+    second_claim = os.path.join(registry, str(port + 1))
+    try:
+        os.mkdir(first_claim)
+    except FileExistsError:
+        first.close()
+        second.close()
+        continue
+    try:
+        os.mkdir(second_claim)
+    except FileExistsError:
+        os.rmdir(first_claim)
         first.close()
         second.close()
         continue
