@@ -94,6 +94,13 @@ if rg -n 'go install "github.com/rhysd/actionlint/cmd/actionlint@latest"|go inst
   status=1
 fi
 
+for workflow in .github/workflows/ci.yml .github/workflows/release.yml; do
+  if ! rg -n -F "go-version: '1.25.x'" "$workflow" >/dev/null; then
+    printf 'workflow release policy check failed: actionlint v1.7.12 requires Go 1.25 or newer: %s\n' "$workflow" >&2
+    status=1
+  fi
+done
+
 if ! rg -n -F "release-v*" .github/workflows/release.yml >/dev/null; then
   printf 'workflow release policy check failed: release-v tag trigger was not found\n' >&2
   status=1

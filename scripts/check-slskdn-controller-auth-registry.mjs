@@ -40,6 +40,12 @@ const inventory = JSON.parse(
 );
 
 function accessFor(row) {
+  // Both frozen daemons return 401 for this read without a principal even
+  // though the action's static metadata is AllowAnonymous. Preserve the
+  // observed runtime contract covered by the authentication differential.
+  if (row.method === 'GET' && row.route === '/api/v0/session') {
+    return 'authenticated';
+  }
   if (row.auth.allowAnonymous) return 'anonymous';
   if (!row.auth.explicit) return 'delegated';
   if (

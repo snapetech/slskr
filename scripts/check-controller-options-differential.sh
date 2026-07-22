@@ -19,13 +19,28 @@ daemon_pid=""
 soulseek_fixture_pid=""
 listener_blocker_pid=""
 lidarr_fixture_pid=""
+tcp_port_registry="$work_dir/.allocated-tcp-ports"
+mkdir -p "$tcp_port_registry"
 
 pick_free_port() {
-  "$python_bin" - <<'PY'
+  "$python_bin" - "$tcp_port_registry" <<'PY'
+import os
 import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("0.0.0.0", 0))
-    print(sock.getsockname()[1])
+import sys
+
+registry = sys.argv[1]
+for _ in range(256):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("0.0.0.0", 0))
+        port = sock.getsockname()[1]
+        try:
+            os.mkdir(os.path.join(registry, str(port)))
+        except FileExistsError:
+            continue
+        print(port)
+        break
+else:
+    raise SystemExit("unable to allocate a unique free TCP port")
 PY
 }
 
@@ -39,8 +54,12 @@ PY
 }
 
 pick_free_port_with_free_successor() {
-  "$python_bin" - <<'PY'
+  "$python_bin" - "$tcp_port_registry" <<'PY'
+import os
 import socket
+import sys
+
+registry = sys.argv[1]
 for _ in range(256):
     first = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     first.bind(("0.0.0.0", 0))
@@ -52,6 +71,21 @@ for _ in range(256):
     try:
         second.bind(("0.0.0.0", port + 1))
     except OSError:
+        first.close()
+        second.close()
+        continue
+    first_claim = os.path.join(registry, str(port))
+    second_claim = os.path.join(registry, str(port + 1))
+    try:
+        os.mkdir(first_claim)
+    except FileExistsError:
+        first.close()
+        second.close()
+        continue
+    try:
+        os.mkdir(second_claim)
+    except FileExistsError:
+        os.rmdir(first_claim)
         first.close()
         second.close()
         continue
@@ -2613,12 +2647,15 @@ run_no_connect_invalid_watch_case() {
     local observed=false
     for _ in $(seq 1 200); do
       local status
-      status="$(curl --silent --show-error --max-time 1 \
+      if curl --silent --show-error --max-time 1 \
         --output "$suite/no-connect-invalid-watch.body" \
         --write-out $'status=%{http_code}\ncontent-type=%{content_type}\n' \
         "$base_url/api/v0/options" \
-        >"$suite/no-connect-invalid-watch.meta" 2>/dev/null \
-        && sed -n 's/^status=//p' "$suite/no-connect-invalid-watch.meta" || true)"
+        >"$suite/no-connect-invalid-watch.meta" 2>/dev/null; then
+        status="$(sed -n 's/^status=//p' "$suite/no-connect-invalid-watch.meta")"
+      else
+        status=""
+      fi
       if [[ "$status" == 500 ]]; then
         observed=true
         break
@@ -4551,9 +4588,10 @@ start_instance_daemon() {
   local log="$5"
   local http_port="$6"
   local https_port="$7"
-  local environment_name="$8"
-  local command_line_name="$9"
-  local append="${10:-false}"
+  local listen_port="$8"
+  local environment_name="$9"
+  local command_line_name="${10}"
+  local append="${11:-false}"
   local redirection='>'
   [[ "$append" == true ]] && redirection='>>'
 
@@ -4565,6 +4603,7 @@ start_instance_daemon() {
     if [[ "$implementation" == upstream ]]; then
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
+      export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       local dll="$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"
       local args=(dotnet "$dll")
       if [[ "$command_line_name" != __unset__ ]]; then
@@ -4577,7 +4616,7 @@ start_instance_daemon() {
       fi
     else
       export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
-      local args=("$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port")
+      local args=("$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
       if [[ "$command_line_name" != __unset__ ]]; then
         args+=(-i "$command_line_name")
       fi
@@ -4667,6 +4706,7 @@ run_instance_name_scenario() {
   for implementation in upstream slskr; do
     local http_port="$(pick_free_port)"
     local https_port="$(pick_free_port)"
+    local listen_port="$(pick_free_port)"
     local base_url="http://127.0.0.1:$http_port"
     local state="$work_dir/state-$target-instance-$implementation"
     local suite="$work_dir/$target-instance-$implementation"
@@ -4675,20 +4715,20 @@ run_instance_name_scenario() {
 
     write_instance_yaml "$state/slskd.yml" '"yaml-wins-environment"'
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" environment-loses __unset__
+      "$http_port" "$https_port" "$listen_port" environment-loses __unset__
     wait_for_options "$base_url" "$work_dir/$target-instance-$implementation-yaml-precedence.json" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" yaml-precedence "$log" yaml-wins-environment
     stop_daemon
 
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" environment-loses cli-wins true
+      "$http_port" "$https_port" "$listen_port" environment-loses cli-wins true
     wait_for_options "$base_url" "$work_dir/$target-instance-$implementation-cli-precedence.json" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" cli-precedence "$log" cli-wins
     stop_daemon
 
     write_instance_yaml "$state/slskd.yml" '"watched-old"'
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" __unset__ __unset__ true
+      "$http_port" "$https_port" "$listen_port" __unset__ __unset__ true
     wait_for_options "$base_url" "$work_dir/$target-instance-$implementation-lifecycle.json" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" lifecycle-startup "$log" watched-old
 
@@ -4703,14 +4743,14 @@ run_instance_name_scenario() {
 
     write_instance_yaml "$state/slskd.yml" "$long_control_yaml"
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" __unset__ __unset__ true
+      "$http_port" "$https_port" "$listen_port" __unset__ __unset__ true
     wait_for_instance_option "$base_url" "$long_control_name" "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" long-control-restarted "$log" __skip__
     stop_daemon
 
     write_instance_yaml "$state/slskd.yml" '""'
     start_instance_daemon "$target" "$root" "$implementation" "$state" "$log" \
-      "$http_port" "$https_port" __unset__ __unset__ true
+      "$http_port" "$https_port" "$listen_port" __unset__ __unset__ true
     wait_for_instance_option "$base_url" default "$log"
     capture_instance_stage "$implementation" "$base_url" "$suite" empty-restarted "$log" default
 
@@ -5311,6 +5351,34 @@ PY
   exit 1
 }
 
+wait_for_download_auto_retry_requests() {
+  local fixture_status="$1"
+  local expected="$2"
+  local log="$3"
+  for _ in $(seq 1 300); do
+    if "$python_bin" - "$fixture_status" "$expected" 2>/dev/null <<'PY'
+import json,sys
+fixture=json.load(open(sys.argv[1],encoding="utf-8"))
+requests=fixture.get("peer_address_requests",[])
+expected=int(sys.argv[2])
+expected_peers=["fixture-peer-a","fixture-peer-b"]
+raise SystemExit(0 if len(requests)==expected and sorted(requests)==expected_peers else 1)
+PY
+    then
+      return
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'download auto-retry daemon exited while waiting for %s peer requests\n' "$expected" >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'download auto-retry timed out waiting for %s peer requests\n' "$expected" >&2
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
 capture_download_auto_retry_stage() {
   local base_url="$1"
   local suite="$2"
@@ -5334,24 +5402,17 @@ PY
 }
 
 capture_download_auto_retry_behavior() {
-  local implementation="$1"
-  local state="$2"
-  local fixture_status="$3"
-  local suite="$4"
-  local count
-  if [[ "$implementation" == upstream ]]; then
-    count="$(sqlite3 "$state/data/transfers.db" 'SELECT COUNT(*) FROM Transfers;')"
-  else
-    count="$($python_bin -c 'import json,sys; print(len(json.load(open(sys.argv[1],encoding="utf-8"))["entries"]))' "$state/transfer-state.json")"
-  fi
-  "$python_bin" - "$fixture_status" "$count" >"$suite/auto-retry-behavior.body" <<'PY'
+  local fixture_status="$1"
+  local suite="$2"
+  "$python_bin" - "$fixture_status" >"$suite/auto-retry-behavior.body" <<'PY'
 import json,sys
 fixture=json.load(open(sys.argv[1],encoding="utf-8"))
-requests=sorted(set(fixture.get("peer_address_requests",[])))
+all_requests=fixture.get("peer_address_requests",[])
+requests=sorted(set(all_requests))
 print(json.dumps({
     "initialFailures":3,
-    "retryCount":int(sys.argv[2])-3,
-    "boundedToTwo":int(sys.argv[2])==5,
+    "retryCount":len(all_requests),
+    "boundedToTwo":len(all_requests)==2,
     "contactedPeers":requests,
 },sort_keys=True,separators=(",",":")))
 PY
@@ -5399,12 +5460,12 @@ run_download_auto_retry_scenario() {
       true 10 10 1 2 1 60 false 0 5.5
     wait_for_download_auto_retry_options "$base_url" true 5.5 "$log"
     capture_download_auto_retry_stage "$base_url" "$suite" watched-enabled
-    wait_for_download_auto_retry_count "$implementation" "$state" 5 "$log"
+    wait_for_download_auto_retry_requests "$fixture_status" 2 "$log"
     sleep 1
-    wait_for_download_auto_retry_count "$implementation" "$state" 5 "$log"
+    wait_for_download_auto_retry_requests "$fixture_status" 2 "$log"
     sleep 11
-    wait_for_download_auto_retry_count "$implementation" "$state" 5 "$log"
-    capture_download_auto_retry_behavior "$implementation" "$state" "$fixture_status" "$suite"
+    wait_for_download_auto_retry_requests "$fixture_status" 2 "$log"
+    capture_download_auto_retry_behavior "$fixture_status" "$suite"
 
     write_download_auto_retry_yaml "$state/slskd.yml" false "$server_port" "$listen_port" \
       null null null null null null null null null null
@@ -5561,6 +5622,29 @@ wait_for_blacklist_option() {
     sleep 0.1
   done
   printf 'blacklist differential failed: timed out waiting for enabled=%s file=%s\n' "$enabled" "$file" >&2
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
+wait_for_blacklist_listener() {
+  local listen_port="$1"
+  local log="$2"
+  local consecutive=0
+  for _ in $(seq 1 600); do
+    if ss -H -ltn "sport = :$listen_port" | rg -q '^LISTEN'; then
+      consecutive=$((consecutive + 1))
+      [[ "$consecutive" -ge 10 ]] && return
+    else
+      consecutive=0
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'blacklist differential failed: daemon exited while waiting for peer listener\n' >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'blacklist differential failed: peer listener did not stabilize on 127.0.0.1:%s\n' "$listen_port" >&2
   tail -120 "$log" >&2 || true
   exit 1
 }
@@ -5735,21 +5819,24 @@ run_blacklist_scenario() {
     wait_for_options "$base_url" "$work_dir/$target-blacklist-$implementation-startup.json" "$log"
     wait_for_blacklist_option "$base_url" false "$cidr_file" "$log"
     wait_for_fixture_active "$fixture_status" 1 "$log"
-    wait_for_direct_user_info_state 127.0.0.1 "$listen_port" open "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     wait_for_share_files "$base_url" share 1 "$log"
     capture_blacklist_stage "$base_url" "$suite" startup-disabled
     capture_blacklist_peer_suite "$suite" peer-startup-disabled "$listen_port" false
 
     write_blacklist_yaml "$state/slskd.yml" "$server_port" "$listen_port" "$share_dir" true "$cidr_file"
     wait_for_blacklist_option "$base_url" true "$cidr_file" "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_stage "$base_url" "$suite" watched-cidr
     capture_blacklist_peer_suite "$suite" peer-watched-cidr "$listen_port" true
 
     write_blacklist_yaml "$state/slskd.yml" "$server_port" "$listen_port" "$share_dir" false "$p2p_file"
     wait_for_blacklist_option "$base_url" false "$p2p_file" "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_peer_suite "$suite" peer-watched-disabled "$listen_port" false
     write_blacklist_yaml "$state/slskd.yml" "$server_port" "$listen_port" "$share_dir" true "$p2p_file"
     wait_for_blacklist_option "$base_url" true "$p2p_file" "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_stage "$base_url" "$suite" watched-p2p
     capture_blacklist_peer_suite "$suite" peer-watched-p2p "$listen_port" true
 
@@ -5780,7 +5867,7 @@ run_blacklist_scenario() {
     wait_for_options "$base_url" "$work_dir/$target-blacklist-$implementation-restart.json" "$log"
     wait_for_blacklist_option "$base_url" true "$p2p_file" "$log"
     wait_for_fixture_active "$fixture_status" 1 "$log"
-    wait_for_direct_user_info_state 127.0.0.1 "$listen_port" open "$log"
+    wait_for_blacklist_listener "$listen_port" "$log"
     capture_blacklist_stage "$base_url" "$suite" restarted
     capture_blacklist_peer_suite "$suite" peer-restarted "$listen_port" true
     stop_daemon
@@ -6264,7 +6351,7 @@ write_dht_yaml() {
   local enabled="$2"
   local dht_port="$3"
   local temporary="$path.tmp"
-  printf 'remote_configuration: true\nflags:\n  no_connect: true\ndht:\n  enabled: %s\n  dht_port: %s\n' \
+  printf 'remote_configuration: true\nflags:\n  no_connect: true\nweb:\n  rate_limiting:\n    enabled: false\ndht:\n  enabled: %s\n  dht_port: %s\n' \
     "$enabled" "$dht_port" >"$temporary"
   mv "$temporary" "$path"
 }
@@ -7028,6 +7115,56 @@ PY
   printf 'status=200\ncontent-type=application/json\n' >"$suite/obfuscation-outbound-$stage.meta"
 }
 
+wait_for_obfuscation_server_connected() {
+  local base_url="$1"
+  local log="$2"
+  for _ in $(seq 1 300); do
+    if curl --fail --silent --max-time 1 "$base_url/api/v0/server" \
+      | "$python_bin" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("isConnected") is True else 1)' \
+        2>/dev/null
+    then
+      return
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'obfuscation outbound differential: daemon exited before login completed\n' >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'obfuscation outbound differential: timed out waiting for server login\n' >&2
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
+wait_for_obfuscation_address_request() {
+  local status="$1"
+  local log="$2"
+  for _ in $(seq 1 100); do
+    if "$python_bin" - "$status" <<'PY' 2>/dev/null
+import json,sys
+value=json.load(open(sys.argv[1], encoding="utf-8"))
+raise SystemExit(0 if "fixture-peer" in value.get("peer_address_requests", []) else 1)
+PY
+    then
+      # Allow the direct connection or regular fallback to settle after the
+      # fixture has answered the address request.
+      sleep 1
+      return
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      printf 'obfuscation outbound differential: daemon exited before requesting the peer address\n' >&2
+      tail -120 "$log" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+  printf 'obfuscation outbound differential: timed out waiting for peer address request\n' >&2
+  cat "$status" >&2 || true
+  tail -120 "$log" >&2 || true
+  exit 1
+}
+
 trigger_obfuscation_outbound() {
   local implementation="$1"
   local base_url="$2"
@@ -7036,7 +7173,6 @@ trigger_obfuscation_outbound() {
   else
     curl --fail --silent --max-time 3 --request POST \
       "$base_url/api/v0/users/fixture-peer/browse/request" >/dev/null
-    sleep 3
   fi
 }
 
@@ -7075,7 +7211,9 @@ run_obfuscation_outbound_scenario() {
         "$http_port" "$https_port"
       wait_for_options "$base_url" "$work_dir/slskdn-obfuscation-outbound-$implementation-$stage.json" "$log"
       wait_for_fixture_active "$fixture_status" 1 "$log"
+      wait_for_obfuscation_server_connected "$base_url" "$log"
       trigger_obfuscation_outbound "$implementation" "$base_url"
+      wait_for_obfuscation_address_request "$fixture_status" "$log"
       capture_obfuscation_outbound "$suite" "$stage" "$fixture_status"
       stop_daemon
       stop_soulseek_fixture
@@ -7264,11 +7402,14 @@ PY
     local invalid_observed=false
     for _ in $(seq 1 200); do
       local status
-      status="$(curl --silent --show-error --max-time 1 \
+      if curl --silent --show-error --max-time 1 \
         --output "$suite/listener-invalid-watch.body" \
         --write-out $'status=%{http_code}\ncontent-type=%{content_type}\n' \
-        "$base_url/api/v0/options" >"$suite/listener-invalid-watch.meta" 2>/dev/null \
-        && sed -n 's/^status=//p' "$suite/listener-invalid-watch.meta" || true)"
+        "$base_url/api/v0/options" >"$suite/listener-invalid-watch.meta" 2>/dev/null; then
+        status="$(sed -n 's/^status=//p' "$suite/listener-invalid-watch.meta")"
+      else
+        status=""
+      fi
       if [[ "$status" == 500 ]]; then
         invalid_observed=true
         break
@@ -9018,6 +9159,8 @@ fi
 if scenario_enabled obfuscation; then
   run_obfuscation_options_scenario "$slskdn_root"
   run_obfuscation_runtime_scenario "$slskdn_root"
+  run_obfuscation_outbound_scenario "$slskdn_root"
+elif scenario_enabled obfuscation-outbound; then
   run_obfuscation_outbound_scenario "$slskdn_root"
 fi
 if scenario_enabled no-connect; then

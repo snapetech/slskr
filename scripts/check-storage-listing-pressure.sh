@@ -51,7 +51,8 @@ if ! rg -n 'slskd_recursive_storage_listing_has_lower_budget|slskd_storage_direc
   status=1
 fi
 
-if ! rg -n 'check_rate_limit\(rate_limit_remote_addr, username\)' crates/slskr/src/main.rs >/dev/null; then
+if ! rg -n 'controller_rate_limit_policy\(' crates/slskr/src/main.rs >/dev/null \
+  || ! rg -n '\.check_ip_partition\(' crates/slskr/src/main.rs >/dev/null; then
   printf 'storage listing pressure check failed: HTTP route rate-limit coverage is missing\n' >&2
   status=1
 fi

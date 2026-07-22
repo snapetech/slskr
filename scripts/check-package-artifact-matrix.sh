@@ -28,6 +28,31 @@ for target in \
   fi
 done
 
+if ! rg -n -U 'name: macos-x64\n[[:space:]]+os: macos-15-intel\n[[:space:]]+target: x86_64-apple-darwin' .github/workflows/release.yml >/dev/null; then
+  printf 'package artifact matrix check failed: macOS x64 releases must build on a native Intel runner\n' >&2
+  status=1
+fi
+
+for expected in \
+  'Select full Perl for vendored OpenSSL' \
+  'OPENSSL_SRC_PERL=' \
+  'Locale::Maketext::Simple'; do
+  if ! rg -n -F "$expected" .github/workflows/release.yml >/dev/null; then
+    printf 'package artifact matrix check failed: Windows vendored OpenSSL prerequisite missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+for expected in \
+  'cfg(all(not(target_os = "windows"), not(target_env = "musl")))' \
+  'cfg(any(target_os = "windows", target_env = "musl"))' \
+  'features = ["vendored"]'; do
+  if ! rg -n -F "$expected" crates/slskr/Cargo.toml >/dev/null; then
+    printf 'package artifact matrix check failed: portable OpenSSL release configuration missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
 for target in \
   x86_64-unknown-linux-gnu \
   x86_64-unknown-linux-musl \

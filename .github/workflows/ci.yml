@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  ACTIONLINT_VERSION: v1.7.7
+  ACTIONLINT_VERSION: v1.7.12
   CARGO_AUDIT_VERSION: 0.22.1
   SLSKR_SECURITY_SCANS_REQUIRED: '1'
   SLSKR_SEMGREP_IMAGE: semgrep/semgrep:1.167.0
@@ -38,7 +38,7 @@ jobs:
             client-ts/package-lock.json
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # actions/setup-go@v6
         with:
-          go-version: '1.23.x'
+          go-version: '1.25.x'
           cache-dependency-path: client-go/go.sum
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # actions/setup-python@v6
         with:

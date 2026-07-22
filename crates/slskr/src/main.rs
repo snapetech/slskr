@@ -10268,6 +10268,7 @@ struct ControllerOptionsOverlayState {
     watched_share_directories: Option<Vec<String>>,
     watched_instance_name: Option<String>,
     watched_controller_swagger: Option<bool>,
+    watched_dht: Option<config::DhtSettings>,
     command_line_environment: BTreeMap<String, String>,
 }
 
@@ -13959,7 +13960,9 @@ async fn route_http_request_with_headers(
     {
         let advanced = state.advanced_networking.read().await;
         let disabled = (normalized_path.starts_with("/api/mesh") && !advanced.mesh.enabled)
-            || (normalized_path.starts_with("/api/dht") && !advanced.dht.enabled)
+            || (normalized_path.starts_with("/api/dht")
+                && normalized_path != "/api/dht/status"
+                && !advanced.dht.enabled)
             || (normalized_path.starts_with("/api/overlay/data") && !advanced.overlay_data.enable)
             || (normalized_path.starts_with("/api/overlay") && !advanced.overlay.enable);
         if disabled {
@@ -29229,6 +29232,11 @@ fn slskd_options_json(
 
     if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
         let advanced = &config.advanced_networking;
+        let dht = if include_volatile_overlay {
+            overlay.watched_dht.as_ref().unwrap_or(&advanced.dht)
+        } else {
+            &advanced.dht
+        };
         let media = &config.media_services;
         response["feature"]["collectionsSharing"] =
             serde_json::json!(media.features.collections_sharing);
@@ -29306,25 +29314,25 @@ fn slskd_options_json(
         response["virtualSoulfind"]["disasterMode"]["recoveryHealthyChecksRequired"] =
             serde_json::json!(disaster.recovery_healthy_checks_required);
         response["dhtRendezvous"] = serde_json::json!({
-            "advertisedOverlayPort": advanced.dht.advertised_overlay_port,
-            "announceIntervalSeconds": advanced.dht.announce_interval.as_secs(),
-            "bootstrapRouters": advanced.dht.bootstrap_routers,
-            "bootstrapTimeoutSeconds": advanced.dht.bootstrap_timeout.as_secs(),
-            "coldBootstrapTimeoutSeconds": advanced.dht.cold_bootstrap_timeout.as_secs(),
-            "dhtPort": advanced.dht.dht_port,
-            "discoveryIntervalSeconds": advanced.dht.discovery_interval.as_secs(),
-            "effectiveOverlayPort": advanced.dht.effective_overlay_port(),
+            "advertisedOverlayPort": dht.advertised_overlay_port,
+            "announceIntervalSeconds": dht.announce_interval.as_secs(),
+            "bootstrapRouters": dht.bootstrap_routers,
+            "bootstrapTimeoutSeconds": dht.bootstrap_timeout.as_secs(),
+            "coldBootstrapTimeoutSeconds": dht.cold_bootstrap_timeout.as_secs(),
+            "dhtPort": dht.dht_port,
+            "discoveryIntervalSeconds": dht.discovery_interval.as_secs(),
+            "effectiveOverlayPort": dht.effective_overlay_port(),
             "enablePeerDiversity": true,
-            "enableStun": advanced.dht.enable_stun,
-            "enableUpnp": advanced.dht.enable_upnp,
+            "enableStun": dht.enable_stun,
+            "enableUpnp": dht.enable_upnp,
             "enableUsernameVerification": false,
-            "enabled": advanced.dht.enabled,
-            "lanOnly": advanced.dht.lan_only,
-            "lanOnlyBootstrapTimeoutSeconds": advanced.dht.lan_only_bootstrap_timeout.as_secs(),
-            "minNeighbors": advanced.dht.min_neighbors,
-            "overlayPort": advanced.dht.overlay_port,
-            "vpnPortSync": advanced.dht.vpn_port_sync,
-            "vpnPortSyncMode": match advanced.dht.vpn_port_sync.as_str() {
+            "enabled": dht.enabled,
+            "lanOnly": dht.lan_only,
+            "lanOnlyBootstrapTimeoutSeconds": dht.lan_only_bootstrap_timeout.as_secs(),
+            "minNeighbors": dht.min_neighbors,
+            "overlayPort": dht.overlay_port,
+            "vpnPortSync": dht.vpn_port_sync,
+            "vpnPortSyncMode": match dht.vpn_port_sync.as_str() {
                 "primary" => "Primary",
                 "target_port" => "TargetPort",
                 _ => "Disabled",
@@ -30751,6 +30759,7 @@ async fn apply_watched_controller_configuration(
         overlay.watched_share_directories = Some(new_directories);
         overlay.watched_instance_name = Some(reloaded.instance_name.clone());
         overlay.watched_controller_swagger = Some(reloaded.controller_swagger);
+        overlay.watched_dht = Some(reloaded.advanced_networking.dht.clone());
     }
     if reloaded.downloads_dir != state.config.downloads_dir
         || reloaded.incomplete_dir != state.config.incomplete_dir
@@ -30804,7 +30813,6 @@ async fn apply_watched_controller_configuration(
         || reloaded.share_settings.cache_storage_mode
             != state.config.share_settings.cache_storage_mode
         || reloaded.share_settings.cache_workers != state.config.share_settings.cache_workers
-        || reloaded.advanced_networking.dht != state.config.advanced_networking.dht
         || reloaded.advanced_networking.mesh != state.config.advanced_networking.mesh
         || reloaded.advanced_networking.overlay != state.config.advanced_networking.overlay
         || reloaded.advanced_networking.overlay_data
@@ -91428,10 +91436,13 @@ mod tests {
 
     #[test]
     fn controller_auth_enforces_slskdn_roles_schemes_scopes_and_anonymous_routes() {
+        let state_dir =
+            std::env::temp_dir().join(format!("slskr-slskdn-auth-test-{}", uuid::Uuid::new_v4()));
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
             &MapEnv::default()
+                .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                 .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
@@ -91483,10 +91494,15 @@ mod tests {
 
     #[test]
     fn controller_auth_selects_the_frozen_slskd_policy_registry() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-controller-auth-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
             &MapEnv::default()
+                .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
                 .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
@@ -91515,6 +91531,7 @@ mod tests {
             None,
             FileConfig::default(),
             &MapEnv::default()
+                .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
                 .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
@@ -92272,6 +92289,49 @@ mod tests {
         assert_eq!(current["feature"]["swagger"], false);
         assert_eq!(startup["feature"]["swagger"], true);
         assert!(state.runtime.read().await.application_restart_requested);
+    }
+
+    #[tokio::test]
+    async fn watched_slskdn_dht_updates_current_options_but_retains_startup_socket_settings() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        );
+        assert!(state.config.advanced_networking.dht.enabled);
+        let yaml = "dht:\n  enabled: false\n  dht_port: 51002\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+
+        super::apply_watched_controller_configuration(
+            &state,
+            Some(yaml),
+            &state.controller_cli_environment,
+        )
+        .await;
+
+        let overlay = state.options_overlay.read().await;
+        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            &state.config,
+            &overlay,
+            true,
+        ))
+        .unwrap();
+        let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            &state.config,
+            &overlay,
+            false,
+        ))
+        .unwrap();
+        assert_eq!(current["dhtRendezvous"]["enabled"], false);
+        assert_eq!(current["dhtRendezvous"]["dhtPort"], 51_002);
+        assert_eq!(startup["dhtRendezvous"]["enabled"], true);
+        assert_eq!(startup["dhtRendezvous"]["dhtPort"], 50_305);
+        assert!(!state.advanced_networking.read().await.dht.enabled);
+        assert!(!state.runtime.read().await.application_restart_requested);
+        let status = super::route_http_request("GET", "/api/v0/dht/status", None, "", &state)
+            .await
+            .expect("watched DHT status");
+        assert_eq!(status.status, "200 OK");
+        let status = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(status["isEnabled"], false);
     }
 
     #[tokio::test]

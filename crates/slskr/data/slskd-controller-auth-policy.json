@@ -275,7 +275,7 @@
   {
     "method": "GET",
     "route": "/api/v0/session",
-    "access": "anonymous",
+    "access": "authenticated",
     "scheme": "any",
     "scopes": []
   },

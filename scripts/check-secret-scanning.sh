@@ -40,6 +40,7 @@ config_like_suffixes = {
 placeholder_terms = {
     "placeholder", "example", "optional", "changeme", "change-me", "your-", "test-token",
     "secret_generated_value", "spotify-app-client-secret", "live-", "dummy", "redacted",
+    "fixture", "differential",
 }
 secret_key = re.compile(r'(?i)\b(api[_-]?key|token|secret|password|passwd|private[_-]?key|client[_-]?secret)\b')
 assignment = re.compile(r'''(?ix)

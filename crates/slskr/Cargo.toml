@@ -47,10 +47,10 @@ suppaftp = { version = "10.0.1", default-features = false, features = ["tokio-ru
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }
 
-[target.'cfg(not(target_env = "musl"))'.dependencies]
+[target.'cfg(all(not(target_os = "windows"), not(target_env = "musl")))'.dependencies]
 openssl = "0.10"
 
-[target.'cfg(target_env = "musl")'.dependencies]
+[target.'cfg(any(target_os = "windows", target_env = "musl"))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
 
 [lints]
