@@ -47963,8 +47963,10 @@ fn slskd_storage_directory_json(
             return Err("path escapes the storage root".to_owned());
         }
         let mut state = StorageDirectoryListState::new(options);
-        slskd_storage_directory_value(root, &path, &mut state, true, 0)
-            .map(|value| value.to_string())
+        slskd_storage_directory_value(root, &path, &mut state, true, 0).map(|mut value| {
+            value["fullName"] = serde_json::json!("");
+            value.to_string()
+        })
     }
 }
 
@@ -58100,10 +58102,25 @@ fn prepare_incomplete_download_file(
     size: u64,
 ) -> Result<(fs::File, u64), String> {
     let file = open_download_file(root, path)?;
-    if strategy.eq_ignore_ascii_case("overwrite") {
-        file.set_len(0)
-            .map_err(|error| format!("download partial overwrite failed: {error}"))?;
-    }
+    let file = if strategy.eq_ignore_ascii_case("overwrite") {
+        #[cfg(not(unix))]
+        {
+            drop(file);
+            fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(path)
+                .map_err(|error| format!("download partial overwrite failed: {error}"))?
+        }
+        #[cfg(unix)]
+        {
+            file.set_len(0)
+                .map_err(|error| format!("download partial overwrite failed: {error}"))?;
+            file
+        }
+    } else {
+        file
+    };
     let metadata = file
         .metadata()
         .map_err(|error| format!("download file metadata failed: {error}"))?;
