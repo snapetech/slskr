@@ -37093,6 +37093,24 @@ async fn sync_lidarr_wanted_to_wishlist(
 }
 
 fn lidarr_map_import_path(path: &str, from_prefix: &str, to_prefix: &str) -> String {
+    // Lidarr mappings may use POSIX virtual paths even when the daemon runs
+    // on Windows; apply that mapping before host Path semantics rewrite them.
+    let raw = path.replace('\\', "/");
+    let from_virtual = from_prefix.trim_end_matches(['/', '\\']).replace('\\', "/");
+    if !from_virtual.is_empty()
+        && (raw == from_virtual
+            || raw
+                .strip_prefix(&from_virtual)
+                .is_some_and(|suffix| suffix.starts_with('/')))
+    {
+        let relative = raw[from_virtual.len()..].trim_start_matches('/');
+        let to = to_prefix.trim_end_matches(['/', '\\']);
+        return if relative.is_empty() {
+            to.to_owned()
+        } else {
+            format!("{to}/{relative}")
+        };
+    }
     let absolute = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
@@ -47860,13 +47878,23 @@ fn slskd_storage_directory_value(
             files.push(slskd_storage_file_json(&path, root));
         } else if metadata.is_dir() {
             if state.options.recursive && depth < SLSKD_STORAGE_MAX_RECURSION_DEPTH {
-                directories.push(slskd_storage_directory_value(
-                    root,
-                    &path,
-                    state,
-                    false,
-                    depth + 1,
-                )?);
+                let mut child =
+                    slskd_storage_directory_value(root, &path, state, false, depth + 1)?;
+                if let Some(nested) = child
+                    .get_mut("files")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    files.append(nested);
+                }
+                if let Some(nested) = child
+                    .get_mut("directories")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    directories.append(nested);
+                }
+                child["files"] = serde_json::json!([]);
+                child["directories"] = serde_json::json!([]);
+                directories.push(child);
             } else {
                 let child_relative = path
                     .strip_prefix(root)
@@ -54742,7 +54770,9 @@ fn open_download_file(root: &Path, path: &Path) -> Result<fs::File, String> {
 #[cfg(not(unix))]
 fn open_download_file(_root: &Path, path: &Path) -> Result<fs::File, String> {
     let mut options = fs::OpenOptions::new();
-    options.create(true).append(true);
+    // Windows rejects SetEndOfFile on an append-only handle; retain append
+    // semantics while requesting read/write access for retry truncation.
+    options.read(true).write(true).create(true).append(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -63677,10 +63707,8 @@ fn scan_share_root(
             if exclusions.iter().any(|excluded| path.starts_with(excluded)) {
                 continue;
             }
-            if filters
-                .iter()
-                .any(|filter| filter.is_match(&path.to_string_lossy()))
-            {
+            let filter_path = path.to_string_lossy().replace('\\', "/");
+            if filters.iter().any(|filter| filter.is_match(&filter_path)) {
                 continue;
             }
             if !options.include_hidden && is_hidden_share_path(root, &path) {
@@ -76879,9 +76907,10 @@ mod tests {
 
     #[tokio::test]
     async fn external_visualizer_launch_records_audit_event_when_enabled() {
+        let command = if cfg!(windows) { "cmd.exe" } else { "true" };
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", "true")
+                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
                 .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
         );
 
@@ -76939,9 +76968,10 @@ mod tests {
 
     #[tokio::test]
     async fn external_visualizer_launch_rejects_when_process_pool_is_full() {
+        let command = if cfg!(windows) { "cmd.exe" } else { "true" };
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", "true")
+                .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
                 .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
         );
         let _permits = Arc::clone(&state.external_visualizer_processes)
@@ -93534,7 +93564,12 @@ mod tests {
 
     #[test]
     fn toml_config_sanitizes_secrets_and_storage_paths() {
-        let file_config = toml::from_str::<FileConfig>(
+        let music_path = std::env::temp_dir()
+            .join("slskr-test-music")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let file_config = toml::from_str::<FileConfig>(&format!(
             r#"
                 [app]
                 http_bind = "127.0.0.1:7788"
@@ -93573,7 +93608,7 @@ mod tests {
                 peer_response_seconds = 9
 
                 [shares]
-                dirs = ["/tmp/music"]
+                dirs = ['{}']
                 fixture = "Virtual/Song.flac=42"
                 follow_symlinks = true
                 include_hidden = true
@@ -93595,7 +93630,8 @@ mod tests {
                 command = "projectm"
                 launch_enabled = true
             "#,
-        )
+            music_path,
+        ))
         .unwrap();
 
         let config = super::AppConfig::from_layers(
@@ -93624,10 +93660,7 @@ mod tests {
         assert_eq!(config.ping_interval.as_secs(), 11);
         assert_eq!(config.user_info_description, "custom daemon");
         assert_eq!(config.peer_response_timeout.as_secs(), 9);
-        assert_eq!(
-            config.share_settings.roots,
-            vec![PathBuf::from("/tmp/music")]
-        );
+        assert_eq!(config.share_settings.roots, vec![PathBuf::from(music_path)]);
         assert_eq!(config.share_settings.fixture_entries.len(), 1);
         assert!(!config.share_settings.cache_tsv_enabled);
         assert_eq!(config.transfer_history_limit, 12);
