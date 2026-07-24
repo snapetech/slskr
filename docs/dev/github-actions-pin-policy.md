@@ -10,17 +10,17 @@ or if a pinned action is missing from this ledger.
 
 | Action | Reviewed ref | Pinned commit | Notes |
 | --- | --- | --- | --- |
-| `actions/checkout` | `v6` | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` | CI, release, live parity, local identity, and CodeQL checkout. |
+| `actions/checkout` | `v6` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | CI, release, live parity, local identity, and CodeQL checkout. |
 | `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | Cached pinned `cargo-audit` binaries for CI and release gates. |
 | `dtolnay/rust-toolchain` | `stable` | `29eef336d9b2848a0b548edc03f92a220660cdb8` | Rust toolchain install for CI, release, and live parity jobs. |
 | `Swatinem/rust-cache` | `v2` | `e18b497796c12c097a38f9edb9d0641fb99eee32` | Dereferenced tag target for Rust cache setup. |
-| `actions/setup-node` | `v6` | `48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e` | Node setup for web, dashboard, TypeScript SDK, and live parity gates. |
-| `actions/setup-go` | `v6` | `924ae3a1cded613372ab5595356fb5720e22ba16` | Go SDK test setup. |
+| `actions/setup-node` | `v6` | `820762786026740c76f36085b0efc47a31fe5020` | Node setup for web, dashboard, TypeScript SDK, and live parity gates. |
+| `actions/setup-go` | `v7.0.0` | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` | Go SDK test setup. |
 | `actions/setup-python` | `v6` | `ece7cb06caefa5fff74198d8649806c4678c61a1` | Python SDK and slskd API compatibility smoke setup. |
 | `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | Release archive and live parity artifact upload. |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | Release archive download before publishing. |
 | `actions/attest-build-provenance` | `v4` | `0f67c3f4856b2e3261c31976d6725780e5e4c373` | Dereferenced tag target for release asset attestations. |
-| `softprops/action-gh-release` | `v3` | `718ea10b132b3b2eba29c1007bb80653f286566b` | GitHub Release publisher. |
+| `softprops/action-gh-release` | `v3` | `3d0d9888cb7fd7b750713d6e236d1fcb99157228` | GitHub Release publisher. |
 | `docker/setup-qemu-action` | `v4.2.0` | `96fe6ef7f33517b61c61be40b68a1882f3264fb8` | QEMU setup for multi-architecture Docker release images. |
 | `docker/setup-buildx-action` | `v4.2.0` | `bb05f3f5519dd87d3ba754cc423b652a5edd6d2c` | Docker Buildx setup for multi-architecture release images. |
 | `docker/login-action` | `v4.4.0` | `af1e73f918a031802d376d3c8bbc3fe56130a9b0` | GHCR and Docker Hub authentication for release images. |
