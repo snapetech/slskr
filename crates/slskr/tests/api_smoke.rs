@@ -8,9 +8,11 @@ use reqwest::StatusCode;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    sync::Mutex,
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+static API_SMOKE_LOCK: Mutex<()> = Mutex::const_new(());
 
 struct ChildGuard {
     child: Child,
@@ -25,6 +27,7 @@ impl Drop for ChildGuard {
 
 #[tokio::test]
 async fn daemon_http_api_smoke() {
+    let _serial = API_SMOKE_LOCK.lock().await;
     let port = unused_loopback_port();
     let base_url = format!("http://127.0.0.1:{port}");
     let state_dir = std::env::temp_dir().join(format!(
@@ -47,6 +50,9 @@ async fn daemon_http_api_smoke() {
         .env("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
         .env("SLSKD_NO_HTTPS", "true")
         .env("SLSKR_API_TOKEN", "smoke-token")
+        // Windows starts Rust processes with a small default stack; the
+        // daemon's startup graph exceeds it before the listener is created.
+        .env("RUST_MIN_STACK", "16777216")
         .env("SLSKR_SHARE_FIXTURE", "Virtual/Test.flac=42")
         .env("SLSKR_DHT_ENABLED", "false")
         .stdout(Stdio::null())
@@ -153,6 +159,7 @@ async fn daemon_http_api_smoke() {
 
 #[tokio::test]
 async fn serve_once_waits_for_the_accepted_request() {
+    let _serial = API_SMOKE_LOCK.lock().await;
     let port = unused_loopback_port();
     let state_dir = std::env::temp_dir().join(format!(
         "slskr-once-smoke-{}-{}",
@@ -176,6 +183,7 @@ async fn serve_once_waits_for_the_accepted_request() {
         .env("SLSKR_AUTO_CONNECT", "false")
         .env("SLSKR_DHT_ENABLED", "false")
         .env("SLSKR_API_TOKEN", "once-token")
+        .env("RUST_MIN_STACK", "16777216")
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()
