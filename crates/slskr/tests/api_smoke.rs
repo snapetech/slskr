@@ -50,7 +50,7 @@ async fn daemon_http_api_smoke() {
         .env("SLSKR_SHARE_FIXTURE", "Virtual/Test.flac=42")
         .env("SLSKR_DHT_ENABLED", "false")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn slskr serve");
     let _guard = ChildGuard { child };
@@ -177,7 +177,7 @@ async fn serve_once_waits_for_the_accepted_request() {
         .env("SLSKR_DHT_ENABLED", "false")
         .env("SLSKR_API_TOKEN", "once-token")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn slskr serve --once");
     let mut guard = ChildGuard { child };
