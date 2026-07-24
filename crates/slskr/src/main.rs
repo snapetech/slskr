@@ -76924,7 +76924,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_visualizer_launch_records_audit_event_when_enabled() {
-        let command = if cfg!(windows) { "cmd.exe" } else { "true" };
+        let command = if cfg!(windows) { "where.exe" } else { "true" };
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
                 .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
@@ -76985,7 +76985,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_visualizer_launch_rejects_when_process_pool_is_full() {
-        let command = if cfg!(windows) { "cmd.exe" } else { "true" };
+        let command = if cfg!(windows) { "where.exe" } else { "true" };
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
                 .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
