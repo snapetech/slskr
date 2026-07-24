@@ -74,7 +74,7 @@ jobs:
       - run: node web/scripts/verify-build-output.mjs
       - run: node web/scripts/smoke-subpath-build.mjs
       - run: npm --prefix dashboard ci
-      - run: npm --prefix dashboard audit --audit-level=moderate
+      - run: bash scripts/check-web-audit.sh dashboard
       - run: npm --prefix dashboard run type-check
       - run: npm --prefix dashboard run lint
       - run: npm --prefix dashboard test
