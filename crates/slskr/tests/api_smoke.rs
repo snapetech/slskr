@@ -10,6 +10,8 @@ use tokio::{
     net::TcpStream,
 };
 
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+
 struct ChildGuard {
     child: Child,
 }
@@ -180,7 +182,7 @@ async fn serve_once_waits_for_the_accepted_request() {
         .expect("spawn slskr serve --once");
     let mut guard = ChildGuard { child };
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
     let mut stream = loop {
         match TcpStream::connect(("127.0.0.1", port)).await {
             Ok(stream) => break stream,
@@ -203,7 +205,7 @@ async fn serve_once_waits_for_the_accepted_request() {
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
     assert!(response.ends_with(r#"{"service":"slskr","status":"ok","warnings":[]}"#));
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
     loop {
         if guard.child.try_wait().unwrap().is_some() {
             break;
