@@ -11259,6 +11259,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&content).unwrap();
         let socket = root.join("slskr.sock");
+        let socket_yaml = socket.display().to_string().replace('\\', "/");
         std::fs::write(
             root.join("slskd.yml"),
             format!(
@@ -11298,7 +11299,7 @@ filters:
     max_count: 77
     cleanup_interval_seconds: 3600
 web:
-  socket: "{}"
+  socket: '{}'
   url_base: /slsk
   content_path: "{}"
   logging: true
@@ -11313,8 +11314,7 @@ web:
         role: readwrite
         cidr: 127.0.0.1/32
 "#,
-                socket.display(),
-                content_name,
+                socket_yaml, content_name,
             ),
         )
         .unwrap();
@@ -11383,16 +11383,19 @@ web:
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&root).unwrap();
+        let destination_path = root.join("downloads").join("music");
+        let destination_yaml = destination_path.display().to_string().replace('\\', "/");
         std::fs::write(
             root.join("slskd.yml"),
-            r#"rooms: [Ambient, Jazz, ambient]
+            format!(
+                r#"rooms: [Ambient, Jazz, ambient]
 soulseek:
   liked_interests: [Aphex Twin, Ambient]
   hated_interests: [spam]
 destinations:
   folders:
     - name: Music
-      path: /downloads/music
+      path: '{}'
       default: true
 shares:
   cache:
@@ -11412,6 +11415,8 @@ throttling:
       circuit_breaker: 600
       response_file_limit: 700
 "#,
+                destination_yaml,
+            ),
         )
         .unwrap();
         let config = super::AppConfig::from_layers(
