@@ -5,12 +5,13 @@ set -euo pipefail
 # adapters. slskR uses BrowserRouter exclusively and ships no RSC runtime.
 # Keep the finding visible while failing on every vulnerability outside this
 # explicitly reviewed, non-applicable surface.
-report="$(npm --prefix web audit --json 2>/dev/null || true)"
+package_dir="${1:-web}"
+report="$(npm --prefix "$package_dir" audit --json 2>/dev/null || true)"
 printf '%s\n' "$report" | jq '.metadata, .vulnerabilities'
 
 unexpected="$(printf '%s\n' "$report" | jq '[.vulnerabilities | to_entries[] | select(.key != "react-router" and .key != "react-router-dom")] | length')"
 if [[ "$unexpected" != "0" ]]; then
-  echo "Unexpected web dependency vulnerabilities detected" >&2
+  echo "Unexpected ${package_dir} dependency vulnerabilities detected" >&2
   exit 1
 fi
 
