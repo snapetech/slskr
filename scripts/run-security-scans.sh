@@ -82,8 +82,12 @@ run_semgrep() {
 }
 
 run_trivy() {
+  local ignore_args=()
+  if [[ -f "$repo_root/.trivyignore" ]]; then
+    ignore_args+=(--ignorefile "$repo_root/.trivyignore")
+  fi
   if command -v trivy >/dev/null 2>&1; then
-    run_or_record "Trivy filesystem scan" trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed .
+    run_or_record "Trivy filesystem scan" trivy fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed "${ignore_args[@]}" .
     return
   fi
 
@@ -98,7 +102,7 @@ run_trivy() {
       -v "$repo_root:/src" \
       -w /src \
       "$trivy_image" \
-      fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed .
+      fs --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed "${ignore_args[@]}" .
     return
   fi
 
