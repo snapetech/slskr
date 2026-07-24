@@ -1,6 +1,7 @@
 use std::{
     net::TcpListener,
     process::{Child, Command, Stdio},
+    sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -11,6 +12,7 @@ use tokio::{
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+static API_SMOKE_LOCK: Mutex<()> = Mutex::new(());
 
 struct ChildGuard {
     child: Child,
@@ -25,6 +27,7 @@ impl Drop for ChildGuard {
 
 #[tokio::test]
 async fn daemon_http_api_smoke() {
+    let _serial = API_SMOKE_LOCK.lock().unwrap();
     let port = unused_loopback_port();
     let base_url = format!("http://127.0.0.1:{port}");
     let state_dir = std::env::temp_dir().join(format!(
@@ -153,6 +156,7 @@ async fn daemon_http_api_smoke() {
 
 #[tokio::test]
 async fn serve_once_waits_for_the_accepted_request() {
+    let _serial = API_SMOKE_LOCK.lock().unwrap();
     let port = unused_loopback_port();
     let state_dir = std::env::temp_dir().join(format!(
         "slskr-once-smoke-{}-{}",
