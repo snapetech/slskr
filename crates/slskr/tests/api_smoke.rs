@@ -50,6 +50,9 @@ async fn daemon_http_api_smoke() {
         .env("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
         .env("SLSKD_NO_HTTPS", "true")
         .env("SLSKR_API_TOKEN", "smoke-token")
+        // Windows starts Rust processes with a small default stack; the
+        // daemon's startup graph exceeds it before the listener is created.
+        .env("RUST_MIN_STACK", "16777216")
         .env("SLSKR_SHARE_FIXTURE", "Virtual/Test.flac=42")
         .env("SLSKR_DHT_ENABLED", "false")
         .stdout(Stdio::null())
@@ -180,6 +183,7 @@ async fn serve_once_waits_for_the_accepted_request() {
         .env("SLSKR_AUTO_CONNECT", "false")
         .env("SLSKR_DHT_ENABLED", "false")
         .env("SLSKR_API_TOKEN", "once-token")
+        .env("RUST_MIN_STACK", "16777216")
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()
