@@ -23,10 +23,12 @@ fn command_for(
         #[cfg(windows)]
         let (shell, prefix) = ("cmd.exe".to_owned(), "/c");
         #[cfg(not(windows))]
-        let (shell, prefix) = (std::env::var("SHELL").unwrap_or_default(), "-c");
-        if shell.is_empty() {
-            return Err("unable to determine script executable".to_owned());
-        }
+        // CI containers and service managers commonly omit SHELL.  `/bin/sh`
+        // is the POSIX fallback required for command-mode integrations.
+        let (shell, prefix) = (
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()),
+            "-c",
+        );
         let mut command = Command::new(shell);
         if script.run.command.starts_with(prefix) {
             command.args(
