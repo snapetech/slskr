@@ -97,7 +97,7 @@ use futures_util::{future::select_all, StreamExt};
 use rand::{rngs::SysRng, TryRng};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as Sha1Digest, Sha1};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use slskr_client::{
     capabilities::{
         decode_peer_capability_message, peer_capability_message, PeerCapabilityDescriptor,
