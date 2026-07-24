@@ -2,3 +2,9 @@
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# The daemon's startup graph exceeds the PE default stack reserve on Windows
+# before its HTTP listener is created.  Reserve the same stack size used by
+# the Windows smoke child environment so the executable can start reliably.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:16777216"]
