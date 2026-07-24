@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as Sha1Digest, Sha1};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use slskr_client::overlay::{
     connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE,
 };
