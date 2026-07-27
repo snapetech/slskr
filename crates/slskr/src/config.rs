@@ -153,11 +153,73 @@ pub struct DaemonFlagsSettings {
     pub volatile: bool,
 }
 
+impl DaemonFlagsSettings {
+    fn from_layers<E: ConfigEnv>(
+        force_migrations: Option<bool>,
+        legacy_windows_tcp_keepalive: Option<bool>,
+        log_sql: Option<bool>,
+        log_unobserved_exceptions: Option<bool>,
+        optimistic_relay_file_info: Option<bool>,
+        volatile: Option<bool>,
+        env: &E,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            force_migrations: env_bool_layer(
+                env,
+                "SLSKD_FORCE_MIGRATIONS",
+                force_migrations.unwrap_or(false),
+            )?,
+            legacy_windows_tcp_keepalive: env_bool_layer(
+                env,
+                "SLSKD_LEGACY_WINDOWS_TCP_KEEPALIVE",
+                legacy_windows_tcp_keepalive.unwrap_or(false),
+            )?,
+            log_sql: env_bool_layer(env, "SLSKD_LOG_SQL", log_sql.unwrap_or(false))?,
+            log_unobserved_exceptions: env_bool_layer(
+                env,
+                "SLSKD_LOG_UNOBSERVED_EXCEPTIONS",
+                log_unobserved_exceptions.unwrap_or(false),
+            )?,
+            optimistic_relay_file_info: env_bool_layer(
+                env,
+                "SLSKD_OPTIMISTIC_RELAY_FILE_INFO",
+                optimistic_relay_file_info.unwrap_or(false),
+            )?,
+            volatile: env_bool_layer(env, "SLSKD_VOLATILE", volatile.unwrap_or(false))?,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LoggerSettings {
     pub disk: bool,
     pub loki: Option<String>,
     pub no_color: bool,
+}
+
+impl LoggerSettings {
+    fn from_layers<E: ConfigEnv>(
+        disk: Option<bool>,
+        loki: Option<String>,
+        no_color: Option<bool>,
+        env: &E,
+    ) -> Result<Self, String> {
+        let loki = env
+            .var("SLSKD_LOKI")
+            .or(loki)
+            .filter(|value| !value.trim().is_empty());
+        if loki
+            .as_deref()
+            .is_some_and(|value| !(value.starts_with("http://") || value.starts_with("https://")))
+        {
+            return Err("logger.loki must be an http:// or https:// URL".to_owned());
+        }
+        Ok(Self {
+            disk: env_bool_layer(env, "SLSKD_DISK_LOGGER", disk.unwrap_or(false))?,
+            loki,
+            no_color: env_bool_layer(env, "SLSKD_NO_COLOR", no_color.unwrap_or(false))?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -169,6 +231,46 @@ pub struct TelemetryTracingSettings {
     pub otlp_endpoint: Option<String>,
 }
 
+impl TelemetryTracingSettings {
+    fn from_layers<E: ConfigEnv>(
+        enabled: Option<bool>,
+        exporter: Option<String>,
+        jaeger_endpoint: Option<String>,
+        jaeger_port: Option<u16>,
+        otlp_endpoint: Option<String>,
+        env: &E,
+    ) -> Result<Self, String> {
+        let exporter = env
+            .var("SLSKD_TELEMETRY_TRACING_EXPORTER")
+            .or(exporter)
+            .unwrap_or_else(|| "console".to_owned())
+            .to_ascii_lowercase();
+        if !matches!(exporter.as_str(), "console" | "jaeger" | "otlp") {
+            return Err("telemetry.tracing.exporter must be console, jaeger, or otlp".to_owned());
+        }
+        Ok(Self {
+            enabled: env_bool_layer(env, "SLSKD_TELEMETRY_TRACING", enabled.unwrap_or(false))?,
+            exporter,
+            jaeger_endpoint: env
+                .var("SLSKD_TELEMETRY_JAEGER_ENDPOINT")
+                .or(jaeger_endpoint)
+                .filter(|value| !value.trim().is_empty()),
+            jaeger_port: match env.var("SLSKD_TELEMETRY_JAEGER_PORT") {
+                Some(value) => Some(
+                    value
+                        .parse::<u16>()
+                        .map_err(|error| format!("invalid SLSKD_TELEMETRY_JAEGER_PORT: {error}"))?,
+                ),
+                None => jaeger_port,
+            },
+            otlp_endpoint: env
+                .var("SLSKD_TELEMETRY_OTLP_ENDPOINT")
+                .or(otlp_endpoint)
+                .filter(|value| !value.trim().is_empty()),
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RetentionSettings {
     pub search_minutes: Option<u64>,
@@ -177,6 +279,139 @@ pub struct RetentionSettings {
     pub files_incomplete_minutes: Option<u64>,
     pub upload: TransferRetentionSettings,
     pub download: TransferRetentionSettings,
+}
+
+impl RetentionSettings {
+    #[allow(clippy::too_many_arguments)]
+    fn from_layers<E: ConfigEnv>(
+        search: Option<u64>,
+        logs: Option<u64>,
+        files_complete: Option<u64>,
+        files_incomplete: Option<u64>,
+        upload: TransferTypeRetentionFileConfig,
+        download: TransferTypeRetentionFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        let settings = Self {
+            search_minutes: env_parse_option_layer(env, "SLSKR_RETENTION_SEARCH", search)?,
+            logs_days: env_parse_layer(env, "SLSKR_RETENTION_LOGS", logs, 180_u64)?,
+            files_complete_minutes: env_parse_option_layer(
+                env,
+                "SLSKR_RETENTION_FILES_COMPLETE",
+                files_complete,
+            )?,
+            files_incomplete_minutes: env_parse_option_layer(
+                env,
+                "SLSKR_RETENTION_FILES_INCOMPLETE",
+                files_incomplete,
+            )?,
+            upload: TransferRetentionSettings {
+                succeeded_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_UPLOAD_SUCCEEDED",
+                    upload.succeeded,
+                )?,
+                errored_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_UPLOAD_ERRORED",
+                    upload.errored,
+                )?,
+                cancelled_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_UPLOAD_CANCELLED",
+                    upload.cancelled,
+                )?,
+                failed_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_UPLOAD_FAILED",
+                    upload.failed,
+                )?,
+            },
+            download: TransferRetentionSettings {
+                succeeded_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_DOWNLOAD_SUCCEEDED",
+                    download.succeeded,
+                )?,
+                errored_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_DOWNLOAD_ERRORED",
+                    download.errored,
+                )?,
+                cancelled_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_DOWNLOAD_CANCELLED",
+                    download.cancelled,
+                )?,
+                failed_minutes: env_parse_option_layer(
+                    env,
+                    "SLSKR_RETENTION_DOWNLOAD_FAILED",
+                    download.failed,
+                )?,
+            },
+        };
+        if settings.logs_days < 1 {
+            return Err("retention.logs must be at least 1 day".to_owned());
+        }
+        for (name, value, minimum) in [
+            ("retention.search", settings.search_minutes, 5),
+            (
+                "retention.files.complete",
+                settings.files_complete_minutes,
+                30,
+            ),
+            (
+                "retention.files.incomplete",
+                settings.files_incomplete_minutes,
+                30,
+            ),
+            (
+                "retention.transfers.upload.succeeded",
+                settings.upload.succeeded_minutes,
+                5,
+            ),
+            (
+                "retention.transfers.upload.errored",
+                settings.upload.errored_minutes,
+                5,
+            ),
+            (
+                "retention.transfers.upload.cancelled",
+                settings.upload.cancelled_minutes,
+                5,
+            ),
+            (
+                "retention.transfers.upload.failed",
+                settings.upload.failed_minutes,
+                5,
+            ),
+            (
+                "retention.transfers.download.succeeded",
+                settings.download.succeeded_minutes,
+                5,
+            ),
+            (
+                "retention.transfers.download.errored",
+                settings.download.errored_minutes,
+                5,
+            ),
+            (
+                "retention.transfers.download.cancelled",
+                settings.download.cancelled_minutes,
+                5,
+            ),
+            (
+                "retention.transfers.download.failed",
+                settings.download.failed_minutes,
+                5,
+            ),
+        ] {
+            if value.is_some_and(|value| value < minimum) {
+                return Err(format!("{name} must be at least {minimum} minutes"));
+            }
+        }
+        Ok(settings)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -194,6 +429,43 @@ pub struct SearchRetentionSettings {
     pub cleanup_interval: Duration,
 }
 
+impl SearchRetentionSettings {
+    fn from_layers<E: ConfigEnv>(
+        cleanup_interval_seconds: Option<u64>,
+        max_age_days: Option<u64>,
+        max_count: Option<usize>,
+        env: &E,
+    ) -> Result<Self, String> {
+        let cleanup_interval_seconds = env_parse_layer(
+            env,
+            "SLSKD_SEARCH_RETENTION_CLEANUP_INTERVAL",
+            cleanup_interval_seconds,
+            86_400_u64,
+        )?;
+        if cleanup_interval_seconds < 3_600 {
+            return Err(
+                "filters.search_retention.cleanup_interval_seconds must be at least 3600"
+                    .to_owned(),
+            );
+        }
+        Ok(Self {
+            max_age_days: env_parse_layer(
+                env,
+                "SLSKD_SEARCH_RETENTION_MAX_AGE_DAYS",
+                max_age_days,
+                30_u64,
+            )?,
+            max_count: env_parse_layer(
+                env,
+                "SLSKD_SEARCH_RETENTION_MAX_COUNT",
+                max_count,
+                1_000_usize,
+            )?,
+            cleanup_interval: Duration::from_secs(cleanup_interval_seconds),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoreWorkflowSettings {
     pub rooms: Vec<String>,
@@ -202,6 +474,129 @@ pub struct CoreWorkflowSettings {
     pub destinations: Vec<DestinationSettings>,
     pub wishlist: WishlistSettings,
     pub incoming_search: IncomingSearchSettings,
+}
+
+impl CoreWorkflowSettings {
+    fn from_layers<E: ConfigEnv>(env: &E) -> Result<Self, String> {
+        let rooms = normalized_controller_values(controller_string_array_layer(
+            env,
+            "SLSKD_ROOMS",
+            Vec::new(),
+        ));
+        let liked_interests = normalized_controller_values(controller_string_array_layer(
+            env,
+            "SLSKD_SLSK_LIKED_INTERESTS",
+            Vec::new(),
+        ));
+        let hated_interests = normalized_controller_values(controller_string_array_layer(
+            env,
+            "SLSKD_SLSK_HATED_INTERESTS",
+            Vec::new(),
+        ));
+        for (name, values) in [
+            ("rooms", &rooms),
+            ("soulseek.liked_interests", &liked_interests),
+            ("soulseek.hated_interests", &hated_interests),
+        ] {
+            if values.len() > 1_000 {
+                return Err(format!("{name} may contain at most 1000 entries"));
+            }
+            if values.iter().any(|value| value.len() > 1_024) {
+                return Err(format!("{name} entries may not exceed 1024 bytes"));
+            }
+        }
+        let destinations = match env.var("SLSKD_DESTINATIONS_JSON") {
+            Some(json) => serde_json::from_str::<Vec<DestinationSettings>>(&json)
+                .map_err(|error| format!("invalid destinations.folders configuration: {error}"))?,
+            None => Vec::new(),
+        };
+        if destinations.len() > 256 {
+            return Err("destinations.folders may contain at most 256 entries".to_owned());
+        }
+        let mut destination_paths = std::collections::BTreeSet::new();
+        let mut default_destinations = 0_usize;
+        for destination in &destinations {
+            if destination.path.as_os_str().is_empty() || !destination.path.is_absolute() {
+                return Err("destinations.folders.path must be absolute".to_owned());
+            }
+            if destination
+                .path
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
+            {
+                return Err(
+                    "destinations.folders.path may not contain traversal segments".to_owned(),
+                );
+            }
+            if !destination_paths.insert(destination.path.clone()) {
+                return Err("destinations.folders paths must be unique".to_owned());
+            }
+            default_destinations += usize::from(destination.default);
+        }
+        if default_destinations > 1 {
+            return Err("destinations.folders may contain only one default".to_owned());
+        }
+        let wishlist_interval_seconds =
+            env_parse_layer(env, "SLSKD_WISHLIST_INTERVAL", None, 3_600_u64)?;
+        if wishlist_interval_seconds < 300 {
+            return Err("wishlist.interval_seconds must be at least 300".to_owned());
+        }
+        let wishlist_max_results =
+            env_parse_layer(env, "SLSKD_WISHLIST_MAX_RESULTS", None, 100_usize)?;
+        if !(10..=1_000).contains(&wishlist_max_results) {
+            return Err("wishlist.max_results must be between 10 and 1000".to_owned());
+        }
+        let incoming_search = IncomingSearchSettings {
+            concurrency: env_parse_layer(
+                env,
+                "SLSKD_THROTTLING_SEARCH_INCOMING_CONCURRENCY",
+                None,
+                10_usize,
+            )?,
+            circuit_breaker: env_parse_layer(
+                env,
+                "SLSKD_THROTTLING_SEARCH_INCOMING_CIRCUIT_BREAKER",
+                None,
+                500_usize,
+            )?,
+            response_file_limit: env_parse_layer(
+                env,
+                "SLSKD_THROTTLING_SEARCH_INCOMING_RESPONSE_FILE_LIMIT",
+                None,
+                500_usize,
+            )?,
+        };
+        if !(1..=100).contains(&incoming_search.concurrency) {
+            return Err(
+                "throttling.search.incoming.concurrency must be between 1 and 100".to_owned(),
+            );
+        }
+        if !(100..=10_000).contains(&incoming_search.circuit_breaker) {
+            return Err(
+                "throttling.search.incoming.circuit_breaker must be between 100 and 10000"
+                    .to_owned(),
+            );
+        }
+        if !(100..=5_000).contains(&incoming_search.response_file_limit) {
+            return Err(
+                "throttling.search.incoming.response_file_limit must be between 100 and 5000"
+                    .to_owned(),
+            );
+        }
+        Ok(Self {
+            rooms,
+            liked_interests,
+            hated_interests,
+            destinations,
+            wishlist: WishlistSettings {
+                enabled: env_bool_layer(env, "SLSKD_WISHLIST_ENABLED", true)?,
+                interval: Duration::from_secs(wishlist_interval_seconds),
+                auto_download: env_bool_layer(env, "SLSKD_WISHLIST_AUTO_DOWNLOAD", false)?,
+                max_results: wishlist_max_results,
+            },
+            incoming_search,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -515,97 +910,30 @@ impl AppConfig {
                 controller_compatibility_target == ControllerCompatibilityTarget::Slskdn,
             ),
         )?;
-        let controller_metrics_enabled = env_bool_layer(
+        let ControllerWebAuthSettings {
+            controller_metrics_enabled,
+            controller_metrics_url,
+            controller_metrics_auth_disabled,
+            controller_metrics_username,
+            controller_metrics_password,
+            controller_web_auth_username,
+            controller_web_auth_password,
+            controller_web_jwt_key,
+            controller_web_jwt_key_configured,
+            controller_web_jwt_ttl_millis,
+        } = resolve_controller_web_auth(
             env,
-            "SLSKD_METRICS",
-            file_config.metrics.enabled.unwrap_or(false),
-        )?;
-        let controller_metrics_url = env
-            .var("SLSKD_METRICS_URL")
-            .or(file_config.metrics.url)
-            .unwrap_or_else(|| "/metrics".to_owned());
-        let controller_metrics_auth_disabled = env_bool_layer(
-            env,
-            "SLSKD_METRICS_NO_AUTH",
-            file_config.metrics.authentication.disabled.unwrap_or(false),
-        )?;
-        let controller_metrics_username = env
-            .var("SLSKD_METRICS_USERNAME")
-            .or(file_config.metrics.authentication.username)
-            .unwrap_or_else(|| "slskd".to_owned());
-        let controller_metrics_password = env
-            .var("SLSKD_METRICS_PASSWORD")
-            .or(file_config.metrics.authentication.password)
-            .unwrap_or_else(|| {
-                if controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
-                    "slskd".to_owned()
-                } else {
-                    String::new()
-                }
-            });
-        let controller_web_auth_username = env
-            .var("SLSKD_USERNAME")
-            .or(file_config.auth.username)
-            .unwrap_or_else(|| "slskd".to_owned());
-        let controller_web_auth_password = env
-            .var("SLSKD_PASSWORD")
-            .or(file_config.auth.password)
-            .unwrap_or_else(|| "slskd".to_owned());
-        for (field, value) in [
-            ("username", controller_web_auth_username.as_str()),
-            ("password", controller_web_auth_password.as_str()),
-        ] {
-            let length = value.encode_utf16().count();
-            if !(1..=255).contains(&length) {
-                return Err(format!(
-                    "web authentication {field} must contain between 1 and 255 characters"
-                ));
-            }
-        }
-        let controller_web_jwt_key = env.var("SLSKD_JWT_KEY").or(file_config.auth.jwt.key);
-        let controller_web_jwt_key_configured = controller_web_jwt_key.is_some();
-        let controller_web_jwt_key = controller_web_jwt_key
-            .map(Ok)
-            .unwrap_or_else(random_controller_jwt_key)?;
-        if !(32..=255).contains(&controller_web_jwt_key.encode_utf16().count()) {
-            return Err(
-                "web authentication JWT key must contain between 32 and 255 characters".to_owned(),
-            );
-        }
-        let controller_web_jwt_ttl_millis = env_parse_layer(
-            env,
-            "SLSKD_JWT_TTL",
+            controller_compatibility_target,
+            file_config.metrics.enabled,
+            file_config.metrics.url,
+            file_config.metrics.authentication.disabled,
+            file_config.metrics.authentication.username,
+            file_config.metrics.authentication.password,
+            file_config.auth.username,
+            file_config.auth.password,
+            file_config.auth.jwt.key,
             file_config.auth.jwt.ttl,
-            if controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
-                604_800_000_u64
-            } else {
-                3_600_000_u64
-            },
         )?;
-        if controller_web_jwt_ttl_millis < 3_600 {
-            return Err("web authentication JWT TTL must be at least 3600 milliseconds".to_owned());
-        }
-        let metrics_auth_requires_credentials = controller_compatibility_target
-            == ControllerCompatibilityTarget::Slskd
-            || (controller_metrics_enabled && !controller_metrics_auth_disabled);
-        if metrics_auth_requires_credentials {
-            for (field, value) in [
-                ("username", controller_metrics_username.as_str()),
-                ("password", controller_metrics_password.as_str()),
-            ] {
-                if value.trim().is_empty() {
-                    return Err(format!(
-                        "metrics authentication {field} must be configured when metrics auth is enabled"
-                    ));
-                }
-                let length = value.encode_utf16().count();
-                if !(1..=255).contains(&length) {
-                    return Err(format!(
-                        "metrics authentication {field} must contain between 1 and 255 characters"
-                    ));
-                }
-            }
-        }
         let instance_name = optional_env_any(env, &["SLSKR_INSTANCE_NAME", "SLSKD_INSTANCE_NAME"])
             .unwrap_or_else(|| "default".to_owned());
         let configured_downloads_dir =
@@ -632,292 +960,45 @@ impl AppConfig {
             controller_compatibility_target,
             configured_incomplete_dir.is_some(),
         )?;
-        let configured_native_http_bind = file_config.app.http_bind.as_deref();
-        let base_http_bind = configured_native_http_bind
-            .unwrap_or("127.0.0.1:5030")
-            .parse::<SocketAddr>()
-            .map_err(|error| format!("invalid configured HTTP bind: {error}"))?;
-        let http_port =
-            env_parse_any_layer(env, &["SLSKD_HTTP_PORT"], None, base_http_bind.port())?;
-        let (http_binds, controller_http_address) = if let Some(value) = env.var("SLSKR_HTTP_BIND")
-        {
-            let address = value
-                .parse::<SocketAddr>()
-                .map_err(|error| format!("invalid SLSKR_HTTP_BIND: {error}"))?;
-            (vec![address], Some(address.ip().to_string()))
-        } else {
-            match controller_compatibility_target {
-                ControllerCompatibilityTarget::Slskd => {
-                    let configured = env.var("SLSKD_HTTP_IP_ADDRESS");
-                    let ips = match configured.as_deref() {
-                        Some(value) if !value.trim().is_empty() => value
-                            .split(',')
-                            .map(str::trim)
-                            .map(|value| {
-                                parse_compat_ip_address(value).map_err(|error| {
-                                    format!("invalid SLSKD_HTTP_IP_ADDRESS: {error}")
-                                })
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                        Some(_) => vec![IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)],
-                        None if configured_native_http_bind.is_some() => vec![base_http_bind.ip()],
-                        None => vec![IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)],
-                    };
-                    (
-                        ips.into_iter()
-                            .map(|ip| SocketAddr::new(ip, http_port))
-                            .collect(),
-                        configured,
-                    )
-                }
-                ControllerCompatibilityTarget::Slskdn => {
-                    let configured = env.var("SLSKD_HTTP_ADDRESS");
-                    let raw = configured
-                        .clone()
-                        .unwrap_or_else(|| base_http_bind.ip().to_string());
-                    let ip = if raw == "*" {
-                        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-                    } else {
-                        raw.parse::<IpAddr>()
-                            .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
-                    };
-                    (vec![SocketAddr::new(ip, http_port)], Some(raw))
-                }
-            }
-        };
-        let http_bind = *http_binds
-            .first()
-            .ok_or_else(|| "HTTP bind list must not be empty".to_owned())?;
-        let controller_socket = env
-            .var("SLSKD_HTTP_SOCKET")
-            .map(PathBuf::from)
-            .or(file_config.web.socket)
-            .filter(|path| !path.as_os_str().is_empty());
-        if controller_socket
-            .as_deref()
-            .is_some_and(|path| !path.is_absolute())
-        {
-            return Err("web.socket must be an absolute path".to_owned());
-        }
-        let mut controller_url_base = env
-            .var("SLSKD_URL_BASE")
-            .or(file_config.web.url_base)
-            .unwrap_or_else(|| "/".to_owned());
-        if !controller_url_base.starts_with('/')
-            || controller_url_base.contains(['?', '#'])
-            || controller_url_base
-                .split('/')
-                .any(|segment| segment == "..")
-        {
-            return Err("web.url_base must be an absolute non-traversing URL path".to_owned());
-        }
-        if controller_url_base.len() > 1 {
-            controller_url_base = controller_url_base.trim_end_matches('/').to_owned();
-        }
-        let configured_content_path = env
-            .var("SLSKD_CONTENT_PATH")
-            .map(PathBuf::from)
-            .or(file_config.web.content_path);
-        let controller_content_path_raw = configured_content_path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("wwwroot"));
-        if controller_content_path_raw.as_os_str().is_empty()
-            || controller_content_path_raw
-                .to_string_lossy()
-                .encode_utf16()
-                .count()
-                > 255
-        {
-            return Err("web.content_path must contain between 1 and 255 characters".to_owned());
-        }
-        if configured_content_path.is_some() && controller_content_path_raw.is_absolute() {
-            return Err(
-                "web.content_path must be relative to the application directory".to_owned(),
-            );
-        }
-        let controller_content_path = if controller_content_path_raw.is_absolute() {
-            controller_content_path_raw.clone()
-        } else {
-            std::env::current_exe()
-                .ok()
-                .and_then(|path| path.parent().map(Path::to_path_buf))
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(&controller_content_path_raw)
-        };
-        if configured_content_path.is_some() && !controller_content_path.is_dir() {
-            return Err(format!(
-                "web.content_path directory does not exist: {}",
-                controller_content_path.display()
-            ));
-        }
-        let https_disabled = env_bool_layer(
+        let ControllerWebResolution {
+            http_bind,
+            http_binds,
+            controller_http_address,
+            controller_web,
+        } = resolve_controller_web(
             env,
-            "SLSKD_NO_HTTPS",
-            file_config.web.https.disabled.unwrap_or(false),
+            controller_compatibility_target,
+            file_config.app.http_bind,
+            file_config.web.socket,
+            file_config.web.url_base,
+            file_config.web.content_path,
+            file_config.web.logging,
+            file_config.web.https,
         )?;
-        let https_port = env_parse_layer(
+        let controller_api_keys = resolve_controller_api_keys(
             env,
-            "SLSKD_HTTPS_PORT",
-            file_config.web.https.port,
-            5031_u16,
+            controller_compatibility_target,
+            file_config.auth.api_keys,
         )?;
-        let https_configured_ip_address = env
-            .var("SLSKD_HTTPS_IP_ADDRESS")
-            .or(file_config.web.https.ip_address);
-        let https_ips = match controller_compatibility_target {
-            ControllerCompatibilityTarget::Slskd => match https_configured_ip_address.as_deref() {
-                Some(value) if !value.trim().is_empty() => value
-                    .split(',')
-                    .map(str::trim)
-                    .map(parse_compat_ip_address)
-                    .collect::<Result<Vec<_>, _>>()?,
-                _ => vec![IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)],
-            },
-            ControllerCompatibilityTarget::Slskdn => vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
-        };
-        let https_certificate_pfx = env
-            .var("SLSKD_HTTPS_CERT_PFX")
-            .map(PathBuf::from)
-            .or(file_config.web.https.certificate.pfx)
-            .filter(|path| !path.as_os_str().is_empty());
-        if https_certificate_pfx
-            .as_deref()
-            .is_some_and(|path| !path.is_file())
-        {
-            return Err("web.https.certificate.pfx must identify a readable file".to_owned());
-        }
-        let controller_web = ControllerWebSettings {
-            socket: controller_socket,
-            url_base: controller_url_base,
-            content_path: controller_content_path,
-            content_path_display: controller_content_path_raw.display().to_string(),
-            logging: env_bool_layer(
-                env,
-                "SLSKD_HTTP_LOGGING",
-                file_config.web.logging.unwrap_or(false),
-            )?,
-            https: ControllerHttpsSettings {
-                disabled: https_disabled,
-                binds: https_ips
-                    .into_iter()
-                    .map(|ip| SocketAddr::new(ip, https_port))
-                    .collect(),
-                configured_ip_address: https_configured_ip_address,
-                force: env_bool_layer(
-                    env,
-                    "SLSKD_HTTPS_FORCE",
-                    file_config.web.https.force.unwrap_or(false),
-                )?,
-                certificate_pfx: https_certificate_pfx,
-                certificate_password: env
-                    .var("SLSKD_HTTPS_CERT_PASSWORD")
-                    .or(file_config.web.https.certificate.password)
-                    .unwrap_or_default(),
-            },
-        };
-        let controller_api_key_files = match env.var("SLSKD_API_KEYS_JSON") {
-            Some(value) => {
-                serde_json::from_str::<BTreeMap<String, ControllerApiKeyFileConfig>>(&value)
-                    .map_err(|error| format!("invalid web.authentication.api_keys: {error}"))?
-            }
-            None => file_config.auth.api_keys,
-        };
-        let mut controller_api_keys = BTreeMap::new();
-        for (name, configured) in controller_api_key_files {
-            let key_length = configured.key.encode_utf16().count();
-            if !(16..=255).contains(&key_length) {
-                return Err(format!(
-                    "web.authentication.api_keys.{name}.key must contain between 16 and 255 characters"
-                ));
-            }
-            let role = configured.role.to_ascii_lowercase();
-            if !matches!(role.as_str(), "readonly" | "readwrite" | "administrator") {
-                return Err(format!(
-                    "web.authentication.api_keys.{name}.role must be readonly, readwrite, or administrator"
-                ));
-            }
-            let default_cidr =
-                if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
-                    "127.0.0.1/32,::1/128"
-                } else {
-                    "0.0.0.0/0,::/0"
-                };
-            let cidrs = configured
-                .cidr
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .chain(
-                    configured
-                        .cidr
-                        .trim()
-                        .is_empty()
-                        .then_some(default_cidr)
-                        .into_iter()
-                        .flat_map(|value| value.split(',')),
-                )
-                .map(TrustedProxyCidr::parse)
-                .collect::<Result<Vec<_>, _>>()?;
-            controller_api_keys.insert(
-                name,
-                ControllerApiKeySettings {
-                    key: configured.key,
-                    role,
-                    cidr: if configured.cidr.trim().is_empty() {
-                        default_cidr.to_owned()
-                    } else {
-                        configured.cidr
-                    },
-                    cidrs,
-                },
-            );
-        }
-        let configured_server_address = env
-            .var("SLSK_SERVER")
-            .or(file_config.network.server_address)
-            .unwrap_or_else(|| CONTROLLER_DEFAULT_SERVER_ADDRESS.to_owned());
-        let (configured_server_host, configured_server_port) =
-            split_server_address(&configured_server_address)?;
-        let server_host = env
-            .var("SLSKD_SLSK_ADDRESS")
-            .unwrap_or(configured_server_host);
-        let server_port =
-            env_parse_any_layer(env, &["SLSKD_SLSK_PORT"], None, configured_server_port)?;
-        let server_address = format_host_port(&server_host, server_port);
-        let listen_port = env_parse_any_layer(
+        let SoulseekIdentity {
+            server_address,
+            listen_port,
+            username,
+            password,
+            credential_store,
+            credential_file,
+            auto_connect,
+        } = resolve_soulseek_identity(
             env,
-            &["SLSK_LISTEN_PORT", "SLSKD_SLSK_LISTEN_PORT"],
+            &state_dir,
+            file_config.network.server_address,
             file_config.network.listen_port,
-            CONTROLLER_DEFAULT_LISTEN_PORT,
+            file_config.network.username,
+            file_config.network.password,
+            file_config.network.credential_store,
+            file_config.network.credential_file,
+            file_config.app.auto_connect,
         )?;
-        if !(1024..=65_535).contains(&listen_port) {
-            return Err("Soulseek.ListenPort must be between 1024 and 65535".to_owned());
-        }
-        let username = optional_env_any(env, &["SLSK_USERNAME", "SLSKD_SLSK_USERNAME"])
-            .or(file_config.network.username);
-        let password = optional_env_any(env, &["SLSK_PASSWORD", "SLSKD_SLSK_PASSWORD"])
-            .or(file_config.network.password);
-        let credential_store = CredentialStoreMode::parse(
-            env.var("SLSKR_CREDENTIAL_STORE")
-                .or(file_config.network.credential_store)
-                .unwrap_or_else(|| "os".to_owned())
-                .as_str(),
-        )?;
-        let credential_file = env
-            .var("SLSKR_CREDENTIAL_FILE")
-            .map(PathBuf::from)
-            .or(file_config.network.credential_file)
-            .unwrap_or_else(|| state_dir.join("soulseek-credentials.json"));
-        let auto_connect_default = file_config.app.auto_connect.unwrap_or(
-            username.is_some() && password.is_some() || credential_store.auto_connect_default(),
-        );
-        let auto_connect = if env.var("SLSKR_AUTO_CONNECT").is_some() {
-            env_bool_layer(env, "SLSKR_AUTO_CONNECT", auto_connect_default)?
-        } else if env.var("SLSKD_NO_CONNECT").is_some() {
-            !env_bool_layer(env, "SLSKD_NO_CONNECT", false)?
-        } else {
-            auto_connect_default
-        };
         let reconnect = env_bool_layer(
             env,
             "SLSKR_RECONNECT",
@@ -941,67 +1022,21 @@ impl AppConfig {
             .or(file_config.app.log_level)
             .or_else(|| env.var("RUST_LOG"))
             .unwrap_or_else(|| "info".to_owned());
-        let daemon_flags = DaemonFlagsSettings {
-            force_migrations: env_bool_layer(
-                env,
-                "SLSKD_FORCE_MIGRATIONS",
-                file_config.flags.force_migrations.unwrap_or(false),
-            )?,
-            legacy_windows_tcp_keepalive: env_bool_layer(
-                env,
-                "SLSKD_LEGACY_WINDOWS_TCP_KEEPALIVE",
-                file_config
-                    .flags
-                    .legacy_windows_tcp_keepalive
-                    .unwrap_or(false),
-            )?,
-            log_sql: env_bool_layer(
-                env,
-                "SLSKD_LOG_SQL",
-                file_config.flags.log_sql.unwrap_or(false),
-            )?,
-            log_unobserved_exceptions: env_bool_layer(
-                env,
-                "SLSKD_LOG_UNOBSERVED_EXCEPTIONS",
-                file_config.flags.log_unobserved_exceptions.unwrap_or(false),
-            )?,
-            optimistic_relay_file_info: env_bool_layer(
-                env,
-                "SLSKD_OPTIMISTIC_RELAY_FILE_INFO",
-                file_config
-                    .flags
-                    .optimistic_relay_file_info
-                    .unwrap_or(false),
-            )?,
-            volatile: env_bool_layer(
-                env,
-                "SLSKD_VOLATILE",
-                file_config.flags.volatile.unwrap_or(false),
-            )?,
-        };
-        let logger_loki = env
-            .var("SLSKD_LOKI")
-            .or(file_config.logger.loki)
-            .filter(|value| !value.trim().is_empty());
-        if logger_loki
-            .as_deref()
-            .is_some_and(|value| !(value.starts_with("http://") || value.starts_with("https://")))
-        {
-            return Err("logger.loki must be an http:// or https:// URL".to_owned());
-        }
-        let logger = LoggerSettings {
-            disk: env_bool_layer(
-                env,
-                "SLSKD_DISK_LOGGER",
-                file_config.logger.disk.unwrap_or(false),
-            )?,
-            loki: logger_loki,
-            no_color: env_bool_layer(
-                env,
-                "SLSKD_NO_COLOR",
-                file_config.logger.no_color.unwrap_or(false),
-            )?,
-        };
+        let daemon_flags = DaemonFlagsSettings::from_layers(
+            file_config.flags.force_migrations,
+            file_config.flags.legacy_windows_tcp_keepalive,
+            file_config.flags.log_sql,
+            file_config.flags.log_unobserved_exceptions,
+            file_config.flags.optimistic_relay_file_info,
+            file_config.flags.volatile,
+            env,
+        )?;
+        let logger = LoggerSettings::from_layers(
+            file_config.logger.disk,
+            file_config.logger.loki,
+            file_config.logger.no_color,
+            env,
+        )?;
         let permissions_file_mode = env
             .var("SLSKD_FILE_PERMISSION_MODE")
             .or(file_config.permissions.file.mode)
@@ -1019,539 +1054,76 @@ impl AppConfig {
         {
             return Err("The 'permissions' keys have been moved under a new 'destination' key under transfers -> download, and the behavior has changed.  See https://github.com/slskd/slskd/pull/1756 for details".to_owned());
         }
-        let telemetry_exporter = env
-            .var("SLSKD_TELEMETRY_TRACING_EXPORTER")
-            .or(file_config.telemetry.tracing.exporter)
-            .unwrap_or_else(|| "console".to_owned())
-            .to_ascii_lowercase();
-        if !matches!(telemetry_exporter.as_str(), "console" | "jaeger" | "otlp") {
-            return Err("telemetry.tracing.exporter must be console, jaeger, or otlp".to_owned());
-        }
-        let telemetry_tracing =
-            TelemetryTracingSettings {
-                enabled: env_bool_layer(
-                    env,
-                    "SLSKD_TELEMETRY_TRACING",
-                    file_config.telemetry.tracing.enabled.unwrap_or(false),
-                )?,
-                exporter: telemetry_exporter,
-                jaeger_endpoint: env
-                    .var("SLSKD_TELEMETRY_JAEGER_ENDPOINT")
-                    .or(file_config.telemetry.tracing.jaeger_endpoint)
-                    .filter(|value| !value.trim().is_empty()),
-                jaeger_port: match env.var("SLSKD_TELEMETRY_JAEGER_PORT") {
-                    Some(value) => Some(value.parse::<u16>().map_err(|error| {
-                        format!("invalid SLSKD_TELEMETRY_JAEGER_PORT: {error}")
-                    })?),
-                    None => file_config.telemetry.tracing.jaeger_port,
-                },
-                otlp_endpoint: env
-                    .var("SLSKD_TELEMETRY_OTLP_ENDPOINT")
-                    .or(file_config.telemetry.tracing.otlp_endpoint)
-                    .filter(|value| !value.trim().is_empty()),
-            };
-        let retention = RetentionSettings {
-            search_minutes: env_parse_option_layer(
-                env,
-                "SLSKR_RETENTION_SEARCH",
-                file_config.retention.search,
-            )?,
-            logs_days: env_parse_layer(
-                env,
-                "SLSKR_RETENTION_LOGS",
-                file_config.retention.logs,
-                180_u64,
-            )?,
-            files_complete_minutes: env_parse_option_layer(
-                env,
-                "SLSKR_RETENTION_FILES_COMPLETE",
-                file_config.retention.files.complete,
-            )?,
-            files_incomplete_minutes: env_parse_option_layer(
-                env,
-                "SLSKR_RETENTION_FILES_INCOMPLETE",
-                file_config.retention.files.incomplete,
-            )?,
-            upload: TransferRetentionSettings {
-                succeeded_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_UPLOAD_SUCCEEDED",
-                    file_config.retention.transfers.upload.succeeded,
-                )?,
-                errored_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_UPLOAD_ERRORED",
-                    file_config.retention.transfers.upload.errored,
-                )?,
-                cancelled_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_UPLOAD_CANCELLED",
-                    file_config.retention.transfers.upload.cancelled,
-                )?,
-                failed_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_UPLOAD_FAILED",
-                    file_config.retention.transfers.upload.failed,
-                )?,
-            },
-            download: TransferRetentionSettings {
-                succeeded_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_DOWNLOAD_SUCCEEDED",
-                    file_config.retention.transfers.download.succeeded,
-                )?,
-                errored_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_DOWNLOAD_ERRORED",
-                    file_config.retention.transfers.download.errored,
-                )?,
-                cancelled_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_DOWNLOAD_CANCELLED",
-                    file_config.retention.transfers.download.cancelled,
-                )?,
-                failed_minutes: env_parse_option_layer(
-                    env,
-                    "SLSKR_RETENTION_DOWNLOAD_FAILED",
-                    file_config.retention.transfers.download.failed,
-                )?,
-            },
-        };
-        if retention.logs_days < 1 {
-            return Err("retention.logs must be at least 1 day".to_owned());
-        }
-        for (name, value, minimum) in [
-            ("retention.search", retention.search_minutes, 5),
-            (
-                "retention.files.complete",
-                retention.files_complete_minutes,
-                30,
-            ),
-            (
-                "retention.files.incomplete",
-                retention.files_incomplete_minutes,
-                30,
-            ),
-            (
-                "retention.transfers.upload.succeeded",
-                retention.upload.succeeded_minutes,
-                5,
-            ),
-            (
-                "retention.transfers.upload.errored",
-                retention.upload.errored_minutes,
-                5,
-            ),
-            (
-                "retention.transfers.upload.cancelled",
-                retention.upload.cancelled_minutes,
-                5,
-            ),
-            (
-                "retention.transfers.upload.failed",
-                retention.upload.failed_minutes,
-                5,
-            ),
-            (
-                "retention.transfers.download.succeeded",
-                retention.download.succeeded_minutes,
-                5,
-            ),
-            (
-                "retention.transfers.download.errored",
-                retention.download.errored_minutes,
-                5,
-            ),
-            (
-                "retention.transfers.download.cancelled",
-                retention.download.cancelled_minutes,
-                5,
-            ),
-            (
-                "retention.transfers.download.failed",
-                retention.download.failed_minutes,
-                5,
-            ),
-        ] {
-            if value.is_some_and(|value| value < minimum) {
-                return Err(format!("{name} must be at least {minimum} minutes"));
-            }
-        }
-        let search_retention_cleanup_seconds = env_parse_layer(
+        let telemetry_tracing = TelemetryTracingSettings::from_layers(
+            file_config.telemetry.tracing.enabled,
+            file_config.telemetry.tracing.exporter,
+            file_config.telemetry.tracing.jaeger_endpoint,
+            file_config.telemetry.tracing.jaeger_port,
+            file_config.telemetry.tracing.otlp_endpoint,
             env,
-            "SLSKD_SEARCH_RETENTION_CLEANUP_INTERVAL",
+        )?;
+        let retention = RetentionSettings::from_layers(
+            file_config.retention.search,
+            file_config.retention.logs,
+            file_config.retention.files.complete,
+            file_config.retention.files.incomplete,
+            file_config.retention.transfers.upload,
+            file_config.retention.transfers.download,
+            env,
+        )?;
+        let search_retention = SearchRetentionSettings::from_layers(
             file_config
                 .filters
                 .search_retention
                 .cleanup_interval_seconds,
-            86_400_u64,
+            file_config.filters.search_retention.max_age_days,
+            file_config.filters.search_retention.max_count,
+            env,
         )?;
-        if search_retention_cleanup_seconds < 3_600 {
-            return Err(
-                "filters.search_retention.cleanup_interval_seconds must be at least 3600"
-                    .to_owned(),
-            );
-        }
-        let search_retention = SearchRetentionSettings {
-            max_age_days: env_parse_layer(
-                env,
-                "SLSKD_SEARCH_RETENTION_MAX_AGE_DAYS",
-                file_config.filters.search_retention.max_age_days,
-                30_u64,
-            )?,
-            max_count: env_parse_layer(
-                env,
-                "SLSKD_SEARCH_RETENTION_MAX_COUNT",
-                file_config.filters.search_retention.max_count,
-                1_000_usize,
-            )?,
-            cleanup_interval: Duration::from_secs(search_retention_cleanup_seconds),
-        };
-        let rooms = normalized_controller_values(controller_string_array_layer(
+        let core_workflow = CoreWorkflowSettings::from_layers(env)?;
+        let ListenerAndObfuscationResolution {
+            listener_bind,
+            advertised_port,
+            obfuscated_listener_bind,
+            obfuscated_advertised_port,
+            overlay_bind,
+            dht_enabled,
+            dht_port,
+            trusted_mesh_peers,
+            obfuscation_enabled,
+            obfuscation_mode,
+            obfuscation_listen_port,
+            obfuscation_advertise_regular_port,
+            obfuscation_prefer_outbound,
+        } = resolve_listener_and_obfuscation(
             env,
-            "SLSKD_ROOMS",
-            Vec::new(),
-        ));
-        let liked_interests = normalized_controller_values(controller_string_array_layer(
-            env,
-            "SLSKD_SLSK_LIKED_INTERESTS",
-            Vec::new(),
-        ));
-        let hated_interests = normalized_controller_values(controller_string_array_layer(
-            env,
-            "SLSKD_SLSK_HATED_INTERESTS",
-            Vec::new(),
-        ));
-        for (name, values) in [
-            ("rooms", &rooms),
-            ("soulseek.liked_interests", &liked_interests),
-            ("soulseek.hated_interests", &hated_interests),
-        ] {
-            if values.len() > 1_000 {
-                return Err(format!("{name} may contain at most 1000 entries"));
-            }
-            if values.iter().any(|value| value.len() > 1_024) {
-                return Err(format!("{name} entries may not exceed 1024 bytes"));
-            }
-        }
-        let destinations = match env.var("SLSKD_DESTINATIONS_JSON") {
-            Some(json) => serde_json::from_str::<Vec<DestinationSettings>>(&json)
-                .map_err(|error| format!("invalid destinations.folders configuration: {error}"))?,
-            None => Vec::new(),
-        };
-        if destinations.len() > 256 {
-            return Err("destinations.folders may contain at most 256 entries".to_owned());
-        }
-        let mut destination_paths = std::collections::BTreeSet::new();
-        let mut default_destinations = 0_usize;
-        for destination in &destinations {
-            if destination.path.as_os_str().is_empty() || !destination.path.is_absolute() {
-                return Err("destinations.folders.path must be absolute".to_owned());
-            }
-            if destination
-                .path
-                .components()
-                .any(|component| component == std::path::Component::ParentDir)
-            {
-                return Err(
-                    "destinations.folders.path may not contain traversal segments".to_owned(),
-                );
-            }
-            if !destination_paths.insert(destination.path.clone()) {
-                return Err("destinations.folders paths must be unique".to_owned());
-            }
-            default_destinations += usize::from(destination.default);
-        }
-        if default_destinations > 1 {
-            return Err("destinations.folders may contain only one default".to_owned());
-        }
-        let wishlist_interval_seconds =
-            env_parse_layer(env, "SLSKD_WISHLIST_INTERVAL", None, 3_600_u64)?;
-        if wishlist_interval_seconds < 300 {
-            return Err("wishlist.interval_seconds must be at least 300".to_owned());
-        }
-        let wishlist_max_results =
-            env_parse_layer(env, "SLSKD_WISHLIST_MAX_RESULTS", None, 100_usize)?;
-        if !(10..=1_000).contains(&wishlist_max_results) {
-            return Err("wishlist.max_results must be between 10 and 1000".to_owned());
-        }
-        let incoming_search = IncomingSearchSettings {
-            concurrency: env_parse_layer(
-                env,
-                "SLSKD_THROTTLING_SEARCH_INCOMING_CONCURRENCY",
-                None,
-                10_usize,
-            )?,
-            circuit_breaker: env_parse_layer(
-                env,
-                "SLSKD_THROTTLING_SEARCH_INCOMING_CIRCUIT_BREAKER",
-                None,
-                500_usize,
-            )?,
-            response_file_limit: env_parse_layer(
-                env,
-                "SLSKD_THROTTLING_SEARCH_INCOMING_RESPONSE_FILE_LIMIT",
-                None,
-                500_usize,
-            )?,
-        };
-        if !(1..=100).contains(&incoming_search.concurrency) {
-            return Err(
-                "throttling.search.incoming.concurrency must be between 1 and 100".to_owned(),
-            );
-        }
-        if !(100..=10_000).contains(&incoming_search.circuit_breaker) {
-            return Err(
-                "throttling.search.incoming.circuit_breaker must be between 100 and 10000"
-                    .to_owned(),
-            );
-        }
-        if !(100..=5_000).contains(&incoming_search.response_file_limit) {
-            return Err(
-                "throttling.search.incoming.response_file_limit must be between 100 and 5000"
-                    .to_owned(),
-            );
-        }
-        let core_workflow = CoreWorkflowSettings {
-            rooms,
-            liked_interests,
-            hated_interests,
-            destinations,
-            wishlist: WishlistSettings {
-                enabled: env_bool_layer(env, "SLSKD_WISHLIST_ENABLED", true)?,
-                interval: Duration::from_secs(wishlist_interval_seconds),
-                auto_download: env_bool_layer(env, "SLSKD_WISHLIST_AUTO_DOWNLOAD", false)?,
-                max_results: wishlist_max_results,
-            },
-            incoming_search,
-        };
-        let listener_bind = optional_env_any(
-            env,
-            &["SLSKR_LISTENER_BIND", "SLSKD_SLSK_LISTEN_IP_ADDRESS"],
-        )
-        .map(|value| {
-            if env.var("SLSKR_LISTENER_BIND").is_none() && value.parse::<IpAddr>().is_ok() {
-                format_host_port(&value, u16::try_from(listen_port).unwrap_or(u16::MAX))
-            } else {
-                value
-            }
-        })
-        .or(file_config.listeners.regular_bind)
-        .or_else(|| {
-            Some(
-                SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    u16::try_from(listen_port).unwrap_or(u16::MAX),
-                )
-                .to_string(),
-            )
-        });
-        if env.var("SLSKR_LISTENER_BIND").is_none() {
-            if let Some(address) = env.var("SLSKD_SLSK_LISTEN_IP_ADDRESS") {
-                address.parse::<IpAddr>().map_err(|_| {
-                    "Soulseek.ListenIpAddress specifies an invalid IPv4 or IPv6 IP address"
-                        .to_owned()
-                })?;
-            }
-        }
-        if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-            && auto_connect
-            && listener_bind.as_deref().is_some_and(|value| {
-                value
-                    .parse::<SocketAddr>()
-                    .map(|address| address.ip().is_loopback())
-                    .or_else(|_| value.parse::<IpAddr>().map(|address| address.is_loopback()))
-                    .unwrap_or(false)
-            })
-        {
-            return Err(
-                "Soulseek.ListenIpAddress must not be a loopback address when the client is connecting. Use 0.0.0.0 or a reachable LAN/VPN interface instead."
-                    .to_owned(),
-            );
-        }
-        let advertised_port = env_parse_layer(
-            env,
-            "SLSKR_ADVERTISED_PORT",
-            file_config.listeners.advertised_port,
+            controller_compatibility_target,
+            &advanced_networking,
             listen_port,
-        )?;
-        let upstream_obfuscated_port =
-            env_parse_any_option(env, &["SLSKD_SLSK_OBFUSCATION_LISTEN_PORT"])?;
-        let obfuscated_listener_bind = env
-            .var("SLSKR_OBFUSCATED_LISTENER_BIND")
-            .or_else(|| {
-                upstream_obfuscated_port
-                    .filter(|port| *port != 0)
-                    .map(|port| {
-                        let host = listener_bind
-                            .as_deref()
-                            .and_then(|value| value.parse::<SocketAddr>().ok())
-                            .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
-                        SocketAddr::new(host, port).to_string()
-                    })
-            })
-            .or(file_config.listeners.obfuscated_bind)
-            .or_else(|| {
-                (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-                    && listen_port < 65_535)
-                    .then(|| {
-                        let host = listener_bind
-                            .as_deref()
-                            .and_then(|value| value.parse::<SocketAddr>().ok())
-                            .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
-                        SocketAddr::new(host, (listen_port + 1) as u16).to_string()
-                    })
-            });
-        let obfuscated_advertised_port = if env.var("SLSKR_OBFUSCATED_ADVERTISED_PORT").is_some() {
-            env_parse_option_layer(
-                env,
-                "SLSKR_OBFUSCATED_ADVERTISED_PORT",
-                file_config.listeners.obfuscated_advertised_port,
-            )?
-        } else {
-            upstream_obfuscated_port
-                .filter(|port| *port != 0)
-                .map(u32::from)
-                .or(file_config.listeners.obfuscated_advertised_port)
-                .or_else(|| {
-                    (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-                        && listen_port < 65_535)
-                        .then_some(listen_port + 1)
-                })
-        };
-        let overlay_bind = env
-            .var("SLSKR_OVERLAY_BIND")
-            .or(file_config.listeners.overlay_bind)
-            .map(|value| {
-                let address = value
-                    .parse::<SocketAddr>()
-                    .map_err(|error| format!("invalid SLSKR_OVERLAY_BIND: {error}"))?;
-                if address.port() == 0 {
-                    return Err("SLSKR_OVERLAY_BIND port must be non-zero".to_owned());
-                }
-                Ok(address)
-            })
-            .transpose()?
-            .or_else(|| {
-                (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-                    && advanced_networking.overlay.enable)
-                    .then_some(SocketAddr::new(
-                        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                        advanced_networking.dht.overlay_port,
-                    ))
-            });
-        let dht_enabled = advanced_networking.dht.enabled;
-        let dht_port = advanced_networking.dht.dht_port;
-        let trusted_mesh_peers = trusted_mesh_peers_from_layers(
-            env.var("SLSKR_TRUSTED_MESH_PEERS"),
+            auto_connect,
+            file_config.listeners.regular_bind,
+            file_config.listeners.advertised_port,
+            file_config.listeners.obfuscated_bind,
+            file_config.listeners.obfuscated_advertised_port,
+            file_config.listeners.overlay_bind,
             file_config.mesh.trusted_peers,
+            file_config.network.obfuscation.enabled,
+            file_config.network.obfuscation.mode,
+            file_config.network.obfuscation.advertise_regular_port,
+            file_config.network.obfuscation.prefer_outbound,
         )?;
-        let obfuscation_enabled = env_bool_any_layer(
+        let PeerProfileSettings {
+            peer_host_override,
+            test_user_endpoint_overrides,
+            user_info_description,
+            user_info_picture,
+            soulseek_diagnostic_level,
+        } = resolve_peer_profile(
             env,
-            &["SLSK_OBFUSCATION", "SLSKD_SLSK_OBFUSCATION"],
-            file_config.network.obfuscation.enabled.unwrap_or(true),
-        )?;
-        let obfuscation_mode = SoulseekObfuscationMode::parse(
-            optional_env_any(
-                env,
-                &["SLSK_OBFUSCATION_MODE", "SLSKD_SLSK_OBFUSCATION_MODE"],
-            )
-            .or(file_config.network.obfuscation.mode)
-            .as_deref()
-            .unwrap_or("compatibility"),
-        )?;
-        let obfuscation_listen_port = u32::from(upstream_obfuscated_port.unwrap_or_default());
-        let obfuscation_advertise_regular_port = env_bool_any_layer(
-            env,
-            &[
-                "SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
-                "SLSKD_SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
-            ],
-            file_config
-                .network
-                .obfuscation
-                .advertise_regular_port
-                .unwrap_or(true),
-        )?;
-        let obfuscation_prefer_outbound = env_bool_any_layer(
-            env,
-            &[
-                "SLSK_OBFUSCATION_PREFER_OUTBOUND",
-                "SLSKD_SLSK_OBFUSCATION_PREFER_OUTBOUND",
-            ],
-            file_config
-                .network
-                .obfuscation
-                .prefer_outbound
-                .unwrap_or(true),
-        )?;
-        let peer_host_override = env
-            .var("SLSKR_PEER_HOST_OVERRIDE")
-            .map(|value| {
-                value
-                    .parse::<Ipv4Addr>()
-                    .map_err(|error| format!("invalid SLSKR_PEER_HOST_OVERRIDE: {error}"))
-            })
-            .transpose()?;
-        let test_user_endpoint_overrides =
-            parse_user_endpoint_overrides(env.var("SLSKR_TEST_USER_ENDPOINT_OVERRIDES"))?;
-        let user_info_description = optional_env_any(
-            env,
-            &["SLSKR_USER_INFO_DESCRIPTION", "SLSKD_SLSK_DESCRIPTION"],
-        )
-        .or(file_config.profile.user_info_description)
-        .unwrap_or_else(|| match controller_compatibility_target {
-            ControllerCompatibilityTarget::Slskd => {
-                "A slskd user. https://github.com/slskd/slskd".to_owned()
-            }
-            ControllerCompatibilityTarget::Slskdn => {
-                "A slskdN user. Unofficial fork of slskd: https://github.com/snapetech/slskdn"
-                    .to_owned()
-            }
-        });
-        let user_info_picture = optional_env_any(
-            env,
-            &[
-                "SLSKR_USER_INFO_PICTURE",
-                "SLSKD_SLSK_PICTURE",
-                "SLSK_PICTURE",
-            ],
-        )
-        .or(file_config.profile.user_info_picture)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-        if let Some(path) = user_info_picture.as_deref() {
-            let metadata = fs::metadata(path).map_err(|error| {
-                format!(
-                    "Soulseek picture '{}' is not readable: {error}",
-                    path.display()
-                )
-            })?;
-            if !metadata.is_file() {
-                return Err(format!(
-                    "Soulseek picture '{}' is not a regular file",
-                    path.display()
-                ));
-            }
-            fs::File::open(path).map_err(|error| {
-                format!(
-                    "Soulseek picture '{}' is not readable: {error}",
-                    path.display()
-                )
-            })?;
-        }
-        let soulseek_diagnostic_level = SoulseekDiagnosticLevel::parse(
-            optional_env_any(
-                env,
-                &[
-                    "SLSKR_SLSK_DIAG_LEVEL",
-                    "SLSKD_SLSK_DIAG_LEVEL",
-                    "SLSK_DIAG_LEVEL",
-                ],
-            )
-            .or(file_config.profile.soulseek_diagnostic_level)
-            .as_deref()
-            .unwrap_or("info"),
+            controller_compatibility_target,
+            file_config.profile.user_info_description,
+            file_config.profile.user_info_picture,
+            file_config.profile.soulseek_diagnostic_level,
         )?;
         let soulseek_distributed = SoulseekDistributedSettings {
             disabled: env_bool_any_layer(
@@ -1721,238 +1293,69 @@ impl AppConfig {
                 "Hi, I'm human and testing a slskd client. Shares may be temporarily unavailable while I validate the client."
             },
         )?;
-        let remote_configuration = env_bool_any_layer(
+        let MiscControllerFlags {
+            remote_configuration,
+            remote_file_management,
+            controller_debug,
+            controller_no_config_watch,
+            controller_no_logo,
+            controller_no_start,
+            controller_no_version_check,
+            controller_experimental,
+            controller_hash_from_audio_file_enabled,
+            controller_no_share_scan,
+            controller_force_share_scan,
+        } = resolve_misc_controller_flags(
             env,
-            &["SLSKR_REMOTE_CONFIGURATION", "SLSKD_REMOTE_CONFIGURATION"],
-            file_config
-                .compatibility
-                .remote_configuration
-                .unwrap_or(false),
+            file_config.compatibility.remote_configuration,
+            file_config.compatibility.debug,
+            file_config.compatibility.no_config_watch,
+            file_config.flags.no_logo,
+            file_config.flags.no_start,
+            file_config.flags.no_version_check,
+            file_config.flags.experimental,
+            file_config.flags.hash_from_audio_file_enabled,
+            file_config.flags.no_share_scan,
+            file_config.flags.force_share_scan,
         )?;
-        let remote_file_management = env_bool_any_layer(
+        let ApiAndWebHardeningSettings {
+            api_token,
+            api_read_write_token,
+            api_read_only_token,
+            api_nowplaying_token,
+            auth_required,
+            api_cookie_auth_enabled,
+            api_rate_limit_anonymous,
+            api_rate_limit_authenticated,
+            controller_web_max_request_body_size,
+            controller_web_enforce_security,
+            controller_web_allow_remote_no_auth,
+            controller_web_passthrough_allowed_cidrs,
+            controller_web_passthrough_cidrs,
+            controller_diagnostics_allow_memory_dump,
+            controller_diagnostics_allow_remote_dump,
+            controller_web_cors,
+            controller_web_rate_limiting,
+        } = resolve_api_and_web_hardening(
             env,
-            &[
-                "SLSKR_REMOTE_FILE_MANAGEMENT",
-                "SLSKD_REMOTE_FILE_MANAGEMENT",
-            ],
-            false,
-        )?;
-        let controller_debug = env_bool_any_layer(
-            env,
-            &["SLSKR_DEBUG", "SLSKD_DEBUG"],
-            file_config.compatibility.debug.unwrap_or(false),
-        )?;
-        let controller_no_config_watch = env_bool_any_layer(
-            env,
-            &["SLSKR_NO_CONFIG_WATCH", "SLSKD_NO_CONFIG_WATCH"],
-            file_config.compatibility.no_config_watch.unwrap_or(false),
-        )?;
-        let controller_no_logo = env_bool_layer(
-            env,
-            "SLSKD_NO_LOGO",
-            file_config.flags.no_logo.unwrap_or(false),
-        )?;
-        let controller_no_start = env_bool_layer(
-            env,
-            "SLSKD_NO_START",
-            file_config.flags.no_start.unwrap_or(false),
-        )?;
-        let controller_no_version_check = env_bool_layer(
-            env,
-            "SLSKD_NO_VERSION_CHECK",
-            file_config.flags.no_version_check.unwrap_or(false),
-        )?;
-        let controller_experimental = env_bool_layer(
-            env,
-            "SLSKD_EXPERIMENTAL",
-            file_config.flags.experimental.unwrap_or(false),
-        )?;
-        let controller_hash_from_audio_file_enabled = env_bool_layer(
-            env,
-            "SLSKR_CONTROLLER_YAML_HASH_FROM_AUDIO_FILE_ENABLED",
-            file_config
-                .flags
-                .hash_from_audio_file_enabled
-                .unwrap_or(false),
-        )?;
-        let controller_no_share_scan = env_bool_layer(
-            env,
-            "SLSKD_NO_SHARE_SCAN",
-            file_config.flags.no_share_scan.unwrap_or(false),
-        )?;
-        let controller_force_share_scan = env_bool_layer(
-            env,
-            "SLSKD_FORCE_SHARE_SCAN",
-            file_config.flags.force_share_scan.unwrap_or(false),
-        )?;
-        let api_token = env.var("SLSKR_API_TOKEN").or(file_config.auth.api_token);
-        let api_read_write_token = env
-            .var("SLSKR_API_READ_WRITE_TOKEN")
-            .or(file_config.auth.read_write_token);
-        let api_read_only_token = env
-            .var("SLSKR_API_READ_ONLY_TOKEN")
-            .or(file_config.auth.read_only_token);
-        let api_nowplaying_token = env
-            .var("SLSKR_API_NOWPLAYING_TOKEN")
-            .or(file_config.auth.nowplaying_token);
-        let configured_tokens = [
-            api_token.as_deref(),
-            api_read_write_token.as_deref(),
-            api_read_only_token.as_deref(),
-            api_nowplaying_token.as_deref(),
-        ];
-        for token in configured_tokens.into_iter().flatten() {
-            validate_api_token(token)?;
-        }
-        let token_count = configured_tokens.into_iter().flatten().count();
-        let unique_token_count = configured_tokens
-            .into_iter()
-            .flatten()
-            .collect::<std::collections::HashSet<_>>()
-            .len();
-        if token_count != unique_token_count {
-            return Err("API tokens for different roles must be distinct".to_owned());
-        }
-        let auth_disabled = env_bool_any_layer(
-            env,
-            &["SLSKR_AUTH_DISABLED", "SLSKD_NO_AUTH"],
-            file_config.auth.disabled.unwrap_or(false),
-        )?;
-        let auth_required = !auth_disabled;
-        let api_cookie_auth_enabled = env_bool_layer(
-            env,
-            "SLSKR_API_COOKIE_AUTH_ENABLED",
-            file_config.auth.cookie_auth_enabled.unwrap_or(false),
-        )?;
-        let api_rate_limit_anonymous = env_parse_layer(
-            env,
-            "SLSKR_API_RATE_LIMIT_ANONYMOUS",
+            controller_compatibility_target,
+            file_config.auth.api_token,
+            file_config.auth.read_write_token,
+            file_config.auth.read_only_token,
+            file_config.auth.nowplaying_token,
+            file_config.auth.disabled,
+            file_config.auth.cookie_auth_enabled,
             file_config.auth.rate_limit_anonymous,
-            1000_u32,
-        )?;
-        let api_rate_limit_authenticated = env_parse_layer(
-            env,
-            "SLSKR_API_RATE_LIMIT_AUTHENTICATED",
             file_config.auth.rate_limit_authenticated,
-            5000_u32,
-        )?;
-        let web_max_request_body_size_default =
-            if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
-                10 * 1024 * 1024
-            } else {
-                crate::http_server::BODY_SIZE_LIMIT as i64
-            };
-        let controller_web_max_request_body_size = env_parse_layer(
-            env,
-            "SLSKD_WEB_MAX_REQUEST_BODY_SIZE",
             file_config.web.max_request_body_size,
-            web_max_request_body_size_default,
+            file_config.web.enforce_security,
+            file_config.web.allow_remote_no_auth,
+            file_config.web.passthrough_allowed_cidrs,
+            file_config.diagnostics.allow_memory_dump,
+            file_config.diagnostics.allow_remote_dump,
+            file_config.web.cors,
+            file_config.web.rate_limiting,
         )?;
-        if !(1..=i32::MAX as i64).contains(&controller_web_max_request_body_size) {
-            return Err("web.max_request_body_size must be between 1 and 2147483647".to_owned());
-        }
-        let controller_web_max_request_body_size = controller_web_max_request_body_size as usize;
-        let controller_web_enforce_security = env_bool_layer(
-            env,
-            "SLSKD_ENFORCE_SECURITY",
-            file_config.web.enforce_security.unwrap_or(false),
-        )?;
-        let controller_web_allow_remote_no_auth = env_bool_layer(
-            env,
-            "SLSKD_ALLOW_REMOTE_NO_AUTH",
-            file_config.web.allow_remote_no_auth.unwrap_or(false),
-        )?;
-        let controller_web_passthrough_allowed_cidrs = env
-            .var("SLSKD_PASSTHROUGH_ALLOWED_CIDRS")
-            .or(file_config.web.passthrough_allowed_cidrs);
-        let controller_web_passthrough_cidrs =
-            controller_passthrough_cidrs(controller_web_passthrough_allowed_cidrs.as_deref());
-        let controller_diagnostics_allow_memory_dump = env_bool_layer(
-            env,
-            "SLSKD_ALLOW_MEMORY_DUMP",
-            file_config.diagnostics.allow_memory_dump.unwrap_or(false),
-        )?;
-        let controller_diagnostics_allow_remote_dump = env_bool_layer(
-            env,
-            "SLSKD_ALLOW_REMOTE_DUMP",
-            file_config.diagnostics.allow_remote_dump.unwrap_or(false),
-        )?;
-        let controller_web_cors = ControllerWebCorsSettings {
-            enabled: env_bool_layer(
-                env,
-                "SLSKD_WEB_CORS_ENABLED",
-                file_config.web.cors.enabled.unwrap_or(false),
-            )?,
-            allow_credentials: env_bool_layer(
-                env,
-                "SLSKD_WEB_CORS_ALLOW_CREDENTIALS",
-                file_config.web.cors.allow_credentials.unwrap_or(false),
-            )?,
-            allowed_origins: controller_string_array_layer(
-                env,
-                "SLSKD_WEB_CORS_ALLOWED_ORIGINS",
-                file_config.web.cors.allowed_origins,
-            ),
-            allowed_headers: controller_string_array_layer(
-                env,
-                "SLSKD_WEB_CORS_ALLOWED_HEADERS",
-                file_config.web.cors.allowed_headers,
-            ),
-            allowed_methods: controller_string_array_layer(
-                env,
-                "SLSKD_WEB_CORS_ALLOWED_METHODS",
-                file_config.web.cors.allowed_methods,
-            ),
-        };
-        let web_rate_limiting_defaults =
-            ControllerWebRateLimitingSettings::defaults(controller_compatibility_target);
-        let controller_web_rate_limiting = ControllerWebRateLimitingSettings {
-            enabled: env_bool_layer(
-                env,
-                "SLSKD_WEB_RATE_LIMITING",
-                file_config
-                    .web
-                    .rate_limiting
-                    .enabled
-                    .unwrap_or(web_rate_limiting_defaults.enabled),
-            )?,
-            api_permit_limit: env_parse_layer(
-                env,
-                "SLSKD_WEB_API_PERMIT_LIMIT",
-                file_config.web.rate_limiting.api_permit_limit,
-                web_rate_limiting_defaults.api_permit_limit,
-            )?,
-            api_window_seconds: env_parse_layer(
-                env,
-                "SLSKD_WEB_API_WINDOW_SECONDS",
-                file_config.web.rate_limiting.api_window_seconds,
-                web_rate_limiting_defaults.api_window_seconds,
-            )?,
-            federation_permit_limit: env_parse_layer(
-                env,
-                "SLSKD_WEB_FEDERATION_PERMIT_LIMIT",
-                file_config.web.rate_limiting.federation_permit_limit,
-                web_rate_limiting_defaults.federation_permit_limit,
-            )?,
-            federation_window_seconds: env_parse_layer(
-                env,
-                "SLSKD_WEB_FEDERATION_WINDOW_SECONDS",
-                file_config.web.rate_limiting.federation_window_seconds,
-                web_rate_limiting_defaults.federation_window_seconds,
-            )?,
-            mesh_gateway_permit_limit: env_parse_layer(
-                env,
-                "SLSKD_WEB_MESH_GATEWAY_PERMIT_LIMIT",
-                file_config.web.rate_limiting.mesh_gateway_permit_limit,
-                web_rate_limiting_defaults.mesh_gateway_permit_limit,
-            )?,
-            mesh_gateway_window_seconds: env_parse_layer(
-                env,
-                "SLSKD_WEB_MESH_GATEWAY_WINDOW_SECONDS",
-                file_config.web.rate_limiting.mesh_gateway_window_seconds,
-                web_rate_limiting_defaults.mesh_gateway_window_seconds,
-            )?,
-        };
         let trusted_proxy_cidrs = trusted_proxy_cidrs_from_layers(
             env.var("SLSKR_TRUSTED_PROXY_CIDRS"),
             file_config.auth.trusted_proxy_cidrs,
@@ -8565,6 +7968,1068 @@ fn format_host_port(host: &str, port: u16) -> String {
     } else {
         format!("{host}:{port}")
     }
+}
+
+struct SoulseekIdentity {
+    server_address: String,
+    listen_port: u32,
+    username: Option<String>,
+    password: Option<String>,
+    credential_store: CredentialStoreMode,
+    credential_file: PathBuf,
+    auto_connect: bool,
+}
+
+struct ControllerWebAuthSettings {
+    controller_metrics_enabled: bool,
+    controller_metrics_url: String,
+    controller_metrics_auth_disabled: bool,
+    controller_metrics_username: String,
+    controller_metrics_password: String,
+    controller_web_auth_username: String,
+    controller_web_auth_password: String,
+    controller_web_jwt_key: String,
+    controller_web_jwt_key_configured: bool,
+    controller_web_jwt_ttl_millis: u64,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_controller_web_auth<E: ConfigEnv>(
+    env: &E,
+    controller_compatibility_target: ControllerCompatibilityTarget,
+    metrics_enabled: Option<bool>,
+    metrics_url: Option<String>,
+    metrics_auth_disabled: Option<bool>,
+    metrics_username: Option<String>,
+    metrics_password: Option<String>,
+    web_auth_username: Option<String>,
+    web_auth_password: Option<String>,
+    web_jwt_key: Option<String>,
+    web_jwt_ttl: Option<u64>,
+) -> Result<ControllerWebAuthSettings, String> {
+    let controller_metrics_enabled =
+        env_bool_layer(env, "SLSKD_METRICS", metrics_enabled.unwrap_or(false))?;
+    let controller_metrics_url = env
+        .var("SLSKD_METRICS_URL")
+        .or(metrics_url)
+        .unwrap_or_else(|| "/metrics".to_owned());
+    let controller_metrics_auth_disabled = env_bool_layer(
+        env,
+        "SLSKD_METRICS_NO_AUTH",
+        metrics_auth_disabled.unwrap_or(false),
+    )?;
+    let controller_metrics_username = env
+        .var("SLSKD_METRICS_USERNAME")
+        .or(metrics_username)
+        .unwrap_or_else(|| "slskd".to_owned());
+    let controller_metrics_password = env
+        .var("SLSKD_METRICS_PASSWORD")
+        .or(metrics_password)
+        .unwrap_or_else(|| {
+            if controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+                "slskd".to_owned()
+            } else {
+                String::new()
+            }
+        });
+    let controller_web_auth_username = env
+        .var("SLSKD_USERNAME")
+        .or(web_auth_username)
+        .unwrap_or_else(|| "slskd".to_owned());
+    let controller_web_auth_password = env
+        .var("SLSKD_PASSWORD")
+        .or(web_auth_password)
+        .unwrap_or_else(|| "slskd".to_owned());
+    for (field, value) in [
+        ("username", controller_web_auth_username.as_str()),
+        ("password", controller_web_auth_password.as_str()),
+    ] {
+        let length = value.encode_utf16().count();
+        if !(1..=255).contains(&length) {
+            return Err(format!(
+                "web authentication {field} must contain between 1 and 255 characters"
+            ));
+        }
+    }
+    let controller_web_jwt_key = env.var("SLSKD_JWT_KEY").or(web_jwt_key);
+    let controller_web_jwt_key_configured = controller_web_jwt_key.is_some();
+    let controller_web_jwt_key = controller_web_jwt_key
+        .map(Ok)
+        .unwrap_or_else(random_controller_jwt_key)?;
+    if !(32..=255).contains(&controller_web_jwt_key.encode_utf16().count()) {
+        return Err(
+            "web authentication JWT key must contain between 32 and 255 characters".to_owned(),
+        );
+    }
+    let controller_web_jwt_ttl_millis = env_parse_layer(
+        env,
+        "SLSKD_JWT_TTL",
+        web_jwt_ttl,
+        if controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+            604_800_000_u64
+        } else {
+            3_600_000_u64
+        },
+    )?;
+    if controller_web_jwt_ttl_millis < 3_600 {
+        return Err("web authentication JWT TTL must be at least 3600 milliseconds".to_owned());
+    }
+    let metrics_auth_requires_credentials = controller_compatibility_target
+        == ControllerCompatibilityTarget::Slskd
+        || (controller_metrics_enabled && !controller_metrics_auth_disabled);
+    if metrics_auth_requires_credentials {
+        for (field, value) in [
+            ("username", controller_metrics_username.as_str()),
+            ("password", controller_metrics_password.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(format!(
+                    "metrics authentication {field} must be configured when metrics auth is enabled"
+                ));
+            }
+            let length = value.encode_utf16().count();
+            if !(1..=255).contains(&length) {
+                return Err(format!(
+                    "metrics authentication {field} must contain between 1 and 255 characters"
+                ));
+            }
+        }
+    }
+    Ok(ControllerWebAuthSettings {
+        controller_metrics_enabled,
+        controller_metrics_url,
+        controller_metrics_auth_disabled,
+        controller_metrics_username,
+        controller_metrics_password,
+        controller_web_auth_username,
+        controller_web_auth_password,
+        controller_web_jwt_key,
+        controller_web_jwt_key_configured,
+        controller_web_jwt_ttl_millis,
+    })
+}
+
+struct MiscControllerFlags {
+    remote_configuration: bool,
+    remote_file_management: bool,
+    controller_debug: bool,
+    controller_no_config_watch: bool,
+    controller_no_logo: bool,
+    controller_no_start: bool,
+    controller_no_version_check: bool,
+    controller_experimental: bool,
+    controller_hash_from_audio_file_enabled: bool,
+    controller_no_share_scan: bool,
+    controller_force_share_scan: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_misc_controller_flags<E: ConfigEnv>(
+    env: &E,
+    compatibility_remote_configuration: Option<bool>,
+    compatibility_debug: Option<bool>,
+    compatibility_no_config_watch: Option<bool>,
+    flags_no_logo: Option<bool>,
+    flags_no_start: Option<bool>,
+    flags_no_version_check: Option<bool>,
+    flags_experimental: Option<bool>,
+    flags_hash_from_audio_file_enabled: Option<bool>,
+    flags_no_share_scan: Option<bool>,
+    flags_force_share_scan: Option<bool>,
+) -> Result<MiscControllerFlags, String> {
+    Ok(MiscControllerFlags {
+        remote_configuration: env_bool_any_layer(
+            env,
+            &["SLSKR_REMOTE_CONFIGURATION", "SLSKD_REMOTE_CONFIGURATION"],
+            compatibility_remote_configuration.unwrap_or(false),
+        )?,
+        remote_file_management: env_bool_any_layer(
+            env,
+            &[
+                "SLSKR_REMOTE_FILE_MANAGEMENT",
+                "SLSKD_REMOTE_FILE_MANAGEMENT",
+            ],
+            false,
+        )?,
+        controller_debug: env_bool_any_layer(
+            env,
+            &["SLSKR_DEBUG", "SLSKD_DEBUG"],
+            compatibility_debug.unwrap_or(false),
+        )?,
+        controller_no_config_watch: env_bool_any_layer(
+            env,
+            &["SLSKR_NO_CONFIG_WATCH", "SLSKD_NO_CONFIG_WATCH"],
+            compatibility_no_config_watch.unwrap_or(false),
+        )?,
+        controller_no_logo: env_bool_layer(env, "SLSKD_NO_LOGO", flags_no_logo.unwrap_or(false))?,
+        controller_no_start: env_bool_layer(
+            env,
+            "SLSKD_NO_START",
+            flags_no_start.unwrap_or(false),
+        )?,
+        controller_no_version_check: env_bool_layer(
+            env,
+            "SLSKD_NO_VERSION_CHECK",
+            flags_no_version_check.unwrap_or(false),
+        )?,
+        controller_experimental: env_bool_layer(
+            env,
+            "SLSKD_EXPERIMENTAL",
+            flags_experimental.unwrap_or(false),
+        )?,
+        controller_hash_from_audio_file_enabled: env_bool_layer(
+            env,
+            "SLSKR_CONTROLLER_YAML_HASH_FROM_AUDIO_FILE_ENABLED",
+            flags_hash_from_audio_file_enabled.unwrap_or(false),
+        )?,
+        controller_no_share_scan: env_bool_layer(
+            env,
+            "SLSKD_NO_SHARE_SCAN",
+            flags_no_share_scan.unwrap_or(false),
+        )?,
+        controller_force_share_scan: env_bool_layer(
+            env,
+            "SLSKD_FORCE_SHARE_SCAN",
+            flags_force_share_scan.unwrap_or(false),
+        )?,
+    })
+}
+
+fn resolve_controller_api_keys<E: ConfigEnv>(
+    env: &E,
+    controller_compatibility_target: ControllerCompatibilityTarget,
+    auth_api_keys: BTreeMap<String, ControllerApiKeyFileConfig>,
+) -> Result<BTreeMap<String, ControllerApiKeySettings>, String> {
+    let controller_api_key_files = match env.var("SLSKD_API_KEYS_JSON") {
+        Some(value) => serde_json::from_str::<BTreeMap<String, ControllerApiKeyFileConfig>>(&value)
+            .map_err(|error| format!("invalid web.authentication.api_keys: {error}"))?,
+        None => auth_api_keys,
+    };
+    let mut controller_api_keys = BTreeMap::new();
+    for (name, configured) in controller_api_key_files {
+        let key_length = configured.key.encode_utf16().count();
+        if !(16..=255).contains(&key_length) {
+            return Err(format!(
+                "web.authentication.api_keys.{name}.key must contain between 16 and 255 characters"
+            ));
+        }
+        let role = configured.role.to_ascii_lowercase();
+        if !matches!(role.as_str(), "readonly" | "readwrite" | "administrator") {
+            return Err(format!(
+                "web.authentication.api_keys.{name}.role must be readonly, readwrite, or administrator"
+            ));
+        }
+        let default_cidr =
+            if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+                "127.0.0.1/32,::1/128"
+            } else {
+                "0.0.0.0/0,::/0"
+            };
+        let cidrs = configured
+            .cidr
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .chain(
+                configured
+                    .cidr
+                    .trim()
+                    .is_empty()
+                    .then_some(default_cidr)
+                    .into_iter()
+                    .flat_map(|value| value.split(',')),
+            )
+            .map(TrustedProxyCidr::parse)
+            .collect::<Result<Vec<_>, _>>()?;
+        controller_api_keys.insert(
+            name,
+            ControllerApiKeySettings {
+                key: configured.key,
+                role,
+                cidr: if configured.cidr.trim().is_empty() {
+                    default_cidr.to_owned()
+                } else {
+                    configured.cidr
+                },
+                cidrs,
+            },
+        );
+    }
+    Ok(controller_api_keys)
+}
+
+struct PeerProfileSettings {
+    peer_host_override: Option<Ipv4Addr>,
+    test_user_endpoint_overrides: BTreeMap<String, SocketAddr>,
+    user_info_description: String,
+    user_info_picture: Option<PathBuf>,
+    soulseek_diagnostic_level: SoulseekDiagnosticLevel,
+}
+
+fn resolve_peer_profile<E: ConfigEnv>(
+    env: &E,
+    controller_compatibility_target: ControllerCompatibilityTarget,
+    profile_user_info_description: Option<String>,
+    profile_user_info_picture: Option<String>,
+    profile_soulseek_diagnostic_level: Option<String>,
+) -> Result<PeerProfileSettings, String> {
+    let peer_host_override = env
+        .var("SLSKR_PEER_HOST_OVERRIDE")
+        .map(|value| {
+            value
+                .parse::<Ipv4Addr>()
+                .map_err(|error| format!("invalid SLSKR_PEER_HOST_OVERRIDE: {error}"))
+        })
+        .transpose()?;
+    let test_user_endpoint_overrides =
+        parse_user_endpoint_overrides(env.var("SLSKR_TEST_USER_ENDPOINT_OVERRIDES"))?;
+    let user_info_description = optional_env_any(
+        env,
+        &["SLSKR_USER_INFO_DESCRIPTION", "SLSKD_SLSK_DESCRIPTION"],
+    )
+    .or(profile_user_info_description)
+    .unwrap_or_else(|| match controller_compatibility_target {
+        ControllerCompatibilityTarget::Slskd => {
+            "A slskd user. https://github.com/slskd/slskd".to_owned()
+        }
+        ControllerCompatibilityTarget::Slskdn => {
+            "A slskdN user. Unofficial fork of slskd: https://github.com/snapetech/slskdn"
+                .to_owned()
+        }
+    });
+    let user_info_picture = optional_env_any(
+        env,
+        &[
+            "SLSKR_USER_INFO_PICTURE",
+            "SLSKD_SLSK_PICTURE",
+            "SLSK_PICTURE",
+        ],
+    )
+    .or(profile_user_info_picture)
+    .filter(|value| !value.is_empty())
+    .map(PathBuf::from);
+    if let Some(path) = user_info_picture.as_deref() {
+        let metadata = fs::metadata(path).map_err(|error| {
+            format!(
+                "Soulseek picture '{}' is not readable: {error}",
+                path.display()
+            )
+        })?;
+        if !metadata.is_file() {
+            return Err(format!(
+                "Soulseek picture '{}' is not a regular file",
+                path.display()
+            ));
+        }
+        fs::File::open(path).map_err(|error| {
+            format!(
+                "Soulseek picture '{}' is not readable: {error}",
+                path.display()
+            )
+        })?;
+    }
+    let soulseek_diagnostic_level = SoulseekDiagnosticLevel::parse(
+        optional_env_any(
+            env,
+            &[
+                "SLSKR_SLSK_DIAG_LEVEL",
+                "SLSKD_SLSK_DIAG_LEVEL",
+                "SLSK_DIAG_LEVEL",
+            ],
+        )
+        .or(profile_soulseek_diagnostic_level)
+        .as_deref()
+        .unwrap_or("info"),
+    )?;
+    Ok(PeerProfileSettings {
+        peer_host_override,
+        test_user_endpoint_overrides,
+        user_info_description,
+        user_info_picture,
+        soulseek_diagnostic_level,
+    })
+}
+
+struct ListenerAndObfuscationResolution {
+    listener_bind: Option<String>,
+    advertised_port: u32,
+    obfuscated_listener_bind: Option<String>,
+    obfuscated_advertised_port: Option<u32>,
+    overlay_bind: Option<SocketAddr>,
+    dht_enabled: bool,
+    dht_port: u16,
+    trusted_mesh_peers: Vec<TrustedMeshPeer>,
+    obfuscation_enabled: bool,
+    obfuscation_mode: SoulseekObfuscationMode,
+    obfuscation_listen_port: u32,
+    obfuscation_advertise_regular_port: bool,
+    obfuscation_prefer_outbound: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_listener_and_obfuscation<E: ConfigEnv>(
+    env: &E,
+    controller_compatibility_target: ControllerCompatibilityTarget,
+    advanced_networking: &AdvancedNetworkingSettings,
+    listen_port: u32,
+    auto_connect: bool,
+    listeners_regular_bind: Option<String>,
+    listeners_advertised_port: Option<u32>,
+    listeners_obfuscated_bind: Option<String>,
+    listeners_obfuscated_advertised_port: Option<u32>,
+    listeners_overlay_bind: Option<String>,
+    mesh_trusted_peers: Vec<TrustedMeshPeerInput>,
+    obfuscation_enabled_file: Option<bool>,
+    obfuscation_mode_file: Option<String>,
+    obfuscation_advertise_regular_port_file: Option<bool>,
+    obfuscation_prefer_outbound_file: Option<bool>,
+) -> Result<ListenerAndObfuscationResolution, String> {
+    let listener_bind = optional_env_any(
+        env,
+        &["SLSKR_LISTENER_BIND", "SLSKD_SLSK_LISTEN_IP_ADDRESS"],
+    )
+    .map(|value| {
+        if env.var("SLSKR_LISTENER_BIND").is_none() && value.parse::<IpAddr>().is_ok() {
+            format_host_port(&value, u16::try_from(listen_port).unwrap_or(u16::MAX))
+        } else {
+            value
+        }
+    })
+    .or(listeners_regular_bind)
+    .or_else(|| {
+        Some(
+            SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                u16::try_from(listen_port).unwrap_or(u16::MAX),
+            )
+            .to_string(),
+        )
+    });
+    if env.var("SLSKR_LISTENER_BIND").is_none() {
+        if let Some(address) = env.var("SLSKD_SLSK_LISTEN_IP_ADDRESS") {
+            address.parse::<IpAddr>().map_err(|_| {
+                "Soulseek.ListenIpAddress specifies an invalid IPv4 or IPv6 IP address".to_owned()
+            })?;
+        }
+    }
+    if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && auto_connect
+        && listener_bind.as_deref().is_some_and(|value| {
+            value
+                .parse::<SocketAddr>()
+                .map(|address| address.ip().is_loopback())
+                .or_else(|_| value.parse::<IpAddr>().map(|address| address.is_loopback()))
+                .unwrap_or(false)
+        })
+    {
+        return Err(
+            "Soulseek.ListenIpAddress must not be a loopback address when the client is connecting. Use 0.0.0.0 or a reachable LAN/VPN interface instead."
+                .to_owned(),
+        );
+    }
+    let advertised_port = env_parse_layer(
+        env,
+        "SLSKR_ADVERTISED_PORT",
+        listeners_advertised_port,
+        listen_port,
+    )?;
+    let upstream_obfuscated_port =
+        env_parse_any_option(env, &["SLSKD_SLSK_OBFUSCATION_LISTEN_PORT"])?;
+    let obfuscated_listener_bind = env
+        .var("SLSKR_OBFUSCATED_LISTENER_BIND")
+        .or_else(|| {
+            upstream_obfuscated_port
+                .filter(|port| *port != 0)
+                .map(|port| {
+                    let host = listener_bind
+                        .as_deref()
+                        .and_then(|value| value.parse::<SocketAddr>().ok())
+                        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
+                    SocketAddr::new(host, port).to_string()
+                })
+        })
+        .or(listeners_obfuscated_bind)
+        .or_else(|| {
+            (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+                && listen_port < 65_535)
+                .then(|| {
+                    let host = listener_bind
+                        .as_deref()
+                        .and_then(|value| value.parse::<SocketAddr>().ok())
+                        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
+                    SocketAddr::new(host, (listen_port + 1) as u16).to_string()
+                })
+        });
+    let obfuscated_advertised_port = if env.var("SLSKR_OBFUSCATED_ADVERTISED_PORT").is_some() {
+        env_parse_option_layer(
+            env,
+            "SLSKR_OBFUSCATED_ADVERTISED_PORT",
+            listeners_obfuscated_advertised_port,
+        )?
+    } else {
+        upstream_obfuscated_port
+            .filter(|port| *port != 0)
+            .map(u32::from)
+            .or(listeners_obfuscated_advertised_port)
+            .or_else(|| {
+                (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+                    && listen_port < 65_535)
+                    .then_some(listen_port + 1)
+            })
+    };
+    let overlay_bind = env
+        .var("SLSKR_OVERLAY_BIND")
+        .or(listeners_overlay_bind)
+        .map(|value| {
+            let address = value
+                .parse::<SocketAddr>()
+                .map_err(|error| format!("invalid SLSKR_OVERLAY_BIND: {error}"))?;
+            if address.port() == 0 {
+                return Err("SLSKR_OVERLAY_BIND port must be non-zero".to_owned());
+            }
+            Ok(address)
+        })
+        .transpose()?
+        .or_else(|| {
+            (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+                && advanced_networking.overlay.enable)
+                .then_some(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    advanced_networking.dht.overlay_port,
+                ))
+        });
+    let dht_enabled = advanced_networking.dht.enabled;
+    let dht_port = advanced_networking.dht.dht_port;
+    let trusted_mesh_peers =
+        trusted_mesh_peers_from_layers(env.var("SLSKR_TRUSTED_MESH_PEERS"), mesh_trusted_peers)?;
+    let obfuscation_enabled = env_bool_any_layer(
+        env,
+        &["SLSK_OBFUSCATION", "SLSKD_SLSK_OBFUSCATION"],
+        obfuscation_enabled_file.unwrap_or(true),
+    )?;
+    let obfuscation_mode = SoulseekObfuscationMode::parse(
+        optional_env_any(
+            env,
+            &["SLSK_OBFUSCATION_MODE", "SLSKD_SLSK_OBFUSCATION_MODE"],
+        )
+        .or(obfuscation_mode_file)
+        .as_deref()
+        .unwrap_or("compatibility"),
+    )?;
+    let obfuscation_listen_port = u32::from(upstream_obfuscated_port.unwrap_or_default());
+    let obfuscation_advertise_regular_port = env_bool_any_layer(
+        env,
+        &[
+            "SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
+            "SLSKD_SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
+        ],
+        obfuscation_advertise_regular_port_file.unwrap_or(true),
+    )?;
+    let obfuscation_prefer_outbound = env_bool_any_layer(
+        env,
+        &[
+            "SLSK_OBFUSCATION_PREFER_OUTBOUND",
+            "SLSKD_SLSK_OBFUSCATION_PREFER_OUTBOUND",
+        ],
+        obfuscation_prefer_outbound_file.unwrap_or(true),
+    )?;
+    Ok(ListenerAndObfuscationResolution {
+        listener_bind,
+        advertised_port,
+        obfuscated_listener_bind,
+        obfuscated_advertised_port,
+        overlay_bind,
+        dht_enabled,
+        dht_port,
+        trusted_mesh_peers,
+        obfuscation_enabled,
+        obfuscation_mode,
+        obfuscation_listen_port,
+        obfuscation_advertise_regular_port,
+        obfuscation_prefer_outbound,
+    })
+}
+
+struct ControllerWebResolution {
+    http_bind: SocketAddr,
+    http_binds: Vec<SocketAddr>,
+    controller_http_address: Option<String>,
+    controller_web: ControllerWebSettings,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_controller_web<E: ConfigEnv>(
+    env: &E,
+    controller_compatibility_target: ControllerCompatibilityTarget,
+    app_http_bind: Option<String>,
+    web_socket: Option<PathBuf>,
+    web_url_base: Option<String>,
+    web_content_path: Option<PathBuf>,
+    web_logging: Option<bool>,
+    web_https: HttpsFileConfig,
+) -> Result<ControllerWebResolution, String> {
+    let configured_native_http_bind = app_http_bind.as_deref();
+    let base_http_bind = configured_native_http_bind
+        .unwrap_or("127.0.0.1:5030")
+        .parse::<SocketAddr>()
+        .map_err(|error| format!("invalid configured HTTP bind: {error}"))?;
+    let http_port = env_parse_any_layer(env, &["SLSKD_HTTP_PORT"], None, base_http_bind.port())?;
+    let (http_binds, controller_http_address) = if let Some(value) = env.var("SLSKR_HTTP_BIND") {
+        let address = value
+            .parse::<SocketAddr>()
+            .map_err(|error| format!("invalid SLSKR_HTTP_BIND: {error}"))?;
+        (vec![address], Some(address.ip().to_string()))
+    } else {
+        match controller_compatibility_target {
+            ControllerCompatibilityTarget::Slskd => {
+                let configured = env.var("SLSKD_HTTP_IP_ADDRESS");
+                let ips = match configured.as_deref() {
+                    Some(value) if !value.trim().is_empty() => value
+                        .split(',')
+                        .map(str::trim)
+                        .map(|value| {
+                            parse_compat_ip_address(value)
+                                .map_err(|error| format!("invalid SLSKD_HTTP_IP_ADDRESS: {error}"))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    Some(_) => vec![IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)],
+                    None if configured_native_http_bind.is_some() => vec![base_http_bind.ip()],
+                    None => vec![IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)],
+                };
+                (
+                    ips.into_iter()
+                        .map(|ip| SocketAddr::new(ip, http_port))
+                        .collect(),
+                    configured,
+                )
+            }
+            ControllerCompatibilityTarget::Slskdn => {
+                let configured = env.var("SLSKD_HTTP_ADDRESS");
+                let raw = configured
+                    .clone()
+                    .unwrap_or_else(|| base_http_bind.ip().to_string());
+                let ip = if raw == "*" {
+                    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+                } else {
+                    raw.parse::<IpAddr>()
+                        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                };
+                (vec![SocketAddr::new(ip, http_port)], Some(raw))
+            }
+        }
+    };
+    let http_bind = *http_binds
+        .first()
+        .ok_or_else(|| "HTTP bind list must not be empty".to_owned())?;
+    let controller_socket = env
+        .var("SLSKD_HTTP_SOCKET")
+        .map(PathBuf::from)
+        .or(web_socket)
+        .filter(|path| !path.as_os_str().is_empty());
+    if controller_socket
+        .as_deref()
+        .is_some_and(|path| !path.is_absolute())
+    {
+        return Err("web.socket must be an absolute path".to_owned());
+    }
+    let mut controller_url_base = env
+        .var("SLSKD_URL_BASE")
+        .or(web_url_base)
+        .unwrap_or_else(|| "/".to_owned());
+    if !controller_url_base.starts_with('/')
+        || controller_url_base.contains(['?', '#'])
+        || controller_url_base
+            .split('/')
+            .any(|segment| segment == "..")
+    {
+        return Err("web.url_base must be an absolute non-traversing URL path".to_owned());
+    }
+    if controller_url_base.len() > 1 {
+        controller_url_base = controller_url_base.trim_end_matches('/').to_owned();
+    }
+    let configured_content_path = env
+        .var("SLSKD_CONTENT_PATH")
+        .map(PathBuf::from)
+        .or(web_content_path);
+    let controller_content_path_raw = configured_content_path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("wwwroot"));
+    if controller_content_path_raw.as_os_str().is_empty()
+        || controller_content_path_raw
+            .to_string_lossy()
+            .encode_utf16()
+            .count()
+            > 255
+    {
+        return Err("web.content_path must contain between 1 and 255 characters".to_owned());
+    }
+    if configured_content_path.is_some() && controller_content_path_raw.is_absolute() {
+        return Err("web.content_path must be relative to the application directory".to_owned());
+    }
+    let controller_content_path = if controller_content_path_raw.is_absolute() {
+        controller_content_path_raw.clone()
+    } else {
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(&controller_content_path_raw)
+    };
+    if configured_content_path.is_some() && !controller_content_path.is_dir() {
+        return Err(format!(
+            "web.content_path directory does not exist: {}",
+            controller_content_path.display()
+        ));
+    }
+    let https_disabled =
+        env_bool_layer(env, "SLSKD_NO_HTTPS", web_https.disabled.unwrap_or(false))?;
+    let https_port = env_parse_layer(env, "SLSKD_HTTPS_PORT", web_https.port, 5031_u16)?;
+    let https_configured_ip_address = env.var("SLSKD_HTTPS_IP_ADDRESS").or(web_https.ip_address);
+    let https_ips = match controller_compatibility_target {
+        ControllerCompatibilityTarget::Slskd => match https_configured_ip_address.as_deref() {
+            Some(value) if !value.trim().is_empty() => value
+                .split(',')
+                .map(str::trim)
+                .map(parse_compat_ip_address)
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => vec![IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)],
+        },
+        ControllerCompatibilityTarget::Slskdn => vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
+    };
+    let https_certificate_pfx = env
+        .var("SLSKD_HTTPS_CERT_PFX")
+        .map(PathBuf::from)
+        .or(web_https.certificate.pfx)
+        .filter(|path| !path.as_os_str().is_empty());
+    if https_certificate_pfx
+        .as_deref()
+        .is_some_and(|path| !path.is_file())
+    {
+        return Err("web.https.certificate.pfx must identify a readable file".to_owned());
+    }
+    let controller_web = ControllerWebSettings {
+        socket: controller_socket,
+        url_base: controller_url_base,
+        content_path: controller_content_path,
+        content_path_display: controller_content_path_raw.display().to_string(),
+        logging: env_bool_layer(env, "SLSKD_HTTP_LOGGING", web_logging.unwrap_or(false))?,
+        https: ControllerHttpsSettings {
+            disabled: https_disabled,
+            binds: https_ips
+                .into_iter()
+                .map(|ip| SocketAddr::new(ip, https_port))
+                .collect(),
+            configured_ip_address: https_configured_ip_address,
+            force: env_bool_layer(env, "SLSKD_HTTPS_FORCE", web_https.force.unwrap_or(false))?,
+            certificate_pfx: https_certificate_pfx,
+            certificate_password: env
+                .var("SLSKD_HTTPS_CERT_PASSWORD")
+                .or(web_https.certificate.password)
+                .unwrap_or_default(),
+        },
+    };
+    Ok(ControllerWebResolution {
+        http_bind,
+        http_binds,
+        controller_http_address,
+        controller_web,
+    })
+}
+
+struct ApiAndWebHardeningSettings {
+    api_token: Option<String>,
+    api_read_write_token: Option<String>,
+    api_read_only_token: Option<String>,
+    api_nowplaying_token: Option<String>,
+    auth_required: bool,
+    api_cookie_auth_enabled: bool,
+    api_rate_limit_anonymous: u32,
+    api_rate_limit_authenticated: u32,
+    controller_web_max_request_body_size: usize,
+    controller_web_enforce_security: bool,
+    controller_web_allow_remote_no_auth: bool,
+    controller_web_passthrough_allowed_cidrs: Option<String>,
+    controller_web_passthrough_cidrs: Vec<TrustedProxyCidr>,
+    controller_diagnostics_allow_memory_dump: bool,
+    controller_diagnostics_allow_remote_dump: bool,
+    controller_web_cors: ControllerWebCorsSettings,
+    controller_web_rate_limiting: ControllerWebRateLimitingSettings,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_api_and_web_hardening<E: ConfigEnv>(
+    env: &E,
+    controller_compatibility_target: ControllerCompatibilityTarget,
+    auth_api_token: Option<String>,
+    auth_read_write_token: Option<String>,
+    auth_read_only_token: Option<String>,
+    auth_nowplaying_token: Option<String>,
+    auth_disabled: Option<bool>,
+    auth_cookie_auth_enabled: Option<bool>,
+    auth_rate_limit_anonymous: Option<u32>,
+    auth_rate_limit_authenticated: Option<u32>,
+    web_max_request_body_size: Option<i64>,
+    web_enforce_security: Option<bool>,
+    web_allow_remote_no_auth: Option<bool>,
+    web_passthrough_allowed_cidrs: Option<String>,
+    diagnostics_allow_memory_dump: Option<bool>,
+    diagnostics_allow_remote_dump: Option<bool>,
+    web_cors: WebCorsFileConfig,
+    web_rate_limiting: WebRateLimitingFileConfig,
+) -> Result<ApiAndWebHardeningSettings, String> {
+    let api_token = env.var("SLSKR_API_TOKEN").or(auth_api_token);
+    let api_read_write_token = env
+        .var("SLSKR_API_READ_WRITE_TOKEN")
+        .or(auth_read_write_token);
+    let api_read_only_token = env
+        .var("SLSKR_API_READ_ONLY_TOKEN")
+        .or(auth_read_only_token);
+    let api_nowplaying_token = env
+        .var("SLSKR_API_NOWPLAYING_TOKEN")
+        .or(auth_nowplaying_token);
+    let configured_tokens = [
+        api_token.as_deref(),
+        api_read_write_token.as_deref(),
+        api_read_only_token.as_deref(),
+        api_nowplaying_token.as_deref(),
+    ];
+    for token in configured_tokens.into_iter().flatten() {
+        validate_api_token(token)?;
+    }
+    let token_count = configured_tokens.into_iter().flatten().count();
+    let unique_token_count = configured_tokens
+        .into_iter()
+        .flatten()
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    if token_count != unique_token_count {
+        return Err("API tokens for different roles must be distinct".to_owned());
+    }
+    let auth_disabled = env_bool_any_layer(
+        env,
+        &["SLSKR_AUTH_DISABLED", "SLSKD_NO_AUTH"],
+        auth_disabled.unwrap_or(false),
+    )?;
+    let auth_required = !auth_disabled;
+    let api_cookie_auth_enabled = env_bool_layer(
+        env,
+        "SLSKR_API_COOKIE_AUTH_ENABLED",
+        auth_cookie_auth_enabled.unwrap_or(false),
+    )?;
+    let api_rate_limit_anonymous = env_parse_layer(
+        env,
+        "SLSKR_API_RATE_LIMIT_ANONYMOUS",
+        auth_rate_limit_anonymous,
+        1000_u32,
+    )?;
+    let api_rate_limit_authenticated = env_parse_layer(
+        env,
+        "SLSKR_API_RATE_LIMIT_AUTHENTICATED",
+        auth_rate_limit_authenticated,
+        5000_u32,
+    )?;
+    let web_max_request_body_size_default =
+        if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+            10 * 1024 * 1024
+        } else {
+            crate::http_server::BODY_SIZE_LIMIT as i64
+        };
+    let controller_web_max_request_body_size = env_parse_layer(
+        env,
+        "SLSKD_WEB_MAX_REQUEST_BODY_SIZE",
+        web_max_request_body_size,
+        web_max_request_body_size_default,
+    )?;
+    if !(1..=i32::MAX as i64).contains(&controller_web_max_request_body_size) {
+        return Err("web.max_request_body_size must be between 1 and 2147483647".to_owned());
+    }
+    let controller_web_max_request_body_size = controller_web_max_request_body_size as usize;
+    let controller_web_enforce_security = env_bool_layer(
+        env,
+        "SLSKD_ENFORCE_SECURITY",
+        web_enforce_security.unwrap_or(false),
+    )?;
+    let controller_web_allow_remote_no_auth = env_bool_layer(
+        env,
+        "SLSKD_ALLOW_REMOTE_NO_AUTH",
+        web_allow_remote_no_auth.unwrap_or(false),
+    )?;
+    let controller_web_passthrough_allowed_cidrs = env
+        .var("SLSKD_PASSTHROUGH_ALLOWED_CIDRS")
+        .or(web_passthrough_allowed_cidrs);
+    let controller_web_passthrough_cidrs =
+        controller_passthrough_cidrs(controller_web_passthrough_allowed_cidrs.as_deref());
+    let controller_diagnostics_allow_memory_dump = env_bool_layer(
+        env,
+        "SLSKD_ALLOW_MEMORY_DUMP",
+        diagnostics_allow_memory_dump.unwrap_or(false),
+    )?;
+    let controller_diagnostics_allow_remote_dump = env_bool_layer(
+        env,
+        "SLSKD_ALLOW_REMOTE_DUMP",
+        diagnostics_allow_remote_dump.unwrap_or(false),
+    )?;
+    let controller_web_cors = ControllerWebCorsSettings {
+        enabled: env_bool_layer(
+            env,
+            "SLSKD_WEB_CORS_ENABLED",
+            web_cors.enabled.unwrap_or(false),
+        )?,
+        allow_credentials: env_bool_layer(
+            env,
+            "SLSKD_WEB_CORS_ALLOW_CREDENTIALS",
+            web_cors.allow_credentials.unwrap_or(false),
+        )?,
+        allowed_origins: controller_string_array_layer(
+            env,
+            "SLSKD_WEB_CORS_ALLOWED_ORIGINS",
+            web_cors.allowed_origins,
+        ),
+        allowed_headers: controller_string_array_layer(
+            env,
+            "SLSKD_WEB_CORS_ALLOWED_HEADERS",
+            web_cors.allowed_headers,
+        ),
+        allowed_methods: controller_string_array_layer(
+            env,
+            "SLSKD_WEB_CORS_ALLOWED_METHODS",
+            web_cors.allowed_methods,
+        ),
+    };
+    let web_rate_limiting_defaults =
+        ControllerWebRateLimitingSettings::defaults(controller_compatibility_target);
+    let controller_web_rate_limiting = ControllerWebRateLimitingSettings {
+        enabled: env_bool_layer(
+            env,
+            "SLSKD_WEB_RATE_LIMITING",
+            web_rate_limiting
+                .enabled
+                .unwrap_or(web_rate_limiting_defaults.enabled),
+        )?,
+        api_permit_limit: env_parse_layer(
+            env,
+            "SLSKD_WEB_API_PERMIT_LIMIT",
+            web_rate_limiting.api_permit_limit,
+            web_rate_limiting_defaults.api_permit_limit,
+        )?,
+        api_window_seconds: env_parse_layer(
+            env,
+            "SLSKD_WEB_API_WINDOW_SECONDS",
+            web_rate_limiting.api_window_seconds,
+            web_rate_limiting_defaults.api_window_seconds,
+        )?,
+        federation_permit_limit: env_parse_layer(
+            env,
+            "SLSKD_WEB_FEDERATION_PERMIT_LIMIT",
+            web_rate_limiting.federation_permit_limit,
+            web_rate_limiting_defaults.federation_permit_limit,
+        )?,
+        federation_window_seconds: env_parse_layer(
+            env,
+            "SLSKD_WEB_FEDERATION_WINDOW_SECONDS",
+            web_rate_limiting.federation_window_seconds,
+            web_rate_limiting_defaults.federation_window_seconds,
+        )?,
+        mesh_gateway_permit_limit: env_parse_layer(
+            env,
+            "SLSKD_WEB_MESH_GATEWAY_PERMIT_LIMIT",
+            web_rate_limiting.mesh_gateway_permit_limit,
+            web_rate_limiting_defaults.mesh_gateway_permit_limit,
+        )?,
+        mesh_gateway_window_seconds: env_parse_layer(
+            env,
+            "SLSKD_WEB_MESH_GATEWAY_WINDOW_SECONDS",
+            web_rate_limiting.mesh_gateway_window_seconds,
+            web_rate_limiting_defaults.mesh_gateway_window_seconds,
+        )?,
+    };
+    Ok(ApiAndWebHardeningSettings {
+        api_token,
+        api_read_write_token,
+        api_read_only_token,
+        api_nowplaying_token,
+        auth_required,
+        api_cookie_auth_enabled,
+        api_rate_limit_anonymous,
+        api_rate_limit_authenticated,
+        controller_web_max_request_body_size,
+        controller_web_enforce_security,
+        controller_web_allow_remote_no_auth,
+        controller_web_passthrough_allowed_cidrs,
+        controller_web_passthrough_cidrs,
+        controller_diagnostics_allow_memory_dump,
+        controller_diagnostics_allow_remote_dump,
+        controller_web_cors,
+        controller_web_rate_limiting,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_soulseek_identity<E: ConfigEnv>(
+    env: &E,
+    state_dir: &Path,
+    network_server_address: Option<String>,
+    network_listen_port: Option<u32>,
+    network_username: Option<String>,
+    network_password: Option<String>,
+    network_credential_store: Option<String>,
+    network_credential_file: Option<PathBuf>,
+    app_auto_connect: Option<bool>,
+) -> Result<SoulseekIdentity, String> {
+    let configured_server_address = env
+        .var("SLSK_SERVER")
+        .or(network_server_address)
+        .unwrap_or_else(|| CONTROLLER_DEFAULT_SERVER_ADDRESS.to_owned());
+    let (configured_server_host, configured_server_port) =
+        split_server_address(&configured_server_address)?;
+    let server_host = env
+        .var("SLSKD_SLSK_ADDRESS")
+        .unwrap_or(configured_server_host);
+    let server_port = env_parse_any_layer(env, &["SLSKD_SLSK_PORT"], None, configured_server_port)?;
+    let server_address = format_host_port(&server_host, server_port);
+    let listen_port = env_parse_any_layer(
+        env,
+        &["SLSK_LISTEN_PORT", "SLSKD_SLSK_LISTEN_PORT"],
+        network_listen_port,
+        CONTROLLER_DEFAULT_LISTEN_PORT,
+    )?;
+    if !(1024..=65_535).contains(&listen_port) {
+        return Err("Soulseek.ListenPort must be between 1024 and 65535".to_owned());
+    }
+    let username =
+        optional_env_any(env, &["SLSK_USERNAME", "SLSKD_SLSK_USERNAME"]).or(network_username);
+    let password =
+        optional_env_any(env, &["SLSK_PASSWORD", "SLSKD_SLSK_PASSWORD"]).or(network_password);
+    let credential_store = CredentialStoreMode::parse(
+        env.var("SLSKR_CREDENTIAL_STORE")
+            .or(network_credential_store)
+            .unwrap_or_else(|| "os".to_owned())
+            .as_str(),
+    )?;
+    let credential_file = env
+        .var("SLSKR_CREDENTIAL_FILE")
+        .map(PathBuf::from)
+        .or(network_credential_file)
+        .unwrap_or_else(|| state_dir.join("soulseek-credentials.json"));
+    let auto_connect_default = app_auto_connect.unwrap_or(
+        username.is_some() && password.is_some() || credential_store.auto_connect_default(),
+    );
+    let auto_connect = if env.var("SLSKR_AUTO_CONNECT").is_some() {
+        env_bool_layer(env, "SLSKR_AUTO_CONNECT", auto_connect_default)?
+    } else if env.var("SLSKD_NO_CONNECT").is_some() {
+        !env_bool_layer(env, "SLSKD_NO_CONNECT", false)?
+    } else {
+        auto_connect_default
+    };
+    Ok(SoulseekIdentity {
+        server_address,
+        listen_port,
+        username,
+        password,
+        credential_store,
+        credential_file,
+        auto_connect,
+    })
 }
 
 fn env_parse_option_layer<E, T>(

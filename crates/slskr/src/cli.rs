@@ -2108,15 +2108,15 @@ async fn local_peer_smoke() -> Result<(), String> {
 
     a_session
         .login(LoginCredentials::default_client(
-            config.a_username.clone(),
-            config.a_password,
+            config.credentials.a_username.clone(),
+            config.credentials.a_password,
         ))
         .await
         .map_err(|error| format!("account A login failed: {error}"))?;
     b_session
         .login(LoginCredentials::default_client(
-            config.b_username.clone(),
-            config.b_password,
+            config.credentials.b_username.clone(),
+            config.credentials.b_password,
         ))
         .await
         .map_err(|error| format!("account B login failed: {error}"))?;
@@ -2126,15 +2126,15 @@ async fn local_peer_smoke() -> Result<(), String> {
         .await
         .map_err(|error| format!("account A wait-port update failed: {error}"))?;
 
-    run_direct_peer_message_smoke(&config.a_username).await?;
-    run_obfuscated_peer_message_smoke(&config.a_username).await?;
-    run_direct_file_transfer_smoke(&config.a_username).await?;
+    run_direct_peer_message_smoke(&config.credentials.a_username).await?;
+    run_obfuscated_peer_message_smoke(&config.credentials.a_username).await?;
+    run_direct_file_transfer_smoke(&config.credentials.a_username).await?;
     run_indirect_peer_message_smoke(
         &mut a_session,
         &mut b_session,
         indirect_listener,
-        &config.a_username,
-        &config.b_username,
+        &config.credentials.a_username,
+        &config.credentials.b_username,
         config.indirect_host_override.as_deref(),
         config.indirect_timeout,
     )
@@ -2142,7 +2142,7 @@ async fn local_peer_smoke() -> Result<(), String> {
 
     b_session
         .send_server_message(ServerMessage::GetPeerAddressRequest {
-            username: config.a_username,
+            username: config.credentials.a_username,
         })
         .await
         .map_err(|error| format!("peer-address request failed: {error}"))?;
@@ -3228,11 +3228,27 @@ async fn live_soak() -> Result<(), String> {
 }
 
 #[derive(Debug, Clone)]
-struct PeerSmokeConfig {
+struct PeerSmokeCredentials {
     a_username: String,
     a_password: String,
     b_username: String,
     b_password: String,
+}
+
+impl PeerSmokeCredentials {
+    fn from_env() -> Result<Self, String> {
+        Ok(Self {
+            a_username: required_env_any(&["SLSKR_A_USERNAME", "SLSK_A_USERNAME"])?,
+            a_password: required_env_any(&["SLSKR_A_PASSWORD", "SLSK_A_PASSWORD"])?,
+            b_username: required_env_any(&["SLSKR_B_USERNAME", "SLSK_B_USERNAME"])?,
+            b_password: required_env_any(&["SLSKR_B_PASSWORD", "SLSK_B_PASSWORD"])?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PeerSmokeConfig {
+    credentials: PeerSmokeCredentials,
     server_address: String,
     indirect_listener_bind: String,
     indirect_host_override: Option<String>,
@@ -3242,10 +3258,7 @@ struct PeerSmokeConfig {
 impl PeerSmokeConfig {
     fn from_env() -> Result<Self, String> {
         Ok(Self {
-            a_username: required_env_any(&["SLSKR_A_USERNAME", "SLSK_A_USERNAME"])?,
-            a_password: required_env_any(&["SLSKR_A_PASSWORD", "SLSK_A_PASSWORD"])?,
-            b_username: required_env_any(&["SLSKR_B_USERNAME", "SLSK_B_USERNAME"])?,
-            b_password: required_env_any(&["SLSKR_B_PASSWORD", "SLSK_B_PASSWORD"])?,
+            credentials: PeerSmokeCredentials::from_env()?,
             server_address: std::env::var("SLSK_SERVER")
                 .unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned()),
             indirect_listener_bind: std::env::var("SLSKR_INDIRECT_LISTENER_BIND")
