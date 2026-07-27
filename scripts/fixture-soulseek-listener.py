@@ -50,8 +50,8 @@ set_wait_port_messages: list[dict[str, int | None]] = []
 login_usernames: list[str] = []
 login_password_digest: list[str] = []
 
-_PASSWORD_DIGEST_SALT = b"slskr-fixture-listener-password-digest-v1"
-_PASSWORD_DIGEST_ITERATIONS = 100_000
+_LOGIN_DIGEST_SALT = b"slskr-fixture-listener-digest-salt-v1"
+_LOGIN_DIGEST_ITERATIONS = 100_000
 
 
 def password_digest(password: bytes) -> str:
@@ -61,7 +61,7 @@ def password_digest(password: bytes) -> str:
     via the status file cannot be brute-forced from a rainbow table.
     """
     return hashlib.pbkdf2_hmac(
-        "sha256", password, _PASSWORD_DIGEST_SALT, _PASSWORD_DIGEST_ITERATIONS
+        "sha256", password, _LOGIN_DIGEST_SALT, _LOGIN_DIGEST_ITERATIONS
     ).hex()
 peer_address_requests: list[str] = []
 peer_accept_order: list[str] = []

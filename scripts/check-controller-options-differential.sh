@@ -2003,7 +2003,7 @@ write_credentials_omitted_yaml() {
 }
 
 password_digest() {
-  "$python_bin" -c 'import hashlib,sys; print(hashlib.pbkdf2_hmac("sha256", sys.argv[1].encode(), b"slskr-fixture-listener-password-digest-v1", 100_000).hex())' "$1"
+  "$python_bin" -c 'import hashlib,sys; print(hashlib.pbkdf2_hmac("sha256", sys.argv[1].encode(), b"slskr-fixture-listener-digest-salt-v1", 100_000).hex())' "$1"
 }
 
 wait_for_credential_option() {
