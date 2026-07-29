@@ -3,6 +3,7 @@
     reason = "batch compatibility types are retained for the public API surface"
 )]
 mod batch;
+mod bloom_filter;
 mod cli;
 mod config;
 mod content_discovery;
@@ -41265,9 +41266,7 @@ async fn misc_controller_mutation_response(
             let discovery = state.content_discovery.read().await;
             let profile = discovery.profile_query(&query);
             drop(discovery);
-            return Some(routing::ok_response(
-                serde_json::json!(profile).to_string(),
-            ));
+            return Some(routing::ok_response(serde_json::json!(profile).to_string()));
         }
         let discovery = state.content_discovery.read().await;
         return Some(routing::ok_response(
@@ -42528,49 +42527,67 @@ async fn musicbrainz_mutation_response(
     if path == "/api/musicbrainz/library-bloom/snapshots/preview" {
         let request = serde_json::from_str::<serde_json::Value>(body)
             .unwrap_or_else(|_| serde_json::json!({}));
-        let library = state.library.read().await;
-        let identifiers = library
-            .records
+        // Matches slskdN's real item source: locally-held hashdb entries
+        // that carry a MusicBrainz recording id, not the generic library
+        // catalog (which has no MusicBrainz identifiers to key membership
+        // on). slskR's hashdb doesn't separately track release ids, so
+        // every real item is tagged under the recording namespace.
+        const RECORDING_NAMESPACE: &str = "musicbrainz:recording";
+        let discovery = state.content_discovery.read().await;
+        let mbids: Vec<String> = discovery
+            .hash_entries()
             .iter()
-            .map(|item| format!("{}\0{}\0{}", item.artist, item.title, item.kind))
-            .collect::<Vec<_>>();
-        let digest = hex::encode(Sha256::digest(identifiers.join("\n").as_bytes()));
+            .filter(|entry| !entry.music_brainz_id.is_empty())
+            .map(|entry| entry.music_brainz_id.clone())
+            .collect();
+        drop(discovery);
+        let digest = hex::encode(Sha256::digest(mbids.join("\n").as_bytes()));
+        let salt_id = request
+            .get("saltId")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("salt:{}", uuid::Uuid::new_v4().simple()));
         let expected_items = request
             .get("expectedItems")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(1_024)
-            .clamp(16, 1_000_000);
+            .clamp(16, 1_000_000)
+            .max(mbids.len() as u64);
         let false_positive_rate = request
             .get("falsePositiveRate")
             .and_then(serde_json::Value::as_f64)
             .filter(|value| (0.0..1.0).contains(value))
             .unwrap_or(0.01);
-        let bit_size = ((-(expected_items as f64) * false_positive_rate.ln()
-            / std::f64::consts::LN_2.powi(2))
-        .ceil() as usize)
-            .max(8);
-        let hash_function_count = ((bit_size as f64 / expected_items as f64)
-            * std::f64::consts::LN_2)
-            .round()
-            .clamp(1.0, 32.0) as usize;
-        let bits_base64 =
-            base64::engine::general_purpose::STANDARD.encode(vec![0_u8; bit_size.div_ceil(8)]);
+        let mut filter = bloom_filter::SaltedBloomFilter::new(expected_items, false_positive_rate);
+        for mbid in &mbids {
+            filter.add(&bloom_filter::build_salted_item(
+                &salt_id,
+                RECORDING_NAMESPACE,
+                mbid,
+            ));
+        }
+        let namespace_item_counts = if mbids.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ RECORDING_NAMESPACE: mbids.len() })
+        };
         return routing::ok_response(
             serde_json::json!({
                 "version": 1,
                 "snapshotId": format!("library-bloom:{}", uuid::Uuid::new_v4().simple()),
                 "scope": "manual-preview",
-                "saltId": request.get("saltId").and_then(serde_json::Value::as_str).unwrap_or_default(),
+                "saltId": salt_id,
                 "createdAt": chrono::Utc::now().to_rfc3339(),
                 "rotatesAt": request.get("rotatesAt").cloned().unwrap_or(serde_json::Value::Null),
-                "expectedItems": expected_items,
-                "falsePositiveRate": false_positive_rate,
-                "bitSize": bit_size,
-                "hashFunctionCount": hash_function_count,
-                "itemCount": identifiers.len(),
-                "fillRatio": 0.0,
-                "bitsBase64": bits_base64,
-                "namespaceItemCounts": {},
+                "expectedItems": filter.expected_items(),
+                "falsePositiveRate": filter.false_positive_rate(),
+                "bitSize": filter.bit_size(),
+                "hashFunctionCount": filter.hash_function_count(),
+                "itemCount": filter.item_count(),
+                "fillRatio": filter.fill_ratio(),
+                "bitsBase64": filter.to_base64(),
+                "namespaceItemCounts": namespace_item_counts,
                 "privacyNotes": [
                     "Snapshot contains salted Bloom-filter membership only; it does not include filenames, paths, file hashes, or exact item identifiers.",
                     "Bloom matches are probabilistic and must be treated as likely suggestions, not proof of remote holdings.",
@@ -85905,9 +85922,8 @@ mod tests {
                 .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
                     flac_key: "route-audit-key".to_owned(),
                     size: 123,
-                    file_sha256:
-                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                            .to_owned(),
+                    file_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_owned(),
                     ..Default::default()
                 }])
                 .expect("seed hash entry");
@@ -85952,6 +85968,99 @@ mod tests {
         assert_eq!(entries[0]["query"], "profile_query");
         assert_eq!(entries[0]["executionCount"], 1);
         assert_eq!(entries[0]["totalRowsReturned"], 1);
+    }
+
+    #[tokio::test]
+    async fn library_bloom_preview_reflects_real_hashdb_contents_not_an_empty_filter() {
+        let (state, _receiver) = test_state();
+
+        // An empty store must not be reported as containing anything, but
+        // the filter parameters should still reflect the real (empty) item
+        // count rather than a canned placeholder.
+        let empty = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            None,
+            r#"{"saltId":"audit-empty"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let empty = serde_json::from_str::<serde_json::Value>(&empty.body).unwrap();
+        assert_eq!(empty["itemCount"], 0);
+        assert_eq!(empty["fillRatio"], 0.0);
+        assert_eq!(empty["namespaceItemCounts"], serde_json::json!({}));
+
+        // Seed two real hashdb entries with MusicBrainz recording ids.
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![
+                    super::content_discovery::HashDbEntry {
+                        flac_key: "bloom-key-1".to_owned(),
+                        size: 111,
+                        file_sha256:
+                            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                                .to_owned(),
+                        music_brainz_id: "11111111-1111-1111-1111-111111111111".to_owned(),
+                        ..Default::default()
+                    },
+                    super::content_discovery::HashDbEntry {
+                        flac_key: "bloom-key-2".to_owned(),
+                        size: 222,
+                        file_sha256:
+                            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                                .to_owned(),
+                        music_brainz_id: "22222222-2222-2222-2222-222222222222".to_owned(),
+                        ..Default::default()
+                    },
+                ])
+                .expect("seed hash entries");
+        }
+
+        let populated = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            None,
+            r#"{"saltId":"audit-populated"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let populated = serde_json::from_str::<serde_json::Value>(&populated.body).unwrap();
+        assert_eq!(populated["itemCount"], 2);
+        assert!(
+            populated["fillRatio"].as_f64().unwrap() > 0.0,
+            "a populated store must not report an all-zero bitset: {populated}"
+        );
+        assert_eq!(
+            populated["namespaceItemCounts"],
+            serde_json::json!({"musicbrainz:recording": 2})
+        );
+        let bits = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            populated["bitsBase64"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            bits.iter().any(|byte| *byte != 0),
+            "expected at least one set bit in the populated filter"
+        );
+
+        // Different salts for the same underlying data must not produce the
+        // same bit pattern -- that's the entire point of salting.
+        let differently_salted = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            None,
+            r#"{"saltId":"audit-different-salt"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let differently_salted =
+            serde_json::from_str::<serde_json::Value>(&differently_salted.body).unwrap();
+        assert_ne!(populated["bitsBase64"], differently_salted["bitsBase64"]);
     }
 
     #[tokio::test]

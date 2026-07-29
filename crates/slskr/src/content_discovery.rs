@@ -182,7 +182,8 @@ impl ContentDiscoveryStore {
     /// Total number of read queries served since this store was created
     /// (not bounded by the `slow_queries` sample window).
     pub fn total_queries(&self) -> u64 {
-        self.total_queries.load(std::sync::atomic::Ordering::Relaxed)
+        self.total_queries
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn load(state_dir: &Path) -> Result<Self, String> {
@@ -293,7 +294,11 @@ impl ContentDiscoveryStore {
                 .all(|candidate| candidate.eq_ignore_ascii_case(hash))
                 .then(|| (*hash).clone())
         })();
-        self.record_query("verified_file_hash", usize::from(result.is_some()), started_at);
+        self.record_query(
+            "verified_file_hash",
+            usize::from(result.is_some()),
+            started_at,
+        );
         result
     }
 
@@ -777,8 +782,10 @@ mod tests {
 
         assert_eq!(store.total_queries(), 4);
         let stats = store.slow_queries(20);
-        let by_query: std::collections::HashMap<_, _> =
-            stats.iter().map(|entry| (entry.query.as_str(), entry)).collect();
+        let by_query: std::collections::HashMap<_, _> = stats
+            .iter()
+            .map(|entry| (entry.query.as_str(), entry))
+            .collect();
         assert_eq!(by_query["lookup_hash"].execution_count, 1);
         assert_eq!(by_query["lookup_hash"].total_rows_returned, 0);
         assert_eq!(by_query["hashes_by_size"].execution_count, 2);
