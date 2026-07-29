@@ -15,17 +15,31 @@ each target rather than choosing one compromise behavior.
 
 ## Current position
 
+**Updated 2026-07-29**: re-ran `scripts/audit-parity-manifest.py --check-frozen`
+against the frozen slskd/slskdN pins (worktrees at the commits below) after this
+document had gone stale (last regenerated 2026-07-17). The configuration
+workstream is now fully closed: 436/436 complete, 0 missing (was 245/436, 191
+missing). All 191 configuration contracts in the implementation-gap queue below
+closed in the intervening real implementation work (see git log 2026-07-17
+through 2026-07-27 for the daemon-foundation, DHT/mesh/PodCore, and
+media/services commits that did this). Spot-checked a sample of the previously
+"missing" families (dht.*, mesh.*, PodCore.*, feature.SongId, feature.Solid,
+player.*) directly against the fresh manifest entries to confirm this wasn't a
+scoring artifact -- confirmed, all report `complete` with
+`lifecycleValidationDifferential: complete`.
+
 Parity is **not achieved**. Every planned workstream has an executable
-certification denominator. The literal proof-case closure ratio is
-**662 / 19,122 = 3.46%**, but this is not a product-completion estimate: most
-generated cases are Cartesian proof dimensions initialized as `needs-proof`,
-including behavior already implemented and tested in slskR. Product completion
-remains unreported until the subsystem reclassification separates absent
-behavior from present-but-unlinked evidence.
+certification denominator. The literal proof-case closure ratio is now
+**853 / 19,122 = 4.46%** (was 662 / 19,122 = 3.46%), but this is not a
+product-completion estimate: most generated cases are Cartesian proof
+dimensions initialized as `needs-proof`, including behavior already
+implemented and tested in slskR. Product completion remains unreported until
+the subsystem reclassification separates absent behavior from
+present-but-unlinked evidence.
 
 | Workstream | Audited denominator | Current evidence | Closure state |
 | --- | ---: | --- | --- |
-| Configuration | 436 frozen YAML leaves | 245 complete, 0 partial, 191 missing | Open |
+| Configuration | 436 frozen YAML leaves | 436 complete, 0 partial, 0 missing | **Closed** (2026-07-29) |
 | slskd controller API | 91 routes | Route presence is covered; exhaustive behavior is not | Open |
 | slskdN controller API | 678 routes | Route presence is covered; exhaustive behavior is not | Open |
 | Frozen WebUI API calls | 417-call union | Call presence is covered; rendered workflows are not | Open |
@@ -37,19 +51,29 @@ behavior from present-but-unlinked evidence.
 
 ### Known implementation-gap queue
 
-The 191 configuration contracts classified as genuinely missing are grouped by
-shared implementation dependency, not processed leaf by leaf:
+**Closed as of 2026-07-29.** The 191 configuration contracts previously
+classified as genuinely missing (grouped below by shared implementation
+dependency) all now report `complete` in a fresh, `--check-frozen`-validated
+manifest run. Kept for historical reference:
 
-| Subsystem batch | Missing contracts | Families | Execution priority |
+| Subsystem batch | Missing contracts (as of 2026-07-17) | Families | Execution priority |
 | --- | ---: | --- | ---: |
-| Daemon foundation | 45 | web/HTTPS, flags, logger, retention, permissions, telemetry, search retention | 1 |
-| Core workflows | 16 | interests, rooms, wishlist, shares, destinations, search throttling | 2 |
-| Advanced networking and security | 88 | DHT, Mesh, PodCore, overlay, overlay data, relay, security | 3 |
-| Media and advanced services | 42 | feature gates, player, Solid, SongID, VirtualSoulfind | 4 |
+| Daemon foundation | 45 (now 0) | web/HTTPS, flags, logger, retention, permissions, telemetry, search retention | done |
+| Core workflows | 16 (now 0) | interests, rooms, wishlist, shares, destinations, search throttling | done |
+| Advanced networking and security | 88 (now 0) | DHT, Mesh, PodCore, overlay, overlay data, relay, security | done |
+| Media and advanced services | 42 (now 0) | feature gates, player, Solid, SongID, VirtualSoulfind | done |
+
+This closes the **configuration-contract presence and validation** layer only
+(YAML/environment/CLI acceptance, defaults, and basic validation matching both
+frozen targets). It does not close the corresponding controller-API,
+security-authorization, protocol-behavior, persistence, or live-interop
+`needs-proof` cases for these same families -- see the 2026-07-29 review
+findings for a sampled, code-verified estimate of how much of that remaining
+work is a genuine feature gap versus unlinked-but-correct evidence.
 
 The 18,269 `needs-proof` cases are not presumed absent. They are certification
-dimensions to be linked in bulk from the subsystem contract matrices after the
-known implementation gaps are closed.
+dimensions to be linked in bulk from the subsystem contract matrices now that
+the known configuration-layer implementation gaps are closed.
 
 The raw proof-case closure ratio is a certification-ledger metric only. It is
 not used as an implementation queue or as a product-completion estimate. Work

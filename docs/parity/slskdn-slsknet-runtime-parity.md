@@ -41,7 +41,88 @@ Endpoint coverage is not sufficient for closure. A route is complete only when
 its response shape, mutation semantics, auth/CSRF/rate-limit posture, UI usage,
 and regression coverage match the parity target.
 
-## Current Status
+## 2026-07-29 Review
+
+This ledger and `completion-plan.md` had gone stale (last regenerated
+2026-07-17). Re-ran `scripts/audit-parity-manifest.py --check-frozen` against
+fresh worktrees of the frozen pins (`/tmp/slskd-frozen-parity` at
+`16e5d86ec9a91120f3ef40b85cb22036566b788a`, `/tmp/slskdn-frozen-parity` at
+`65a14a8b821de4df4ab7ef3ab3b156d7206837a3`) as part of a feature/interop parity
+review. The frozen inventory shape still matches `EXPECTED` in the script
+(`--check-frozen` passed cleanly), so this is an evidence refresh, not a
+denominator change.
+
+**Configuration workstream is now fully closed**: 436/436 complete, 0 partial,
+0 missing (was 245/436, 191 missing on 2026-07-17). Spot-checked the
+previously-missing families directly in the fresh manifest -- `dht.*`, `mesh.*`,
+`PodCore.*`, `feature.SongId`, `feature.Solid`, `player.*` all now report
+`complete` with `lifecycleValidationDifferential: complete`. This matches real
+implementation commits in the 2026-07-17 to 2026-07-27 range (daemon
+foundation, DHT/mesh/PodCore, media/services).
+
+Overall proof-case closure is now **853 / 19,122 = 4.46%** (was 662 / 19,122 =
+3.46%).
+
+Sampled, code-verified findings on the two largest remaining `needs-proof`
+buckets (controller-api: 4,674 cases; security-authorization: 7,690 cases) --
+both dominated by "route/policy declared correctly, live behavior never
+executed and recorded" rather than genuine absence:
+
+- **Security-authorization**: sampled 35 (route, auth-scenario) pairs across
+  all 20+ feature families by building slskR and firing live HTTP requests
+  with anonymous/read-only/read-write/administrator credentials. **35/35
+  matched the declared policy exactly** (401 anonymous on protected routes,
+  403 for under-privileged tokens, 200 only at the correct tier). Zero
+  authorization bypasses found. High confidence (~90%+) the remaining
+  unsampled cases are correctly enforced by the same table-driven auth-policy
+  mechanism (`crates/slskr/src/utils.rs` + `data/slskd(n)-controller-auth-policy.json`),
+  not silently broken. One non-security defect noted: `main.rs` maps every
+  `Err("forbidden")` (CSRF rejection *and* plain role-insufficiency) to the
+  same hardcoded `"cross-site mutating request rejected"` body, which is a
+  misleading diagnostic, not a security hole.
+- **Controller API**: see follow-up findings below (investigation in progress
+  at review time).
+
+Discovered and fixed two **real bugs**, both introduced by commit `70a004b8`
+(2026-07-20, "Complete controller parity and add AArch64 builds"):
+
+1. A startup validation rejecting a loopback `Soulseek.ListenIpAddress` when
+   auto-connecting under the slskdN compatibility profile -- a legitimate
+   production safety guard, but it also broke
+   `scripts/run-slskdn-cross-client-interop.sh`, which deliberately binds
+   slskR's listener to `127.0.0.1` so slskdN (on the same machine) can reach it
+   via test endpoint overrides. The interop harness had not been successfully
+   run since that commit landed. Fixed by binding to `0.0.0.0` instead
+   (matches what slskdN's own generated config already does for the same
+   reason, and is not loopback so the validation no longer fires) -- a
+   one-line test-script fix, not a product change.
+2. A **stub handler** for `GET /api/v0/session` in `main.rs` that returned an
+   empty 200 OK, shadowing the real handler in the same match block. This is
+   the exact endpoint slskR's own WebUI polls for connection status
+   (`web/src/lib/session.js`), so the WebUI session display has been silently
+   broken in any real deployment since 2026-07-20. Went undetected because the
+   unit test covering it (`read_only_api_routes_return_contract_shapes`)
+   asserted the stub's behavior (`body.is_empty()`) instead of the real spec.
+   Fixed the handler (removed the stub arm so the real handler underneath
+   takes over) and corrected the test to assert real session-state JSON.
+
+After both fixes, re-ran the live interop harness end to end against the real
+Soulseek network with a freshly built current slskdN
+(`dotnet publish src/slskd/slskd.csproj -c Release -r linux-x64
+--self-contained false`, HEAD `e071f6462`). Session/listener/resolution,
+VirtualSoulfind v2 (create/pending/plan/release/process, both directions),
+browse, search, backfill, bidirectional downloads (SHA256-verified), and
+private/server message dispatch all passed with a fresh 2026-07-29 run. The
+mesh-capability handshake ack (`protocol-ksdn-slskr-receives-ack`) timed out,
+but slskdN's own log shows why: `"Direct mesh transport is enabled but QUIC
+runtime support is unavailable"` -- this sandbox has `libngtcp2` but not
+`libmsquic` (what .NET's `System.Net.Quic` actually requires), so slskdN's
+direct mesh transport is disabled here regardless of code correctness. Treated
+as an environment gap, not a parity gap; needs re-verification in an
+environment with `libmsquic` installed.
+
+## Current Status (as of 2026-07-17, superseded by the review above for
+## overall counts -- kept for detailed narrative)
 
 Overall closure: **NOT ACHIEVED**. Route presence, compatibility projections,
 and selected live paths are evidence inputs, not proof of literal 1:1 parity.
@@ -52,10 +133,10 @@ zero unproved or divergent behavior for both targets.
 `scripts/audit-parity-manifest.py --check-frozen` now combines the frozen
 configuration, controller-route, WebUI-workflow, protocol, persistence/lifecycle,
 security, operator/packaging, and live-interoperability inventories into 19,122 unique
-proof cases. Its current certification-ledger classification is 662 complete, 0 partial, 191
+proof cases. Its 2026-07-17 certification-ledger classification was 662 complete, 0 partial, 191
 missing, and 18,269 needing behavioral proof, with zero missing denominators.
 The proof cases intentionally have different granularity; the manifest reports
-their raw 3.46% closure ratio without treating it as weighted feature value.
+their raw closure ratio without treating it as weighted feature value.
 
 The executable configuration ledger currently reports **245 complete, 0
 partial, and 191 missing** leaves out of the 436-path frozen union.

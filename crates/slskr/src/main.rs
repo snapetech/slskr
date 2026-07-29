@@ -14120,11 +14120,6 @@ async fn route_http_request_with_headers(
         ("GET", "/api/health") => Ok(health_response(&state.config)),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
-        ("GET", "/api/session") if route.path.starts_with("/api/v0/") => Ok(HttpResponse {
-            status: "200 OK",
-            content_type: "",
-            body: String::new(),
-        }),
         ("GET", "/.well-known/webfinger") => {
             Ok(activitypub_webfinger_response(route.query, state).await)
         }
@@ -67299,8 +67294,12 @@ mod tests {
             .await
             .expect("versioned session check");
         assert_eq!(session_check.status, "200 OK");
-        assert!(session_check.body.is_empty());
-        assert!(session_check.content_type.is_empty());
+        assert_eq!(session_check.content_type, "application/json");
+        assert!(
+            session_check.body.contains("\"state\":"),
+            "{}",
+            session_check.body
+        );
     }
 
     #[tokio::test]
