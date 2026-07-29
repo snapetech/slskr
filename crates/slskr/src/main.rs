@@ -41262,6 +41262,12 @@ async fn misc_controller_mutation_response(
                     "Query is not allowed for profiling",
                 ));
             }
+            let discovery = state.content_discovery.read().await;
+            let profile = discovery.profile_query(&query);
+            drop(discovery);
+            return Some(routing::ok_response(
+                serde_json::json!(profile).to_string(),
+            ));
         }
         let discovery = state.content_discovery.read().await;
         return Some(routing::ok_response(
@@ -46632,7 +46638,20 @@ async fn extended_controller_get_response(
             )
         }
         "/api/hashdb/optimize/slow-queries" => {
-            routing::ok_response(r#"{"slowQueries":[],"totalQueries":0}"#.to_owned())
+            let limit = query_parameter(query, "limit")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(20);
+            let discovery = state.content_discovery.read().await;
+            let slow_queries = discovery.slow_queries(limit);
+            let total_queries = discovery.total_queries();
+            drop(discovery);
+            routing::ok_response(
+                serde_json::json!({
+                    "totalQueries": total_queries,
+                    "slowQueries": slow_queries,
+                })
+                .to_string(),
+            )
         }
         "/api/hashdb/peers" => {
             let discovery = state.content_discovery.read().await;
@@ -85872,6 +85891,67 @@ mod tests {
                 .unwrap();
         assert_eq!(versioned.status, "200 OK");
         assert_eq!(versioned.body, r#"{"updated":0}"#);
+    }
+
+    #[tokio::test]
+    async fn hashdb_optimize_profile_and_slow_queries_report_real_observed_data() {
+        let (state, _receiver) = test_state();
+
+        // Prime the store with a real hash entry so the profile/slow-query
+        // endpoints have genuine data to report on, not an empty store.
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
+                    flac_key: "route-audit-key".to_owned(),
+                    size: 123,
+                    file_sha256:
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_owned(),
+                    ..Default::default()
+                }])
+                .expect("seed hash entry");
+        }
+
+        let profile = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/optimize/profile",
+            None,
+            r#"{"query":"SELECT * FROM hash_entries"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(profile.status, "200 OK");
+        let profile = serde_json::from_str::<serde_json::Value>(&profile.body).unwrap();
+        assert_eq!(profile["query"], "SELECT * FROM hash_entries");
+        assert_eq!(profile["rowsReturned"], 1);
+        assert!(profile["executionTimeMs"].is_u64());
+        assert!(
+            profile["queryPlan"]
+                .as_str()
+                .unwrap()
+                .contains("linear scan"),
+            "{profile}"
+        );
+
+        let slow_queries = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/optimize/slow-queries",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(slow_queries.status, "200 OK");
+        let slow_queries = serde_json::from_str::<serde_json::Value>(&slow_queries.body).unwrap();
+        assert_eq!(slow_queries["totalQueries"], 1);
+        let entries = slow_queries["slowQueries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["query"], "profile_query");
+        assert_eq!(entries[0]["executionCount"], 1);
+        assert_eq!(entries[0]["totalRowsReturned"], 1);
     }
 
     #[tokio::test]
