@@ -43924,6 +43924,23 @@ async fn podcore_mutation_response(
             })
         }
         ("DELETE", [section, pod_id, peer_id]) if section == "membership" => {
+            // Matches the frozen slskdN contract: removing a membership
+            // record requires either moderating the pod, or the acting
+            // peer removing themselves. An unspecified or mismatched actor
+            // must not be able to remove an arbitrary other member.
+            let acting_peer_id = query_parameter(query, "actingPeerId").unwrap_or_default();
+            let is_self_leave =
+                !acting_peer_id.is_empty() && acting_peer_id.eq_ignore_ascii_case(peer_id);
+            let can_moderate = state
+                .pods
+                .read()
+                .await
+                .can_moderate(pod_id, &acting_peer_id);
+            if !is_self_leave && !can_moderate {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator or the member themselves may remove this membership",
+                ));
+            }
             if let Err(error) = state.pods.write().await.leave(pod_id, peer_id) {
                 return Some(routing::bad_request_response(&error));
             }
@@ -86064,6 +86081,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pod_membership_removal_requires_moderator_or_self() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:00000000000000000000000000000099";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Membership Removal Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "ordinary-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add ordinary member");
+
+        // An unrelated peer may not remove another member.
+        let denied = super::route_http_request(
+            "DELETE",
+            &format!(
+                "/api/v0/podcore/membership/{pod_id}/ordinary-member?actingPeerId=some-other-peer"
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(denied.status, "403 Forbidden");
+
+        // The pod owner (a moderator) may remove someone else's membership.
+        let removed = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/membership/{pod_id}/ordinary-member?actingPeerId=owner-peer"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(removed.status, "200 OK", "{}", removed.body);
+    }
+
+    #[tokio::test]
     async fn deterministic_openapi_mutations_match_slskdn_status_and_dto_contracts() {
         let (state, _receiver) = test_state();
 
@@ -86621,9 +86699,27 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(opinion.status, "400 Bad Request");
-        let removed = super::route_http_request(
+
+        // An unspecified or unrelated actor must not be able to remove an
+        // arbitrary other member's membership.
+        let denied = super::route_http_request(
             "DELETE",
             &format!("/api/v0/podcore/membership/{pod_id}/00000000-0000-4000-8000-000000000001"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(denied.status, "403 Forbidden");
+
+        // The member themselves may remove their own membership.
+        let removed = super::route_http_request(
+            "DELETE",
+            &format!(
+                "/api/v0/podcore/membership/{pod_id}/00000000-0000-4000-8000-000000000001\
+                 ?actingPeerId=00000000-0000-4000-8000-000000000001"
+            ),
             None,
             "",
             &state,
