@@ -79,7 +79,7 @@ pub fn check_route_auth(
     }
 
     if !csrf_origin_allowed(config, method, normalized, headers) {
-        return Err("forbidden");
+        return Err("csrf");
     }
 
     Ok(())

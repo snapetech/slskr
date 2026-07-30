@@ -13903,12 +13903,12 @@ async fn route_http_request_with_headers(
         if let Err(err) =
             routing::check_route_auth(&state.config, method, route.path, authorization, &headers)
         {
-            let status = if err == "forbidden" { 403 } else { 401 };
+            let status = if err == "unauthorized" { 401 } else { 403 };
             tracing::complete_request_span(status);
-            return Ok(if err == "forbidden" {
-                routing::forbidden_response("cross-site mutating request rejected")
-            } else {
-                routing::unauthorized_response()
+            return Ok(match err {
+                "unauthorized" => routing::unauthorized_response(),
+                "csrf" => routing::forbidden_response("cross-site mutating request rejected"),
+                _ => routing::forbidden_response("insufficient permissions for this route"),
             });
         }
     }
@@ -61912,8 +61912,8 @@ where
             ) {
                 let response = match reason {
                     "unauthorized" => routing::unauthorized_response(),
-                    "forbidden" => routing::forbidden_response("forbidden"),
-                    _ => routing::forbidden_response(reason),
+                    "csrf" => routing::forbidden_response("cross-site mutating request rejected"),
+                    _ => routing::forbidden_response("insufficient permissions for this route"),
                 };
                 let _ = http_server::write_http_response(&mut writer, &response, false, "").await;
                 break;
@@ -66099,6 +66099,59 @@ mod tests {
         extra_env: MapEnv,
     ) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
         test_state_with_env_parts(extra_env, super::SearchStore::new(), None)
+    }
+
+    #[tokio::test]
+    async fn role_denials_are_distinguishable_from_csrf_rejections() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
+                .with("SLSKR_API_READ_ONLY_TOKEN", "read-token"),
+        );
+
+        // Authenticated, but with a role too low for this route -- must not
+        // be reported as a CSRF rejection.
+        let role_denied = super::route_http_request(
+            "POST",
+            "/api/v0/transfers/downloads/peer",
+            Some("Bearer read-token"),
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(role_denied.status, "403 Forbidden");
+        assert_eq!(
+            role_denied.body,
+            "{\"error\":\"insufficient permissions for this route\"}"
+        );
+
+        // A cross-origin mutating request with sufficient role must still be
+        // reported as the distinct CSRF rejection.
+        let csrf_denied = super::route_http_request_with_headers(
+            "POST",
+            "/api/v0/transfers/downloads/peer",
+            Some("Bearer write-token"),
+            "",
+            &state,
+            super::RequestSecurityHeaders {
+                host: Some("127.0.0.1:5030".to_string()),
+                origin: Some("https://evil.example".to_string()),
+                referer: None,
+                cookie: None,
+                x_share_token: None,
+                remote_addr: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(csrf_denied.status, "403 Forbidden");
+        assert_eq!(
+            csrf_denied.body,
+            "{\"error\":\"cross-site mutating request rejected\"}"
+        );
     }
 
     #[tokio::test]
