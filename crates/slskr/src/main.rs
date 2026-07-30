@@ -41147,6 +41147,124 @@ async fn extended_controller_mutation_response(
     )
 }
 
+const STUN_BINDING_REQUEST: u16 = 0x0001;
+const STUN_MAGIC_COOKIE: u32 = 0x2112_A442;
+const STUN_MAPPED_ADDRESS: u16 = 0x0001;
+const STUN_XOR_MAPPED_ADDRESS: u16 = 0x0020;
+/// Public STUN servers used for best-effort NAT type detection, matching
+/// the slskdN oracle's `MeshOptions.StunServers` defaults exactly.
+const STUN_SERVERS: [&str; 2] = ["stun.l.google.com:19302", "stun1.l.google.com:19302"];
+
+struct StunMapping {
+    mapped: SocketAddr,
+    local: SocketAddr,
+}
+
+fn build_stun_binding_request(transaction_id: [u8; 12]) -> [u8; 20] {
+    let mut request = [0_u8; 20];
+    request[0..2].copy_from_slice(&STUN_BINDING_REQUEST.to_be_bytes());
+    request[4..8].copy_from_slice(&STUN_MAGIC_COOKIE.to_be_bytes());
+    request[8..20].copy_from_slice(&transaction_id);
+    request
+}
+
+/// Parses a STUN Binding response for a MAPPED-ADDRESS or XOR-MAPPED-ADDRESS
+/// attribute (IPv4 only -- the default STUN servers reply over IPv4).
+fn parse_stun_mapped_address(response: &[u8]) -> Option<SocketAddr> {
+    if response.len() < 20 {
+        return None;
+    }
+    let mut offset = 20;
+    while offset + 4 <= response.len() {
+        let attr_type = u16::from_be_bytes([response[offset], response[offset + 1]]);
+        let attr_len = u16::from_be_bytes([response[offset + 2], response[offset + 3]]) as usize;
+        offset += 4;
+        if offset + attr_len > response.len() {
+            break;
+        }
+        if (attr_type == STUN_XOR_MAPPED_ADDRESS || attr_type == STUN_MAPPED_ADDRESS)
+            && attr_len >= 8
+            && response[offset + 1] == 0x01
+        {
+            let mut port = u16::from_be_bytes([response[offset + 2], response[offset + 3]]);
+            let mut address = u32::from_be_bytes([
+                response[offset + 4],
+                response[offset + 5],
+                response[offset + 6],
+                response[offset + 7],
+            ]);
+            if attr_type == STUN_XOR_MAPPED_ADDRESS {
+                port ^= (STUN_MAGIC_COOKIE >> 16) as u16;
+                address ^= STUN_MAGIC_COOKIE;
+            }
+            return Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::from(address)),
+                port,
+            ));
+        }
+        offset += (attr_len + 3) & !3;
+    }
+    None
+}
+
+/// Sends a single STUN Binding request to `server` from a fresh ephemeral
+/// local UDP socket and returns the mapped/local endpoint pair, or `None` on
+/// any resolution, transport, or timeout failure (best-effort, like the
+/// oracle's `ProbeServer`).
+async fn stun_probe(server: &str) -> Option<StunMapping> {
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    let target = tokio::time::timeout(Duration::from_secs(1), tokio::net::lookup_host(server))
+        .await
+        .ok()?
+        .ok()?
+        .next()?;
+    let mut transaction_id = [0_u8; 12];
+    SysRng.try_fill_bytes(&mut transaction_id).ok()?;
+    let request = build_stun_binding_request(transaction_id);
+    socket.send_to(&request, target).await.ok()?;
+    let mut buf = [0_u8; 128];
+    let count = tokio::time::timeout(Duration::from_secs(2), socket.recv_from(&mut buf))
+        .await
+        .ok()?
+        .ok()?
+        .0;
+    let mapped = parse_stun_mapped_address(&buf[..count])?;
+    let local = socket.local_addr().ok()?;
+    Some(StunMapping { mapped, local })
+}
+
+/// Detects the local NAT type via STUN, matching the oracle's
+/// `StunNatDetector.DetectAsync` classification: probe the primary server
+/// twice (a changed mapping means a symmetric NAT), then optionally a second
+/// server (a changed mapping there also means symmetric); a mapping that's
+/// stable but differs from the local endpoint is a restricted/cone NAT, and
+/// no response at all is unknown. Returns `(type, detected)`.
+async fn detect_nat_type(servers: &[&str]) -> (&'static str, bool) {
+    let Some(primary) = servers.first() else {
+        return ("unknown", false);
+    };
+    let Some(mapping1) = stun_probe(primary).await else {
+        return ("unknown", false);
+    };
+    if mapping1.mapped == mapping1.local {
+        return ("direct", true);
+    }
+    let Some(mapping2) = stun_probe(primary).await else {
+        return ("unknown", false);
+    };
+    if mapping1.mapped != mapping2.mapped {
+        return ("symmetric", true);
+    }
+    if let Some(secondary) = servers.get(1) {
+        match stun_probe(secondary).await {
+            None => return ("restricted", true),
+            Some(mapping3) if mapping1.mapped != mapping3.mapped => return ("symmetric", true),
+            Some(_) => {}
+        }
+    }
+    ("restricted", true)
+}
+
 async fn misc_controller_mutation_response(
     method: &str,
     path: &str,
@@ -41404,11 +41522,10 @@ async fn misc_controller_mutation_response(
         );
     }
     if method == "POST" && path == "/api/mesh/nat/detect" {
-        let listeners = state.listeners.read().await;
-        let detected = listeners.regular_local_addr.is_some();
+        let (nat_type, detected) = detect_nat_type(&STUN_SERVERS).await;
         return Some(routing::ok_response(
             serde_json::json!({
-                "type": if detected { "open" } else { "unknown" },
+                "type": nat_type,
                 "detected": detected,
             })
             .to_string(),
@@ -70970,6 +71087,107 @@ mod tests {
         task_a.abort();
         task_b.abort();
         std::fs::remove_dir_all(&state.config.state_dir).expect("remove test state directory");
+    }
+
+    fn build_stun_success_response(transaction_id: [u8; 12], mapped: SocketAddr) -> Vec<u8> {
+        let SocketAddr::V4(mapped) = mapped else {
+            panic!("STUN test fixture requires an IPv4 mapped address");
+        };
+        let xor_port = mapped.port() ^ ((super::STUN_MAGIC_COOKIE >> 16) as u16);
+        let xor_address = u32::from(*mapped.ip()) ^ super::STUN_MAGIC_COOKIE;
+        let mut attribute = Vec::with_capacity(8);
+        attribute.push(0x00);
+        attribute.push(0x01);
+        attribute.extend_from_slice(&xor_port.to_be_bytes());
+        attribute.extend_from_slice(&xor_address.to_be_bytes());
+
+        let mut response = Vec::with_capacity(32);
+        response.extend_from_slice(&0x0101_u16.to_be_bytes());
+        response.extend_from_slice(&(attribute.len() as u16 + 4).to_be_bytes());
+        response.extend_from_slice(&super::STUN_MAGIC_COOKIE.to_be_bytes());
+        response.extend_from_slice(&transaction_id);
+        response.extend_from_slice(&0x0020_u16.to_be_bytes());
+        response.extend_from_slice(&(attribute.len() as u16).to_be_bytes());
+        response.extend_from_slice(&attribute);
+        response
+    }
+
+    async fn serve_one_stun_response(socket: &tokio::net::UdpSocket, mapped: SocketAddr) {
+        let mut buf = [0_u8; 128];
+        let (count, peer) = socket.recv_from(&mut buf).await.expect("recv STUN request");
+        assert!(count >= 20, "STUN request too short");
+        let mut transaction_id = [0_u8; 12];
+        transaction_id.copy_from_slice(&buf[8..20]);
+        let response = build_stun_success_response(transaction_id, mapped);
+        socket
+            .send_to(&response, peer)
+            .await
+            .expect("send STUN response");
+    }
+
+    #[test]
+    fn stun_response_parsing_decodes_the_xor_mapped_address() {
+        let mapped = "203.0.113.5:51820".parse::<SocketAddr>().unwrap();
+        let response = build_stun_success_response([7_u8; 12], mapped);
+        assert_eq!(super::parse_stun_mapped_address(&response), Some(mapped));
+    }
+
+    #[tokio::test]
+    async fn stun_probe_resolves_the_mapped_address_from_a_real_udp_round_trip() {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind STUN fixture");
+        let address = socket.local_addr().expect("STUN fixture address");
+        let mapped = "198.51.100.9:4000".parse::<SocketAddr>().unwrap();
+        let server = tokio::spawn(async move { serve_one_stun_response(&socket, mapped).await });
+        let result = super::stun_probe(&address.to_string())
+            .await
+            .expect("STUN probe");
+        server.await.expect("STUN fixture task");
+        assert_eq!(result.mapped, mapped);
+    }
+
+    #[tokio::test]
+    async fn detect_nat_type_reports_symmetric_when_the_mapping_changes_between_probes() {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind STUN fixture");
+        let address = socket.local_addr().expect("STUN fixture address");
+        let server = tokio::spawn(async move {
+            serve_one_stun_response(&socket, "198.51.100.9:4000".parse().unwrap()).await;
+            serve_one_stun_response(&socket, "198.51.100.9:4001".parse().unwrap()).await;
+        });
+        let server_addr = address.to_string();
+        let (nat_type, detected) = super::detect_nat_type(&[&server_addr]).await;
+        server.await.expect("STUN fixture task");
+        assert_eq!(nat_type, "symmetric");
+        assert!(detected);
+    }
+
+    #[tokio::test]
+    async fn detect_nat_type_reports_restricted_when_the_mapping_is_stable() {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind STUN fixture");
+        let address = socket.local_addr().expect("STUN fixture address");
+        let mapped: SocketAddr = "198.51.100.9:4000".parse().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                serve_one_stun_response(&socket, mapped).await;
+            }
+        });
+        let server_addr = address.to_string();
+        let (nat_type, detected) = super::detect_nat_type(&[&server_addr, &server_addr]).await;
+        server.await.expect("STUN fixture task");
+        assert_eq!(nat_type, "restricted");
+        assert!(detected);
+    }
+
+    #[tokio::test]
+    async fn detect_nat_type_reports_unknown_when_no_server_responds() {
+        let (nat_type, detected) = super::detect_nat_type(&["127.0.0.1:1"]).await;
+        assert_eq!(nat_type, "unknown");
+        assert!(!detected);
     }
 
     #[tokio::test]
