@@ -255,6 +255,27 @@ impl ContentDiscoveryStore {
         &self.shadow_records
     }
 
+    /// Count of distinct peers referenced anywhere in the shadow index --
+    /// the closest real analog to the oracle's `Peers` table row count.
+    pub fn distinct_peer_count(&self) -> usize {
+        self.shadow_records
+            .iter()
+            .flat_map(|record| record.peer_ids.iter())
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    }
+
+    /// Real on-disk size of the state file, matching the oracle's
+    /// `FileInfo.Length` over its SQLite file. Zero for an in-memory store
+    /// or before the state file has been written yet.
+    pub fn database_size_bytes(&self) -> u64 {
+        self.state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+    }
+
     pub fn lookup_hash(&self, flac_key: &str) -> Option<&HashDbEntry> {
         let started_at = Instant::now();
         let flac_key = flac_key.trim();

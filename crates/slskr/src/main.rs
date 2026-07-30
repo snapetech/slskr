@@ -46657,16 +46657,34 @@ async fn extended_controller_get_response(
         }
         "/api/hashdb/optimize/analyze" => {
             let discovery = state.content_discovery.read().await;
+            let hash_db_entry_count = discovery.hash_entries().len();
+            let peer_count = discovery.distinct_peer_count();
+            let database_size_bytes = discovery.database_size_bytes();
+            drop(discovery);
+            let mut recommendations: Vec<&str> = Vec::new();
+            if hash_db_entry_count > 100_000 {
+                recommendations
+                    .push("Large HashDb table detected. Consider running VACUUM to reclaim space.");
+            }
+            if database_size_bytes > 100 * 1024 * 1024 {
+                recommendations
+                    .push("Database size exceeds 100MB. Consider running VACUUM to optimize.");
+            }
             routing::ok_response(
                 serde_json::json!({
                     "analyzed": true,
-                    "entries": discovery.hash_entries().len(),
-                    "hashDbEntryCount": discovery.hash_entries().len(),
+                    "entries": hash_db_entry_count,
+                    "hashDbEntryCount": hash_db_entry_count,
+                    // slskR's content-discovery store has no FlacInventory
+                    // table distinct from HashDb -- there is nothing else
+                    // to count here.
                     "flacInventoryEntryCount": 0,
-                    "peerCount": 0,
-                    "databaseSizeBytes": 0,
-                    "missingIndexes": [],
-                    "recommendations": [],
+                    "peerCount": peer_count,
+                    "databaseSizeBytes": database_size_bytes,
+                    // The store is a single JSON file, not SQLite -- there
+                    // are no named indexes that can be "missing".
+                    "missingIndexes": Vec::<String>::new(),
+                    "recommendations": recommendations,
                 })
                 .to_string(),
             )
@@ -85985,6 +86003,47 @@ mod tests {
         assert_eq!(entries[0]["query"], "profile_query");
         assert_eq!(entries[0]["executionCount"], 1);
         assert_eq!(entries[0]["totalRowsReturned"], 1);
+    }
+
+    #[tokio::test]
+    async fn hashdb_optimize_analyze_reports_real_observed_counts_and_thresholds() {
+        let (state, _receiver) = test_state();
+
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
+                    flac_key: "analyze-audit-key".to_owned(),
+                    size: 456,
+                    file_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_owned(),
+                    ..Default::default()
+                }])
+                .expect("seed hash entry");
+            discovery
+                .merge_shadow_records(vec![super::content_discovery::ShadowIndexRecord {
+                    recording_id: "mbid-analyze-audit".to_owned(),
+                    peer_ids: vec!["peer-a".to_owned(), "peer-b".to_owned()],
+                    updated_at: 0,
+                }])
+                .expect("seed shadow record");
+        }
+
+        let analyze =
+            super::route_http_request("GET", "/api/v0/hashdb/optimize/analyze", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(analyze.status, "200 OK");
+        let analyze = serde_json::from_str::<serde_json::Value>(&analyze.body).unwrap();
+        assert_eq!(analyze["hashDbEntryCount"], 1);
+        assert_eq!(analyze["entries"], 1);
+        assert_eq!(analyze["peerCount"], 2);
+        assert!(analyze["databaseSizeBytes"].is_u64());
+        // An in-memory store (no state file yet) has nothing on disk.
+        assert_eq!(analyze["databaseSizeBytes"], 0);
+        // Below both real thresholds, so no recommendations should fire.
+        assert_eq!(analyze["recommendations"], serde_json::json!([]));
+        assert_eq!(analyze["missingIndexes"], serde_json::json!([]));
     }
 
     #[tokio::test]
