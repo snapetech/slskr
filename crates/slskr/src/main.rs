@@ -24856,25 +24856,40 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/jobs/mb-release") => {
-              if route.path.starts_with("/api/v0/")
-                  && extract_json_string_field(body, "mb_release_id")
-                      .or_else(|| extract_json_string_field(body, "mbReleaseId"))
-                      .is_some()
+              let release_id = extract_json_string_field(body, "mb_release_id")
+                  .or_else(|| extract_json_string_field(body, "mbReleaseId"))
+                  .filter(|id| !id.trim().is_empty());
+              let (artist, title) = if let Some(release_id) =
+                  release_id.filter(|_| route.path.starts_with("/api/v0/"))
               {
-                  return Ok(HttpResponse {
-                      status: "404 Not Found",
-                      content_type: "application/json",
-                      body: serde_json::json!(
-                          "Unable to resolve release into a SongID-ready MusicBrainz target."
-                      )
-                      .to_string(),
-                  });
-              }
-              let artist = extract_json_string_field(body, "artist").unwrap_or_default();
-              let title = extract_json_string_field(body, "title")
-                  .or_else(|| extract_json_string_field(body, "release"))
-                  .or_else(|| extract_json_string_field(body, "query"))
-                  .unwrap_or_else(|| "release".to_owned());
+                  match musicbrainz_release_target("https://musicbrainz.org/ws/2", &release_id)
+                      .await
+                  {
+                      Ok(Some(target)) => target,
+                      Ok(None) => {
+                          return Ok(HttpResponse {
+                              status: "404 Not Found",
+                              content_type: "application/json",
+                              body: serde_json::json!(
+                                  "Unable to resolve release into a SongID-ready MusicBrainz target."
+                              )
+                              .to_string(),
+                          });
+                      }
+                      Err(error) => {
+                          return Ok(routing::service_unavailable_response(&format!(
+                              "MusicBrainz lookup failed: {error}"
+                          )));
+                      }
+                  }
+              } else {
+                  let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+                  let title = extract_json_string_field(body, "title")
+                      .or_else(|| extract_json_string_field(body, "release"))
+                      .or_else(|| extract_json_string_field(body, "query"))
+                      .unwrap_or_else(|| "release".to_owned());
+                  (artist, title)
+              };
               let query = [artist.as_str(), title.as_str()]
                   .into_iter()
                   .filter(|value| !value.trim().is_empty())
@@ -37462,6 +37477,57 @@ async fn read_bounded_integration_json(
     }
 
     serde_json::from_slice(&body).map_err(|error| format!("invalid {label} JSON: {error}"))
+}
+
+/// Resolves a MusicBrainz release id into a SongID-ready `(artist, title)`
+/// pair, matching the oracle's `MusicBrainzClient.GetReleaseAsync` +
+/// `MapToAlbumTarget`: `Ok(None)` when the release doesn't exist or has no
+/// resolvable artist credit, `Err` only on a genuine transport/parse failure.
+async fn musicbrainz_release_target(
+    base_url: &str,
+    release_id: &str,
+) -> Result<Option<(String, String)>, String> {
+    let url = format!(
+        "{}/release/{}?fmt=json&inc=artist-credits",
+        base_url.trim_end_matches('/'),
+        url_encode(release_id.trim())
+    );
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("failed to build MusicBrainz client: {error}"))?
+        .get(url)
+        .header(reqwest::header::USER_AGENT, format!("slskR v{APP_VERSION}"))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|error| format!("MusicBrainz API request failed: {error}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("MusicBrainz returned HTTP {}", response.status()));
+    }
+    let value = read_bounded_integration_json(response, "MusicBrainz API").await?;
+    let artist_id = value
+        .pointer("/artist-credit/0/artist/id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.trim().is_empty());
+    if artist_id.is_none() {
+        return Ok(None);
+    }
+    let title = value
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let artist_name = value
+        .pointer("/artist-credit/0/name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Ok(Some((artist_name, title)))
 }
 
 struct ResolvedIntegrationTarget {
@@ -68174,6 +68240,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn musicbrainz_release_lookup_resolves_a_release_with_an_artist_credit() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind MusicBrainz fixture");
+        let address = listener.local_addr().expect("MusicBrainz fixture address");
+        let server = tokio::spawn(async move {
+            serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "id": "release-1",
+                    "title": "Route Audit Release",
+                    "artist-credit": [
+                        {"name": "Route Audit Artist", "artist": {"id": "artist-1"}},
+                    ],
+                }),
+            )
+            .await
+        });
+        let target = super::musicbrainz_release_target(&format!("http://{address}"), "release-1")
+            .await
+            .expect("MusicBrainz lookup");
+        server.await.expect("MusicBrainz fixture task");
+        assert_eq!(
+            target,
+            Some((
+                "Route Audit Artist".to_owned(),
+                "Route Audit Release".to_owned()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn musicbrainz_release_lookup_returns_none_when_release_is_not_found() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind MusicBrainz fixture");
+        let address = listener.local_addr().expect("MusicBrainz fixture address");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept MusicBrainz request");
+            let mut buffer = [0_u8; 1024];
+            assert!(stream.read(&mut buffer).await.unwrap() > 0);
+            let reply = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(reply.as_bytes())
+                .await
+                .expect("write MusicBrainz 404");
+        });
+        let target =
+            super::musicbrainz_release_target(&format!("http://{address}"), "missing-release")
+                .await
+                .expect("MusicBrainz lookup");
+        server.await.expect("MusicBrainz fixture task");
+        assert_eq!(target, None);
+    }
+
+    #[tokio::test]
     async fn youtube_and_lastfm_source_providers_fetch_real_rows() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -86412,12 +86536,6 @@ mod tests {
                 "/api/v0/rooms/joined",
                 r#""route-audit""#,
                 "503 Service Unavailable",
-            ),
-            (
-                "POST",
-                "/api/v0/jobs/mb-release",
-                r#"{"mb_release_id":"00000000-0000-4000-8000-000000000001"}"#,
-                "404 Not Found",
             ),
             (
                 "POST",
