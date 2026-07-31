@@ -43983,19 +43983,40 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             return routing::bad_request_response("request fields are required");
         }
         let mut errors = Vec::new();
+        let local_reason = request
+            .get("localReason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if local_reason.is_empty() {
+            errors.push("Local quarantine reason is required.");
+        }
         let jurors = request
             .get("jurors")
             .and_then(serde_json::Value::as_array)
-            .map_or(0, Vec::len);
-        let evidence = request
+            .cloned()
+            .unwrap_or_default();
+        let evidence_items = request
             .get("evidence")
             .and_then(serde_json::Value::as_array)
-            .map_or(0, Vec::len);
-        if jurors == 0 {
+            .cloned()
+            .unwrap_or_default();
+        if jurors.is_empty() {
             errors.push("At least one trusted juror is required.");
         }
-        if evidence == 0 {
+        if evidence_items.is_empty() {
             errors.push("At least one minimal evidence item is required.");
+        }
+        // Matches the oracle's real ValidateRequest: every evidence item
+        // and juror identifier is checked individually, not just counted.
+        for evidence in &evidence_items {
+            quarantine_add_evidence_errors(&mut errors, evidence);
+        }
+        for juror in jurors.iter().filter_map(serde_json::Value::as_str) {
+            if !is_safe_opaque_reference(juror) {
+                errors.push("Juror identifiers must be opaque and safe.");
+            }
         }
         if !errors.is_empty() {
             return HttpResponse {
@@ -44011,6 +44032,7 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             .map(str::to_owned)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         request["requestId"] = serde_json::json!(id);
+        request["localReason"] = serde_json::json!(local_reason);
         request["createdAt"] = serde_json::json!(unix_timestamp());
         request["status"] = serde_json::json!("Pending");
         return match state
@@ -88914,6 +88936,91 @@ mod tests {
             real_route_json["errorMessage"],
             "Routing backend is not available."
         );
+    }
+
+    #[tokio::test]
+    async fn quarantine_jury_request_creation_validates_reason_evidence_and_jurors() {
+        let (state, _receiver) = test_state();
+
+        let missing_reason = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"jurors":["juror-a"],"evidence":[{"type":"hash","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("missing local reason");
+        assert_eq!(missing_reason.status, "400 Bad Request");
+        let missing_reason_json =
+            serde_json::from_str::<serde_json::Value>(&missing_reason.body).unwrap();
+        assert!(
+            missing_reason_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Local quarantine reason is required."),
+            "{missing_reason_json}"
+        );
+
+        // An evidence reference shaped like a filesystem path is real,
+        // concrete leakage risk -- must be rejected, not merely counted.
+        let unsafe_evidence = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit","jurors":["juror-a"],"evidence":[{"type":"hash","reference":"/etc/passwd"}]}"#,
+            &state,
+        )
+        .await
+        .expect("unsafe evidence reference");
+        assert_eq!(unsafe_evidence.status, "400 Bad Request");
+        let unsafe_evidence_json =
+            serde_json::from_str::<serde_json::Value>(&unsafe_evidence.body).unwrap();
+        assert!(
+            unsafe_evidence_json["errors"].as_array().unwrap().iter().any(
+                |error| error
+                    == "Evidence references must not include paths, raw hashes, endpoints, or private identifiers."
+            ),
+            "{unsafe_evidence_json}"
+        );
+
+        // A juror identifier that looks like a filesystem path is the
+        // same class of leakage risk on the juror side.
+        let unsafe_juror = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit","jurors":["/etc/shadow"],"evidence":[{"type":"hash","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("unsafe juror identifier");
+        assert_eq!(unsafe_juror.status, "400 Bad Request");
+        let unsafe_juror_json =
+            serde_json::from_str::<serde_json::Value>(&unsafe_juror.body).unwrap();
+        assert!(
+            unsafe_juror_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Juror identifiers must be opaque and safe."),
+            "{unsafe_juror_json}"
+        );
+
+        // A genuinely safe request must still succeed.
+        let valid = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"  audit  ","jurors":["juror-a"],"evidence":[{"type":"hash","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("valid request");
+        assert_eq!(valid.status, "200 OK", "{}", valid.body);
+        let valid_json = serde_json::from_str::<serde_json::Value>(&valid.body).unwrap();
+        assert_eq!(valid_json["request"]["localReason"], "audit");
     }
 
     #[tokio::test]
