@@ -43765,21 +43765,58 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        if request_id.is_empty()
-            || state
-                .controller_features
-                .read()
-                .await
-                .get(&format!("quarantine/request/{request_id}"))
-                .is_none()
-        {
+        let Some(request) = state
+            .controller_features
+            .read()
+            .await
+            .get(&format!("quarantine/request/{request_id}"))
+            .cloned()
+        else {
             return HttpResponse {
                 status: "400 Bad Request",
                 content_type: "application/json",
                 body: r#"{"isValid":false,"errors":["Request not found."]}"#.to_owned(),
             };
+        };
+        let mut errors = Vec::new();
+        let juror = verdict
+            .get("juror")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let jurors_listed = request
+            .get("jurors")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|jurors| {
+                jurors
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .any(|listed| listed.eq_ignore_ascii_case(&juror))
+            });
+        if !jurors_listed {
+            errors.push("Juror is not selected for this request.");
         }
-        let id = uuid::Uuid::new_v4().to_string();
+        if !matches!(
+            verdict.get("verdict").and_then(serde_json::Value::as_str),
+            Some("NeedsManualReview" | "UpholdQuarantine" | "ReleaseCandidate")
+        ) {
+            errors
+                .push("Verdict must be NeedsManualReview, UpholdQuarantine, or ReleaseCandidate.");
+        }
+        if !errors.is_empty() {
+            return HttpResponse {
+                status: "400 Bad Request",
+                content_type: "application/json",
+                body: serde_json::json!({"isValid": false, "errors": errors}).to_string(),
+            };
+        }
+        // One verdict per juror per request: a resubmission replaces the
+        // prior verdict rather than double-counting toward quorum.
+        let id = format!(
+            "quarantine-jury-verdict:{}:{}",
+            request_id.trim().to_ascii_lowercase(),
+            juror.trim().to_ascii_lowercase()
+        );
         verdict["verdictId"] = serde_json::json!(id);
         verdict["submittedAt"] = serde_json::json!(unix_timestamp());
         return match state.controller_features.write().await.upsert(
@@ -43792,42 +43829,305 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             Err(error) => routing::service_unavailable_response(&error),
         };
     }
-    let action = if path.ends_with("/accept-release-candidate") {
-        "accept-release-candidate"
-    } else if path.ends_with("/routes") {
-        "routes"
+    if path.ends_with("/accept-release-candidate") {
+        return quarantine_accept_release_candidate_response(path, body, state).await;
+    }
+    if path.ends_with("/routes") {
+        return quarantine_route_request_response(path, body, state).await;
+    }
+    routing::not_found_response()
+}
+
+fn quarantine_verdict_rank(verdict: &str) -> u8 {
+    match verdict {
+        "UpholdQuarantine" => 1,
+        "ReleaseCandidate" => 2,
+        _ => 0,
+    }
+}
+
+/// Builds the real quorum-based aggregate for a quarantine-jury request,
+/// matching the oracle's `BuildAggregate`: groups stored verdicts by type
+/// and requires a 2/3 supermajority once `minJurorVotes` real verdicts have
+/// been recorded (ties broken toward the lowest-ranked verdict, i.e.
+/// `NeedsManualReview`). Returns `None` only if the request itself does not
+/// exist.
+async fn quarantine_build_aggregate(
+    state: &AppState,
+    request_id: &str,
+) -> Option<serde_json::Value> {
+    let features = state.controller_features.read().await;
+    let request = features
+        .get(&format!("quarantine/request/{request_id}"))
+        .cloned()?;
+    let required_votes = request
+        .get("minJurorVotes")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(2)
+        .max(1) as usize;
+    let verdicts = features.values_with_prefix(&format!("quarantine/verdict/{request_id}/"));
+    drop(features);
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for verdict in &verdicts {
+        let value = verdict
+            .get("verdict")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("NeedsManualReview")
+            .to_owned();
+        *counts.entry(value).or_insert(0) += 1;
+    }
+    let total_verdicts = verdicts.len();
+    let quorum_reached = total_verdicts >= required_votes;
+    let recommendation = if !quorum_reached {
+        "NeedsManualReview".to_owned()
     } else {
+        let required_agreement = total_verdicts.saturating_mul(2).div_ceil(3);
+        let mut ranked = counts.iter().collect::<Vec<_>>();
+        ranked.sort_by(|(a_verdict, a_count), (b_verdict, b_count)| {
+            b_count.cmp(a_count).then_with(|| {
+                quarantine_verdict_rank(a_verdict).cmp(&quarantine_verdict_rank(b_verdict))
+            })
+        });
+        ranked
+            .first()
+            .filter(|(_, count)| **count >= required_agreement)
+            .map(|(verdict, _)| (*verdict).clone())
+            .unwrap_or_else(|| "NeedsManualReview".to_owned())
+    };
+    let dissenting_jurors = verdicts
+        .iter()
+        .filter(|verdict| {
+            verdict.get("verdict").and_then(serde_json::Value::as_str)
+                != Some(recommendation.as_str())
+        })
+        .filter_map(|verdict| {
+            verdict
+                .get("juror")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    let reason = if !quorum_reached {
+        format!("Waiting for trusted juror quorum: {total_verdicts}/{required_votes}.")
+    } else if recommendation == "NeedsManualReview" {
+        "Trusted jurors did not reach a supermajority.".to_owned()
+    } else {
+        "Trusted jurors reached a supermajority recommendation.".to_owned()
+    };
+
+    Some(serde_json::json!({
+        "requestId": request_id,
+        "recommendation": recommendation,
+        "totalVerdicts": total_verdicts,
+        "requiredVotes": required_votes,
+        "verdictCounts": counts,
+        "dissentingJurors": dissenting_jurors,
+        "quorumReached": quorum_reached,
+        "reason": reason,
+    }))
+}
+
+fn quarantine_can_accept(aggregate: &serde_json::Value, already_accepted: bool) -> bool {
+    !already_accepted
+        && aggregate["quorumReached"] == serde_json::json!(true)
+        && aggregate["recommendation"] == "ReleaseCandidate"
+}
+
+fn quarantine_acceptance_reason(aggregate: &serde_json::Value, already_accepted: bool) -> String {
+    if already_accepted {
+        return "Release-candidate recommendation has already been accepted.".to_owned();
+    }
+    if aggregate["quorumReached"] != serde_json::json!(true) {
+        return "Waiting for trusted juror quorum.".to_owned();
+    }
+    if aggregate["recommendation"] == "ReleaseCandidate" {
+        "Release-candidate recommendation can be accepted manually.".to_owned()
+    } else {
+        "Only a release-candidate supermajority can be accepted.".to_owned()
+    }
+}
+
+async fn quarantine_accept_release_candidate_response(
+    path: &str,
+    body: &str,
+    state: &AppState,
+) -> HttpResponse {
+    let Some(request_id) = path_segment_between(
+        path,
+        "/api/quarantine-jury/requests/",
+        "/accept-release-candidate",
+    ) else {
         return routing::not_found_response();
     };
-    let suffix = format!("/{action}");
-    let Some(request_id) = path_segment_between(path, "/api/quarantine-jury/requests/", &suffix)
+    let request_id = decoded_path_segment(request_id);
+    let Some(aggregate) = quarantine_build_aggregate(state, &request_id).await else {
+        return HttpResponse {
+            status: "404 Not Found",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "isAccepted": false,
+                "errors": ["Request not found."],
+                "decision": null,
+            })
+            .to_string(),
+        };
+    };
+    let acceptance_key = format!("quarantine/acceptance/{request_id}");
+    if let Some(existing) = state
+        .controller_features
+        .read()
+        .await
+        .get(&acceptance_key)
+        .cloned()
+    {
+        return routing::ok_response(
+            serde_json::json!({"isAccepted": true, "errors": [], "decision": existing}).to_string(),
+        );
+    }
+    if !quarantine_can_accept(&aggregate, false) {
+        let reason = quarantine_acceptance_reason(&aggregate, false);
+        return HttpResponse {
+            status: "400 Bad Request",
+            content_type: "application/json",
+            body: serde_json::json!({"isAccepted": false, "errors": [reason], "decision": null})
+                .to_string(),
+        };
+    }
+    let payload =
+        serde_json::from_str::<serde_json::Value>(body).unwrap_or_else(|_| serde_json::json!({}));
+    let accepted_by = payload
+        .get("acceptedBy")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("local-user")
+        .to_owned();
+    let note = payload
+        .get("note")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let decision = serde_json::json!({
+        "id": format!("quarantine-jury-acceptance:{}", uuid::Uuid::new_v4().simple()),
+        "requestId": request_id,
+        "acceptedBy": accepted_by,
+        "acceptedRecommendation": "ReleaseCandidate",
+        "note": note,
+        "aggregateSnapshot": aggregate,
+        "createdAt": unix_timestamp(),
+    });
+    match state
+        .controller_features
+        .write()
+        .await
+        .upsert(acceptance_key, decision.clone())
+    {
+        Ok(()) => routing::ok_response(
+            serde_json::json!({"isAccepted": true, "errors": [], "decision": decision}).to_string(),
+        ),
+        Err(error) => routing::service_unavailable_response(&error),
+    }
+}
+
+async fn quarantine_route_request_response(
+    path: &str,
+    body: &str,
+    state: &AppState,
+) -> HttpResponse {
+    let Some(request_id) = path_segment_between(path, "/api/quarantine-jury/requests/", "/routes")
     else {
         return routing::not_found_response();
     };
     let request_id = decoded_path_segment(request_id);
-    if state
+    let Some(request) = state
         .controller_features
         .read()
         .await
         .get(&format!("quarantine/request/{request_id}"))
-        .is_none()
-    {
-        return routing::not_found_response();
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    let value = serde_json::json!({
+        .cloned()
+    else {
+        return HttpResponse {
+            status: "404 Not Found",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "success": false,
+                "errorMessage": "Request not found.",
+                "requestId": request_id,
+            })
+            .to_string(),
+        };
+    };
+    let payload =
+        serde_json::from_str::<serde_json::Value>(body).unwrap_or_else(|_| serde_json::json!({}));
+    let juror_names = request
+        .get("jurors")
+        .and_then(serde_json::Value::as_array)
+        .map(|jurors| {
+            jurors
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut target_jurors = payload
+        .get("targetJurors")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|values| !values.is_empty())
+        .unwrap_or_else(|| juror_names.clone());
+    target_jurors.sort_by_key(|juror| juror.to_ascii_lowercase());
+    target_jurors.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    let invalid_target = target_jurors.iter().any(|juror| {
+        !juror_names
+            .iter()
+            .any(|listed| listed.eq_ignore_ascii_case(juror))
+    });
+
+    let id = format!("quarantine-jury-route:{}", uuid::Uuid::new_v4().simple());
+    let (success, error_message, failed_jurors) = if invalid_target {
+        (
+            false,
+            "Route targets must be selected safe jurors.".to_owned(),
+            target_jurors.clone(),
+        )
+    } else {
+        // slskr has no pod-to-peer message router wired to this feature
+        // yet. This matches the oracle's own fallback when its router
+        // isn't configured (`_messageRouter == null`) -- a real code path,
+        // not a fabricated success.
+        (
+            false,
+            "Routing backend is not available.".to_owned(),
+            target_jurors.clone(),
+        )
+    };
+    let attempt = serde_json::json!({
         "id": id,
         "requestId": request_id,
-        "action": action,
-        "success": true,
-        "payload": serde_json::from_str::<serde_json::Value>(body).unwrap_or_default(),
-        "completedAt": unix_timestamp(),
+        "targetJurors": target_jurors,
+        "routedJurors": Vec::<String>::new(),
+        "failedJurors": failed_jurors,
+        "success": success,
+        "errorMessage": error_message,
+        "createdAt": unix_timestamp(),
     });
     match state.controller_features.write().await.upsert(
-        format!("quarantine/{action}/{request_id}/{id}"),
-        value.clone(),
+        format!("quarantine/routes/{request_id}/{id}"),
+        attempt.clone(),
     ) {
-        Ok(()) => routing::ok_response(value.to_string()),
+        Ok(()) if success => routing::ok_response(attempt.to_string()),
+        Ok(()) => HttpResponse {
+            status: "400 Bad Request",
+            content_type: "application/json",
+            body: attempt.to_string(),
+        },
         Err(error) => routing::service_unavailable_response(&error),
     }
 }
@@ -46787,41 +47087,106 @@ async fn quarantine_dynamic_get_response(path: &str, state: &AppState) -> HttpRe
     else {
         return routing::not_found_response();
     };
+    drop(features);
     match segments.as_slice() {
         [_] => routing::ok_response(request.to_string()),
-        [_, action] if action == "aggregate" || action == "review" => {
+        [_, action] if action == "aggregate" => {
+            let aggregate = quarantine_build_aggregate(state, request_id)
+                .await
+                .expect("request presence already confirmed above");
+            routing::ok_response(aggregate.to_string())
+        }
+        [_, action] if action == "review" => {
+            let aggregate = quarantine_build_aggregate(state, request_id)
+                .await
+                .expect("request presence already confirmed above");
+            let features = state.controller_features.read().await;
             let verdicts =
                 features.values_with_prefix(&format!("quarantine/verdict/{request_id}/"));
-            let accepted = verdicts
-                .iter()
-                .filter(|verdict| {
-                    verdict
-                        .get("accepted")
-                        .or_else(|| verdict.get("isAccepted"))
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                })
-                .count();
+            let route_attempts =
+                features.values_with_prefix(&format!("quarantine/routes/{request_id}/"));
+            let acceptance = features
+                .get(&format!("quarantine/acceptance/{request_id}"))
+                .cloned();
+            drop(features);
+            let already_accepted = acceptance.is_some();
             routing::ok_response(
                 serde_json::json!({
                     "request": request,
+                    "aggregate": aggregate.clone(),
                     "verdicts": verdicts,
-                    "verdictCount": verdicts.len(),
-                    "acceptedCount": accepted,
-                    "ready": !verdicts.is_empty(),
+                    "routeAttempts": route_attempts,
+                    "acceptance": acceptance,
+                    "canAcceptReleaseCandidate": quarantine_can_accept(&aggregate, already_accepted),
+                    "acceptanceReason": quarantine_acceptance_reason(&aggregate, already_accepted),
                 })
                 .to_string(),
             )
         }
-        [_, action] if action == "release-package" => routing::ok_response(
-            serde_json::json!({
+        [_, action] if action == "release-package" => {
+            let Some(acceptance) = state
+                .controller_features
+                .read()
+                .await
+                .get(&format!("quarantine/acceptance/{request_id}"))
+                .cloned()
+            else {
+                return HttpResponse {
+                    status: "400 Bad Request",
+                    content_type: "application/json",
+                    body: serde_json::json!({
+                        "isReady": false,
+                        "errors": ["Release candidate has not been accepted locally."],
+                        "package": null,
+                    })
+                    .to_string(),
+                };
+            };
+            let aggregate = quarantine_build_aggregate(state, request_id)
+                .await
+                .expect("request presence already confirmed above");
+            let features = state.controller_features.read().await;
+            let verdicts =
+                features.values_with_prefix(&format!("quarantine/verdict/{request_id}/"));
+            let route_attempts =
+                features.values_with_prefix(&format!("quarantine/routes/{request_id}/"));
+            drop(features);
+            let mut warnings = vec![
+                "Release package is evidence-only and does not change local quarantine enforcement."
+                    .to_owned(),
+            ];
+            let snapshot = acceptance
+                .get("aggregateSnapshot")
+                .cloned()
+                .unwrap_or_default();
+            if snapshot["recommendation"] != aggregate["recommendation"]
+                || snapshot["totalVerdicts"] != aggregate["totalVerdicts"]
+            {
+                warnings.push(
+                    "Current verdict aggregate differs from the aggregate accepted by the operator."
+                        .to_owned(),
+                );
+            }
+            let package = serde_json::json!({
+                "type": "slskdn.quarantine-jury.release-package.v1",
+                "version": "1.0",
+                "generatedAt": chrono::Utc::now().to_rfc3339(),
                 "requestId": request_id,
-                "request": request,
-                "isReady": true,
-                "errors": [],
-            })
-            .to_string(),
-        ),
+                "localReason": request.get("localReason").cloned().unwrap_or(serde_json::Value::Null),
+                "requestCreatedAt": request.get("createdAt").cloned().unwrap_or(serde_json::Value::Null),
+                "requestEvidence": request.get("evidence").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "jurors": request.get("jurors").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "currentAggregate": aggregate,
+                "acceptance": acceptance,
+                "verdicts": verdicts,
+                "routeAttempts": route_attempts,
+                "warnings": warnings,
+                "mutatesLocalQuarantineState": false,
+            });
+            routing::ok_response(
+                serde_json::json!({"isReady": true, "errors": [], "package": package}).to_string(),
+            )
+        }
         _ => routing::not_found_response(),
     }
 }
@@ -87125,6 +87490,219 @@ mod tests {
         assert_eq!(kpis_json["slskr_transfers"]["type"], "gauge");
         assert_eq!(kpis_json["slskr_transfers"]["samples"][0]["value"], 0.0);
         assert_eq!(kpis_json["slskr_searches"]["type"], "gauge");
+    }
+
+    #[tokio::test]
+    async fn quarantine_jury_requires_real_quorum_before_accepting_or_releasing() {
+        let (state, _receiver) = test_state();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"route-audit","jurors":["juror-a","juror-b","juror-c"],"evidence":[{"type":"hash","reference":"opaque-ref"}],"minJurorVotes":2}"#,
+            &state,
+        )
+        .await
+        .expect("create quarantine request");
+        assert_eq!(created.status, "200 OK", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let request_id = created_json["request"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // A verdict from a juror not on the request must be rejected.
+        let unlisted = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &format!(r#"{{"requestId":"{request_id}","juror":"not-a-juror","verdict":"ReleaseCandidate"}}"#),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unlisted.status, "400 Bad Request");
+
+        // Before quorum (minJurorVotes=2), acceptance and release must be
+        // denied -- not silently accepted, as the old fake handlers did.
+        let too_early = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(too_early.status, "400 Bad Request", "{}", too_early.body);
+        let too_early_json = serde_json::from_str::<serde_json::Value>(&too_early.body).unwrap();
+        assert_eq!(too_early_json["isAccepted"], false);
+
+        let package_too_early = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/release-package"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(package_too_early.status, "400 Bad Request");
+        let package_too_early_json =
+            serde_json::from_str::<serde_json::Value>(&package_too_early.body).unwrap();
+        assert_eq!(package_too_early_json["isReady"], false);
+        assert!(package_too_early_json["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("has not been accepted"));
+
+        // Two of three jurors vote ReleaseCandidate -- quorum (2) reached
+        // and a real 2/3 supermajority.
+        for juror in ["juror-a", "juror-b"] {
+            let verdict = super::route_http_request(
+                "POST",
+                "/api/v0/quarantine-jury/verdicts",
+                None,
+                &format!(
+                    r#"{{"requestId":"{request_id}","juror":"{juror}","verdict":"ReleaseCandidate"}}"#
+                ),
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(verdict.status, "200 OK", "{}", verdict.body);
+        }
+
+        let aggregate = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/aggregate"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(aggregate.status, "200 OK");
+        let aggregate_json = serde_json::from_str::<serde_json::Value>(&aggregate.body).unwrap();
+        assert_eq!(aggregate_json["recommendation"], "ReleaseCandidate");
+        assert_eq!(aggregate_json["totalVerdicts"], 2);
+        assert_eq!(aggregate_json["requiredVotes"], 2);
+        assert_eq!(aggregate_json["quorumReached"], true);
+
+        let review = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/review"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let review_json = serde_json::from_str::<serde_json::Value>(&review.body).unwrap();
+        assert_eq!(review_json["canAcceptReleaseCandidate"], true);
+        assert_eq!(review_json["verdicts"].as_array().unwrap().len(), 2);
+
+        // Real quorum reached: acceptance must now succeed.
+        let accepted = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate"),
+            None,
+            r#"{"acceptedBy":"route-audit-operator"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(accepted.status, "200 OK", "{}", accepted.body);
+        let accepted_json = serde_json::from_str::<serde_json::Value>(&accepted.body).unwrap();
+        assert_eq!(accepted_json["isAccepted"], true);
+        assert_eq!(
+            accepted_json["decision"]["acceptedBy"],
+            "route-audit-operator"
+        );
+
+        // Re-accepting is idempotent, not a second decision.
+        let reaccepted = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(reaccepted.status, "200 OK");
+        let reaccepted_json = serde_json::from_str::<serde_json::Value>(&reaccepted.body).unwrap();
+        assert_eq!(
+            reaccepted_json["decision"]["id"],
+            accepted_json["decision"]["id"]
+        );
+
+        // Now that a real acceptance decision exists, the release package
+        // must be built from real stored data.
+        let package = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/release-package"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(package.status, "200 OK", "{}", package.body);
+        let package_json = serde_json::from_str::<serde_json::Value>(&package.body).unwrap();
+        assert_eq!(package_json["isReady"], true);
+        assert_eq!(package_json["package"]["requestId"], request_id);
+        assert_eq!(
+            package_json["package"]["currentAggregate"]["recommendation"],
+            "ReleaseCandidate"
+        );
+        assert_eq!(
+            package_json["package"]["verdicts"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        // Routing to a juror not on the request must be rejected before
+        // ever reaching the (currently unwired) routing backend.
+        let bad_route = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/routes"),
+            None,
+            r#"{"targetJurors":["not-a-juror"]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(bad_route.status, "400 Bad Request");
+        let bad_route_json = serde_json::from_str::<serde_json::Value>(&bad_route.body).unwrap();
+        assert_eq!(bad_route_json["success"], false);
+        assert!(bad_route_json["errorMessage"]
+            .as_str()
+            .unwrap()
+            .contains("safe jurors"));
+
+        // Valid jurors pass validation but hit the same "routing backend
+        // unavailable" outcome the oracle itself reports when its router
+        // isn't configured -- a real code path, not a fabricated success.
+        let real_route = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/routes"),
+            None,
+            r#"{"targetJurors":["juror-a"]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(real_route.status, "400 Bad Request");
+        let real_route_json = serde_json::from_str::<serde_json::Value>(&real_route.body).unwrap();
+        assert_eq!(real_route_json["success"], false);
+        assert_eq!(
+            real_route_json["errorMessage"],
+            "Routing backend is not available."
+        );
     }
 
     #[tokio::test]
