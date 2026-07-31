@@ -45360,7 +45360,7 @@ async fn podcore_mutation_response(
             if section == "signing"
                 && matches!(action.as_str(), "generate-keypair" | "sign" | "verify") =>
         {
-            Some(pod_signing_response(action, body))
+            Some(pod_signing_response(action, body, state).await)
         }
         ("POST", [section, message]) if section == "verification" && message == "message" => {
             let payload = serde_json::from_str::<serde_json::Value>(body)
@@ -45488,7 +45488,54 @@ async fn podcore_mutation_response(
     }
 }
 
-fn pod_signing_response(action: &str, body: &str) -> HttpResponse {
+/// Matches the oracle's canonical payload exactly:
+/// `sigVersion|podId|channelId|messageId|senderPeerId|timestampUnixMs|base64(sha256(body))`.
+/// `podId` falls back to the segment before the first `:` in `channelId`
+/// when absent, matching `MessageSigner.GetPodId`.
+fn pod_message_canonical_payload(message: &serde_json::Value) -> (String, String) {
+    let sig_version = message
+        .get("sigVersion")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(1);
+    let explicit_pod_id = message
+        .get("podId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let channel_id = message
+        .get("channelId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let pod_id = if !explicit_pod_id.is_empty() {
+        explicit_pod_id.to_owned()
+    } else {
+        channel_id
+            .split_once(':')
+            .map_or_else(String::new, |(prefix, _)| prefix.to_owned())
+    };
+    let message_id = message
+        .get("messageId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let sender_peer_id = message
+        .get("senderPeerId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let timestamp_unix_ms = message
+        .get("timestampUnixMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let body_text = message
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let body_sha256 = STANDARD.encode(Sha256::digest(body_text.as_bytes()));
+    let canonical = format!(
+        "{sig_version}|{pod_id}|{channel_id}|{message_id}|{sender_peer_id}|{timestamp_unix_ms}|{body_sha256}"
+    );
+    (canonical, pod_id)
+}
+
+async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> HttpResponse {
     if action == "generate-keypair" {
         let mut secret = [0_u8; 32];
         if SysRng.try_fill_bytes(&mut secret).is_err() {
@@ -45513,10 +45560,7 @@ fn pod_signing_response(action: &str, body: &str) -> HttpResponse {
         .get("message")
         .cloned()
         .unwrap_or_else(|| payload.clone());
-    let message_bytes = match serde_json::to_vec(&message) {
-        Ok(bytes) => bytes,
-        Err(_) => return routing::bad_request_response("message is not serializable"),
-    };
+    let (canonical, pod_id) = pod_message_canonical_payload(&message);
     if action == "sign" {
         let private_key = payload
             .get("privateKey")
@@ -45533,52 +45577,96 @@ fn pod_signing_response(action: &str, body: &str) -> HttpResponse {
             }
         };
         let signing_key = SigningKey::from_bytes(&secret);
-        let signature = signing_key.sign(&message_bytes);
+        let signature = signing_key.sign(canonical.as_bytes());
         return routing::ok_response(
             serde_json::json!({
                 "message": message,
-                "signature": STANDARD.encode(signature.to_bytes()),
+                "signature": format!("ed25519:{}", STANDARD.encode(signature.to_bytes())),
                 "publicKey": STANDARD.encode(signing_key.verifying_key().to_bytes()),
-                "sigVersion": 1,
+                "sigVersion": message.get("sigVersion").and_then(serde_json::Value::as_i64).unwrap_or(1),
             })
             .to_string(),
         );
     }
+    // Matches the oracle's MessageSigner.VerifyMessageAsync: the sender's
+    // public key is always resolved from real pod membership, never taken
+    // from a client-supplied field -- accepting a caller-supplied public
+    // key would let anyone "verify" a signature they made up themselves
+    // against a key they also made up, proving nothing about the actual
+    // sender. A missing or non-ed25519 signature is honored as valid only
+    // when the pod's configured signature mode isn't Enforce, matching the
+    // same mode already enforced on real message posting.
     let signature = payload
         .get("signature")
         .or_else(|| message.get("signature"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let public_key = payload
-        .get("publicKey")
-        .or_else(|| message.get("publicKey"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if !signature.is_empty() && !signature.starts_with("ed25519:") && public_key.is_empty() {
-        return routing::ok_response(serde_json::json!({"isValid": true}).to_string());
+    let mode = state
+        .advanced_networking
+        .read()
+        .await
+        .pod_security_signature_mode;
+    if signature.is_empty() || !signature.starts_with("ed25519:") {
+        return routing::ok_response(
+            serde_json::json!({"isValid": mode != PodSignatureMode::Enforce}).to_string(),
+        );
     }
-    let signature = signature.strip_prefix("ed25519:").unwrap_or(signature);
-    let signature: [u8; 64] = match STANDARD
-        .decode(signature.as_bytes())
+    let stripped = signature.strip_prefix("ed25519:").unwrap_or(signature);
+    let signature_bytes: [u8; 64] = match STANDARD
+        .decode(stripped.as_bytes())
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(signature) => signature,
         None => return routing::bad_request_response("signature must be base64 Ed25519 bytes"),
     };
+    let timestamp_unix_ms = message
+        .get("timestampUnixMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let now_ms = i64::try_from(unix_timestamp())
+        .unwrap_or(i64::MAX)
+        .saturating_mul(1000);
+    if (now_ms - timestamp_unix_ms).abs() > 5 * 60 * 1000 {
+        return routing::ok_response(serde_json::json!({"isValid": false}).to_string());
+    }
+    let sender_peer_id = message
+        .get("senderPeerId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if pod_id.is_empty() || sender_peer_id.is_empty() {
+        return routing::ok_response(serde_json::json!({"isValid": false}).to_string());
+    }
+    let sender_public_key = state
+        .pods
+        .read()
+        .await
+        .members(&pod_id)
+        .and_then(|members| {
+            members
+                .into_iter()
+                .find(|member| member.peer_id.eq_ignore_ascii_case(sender_peer_id))
+        })
+        .and_then(|member| member.public_key);
+    let Some(sender_public_key) = sender_public_key else {
+        return routing::ok_response(serde_json::json!({"isValid": false}).to_string());
+    };
     let public_key: [u8; 32] = match STANDARD
-        .decode(public_key.as_bytes())
+        .decode(sender_public_key.as_bytes())
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(public_key) => public_key,
-        None => return routing::bad_request_response("publicKey must be a base64 Ed25519 key"),
+        None => return routing::ok_response(serde_json::json!({"isValid": false}).to_string()),
     };
     let is_valid = VerifyingKey::from_bytes(&public_key)
         .ok()
         .is_some_and(|key| {
-            key.verify(&message_bytes, &Signature::from_bytes(&signature))
-                .is_ok()
+            key.verify(
+                canonical.as_bytes(),
+                &Signature::from_bytes(&signature_bytes),
+            )
+            .is_ok()
         });
     routing::ok_response(serde_json::json!({"isValid": is_valid}).to_string())
 }
@@ -90212,13 +90300,41 @@ mod tests {
         .await
         .expect("generate pod signing keypair");
         let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        // Verification resolves the sender's public key from real pod
+        // membership, matching the oracle -- not from a client-supplied
+        // field, which would let anyone "verify" a self-made signature
+        // against a self-made key. Register "tester" as a real member
+        // with the generated public key so verification has a real key
+        // to check against.
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                "pod-controller",
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
         let signed = super::route_http_request(
             "POST",
             "/api/v0/podcore/signing/sign",
             None,
             &serde_json::json!({
                 "privateKey": keys["privateKey"],
-                "message": {"messageId":"message-1","podId":"pod-controller","senderPeerId":"tester","body":"hello"}
+                "message": {
+                    "messageId":"message-1",
+                    "podId":"pod-controller",
+                    "senderPeerId":"tester",
+                    "body":"hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
             })
             .to_string(),
             &state,
@@ -90226,6 +90342,14 @@ mod tests {
         .await
         .expect("sign pod message");
         assert_eq!(signed.status, "200 OK");
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap();
+        assert!(
+            signed_json["signature"]
+                .as_str()
+                .unwrap()
+                .starts_with("ed25519:"),
+            "{signed_json}"
+        );
         let verified = super::route_http_request(
             "POST",
             "/api/v0/podcore/signing/verify",
@@ -90235,7 +90359,23 @@ mod tests {
         )
         .await
         .expect("verify pod message");
-        assert_eq!(verified.body, r#"{"isValid":true}"#);
+        assert_eq!(verified.body, r#"{"isValid":true}"#, "{}", verified.body);
+
+        // A signature that doesn't match the sender's real registered
+        // public key must fail -- not a fake "isValid: true" for whatever
+        // key the caller happens to supply.
+        let mut forged = signed_json.clone();
+        forged["message"]["senderPeerId"] = serde_json::json!("someone-else");
+        let forged_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &forged.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify forged sender");
+        assert_eq!(forged_verified.body, r#"{"isValid":false}"#);
 
         let ranked = super::route_http_request(
             "POST",
@@ -90274,6 +90414,88 @@ mod tests {
                 ["wasPublished"],
             true
         );
+    }
+
+    #[tokio::test]
+    async fn pod_signature_verification_fails_for_a_sender_with_no_registered_key() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:00000000000000000000000000000ba08";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Signing Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+        // "tester" (the fixture's default configured Soulseek identity,
+        // required by the sign endpoint's own auth check) is a real pod
+        // member, but has never registered a public key -- a well-formed
+        // signature from them must still be rejected, since there is
+        // nothing real to verify it against.
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add member with no public key");
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({
+                "privateKey": keys["privateKey"],
+                "message": {
+                    "messageId": "message-1",
+                    "podId": pod_id,
+                    "senderPeerId": "tester",
+                    "body": "hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("sign message");
+        assert_eq!(signed.status, "200 OK");
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &signed.body,
+            &state,
+        )
+        .await
+        .expect("verify message");
+        assert_eq!(verified.body, r#"{"isValid":false}"#);
     }
 
     #[test]
