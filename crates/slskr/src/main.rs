@@ -14119,6 +14119,10 @@ async fn route_http_request_with_headers(
         ("GET", "/dashboard") => Ok(fallback_dashboard_response()),
         ("HEAD", "/dashboard") => Ok(head_response(fallback_dashboard_response())),
         ("GET", "/api/health") => Ok(health_response(&state.config)),
+        ("GET", "/health") => Ok(health_response(&state.config)),
+        ("HEAD", "/health") => Ok(head_response(health_response(&state.config))),
+        ("GET", "/health/mesh") => Ok(mesh_health_response(&state.config)),
+        ("HEAD", "/health/mesh") => Ok(head_response(mesh_health_response(&state.config))),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
         ("GET", "/.well-known/webfinger") => {
@@ -28325,6 +28329,21 @@ fn health_response(config: &AppConfig) -> HttpResponse {
             "status": "ok",
             "service": "slskr",
             "warnings": warnings,
+        })
+        .to_string(),
+    }
+}
+
+/// Matches the oracle's `MapHealthChecks("/health/mesh", ...)`, filtered to
+/// checks tagged "mesh": reports whether the mesh subsystem is enabled.
+fn mesh_health_response(config: &AppConfig) -> HttpResponse {
+    let enabled = config.advanced_networking.mesh.enabled;
+    HttpResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        body: serde_json::json!({
+            "status": if enabled { "ok" } else { "disabled" },
+            "service": "slskr-mesh",
         })
         .to_string(),
     }
@@ -66454,6 +66473,29 @@ mod tests {
         let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
         assert_eq!(json["status"], "ok");
         assert_eq!(json["warnings"][0], "auth_disabled_non_loopback");
+    }
+
+    #[tokio::test]
+    async fn root_health_endpoints_are_served_anonymously() {
+        // Matches the oracle's endpoints.MapHealthChecks("/health") and
+        // ("/health/mesh"), both AllowAnonymous -- orchestrator/container
+        // health probes hit these at the root, not under /api.
+        let (state, _receiver) =
+            test_state_with_env(MapEnv::default().with("SLSKR_AUTH_DISABLED", "false"));
+
+        let health = super::route_http_request("GET", "/health", None, "", &state)
+            .await
+            .expect("root health response");
+        assert_eq!(health.status, "200 OK");
+        let json = serde_json::from_str::<serde_json::Value>(&health.body).unwrap();
+        assert_eq!(json["status"], "ok");
+
+        let mesh_health = super::route_http_request("GET", "/health/mesh", None, "", &state)
+            .await
+            .expect("root mesh health response");
+        assert_eq!(mesh_health.status, "200 OK");
+        let mesh_json = serde_json::from_str::<serde_json::Value>(&mesh_health.body).unwrap();
+        assert!(mesh_json.get("status").is_some());
     }
 
     #[tokio::test]
