@@ -24220,42 +24220,25 @@ async fn route_http_request_with_headers(
             })
         }
 
+          // Matches the oracle exactly: TelemetryController.GetKpis and
+          // MetricsController.GetKpis are different controllers mounted at
+          // different routes, but both call the same
+          // Telemetry.Prometheus.GetMetricsAsObject(include: KpiRegexes)
+          // with an identical regex list, so they return identical
+          // content. slskR's /api/telemetry/prometheus/kpis was already
+          // fixed to the real dictionary-of-PrometheusMetric shape; this
+          // sibling route reuses the exact same real data instead of its
+          // own invented {kpis:[...], count} array.
           ("GET", "/api/telemetry/metrics/kpi") | ("GET", "/api/telemetry/metrics/kpis") => {
               let transfers = state.transfers.read().await;
-              let total_bytes = transfers
-                  .entries
-                  .iter()
-                  .map(|entry| entry.bytes_transferred)
-                  .sum::<u64>();
-              let active_transfers = transfers
-                  .entries
-                  .iter()
-                  .filter(|entry| matches!(entry.status.as_str(), "queued" | "requested" | "in_progress"))
-                  .count();
-              let transfer_count = transfers.entries.len();
-              drop(transfers);
               let searches = state.searches.read().await;
-              let search_count = searches.records.len();
-              let search_results = searches.records.iter().map(|record| record.results.len()).sum::<usize>();
+              let metrics = serde_json::json!({
+                  "slskr_transfers": prometheus_metric_json("slskr_transfers", "gauge", transfers.entries.len() as f64),
+                  "slskr_searches": prometheus_metric_json("slskr_searches", "gauge", searches.records.len() as f64),
+              });
+              drop(transfers);
               drop(searches);
-              let shares = state.shares.read().await;
-              let shared_files = shares.entries.len();
-              let shared_bytes = shares.entries.iter().map(|entry| entry.size).sum::<u64>();
-              drop(shares);
-              let kpis = serde_json::json!([
-                  { "id": "transfers.total", "name": "Transfers", "value": transfer_count },
-                  { "id": "transfers.active", "name": "Active transfers", "value": active_transfers },
-                  { "id": "transfers.bytes", "name": "Transferred bytes", "value": total_bytes },
-                  { "id": "searches.total", "name": "Searches", "value": search_count },
-                  { "id": "searches.results", "name": "Search results", "value": search_results },
-                  { "id": "shares.files", "name": "Shared files", "value": shared_files },
-                  { "id": "shares.bytes", "name": "Shared bytes", "value": shared_bytes },
-              ]);
-              let count = kpis.as_array().map_or(0, Vec::len);
-              Ok(routing::ok_response(serde_json::json!({
-                  "kpis": kpis,
-                  "count": count,
-              }).to_string()))
+              Ok(routing::ok_response(metrics.to_string()))
           }
 
           // ADDITIONAL MISSING GET ENDPOINTS (Phase 6)
@@ -93430,8 +93413,15 @@ mod tests {
                 .await
                 .expect("kpis");
         let kpis_json = serde_json::from_str::<serde_json::Value>(&kpis.body).unwrap();
-        assert!(kpis_json["count"].as_u64().unwrap() >= 7);
-        assert_eq!(kpis_json["kpis"][0]["id"], "transfers.total");
+        // Matches the oracle: TelemetryController.GetKpis and
+        // MetricsController.GetKpis both call the same
+        // Telemetry.Prometheus.GetMetricsAsObject with an identical KPI
+        // regex list, so this sibling route returns the exact same
+        // dictionary-of-PrometheusMetric shape as
+        // /api/telemetry/prometheus/kpis, not an invented {kpis:[],count}
+        // array.
+        assert_eq!(kpis_json["slskr_transfers"]["type"], "gauge");
+        assert_eq!(kpis_json["slskr_searches"]["type"], "gauge");
 
         let pod_created = super::route_http_request(
             "POST",
