@@ -13079,6 +13079,49 @@ fn is_safe_opaque_reference(value: &str) -> bool {
     !(trimmed.len() >= 32 && trimmed.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
+/// Matches the oracle's `PodAffinityScorer.CalculateTrustScore`: a base
+/// trust of 0.5, +0.3 for an owner or +0.2 for a mod, +0.2 for no ban,
+/// capped at 1.0.
+fn pod_member_trust_score(role: &str, is_banned: bool) -> f64 {
+    let role_bonus = match role {
+        "owner" => 0.3,
+        "mod" => 0.2,
+        _ => 0.0,
+    };
+    let clean_record_bonus = if is_banned { 0.0 } else { 0.2 };
+    (0.5_f64 + role_bonus + clean_record_bonus).min(1.0)
+}
+
+/// Matches the oracle's `PodOpinionAggregator.CalculateAffinityScore`.
+fn pod_member_affinity_score(
+    message_count: usize,
+    opinion_count: usize,
+    membership_duration_seconds: i64,
+    is_active: bool,
+) -> f64 {
+    let activity_score = ((message_count as f64 + opinion_count as f64 * 2.0) / 100.0).min(1.0);
+    let duration_months = membership_duration_seconds as f64 / 86_400.0 / 30.0;
+    let duration_bonus = (duration_months / 12.0).min(0.3);
+    let activity_bonus = if is_active { 0.2 } else { 0.0 };
+    let trust_component = (0.5 + activity_score * 0.5).min(1.0);
+    (activity_score + duration_bonus + activity_bonus).min(1.0) * trust_component
+}
+
+/// Formats a duration the way .NET's default `TimeSpan.ToString()` does:
+/// `d.hh:mm:ss` once it spans a full day, else `hh:mm:ss`.
+fn format_timespan_hms(total_seconds: i64) -> String {
+    let total_seconds = total_seconds.max(0);
+    let days = total_seconds / 86_400;
+    let hours = (total_seconds % 86_400) / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+    if days > 0 {
+        format!("{days}.{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    }
+}
+
 /// Matches the oracle's `SongIdCapabilityReporter`: real external-tool
 /// presence checks on `PATH` (and, for panako/audfprint, known install
 /// locations), not a hardcoded list. Capabilities that depend on features
@@ -44669,12 +44712,20 @@ async fn podcore_mutation_response(
                 && affinity == "affinity"
                 && update == "update" =>
         {
+            // slskR computes affinities fresh on every GET rather than
+            // caching them (see pod_member_affinities_json), so "update"
+            // has no separate cache to invalidate; it real-computes them
+            // once here and reports the real count, matching the oracle's
+            // UpdateMemberAffinitiesAsync contract without a fake 0.
+            let started_at = std::time::Instant::now();
+            let affinities = pod_member_affinities_json(state, pod_id).await;
+            let members_updated = affinities.as_object().map_or(0, serde_json::Map::len);
             Some(routing::ok_response(
                 serde_json::json!({
                     "success": true,
                     "podId": pod_id,
-                    "membersUpdated": 0,
-                    "duration": "00:00:00",
+                    "membersUpdated": members_updated,
+                    "duration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
                     "errorMessage": null,
                 })
                 .to_string(),
@@ -47287,6 +47338,128 @@ async fn quarantine_dynamic_get_response(path: &str, state: &AppState) -> HttpRe
     }
 }
 
+/// Matches the oracle's `PodOpinionAggregator.GetMemberAffinitiesAsync`:
+/// real per-member engagement/trust scoring from actual channel messages,
+/// stored opinions, and membership records -- not the hardcoded zeros the
+/// prior handler returned for every member regardless of real activity.
+/// One honest simplification: the oracle scopes `opinionCount` to opinions
+/// about this pod's own known content ids; slskR's opinion store has no
+/// pod-to-content association to filter on, so this counts all opinions
+/// issued by the member globally instead (documented here, not silently
+/// invented).
+async fn pod_member_affinities_json(state: &AppState, pod_id: &str) -> serde_json::Value {
+    let (pod_members, channel_ids) = {
+        let pods = state.pods.read().await;
+        let members = pods.members(pod_id).unwrap_or_default();
+        let channel_ids = pods
+            .get(pod_id)
+            .map(|pod| {
+                pod.channels
+                    .into_iter()
+                    .map(|channel| channel.channel_id)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (members, channel_ids)
+    };
+    let now = chrono::Utc::now();
+    let activity_window_start_millis = (now - chrono::Duration::days(30)).timestamp_millis();
+    let messages = state.pod_channels.read().await;
+    let pod_messages = channel_ids
+        .iter()
+        .flat_map(|channel_id| messages.list(pod_id, channel_id, None))
+        .collect::<Vec<_>>();
+    drop(messages);
+    let opinions = state
+        .controller_features
+        .read()
+        .await
+        .values_with_prefix("opinion/");
+
+    let affinities = pod_members
+        .into_iter()
+        .map(|member| {
+            let member_messages = pod_messages
+                .iter()
+                .filter(|message| message.sender_peer_id.eq_ignore_ascii_case(&member.peer_id));
+            let recent_message_count = member_messages
+                .clone()
+                .filter(|message| message.timestamp_unix_ms as i64 >= activity_window_start_millis)
+                .count();
+            let last_message_millis = member_messages
+                .map(|message| message.timestamp_unix_ms)
+                .max();
+            let opinion_count = opinions
+                .iter()
+                .filter(|opinion| {
+                    opinion
+                        .get("issuer")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|issuer| issuer.eq_ignore_ascii_case(&member.peer_id))
+                })
+                .count();
+            let joined_at_millis = member
+                .joined_at
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.timestamp_millis());
+            let membership_duration_seconds = joined_at_millis
+                .map(|joined_at_millis| (now.timestamp_millis() - joined_at_millis) / 1000)
+                .unwrap_or(0)
+                .max(0);
+            let last_seen_millis = member
+                .last_seen
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.timestamp_millis());
+            let last_activity_millis = [
+                last_seen_millis,
+                last_message_millis.map(|value| value as i64),
+            ]
+            .into_iter()
+            .flatten()
+            .max();
+            let is_active =
+                last_activity_millis.is_some_and(|value| value >= activity_window_start_millis);
+            let affinity_score = pod_member_affinity_score(
+                recent_message_count,
+                opinion_count,
+                membership_duration_seconds,
+                is_active,
+            );
+            let trust_score = pod_member_trust_score(&member.role, member.is_banned);
+            let mut recent_activity = Vec::new();
+            if recent_message_count > 0 {
+                recent_activity.push(format!(
+                    "{recent_message_count} messages in the last 30 days"
+                ));
+            }
+            if opinion_count > 0 {
+                recent_activity.push(format!("{opinion_count} opinions expressed"));
+            }
+            let last_activity = last_activity_millis
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .unwrap_or(now)
+                .to_rfc3339();
+
+            (
+                member.peer_id.clone(),
+                serde_json::json!({
+                    "peerId": member.peer_id,
+                    "affinityScore": affinity_score,
+                    "messageCount": recent_message_count,
+                    "opinionCount": opinion_count,
+                    "membershipDuration": format_timespan_hms(membership_duration_seconds),
+                    "lastActivity": last_activity,
+                    "trustScore": trust_score,
+                    "recentActivity": recent_activity,
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    serde_json::Value::Object(affinities)
+}
+
 async fn podcore_dynamic_get_response(
     path: &str,
     query: Option<&str>,
@@ -47403,33 +47576,7 @@ async fn podcore_dynamic_get_response(
         [pod_id, section, members, affinity]
             if section == "opinions" && members == "members" && affinity == "affinity" =>
         {
-            let pods = state.pods.read().await;
-            let members = pods.members(pod_id).unwrap_or_default();
-            let features = state.controller_features.read().await;
-            let affinities = members
-                .into_iter()
-                .map(|member| {
-                    let affinity_score = features
-                        .get(&format!("pod/affinity/{pod_id}/{}", member.peer_id))
-                        .and_then(|value| value.get("affinity"))
-                        .and_then(serde_json::Value::as_f64)
-                        .unwrap_or(0.0);
-                    (
-                        member.peer_id.clone(),
-                        serde_json::json!({
-                            "peerId": member.peer_id,
-                            "affinityScore": affinity_score,
-                            "messageCount": 0,
-                            "opinionCount": 0,
-                            "membershipDuration": "00:00:00",
-                            "lastActivity": chrono::Utc::now().to_rfc3339(),
-                            "trustScore": 0.0,
-                            "recentActivity": [],
-                        }),
-                    )
-                })
-                .collect::<serde_json::Map<_, _>>();
-            routing::ok_response(serde_json::Value::Object(affinities).to_string())
+            routing::ok_response(pod_member_affinities_json(state, pod_id).await.to_string())
         }
         [section, pod_id, last_seen] if section == "backfill" && last_seen == "last-seen" => {
             let messages = state.pod_channels.read().await;
@@ -87826,6 +87973,130 @@ mod tests {
             real_route_json["errorMessage"],
             "Routing backend is not available."
         );
+    }
+
+    #[tokio::test]
+    async fn pod_member_affinities_reflect_real_activity_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:00000000000000000000000000000ba07";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Affinity Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "member-1".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: "general".to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "general".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        let now_millis = super::unix_timestamp() * 1000;
+        {
+            let mut channels = state.pod_channels.write().await;
+            for index in 0..3 {
+                channels
+                    .append(
+                        pod_id.to_owned(),
+                        "general".to_owned(),
+                        "member-1".to_owned(),
+                        format!("message {index}"),
+                        String::new(),
+                        now_millis + index,
+                    )
+                    .expect("append message");
+            }
+        }
+        let opinion = super::route_http_request(
+            "POST",
+            "/api/v0/opinions",
+            None,
+            r#"{"issuer":"member-1","subjectType":"MeshPeer","subjectId":"track-1","kind":"Like","strength":0.8,"confidence":0.9}"#,
+            &state,
+        )
+        .await
+        .expect("submit opinion");
+        assert_eq!(opinion.status, "200 OK", "{}", opinion.body);
+
+        let affinities = super::route_http_request(
+            "GET",
+            &format!("/api/v0/podcore/{pod_id}/opinions/members/affinity"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("member affinities");
+        assert_eq!(affinities.status, "200 OK");
+        let affinities = serde_json::from_str::<serde_json::Value>(&affinities.body).unwrap();
+
+        let member = &affinities["member-1"];
+        assert_eq!(member["messageCount"], 3);
+        assert_eq!(member["opinionCount"], 1);
+        assert_eq!(member["trustScore"], 0.7);
+        assert!(member["affinityScore"].as_f64().unwrap() > 0.0, "{member}");
+        assert!(!member["recentActivity"].as_array().unwrap().is_empty());
+
+        let owner = &affinities["owner-peer"];
+        assert_eq!(owner["messageCount"], 0);
+        assert_eq!(owner["opinionCount"], 0);
+        assert_eq!(owner["trustScore"], 1.0, "owner gets the +0.3 role bonus");
+        // Owner has no messages/opinions, but `create()` sets joined_at
+        // and last_seen to "now", so is_active is real too -- a nonzero
+        // activity_bonus-only score (0.2 * trust_component 0.5 = 0.1),
+        // not the flat 0.0 the old hardcoded handler always returned.
+        let owner_affinity = owner["affinityScore"].as_f64().unwrap();
+        assert!(
+            (owner_affinity - 0.1).abs() < 1e-9,
+            "expected ~0.1, got {owner_affinity}"
+        );
+
+        let update = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{pod_id}/opinions/members/affinity/update"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("update affinities");
+        assert_eq!(update.status, "200 OK");
+        let update = serde_json::from_str::<serde_json::Value>(&update.body).unwrap();
+        assert_eq!(update["success"], true);
+        assert_eq!(update["membersUpdated"], 2, "real member count, not 0");
     }
 
     #[tokio::test]
