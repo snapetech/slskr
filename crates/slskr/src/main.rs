@@ -48076,32 +48076,122 @@ async fn extended_controller_get_response(
                 .to_string(),
             )
         }
-        "/api/opinions" | "/api/opinions/summary" => {
+        "/api/opinions" => {
             let opinions = state
                 .controller_features
                 .read()
                 .await
                 .values_with_prefix("opinion/");
-            if path == "/api/opinions" {
-                routing::ok_response(serde_json::Value::Array(opinions).to_string())
-            } else {
-                let score = |opinion: &serde_json::Value| {
-                    opinion
-                        .get("score")
-                        .or_else(|| opinion.get("rating"))
-                        .and_then(serde_json::Value::as_f64)
-                        .unwrap_or(0.0)
-                };
-                routing::ok_response(
-                    serde_json::json!({
-                        "totalOpinions": opinions.len(),
-                        "positiveOpinions": opinions.iter().filter(|opinion| score(opinion) > 0.0).count(),
-                        "negativeOpinions": opinions.iter().filter(|opinion| score(opinion) < 0.0).count(),
-                        "neutralOpinions": opinions.iter().filter(|opinion| score(opinion) == 0.0).count(),
-                    })
-                    .to_string(),
-                )
+            routing::ok_response(serde_json::Value::Array(opinions).to_string())
+        }
+        "/api/opinions/summary" => {
+            // Matches the oracle's OpinionController.Summary +
+            // OpinionService.SummarizeAsync: requires a real subjectType
+            // and subjectId (not just a non-empty query string), filters
+            // to that subject/scope, and returns a real weighted-score
+            // summary -- not a global aggregate with an invented "neutral"
+            // bucket the oracle's DTO doesn't have.
+            let subject_type = query_parameter(query, "subjectType").unwrap_or_default();
+            let subject_id = query_parameter(query, "subjectId").unwrap_or_default();
+            if subject_type.trim().is_empty()
+                || subject_type.eq_ignore_ascii_case("Unknown")
+                || subject_id.trim().is_empty()
+            {
+                return routing::bad_request_response("subjectType and subjectId are required");
             }
+            let subject_id = subject_id.trim().to_owned();
+            let scope = query_parameter(query, "scope")
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "global".to_owned());
+
+            fn opinion_polarity(opinion: &serde_json::Value) -> i64 {
+                match opinion
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                {
+                    "Like" | "Trust" | "Recommend" | "VerifiedGood" => 1,
+                    "Hate" | "Distrust" | "Block" | "Quarantine" | "VerifiedBad" => -1,
+                    _ => 0,
+                }
+            }
+
+            let matching = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("opinion/")
+                .into_iter()
+                .filter(|opinion| {
+                    opinion
+                        .get("subjectType")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|value| value.eq_ignore_ascii_case(&subject_type))
+                        && opinion
+                            .get("subjectId")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|value| value.trim() == subject_id)
+                        && opinion
+                            .get("scope")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("global")
+                            .eq_ignore_ascii_case(&scope)
+                })
+                .collect::<Vec<_>>();
+            let total = matching.len();
+            let weighted: f64 = matching
+                .iter()
+                .map(|opinion| {
+                    let strength = opinion
+                        .get("strength")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+                    let confidence = opinion
+                        .get("confidence")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+                    opinion_polarity(opinion) as f64 * strength.abs() * confidence
+                })
+                .sum();
+            let weighted_score = weighted.clamp(-(total as f64), total as f64);
+            let confidence = if total == 0 {
+                0.0
+            } else {
+                matching
+                    .iter()
+                    .map(|opinion| {
+                        opinion
+                            .get("confidence")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0)
+                    })
+                    .sum::<f64>()
+                    / total as f64
+            };
+            let positive = matching
+                .iter()
+                .filter(|opinion| opinion_polarity(opinion) > 0)
+                .count();
+            let negative = matching
+                .iter()
+                .filter(|opinion| opinion_polarity(opinion) < 0)
+                .count();
+
+            routing::ok_response(
+                serde_json::json!({
+                    "subjectType": subject_type,
+                    "subjectId": subject_id,
+                    "scope": scope,
+                    "total": total,
+                    "positive": positive,
+                    "negative": negative,
+                    "weightedScore": weighted_score,
+                    "confidence": confidence,
+                    "opinions": matching,
+                })
+                .to_string(),
+            )
         }
         "/api/overlay/blocklist" => {
             let security = state.security.read().await;
@@ -88097,6 +88187,82 @@ mod tests {
         let update = serde_json::from_str::<serde_json::Value>(&update.body).unwrap();
         assert_eq!(update["success"], true);
         assert_eq!(update["membersUpdated"], 2, "real member count, not 0");
+    }
+
+    #[tokio::test]
+    async fn opinions_summary_requires_subject_and_computes_a_real_weighted_score() {
+        let (state, _receiver) = test_state();
+
+        // Matches the oracle's required-parameter 400, not just the
+        // generic "query string is present" check.
+        let missing_subject_id = super::route_http_request(
+            "GET",
+            "/api/v0/opinions/summary?subjectType=Track",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(missing_subject_id.status, "400 Bad Request");
+
+        for (issuer, kind, strength, confidence) in [
+            ("peer-a", "Like", 1.0, 1.0),
+            ("peer-b", "Like", 1.0, 0.5),
+            ("peer-c", "Hate", 1.0, 1.0),
+        ] {
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/opinions",
+                None,
+                &format!(
+                    r#"{{"issuer":"{issuer}","subjectType":"Track","subjectId":"track-1","kind":"{kind}","strength":{strength},"confidence":{confidence}}}"#
+                ),
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(created.status, "200 OK", "{}", created.body);
+        }
+        // A different subject must not be counted in track-1's summary.
+        super::route_http_request(
+            "POST",
+            "/api/v0/opinions",
+            None,
+            r#"{"issuer":"peer-d","subjectType":"Track","subjectId":"track-2","kind":"Like","strength":1.0,"confidence":1.0}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+
+        let summary = super::route_http_request(
+            "GET",
+            "/api/v0/opinions/summary?subjectType=Track&subjectId=track-1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.status, "200 OK", "{}", summary.body);
+        let summary = serde_json::from_str::<serde_json::Value>(&summary.body).unwrap();
+        assert_eq!(summary["subjectType"], "Track");
+        assert_eq!(summary["subjectId"], "track-1");
+        assert_eq!(summary["scope"], "global");
+        assert_eq!(summary["total"], 3);
+        assert_eq!(summary["positive"], 2);
+        assert_eq!(summary["negative"], 1);
+        // weighted = (1*1*1.0) + (1*1*0.5) + (-1*1*1.0) = 0.5
+        assert!(
+            (summary["weightedScore"].as_f64().unwrap() - 0.5).abs() < 1e-9,
+            "{summary}"
+        );
+        // confidence = average(1.0, 0.5, 1.0)
+        assert!(
+            (summary["confidence"].as_f64().unwrap() - (2.5 / 3.0)).abs() < 1e-9,
+            "{summary}"
+        );
+        assert_eq!(summary["opinions"].as_array().unwrap().len(), 3);
     }
 
     #[tokio::test]
