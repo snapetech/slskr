@@ -44095,16 +44095,21 @@ async fn podcore_mutation_response(
         ("DELETE", [section, pod_id, peer_id]) if section == "membership" => {
             // Matches the frozen slskdN contract: removing a membership
             // record requires either moderating the pod, or the acting
-            // peer removing themselves. An unspecified or mismatched actor
-            // must not be able to remove an arbitrary other member.
-            let acting_peer_id = query_parameter(query, "actingPeerId").unwrap_or_default();
-            let is_self_leave =
-                !acting_peer_id.is_empty() && acting_peer_id.eq_ignore_ascii_case(peer_id);
-            let can_moderate = state
-                .pods
-                .read()
-                .await
-                .can_moderate(pod_id, &acting_peer_id);
+            // peer removing themselves. The acting peer is always this
+            // instance's own configured Soulseek identity (as with every
+            // other podcore mutation, see `pod_request_peer_id`) -- never a
+            // client-supplied parameter, which would let any caller assert
+            // an arbitrary identity and bypass the check entirely.
+            let acting_peer_id = pod_request_peer_id(state).await;
+            let is_self_leave = acting_peer_id
+                .as_deref()
+                .is_some_and(|acting| acting.eq_ignore_ascii_case(peer_id.as_str()));
+            let can_moderate = {
+                let pods = state.pods.read().await;
+                acting_peer_id
+                    .as_deref()
+                    .is_some_and(|acting| pods.can_moderate(pod_id, acting))
+            };
             if !is_self_leave && !can_moderate {
                 return Some(routing::forbidden_response(
                     "only a pod moderator or the member themselves may remove this membership",
@@ -86533,16 +86538,25 @@ mod tests {
 
     #[tokio::test]
     async fn pod_membership_removal_requires_moderator_or_self() {
-        let (state, _receiver) = test_state();
-        let pod_id = "pod:00000000000000000000000000000099";
+        // The acting peer for every podcore mutation is this instance's own
+        // configured Soulseek identity (`pod_request_peer_id`), never a
+        // client-supplied parameter -- so the fixture's local identity is
+        // what stands in for "the caller" throughout this test.
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSK_USERNAME", "operator-peer")
+                .with("SLSK_PASSWORD", "operator-secret"),
+        );
+
+        let ordinary_pod = "pod:00000000000000000000000000000098";
         state
             .pods
             .write()
             .await
             .create(
                 serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
-                    "podId": pod_id,
-                    "name": "Membership Removal Audit",
+                    "podId": ordinary_pod,
+                    "name": "Membership Removal Audit (ordinary)",
                 }))
                 .expect("deserialize pod record fixture"),
                 "owner-peer".to_owned(),
@@ -86553,9 +86567,9 @@ mod tests {
             .write()
             .await
             .upsert_member(
-                pod_id,
+                ordinary_pod,
                 super::pods::PodMember {
-                    peer_id: "ordinary-member".to_owned(),
+                    peer_id: "operator-peer".to_owned(),
                     role: "member".to_owned(),
                     is_banned: false,
                     public_key: None,
@@ -86563,14 +86577,29 @@ mod tests {
                     last_seen: None,
                 },
             )
-            .expect("add ordinary member");
+            .expect("add local peer as an ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                ordinary_pod,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member");
 
-        // An unrelated peer may not remove another member.
+        // An ordinary (non-moderator) local peer may not remove another
+        // member.
         let denied = super::route_http_request(
             "DELETE",
-            &format!(
-                "/api/v0/podcore/membership/{pod_id}/ordinary-member?actingPeerId=some-other-peer"
-            ),
+            &format!("/api/v0/podcore/membership/{ordinary_pod}/target-member"),
             None,
             "",
             &state,
@@ -86579,10 +86608,53 @@ mod tests {
         .unwrap();
         assert_eq!(denied.status, "403 Forbidden");
 
+        // The same ordinary local peer may remove their own membership.
+        let self_removed = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/membership/{ordinary_pod}/operator-peer"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(self_removed.status, "200 OK", "{}", self_removed.body);
+
+        let owned_pod = "pod:00000000000000000000000000000099";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": owned_pod,
+                    "name": "Membership Removal Audit (owned)",
+                }))
+                .expect("deserialize pod record fixture"),
+                "operator-peer".to_owned(),
+            )
+            .expect("create pod owned by the local peer");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                owned_pod,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member to owned pod");
+
         // The pod owner (a moderator) may remove someone else's membership.
         let removed = super::route_http_request(
             "DELETE",
-            &format!("/api/v0/podcore/membership/{pod_id}/ordinary-member?actingPeerId=owner-peer"),
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member"),
             None,
             "",
             &state,
@@ -87145,26 +87217,15 @@ mod tests {
         .unwrap();
         assert_eq!(opinion.status, "400 Bad Request");
 
-        // An unspecified or unrelated actor must not be able to remove an
-        // arbitrary other member's membership.
-        let denied = super::route_http_request(
-            "DELETE",
-            &format!("/api/v0/podcore/membership/{pod_id}/00000000-0000-4000-8000-000000000001"),
-            None,
-            "",
-            &state,
-        )
-        .await
-        .unwrap();
-        assert_eq!(denied.status, "403 Forbidden");
-
-        // The member themselves may remove their own membership.
+        // This state's local peer (the pod's creator/owner, since no
+        // requestingPeerId was given to create-pod above) can moderate the
+        // pod, so it may remove another member's membership. The deny/self
+        // paths for a non-moderating actor are covered in the dedicated
+        // `pod_membership_removal_requires_moderator_or_self` test, which
+        // configures a distinct local identity for that purpose.
         let removed = super::route_http_request(
             "DELETE",
-            &format!(
-                "/api/v0/podcore/membership/{pod_id}/00000000-0000-4000-8000-000000000001\
-                 ?actingPeerId=00000000-0000-4000-8000-000000000001"
-            ),
+            &format!("/api/v0/podcore/membership/{pod_id}/00000000-0000-4000-8000-000000000001"),
             None,
             "",
             &state,
