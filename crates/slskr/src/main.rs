@@ -13519,6 +13519,52 @@ struct AppState {
     preview_streams: Arc<Semaphore>,
     revoked_jwts: RwLock<RevokedJwtStore>,
     login_attempts: RwLock<LoginAttemptStore>,
+    pod_signature_stats: PodSignatureStats,
+}
+
+/// Matches the oracle's `MessageSigner`'s real `Interlocked` counters --
+/// real signing/verification activity, not the hardcoded zeros
+/// `/api/podcore/signing/stats` used to report regardless of use.
+#[derive(Debug, Default)]
+struct PodSignatureStats {
+    signatures_created: std::sync::atomic::AtomicU64,
+    signatures_verified: std::sync::atomic::AtomicU64,
+    successful_verifications: std::sync::atomic::AtomicU64,
+    failed_verifications: std::sync::atomic::AtomicU64,
+    total_signing_time_ms: std::sync::atomic::AtomicU64,
+    total_verification_time_ms: std::sync::atomic::AtomicU64,
+    last_operation_at: std::sync::Mutex<Option<String>>,
+}
+
+impl PodSignatureStats {
+    fn record_sign(&self, elapsed_ms: u64) {
+        self.signatures_created
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_signing_time_ms
+            .fetch_add(elapsed_ms, std::sync::atomic::Ordering::Relaxed);
+        self.touch();
+    }
+
+    fn record_verify(&self, elapsed_ms: u64, success: bool) {
+        self.signatures_verified
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if success {
+            self.successful_verifications
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            self.failed_verifications
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.total_verification_time_ms
+            .fetch_add(elapsed_ms, std::sync::atomic::Ordering::Relaxed);
+        self.touch();
+    }
+
+    fn touch(&self) {
+        if let Ok(mut guard) = self.last_operation_at.lock() {
+            *guard = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
 }
 
 fn effective_downloads_dir(state: &AppState) -> PathBuf {
@@ -45577,7 +45623,11 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
             }
         };
         let signing_key = SigningKey::from_bytes(&secret);
+        let signing_started_at = std::time::Instant::now();
         let signature = signing_key.sign(canonical.as_bytes());
+        state
+            .pod_signature_stats
+            .record_sign(signing_started_at.elapsed().as_millis() as u64);
         return routing::ok_response(
             serde_json::json!({
                 "message": message,
@@ -45606,10 +45656,34 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
         .read()
         .await
         .pod_security_signature_mode;
+    let verification_started_at = std::time::Instant::now();
+    match pod_verify_signature(&message, &canonical, &pod_id, signature, mode, state).await {
+        Ok(is_valid) => {
+            state.pod_signature_stats.record_verify(
+                verification_started_at.elapsed().as_millis() as u64,
+                is_valid,
+            );
+            routing::ok_response(serde_json::json!({"isValid": is_valid}).to_string())
+        }
+        Err(response) => response,
+    }
+}
+
+/// The real signature-check body of `pod_signing_response`'s "verify"
+/// action, split out so `pod_signing_response` can time and record every
+/// real outcome (including the mode-based leniency path) in exactly one
+/// place. `Err` is reserved for a malformed request that never reaches a
+/// real verification verdict.
+async fn pod_verify_signature(
+    message: &serde_json::Value,
+    canonical: &str,
+    pod_id: &str,
+    signature: &str,
+    mode: PodSignatureMode,
+    state: &AppState,
+) -> Result<bool, HttpResponse> {
     if signature.is_empty() || !signature.starts_with("ed25519:") {
-        return routing::ok_response(
-            serde_json::json!({"isValid": mode != PodSignatureMode::Enforce}).to_string(),
-        );
+        return Ok(mode != PodSignatureMode::Enforce);
     }
     let stripped = signature.strip_prefix("ed25519:").unwrap_or(signature);
     let signature_bytes: [u8; 64] = match STANDARD
@@ -45618,7 +45692,11 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(signature) => signature,
-        None => return routing::bad_request_response("signature must be base64 Ed25519 bytes"),
+        None => {
+            return Err(routing::bad_request_response(
+                "signature must be base64 Ed25519 bytes",
+            ))
+        }
     };
     let timestamp_unix_ms = message
         .get("timestampUnixMs")
@@ -45628,20 +45706,20 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
         .unwrap_or(i64::MAX)
         .saturating_mul(1000);
     if (now_ms - timestamp_unix_ms).abs() > 5 * 60 * 1000 {
-        return routing::ok_response(serde_json::json!({"isValid": false}).to_string());
+        return Ok(false);
     }
     let sender_peer_id = message
         .get("senderPeerId")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     if pod_id.is_empty() || sender_peer_id.is_empty() {
-        return routing::ok_response(serde_json::json!({"isValid": false}).to_string());
+        return Ok(false);
     }
     let sender_public_key = state
         .pods
         .read()
         .await
-        .members(&pod_id)
+        .members(pod_id)
         .and_then(|members| {
             members
                 .into_iter()
@@ -45649,7 +45727,7 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
         })
         .and_then(|member| member.public_key);
     let Some(sender_public_key) = sender_public_key else {
-        return routing::ok_response(serde_json::json!({"isValid": false}).to_string());
+        return Ok(false);
     };
     let public_key: [u8; 32] = match STANDARD
         .decode(sender_public_key.as_bytes())
@@ -45657,9 +45735,9 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(public_key) => public_key,
-        None => return routing::ok_response(serde_json::json!({"isValid": false}).to_string()),
+        None => return Ok(false),
     };
-    let is_valid = VerifyingKey::from_bytes(&public_key)
+    Ok(VerifyingKey::from_bytes(&public_key)
         .ok()
         .is_some_and(|key| {
             key.verify(
@@ -45667,8 +45745,7 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
                 &Signature::from_bytes(&signature_bytes),
             )
             .is_ok()
-        });
-    routing::ok_response(serde_json::json!({"isValid": is_valid}).to_string())
+        }))
 }
 
 fn levenshtein_similarity(left: &str, right: &str) -> f64 {
@@ -48618,16 +48695,37 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             "routingStatsByPod": {},
             "routes": channel_count, "delivered": 0, "failed": 0,
         }).to_string()),
-        "/api/podcore/signing/stats" => routing::ok_response(serde_json::json!({
-            "totalSignaturesCreated": 0,
-            "totalSignaturesVerified": 0,
-            "successfulVerifications": 0,
-            "failedVerifications": 0,
-            "averageSigningTimeMs": 0.0,
-            "averageVerificationTimeMs": 0.0,
-            "lastSignatureOperation": serde_json::Value::Null,
-            "signedMessages": 0, "verificationFailures": 0, "enabled": true,
-        }).to_string()),
+        "/api/podcore/signing/stats" => {
+            use std::sync::atomic::Ordering;
+            let stats = &state.pod_signature_stats;
+            let signatures_created = stats.signatures_created.load(Ordering::Relaxed);
+            let signatures_verified = stats.signatures_verified.load(Ordering::Relaxed);
+            let successful_verifications = stats.successful_verifications.load(Ordering::Relaxed);
+            let failed_verifications = stats.failed_verifications.load(Ordering::Relaxed);
+            let total_signing_time_ms = stats.total_signing_time_ms.load(Ordering::Relaxed);
+            let total_verification_time_ms =
+                stats.total_verification_time_ms.load(Ordering::Relaxed);
+            let last_operation_at = stats
+                .last_operation_at
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            routing::ok_response(
+                serde_json::json!({
+                    "totalSignaturesCreated": signatures_created,
+                    "totalSignaturesVerified": signatures_verified,
+                    "successfulVerifications": successful_verifications,
+                    "failedVerifications": failed_verifications,
+                    "averageSigningTimeMs": total_signing_time_ms as f64 / signatures_created.max(1) as f64,
+                    "averageVerificationTimeMs": total_verification_time_ms as f64 / signatures_verified.max(1) as f64,
+                    "lastSignatureOperation": last_operation_at,
+                    "signedMessages": signatures_created,
+                    "verificationFailures": failed_verifications,
+                    "enabled": true,
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/verification/stats" => routing::ok_response(serde_json::json!({
             "totalVerifications": 0,
             "successfulVerifications": 0,
@@ -51559,6 +51657,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         preview_streams: Arc::new(Semaphore::new(MAX_PREVIEW_STREAMS)),
         revoked_jwts: RwLock::new(revoked_jwts),
         login_attempts: RwLock::new(LoginAttemptStore::default()),
+        pod_signature_stats: PodSignatureStats::default(),
     });
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
@@ -68876,6 +68975,7 @@ mod tests {
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
+            pod_signature_stats: super::PodSignatureStats::default(),
         });
         (state, receiver)
     }
@@ -90578,6 +90678,128 @@ mod tests {
         assert_eq!(verified.body, r#"{"isValid":false}"#);
     }
 
+    #[tokio::test]
+    async fn pod_signing_stats_reflect_real_activity_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+        let baseline =
+            super::route_http_request("GET", "/api/v0/podcore/signing/stats", None, "", &state)
+                .await
+                .expect("baseline signing stats");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["totalSignaturesCreated"], 0);
+        assert_eq!(baseline_json["totalSignaturesVerified"], 0);
+        assert_eq!(
+            baseline_json["lastSignatureOperation"],
+            serde_json::Value::Null
+        );
+
+        let pod_id = "pod:00000000000000000000000000000ba09";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Signing Stats Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
+
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({
+                "privateKey": keys["privateKey"],
+                "message": {
+                    "messageId": "message-1",
+                    "podId": pod_id,
+                    "senderPeerId": "tester",
+                    "body": "hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("sign message");
+        assert_eq!(signed.status, "200 OK");
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &signed.body,
+            &state,
+        )
+        .await
+        .expect("verify message");
+        assert_eq!(verified.body, r#"{"isValid":true}"#);
+
+        // A forged sender fails verification -- this must also count as a
+        // real (failed) verification, not be silently dropped from stats.
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap();
+        let mut forged = signed_json.clone();
+        forged["message"]["senderPeerId"] = serde_json::json!("someone-else");
+        let forged_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &forged.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify forged sender");
+        assert_eq!(forged_verified.body, r#"{"isValid":false}"#);
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/podcore/signing/stats", None, "", &state)
+                .await
+                .expect("signing stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalSignaturesCreated"], 1, "{stats_json}");
+        assert_eq!(stats_json["totalSignaturesVerified"], 2, "{stats_json}");
+        assert_eq!(stats_json["successfulVerifications"], 1, "{stats_json}");
+        assert_eq!(stats_json["failedVerifications"], 1, "{stats_json}");
+        assert_eq!(stats_json["signedMessages"], 1, "{stats_json}");
+        assert_eq!(stats_json["verificationFailures"], 1, "{stats_json}");
+        assert!(
+            stats_json["lastSignatureOperation"].is_string(),
+            "{stats_json}"
+        );
+    }
+
     #[test]
     fn controller_feature_state_persists_bounded_records() {
         let root = std::env::temp_dir().join(format!(
@@ -97425,6 +97647,7 @@ mod tests {
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
+            pod_signature_stats: super::PodSignatureStats::default(),
         });
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
             .await
@@ -97726,6 +97949,7 @@ mod tests {
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
+            pod_signature_stats: super::PodSignatureStats::default(),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",
