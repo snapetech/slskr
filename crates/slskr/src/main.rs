@@ -13357,22 +13357,61 @@ fn controller_options_validation_failure_response(state: &AppState) -> Option<Ht
     })
 }
 
+/// Durable, expiry-bounded JWT revocation storage, matching the oracle's
+/// `JwtRevocationStore`: revocations must survive a restart, or a stable
+/// configured JWT key (see `SLSKR_JWT_KEY`) would let a previously-revoked
+/// token be honored again for the remainder of its lifetime.
 #[derive(Debug, Default)]
 struct RevokedJwtStore {
     records: BTreeMap<String, u64>,
+    state_path: Option<PathBuf>,
 }
 
 impl RevokedJwtStore {
+    const STATE_FILE_NAME: &'static str = "jwt-revocations.json";
+
+    fn load(state_dir: &Path) -> Self {
+        let state_path = state_dir.join(Self::STATE_FILE_NAME);
+        let records = fs::read(&state_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<BTreeMap<String, u64>>(&bytes).ok())
+            .unwrap_or_default();
+        let mut store = Self {
+            records,
+            state_path: Some(state_path),
+        };
+        store.prune(unix_timestamp());
+        store
+    }
+
     fn revoke(&mut self, jti: String, expires_at: u64, now: u64) {
         self.records.retain(|_, expiry| *expiry > now);
         if expires_at > now {
             self.records.insert(jti, expires_at);
         }
+        self.persist();
     }
 
     fn contains(&mut self, jti: &str, now: u64) -> bool {
-        self.records.retain(|_, expiry| *expiry > now);
+        self.prune(now);
         self.records.contains_key(jti)
+    }
+
+    fn prune(&mut self, now: u64) {
+        let had_expired = self.records.values().any(|expiry| *expiry <= now);
+        self.records.retain(|_, expiry| *expiry > now);
+        if had_expired {
+            self.persist();
+        }
+    }
+
+    fn persist(&self) {
+        let Some(path) = self.state_path.as_deref() else {
+            return;
+        };
+        if let Ok(body) = serde_json::to_vec(&self.records) {
+            let _ = write_file_atomic(path, body);
+        }
     }
 }
 
@@ -50246,6 +50285,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         config.controller_case_sensitive_regex,
     )?;
     let controller_cli_environment = invocation.config_environment.clone();
+    let revoked_jwts = RevokedJwtStore::load(&config.state_dir);
     let state = Arc::new(AppState {
         controller_version: std::sync::RwLock::new(ControllerVersionState::initial()),
         controller_cli_environment,
@@ -50390,7 +50430,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         controller_features: RwLock::new(controller_feature_state),
         peer_endpoints: RwLock::new(BTreeMap::new()),
         preview_streams: Arc::new(Semaphore::new(MAX_PREVIEW_STREAMS)),
-        revoked_jwts: RwLock::new(RevokedJwtStore::default()),
+        revoked_jwts: RwLock::new(revoked_jwts),
         login_attempts: RwLock::new(LoginAttemptStore::default()),
     });
     start_controller_version_check(Arc::clone(&state)).await;
@@ -65392,6 +65432,62 @@ mod tests {
             disabled.controller_case_sensitive_regex,
         );
         assert!(!runtime.is_blacklisted(Some("peer"), Some("127.0.0.1".parse().unwrap()), 102));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revoked_jwt_store_persists_and_reloads_across_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-revoked-jwt-store-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let now = super::unix_timestamp();
+
+        {
+            let mut store = super::RevokedJwtStore::load(&root);
+            assert!(!store.contains("token-1", now), "fresh store must be empty");
+            store.revoke("token-1".to_owned(), now + 3_600, now);
+            assert!(store.contains("token-1", now));
+        }
+
+        // Simulate a restart: a fresh store loaded from the same state
+        // directory must still honor the revocation.
+        let mut reloaded = super::RevokedJwtStore::load(&root);
+        assert!(
+            reloaded.contains("token-1", now),
+            "revocation must survive a restart"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revoked_jwt_store_prunes_expired_entries_on_reload() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-revoked-jwt-store-prune-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let now = super::unix_timestamp();
+
+        {
+            let mut store = super::RevokedJwtStore::load(&root);
+            store.revoke("short-lived-token".to_owned(), now + 1, now);
+        }
+
+        // Reload well after expiry: the entry must be pruned, not resurrected.
+        let mut reloaded = super::RevokedJwtStore::load(&root);
+        assert!(!reloaded.contains("short-lived-token", now + 100));
+
         fs::remove_dir_all(root).unwrap();
     }
 
