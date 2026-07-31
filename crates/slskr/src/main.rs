@@ -47206,6 +47206,21 @@ async fn realm_subject_dynamic_get_response(path: &str, state: &AppState) -> Htt
     }
 }
 
+/// Matches the oracle's `PrometheusMetric` JSON shape (a single-sample
+/// gauge, the only kind slskr currently emits).
+fn prometheus_metric_json(name: &str, metric_type: &str, value: f64) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "help": "",
+        "type": metric_type,
+        "sum": null,
+        "count": null,
+        "samples": [{"value": value, "labels": {}}],
+        "buckets": {},
+        "quantiles": {},
+    })
+}
+
 async fn extended_controller_get_response(
     path: &str,
     query: Option<&str>,
@@ -47569,7 +47584,7 @@ async fn extended_controller_get_response(
             )
         }
         "/api/songid/capabilities" => routing::ok_response(songid_capabilities_json().to_string()),
-        "/api/telemetry/prometheus" | "/api/telemetry/prometheus/kpis" => {
+        "/api/telemetry/prometheus" => {
             let transfers = state.transfers.read().await;
             let searches = state.searches.read().await;
             HttpResponse {
@@ -47580,6 +47595,20 @@ async fn extended_controller_get_response(
                     transfers.entries.len(), searches.records.len()
                 ),
             }
+        }
+        // Matches the oracle's GetKpis: always a JSON dictionary keyed by
+        // metric name, never text/plain (unlike the base prometheus route,
+        // which supports both via content negotiation).
+        "/api/telemetry/prometheus/kpis" => {
+            let transfers = state.transfers.read().await;
+            let searches = state.searches.read().await;
+            let metrics = serde_json::json!({
+                "slskr_transfers": prometheus_metric_json("slskr_transfers", "gauge", transfers.entries.len() as f64),
+                "slskr_searches": prometheus_metric_json("slskr_searches", "gauge", searches.records.len() as f64),
+            });
+            drop(transfers);
+            drop(searches);
+            routing::ok_response(metrics.to_string())
         }
         "/api/virtualsoulfind/disaster-mode/status" => {
             let session = state.session.read().await;
@@ -86077,7 +86106,10 @@ mod tests {
                 .await
                 .unwrap_or_else(|error| panic!("{path}: {error}"));
             assert_ne!(response.status, "404 Not Found", "{path}");
-            if path.contains("telemetry/prometheus") {
+            // Matches the oracle's MetricsController: the base prometheus
+            // route defaults to text/plain, but /kpis is always a JSON
+            // dictionary -- it has no text/plain response type at all.
+            if path.ends_with("telemetry/prometheus") {
                 assert!(response.content_type.starts_with("text/plain"), "{path}");
             } else {
                 assert!(
@@ -87066,6 +87098,33 @@ mod tests {
         let hash_flag = by_id("hash_from_audio_file_flag");
         assert_eq!(hash_flag["status"], "broken");
         assert_eq!(hash_flag["available"], false);
+    }
+
+    #[tokio::test]
+    async fn telemetry_kpis_are_always_json_unlike_the_base_prometheus_route() {
+        let (state, _receiver) = test_state();
+
+        let base = super::route_http_request("GET", "/api/telemetry/prometheus", None, "", &state)
+            .await
+            .expect("base prometheus route");
+        assert!(base.content_type.starts_with("text/plain"), "{base:?}");
+        assert!(base.body.contains("slskr_transfers"));
+
+        let kpis =
+            super::route_http_request("GET", "/api/telemetry/prometheus/kpis", None, "", &state)
+                .await
+                .expect("kpis route");
+        // Matches the oracle's GetKpis: always application/json, a
+        // dictionary keyed by metric name -- never the base route's
+        // text/plain Prometheus exposition format.
+        assert!(
+            kpis.content_type.starts_with("application/json"),
+            "{kpis:?}"
+        );
+        let kpis_json = serde_json::from_str::<serde_json::Value>(&kpis.body).unwrap();
+        assert_eq!(kpis_json["slskr_transfers"]["type"], "gauge");
+        assert_eq!(kpis_json["slskr_transfers"]["samples"][0]["value"], 0.0);
+        assert_eq!(kpis_json["slskr_searches"]["type"], "gauge");
     }
 
     #[tokio::test]
