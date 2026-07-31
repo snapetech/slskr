@@ -13478,6 +13478,58 @@ fn schedule_lifecycle_command(state: &AppState, command: LifecycleCommand) {
     });
 }
 
+/// Disconnects from the Soulseek server (best-effort) before scheduling
+/// process shutdown, matching the oracle's `StopAsync` teardown
+/// (`Client.Disconnect("Shutting down", ...)`) rather than exiting with the
+/// session left connected.
+async fn initiate_graceful_shutdown(state: &AppState) {
+    let _ = send_session_command(state, SessionCommand::Disconnect).await;
+    schedule_lifecycle_command(state, LifecycleCommand::Shutdown);
+}
+
+/// Registers a background task that waits for a shutdown signal (SIGTERM,
+/// SIGINT, and SIGQUIT on Unix; Ctrl-C on other platforms) and runs the same
+/// graceful shutdown sequence as `DELETE /api/application`, matching the
+/// oracle's `PosixSignalRegistration`-based teardown -- without this, a
+/// `docker stop` or `systemctl stop` hard-kills the process with no drain
+/// or clean disconnect at all.
+fn spawn_signal_shutdown_handler(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        record_daemon_log(
+            &state,
+            logging::LogLevel::Info,
+            "lifecycle",
+            "shutdown signal received; disconnecting and stopping".to_owned(),
+        )
+        .await;
+        initiate_graceful_shutdown(&state).await;
+    });
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    async fn wait_or_pending(kind: SignalKind) {
+        match signal(kind) {
+            Ok(mut stream) => {
+                stream.recv().await;
+            }
+            Err(_) => std::future::pending().await,
+        }
+    }
+    tokio::select! {
+        () = wait_or_pending(SignalKind::terminate()) => {}
+        () = wait_or_pending(SignalKind::interrupt()) => {}
+        () = wait_or_pending(SignalKind::quit()) => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+}
+
 fn spawn_replacement_process() -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current executable: {error}"))?;
@@ -14208,7 +14260,7 @@ async fn route_http_request_with_headers(
             {
                 return Ok(routing::service_unavailable_response(&error));
             }
-            schedule_lifecycle_command(state, LifecycleCommand::Shutdown);
+            initiate_graceful_shutdown(state).await;
             Ok(routing::no_content_response())
         }
         ("POST", "/api/application/gc") => {
@@ -50381,6 +50433,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     spawn_lidarr_sync_scheduler(Arc::clone(&state));
     spawn_source_discovery(Arc::clone(&state));
     spawn_mesh_dht_publisher(Arc::clone(&state));
+    spawn_signal_shutdown_handler(Arc::clone(&state));
     spawn_configured_listeners(
         Arc::clone(&state),
         regular_listener_receiver,
@@ -66496,6 +66549,22 @@ mod tests {
         assert_eq!(mesh_health.status, "200 OK");
         let mesh_json = serde_json::from_str::<serde_json::Value>(&mesh_health.body).unwrap();
         assert!(mesh_json.get("status").is_some());
+    }
+
+    #[tokio::test]
+    async fn initiate_graceful_shutdown_disconnects_the_session() {
+        // Matches the oracle's StopAsync teardown (Client.Disconnect before
+        // exit) -- this is the logic a SIGTERM/SIGINT/SIGQUIT handler runs;
+        // registering real OS signals isn't exercised here since raising
+        // them would affect the whole shared test process.
+        let (state, mut receiver) = test_state();
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+        }
+        super::initiate_graceful_shutdown(&state).await;
+        let command = receiver.recv().await.expect("session command sent");
+        assert!(matches!(command, super::SessionCommand::Disconnect));
     }
 
     #[tokio::test]
