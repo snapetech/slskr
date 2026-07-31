@@ -27636,31 +27636,65 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/podcore/content/search") => {
-            let query = route
-                .query
-                .map(query_params)
-                .unwrap_or_default()
-                .into_iter()
+            let params = route.query.map(query_params).unwrap_or_default();
+            let query = params
+                .iter()
                 .find(|(key, _)| key == "query" || key == "q")
-                .map(|(_, value)| value)
+                .map(|(_, value)| value.trim().to_owned())
                 .unwrap_or_default();
+            if query.is_empty() {
+                return Ok(routing::bad_request_response("Search query is required"));
+            }
+            // The oracle's real backend is a live MusicBrainz recording
+            // search; slskR has no such client wired in, so this searches
+            // the local share index instead -- an honest architectural
+            // difference in *source*, but the response is still a real,
+            // flat `ContentSearchResult[]` array over real local share
+            // data, not the old {query, results, count} wrapper with
+            // invented field names.
+            let domain = params
+                .iter()
+                .find(|(key, _)| key == "domain")
+                .map(|(_, value)| value.trim().to_owned())
+                .filter(|value| !value.is_empty());
+            if domain.is_some_and(|domain| !domain.eq_ignore_ascii_case("audio")) {
+                return Ok(routing::ok_response("[]".to_owned()));
+            }
+            let limit = params
+                .iter()
+                .find(|(key, _)| key == "limit")
+                .and_then(|(_, value)| value.parse::<i64>().ok())
+                .unwrap_or(20)
+                .clamp(1, 100) as usize;
             let shares = state.shares.read().await;
             let results = search_shares(&shares.entries, &query)
                 .into_iter()
-                .map(|entry| serde_json::json!({
-                    "filename": entry.filename,
-                    "size": entry.size,
-                    "extension": entry.extension,
-                    "source": "share-index",
-                }))
+                .take(limit)
+                .map(|entry| {
+                    let content_hash = hex::encode(Sha256::digest(entry.filename.as_bytes()));
+                    let title = std::path::Path::new(&entry.filename)
+                        .file_name()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .unwrap_or(&entry.filename)
+                        .to_owned();
+                    serde_json::json!({
+                        "contentId": format!("content:audio:track:{}", &content_hash[..32]),
+                        "title": title,
+                        "subtitle": "",
+                        "type": "track",
+                        "domain": "audio",
+                        "metadata": {
+                            "filename": entry.filename,
+                            "extension": entry.extension,
+                            "size": entry.size,
+                        },
+                    })
+                })
                 .collect::<Vec<_>>();
-            let count = results.len();
             drop(shares);
-            Ok(routing::ok_response(serde_json::json!({
-                "query": query,
-                "results": results,
-                "count": count,
-            }).to_string()))
+            Ok(routing::ok_response(
+                serde_json::Value::Array(results).to_string(),
+            ))
         }
 
         ("POST", "/api/podcore/membership/join") => {
@@ -88696,6 +88730,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn podcore_content_search_returns_a_real_array_over_real_shares() {
+        let (state, _receiver) = test_state();
+        {
+            let mut shares = state.shares.write().await;
+            shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
+                code: 1,
+                filename: "Virtual/Search Audit Track.flac".to_owned(),
+                size: 4096,
+                extension: "flac".to_owned(),
+                attributes: Vec::new(),
+            });
+        }
+
+        let missing_query =
+            super::route_http_request("GET", "/api/v0/podcore/content/search", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(missing_query.status, "400 Bad Request");
+
+        // Only the "audio" domain is supported (matching the oracle's real
+        // MusicBrainz-backed search, which only covers audio) -- any other
+        // requested domain must come back empty, not error or ignore the
+        // filter.
+        let wrong_domain = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/search?query=Search%20Audit&domain=video",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(wrong_domain.status, "200 OK");
+        assert_eq!(wrong_domain.body, "[]");
+
+        let found = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/search?query=Search%20Audit&domain=audio&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(found.status, "200 OK", "{}", found.body);
+        let found_json = serde_json::from_str::<serde_json::Value>(&found.body).unwrap();
+        let results = found_json
+            .as_array()
+            .expect("flat array, not a wrapper object");
+        assert_eq!(results.len(), 1, "{found_json}");
+        assert!(
+            results[0]["contentId"]
+                .as_str()
+                .unwrap()
+                .starts_with("content:audio:track:"),
+            "{found_json}"
+        );
+        assert_eq!(results[0]["title"], "Search Audit Track.flac");
+        assert_eq!(results[0]["domain"], "audio");
+        assert_eq!(results[0]["type"], "track");
+        assert_eq!(results[0]["metadata"]["extension"], "flac");
+    }
+
+    #[tokio::test]
     async fn library_bloom_preview_reflects_real_hashdb_contents_not_an_empty_filter() {
         let (state, _receiver) = test_state();
 
@@ -92152,7 +92252,15 @@ mod tests {
         .expect("podcore search");
         let podcore_search_json =
             serde_json::from_str::<serde_json::Value>(&podcore_search.body).unwrap();
-        assert!(podcore_search_json["count"].as_u64().unwrap() >= 1);
+        let podcore_search_results = podcore_search_json.as_array().unwrap();
+        assert!(!podcore_search_results.is_empty(), "{podcore_search_json}");
+        assert!(
+            podcore_search_results[0]["contentId"]
+                .as_str()
+                .unwrap()
+                .starts_with("content:audio:track:"),
+            "{podcore_search_json}"
+        );
         let stream = super::route_http_request(
             "GET",
             "/api/streams/Library/Known/Release.flac",
