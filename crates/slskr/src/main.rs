@@ -13520,6 +13520,7 @@ struct AppState {
     revoked_jwts: RwLock<RevokedJwtStore>,
     login_attempts: RwLock<LoginAttemptStore>,
     pod_signature_stats: PodSignatureStats,
+    pod_verification_stats: PodVerificationStats,
 }
 
 /// Matches the oracle's `MessageSigner`'s real `Interlocked` counters --
@@ -13562,6 +13563,52 @@ impl PodSignatureStats {
 
     fn touch(&self) {
         if let Ok(mut guard) = self.last_operation_at.lock() {
+            *guard = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+}
+
+/// Matches the oracle's `PodMembershipVerifier`'s real counters -- real
+/// membership/signature verification activity, not the hardcoded zeros
+/// `/api/podcore/verification/stats` used to report regardless of use.
+#[derive(Debug, Default)]
+struct PodVerificationStats {
+    total_verifications: std::sync::atomic::AtomicU64,
+    successful_verifications: std::sync::atomic::AtomicU64,
+    failed_membership_checks: std::sync::atomic::AtomicU64,
+    failed_signature_checks: std::sync::atomic::AtomicU64,
+    banned_member_rejections: std::sync::atomic::AtomicU64,
+    total_verification_time_ms: std::sync::atomic::AtomicU64,
+    last_verification_at: std::sync::Mutex<Option<String>>,
+}
+
+impl PodVerificationStats {
+    fn record(
+        &self,
+        elapsed_ms: u64,
+        is_from_valid_member: bool,
+        is_not_banned: bool,
+        has_valid_signature: bool,
+        is_valid: bool,
+    ) {
+        use std::sync::atomic::Ordering;
+        self.total_verifications.fetch_add(1, Ordering::Relaxed);
+        self.total_verification_time_ms
+            .fetch_add(elapsed_ms, Ordering::Relaxed);
+        if is_valid {
+            self.successful_verifications
+                .fetch_add(1, Ordering::Relaxed);
+        } else if !is_not_banned {
+            self.banned_member_rejections
+                .fetch_add(1, Ordering::Relaxed);
+        } else if !is_from_valid_member {
+            self.failed_membership_checks
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if !has_valid_signature {
+            self.failed_signature_checks.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Ok(mut guard) = self.last_verification_at.lock() {
             *guard = Some(chrono::Utc::now().to_rfc3339());
         }
     }
@@ -45409,26 +45456,7 @@ async fn podcore_mutation_response(
             Some(pod_signing_response(action, body, state).await)
         }
         ("POST", [section, message]) if section == "verification" && message == "message" => {
-            let payload = serde_json::from_str::<serde_json::Value>(body)
-                .unwrap_or_else(|_| serde_json::json!({}));
-            let channel_id = payload
-                .get("channelId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            Some(routing::ok_response(
-                serde_json::json!({
-                    "isValid": false,
-                    "isFromValidMember": false,
-                    "hasValidSignature": false,
-                    "isNotBanned": false,
-                    "errorMessage": if channel_id.starts_with("channel:") {
-                        "Member not found"
-                    } else {
-                        "Invalid channel ID format"
-                    },
-                })
-                .to_string(),
-            ))
+            Some(pod_verification_message_response(body, state).await)
         }
         ("POST", [section, action, tail @ ..])
             if matches!(section.as_str(), "dht" | "discovery") =>
@@ -45657,23 +45685,23 @@ async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> Htt
         .await
         .pod_security_signature_mode;
     let verification_started_at = std::time::Instant::now();
-    match pod_verify_signature(&message, &canonical, &pod_id, signature, mode, state).await {
-        Ok(is_valid) => {
-            state.pod_signature_stats.record_verify(
-                verification_started_at.elapsed().as_millis() as u64,
-                is_valid,
-            );
-            routing::ok_response(serde_json::json!({"isValid": is_valid}).to_string())
-        }
-        Err(response) => response,
-    }
+    let is_valid =
+        pod_verify_signature(&message, &canonical, &pod_id, signature, mode, state).await;
+    state.pod_signature_stats.record_verify(
+        verification_started_at.elapsed().as_millis() as u64,
+        is_valid,
+    );
+    routing::ok_response(serde_json::json!({"isValid": is_valid}).to_string())
 }
 
 /// The real signature-check body of `pod_signing_response`'s "verify"
-/// action, split out so `pod_signing_response` can time and record every
-/// real outcome (including the mode-based leniency path) in exactly one
-/// place. `Err` is reserved for a malformed request that never reaches a
-/// real verification verdict.
+/// action, split out so it can also be reused by the pod membership
+/// verification endpoint, whose `hasValidSignature` field runs the exact
+/// same check (both wrap the oracle's single `MessageSigner.
+/// VerifyMessageAsync`). Matches the oracle exactly: a malformed
+/// signature is a verification failure (`false`), never a 400 -- the
+/// oracle's own implementation returns `false` for malformed base64
+/// rather than raising an error.
 async fn pod_verify_signature(
     message: &serde_json::Value,
     canonical: &str,
@@ -45681,9 +45709,9 @@ async fn pod_verify_signature(
     signature: &str,
     mode: PodSignatureMode,
     state: &AppState,
-) -> Result<bool, HttpResponse> {
+) -> bool {
     if signature.is_empty() || !signature.starts_with("ed25519:") {
-        return Ok(mode != PodSignatureMode::Enforce);
+        return mode != PodSignatureMode::Enforce;
     }
     let stripped = signature.strip_prefix("ed25519:").unwrap_or(signature);
     let signature_bytes: [u8; 64] = match STANDARD
@@ -45692,11 +45720,7 @@ async fn pod_verify_signature(
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(signature) => signature,
-        None => {
-            return Err(routing::bad_request_response(
-                "signature must be base64 Ed25519 bytes",
-            ))
-        }
+        None => return false,
     };
     let timestamp_unix_ms = message
         .get("timestampUnixMs")
@@ -45706,14 +45730,14 @@ async fn pod_verify_signature(
         .unwrap_or(i64::MAX)
         .saturating_mul(1000);
     if (now_ms - timestamp_unix_ms).abs() > 5 * 60 * 1000 {
-        return Ok(false);
+        return false;
     }
     let sender_peer_id = message
         .get("senderPeerId")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     if pod_id.is_empty() || sender_peer_id.is_empty() {
-        return Ok(false);
+        return false;
     }
     let sender_public_key = state
         .pods
@@ -45727,7 +45751,7 @@ async fn pod_verify_signature(
         })
         .and_then(|member| member.public_key);
     let Some(sender_public_key) = sender_public_key else {
-        return Ok(false);
+        return false;
     };
     let public_key: [u8; 32] = match STANDARD
         .decode(sender_public_key.as_bytes())
@@ -45735,9 +45759,9 @@ async fn pod_verify_signature(
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(public_key) => public_key,
-        None => return Ok(false),
+        None => return false,
     };
-    Ok(VerifyingKey::from_bytes(&public_key)
+    VerifyingKey::from_bytes(&public_key)
         .ok()
         .is_some_and(|key| {
             key.verify(
@@ -45745,7 +45769,122 @@ async fn pod_verify_signature(
                 &Signature::from_bytes(&signature_bytes),
             )
             .is_ok()
-        }))
+        })
+}
+
+/// Matches the oracle's `PodMembershipVerifier.VerifyMessageAsync`: real
+/// pod-membership + signature checks, not the always-false stub this
+/// endpoint used to return regardless of input.
+async fn pod_verification_message_response(body: &str, state: &AppState) -> HttpResponse {
+    const MAX_FIELD_LEN: usize = 512;
+    let payload = match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(payload @ serde_json::Value::Object(_)) => payload,
+        _ => return routing::bad_request_response("Message is required"),
+    };
+    let message_id = payload
+        .get("messageId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let pod_id = payload
+        .get("podId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let channel_id = payload
+        .get("channelId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let sender_peer_id = payload
+        .get("senderPeerId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let signature = payload
+        .get("signature")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if message_id.is_empty()
+        || pod_id.is_empty()
+        || message_id.len() > MAX_FIELD_LEN
+        || pod_id.len() > MAX_FIELD_LEN
+        || channel_id.len() > MAX_FIELD_LEN
+        || sender_peer_id.len() > MAX_FIELD_LEN
+        || signature.len() > MAX_FIELD_LEN
+    {
+        return routing::bad_request_response(
+            "Message fields are required and must be within length limits",
+        );
+    }
+
+    // The membership check's podId comes from splitting channelId as
+    // "podId:channelId", independent of the message's own explicit
+    // `podId` field (used below for signature verification) -- this
+    // mirrors the oracle's real (if slightly inconsistent) behavior
+    // rather than unifying the two for tidiness.
+    let Some((channel_pod_id, _)) = channel_id.split_once(':') else {
+        return routing::ok_response(
+            serde_json::json!({
+                "isValid": false,
+                "isFromValidMember": false,
+                "hasValidSignature": false,
+                "isNotBanned": false,
+                "errorMessage": "Invalid channel ID format",
+            })
+            .to_string(),
+        );
+    };
+
+    let member = state
+        .pods
+        .read()
+        .await
+        .members(channel_pod_id)
+        .and_then(|members| {
+            members
+                .into_iter()
+                .find(|candidate| candidate.peer_id.eq_ignore_ascii_case(sender_peer_id))
+        });
+    let is_from_valid_member = member.is_some();
+    let is_not_banned = !member.as_ref().is_some_and(|member| member.is_banned);
+
+    let mode = state
+        .advanced_networking
+        .read()
+        .await
+        .pod_security_signature_mode;
+    let (canonical, signature_pod_id) = pod_message_canonical_payload(&payload);
+    let started_at = std::time::Instant::now();
+    let has_valid_signature = pod_verify_signature(
+        &payload,
+        &canonical,
+        &signature_pod_id,
+        signature,
+        mode,
+        state,
+    )
+    .await;
+    let is_valid = is_from_valid_member && is_not_banned && has_valid_signature;
+
+    state.pod_verification_stats.record(
+        started_at.elapsed().as_millis() as u64,
+        is_from_valid_member,
+        is_not_banned,
+        has_valid_signature,
+        is_valid,
+    );
+
+    routing::ok_response(
+        serde_json::json!({
+            "isValid": is_valid,
+            "isFromValidMember": is_from_valid_member,
+            "hasValidSignature": has_valid_signature,
+            "isNotBanned": is_not_banned,
+        })
+        .to_string(),
+    )
 }
 
 fn levenshtein_similarity(left: &str, right: &str) -> f64 {
@@ -48726,16 +48865,37 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 .to_string(),
             )
         }
-        "/api/podcore/verification/stats" => routing::ok_response(serde_json::json!({
-            "totalVerifications": 0,
-            "successfulVerifications": 0,
-            "failedMembershipChecks": 0,
-            "failedSignatureChecks": 0,
-            "bannedMemberRejections": 0,
-            "averageVerificationTimeMs": 0.0,
-            "lastVerification": serde_json::Value::Null,
-            "verifiedMessages": 0, "rejectedMessages": 0, "replayRecords": state.pod_join_replays.read().await.len(),
-        }).to_string()),
+        "/api/podcore/verification/stats" => {
+            use std::sync::atomic::Ordering;
+            let stats = &state.pod_verification_stats;
+            let total_verifications = stats.total_verifications.load(Ordering::Relaxed);
+            let successful_verifications = stats.successful_verifications.load(Ordering::Relaxed);
+            let failed_membership_checks = stats.failed_membership_checks.load(Ordering::Relaxed);
+            let failed_signature_checks = stats.failed_signature_checks.load(Ordering::Relaxed);
+            let banned_member_rejections = stats.banned_member_rejections.load(Ordering::Relaxed);
+            let total_verification_time_ms =
+                stats.total_verification_time_ms.load(Ordering::Relaxed);
+            let last_verification = stats
+                .last_verification_at
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            routing::ok_response(
+                serde_json::json!({
+                    "totalVerifications": total_verifications,
+                    "successfulVerifications": successful_verifications,
+                    "failedMembershipChecks": failed_membership_checks,
+                    "failedSignatureChecks": failed_signature_checks,
+                    "bannedMemberRejections": banned_member_rejections,
+                    "averageVerificationTimeMs": total_verification_time_ms as f64 / total_verifications.max(1) as f64,
+                    "lastVerification": last_verification,
+                    "verifiedMessages": successful_verifications,
+                    "rejectedMessages": total_verifications.saturating_sub(successful_verifications),
+                    "replayRecords": state.pod_join_replays.read().await.len(),
+                })
+                .to_string(),
+            )
+        }
         _ => routing::not_found_response(),
     }
 }
@@ -51658,6 +51818,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         revoked_jwts: RwLock::new(revoked_jwts),
         login_attempts: RwLock::new(LoginAttemptStore::default()),
         pod_signature_stats: PodSignatureStats::default(),
+        pod_verification_stats: PodVerificationStats::default(),
     });
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
@@ -68976,6 +69137,7 @@ mod tests {
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
+            pod_verification_stats: super::PodVerificationStats::default(),
         });
         (state, receiver)
     }
@@ -90800,6 +90962,181 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn pod_verification_message_checks_real_membership_and_signature() {
+        let (state, _receiver) = test_state();
+        // Unlike other pod fixtures in this suite, this podId deliberately
+        // contains no colon: verification/message derives the membership
+        // podId by splitting channelId on the first ':' as "podId:channel",
+        // a convention that wouldn't round-trip through this test if the
+        // podId itself contained a colon.
+        let pod_id = "verification-audit-pod";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Verification Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
+
+        let message = serde_json::json!({
+            "messageId": "message-1",
+            "podId": pod_id,
+            "channelId": format!("{pod_id}:general"),
+            "senderPeerId": "tester",
+            "body": "hello",
+            "timestampUnixMs": super::unix_timestamp() * 1000,
+        });
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({"privateKey": keys["privateKey"], "message": message}).to_string(),
+            &state,
+        )
+        .await
+        .expect("sign message");
+        assert_eq!(signed.status, "200 OK");
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap();
+        let mut verified_message = message.clone();
+        verified_message["signature"] = signed_json["signature"].clone();
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &verified_message.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify message");
+        assert_eq!(verified.status, "200 OK");
+        let verified_json = serde_json::from_str::<serde_json::Value>(&verified.body).unwrap();
+        assert_eq!(
+            verified_json,
+            serde_json::json!({
+                "isValid": true,
+                "isFromValidMember": true,
+                "hasValidSignature": true,
+                "isNotBanned": true,
+            }),
+            "{verified_json}"
+        );
+
+        // A sender who was never registered as a real pod member fails
+        // the membership check, even with a structurally valid message.
+        let mut unknown_sender = verified_message.clone();
+        unknown_sender["senderPeerId"] = serde_json::json!("stranger");
+        let unknown_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &unknown_sender.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify unknown sender");
+        let unknown_json =
+            serde_json::from_str::<serde_json::Value>(&unknown_verified.body).unwrap();
+        assert_eq!(unknown_json["isValid"], false, "{unknown_json}");
+        assert_eq!(unknown_json["isFromValidMember"], false, "{unknown_json}");
+        assert_eq!(unknown_json["isNotBanned"], true, "{unknown_json}");
+
+        // A channelId with no "podId:channel" separator is a structurally
+        // invalid request, reported honestly rather than treated as some
+        // other kind of failure.
+        let mut bad_channel = verified_message.clone();
+        bad_channel["channelId"] = serde_json::json!("no-colon-here");
+        let bad_channel_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &bad_channel.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify bad channel id");
+        assert_eq!(
+            bad_channel_verified.body,
+            serde_json::json!({
+                "isValid": false,
+                "isFromValidMember": false,
+                "hasValidSignature": false,
+                "isNotBanned": false,
+                "errorMessage": "Invalid channel ID format",
+            })
+            .to_string()
+        );
+
+        // Missing required fields is a real 400, not a silently-accepted
+        // always-false result.
+        let missing_pod_id = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            r#"{"messageId":"message-1"}"#,
+            &state,
+        )
+        .await
+        .expect("verify missing podId");
+        assert_eq!(missing_pod_id.status, "400 Bad Request");
+
+        let stats = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/verification/stats",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("verification stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        // Only 2 real verification attempts are recorded: the successful
+        // one and the unknown-sender failure. Matching the oracle exactly,
+        // the invalid-channel-format and missing-field cases never reach
+        // the verifier (they fail before any membership/signature check
+        // runs), so neither counts as a verification attempt.
+        assert_eq!(stats_json["totalVerifications"], 2, "{stats_json}");
+        assert_eq!(stats_json["successfulVerifications"], 1, "{stats_json}");
+        assert_eq!(stats_json["failedMembershipChecks"], 1, "{stats_json}");
+        assert_eq!(stats_json["verifiedMessages"], 1, "{stats_json}");
+        assert_eq!(stats_json["rejectedMessages"], 1, "{stats_json}");
+        assert!(stats_json["lastVerification"].is_string(), "{stats_json}");
+    }
+
     #[test]
     fn controller_feature_state_persists_bounded_records() {
         let root = std::env::temp_dir().join(format!(
@@ -97648,6 +97985,7 @@ mod tests {
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
+            pod_verification_stats: super::PodVerificationStats::default(),
         });
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
             .await
@@ -97950,6 +98288,7 @@ mod tests {
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
+            pod_verification_stats: super::PodVerificationStats::default(),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",
