@@ -13048,6 +13048,37 @@ fn file_exists_at_known_location_or_on_path(candidates: &[&str], path_file_name:
         || command_exists_on_path(path_file_name)
 }
 
+/// Matches the oracle's `IsSafeOpaqueReference`, used across several
+/// PodCore/mesh subsystems (quarantine jury, realm subject indexes) to
+/// reject identifiers that leak paths, private/local addresses, or raw
+/// hashes instead of an opaque reference.
+fn is_safe_opaque_reference(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > 200 {
+        return false;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    let has_unsafe_substring = [
+        "/",
+        "\\",
+        "localhost",
+        "127.0.0.1",
+        "192.168.",
+        "10.",
+        "172.16.",
+        "path",
+        "file",
+        "private",
+        "internal",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle));
+    if has_unsafe_substring {
+        return false;
+    }
+    !(trimmed.len() >= 32 && trimmed.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
 /// Matches the oracle's `SongIdCapabilityReporter`: real external-tool
 /// presence checks on `PATH` (and, for panako/audfprint, known install
 /// locations), not a hardcoded list. Capabilities that depend on features
@@ -42253,34 +42284,63 @@ async fn feature_controller_mutation_response(
         }
         let request = serde_json::from_str::<serde_json::Value>(body)
             .unwrap_or_else(|_| serde_json::json!({}));
-        if is_versioned_v0 {
+        let enabled = request
+            .get("enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        let decided_by = request
+            .get("decidedBy")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("local-user")
+            .trim()
+            .to_owned();
+        let note = request
+            .get("note")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+
+        // Matches the oracle's SetAuthorityEnabledAsync: real input
+        // validation instead of a hardcoded always-fail (versioned) or
+        // always-succeed (unversioned) response regardless of input.
+        // slskR has no registered-index inventory to check "index
+        // authority was not found" against (this whole subsystem is
+        // otherwise unimplemented -- see /conflicts, still a fake stub),
+        // so that specific oracle check is honestly omitted rather than
+        // faked; everything else checkable here is real.
+        let mut errors = Vec::new();
+        if realm_id.trim().is_empty() {
+            errors.push("Realm id is required.");
+        }
+        if index_id.trim().is_empty() {
+            errors.push("Index id is required.");
+        }
+        if !is_safe_opaque_reference(&decided_by) {
+            errors.push("Decided-by identifier must be opaque and safe.");
+        }
+        if note.chars().count() > 512 {
+            errors.push("Authority decision note must be 512 characters or fewer.");
+        }
+        let is_accepted = errors.is_empty();
+        let value = serde_json::json!({
+            "isAccepted": is_accepted,
+            "realmId": realm_id,
+            "indexId": index_id,
+            "enabled": enabled,
+            "decidedBy": decided_by,
+            "note": note,
+            "decidedAt": chrono::Utc::now().to_rfc3339(),
+            "errors": errors,
+        });
+        if !is_accepted {
             return Some(HttpResponse {
                 status: "400 Bad Request",
                 content_type: "application/json",
-                body: serde_json::json!({
-                    "isAccepted": false,
-                    "realmId": realm_id,
-                    "indexId": index_id,
-                    "enabled": request.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true),
-                    "decidedBy": request.get("decidedBy").and_then(serde_json::Value::as_str).unwrap_or_default(),
-                    "note": request.get("note").and_then(serde_json::Value::as_str).unwrap_or_default(),
-                    "decidedAt": chrono::Utc::now().to_rfc3339(),
-                    "errors": [
-                        "Realm id does not match the local realm.",
-                        "Index authority was not found."
-                    ],
-                })
-                .to_string(),
+                body: value.to_string(),
             });
         }
-        let value = serde_json::json!({
-            "realmId": realm_id,
-            "indexId": index_id,
-            "isAuthorityEnabled": request.get("isAuthorityEnabled").and_then(serde_json::Value::as_bool).unwrap_or(true),
-            "reason": request.get("reason").and_then(serde_json::Value::as_str).unwrap_or_default(),
-            "isAccepted": true,
-            "updatedAt": unix_timestamp(),
-        });
         return Some(
             match state.controller_features.write().await.upsert(
                 format!("realm/decision/{realm_id}/{index_id}"),
@@ -88760,6 +88820,30 @@ mod tests {
                 .unwrap();
         assert_eq!(stop.body, r#"{"message":"Port forwarding stopped"}"#);
 
+        // An unsafe decidedBy identifier (a local file path) must be
+        // rejected by real validation, matching the oracle's
+        // IsSafeOpaqueReference check.
+        let unsafe_decision = super::route_http_request(
+            "POST",
+            "/api/v0/realm-subject-indexes/realm/index/authority-decision",
+            None,
+            r#"{"enabled":true,"decidedBy":"/etc/passwd","note":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unsafe_decision.status, "400 Bad Request");
+        let unsafe_decision =
+            serde_json::from_str::<serde_json::Value>(&unsafe_decision.body).unwrap();
+        assert_eq!(unsafe_decision["isAccepted"], false);
+        assert!(unsafe_decision["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("opaque and safe"));
+
+        // A safe, well-formed decision must be genuinely accepted -- not
+        // an unconditional 400 (versioned) or unconditional 200
+        // (unversioned) regardless of input, as the old fake handlers did.
         let decision = super::route_http_request(
             "POST",
             "/api/v0/realm-subject-indexes/realm/index/authority-decision",
@@ -88769,10 +88853,11 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(decision.status, "400 Bad Request");
+        assert_eq!(decision.status, "200 OK", "{}", decision.body);
         let decision = serde_json::from_str::<serde_json::Value>(&decision.body).unwrap();
-        assert_eq!(decision["isAccepted"], false);
+        assert_eq!(decision["isAccepted"], true);
         assert_eq!(decision["enabled"], true);
+        assert_eq!(decision["errors"], serde_json::json!([]));
 
         let pod_id = "pod:00000000000000000000000000000001";
         let created = super::route_http_request(
