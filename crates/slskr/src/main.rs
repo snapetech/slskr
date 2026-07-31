@@ -14554,6 +14554,13 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", "/api/application/version/latest") => {
+            if query_parameter(route.query, "forceCheck").as_deref() == Some("true") {
+                refresh_controller_version_check(
+                    state,
+                    "https://api.github.com/repos/snapetech/slskdn/releases/latest",
+                )
+                .await;
+            }
             Ok(routing::ok_response(slskd_version_json(state).to_string()))
         }
         ("GET", "/api/application/dump") => Ok(HttpResponse {
@@ -29013,87 +29020,101 @@ async fn start_controller_version_check(state: Arc<AppState>) {
     )
     .await;
     tokio::spawn(async move {
-        let result = async {
-            let client = reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(100))
-                .build()
-                .map_err(|error| error.to_string())?;
-            let response = client
-                .get("https://api.github.com/repos/snapetech/slskdn/releases/latest")
-                .header(
-                    reqwest::header::USER_AGENT,
-                    format!("slskdN v{APP_VERSION} ({APP_VERSION})"),
-                )
-                .send()
-                .await
-                .map_err(|error| error.to_string())?
-                .error_for_status()
-                .map_err(|error| error.to_string())?;
-            let release = response
-                .json::<serde_json::Value>()
-                .await
-                .map_err(|error| error.to_string())?;
-            let latest_tag = release
-                .get("tag_name")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| "GitHub release omitted tag_name".to_owned())?
-                .to_owned();
-            let latest = normalize_controller_release_version(&latest_tag);
-            let latest_lower = latest.to_ascii_lowercase();
-            if latest_lower.contains("-dev-") || latest_lower.contains("-canary-") {
-                return Ok(None);
-            }
-            let latest_url = release
-                .get("html_url")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            Ok::<_, String>(Some((latest, latest_tag, latest_url)))
-        }
-        .await;
-        match result {
-            Ok(Some((latest, latest_tag, latest_url))) => {
-                let is_update_available =
-                    is_newer_controller_release_available(APP_VERSION, &latest);
-                {
-                    let mut version = state
-                        .controller_version
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    version.latest = Some(latest.clone());
-                    version.latest_tag = Some(latest_tag);
-                    version.latest_url = Some(latest_url);
-                    version.checked_at = Some(chrono::Utc::now().to_rfc3339());
-                    version.is_update_available = Some(is_update_available);
-                }
-                let message = if is_update_available {
-                    format!("A new version is available! {APP_VERSION} -> {latest}")
-                } else {
-                    format!("Version {APP_VERSION} is up to date.")
-                };
-                record_daemon_log(&state, logging::LogLevel::Info, "version", message).await;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                {
-                    let mut version = state
-                        .controller_version
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    version.checked_at = Some(chrono::Utc::now().to_rfc3339());
-                    version.is_update_available = None;
-                }
-                record_daemon_log(
-                    &state,
-                    logging::LogLevel::Warn,
-                    "version",
-                    format!("Failed to check version: {error}"),
-                )
-                .await;
-            }
-        }
+        refresh_controller_version_check(
+            &state,
+            "https://api.github.com/repos/snapetech/slskdn/releases/latest",
+        )
+        .await
     });
+}
+
+/// Performs one real GitHub Releases lookup and updates `controller_version`
+/// -- matches the oracle's `Application.CheckVersionAsync`. Shared by the
+/// startup check (fire-and-forget via `start_controller_version_check`) and
+/// `GET .../version/latest?forceCheck=true`, which awaits it directly so
+/// the response reflects a freshly fetched latest release. `releases_url`
+/// is parameterized so tests can point it at a local fixture instead of
+/// the real GitHub API.
+async fn refresh_controller_version_check(state: &AppState, releases_url: &str) {
+    let result = async {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(100))
+            .build()
+            .map_err(|error| error.to_string())?;
+        let response = client
+            .get(releases_url)
+            .header(
+                reqwest::header::USER_AGENT,
+                format!("slskdN v{APP_VERSION} ({APP_VERSION})"),
+            )
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?;
+        let release = response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|error| error.to_string())?;
+        let latest_tag = release
+            .get("tag_name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "GitHub release omitted tag_name".to_owned())?
+            .to_owned();
+        let latest = normalize_controller_release_version(&latest_tag);
+        let latest_lower = latest.to_ascii_lowercase();
+        if latest_lower.contains("-dev-") || latest_lower.contains("-canary-") {
+            return Ok(None);
+        }
+        let latest_url = release
+            .get("html_url")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        Ok::<_, String>(Some((latest, latest_tag, latest_url)))
+    }
+    .await;
+    match result {
+        Ok(Some((latest, latest_tag, latest_url))) => {
+            let is_update_available = is_newer_controller_release_available(APP_VERSION, &latest);
+            {
+                let mut version = state
+                    .controller_version
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                version.latest = Some(latest.clone());
+                version.latest_tag = Some(latest_tag);
+                version.latest_url = Some(latest_url);
+                version.checked_at = Some(chrono::Utc::now().to_rfc3339());
+                version.is_update_available = Some(is_update_available);
+            }
+            let message = if is_update_available {
+                format!("A new version is available! {APP_VERSION} -> {latest}")
+            } else {
+                format!("Version {APP_VERSION} is up to date.")
+            };
+            record_daemon_log(state, logging::LogLevel::Info, "version", message).await;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            {
+                let mut version = state
+                    .controller_version
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                version.checked_at = Some(chrono::Utc::now().to_rfc3339());
+                version.is_update_available = None;
+            }
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "version",
+                format!("Failed to check version: {error}"),
+            )
+            .await;
+        }
+    }
 }
 
 fn slskd_options_json(
@@ -69373,6 +69394,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn force_checking_the_latest_version_awaits_a_real_github_lookup() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind version fixture");
+        let address = listener.local_addr().expect("version fixture address");
+        let server = tokio::spawn(async move {
+            serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "tag_name": "v9.9.9-slskdn.20260101120000",
+                    "html_url": "https://github.com/snapetech/slskdn/releases/tag/v9.9.9-slskdn.20260101120000",
+                }),
+            )
+            .await
+        });
+        let (state, _receiver) = test_state();
+        super::refresh_controller_version_check(&state, &format!("http://{address}")).await;
+        server.await.expect("version fixture task");
+
+        let version = state
+            .controller_version
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(
+            version.latest.as_deref(),
+            Some("9.9.9-slskdn.20260101120000")
+        );
+        assert!(version.latest_tag.is_some());
+        assert!(version.checked_at.is_some());
+    }
+
+    #[tokio::test]
     async fn musicbrainz_release_lookup_resolves_a_release_with_an_artist_credit() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -74202,7 +74255,10 @@ mod tests {
         }
 
         let query_contract_routes = [
-            ("GET", "/api/application/version/latest?forceCheck=true", ""),
+            // Not "/api/application/version/latest?forceCheck=true" here:
+            // that now awaits a real (parameterized, separately tested)
+            // GitHub Releases lookup, so it can't share this 1-second
+            // timeout or depend on live network in a hermetic test run.
             ("GET", "/api/searches?includeResponses=true", ""),
             ("DELETE", "/api/transfers/downloads/peer1/1?remove=true", ""),
             ("GET", "/api/transfers/downloads/?includeRemoved=true", ""),
