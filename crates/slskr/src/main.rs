@@ -51234,6 +51234,11 @@ fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQu
         .entries
         .iter()
         .filter(|entry| slskd_transfer_matches_query(entry, direction, None))
+        // Matches the oracle's GetTransferLeaderboard: only completed
+        // transfers count toward the leaderboard, not queued/in-progress/
+        // cancelled/failed ones -- otherwise a user with many failed
+        // attempts could outrank one with fewer, real completions.
+        .filter(|entry| slskd_transfer_state(&entry.status) == "Completed")
     {
         let username = entry.peer_username.clone().unwrap_or_default();
         let bytes = entry.size.unwrap_or(entry.bytes_transferred);
@@ -51373,10 +51378,16 @@ fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQu
     let username = slskd_transfer_query_username(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let mut grouped: BTreeMap<String, (usize, u64, BTreeMap<String, ()>)> = BTreeMap::new();
+    // Matches the oracle's GetTransferDirectoryFrequency exactly: this
+    // report always answers "which of my shared directories are popular"
+    // -- i.e. what other users downloaded from local shares (Upload),
+    // never what this instance itself downloaded -- and only counts
+    // completed transfers, never queued/in-progress/failed ones.
     for entry in transfers
         .entries
         .iter()
-        .filter(|entry| entry.direction == 0)
+        .filter(|entry| entry.direction == 1)
+        .filter(|entry| slskd_transfer_state(&entry.status) == "Completed")
         .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
     {
         let directory = Path::new(&entry.filename)
@@ -51406,9 +51417,10 @@ fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQu
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| {
-        right["count"]
+        right["distinctUsers"]
             .as_u64()
-            .cmp(&left["count"].as_u64())
+            .cmp(&left["distinctUsers"].as_u64())
+            .then_with(|| right["count"].as_u64().cmp(&left["count"].as_u64()))
             .then_with(|| left["path"].as_str().cmp(&right["path"].as_str()))
     });
     serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
@@ -75014,6 +75026,39 @@ mod tests {
         .await
         .expect("telemetry transfer");
         assert_eq!(telemetry_transfer.status, "200 OK");
+
+        // The leaderboard and directories reports only count real
+        // completed transfers now (matching the oracle's State=48
+        // filter), so mark the downloads above completed, and add a real
+        // completed *upload* for the directories report -- which, also
+        // matching the oracle, only ever reports on uploads (what other
+        // users downloaded from local shares), never downloads.
+        {
+            let mut transfers = state.transfers.write().await;
+            for entry in transfers.entries.iter_mut() {
+                if entry.direction == 0 {
+                    entry.status = "succeeded".to_owned();
+                }
+            }
+            // A distinct username -- not "telemetry peer" -- so this
+            // synthetic upload doesn't inflate that user's own transfer
+            // count/report later in this test.
+            transfers.create(
+                1,
+                Some("directory-audit-peer".to_owned()),
+                "Telemetry/Album/Track.flac".to_owned(),
+                None,
+                Some(321),
+            );
+            if let Some(entry) = transfers
+                .entries
+                .iter_mut()
+                .rev()
+                .find(|entry| entry.direction == 1)
+            {
+                entry.status = "succeeded".to_owned();
+            }
+        }
 
         let leaderboard = super::route_http_request(
             "GET",
@@ -100756,6 +100801,120 @@ mod tests {
         assert_eq!(speeds["sessionBytesDownloaded"], 500);
         assert_eq!(speeds["sessionBytesUploaded"], 120);
         assert_eq!(speeds["sessionBytesTotal"], 620);
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
+    }
+
+    #[test]
+    fn transfer_leaderboard_excludes_incomplete_transfers_not_hardcoded_status() {
+        let mut queue = super::TransferQueue::new_in_memory(8);
+        // A failed download must never count toward the leaderboard --
+        // matching the oracle's GetTransferLeaderboard, which filters
+        // State = 48 (Completed | Succeeded) at the SQL layer.
+        let failed = queue.create(
+            0,
+            Some("flaky".to_owned()),
+            "Remote/Flaky.flac".to_owned(),
+            None,
+            Some(9999),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == failed.id)
+            .unwrap()
+            .status = "failed".to_owned();
+        let succeeded = queue.create(
+            0,
+            Some("reliable".to_owned()),
+            "Remote/Reliable.flac".to_owned(),
+            None,
+            Some(50),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == succeeded.id)
+            .unwrap()
+            .status = "succeeded".to_owned();
+
+        let leaderboard = serde_json::from_str::<serde_json::Value>(
+            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue),
+        )
+        .unwrap();
+        let rows = leaderboard.as_array().unwrap();
+        assert!(
+            rows.iter().all(|row| row["username"] != "flaky"),
+            "{leaderboard}"
+        );
+        assert!(
+            rows.iter().any(|row| row["username"] == "reliable"),
+            "{leaderboard}"
+        );
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
+    }
+
+    #[test]
+    fn transfer_directories_report_is_completed_uploads_only() {
+        let mut queue = super::TransferQueue::new_in_memory(8);
+        // Matches the oracle's GetTransferDirectoryFrequency exactly: it
+        // always reports on Uploads (what others downloaded from local
+        // shares) and only completed ones -- never downloads, and never
+        // queued/failed transfers.
+        let download = queue.create(
+            0,
+            Some("downloader".to_owned()),
+            "Shared/DownloadOnly/File.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == download.id)
+            .unwrap()
+            .status = "succeeded".to_owned();
+        let incomplete_upload = queue.create(
+            1,
+            Some("stalled-peer".to_owned()),
+            "Shared/StillQueued/File.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == incomplete_upload.id)
+            .unwrap()
+            .status = "queued".to_owned();
+        let completed_upload = queue.create(
+            1,
+            Some("real-uploader".to_owned()),
+            "Shared/Popular/File.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == completed_upload.id)
+            .unwrap()
+            .status = "succeeded".to_owned();
+
+        let report = serde_json::from_str::<serde_json::Value>(
+            &super::slskd_transfer_directories_report(None, &queue),
+        )
+        .unwrap();
+        let paths = report
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["path"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["Shared/Popular"], "{report}");
 
         let _ = std::fs::remove_file(queue.events_path);
         let _ = std::fs::remove_file(queue.state_path);
