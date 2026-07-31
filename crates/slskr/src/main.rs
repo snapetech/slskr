@@ -23988,13 +23988,23 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/songid/runs") => {
+             // Matches the oracle's SongIdController.CreateRun: a request
+             // with no real source is rejected before ever consuming a
+             // concurrency slot, not silently accepted as an empty-source
+             // run.
+             let source = extract_json_string_field(body, "source")
+                 .unwrap_or_default()
+                 .trim()
+                 .to_owned();
+             if source.is_empty() {
+                 return Ok(routing::bad_request_response("SongID source is required."));
+             }
              let Ok(_songid_permit) = Arc::clone(&state.songid_run_slots).try_acquire_owned()
              else {
                  return Ok(routing::service_unavailable_response(
                      "SongID run concurrency limit reached",
                  ));
              };
-             let source = extract_json_string_field(body, "source").unwrap_or_default();
              let query = extract_json_string_field(body, "query").unwrap_or_default();
              let library = state.library.read().await;
              let shares = state.shares.read().await;
@@ -78452,7 +78462,13 @@ mod tests {
                 "",
                 false,
             ),
-            ("POST", "/api/songid/runs", "", "", false),
+            (
+                "POST",
+                "/api/songid/runs",
+                r#"{"source":"route-audit"}"#,
+                "",
+                false,
+            ),
             (
                 "POST",
                 "/api/integrations/lidarr/wanted/sync",
@@ -78619,9 +78635,15 @@ mod tests {
                 .await
                 .expect("warm cache");
         assert_eq!(warm_cache.status, "202 Accepted");
-        let songid = super::route_http_request("POST", "/api/songid/runs", None, "{}", &state)
-            .await
-            .expect("songid");
+        let songid = super::route_http_request(
+            "POST",
+            "/api/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("songid");
         assert_eq!(songid.status, "202 Accepted");
         let backfill = super::route_http_request("POST", "/api/backfill", None, "{}", &state)
             .await
@@ -88654,6 +88676,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn songid_run_creation_requires_a_real_non_empty_source() {
+        let (state, _receiver) = test_state();
+
+        // Matches the oracle's SongIdController.CreateRun: an empty (or
+        // missing) source is rejected before a run is ever queued, not
+        // silently accepted as an empty-source run.
+        for body in ["{}", r#"{"source":""}"#, r#"{"source":"   "}"#] {
+            let response =
+                super::route_http_request("POST", "/api/v0/songid/runs", None, body, &state)
+                    .await
+                    .unwrap_or_else(|error| panic!("{body}: {error}"));
+            assert_eq!(response.status, "400 Bad Request", "{body}");
+            assert!(
+                response.body.contains("SongID source is required."),
+                "{body}: {}",
+                response.body
+            );
+        }
+
+        let before = super::route_http_request("GET", "/api/v0/songid/runs", None, "", &state)
+            .await
+            .expect("runs before");
+        let before_count = serde_json::from_str::<serde_json::Value>(&before.body)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len();
+
+        let valid = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("valid run");
+        assert_eq!(valid.status, "202 Accepted", "{}", valid.body);
+
+        let after = super::route_http_request("GET", "/api/v0/songid/runs", None, "", &state)
+            .await
+            .expect("runs after");
+        let after_count = serde_json::from_str::<serde_json::Value>(&after.body)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len();
+        assert_eq!(after_count, before_count + 1);
+    }
+
+    #[tokio::test]
     async fn telemetry_kpis_are_always_json_unlike_the_base_prometheus_route() {
         let (state, _receiver) = test_state();
 
@@ -92991,9 +93064,15 @@ mod tests {
             .expect("song id runs");
         let song_runs_json = serde_json::from_str::<serde_json::Value>(&song_runs.body).unwrap();
         assert!(song_runs_json.as_array().unwrap().is_empty());
-        let song_run = super::route_http_request("POST", "/api/songid/runs", None, "{}", &state)
-            .await
-            .expect("song id run");
+        let song_run = super::route_http_request(
+            "POST",
+            "/api/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("song id run");
         let song_run_json = serde_json::from_str::<serde_json::Value>(&song_run.body).unwrap();
         assert!(song_run_json["matchCount"].as_u64().unwrap() >= 1);
         assert_eq!(song_run_json["runs"], 1);
